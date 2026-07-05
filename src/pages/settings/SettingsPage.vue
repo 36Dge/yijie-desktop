@@ -1,28 +1,26 @@
+<script setup lang="ts">
+import { NButton, NCard, NH1, NLayout, NSpace, NText } from "naive-ui";
+import { useRouter } from "vue-router";
+
+const router = useRouter();
+</script>
+
 <template>
-  <main class="page">
-    <RouterLink to="/chat">返回 Chat</RouterLink>
-    <h1>本地设置</h1>
-    <section class="panel">
-      <h2>Sidecar</h2>
-      <p>桌面端会在后续版本管理 Codex Runtime 与 yijie-agent-host sidecar。</p>
-    </section>
-  </main>
+  <n-layout class="page">
+    <n-space vertical size="large">
+      <n-button text @click="router.push('/chat')">返回 Chat</n-button>
+      <n-h1>本地设置</n-h1>
+      <n-card title="Sidecar" :bordered="false">
+        <n-text>桌面端会在后续版本管理 Codex Runtime 与 yijie-agent-host sidecar。</n-text>
+      </n-card>
+    </n-space>
+  </n-layout>
 </template>
 
 <style scoped>
 .page {
   min-height: 100vh;
   padding: 32px;
-}
-
-a {
-  color: #1f6feb;
-}
-
-.panel {
-  padding: 18px;
-  border: 1px solid #d5e0e8;
-  border-radius: 8px;
-  background: #ffffff;
+  background: #eef3f8;
 }
 </style>

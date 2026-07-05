@@ -1,6 +1,6 @@
 # Architecture
 
-`yijie-desktop` 是卖家的唯一客户端入口。它通过 `yijie-api` 创建和查询任务，通过本地或云端 `yijie-agent-host` 驱动 Codex Runtime，并展示工具调用审批和任务结果。
+`yijie-desktop` 是卖家的唯一客户端入口。它通过 `yijie-api` 创建和查询任务，通过本地或云端 `yijie-agent-host` 驱动 Codex Runtime，并展示工具调用审批和任务结果。UI 组件库使用 Naive UI。
 
 ## 目录
 

@@ -1,6 +1,6 @@
 # yijie-desktop
 
-易界 AI Mac 桌面端，使用 Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router 和 pnpm。
+易界 AI Mac 桌面端，使用 Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI 和 pnpm。
 
 ## 仓库职责
 

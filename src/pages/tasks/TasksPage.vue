@@ -1,54 +1,36 @@
 <script setup lang="ts">
+import { NButton, NCard, NH1, NLayout, NList, NListItem, NSpace, NTag, NText } from "naive-ui";
+import { useRouter } from "vue-router";
 import { sampleTasks } from "../../domain/tasks";
+
+const router = useRouter();
 </script>
 
 <template>
-  <main class="page">
-    <header>
-      <RouterLink to="/chat">返回 Chat</RouterLink>
-      <h1>任务列表</h1>
-    </header>
+  <n-layout class="page">
+    <n-space vertical size="large">
+      <n-button text @click="router.push('/chat')">返回 Chat</n-button>
+      <n-h1>任务列表</n-h1>
 
-    <section class="task-list">
-      <article v-for="task in sampleTasks" :key="task.id" class="task-card">
-        <p class="status">{{ task.status }}</p>
-        <h2>{{ task.title }}</h2>
-        <p>{{ task.description }}</p>
-      </article>
-    </section>
-  </main>
+      <n-card :bordered="false">
+        <n-list>
+          <n-list-item v-for="task in sampleTasks" :key="task.id">
+            <n-space vertical size="small">
+              <n-tag size="small" type="info">{{ task.status }}</n-tag>
+              <n-text strong>{{ task.title }}</n-text>
+              <n-text depth="3">{{ task.description }}</n-text>
+            </n-space>
+          </n-list-item>
+        </n-list>
+      </n-card>
+    </n-space>
+  </n-layout>
 </template>
 
 <style scoped>
 .page {
   min-height: 100vh;
   padding: 32px;
-}
-
-a {
-  color: #1f6feb;
-}
-
-h1 {
-  margin: 12px 0 24px;
-}
-
-.task-list {
-  display: grid;
-  gap: 16px;
-}
-
-.task-card {
-  padding: 18px;
-  border: 1px solid #d5e0e8;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.status {
-  color: #287271;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
+  background: #eef3f8;
 }
 </style>

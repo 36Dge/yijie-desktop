@@ -14,7 +14,7 @@
 
 ## 技术栈
 
-Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、pnpm、Rust。
+Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、pnpm、Rust。
 
 ## 开发命令
 
