@@ -1,0 +1,7 @@
+[workspace]
+name = "yijie-desktop"
+stack = "Tauri v2 + Vue 3 + TypeScript + Pinia + Vue Router"
+
+[rules]
+no_platform_tokens_in_frontend = true
+approval_required_for_high_risk_tools = true
