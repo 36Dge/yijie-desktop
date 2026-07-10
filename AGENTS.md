@@ -16,6 +16,19 @@
 
 Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、pnpm、Rust。
 
+## Design System / UX 规则
+
+- 所有前端 UI 代码必须遵守 `docs/design/docs/design/` 下的设计系统规范。
+- 复杂页面或交互改动前，必须先阅读对应 pattern、component、token 或 AI/Codex 规则文档。
+- Naive UI 只能通过集中主题覆盖接入；图表使用 ECharts 与易界图表主题。
+- 图标必须通过 `YjIcon` 和 `src/icons/registry.ts` 使用，不允许页面直接引入任意图标库。
+- 不允许硬编码颜色、字号、间距、圆角、阴影或 z-index；必须使用 design token 和 CSS variables。
+- 新页面应优先复用 `YjPage`、`YjPageHeader`、`YjSection`、`YjCard`、`YjMetricCard`、`YjDataTable`、`YjChartCard` 等 `Yj*` 组件。
+- 页面必须覆盖 loading、empty、error、permission denied 和 ready 状态。
+- 界面文案默认中文，语气专业；亮色和暗色主题都必须可用。
+- 涉及店铺、广告、Listing、库存、价格、买家消息等高影响操作时，必须包含确认或审批 UI 承接点。
+- 不提交真实卖家数据、平台 token、cookie、凭据或未授权品牌资产。
+
 ## 开发命令
 
 ```bash
@@ -23,6 +36,7 @@ pnpm install
 pnpm dev
 pnpm tauri:dev
 pnpm build
+pnpm docs:dev
 ```
 
 ## 安全要求

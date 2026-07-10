@@ -10,6 +10,9 @@
     "test": "pnpm lint",
     "generate": "echo 'No generated assets yet'",
     "preview": "vite preview",
+    "docs:dev": "pnpm --dir docs/design docs:dev",
+    "docs:build": "pnpm --dir docs/design docs:build",
+    "docs:preview": "pnpm --dir docs/design docs:preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri": "tauri"

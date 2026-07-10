@@ -34,6 +34,14 @@ Tauri 开发：
 pnpm tauri:dev
 ```
 
+设计系统文档：
+
+```bash
+pnpm docs:dev
+```
+
+前端 UI 与交互规范位于 `docs/design/docs/design/`。
+
 ## 测试与构建
 
 ```bash

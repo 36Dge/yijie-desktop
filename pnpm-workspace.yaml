@@ -1,2 +1,6 @@
+packages:
+  - .
+  - docs/design
+
 allowBuilds:
   esbuild: true
