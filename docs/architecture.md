@@ -10,3 +10,5 @@
 - `src/api/`：API client 占位；
 - `src-tauri/`：Tauri v2 shell 和本地命令；
 - `sidecars/`：未来放置 Codex 与 Agent Host sidecar。
+
+Tauri 只启用主窗口所需的最小 capability。WebView CSP 仅允许本地 IPC、API 和 Agent Host 端口；新增远端域名或系统权限必须先完成安全评审并更新 capability。
