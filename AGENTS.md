@@ -22,6 +22,7 @@
 
 - 活跃应用代码位于 `src/`，当前页面、API client 和样式仍是早期骨架；
 - `src/api/client.ts` 当前返回本地占位数据，不代表真实 Runtime 或后端已经接通；
+- `pnpm generate` 当前只输出 `No generated assets yet`，没有 contract lock 或 generate-drift CI，不能满足不可变消费和发布门禁；
 - `docs/design/docs/design/` 是设计系统的规范来源；
 - `docs/design/exports/` 是待逐步迁移的参考实现，不是应用运行时代码，禁止从 `src/` 直接导入；
 - `YjIcon`、图标 registry、设计 token 和部分 `Yj*` 组件尚未完整迁移到活跃的 `src/`，不得假定这些模块已经存在；
@@ -54,10 +55,16 @@
 
 ## 契约与数据
 
-- 对接真实接口前先在 `yijie-contracts` 更新和评审契约，再生成或适配客户端；
+- 每个任务先标记 `contract-impact = none | additive | semantic | breaking`；分类覆盖跨进程、跨仓、跨版本及持久化/重放边界，`none` 必须说明 Desktop、API/Agent Host 与本地持久状态均无可观察变化；
+- 按 `breaking > semantic > additive > none` 的最高风险唯一选择；任一受支持交互可能失效即 breaking，不确定时不能假定 additive/none；
+- 对接真实接口前先在 `yijie-contracts` 更新、评审并形成不可变 tag 或完整 commit；本仓固定精确引用后，相关实现才可合并或启用；
 - 不为真实接口手写一份与契约重复的 DTO；当前占位 client 应在接入时被明确替换或隔离；
+- 请求字段只能在 provider 已支持后发送；响应字段、enum 和事件必须覆盖 unknown/版本不兼容，不能把穷举类型假设成永远封闭；
 - 把请求失败、超时、取消、权限拒绝和版本不兼容映射成可测试的 UI 状态；
 - 不根据假设决定认证会话、token 存储、租户上下文或离线缓存策略。
+
+dirty/floating sibling 只能用于本地候选验证，不能作为发布来源。兄弟元仓存在时同时
+遵循 `../yijie/docs/dev/contract-first.md`。
 
 ## Tauri 安全规则
 
@@ -100,5 +107,6 @@ pnpm docs:build
 - 设计规范与当前实现状态一致，新增 UI 没有继续制造设计系统债务；
 - loading、empty、error、permission denied 和 ready 状态完整；
 - 高风险操作、安全权限和敏感数据处理符合约束；
+- 当 `contract-impact != none` 时按权威源路由：公共 wire 提供契约不可变引用、consumer pin 与未知值/失败 conformance；本地持久状态、sidecar/native 或 deployment interface 提供相应 schema/config/version 引用、升级/回滚兼容和受影响平台验证；不适用的 contracts 字段写 `N/A + 理由`；`none` 只需分类理由；
 - 与改动对应的 lint、测试、构建和视觉检查通过；
 - 未完成的 sidecar、签名、公证或真实接口验证被明确说明。
