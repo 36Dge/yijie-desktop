@@ -14,7 +14,9 @@
       {
         "title": "易界 AI",
         "width": 1180,
-        "height": 780
+        "height": 780,
+        "minWidth": 1180,
+        "minHeight": 760
       }
     ],
     "security": {

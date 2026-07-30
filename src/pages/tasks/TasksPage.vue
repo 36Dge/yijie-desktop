@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { NButton, NCard, NH1, NLayout, NList, NListItem, NSpace, NTag, NText } from "naive-ui";
-import { useRouter } from "vue-router";
+import { NCard, NList, NListItem, NSpace, NTag, NText } from "naive-ui";
 import { sampleTasks } from "../../domain/tasks";
-
-const router = useRouter();
 </script>
 
 <template>
-  <n-layout class="page">
-    <n-space vertical size="large">
-      <n-button text @click="router.push('/chat')">返回 Chat</n-button>
-      <n-h1>任务列表</n-h1>
-
-      <n-card :bordered="false">
+  <section class="page" aria-labelledby="tasks-page-title">
+    <div class="page__content">
+      <h1 id="tasks-page-title" class="page__title">任务记录</h1>
+      <n-card class="page__card" :bordered="false">
         <n-list>
           <n-list-item v-for="task in sampleTasks" :key="task.id">
             <n-space vertical size="small">
@@ -23,14 +18,32 @@ const router = useRouter();
           </n-list-item>
         </n-list>
       </n-card>
-    </n-space>
-  </n-layout>
+    </div>
+  </section>
 </template>
 
 <style scoped>
 .page {
-  min-height: 100vh;
-  padding: 32px;
-  background: #eef3f8;
+  min-height: 100%;
+  padding: var(--yj-space-8);
+  background: var(--yj-color-bg-page);
+}
+
+.page__content {
+  width: min(100%, var(--yj-layout-form-max));
+  margin-inline: auto;
+}
+
+.page__title {
+  margin: 0 0 var(--yj-space-6);
+  color: var(--yj-color-text-primary);
+  font-size: var(--yj-font-size-page-title);
+  font-weight: var(--yj-font-weight-semibold);
+  line-height: var(--yj-line-height-page-title);
+}
+
+.page__card {
+  background: var(--yj-color-bg-card);
+  box-shadow: var(--yj-shadow-xs);
 }
 </style>
