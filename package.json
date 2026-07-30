@@ -23,6 +23,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@lucide/vue": "1.27.0",
     "@tauri-apps/api": "^2",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",

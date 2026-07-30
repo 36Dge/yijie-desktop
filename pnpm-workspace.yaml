@@ -3,6 +3,7 @@ packages:
   - docs/design
 
 overrides:
+  postcss: 8.5.18
   vitepress>vite: 6.4.3
 
 allowBuilds:
