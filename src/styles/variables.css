@@ -44,6 +44,8 @@
   --yj-line-height-section-title: 26px;
   --yj-line-height-page-title: 32px;
   --yj-line-height-display: 40px;
+  --yj-font-weight-regular: 400;
+  --yj-font-weight-semibold: 600;
 
   --yj-space-0: 0;
   --yj-space-1: 4px;
@@ -63,6 +65,7 @@
   --yj-radius-lg: 12px;
   --yj-radius-xl: 16px;
   --yj-radius-full: 999px;
+  --yj-border-width: 1px;
 
   --yj-shadow-xs: 0 1px 2px rgba(24, 35, 15, 0.06);
   --yj-shadow-card: 0 8px 24px rgba(24, 35, 15, 0.08);
@@ -78,6 +81,8 @@
   --yj-layout-sidebar-expanded: 240px;
   --yj-layout-sidebar-collapsed: 72px;
   --yj-layout-form-max: 960px;
+  --yj-layout-composer-height: 176px;
+  --yj-layout-chat-entry-top-offset: 96px;
 
   --yj-logo-mark-sm: 24px;
   --yj-logo-mark-md: 32px;
