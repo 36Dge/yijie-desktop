@@ -31,7 +31,7 @@ Naive UI 是基础组件库，不是易界完整设计系统。易界设计系�
 ## 推荐 Provider
 
 ```vue
-<n-config-provider :theme="resolvedTheme" :theme-overrides="naiveThemeOverrides">
+<n-config-provider :theme="resolvedTheme" :theme-overrides="resolvedThemeOverrides">
   <n-dialog-provider>
     <n-message-provider>
       <n-notification-provider>
@@ -57,7 +57,7 @@ Naive UI 是基础组件库，不是易界完整设计系统。易界设计系�
 
 ## 实现要求
 
-`src/design/theme/naive-theme.ts` 是 Naive UI 主题唯一入口。`App.vue` 或 provider 层根据系统主题选择 light/dark。业务组件不得直接 import 多套主题。
+`src/design/theme/naive-theme.ts` 是 Naive UI 主题唯一入口。`App.vue` 或 provider 层根据系统主题选择 light/dark，并在主题切换后通过 `getComputedStyle` 把 CSS token 解析为实际值，再调用 `createNaiveThemeOverrides`。Naive UI 会对颜色做运行时运算，禁止把 `var(--token)` 字符串直接传入颜色类 override。业务组件不得直接 import 多套主题。
 
 ## 验收清单
 

@@ -28,16 +28,28 @@ exports/src/design/theme/naive-theme.ts
 主题必须集中配置，不允许页面局部覆盖。
 
 ```ts
-export const naiveThemeOverrides = {
-  common: {
-    fontFamily: 'var(--yj-font-family-sans)',
-    primaryColor: 'var(--yj-color-brand-primary)',
-    primaryColorHover: 'var(--yj-color-brand-hover)',
-    primaryColorPressed: 'var(--yj-color-brand-active)',
-    borderRadius: '8px'
+export function createNaiveThemeOverrides(readVariable) {
+  const token = (name) => {
+    const value = readVariable(name).trim()
+    if (!value) throw new Error(`Missing design token: ${name}`)
+    return value
+  }
+
+  return {
+    common: {
+      fontFamily: token('--yj-font-family-sans'),
+      primaryColor: token('--yj-color-brand-primary'),
+      primaryColorHover: token('--yj-color-brand-hover'),
+      primaryColorPressed: token('--yj-color-brand-active'),
+      borderRadius: token('--yj-radius-md')
+    }
   }
 }
 ```
+
+`App.vue` 在设置 light/dark 的 `data-theme` 后，通过
+`getComputedStyle(document.documentElement).getPropertyValue(name)` 读取 token。
+不得把 `var(--token)` 直接传入 Naive UI 的颜色类 override；组件库会对颜色做运行时计算。
 
 ## AI / Codex 必须遵守
 

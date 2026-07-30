@@ -1,37 +1,60 @@
 import type { GlobalThemeOverrides } from "naive-ui";
 
-export const naiveThemeOverrides: GlobalThemeOverrides = {
-  common: {
-    fontFamily: "var(--yj-font-family-sans)",
-    primaryColor: "var(--yj-color-brand-primary)",
-    primaryColorHover: "var(--yj-color-brand-hover)",
-    primaryColorPressed: "var(--yj-color-brand-active)",
-    primaryColorSuppl: "var(--yj-color-brand-hover)",
-    borderRadius: "var(--yj-radius-md)",
-    textColorBase: "var(--yj-color-text-primary)",
-    textColor1: "var(--yj-color-text-primary)",
-    textColor2: "var(--yj-color-text-secondary)",
-    textColor3: "var(--yj-color-text-tertiary)",
-    bodyColor: "var(--yj-color-bg-app)",
-    cardColor: "var(--yj-color-bg-card)",
-    modalColor: "var(--yj-color-bg-elevated)",
-    borderColor: "var(--yj-color-border-default)",
-    dividerColor: "var(--yj-color-border-subtle)",
-  },
-  Button: {
-    borderRadiusMedium: "var(--yj-radius-md)",
-    heightMedium: "36px",
-    fontWeight: "500",
-  },
-  Card: {
-    borderRadius: "var(--yj-radius-lg)",
-    paddingMedium: "var(--yj-space-5)",
-  },
-  Input: {
-    borderRadius: "var(--yj-radius-md)",
-    heightMedium: "36px",
-  },
-  Tag: {
-    borderRadius: "var(--yj-radius-sm)",
-  },
-};
+export type CssVariableReader = (variableName: string) => string;
+
+function readRequiredToken(readVariable: CssVariableReader, variableName: string): string {
+  const value = readVariable(variableName).trim();
+
+  if (!value) {
+    throw new Error(`Missing design token: ${variableName}`);
+  }
+
+  return value;
+}
+
+export function createNaiveThemeOverrides(
+  readVariable: CssVariableReader,
+): GlobalThemeOverrides {
+  const token = (variableName: string) => readRequiredToken(readVariable, variableName);
+
+  return {
+    common: {
+      fontFamily: token("--yj-font-family-sans"),
+      primaryColor: token("--yj-color-brand-primary"),
+      primaryColorHover: token("--yj-color-brand-hover"),
+      primaryColorPressed: token("--yj-color-brand-active"),
+      primaryColorSuppl: token("--yj-color-brand-hover"),
+      borderRadius: token("--yj-radius-md"),
+      textColorBase: token("--yj-color-text-primary"),
+      textColor1: token("--yj-color-text-primary"),
+      textColor2: token("--yj-color-text-secondary"),
+      textColor3: token("--yj-color-text-tertiary"),
+      bodyColor: token("--yj-color-bg-app"),
+      cardColor: token("--yj-color-bg-card"),
+      modalColor: token("--yj-color-bg-elevated"),
+      borderColor: token("--yj-color-border-default"),
+      dividerColor: token("--yj-color-border-subtle"),
+    },
+    Button: {
+      borderRadiusMedium: token("--yj-radius-md"),
+      heightMedium: "36px",
+      fontWeight: "500",
+    },
+    Card: {
+      borderRadius: token("--yj-radius-lg"),
+      paddingMedium: token("--yj-space-5"),
+    },
+    Input: {
+      borderRadius: token("--yj-radius-md"),
+      heightMedium: "36px",
+    },
+    DataTable: {
+      borderRadius: token("--yj-radius-lg"),
+      thColor: token("--yj-color-bg-subtle"),
+      borderColor: token("--yj-color-border-subtle"),
+    },
+    Tag: {
+      borderRadius: token("--yj-radius-sm"),
+    },
+  };
+}
