@@ -7,3 +7,6 @@
 - 本地 sidecar 状态和日志必须脱敏；
 - 不绕过 `yijie-api` 权限和审批策略；
 - 不在 fixtures 中保存真实商家数据。
+
+FEAT-125 S5A 的原生 OIDC、Keychain 生命周期、loopback 回调和固定权限投影传输边界见
+[`docs/security/FEAT-125-S5A-security-matrix.md`](docs/security/FEAT-125-S5A-security-matrix.md)。

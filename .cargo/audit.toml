@@ -1,0 +1,6 @@
+[advisories]
+# S5A acceptance (2026-08-01): `rsa` is pulled only by `openidconnect` for public-key
+# RS256 ID-token verification. This application performs no RSA private-key signing or
+# decryption, which is the operation exposed by RUSTSEC-2023-0071. No fixed release exists;
+# remove this exception as soon as the upstream dependency publishes one.
+ignore = ["RUSTSEC-2023-0071"]

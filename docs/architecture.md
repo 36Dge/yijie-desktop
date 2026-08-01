@@ -12,3 +12,8 @@
 - `sidecars/`：未来放置 Codex 与 Agent Host sidecar。
 
 Tauri 只启用主窗口所需的最小 capability。WebView CSP 仅允许本地 IPC、API 和 Agent Host 端口；新增远端域名或系统权限必须先完成安全评审并更新 capability。
+
+FEAT-125 S5A 将 OIDC code flow、系统浏览器打开、loopback callback、token 刷新和
+`GET /v1/me/tenants` / `GET /v1/me/capabilities` 固定传输保留在 Rust 边界内。WebView
+不接收 access/refresh token，也不能传入 URL、HTTP method、任意 header 或 body。该能力默认关闭；
+生产 IdP 与 API origin 在 G3/G5 前不得配置或激活。
