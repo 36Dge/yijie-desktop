@@ -145,8 +145,9 @@ G3-NP-LOCAL 只验证本地环境兼容性：localhost IdP/DNS/TLS/API bootstrap
 - 正式 provisioning、签名、公证和 entitlements 的生产 App 验证；
 - 生产 CSP、发布配置、灰度、回滚和生产激活。
 
-S5B/UI 与 generated DTO consumer 本轮同样未执行，但它是 G3-NP-LOCAL 环境兼容性 PASS 后的下一独立
-切片，不属于上述 S7/G5 保留项。
+S5A 本轮没有包含 S5B/UI 与 generated DTO consumer。G3-NP-LOCAL 后续已经 PASS，段成威于
+2026-08-01 单独批准 S5B；S5B 的 exact pin、generated adapter 与 permission store 证据独立记录在
+`FEAT-125-S5B-consumer-matrix.md`，仍不包含 S6 UI。
 
 ## 8. G3-NP-LOCAL Desktop 候选
 
@@ -154,11 +155,13 @@ S5B/UI 与 generated DTO consumer 本轮同样未执行，但它是 G3-NP-LOCAL 
 HTTP wire 未改变，因此 contracts PR/tag/generator 为 `N/A`。production 默认、OIDC/API 路径、状态码及
 权威 contracts candidate `9ec34abd6e7dfb5a23b0154d467694167224ebbb` 均未改变。
 
-当前候选已证明仓内实现、local stack、live Keycloak、专用 API PostgreSQL bootstrap 与 offline ready。
-online preflight 已执行：显式信任本地 CA 的 discovery、JWKS 与 callback 检查 PASS，随后在 API
-`/healthz` 得到 `502`（脚本退出码 `2`）。因此 G3-NP-LOCAL 仍为 **BLOCKED / NOT PASS**，S5B
-未获批准。带 provisioning 的 signed `.app` Keychain 矩阵与完整 Desktop native login/refresh E2E
-属于 S7/G5；它们保持 `NOT RUN` 不影响后续 G3-NP-LOCAL PASS，也不阻断 S5B。
+当前候选已证明仓内实现、local stack、live Keycloak、专用 API PostgreSQL bootstrap、offline ready
+与最终 core online preflight。历史首次 `/healthz` `502` 已由 API local-only 显式 CA PEM/SHA-256 pin
+修复关闭；API `faeb78019d95aaf9dcfbd8493f8bc2ecf7e4bf34`、Desktop
+`446b4d608546fca8f53f4582201d6b43ef6f762d` 与 Infra
+`298192e386a7f7b81e8f0f8fe733c1f79f096ab4` 的最终门禁、readiness、两个未认证 `401` 和 Tasks
+edge/direct `404` 均 PASS。因此 G3-NP-LOCAL 为 **PASS**，S5B 已获单独批准。带 provisioning 的
+signed `.app` Keychain 矩阵与完整 Desktop native login/refresh E2E 属于 S7/G5，保持 `NOT RUN`。
 
 ### 8.1 2026-08-01 仓内验证结果
 
@@ -193,8 +196,9 @@ Keychain session；若被拒 token 仍是当前 token，才清理并转为 signe
 debug `.app` 的 `codesign -dvv` 结果是 `Signature=adhoc`、`TeamIdentifier=not set`，且没有
 provisioning entitlements；`codesign --verify --deep --strict` 也因 bundle 没有可验证的 sealed
 resources 而失败。因此 debug bundle 只证明编译和打包，不能作为 Protected Data Keychain 原生 PASS。
-真实 localhost IdP/DNS/TLS、live provision、专用数据库 bootstrap 与 offline ready 均已 PASS；online
-preflight 在显式 CA 下通过 discovery、JWKS 与 callback，随后因 API 无法使用本地 CA 获取 HTTPS JWKS，
-在 `/healthz` 返回 `502`（退出码 `2`）。所以 G3-NP-LOCAL 为 **BLOCKED / NOT PASS**，S5B 未批准。
-signed local bundle、Protected Data Keychain 与完整 Desktop login/refresh E2E 为 S7/G5 的 **NOT RUN**，
-不阻断后续 G3-NP-LOCAL/S5B，但仍是 S7/G5/生产激活前置。
+真实 localhost IdP/DNS/TLS、live provision、专用数据库 bootstrap、offline ready 与最终 online
+preflight 均已 PASS。历史 API JWKS CA `502` 已由 API
+`faeb78019d95aaf9dcfbd8493f8bc2ecf7e4bf34` 的 local-profile-only 显式 CA pin 关闭；最终
+discovery/JWKS/callback、API health/ready、两个未认证 `401` 与 Tasks edge/direct `404` 全部 PASS。
+所以 G3-NP-LOCAL 为 **PASS**，S5B 已获单独批准。signed local bundle、Protected Data Keychain 与
+完整 Desktop login/refresh E2E 仍为 S7/G5 的 **NOT RUN**，并继续阻断 S7/G5/生产激活。

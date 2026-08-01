@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.3.0-candidate",
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "full_commit": "9ec34abd6e7dfb5a23b0154d467694167224ebbb",
+  "source_path": "openapi/public/public.yaml",
+  "source_sha256": "7bd40dd1c5a53cc1dcd317e3a64bf7189170fd7f575b25bb07f0eb243d0319ed",
+  "generator": {
+    "package": "openapi-typescript",
+    "version": "7.13.0",
+    "typescript_version": "5.9.3",
+    "command": "pnpm --dir tools/public-api-generator exec openapi-typescript openapi/public/public.yaml"
+  },
+  "generated_path": "src/api/generated/public.gen.ts",
+  "generated_sha256": "77babb215608c6ace4468d37b72fc8e43f5758231c7807a4301063cb156ae8e0",
+  "fixtures": [
+    {
+      "path": "tests/fixtures/public/access/capability-v1-empty.json",
+      "sha256": "bcea0e5c396c71b2f5234ac95c0d022f055149e6eb371216125d9b9d06bfc8a1"
+    },
+    {
+      "path": "tests/fixtures/public/access/capability-v1-ready.json",
+      "sha256": "a0f703db9f3af26df0800cad66f4d9e77dde457b0793a62b037684043207c17f"
+    },
+    {
+      "path": "tests/fixtures/public/access/capability-v1-unknown.json",
+      "sha256": "6251ce92a25018c43cf98f8b91472dfb5b73b6aee4214a61025314861657cb22"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-authorization-unavailable.json",
+      "sha256": "b35300fb286fc3c21e0b5aa194d835279a208d9781208fd3e143f67c3155de34"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-internal-error.json",
+      "sha256": "fb0942be54805cfc53fb8332f488b6d370f3358be8a2f2884de083bab9515695"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-invalid-tenant-context.json",
+      "sha256": "991ddddefaaaeb6393af28f82412f05d196450c0440fe3f8018f05b875353459"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-tenant-access-denied.json",
+      "sha256": "94c88a6c3b3deb43c55f71841784acb112a181c0ee9d6431ef8d71eda93a1805"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-unauthorized.json",
+      "sha256": "bbc3463ff819cae06b5546f41f232635ac9e05c6ae4373a5c8c5934194158f0b"
+    },
+    {
+      "path": "tests/fixtures/public/access/error-user-access-denied.json",
+      "sha256": "2ca266df1c8505d306bb65cfbf11b71483c969877c7f35cae466195d6808f8a1"
+    },
+    {
+      "path": "tests/fixtures/public/access/tenant-list-v1-empty.json",
+      "sha256": "1f324b0824012ee09e390fc954af523ac56f65c2a00efb9bbcc1257c71e1e040"
+    },
+    {
+      "path": "tests/fixtures/public/access/tenant-list-v1-multiple.json",
+      "sha256": "513877454e1b4235d886324daf4ac7c2bc53b1d1f4f25d47c0e90085c8116762"
+    },
+    {
+      "path": "tests/fixtures/public/access/tenant-list-v1-single.json",
+      "sha256": "52600d769420b8e84371dd97fef32128e2745fbd119fee02f40d3488b4f7a127"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 packages:
   - .
   - docs/design
+  - tools/public-api-generator
 
 overrides:
   brace-expansion: 5.0.8
