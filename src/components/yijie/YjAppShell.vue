@@ -1,26 +1,25 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import {
-  resolveAppNavigation,
-  type AppNavVisibilityProjection,
-} from "../../navigation/app-nav";
+import { resolveNavigationVisibility } from "../../authorization/app-permission-policy";
+import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
+import { resolveAppNavigation } from "../../navigation/app-nav";
+import { usePermissionStore } from "../../stores/permission.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import YjSidebar from "./YjSidebar.vue";
 
-const props = withDefaults(
-  defineProps<{
-    navigationVisibility?: AppNavVisibilityProjection;
-  }>(),
-  {
-    navigationVisibility: () => ({}),
-  },
-);
-
 const route = useRoute();
 const sidebarStore = useSidebarStore();
+const permissionStore = usePermissionStore();
 const navigationEntries = computed(() =>
-  resolveAppNavigation(undefined, props.navigationVisibility),
+  resolveAppNavigation(
+    undefined,
+    resolveNavigationVisibility({
+      enabled: authoritativePermissionUiEnabled,
+      ready: permissionStore.isReady,
+      hasCapability: permissionStore.hasCapability,
+    }),
+  ),
 );
 
 let storage: Storage | undefined;

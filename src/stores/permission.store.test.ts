@@ -76,6 +76,46 @@ describe("permission store", () => {
     expect(getMyCapabilities).not.toHaveBeenCalled();
   });
 
+  it("coalesces concurrent startup discovery into one request", async () => {
+    const response = new Deferred<readonly TenantOption[]>();
+    const listMyTenants = vi.fn(async () => response.promise);
+    const store = createStore({
+      listMyTenants,
+      getMyCapabilities: async () => projection(TENANT_A, 1),
+    });
+
+    const first = store.ensureInitialized();
+    const second = store.ensureInitialized();
+    response.resolve([]);
+    await Promise.all([first, second]);
+
+    expect(listMyTenants).toHaveBeenCalledTimes(1);
+    expect(store.phase).toBe("recovery");
+  });
+
+  it("starts a fresh discovery after logout invalidates pending initialization", async () => {
+    const firstResponse = new Deferred<readonly TenantOption[]>();
+    let calls = 0;
+    const store = createStore({
+      listMyTenants: async () => {
+        calls += 1;
+        return calls === 1 ? firstResponse.promise : [TENANTS[0]];
+      },
+      getMyCapabilities: async () => projection(TENANT_A, 1),
+    });
+
+    const staleInitialization = store.ensureInitialized();
+    store.clearForLogout();
+    const currentInitialization = store.ensureInitialized();
+    await currentInitialization;
+    firstResponse.resolve(TENANTS);
+    await staleInitialization;
+
+    expect(calls).toBe(2);
+    expect(store.phase).toBe("ready");
+    expect(store.selectedTenantId).toBe(TENANT_A);
+  });
+
   it("automatically selects the only membership and commits one atomic snapshot", async () => {
     const store = createStore({
       listMyTenants: async () => [TENANTS[0]],

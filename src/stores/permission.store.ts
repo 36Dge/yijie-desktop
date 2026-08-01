@@ -31,6 +31,7 @@ export function createPermissionStoreDefinition(
 
     let requestEpoch = 0;
     let activeController: AbortController | null = null;
+    let initializationPromise: Promise<void> | null = null;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
     let expiresAtEpochMs: number | null = null;
     const lastAcceptedRevision = new Map<
@@ -58,11 +59,11 @@ export function createPermissionStoreDefinition(
       controller: AbortController;
     } {
       activeController?.abort();
+      phase.value = nextPhase;
       clearProjection();
       requestEpoch += 1;
       const controller = new AbortController();
       activeController = controller;
-      phase.value = nextPhase;
       lastFailure.value = null;
       return { epoch: requestEpoch, controller };
     }
@@ -118,7 +119,6 @@ export function createPermissionStoreDefinition(
         ) {
           return;
         }
-        clearProjection();
         void loadTenant(scheduledTenant);
       }, delay);
     }
@@ -203,6 +203,23 @@ export function createPermissionStoreDefinition(
       }
     }
 
+    async function ensureInitialized(): Promise<void> {
+      if (initializationPromise !== null) {
+        return initializationPromise;
+      }
+      if (phase.value !== "idle") {
+        return;
+      }
+      const initialization = discoverTenants();
+      const trackedInitialization = initialization.finally(() => {
+        if (initializationPromise === trackedInitialization) {
+          initializationPromise = null;
+        }
+      });
+      initializationPromise = trackedInitialization;
+      return trackedInitialization;
+    }
+
     async function selectTenant(tenantId: string): Promise<void> {
       await loadTenant(tenantId);
     }
@@ -227,12 +244,13 @@ export function createPermissionStoreDefinition(
     function clearForLogout(): void {
       activeController?.abort();
       activeController = null;
+      initializationPromise = null;
       requestEpoch += 1;
+      phase.value = "idle";
       clearProjection();
       tenants.value = Object.freeze([]);
       selectedTenantId.value = null;
       lastFailure.value = null;
-      phase.value = "idle";
       lastAcceptedRevision.clear();
     }
 
@@ -247,6 +265,7 @@ export function createPermissionStoreDefinition(
       capabilities,
       lastFailure,
       isReady,
+      ensureInitialized,
       discoverTenants,
       selectTenant,
       refresh,
