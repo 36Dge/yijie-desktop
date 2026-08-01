@@ -100,6 +100,8 @@ tenant/context、revision/expiry、并发、持久化、依赖与 CI：
 | S5B-REV-002 | P2 / resolved | 已取消 signal 原可能在拒绝前仍启动 native invoke；现在调用前检查 abort，负测证明调用数为 0 |
 | S5B-REV-003 | P2 / resolved | 同一 revision 若返回不同已知 capability，原状态机仍可能接受；现在记录 revision+capability key，同 revision 漂移与 revision rollback 均拒绝 |
 | S5B-REV-004 | P2 / resolved | `Date.parse` 会规范化 2 月 30 日或 24:00；现在先做日历有效性、RFC3339、future 与≤5m 校验，边界负测 PASS |
+| S5B-REV-005 | P1 / resolved | 首次远端 CI 使用脚本级 contracts 变量，但 Makefile 默认值覆盖后仍访问 sibling 路径；workflow 改用正式 `CONTRACTS_DIR=.contracts-source` 输入，exact checkout 校验 PASS |
+| S5B-REV-006 | P1 / resolved | 仓内 `.contracts-source` checkout 会被 Vitest 默认发现并误执行 Contracts 仓测试；Desktop test 命令显式排除该只读 source tree，12 个 Desktop test files/80 tests 保持执行 |
 
 S5B 当前开放 P0/P1/P2 为 0；没有以本审查冒充段成威最终人工批准，也没有把本地单元/conformance
 测试写成 S7 跨仓 E2E。
