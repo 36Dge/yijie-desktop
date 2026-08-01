@@ -259,6 +259,36 @@ mod tests {
         assert_eq!(LEGACY_KEYCHAIN_ACCOUNT, "refresh-token-family");
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "S7 local integration: mutates and then removes an isolated synthetic Keychain item"]
+    fn protected_data_keychain_s7_round_trip() {
+        use keyring_core::api::CredentialStoreApi;
+        use std::collections::HashMap;
+
+        const SMOKE_SERVICE: &str = "ai.yijie.desktop.auth.s7-smoke";
+        const SMOKE_ACCOUNT: &str = "protected-store-round-trip";
+        const SMOKE_SECRET: &[u8] = b"synthetic-keychain-probe";
+
+        let store = apple_native_keyring_store::protected::Store::new()
+            .expect("create Protected Data Keychain store");
+        let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+        let entry = store
+            .build(SMOKE_SERVICE, SMOKE_ACCOUNT, Some(&modifiers))
+            .expect("build isolated S7 Keychain entry");
+
+        let set_result = entry.set_secret(SMOKE_SECRET);
+        let loaded = set_result
+            .as_ref()
+            .ok()
+            .and_then(|_| entry.get_secret().ok());
+        let delete_result = entry.delete_credential();
+
+        set_result.expect("write isolated S7 Keychain entry");
+        assert_eq!(loaded.as_deref(), Some(SMOKE_SECRET));
+        delete_result.expect("remove isolated S7 Keychain entry");
+    }
+
     fn binding(environment: &str, issuer: &str, client_id: &str) -> RefreshTokenBinding {
         RefreshTokenBinding {
             environment: environment.to_owned(),

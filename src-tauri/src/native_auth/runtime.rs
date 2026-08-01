@@ -37,6 +37,18 @@ struct AuthService {
     refresh_lock: Mutex<()>,
 }
 
+#[async_trait::async_trait]
+trait RefreshRevoker: Send + Sync {
+    async fn revoke_refresh(&self, refresh_token: &SecretValue);
+}
+
+#[async_trait::async_trait]
+impl RefreshRevoker for OidcClient {
+    async fn revoke_refresh(&self, refresh_token: &SecretValue) {
+        self.revoke(refresh_token).await;
+    }
+}
+
 struct AccessSession {
     token: SecretValue,
     expires_at: Instant,
@@ -314,18 +326,18 @@ impl AuthService {
         let tokens = match self.oidc.refresh(&current_refresh).await {
             Ok(tokens) => tokens,
             Err(RefreshFailure::InvalidGrant) => {
-                self.clear_all().await?;
+                self.revoke_and_clear_refresh(&self.oidc, &current_refresh)
+                    .await?;
                 return Err(NativeAuthError::SignedOut);
             }
             Err(RefreshFailure::Failed) => return Err(NativeAuthError::TransportFailed),
         };
 
+        let rotated_refresh = tokens.refresh_token.clone();
         stored.refresh_token = tokens.refresh_token.expose().to_owned();
         stored.last_used_at_epoch_seconds = now;
-        if self.store.save(&stored).await.is_err() {
-            let _ = self.clear_all().await;
-            return Err(NativeAuthError::SecureStorageUnavailable);
-        }
+        self.save_rotated_refresh(&self.oidc, &stored, &rotated_refresh)
+            .await?;
         let access = tokens.access_token.clone();
         *self.access.lock().await = Some(AccessSession {
             token: tokens.access_token,
@@ -350,6 +362,30 @@ impl AuthService {
         *self.storage_blocked.lock().await = true;
         *self.access.lock().await = None;
         self.store.delete().await
+    }
+
+    async fn revoke_and_clear_refresh<R: RefreshRevoker + ?Sized>(
+        &self,
+        revoker: &R,
+        refresh_token: &SecretValue,
+    ) -> Result<(), NativeAuthError> {
+        revoker.revoke_refresh(refresh_token).await;
+        self.clear_all().await
+    }
+
+    async fn save_rotated_refresh<R: RefreshRevoker + ?Sized>(
+        &self,
+        revoker: &R,
+        stored: &StoredRefreshToken,
+        rotated_refresh: &SecretValue,
+    ) -> Result<(), NativeAuthError> {
+        if self.store.save(stored).await.is_err() {
+            let _ = self
+                .revoke_and_clear_refresh(revoker, rotated_refresh)
+                .await;
+            return Err(NativeAuthError::SecureStorageUnavailable);
+        }
+        Ok(())
     }
 
     async fn clear_rejected_session(
@@ -431,18 +467,23 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
 
     struct TestStore {
         record: StdMutex<Option<RefreshTokenRecord>>,
         deletes: AtomicUsize,
+        save_fails: AtomicBool,
     }
 
     #[async_trait]
     impl RefreshTokenStore for TestStore {
         async fn save(&self, _token: &StoredRefreshToken) -> Result<(), NativeAuthError> {
-            Ok(())
+            if self.save_fails.load(Ordering::Relaxed) {
+                Err(NativeAuthError::SecureStorageUnavailable)
+            } else {
+                Ok(())
+            }
         }
 
         async fn load(&self) -> Result<RefreshTokenRecord, NativeAuthError> {
@@ -457,6 +498,20 @@ mod tests {
         async fn delete(&self) -> Result<(), NativeAuthError> {
             self.deletes.fetch_add(1, Ordering::Relaxed);
             Ok(())
+        }
+    }
+
+    struct TestRevoker {
+        revoked: StdMutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl RefreshRevoker for TestRevoker {
+        async fn revoke_refresh(&self, refresh_token: &SecretValue) {
+            self.revoked
+                .lock()
+                .expect("test revocation lock")
+                .push(refresh_token.expose().to_owned());
         }
     }
 
@@ -493,6 +548,7 @@ mod tests {
         let store = Arc::new(TestStore {
             record: StdMutex::new(Some(record)),
             deletes: AtomicUsize::new(0),
+            save_fails: AtomicBool::new(false),
         });
         let service = AuthService {
             oidc: OidcClient::new(config.clone()).expect("OIDC client"),
@@ -649,6 +705,61 @@ mod tests {
             .clear_rejected_session(&SecretValue::new("rejected-access".to_owned()))
             .await
             .expect("clear rejected session"));
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 1);
+        assert!(*service.storage_blocked.lock().await);
+        assert!(service.access.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_refresh_cleanup_revokes_current_token_and_clears_session() {
+        let (service, store) = service(RefreshTokenRecord::Missing);
+        *service.access.lock().await = Some(AccessSession {
+            token: SecretValue::new("access".to_owned()),
+            expires_at: Instant::now() + Duration::from_secs(600),
+        });
+        let revoker = TestRevoker {
+            revoked: StdMutex::new(Vec::new()),
+        };
+
+        service
+            .revoke_and_clear_refresh(&revoker, &SecretValue::new("current-refresh".to_owned()))
+            .await
+            .expect("revoke invalid refresh and clear session");
+
+        assert_eq!(
+            *revoker.revoked.lock().expect("test revocation lock"),
+            vec!["current-refresh".to_owned()]
+        );
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 1);
+        assert!(*service.storage_blocked.lock().await);
+        assert!(service.access.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn rotated_refresh_save_failure_revokes_new_token_and_clears_session() {
+        let (service, store) = service(RefreshTokenRecord::Missing);
+        store.save_fails.store(true, Ordering::Relaxed);
+        *service.access.lock().await = Some(AccessSession {
+            token: SecretValue::new("access".to_owned()),
+            expires_at: Instant::now() + Duration::from_secs(600),
+        });
+        let revoker = TestRevoker {
+            revoked: StdMutex::new(Vec::new()),
+        };
+
+        let result = service
+            .save_rotated_refresh(
+                &revoker,
+                &stored(10_000_000),
+                &SecretValue::new("rotated-refresh".to_owned()),
+            )
+            .await;
+
+        assert_eq!(result, Err(NativeAuthError::SecureStorageUnavailable));
+        assert_eq!(
+            *revoker.revoked.lock().expect("test revocation lock"),
+            vec!["rotated-refresh".to_owned()]
+        );
         assert_eq!(store.deletes.load(Ordering::Relaxed), 1);
         assert!(*service.storage_blocked.lock().await);
         assert!(service.access.lock().await.is_none());
