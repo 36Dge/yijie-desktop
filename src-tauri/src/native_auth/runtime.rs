@@ -1,6 +1,7 @@
 use super::{
     CommandError, NativeAuthConfig, NativeAuthError, OidcClient, ProtectedKeychainStore,
-    RefreshFailure, RefreshTokenStore, SecretValue, StoredRefreshToken,
+    RefreshFailure, RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue,
+    StoredRefreshToken,
 };
 use crate::native_auth::loopback::LoopbackCallback;
 use crate::native_auth::transport::{OperationResponse, OperationTransport};
@@ -27,6 +28,7 @@ enum RuntimeMode {
 
 struct AuthService {
     oidc: OidcClient,
+    binding: RefreshTokenBinding,
     store: Arc<dyn RefreshTokenStore>,
     transport: OperationTransport,
     access: Mutex<Option<AccessSession>>,
@@ -53,22 +55,28 @@ impl NativeAuthRuntime {
         let mode = match NativeAuthConfig::from_environment() {
             Ok(None) => RuntimeMode::Disabled,
             Err(_) => RuntimeMode::Invalid,
-            Ok(Some(config)) => match (
-                OidcClient::new(config.clone()),
-                ProtectedKeychainStore::new(),
-                OperationTransport::new(&config),
-            ) {
-                (Ok(oidc), Ok(store), Ok(transport)) => RuntimeMode::Ready(Arc::new(AuthService {
-                    oidc,
-                    store: Arc::new(store),
-                    transport,
-                    access: Mutex::new(None),
-                    storage_blocked: Mutex::new(false),
-                    login_lock: Mutex::new(()),
-                    refresh_lock: Mutex::new(()),
-                })),
-                _ => RuntimeMode::Invalid,
-            },
+            Ok(Some(config)) => {
+                let binding = RefreshTokenBinding::from_config(&config);
+                match (
+                    OidcClient::new(config.clone()),
+                    ProtectedKeychainStore::new(),
+                    OperationTransport::new(&config),
+                ) {
+                    (Ok(oidc), Ok(store), Ok(transport)) => {
+                        RuntimeMode::Ready(Arc::new(AuthService {
+                            oidc,
+                            binding,
+                            store: Arc::new(store),
+                            transport,
+                            access: Mutex::new(None),
+                            storage_blocked: Mutex::new(false),
+                            login_lock: Mutex::new(()),
+                            refresh_lock: Mutex::new(()),
+                        }))
+                    }
+                    _ => RuntimeMode::Invalid,
+                }
+            }
         };
         Self { mode }
     }
@@ -128,8 +136,7 @@ impl AuthService {
 
         let retry_token = self.access_token(Some(&first_token)).await?;
         let retry = self.transport.list_my_tenants(&retry_token).await?;
-        if retry.status == 401 {
-            self.clear_all().await?;
+        if retry.status == 401 && self.clear_rejected_session(&retry_token).await? {
             return Err(NativeAuthError::SignedOut);
         }
         Ok(retry)
@@ -153,8 +160,7 @@ impl AuthService {
             .transport
             .get_my_capabilities(tenant_id, &retry_token)
             .await?;
-        if retry.status == 401 {
-            self.clear_all().await?;
+        if retry.status == 401 && self.clear_rejected_session(&retry_token).await? {
             return Err(NativeAuthError::SignedOut);
         }
         Ok(retry)
@@ -184,7 +190,7 @@ impl AuthService {
                 return Err(error);
             }
         };
-        let old_refresh = match self.store.load().await {
+        let old_refresh = match self.load_bound_refresh().await {
             Ok(refresh) => refresh,
             Err(error) => {
                 self.oidc.revoke(&issued_refresh).await;
@@ -198,12 +204,13 @@ impl AuthService {
                 return Err(NativeAuthError::AuthenticationFailed);
             }
         };
-        let stored = StoredRefreshToken {
-            refresh_token: tokens.refresh_token.expose().to_owned(),
-            issued_at_epoch_seconds: now,
-            last_used_at_epoch_seconds: now,
+        let stored = StoredRefreshToken::new(
+            &self.binding,
+            tokens.refresh_token.expose().to_owned(),
+            now,
+            now,
             absolute_expires_at_epoch_seconds,
-        };
+        );
         if self.store.save(&stored).await.is_err() {
             self.oidc.revoke(&issued_refresh).await;
             let _ = self.clear_all().await;
@@ -231,7 +238,7 @@ impl AuthService {
         let _refresh_guard = self.refresh_lock.lock().await;
         *self.storage_blocked.lock().await = true;
         *self.access.lock().await = None;
-        let refresh = self.store.load().await?;
+        let refresh = self.load_bound_refresh().await?;
         if let Some(refresh) = refresh {
             self.oidc
                 .revoke(&SecretValue::new(refresh.refresh_token.clone()))
@@ -255,7 +262,7 @@ impl AuthService {
         if self.access.lock().await.is_some() {
             return Ok(AuthStatus::SignedIn);
         }
-        let Some(stored) = self.store.load().await? else {
+        let Some(stored) = self.load_bound_refresh().await? else {
             return Ok(AuthStatus::SignedOut);
         };
         let now = epoch_seconds()?;
@@ -293,7 +300,10 @@ impl AuthService {
             }
         }
 
-        let mut stored = self.store.load().await?.ok_or(NativeAuthError::SignedOut)?;
+        let mut stored = self
+            .load_bound_refresh()
+            .await?
+            .ok_or(NativeAuthError::SignedOut)?;
         let now = epoch_seconds()?;
         if validate_stored_refresh(&stored, now).is_err() {
             self.clear_all().await?;
@@ -340,6 +350,35 @@ impl AuthService {
         *self.storage_blocked.lock().await = true;
         *self.access.lock().await = None;
         self.store.delete().await
+    }
+
+    async fn clear_rejected_session(
+        &self,
+        rejected_token: &SecretValue,
+    ) -> Result<bool, NativeAuthError> {
+        let _refresh_guard = self.refresh_lock.lock().await;
+        if let Some(current) = self.access.lock().await.as_ref() {
+            if !constant_time_equal(current.token.expose(), rejected_token.expose()) {
+                return Ok(false);
+            }
+        }
+        self.clear_all().await?;
+        Ok(true)
+    }
+
+    async fn load_bound_refresh(&self) -> Result<Option<StoredRefreshToken>, NativeAuthError> {
+        match self.store.load().await? {
+            RefreshTokenRecord::Missing => Ok(None),
+            RefreshTokenRecord::Current(stored) if stored.is_bound_to(&self.binding) => {
+                Ok(Some(stored))
+            }
+            RefreshTokenRecord::Current(_) | RefreshTokenRecord::Incompatible => {
+                *self.storage_blocked.lock().await = true;
+                *self.access.lock().await = None;
+                self.store.delete().await?;
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -390,14 +429,92 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex as StdMutex;
+
+    struct TestStore {
+        record: StdMutex<Option<RefreshTokenRecord>>,
+        deletes: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl RefreshTokenStore for TestStore {
+        async fn save(&self, _token: &StoredRefreshToken) -> Result<(), NativeAuthError> {
+            Ok(())
+        }
+
+        async fn load(&self) -> Result<RefreshTokenRecord, NativeAuthError> {
+            Ok(self
+                .record
+                .lock()
+                .expect("test record lock")
+                .take()
+                .unwrap_or(RefreshTokenRecord::Missing))
+        }
+
+        async fn delete(&self) -> Result<(), NativeAuthError> {
+            self.deletes.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    fn config(client_id: &str) -> NativeAuthConfig {
+        let values = HashMap::from([
+            ("YIJIE_DESKTOP_NATIVE_AUTH_ENABLED", "true"),
+            ("YIJIE_DESKTOP_OIDC_ISSUER", "https://identity.example/"),
+            (
+                "YIJIE_DESKTOP_OIDC_AUTHORIZATION_ENDPOINT",
+                "https://identity.example/oauth/authorize",
+            ),
+            (
+                "YIJIE_DESKTOP_OIDC_TOKEN_ENDPOINT",
+                "https://identity.example/oauth/token",
+            ),
+            (
+                "YIJIE_DESKTOP_OIDC_JWKS_URI",
+                "https://identity.example/.well-known/jwks.json",
+            ),
+            (
+                "YIJIE_DESKTOP_OIDC_REVOCATION_ENDPOINT",
+                "https://identity.example/oauth/revoke",
+            ),
+            ("YIJIE_DESKTOP_OIDC_CLIENT_ID", client_id),
+            ("YIJIE_DESKTOP_API_ORIGIN", "https://api.example/"),
+        ]);
+        NativeAuthConfig::from_test_lookup(|name| values.get(name).map(|value| (*value).to_owned()))
+            .expect("valid config")
+            .expect("enabled config")
+    }
+
+    fn service(record: RefreshTokenRecord) -> (AuthService, Arc<TestStore>) {
+        let config = config("client-a");
+        let store = Arc::new(TestStore {
+            record: StdMutex::new(Some(record)),
+            deletes: AtomicUsize::new(0),
+        });
+        let service = AuthService {
+            oidc: OidcClient::new(config.clone()).expect("OIDC client"),
+            binding: RefreshTokenBinding::from_config(&config),
+            store: store.clone(),
+            transport: OperationTransport::new(&config).expect("operation transport"),
+            access: Mutex::new(None),
+            storage_blocked: Mutex::new(false),
+            login_lock: Mutex::new(()),
+            refresh_lock: Mutex::new(()),
+        };
+        (service, store)
+    }
 
     fn stored(now: u64) -> StoredRefreshToken {
-        StoredRefreshToken {
-            refresh_token: "refresh".to_owned(),
-            issued_at_epoch_seconds: now - 10,
-            last_used_at_epoch_seconds: now - 5,
-            absolute_expires_at_epoch_seconds: now + 10,
-        }
+        StoredRefreshToken::new(
+            &RefreshTokenBinding::from_config(&config("client-a")),
+            "refresh".to_owned(),
+            now - 10,
+            now - 5,
+            now + 10,
+        )
     }
 
     #[test]
@@ -434,6 +551,107 @@ mod tests {
         assert!(constant_time_equal("refresh", "refresh"));
         assert!(!constant_time_equal("refresh-a", "refresh-b"));
         assert!(!constant_time_equal("short", "a much longer secret"));
+    }
+
+    #[tokio::test]
+    async fn incompatible_or_mismatched_records_are_deleted_without_becoming_refreshable() {
+        let (incompatible_service, incompatible_store) = service(RefreshTokenRecord::Incompatible);
+        assert!(incompatible_service
+            .load_bound_refresh()
+            .await
+            .expect("purge incompatible")
+            .is_none());
+        assert_eq!(incompatible_store.deletes.load(Ordering::Relaxed), 1);
+        assert!(*incompatible_service.storage_blocked.lock().await);
+
+        let mismatched = StoredRefreshToken::new(
+            &RefreshTokenBinding::from_config(&config("client-b")),
+            "must-not-be-sent".to_owned(),
+            1,
+            2,
+            3,
+        );
+        let (mismatched_service, mismatched_store) =
+            service(RefreshTokenRecord::Current(mismatched));
+        assert!(mismatched_service
+            .load_bound_refresh()
+            .await
+            .expect("purge mismatched")
+            .is_none());
+        assert_eq!(mismatched_store.deletes.load(Ordering::Relaxed), 1);
+        assert!(*mismatched_service.storage_blocked.lock().await);
+    }
+
+    #[tokio::test]
+    async fn exactly_bound_record_remains_available_without_deletion() {
+        let record = stored(10_000_000);
+        let (service, store) = service(RefreshTokenRecord::Current(record));
+        assert!(service
+            .load_bound_refresh()
+            .await
+            .expect("load matching")
+            .is_some());
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
+        assert!(!*service.storage_blocked.lock().await);
+    }
+
+    #[tokio::test]
+    async fn rejected_access_token_cannot_delete_a_concurrently_refreshed_session() {
+        let (service, store) = service(RefreshTokenRecord::Missing);
+        let service = Arc::new(service);
+        *service.access.lock().await = Some(AccessSession {
+            token: SecretValue::new("rejected-access".to_owned()),
+            expires_at: Instant::now() + Duration::from_secs(600),
+        });
+
+        let refresh_guard = service.refresh_lock.lock().await;
+        let invalidating_service = service.clone();
+        let invalidation = tokio::spawn(async move {
+            invalidating_service
+                .clear_rejected_session(&SecretValue::new("rejected-access".to_owned()))
+                .await
+        });
+        tokio::task::yield_now().await;
+        *service.access.lock().await = Some(AccessSession {
+            token: SecretValue::new("new-access".to_owned()),
+            expires_at: Instant::now() + Duration::from_secs(600),
+        });
+        drop(refresh_guard);
+
+        assert!(!invalidation
+            .await
+            .expect("invalidation task")
+            .expect("compare-and-clear"));
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
+        assert!(!*service.storage_blocked.lock().await);
+        assert!(constant_time_equal(
+            service
+                .access
+                .lock()
+                .await
+                .as_ref()
+                .expect("concurrently refreshed access")
+                .token
+                .expose(),
+            "new-access",
+        ));
+    }
+
+    #[tokio::test]
+    async fn current_rejected_access_token_is_cleared_under_the_refresh_lock() {
+        let (service, store) = service(RefreshTokenRecord::Missing);
+        *service.access.lock().await = Some(AccessSession {
+            token: SecretValue::new("rejected-access".to_owned()),
+            expires_at: Instant::now() + Duration::from_secs(600),
+        });
+
+        assert!(service
+            .clear_rejected_session(&SecretValue::new("rejected-access".to_owned()))
+            .await
+            .expect("clear rejected session"));
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 1);
+        assert!(*service.storage_blocked.lock().await);
+        assert!(service.access.lock().await.is_none());
     }
 
     #[tokio::test]

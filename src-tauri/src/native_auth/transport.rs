@@ -37,12 +37,15 @@ enum Operation {
 
 impl OperationTransport {
     pub fn new(config: &NativeAuthConfig) -> Result<Self, NativeAuthError> {
-        let http = reqwest::Client::builder()
-            .https_only(true)
-            .redirect(Policy::none())
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
-            .user_agent("YijieDesktop/0.1 permission-transport")
+        let http = config
+            .harden_http_client(
+                reqwest::Client::builder()
+                    .https_only(true)
+                    .redirect(Policy::none())
+                    .connect_timeout(Duration::from_secs(5))
+                    .timeout(Duration::from_secs(10))
+                    .user_agent("YijieDesktop/0.1 permission-transport"),
+            )
             .build()
             .map_err(|_| NativeAuthError::InvalidConfiguration)?;
         Ok(Self {

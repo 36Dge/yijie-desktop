@@ -29,6 +29,11 @@ fragment、OIDC 跨 origin 或带 path 的 API origin 均导致 fail-closed：
 
 仓库不提供变量值、client secret、生产样例或启用默认值。
 
+G3-NP-LOCAL 额外定义 `YIJIE_DESKTOP_AUTH_ENVIRONMENT`、
+`YIJIE_DESKTOP_LOCAL_CA_PEM_PATH` 与 `YIJIE_DESKTOP_LOCAL_CA_SHA256`。自定义 CA 只允许在显式
+`local-integration` 下使用，且 issuer/API host 必须精确为 `localhost`；完整边界见
+[`FEAT-125-G3-NP-LOCAL.md`](FEAT-125-G3-NP-LOCAL.md)。
+
 ## 3. 安全不变量
 
 | ID | 不变量 | 实现与验证证据 |
@@ -51,6 +56,11 @@ fragment、OIDC 跨 origin 或带 path 的 API origin 均导致 fail-closed：
 | S5A-16 | HTTP 禁止 redirect，限制 10 秒与 256 KiB，响应必须 `application/json` / `no-store` | hardened reqwest client + header/status/body 检查 |
 | S5A-17 | Rust/Tauri 输出不包含 token、内部错误、任意响应 header | `SecretValue` redaction + 固定 `CommandError` / `OperationResponse` |
 | S5A-18 | 功能默认关闭，部分或非法配置不降级 | 配置矩阵单元测试 |
+| G3L-01 | 本地 CA 只在显式 local-integration 使用；production 出现 CA 变量即拒绝 | environment/CA 配置负向矩阵 |
+| G3L-02 | local-integration issuer/API 只允许精确 `localhost`；仍强制 HTTPS、hostname/SAN 与 no redirect | config + 两个 hardened reqwest builder |
+| G3L-03 | CA 必须为绝对 regular/non-symlink、0400/0600、≤64 KiB、单 certificate、无 private key 且 SHA-256 pin 匹配 | CA 文件负向矩阵 |
+| G3L-04 | Keychain v2 绑定 environment/issuer/client；旧、双版本、非法或不匹配记录删除后要求重登 | v2 account/envelope + purge 测试 |
+| G3L-05 | v2 使用独立 account，旧 reader 回滚只看到 signed-out，不解析 v2 | `refresh-token-family-v2` 与 legacy detection |
 
 ## 4. Operation-scoped transport
 
@@ -104,20 +114,87 @@ RS256 公钥验签，不包含 RSA 私钥、签名或解密路径。因此在 `.
 
 1. 401 并发等待者原本可能在前一个请求完成轮换后再次轮换；加入 rejected-token 重检，保证 single-flight 复用。
 2. Keychain 删除失败后，内存态原本可能再次读取旧 token；加入 `storage_blocked` 熔断，只有新登录成功落盘才解除。
-3. 新 OIDC token 在 Keychain load/save 失败时可能成为服务器端孤儿会话；失败分支现在先撤销新 refresh token。
-4. refresh 返回同 token、缺失 refresh token 或非法 token response 时原本可能保留旧 family；现在统一 fail-closed、撤销并清理。
+3. 初次登录取得的新 OIDC token 在 Keychain load/save 失败时会先 best-effort 撤销新 refresh token；但
+   refresh rotation 已取得新 token 后若 Keychain save 失败，当前只熔断并清理本地状态，尚未撤销该新
+   token。这是开放 P2，必须在 S7/G5/生产激活前修复并做故障注入验证。
+4. refresh 返回同 token 时会 best-effort 撤销；但缺失 refresh token 或非法 token response 当前只映射
+   `InvalidGrant` 并清理本地状态，尚未 best-effort 撤销当前 refresh token。该分支与第 3 项合并登记为
+   `S5A-REV-OPEN-001`，不得写成服务端 refresh family 已统一撤销。
 5. callback parser 增加精确可选 issuer、request-body/transfer-encoding 拒绝与安全响应 header。
 6. npm high advisory `GHSA-mh99-v99m-4gvg` 通过 workspace override `brace-expansion=5.0.8` 关闭。
 
-最终审查结论：S5A 范围内无未关闭的 P0/P1/P2 finding；没有 Desktop access-JWT verifier、通用原生
-HTTP 代理、token IPC、深链/嵌入式登录、Tasks/UI 修改或生产激活。
+最终审查结论：S5A/G3 当前无未关闭的 P0/P1；存在一个不阻断 G3 环境兼容性或 S5B/UI 实现、但阻断
+S7/G5 与生产激活的 P2 `S5A-REV-OPEN-001`。本轮没有 Desktop access-JWT verifier、通用原生 HTTP
+代理、token IPC、深链/嵌入式登录、Tasks/UI 修改或生产激活。
 
-## 7. 明确保留给 G3/G5 的验证
+## 7. 后续门禁分层
 
-以下项目本轮为 **NOT RUN（按范围保留）**，不能解释为已通过生产验证：
+G3-NP-LOCAL 只验证本地环境兼容性：localhost IdP/DNS/TLS/API bootstrap、offline ready、online preflight
+及 fail-closed 负向检查。该层通过即可批准 S5B，不要求签名身份或完整 Desktop native E2E。
 
-- 真实 IdP issuer/client/JWKS/revocation endpoint 的端到端登录、refresh rotation/reuse-family 行为；
-- 真实生产 API origin 上的 tenants/capabilities producer-consumer 联调；
-- 带正式 provisioning、签名、公证和 entitlements 的 App 对 Protected Data Keychain 的读写/删除；
-- 生产 CSP、发布配置、灰度、回滚和生产激活；
-- S5B/UI 与 generated DTO consumer。
+以下项目本轮为 **NOT RUN（保留给 S7/G5）**，不能解释为已通过生产验证，也不阻断 S5B：
+
+- 修复并故障注入验证 `S5A-REV-OPEN-001`：refresh rotation 新 token 的 Keychain save 失败时撤销
+  新 token；缺失/非法 refresh-token response 时撤销当前 token，并验证 Keychain delete 同时失败时
+  重启也不会恢复 outcome-ambiguous session；
+- signed local `.app` 的系统浏览器登录、callback、refresh rotation/reuse-family 与
+  tenants/capabilities consumer 端到端联调；
+- 带本地 Apple Development provisioning、签名和 entitlements 的 App 对 Protected Data Keychain 的
+  读写/删除；
+- 真实生产 IdP/API origin 的 producer-consumer 联调；
+- 正式 provisioning、签名、公证和 entitlements 的生产 App 验证；
+- 生产 CSP、发布配置、灰度、回滚和生产激活。
+
+S5B/UI 与 generated DTO consumer 本轮同样未执行，但它是 G3-NP-LOCAL 环境兼容性 PASS 后的下一独立
+切片，不属于上述 S7/G5 保留项。
+
+## 8. G3-NP-LOCAL Desktop 候选
+
+本切片的 contract impact 为 `semantic`：权威源是本仓 deployment config 与 Keychain schema v2；公共
+HTTP wire 未改变，因此 contracts PR/tag/generator 为 `N/A`。production 默认、OIDC/API 路径、状态码及
+权威 contracts candidate `9ec34abd6e7dfb5a23b0154d467694167224ebbb` 均未改变。
+
+当前候选已证明仓内实现、local stack、live Keycloak、专用 API PostgreSQL bootstrap 与 offline ready。
+online preflight 已执行：显式信任本地 CA 的 discovery、JWKS 与 callback 检查 PASS，随后在 API
+`/healthz` 得到 `502`（脚本退出码 `2`）。因此 G3-NP-LOCAL 仍为 **BLOCKED / NOT PASS**，S5B
+未获批准。带 provisioning 的 signed `.app` Keychain 矩阵与完整 Desktop native login/refresh E2E
+属于 S7/G5；它们保持 `NOT RUN` 不影响后续 G3-NP-LOCAL PASS，也不阻断 S5B。
+
+### 8.1 2026-08-01 仓内验证结果
+
+验证基线为 `yijie-desktop/develop` 的
+`3798c67d260237928730758c7ec4c1fbe6fcf7d2`，执行前与 `origin/develop` 相等。本轮尚未提交，因而
+没有伪造 candidate commit SHA。
+
+| 门禁 | 结果 | 证据摘要 |
+| --- | --- | --- |
+| `pnpm install --frozen-lockfile` | PASS | 2 个 workspace，lockfile 无修改 |
+| `make lint` | PASS | ESLint、Vue TSC、Rust fmt、Clippy `-D warnings` |
+| `make test` | PASS | 前端 9 files / 37 tests；Rust 36 tests；loopback bind 在允许本机回环的上下文通过 |
+| `make build` | PASS | Vue TSC + Vite production build |
+| `pnpm docs:build` | PASS | VitePress client/server build 与页面渲染 |
+| `pnpm tauri:build --debug` | PASS | 生成 debug `.app` 与 aarch64 `.dmg`；macOS DMG bundler 在沙箱外完成 |
+| RustSec advisory scan | PASS（离线） | 既有本地 database 1177 advisories；0 个未豁免漏洞，17 个既有 allowed warnings；未进行在线 freshness/yanked 查询 |
+| `pnpm audit --audit-level high` | PASS | 经明确批准访问 npm 官方 advisory 服务；`No known vulnerabilities found`，且本轮没有依赖或 lockfile 变化 |
+| `git diff --check` | PASS | 无 whitespace error |
+| secret / scope scan | PASS | 只有 synthetic public test CA；无 private key、token、client secret、生产值、S5B/UI、Tasks、contracts 或 `tauri.conf.json` 改动 |
+
+结构化复审发现第二次 `401` 清理与并发 refresh 之间可能竞态；当前实现已在同一 `refresh_lock` 下按
+被拒 access token 执行 compare-and-clear。若另一请求已经发布不同的新 token，则旧请求不得删除新
+Keychain session；若被拒 token 仍是当前 token，才清理并转为 signed-out。两条定向并发测试已纳入
+上述 Rust 36 tests。
+
+可复现性摘要：
+
+- `src-tauri/Cargo.lock` SHA-256：`94b1ee21ed1bd9e4e97528622971da9241c43c4e497181ec83f77f2da6a5b973`（与 S5A 相同）；
+- `pnpm-lock.yaml` SHA-256：`aaa0a300afb760c0a768aebefcf338bdbbb66dd6a62a3a907d456d0246fedc0c`（与 S5A 相同）；
+- synthetic public test CA PEM SHA-256：`2c95fe33d6b3fc5d54cc8abcd26d8da92d84bf389468013cbd9cf0ade55384b6`；仓库不含对应 private key。
+
+debug `.app` 的 `codesign -dvv` 结果是 `Signature=adhoc`、`TeamIdentifier=not set`，且没有
+provisioning entitlements；`codesign --verify --deep --strict` 也因 bundle 没有可验证的 sealed
+resources 而失败。因此 debug bundle 只证明编译和打包，不能作为 Protected Data Keychain 原生 PASS。
+真实 localhost IdP/DNS/TLS、live provision、专用数据库 bootstrap 与 offline ready 均已 PASS；online
+preflight 在显式 CA 下通过 discovery、JWKS 与 callback，随后因 API 无法使用本地 CA 获取 HTTPS JWKS，
+在 `/healthz` 返回 `502`（退出码 `2`）。所以 G3-NP-LOCAL 为 **BLOCKED / NOT PASS**，S5B 未批准。
+signed local bundle、Protected Data Keychain 与完整 Desktop login/refresh E2E 为 S7/G5 的 **NOT RUN**，
+不阻断后续 G3-NP-LOCAL/S5B，但仍是 S7/G5/生产激活前置。

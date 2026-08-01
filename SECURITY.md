@@ -10,3 +10,6 @@
 
 FEAT-125 S5A 的原生 OIDC、Keychain 生命周期、loopback 回调和固定权限投影传输边界见
 [`docs/security/FEAT-125-S5A-security-matrix.md`](docs/security/FEAT-125-S5A-security-matrix.md)。
+
+FEAT-125 G3-NP-LOCAL 的本地 CA 信任、`localhost` 限制、Keychain envelope 迁移和本地签名门禁见
+[`docs/security/FEAT-125-G3-NP-LOCAL.md`](docs/security/FEAT-125-G3-NP-LOCAL.md)。

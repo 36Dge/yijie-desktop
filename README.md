@@ -53,3 +53,6 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## 安全要求
 
 桌面端不得持久化平台 access token。高风险工具调用必须展示审批卡片，并由 `yijie-api` 与 `yijie-agent-host` 执行策略校验。
+
+FEAT-125 本地类生产认证环境的受限 CA、`localhost` origin、Keychain v2 迁移与签名验证边界见
+[`docs/security/FEAT-125-G3-NP-LOCAL.md`](docs/security/FEAT-125-G3-NP-LOCAL.md)。

@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# FEAT-125 local-integration trust and signing inputs stay machine-local.
+*.local-ca.pem
+*.local-ca-key.pem
+*.local-integration.env
+*.provisionprofile
