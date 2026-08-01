@@ -7,7 +7,7 @@ Owner / reviewer / technical lead: 段成威
 Baseline: `f94ac343881b0f7df59c0f5f4169372e612fd019`
 
 Contracts candidate: `9ec34abd6e7dfb5a23b0154d467694167224ebbb`
-Status: implementation and local gates PASS; commit/remote SHA pending explicit commit approval
+Status: implementation commit `cf0e080e4cf2fa10e1394aead67c669574714a4d` pushed and verified on `origin/develop`; no release
 
 ## 1. Approved scope
 
@@ -85,7 +85,7 @@ Final open P0/P1/P2 findings in S6 scope: **0**.
 | JS license scan | PASS; 11 license groups, no AGPL/GPL/SSPL/BUSL/Commons-Clause group |
 | `git diff --check` | PASS |
 
-Current evidence digests before commit:
+Evidence digests for implementation commit `cf0e080e4cf2fa10e1394aead67c669574714a4d`:
 
 - `pnpm-lock.yaml`: `649b6c2c81c5d89f83a22ee2b524f18bc6ab9098e6cd94fc467b3dfed472b9e2`
 - unsigned debug DMG: `207757adaecc172ac182e916445e0ebc903a4e8c3bab1c2477040c4e72f735cb`
