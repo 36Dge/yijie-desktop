@@ -138,6 +138,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a creator-private task in the verified tenant
+         * @description Creates a task owned by the authenticated internal user. The bearer identity
+         *     and `X-Yijie-Tenant-ID` selection are independently verified; the client cannot
+         *     submit or override `tenant_id` or `created_by_user_id`. Reusing an idempotency
+         *     key with the same canonical request returns the original result; reusing it with
+         *     different input returns `idempotency_conflict`.
+         */
+        post: operations["createTaskV2"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Creator-private task identifier. */
+                task_id: components["parameters"]["TaskV2Id"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a creator-private task in the verified tenant
+         * @description Returns a task only when the authenticated internal user is its creator in the
+         *     verified tenant, unless a future explicit `task.read_all` capability is added
+         *     and authorized. Roles alone do not grant cross-creator access. Missing and
+         *     unauthorized identifiers share `task_not_found` to prevent enumeration.
+         */
+        get: operations["getTaskV2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -202,6 +252,43 @@ export interface components {
             input: {
                 [key: string]: unknown;
             };
+        };
+        CreateTaskV2Request: {
+            task_type: string;
+            title: string;
+            /** @description Task-type-specific input. Identity, tenant, ownership, and authorization fields are forbidden. */
+            input: {
+                [key: string]: unknown;
+            };
+        };
+        TaskV2: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Verified tenant context; never an authorization credential.
+             */
+            tenant_id: string;
+            /**
+             * Format: uuid
+             * @description Server-derived internal creator identifier; never accepted from clients.
+             */
+            created_by_user_id: string;
+            task_type: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "running" | "waiting_approval" | "completed" | "failed";
+            input: {
+                [key: string]: unknown;
+            };
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            error_message?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         Task: {
             /** Format: uuid */
@@ -292,6 +379,67 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description `invalid_request` or `invalid_tenant_context`: request fields or tenant selection are invalid. */
+        TaskV2BadRequest: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description `unauthenticated`: a valid external IdP access JWT is required. */
+        TaskV2Unauthenticated: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                "WWW-Authenticate": components["headers"]["BearerChallenge"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description `access_denied`: the authenticated user, tenant membership, or required task capability is denied. */
+        TaskV2AccessDenied: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description `task_not_found`: no creator-private task is visible for this identifier and verified tenant. */
+        TaskV2NotFound: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description `idempotency_conflict`: the idempotency key was already used with different canonical input. */
+        TaskV2IdempotencyConflict: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description `internal_error`: the task operation failed without exposing internal details. */
+        TaskV2InternalError: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
     };
     parameters: {
         /**
@@ -300,6 +448,14 @@ export interface components {
          *     membership, and tenant-scoped roles for every request.
          */
         TenantIdHeader: string;
+        /**
+         * @description Client-generated UUID that identifies one create intent. Retries of an unknown
+         *     network result reuse the same key and request. A key is scoped to the verified
+         *     internal user, tenant, operation, and bounded provider retention window.
+         */
+        IdempotencyKeyHeader: string;
+        /** @description Creator-private task identifier. */
+        TaskV2Id: string;
     };
     requestBodies: never;
     headers: {
@@ -531,6 +687,87 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    createTaskV2: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description UUID of the tenant selected by the client. This is an untrusted selection
+                 *     hint; the API independently verifies the authenticated user, tenant, active
+                 *     membership, and tenant-scoped roles for every request.
+                 */
+                "X-Yijie-Tenant-ID": components["parameters"]["TenantIdHeader"];
+                /**
+                 * @description Client-generated UUID that identifies one create intent. Retries of an unknown
+                 *     network result reuse the same key and request. A key is scoped to the verified
+                 *     internal user, tenant, operation, and bounded provider retention window.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKeyHeader"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskV2Request"];
+            };
+        };
+        responses: {
+            /** @description Creator-private task created, or the original idempotent result. */
+            201: {
+                headers: {
+                    "Cache-Control": components["headers"]["NoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskV2"];
+                };
+            };
+            400: components["responses"]["TaskV2BadRequest"];
+            401: components["responses"]["TaskV2Unauthenticated"];
+            403: components["responses"]["TaskV2AccessDenied"];
+            409: components["responses"]["TaskV2IdempotencyConflict"];
+            500: components["responses"]["TaskV2InternalError"];
+            503: components["responses"]["AuthorizationUnavailable"];
+        };
+    };
+    getTaskV2: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description UUID of the tenant selected by the client. This is an untrusted selection
+                 *     hint; the API independently verifies the authenticated user, tenant, active
+                 *     membership, and tenant-scoped roles for every request.
+                 */
+                "X-Yijie-Tenant-ID": components["parameters"]["TenantIdHeader"];
+            };
+            path: {
+                /** @description Creator-private task identifier. */
+                task_id: components["parameters"]["TaskV2Id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Creator-private task found. */
+            200: {
+                headers: {
+                    "Cache-Control": components["headers"]["NoStore"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskV2"];
+                };
+            };
+            400: components["responses"]["TaskV2BadRequest"];
+            401: components["responses"]["TaskV2Unauthenticated"];
+            403: components["responses"]["TaskV2AccessDenied"];
+            404: components["responses"]["TaskV2NotFound"];
+            500: components["responses"]["TaskV2InternalError"];
+            503: components["responses"]["AuthorizationUnavailable"];
         };
     };
 }

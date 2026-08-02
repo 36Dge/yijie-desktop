@@ -5,7 +5,7 @@ const validLock = {
   schema_version: 1,
   contract_version: "0.3.0-candidate",
   repository: "https://github.com/36Dge/yijie-contracts.git",
-  full_commit: "9ec34abd6e7dfb5a23b0154d467694167224ebbb",
+  full_commit: "c000a0245acb5c3f7ead5d2a877fb60c281c588c",
   source_path: "openapi/public/public.yaml",
   source_sha256: "b".repeat(64),
   generator: {
@@ -32,7 +32,17 @@ const validLock = {
   ].map((name) => ({
     path: `tests/fixtures/public/access/${name}`,
     sha256: "d".repeat(64),
-  })),
+  })).concat(
+    [
+      "create-request.json",
+      "error-access-denied.json",
+      "error-task-not-found.json",
+      "task-response.json",
+    ].map((name) => ({
+      path: `tests/fixtures/public/tasks-v2/${name}`,
+      sha256: "d".repeat(64),
+    })),
+  ),
 };
 
 describe("Public API contract pin", () => {

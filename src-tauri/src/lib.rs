@@ -1,7 +1,9 @@
+pub mod chat;
 mod native_auth;
 
+use chat::ChatRuntime;
 use native_auth::{AuthStatus, CommandError, NativeAuthRuntime, OperationResponse};
-use tauri::State;
+use tauri::{Manager, State};
 
 #[tauri::command]
 fn runtime_health() -> &'static str {
@@ -48,13 +50,28 @@ async fn get_my_capabilities(
 pub fn run() {
     tauri::Builder::default()
         .manage(NativeAuthRuntime::from_environment())
+        .setup(|app| {
+            let app_data_directory = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
+            app.manage(ChatRuntime::from_environment(app_data_directory));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             runtime_health,
             native_auth_login,
             native_auth_logout,
             native_auth_status,
             list_my_tenants,
-            get_my_capabilities
+            get_my_capabilities,
+            chat::chat_foundation_status,
+            chat::chat_pick_project,
+            chat::chat_revalidate_project,
+            chat::chat_list_projects,
+            chat::chat_remove_project,
+            chat::chat_start_local_host,
+            chat::chat_stop_local_host
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

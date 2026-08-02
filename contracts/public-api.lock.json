@@ -2,9 +2,9 @@
   "schema_version": 1,
   "contract_version": "0.3.0-candidate",
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "full_commit": "9ec34abd6e7dfb5a23b0154d467694167224ebbb",
+  "full_commit": "c000a0245acb5c3f7ead5d2a877fb60c281c588c",
   "source_path": "openapi/public/public.yaml",
-  "source_sha256": "7bd40dd1c5a53cc1dcd317e3a64bf7189170fd7f575b25bb07f0eb243d0319ed",
+  "source_sha256": "c7ab2577b26a0776a7c204d3b9ee38b424cbaf0b9b0dc33d99a6806dfced998b",
   "generator": {
     "package": "openapi-typescript",
     "version": "7.13.0",
@@ -12,7 +12,7 @@
     "command": "pnpm --dir tools/public-api-generator exec openapi-typescript openapi/public/public.yaml"
   },
   "generated_path": "src/api/generated/public.gen.ts",
-  "generated_sha256": "77babb215608c6ace4468d37b72fc8e43f5758231c7807a4301063cb156ae8e0",
+  "generated_sha256": "d3493a79ade649a17a78573ae0f9da3fa261f76c4472a151fbabd7056614d03b",
   "fixtures": [
     {
       "path": "tests/fixtures/public/access/capability-v1-empty.json",
@@ -61,6 +61,22 @@
     {
       "path": "tests/fixtures/public/access/tenant-list-v1-single.json",
       "sha256": "52600d769420b8e84371dd97fef32128e2745fbd119fee02f40d3488b4f7a127"
+    },
+    {
+      "path": "tests/fixtures/public/tasks-v2/create-request.json",
+      "sha256": "513d2cdedceebd74bcfd24bf5e9fdbc007ae57970c3bf3ca149498e314670155"
+    },
+    {
+      "path": "tests/fixtures/public/tasks-v2/error-access-denied.json",
+      "sha256": "77404767c92f13bcee858055d104f6bdea2cd835a794ec2c5918646adc4385a8"
+    },
+    {
+      "path": "tests/fixtures/public/tasks-v2/error-task-not-found.json",
+      "sha256": "99a99b93011756c3a5955ffb50f63de1d08d86bb6678640649e23260895a2ef9"
+    },
+    {
+      "path": "tests/fixtures/public/tasks-v2/task-response.json",
+      "sha256": "b777a5e87dfb798066b2b3cb5fc17cc66c18857e75df134361ffc9de541794b5"
     }
   ]
 }
