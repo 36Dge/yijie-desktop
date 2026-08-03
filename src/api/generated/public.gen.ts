@@ -153,7 +153,12 @@ export interface paths {
          *     and `X-Yijie-Tenant-ID` selection are independently verified; the client cannot
          *     submit or override `tenant_id` or `created_by_user_id`. Reusing an idempotency
          *     key with the same canonical request returns the original result; reusing it with
-         *     different input returns `idempotency_conflict`.
+         *     a different content-free reference returns `idempotency_conflict`.
+         *
+         *     This control-plane operation accepts metadata only. It must never receive or
+         *     derive prompt, message, raw reasoning, title content, project paths, or provider
+         *     output. Conversation content and generated titles remain in the local Desktop
+         *     SQLCipher authority and are not represented by this resource.
          */
         post: operations["createTaskV2"];
         delete?: never;
@@ -177,7 +182,9 @@ export interface paths {
          * @description Returns a task only when the authenticated internal user is its creator in the
          *     verified tenant, unless a future explicit `task.read_all` capability is added
          *     and authorized. Roles alone do not grant cross-creator access. Missing and
-         *     unauthorized identifiers share `task_not_found` to prevent enumeration.
+         *     unauthorized identifiers share `task_not_found` to prevent enumeration. The
+         *     response is metadata-only and never returns prompt, message, raw reasoning,
+         *     title content, project paths, provider output, or local conversation state.
          */
         get: operations["getTaskV2"];
         put?: never;
@@ -254,12 +261,26 @@ export interface components {
             };
         };
         CreateTaskV2Request: {
-            task_type: string;
-            title: string;
-            /** @description Task-type-specific input. Identity, tenant, ownership, and authorization fields are forbidden. */
-            input: {
-                [key: string]: unknown;
-            };
+            /** @enum {string} */
+            task_type: "conversation";
+            input: components["schemas"]["TaskContentReferenceV2"];
+        };
+        /**
+         * @description Closed, content-free control-plane reference. `client_reference_id` is a fresh
+         *     opaque UUID and must not be derived from or encode a prompt, message, raw
+         *     reasoning, title, project path, filesystem identifier, identity, tenant, or
+         *     authorization fact.
+         */
+        TaskContentReferenceV2: {
+            /**
+             * Format: int32
+             * @enum {integer}
+             */
+            schema_version: 1;
+            /** @enum {string} */
+            content_mode: "local_only";
+            /** Format: uuid */
+            client_reference_id: string;
         };
         TaskV2: {
             /** Format: uuid */
@@ -274,21 +295,20 @@ export interface components {
              * @description Server-derived internal creator identifier; never accepted from clients.
              */
             created_by_user_id: string;
-            task_type: string;
-            title: string;
+            /** @enum {string} */
+            task_type: "conversation";
             /** @enum {string} */
             status: "draft" | "running" | "waiting_approval" | "completed" | "failed";
-            input: {
-                [key: string]: unknown;
-            };
-            result?: {
-                [key: string]: unknown;
-            } | null;
-            error_message?: string | null;
+            input: components["schemas"]["TaskContentReferenceV2"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description Closed, content-free Public Tasks v2 error body. Error detail is server-side only. */
+        TaskV2ErrorResponse: {
+            /** @enum {string} */
+            code: "invalid_request" | "invalid_tenant_context" | "unauthenticated" | "access_denied" | "task_not_found" | "idempotency_conflict" | "authorization_unavailable" | "internal_error";
         };
         Task: {
             /** Format: uuid */
@@ -386,7 +406,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
         /** @description `unauthenticated`: a valid external IdP access JWT is required. */
@@ -397,7 +417,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
         /** @description `access_denied`: the authenticated user, tenant membership, or required task capability is denied. */
@@ -407,7 +427,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
         /** @description `task_not_found`: no creator-private task is visible for this identifier and verified tenant. */
@@ -417,7 +437,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
         /** @description `idempotency_conflict`: the idempotency key was already used with different canonical input. */
@@ -427,7 +447,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
         /** @description `internal_error`: the task operation failed without exposing internal details. */
@@ -437,7 +457,18 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["ErrorResponse"];
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
+            };
+        };
+        /** @description `authorization_unavailable`: identity, JWKS, membership, or RBAC data is unavailable. */
+        TaskV2AuthorizationUnavailable: {
+            headers: {
+                "Cache-Control": components["headers"]["NoStore"];
+                "Retry-After": components["headers"]["RetryAfter"];
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["TaskV2ErrorResponse"];
             };
         };
     };
@@ -730,7 +761,7 @@ export interface operations {
             403: components["responses"]["TaskV2AccessDenied"];
             409: components["responses"]["TaskV2IdempotencyConflict"];
             500: components["responses"]["TaskV2InternalError"];
-            503: components["responses"]["AuthorizationUnavailable"];
+            503: components["responses"]["TaskV2AuthorizationUnavailable"];
         };
     };
     getTaskV2: {
@@ -767,7 +798,7 @@ export interface operations {
             403: components["responses"]["TaskV2AccessDenied"];
             404: components["responses"]["TaskV2NotFound"];
             500: components["responses"]["TaskV2InternalError"];
-            503: components["responses"]["AuthorizationUnavailable"];
+            503: components["responses"]["TaskV2AuthorizationUnavailable"];
         };
     };
 }

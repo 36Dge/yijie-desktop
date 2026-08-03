@@ -4,5 +4,9 @@
   "description": "Minimal local capability for the main Yijie window",
   "windows": ["main"],
   "platforms": ["macOS"],
-  "permissions": ["core:app:default"]
+  "permissions": [
+    "core:app:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

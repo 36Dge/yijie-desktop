@@ -1,0 +1,737 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-ipc-v1.schema.json",
+  "title": "Yijie Desktop Private Chat IPC v1",
+  "description": "Desktop-owned private IPC. This schema is not a public API contract.",
+  "x-yijie-schema-version": 1,
+  "x-yijie-event-channel": "yijie.chat.event.v1",
+  "x-yijie-command-names": [
+    "chat_bind_context_v1",
+    "chat_list_projects_v1",
+    "chat_pick_project_v1",
+    "chat_revalidate_project_v1",
+    "chat_set_project_pinned_v1",
+    "chat_remove_project_v1",
+    "chat_create_session_v1",
+    "chat_submit_turn_v1",
+    "chat_list_sessions_v1",
+    "chat_load_history_v1",
+    "chat_load_reasoning_v1",
+    "chat_rename_session_v1",
+    "chat_set_session_pinned_v1",
+    "chat_interrupt_turn_v1",
+    "chat_delete_session_v1",
+    "chat_get_cleanup_status_v1",
+    "chat_subscribe_session_v1",
+    "chat_resync_session_v1",
+    "chat_cancel_request_v1",
+    "chat_unsubscribe_session_v1"
+  ],
+  "x-yijie-command-contracts": {
+    "chat_bind_context_v1": { "request": "#/$defs/bindRequest", "response": "#/$defs/boundContextResponse" },
+    "chat_list_projects_v1": { "request": "#/$defs/emptyRequest", "response": "#/$defs/projectListResponse" },
+    "chat_pick_project_v1": { "request": "#/$defs/operationOnlyRequest", "response": "#/$defs/optionalProjectResponse" },
+    "chat_revalidate_project_v1": { "request": "#/$defs/projectOperationRequest", "response": "#/$defs/projectResponse" },
+    "chat_set_project_pinned_v1": { "request": "#/$defs/setProjectPinnedRequest", "response": "#/$defs/operationResponse" },
+    "chat_remove_project_v1": { "request": "#/$defs/projectOperationRequest", "response": "#/$defs/operationResponse" },
+    "chat_create_session_v1": { "request": "#/$defs/createSessionRequest", "response": "#/$defs/createdTurnResponse" },
+    "chat_submit_turn_v1": { "request": "#/$defs/submitTurnRequest", "response": "#/$defs/createdTurnResponse" },
+    "chat_list_sessions_v1": { "request": "#/$defs/listSessionsRequest", "response": "#/$defs/sessionPageResponse" },
+    "chat_load_history_v1": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/historyPageResponse" },
+    "chat_load_reasoning_v1": { "request": "#/$defs/reasoningRequest", "response": "#/$defs/reasoningListResponse" },
+    "chat_rename_session_v1": { "request": "#/$defs/renameSessionRequest", "response": "#/$defs/operationResponse" },
+    "chat_set_session_pinned_v1": { "request": "#/$defs/setSessionPinnedRequest", "response": "#/$defs/operationResponse" },
+    "chat_interrupt_turn_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/createdTurnResponse" },
+    "chat_delete_session_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/cleanupResponse" },
+    "chat_get_cleanup_status_v1": { "request": "#/$defs/cleanupStatusRequest", "response": "#/$defs/optionalCleanupResponse" },
+    "chat_subscribe_session_v1": { "request": "#/$defs/subscribeRequest", "response": "#/$defs/subscriptionResponse" },
+    "chat_resync_session_v1": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/resyncResponse" },
+    "chat_cancel_request_v1": { "request": "#/$defs/cancelRequest", "response": "#/$defs/cancelledResponse" },
+    "chat_unsubscribe_session_v1": { "request": "#/$defs/unsubscribeRequest", "response": "#/$defs/cancelledResponse" }
+  },
+  "x-yijie-error-codes": [
+    "chat_unauthenticated",
+    "chat_context_invalid",
+    "chat_capability_denied",
+    "chat_resource_not_found",
+    "chat_project_invalid",
+    "chat_cursor_invalid",
+    "chat_request_invalid",
+    "chat_request_cancelled",
+    "chat_conflict",
+    "chat_turn_active",
+    "chat_host_not_ready",
+    "chat_storage_unavailable",
+    "chat_protocol_error",
+    "chat_limit_exceeded",
+    "chat_cleanup_incomplete",
+    "chat_temporarily_unavailable"
+  ],
+  "x-yijie-event-kinds": [
+    "assistant_append",
+    "reasoning_append",
+    "turn_state",
+    "turn_terminal",
+    "cleanup_state",
+    "resync_required",
+    "context_invalidated"
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "opaqueCursor": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "uint64String": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "x-yijie-maximum": "18446744073709551615"
+    },
+    "epoch": { "type": "integer", "minimum": 0 },
+    "nullableEpoch": { "type": ["integer", "null"], "minimum": 0 },
+    "boundedStatus": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "boundedReasonCode": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+    "textInput": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536,
+      "x-yijie-max-utf8-bytes": 65536,
+      "x-yijie-forbid-nul": true
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "x-yijie-max-utf8-bytes": 1024,
+      "x-yijie-forbid-nul": true
+    },
+    "commandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "type": "object" }
+      }
+    },
+    "commandResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": {}
+      }
+    },
+    "bindRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/bindPayload" }
+      }
+    },
+    "bindPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenantSelector"],
+      "properties": { "tenantSelector": { "$ref": "#/$defs/uuid" } }
+    },
+    "emptyPayload": { "type": "object", "additionalProperties": false, "maxProperties": 0 },
+    "operationOnlyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId"],
+      "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
+    },
+    "projectOperationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "operationId"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "setProjectPinnedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "pinned", "operationId"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "pinned": { "type": "boolean" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "createSessionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "input", "operationId"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "input": { "$ref": "#/$defs/textInput" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "submitTurnPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "input", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "input": { "$ref": "#/$defs/textInput" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "listSessionsPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": { "$ref": "#/$defs/opaqueCursor" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "sessionReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "cursor": { "$ref": "#/$defs/opaqueCursor" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "reasoningPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turnId"],
+      "properties": { "turnId": { "$ref": "#/$defs/uuid" } }
+    },
+    "renameSessionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "title", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "title": { "$ref": "#/$defs/title" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "setSessionPinnedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "pinned", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "pinned": { "type": "boolean" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "sessionOperationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "cleanupStatusPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId"],
+      "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
+    },
+    "subscribePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "$ref": "#/$defs/uuid" } }
+    },
+    "unsubscribePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subscriptionId"],
+      "properties": { "subscriptionId": { "$ref": "#/$defs/uuid" } }
+    },
+    "cancelPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetRequestId"],
+      "properties": { "targetRequestId": { "$ref": "#/$defs/uuid" } }
+    },
+    "emptyRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/emptyPayload" } } }
+      ]
+    },
+    "operationOnlyRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/operationOnlyPayload" } } }
+      ]
+    },
+    "projectOperationRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/projectOperationPayload" } } }
+      ]
+    },
+    "setProjectPinnedRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/setProjectPinnedPayload" } } }
+      ]
+    },
+    "createSessionRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/createSessionPayload" } } }
+      ]
+    },
+    "submitTurnRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/submitTurnPayload" } } }
+      ]
+    },
+    "listSessionsRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/listSessionsPayload" } } }
+      ]
+    },
+    "sessionReadRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/sessionReadPayload" } } }
+      ]
+    },
+    "reasoningRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/reasoningPayload" } } }
+      ]
+    },
+    "renameSessionRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/renameSessionPayload" } } }
+      ]
+    },
+    "setSessionPinnedRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/setSessionPinnedPayload" } } }
+      ]
+    },
+    "sessionOperationRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/sessionOperationPayload" } } }
+      ]
+    },
+    "cleanupStatusRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/cleanupStatusPayload" } } }
+      ]
+    },
+    "subscribeRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/subscribePayload" } } }
+      ]
+    },
+    "unsubscribeRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/unsubscribePayload" } } }
+      ]
+    },
+    "cancelRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/cancelPayload" } } }
+      ]
+    },
+    "allowedAction": {
+      "enum": [
+        "read_sessions", "create_session", "submit_turn", "rename_session",
+        "pin_session", "interrupt_turn", "delete_session", "read_projects",
+        "use_project", "pin_project", "remove_project", "read_cleanup"
+      ]
+    },
+    "boundContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contextId", "expiresAtEpochSeconds", "allowedActions"],
+      "properties": {
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "expiresAtEpochSeconds": { "type": "integer", "minimum": 1 },
+        "allowedActions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/allowedAction" },
+          "maxItems": 12,
+          "uniqueItems": true
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "safeName", "pinnedAt", "lastUsedAt", "available"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "safeName": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "pinnedAt": { "$ref": "#/$defs/nullableEpoch" },
+        "lastUsedAt": { "$ref": "#/$defs/epoch" },
+        "available": { "type": "boolean" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId", "projectId", "title", "titleSource", "pinnedAt",
+        "lastActivityAt", "latestTurnStatus", "projectAvailable"
+      ],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "title": { "$ref": "#/$defs/title" },
+        "titleSource": { "enum": ["fallback", "model", "user"] },
+        "pinnedAt": { "$ref": "#/$defs/nullableEpoch" },
+        "lastActivityAt": { "$ref": "#/$defs/epoch" },
+        "latestTurnStatus": { "anyOf": [{ "$ref": "#/$defs/boundedStatus" }, { "type": "null" }] },
+        "projectAvailable": { "type": "boolean" }
+      }
+    },
+    "sessionPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "nextCursor"],
+      "properties": {
+        "sessions": { "type": "array", "items": { "$ref": "#/$defs/session" }, "maxItems": 50 },
+        "nextCursor": { "anyOf": [{ "$ref": "#/$defs/opaqueCursor" }, { "type": "null" }] }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "role", "content", "status", "ordinal", "createdAt"],
+      "properties": {
+        "messageId": { "$ref": "#/$defs/uuid" },
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "type": "string", "maxLength": 1048576, "x-yijie-max-utf8-bytes": 1048576, "x-yijie-forbid-nul": true },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/epoch" }
+      }
+    },
+    "reasoningMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemOrdinal", "status", "reasonCode", "totalBytes", "partCount", "finalizedAtMs"],
+      "properties": {
+        "itemOrdinal": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "status": { "enum": ["complete", "incomplete", "unavailable"] },
+        "reasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "totalBytes": { "type": "integer", "minimum": 0, "maximum": 131072 },
+        "partCount": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "finalizedAtMs": { "$ref": "#/$defs/epoch" }
+      }
+    },
+    "historyTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turnId", "status", "terminalAt", "reasoningStatus",
+        "reasoningReasonCode", "messages", "reasoning"
+      ],
+      "properties": {
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "terminalAt": { "$ref": "#/$defs/nullableEpoch" },
+        "reasoningStatus": { "$ref": "#/$defs/boundedStatus" },
+        "reasoningReasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/message" } },
+        "reasoning": { "type": "array", "items": { "$ref": "#/$defs/reasoningMetadata" }, "maxItems": 8 }
+      }
+    },
+    "historyPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turns", "nextCursor"],
+      "properties": {
+        "turns": { "type": "array", "items": { "$ref": "#/$defs/historyTurn" }, "maxItems": 50 },
+        "nextCursor": { "anyOf": [{ "$ref": "#/$defs/opaqueCursor" }, { "type": "null" }] }
+      }
+    },
+    "reasoningPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentIndex", "text"],
+      "properties": {
+        "contentIndex": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "text": { "type": "string", "maxLength": 65536, "x-yijie-max-utf8-bytes": 65536, "x-yijie-forbid-nul": true }
+      }
+    },
+    "reasoningItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemOrdinal", "status", "reasonCode", "finalizedAtMs", "parts"],
+      "properties": {
+        "itemOrdinal": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "status": { "enum": ["complete", "incomplete", "unavailable"] },
+        "reasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "finalizedAtMs": { "$ref": "#/$defs/epoch" },
+        "parts": { "type": "array", "items": { "$ref": "#/$defs/reasoningPart" }, "maxItems": 8 }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId", "desktopState", "hostState", "runtimeState", "outcomeCode",
+        "lastErrorCode", "requestedAt", "completedAt", "expiresAt"
+      ],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "desktopState": { "$ref": "#/$defs/cleanupSurfaceState" },
+        "hostState": { "$ref": "#/$defs/cleanupSurfaceState" },
+        "runtimeState": { "$ref": "#/$defs/cleanupSurfaceState" },
+        "outcomeCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "lastErrorCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "requestedAt": { "$ref": "#/$defs/epoch" },
+        "completedAt": { "$ref": "#/$defs/nullableEpoch" },
+        "expiresAt": { "$ref": "#/$defs/nullableEpoch" }
+      }
+    },
+    "cleanupSurfaceState": { "enum": ["pending", "complete", "incomplete", "not_attempted"] },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId"],
+      "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
+    },
+    "createdTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "subscription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subscriptionId"],
+      "properties": { "subscriptionId": { "$ref": "#/$defs/uuid" } }
+    },
+    "cancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cancelled"],
+      "properties": { "cancelled": { "type": "boolean" } }
+    },
+    "resync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session", "history", "cleanup"],
+      "properties": {
+        "session": { "$ref": "#/$defs/session" },
+        "history": { "$ref": "#/$defs/historyPage" },
+        "cleanup": { "anyOf": [{ "$ref": "#/$defs/cleanup" }, { "type": "null" }] }
+      }
+    },
+    "boundContextResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/boundContext" } } }]
+    },
+    "projectListResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "type": "array", "items": { "$ref": "#/$defs/project" }, "maxItems": 256 } } }]
+    },
+    "optionalProjectResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "anyOf": [{ "$ref": "#/$defs/project" }, { "type": "null" }] } } }]
+    },
+    "projectResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/project" } } }]
+    },
+    "operationResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/operation" } } }]
+    },
+    "createdTurnResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/createdTurn" } } }]
+    },
+    "sessionPageResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/sessionPage" } } }]
+    },
+    "historyPageResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/historyPage" } } }]
+    },
+    "reasoningListResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "type": "array", "items": { "$ref": "#/$defs/reasoningItem" }, "maxItems": 8, "x-yijie-max-total-utf8-bytes": 262144 } } }]
+    },
+    "cleanupResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/cleanup" } } }]
+    },
+    "optionalCleanupResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "anyOf": [{ "$ref": "#/$defs/cleanup" }, { "type": "null" }] } } }]
+    },
+    "subscriptionResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/subscription" } } }]
+    },
+    "cancelledResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/cancelled" } } }]
+    },
+    "resyncResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/resync" } } }]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "code", "retryable", "recovery"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "code": {
+          "enum": [
+            "chat_unauthenticated", "chat_context_invalid", "chat_capability_denied",
+            "chat_resource_not_found", "chat_project_invalid", "chat_cursor_invalid",
+            "chat_request_invalid", "chat_request_cancelled", "chat_conflict",
+            "chat_turn_active", "chat_host_not_ready", "chat_storage_unavailable",
+            "chat_protocol_error", "chat_limit_exceeded", "chat_cleanup_incomplete",
+            "chat_temporarily_unavailable"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "recovery": {
+          "enum": [
+            "none", "sign_in", "rebind_context", "request_permission", "fix_request",
+            "reload", "resync", "retry", "start_host", "wait_cleanup",
+            "reduce_input", "reselect_project"
+          ]
+        },
+        "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 60000 }
+      }
+    },
+    "assistantPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 65536, "x-yijie-max-utf8-bytes": 65536, "x-yijie-forbid-nul": true } }
+    },
+    "reasoningAppendPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemOrdinal", "contentIndex", "text"],
+      "properties": {
+        "itemOrdinal": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "contentIndex": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 16384, "x-yijie-max-utf8-bytes": 16384, "x-yijie-forbid-nul": true }
+      }
+    },
+    "turnStatePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "enum": ["streaming", "stopping"] } }
+    },
+    "turnTerminalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "enum": ["completed", "interrupted", "failed"] } }
+    },
+    "cleanupEventPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId", "state"],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "state": { "enum": ["pending", "retry_scheduled", "complete"] }
+      }
+    },
+    "resyncRequiredPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": { "reason": { "enum": ["backpressure", "sequence_gap", "protocol_error"] } }
+    },
+    "contextInvalidatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": { "reason": { "const": "authority_changed" } }
+    },
+    "eventBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "subscriptionId", "contextId", "sessionId",
+        "projectionSequence", "eventId", "kind", "payload"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "subscriptionId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "projectionSequence": { "$ref": "#/$defs/uint64String" },
+        "eventId": { "$ref": "#/$defs/uuid" },
+        "kind": {
+          "enum": [
+            "assistant_append", "reasoning_append", "turn_state", "turn_terminal",
+            "cleanup_state", "resync_required", "context_invalidated"
+          ]
+        },
+        "payload": { "type": "object" }
+      }
+    },
+    "assistantEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "assistant_append" }, "payload": { "$ref": "#/$defs/assistantPayload" } } }]
+    },
+    "reasoningEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "reasoning_append" }, "payload": { "$ref": "#/$defs/reasoningAppendPayload" } } }]
+    },
+    "turnStateEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "turn_state" }, "payload": { "$ref": "#/$defs/turnStatePayload" } } }]
+    },
+    "turnTerminalEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "turn_terminal" }, "payload": { "$ref": "#/$defs/turnTerminalPayload" } } }]
+    },
+    "cleanupEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "cleanup_state" }, "payload": { "$ref": "#/$defs/cleanupEventPayload" } } }]
+    },
+    "resyncRequiredEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "resync_required" }, "payload": { "$ref": "#/$defs/resyncRequiredPayload" } } }]
+    },
+    "contextInvalidatedEvent": {
+      "allOf": [{ "$ref": "#/$defs/eventBase" }, { "properties": { "kind": { "const": "context_invalidated" }, "payload": { "$ref": "#/$defs/contextInvalidatedPayload" } } }]
+    },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/assistantEvent" },
+        { "$ref": "#/$defs/reasoningEvent" },
+        { "$ref": "#/$defs/turnStateEvent" },
+        { "$ref": "#/$defs/turnTerminalEvent" },
+        { "$ref": "#/$defs/cleanupEvent" },
+        { "$ref": "#/$defs/resyncRequiredEvent" },
+        { "$ref": "#/$defs/contextInvalidatedEvent" }
+      ]
+    }
+  }
+}

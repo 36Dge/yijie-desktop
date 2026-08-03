@@ -1,20 +1,46 @@
+mod application;
+mod authorization;
 mod database;
 mod error;
+mod host_bridge;
+mod host_domain;
+pub(crate) mod ipc;
 mod keychain;
 mod migrations;
 mod native_project;
 mod sidecar;
 mod worker;
 
+pub use application::{
+    AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
+    ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome, LiveReasoningProjection,
+    LiveTurnProjection, ReducerOutcome, ReducerOutcomeKind, TurnEventReducer, TurnProjectionSink,
+};
+pub use authorization::{
+    AuthoritativeChatProjection, ChatAction, ChatAuthorizationContext, ChatAuthorizationManager,
+};
 pub use database::{
-    ChatRepository, ChatScope, ProjectSummary, ReasoningItem, ReasoningPart, ReasoningStatus,
+    ActiveTurnContext, ChatRepository, ChatScope, ClaimedDeletion, ClaimedOutbox,
+    CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, HistoryMessage, HistoryPage,
+    HistoryReasoningMetadata, HistoryTurn, InterruptTurnDispatch, OutboxKind, OutboxState,
+    PendingConversation, ProjectSummary, ReasoningItem, ReasoningPart, ReasoningStatus,
+    RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary, SessionTitleSource,
+    StartTurnDispatch, StoredEventCursor, TerminalTurnCommit, TurnProgress,
 };
 pub use error::{ChatCommandError, ChatError};
-use keychain::ProtectedDatabaseKeyStore;
-pub use keychain::{
-    DatabaseKey, DatabaseKeyStore, DATABASE_KEYCHAIN_ACCOUNT, DATABASE_KEYCHAIN_SERVICE,
-    RECEIPT_KEYCHAIN_ACCOUNT, RECEIPT_KEYCHAIN_SERVICE,
+pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
+pub use host_domain::{
+    HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupReason,
+    HostCleanupSurfaceStatus, HostCleanupSurfaces, HostErrorCode, HostEvent, HostEventCursor,
+    HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSession,
+    HostSessionFailure, HostSessionState, HostTurnStatus,
 };
+pub use ipc::{ChatIpcRuntime, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION};
+pub use keychain::{
+    DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore, DATABASE_KEYCHAIN_ACCOUNT,
+    DATABASE_KEYCHAIN_SERVICE, RECEIPT_KEYCHAIN_ACCOUNT, RECEIPT_KEYCHAIN_SERVICE,
+};
+use keychain::{ProtectedDatabaseKeyStore, ProtectedReceiptKeyStore};
 pub use migrations::{catalog_digests, validate_embedded_migrations, LATEST_SCHEMA_VERSION};
 use serde::Serialize;
 use sidecar::{SidecarState, SidecarSupervisor};
@@ -24,7 +50,7 @@ use tauri::State;
 use tokio::sync::Mutex;
 use worker::DatabaseWorker;
 
-const CONTRACT_COMMIT: &str = "c000a0245acb5c3f7ead5d2a877fb60c281c588c";
+const CONTRACT_COMMIT: &str = "29317b6426578749dc698fc2ad32b986ee5c8e9f";
 
 #[derive(Clone)]
 struct LocalChatConfig {
@@ -40,9 +66,11 @@ enum RuntimeMode {
 
 pub struct ChatRuntime {
     mode: RuntimeMode,
+    authorization: Option<ChatAuthorizationManager>,
     worker: Mutex<Option<DatabaseWorker>>,
     initialization: Mutex<()>,
     sidecar: Option<Arc<SidecarSupervisor>>,
+    host_bridge: Mutex<Option<Arc<HostBridge>>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -58,9 +86,11 @@ impl ChatRuntime {
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
                 mode: RuntimeMode::Disabled,
+                authorization: None,
                 worker: Mutex::new(None),
                 initialization: Mutex::new(()),
                 sidecar: None,
+                host_bridge: Mutex::new(None),
             };
         }
         let mut mode = if std::env::var("YIJIE_ENV").as_deref() != Ok("local") {
@@ -87,11 +117,17 @@ impl ChatRuntime {
                 None
             }
         };
+        let authorization = match &mode {
+            RuntimeMode::Local(config) => ChatAuthorizationManager::new(&config.scope).ok(),
+            RuntimeMode::Disabled | RuntimeMode::Invalid => None,
+        };
         Self {
             mode,
+            authorization,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
             sidecar,
+            host_bridge: Mutex::new(None),
         }
     }
 
@@ -110,7 +146,13 @@ impl ChatRuntime {
         }
         let worker = tokio::task::spawn_blocking(move || {
             let key_store = ProtectedDatabaseKeyStore::new()?;
-            DatabaseWorker::start(config.chat_directory, config.scope, Box::new(key_store))
+            let receipt_key_store = ProtectedReceiptKeyStore::new()?;
+            DatabaseWorker::start(
+                config.chat_directory,
+                config.scope,
+                Box::new(key_store),
+                Box::new(receipt_key_store),
+            )
         })
         .await
         .map_err(|_| ChatError::DatabaseUnavailable)??;
@@ -180,11 +222,16 @@ impl ChatRuntime {
     async fn start_sidecar(&self) -> Result<SidecarState, ChatError> {
         match self.mode {
             RuntimeMode::Local(_) => {
-                self.sidecar
+                let supervisor = self
+                    .sidecar
                     .as_ref()
-                    .ok_or(ChatError::InvalidConfiguration)?
-                    .start()
-                    .await
+                    .ok_or(ChatError::InvalidConfiguration)?;
+                let state = supervisor.start().await?;
+                let connection = supervisor.connection().await?;
+                let bridge = HostBridge::from_connection(connection)
+                    .map_err(|_| ChatError::SidecarUnavailable)?;
+                *self.host_bridge.lock().await = Some(Arc::new(bridge));
+                Ok(state)
             }
             RuntimeMode::Disabled => Err(ChatError::Disabled),
             RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
@@ -194,6 +241,7 @@ impl ChatRuntime {
     async fn stop_sidecar(&self) -> Result<SidecarState, ChatError> {
         match self.mode {
             RuntimeMode::Local(_) => {
+                *self.host_bridge.lock().await = None;
                 self.sidecar
                     .as_ref()
                     .ok_or(ChatError::InvalidConfiguration)?
@@ -203,6 +251,51 @@ impl ChatRuntime {
             RuntimeMode::Disabled => Err(ChatError::Disabled),
             RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
         }
+    }
+
+    pub async fn local_host_bridge(&self) -> Result<Arc<HostBridge>, ChatError> {
+        match self.mode {
+            RuntimeMode::Disabled => Err(ChatError::Disabled),
+            RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
+            RuntimeMode::Local(_) => self
+                .host_bridge
+                .lock()
+                .await
+                .clone()
+                .ok_or(ChatError::SidecarUnavailable),
+        }
+    }
+
+    /// Rust-owned authorization state for the future private IPC adapter. This is not a
+    /// Tauri command and does not expose the bound owner or tenant to the WebView.
+    pub fn authorization_manager(&self) -> Result<ChatAuthorizationManager, ChatError> {
+        self.authorization.clone().ok_or(match self.mode {
+            RuntimeMode::Disabled => ChatError::Disabled,
+            RuntimeMode::Invalid | RuntimeMode::Local(_) => ChatError::InvalidConfiguration,
+        })
+    }
+
+    pub async fn local_conversation_application(
+        &self,
+    ) -> Result<ConversationApplication, ChatError> {
+        let database = self.database().await?;
+        let host = self.local_host_bridge().await?;
+        Ok(ConversationApplication::new(database, host))
+    }
+
+    pub async fn local_offline_conversation_application(
+        &self,
+    ) -> Result<ConversationApplication, ChatError> {
+        Ok(ConversationApplication::new_offline(self.database().await?))
+    }
+
+    pub async fn local_authorized_conversation_application(
+        &self,
+    ) -> Result<AuthorizedConversationApplication, ChatError> {
+        Ok(AuthorizedConversationApplication::new(
+            self.local_conversation_application().await?,
+            self.authorization_manager()?,
+        ))
     }
 }
 
@@ -268,9 +361,11 @@ mod tests {
     async fn disabled_foundation_does_not_open_database_or_sidecar() {
         let runtime = ChatRuntime {
             mode: RuntimeMode::Disabled,
+            authorization: None,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
             sidecar: None,
+            host_bridge: Mutex::new(None),
         };
         let status = runtime.foundation_status().await.unwrap();
         assert_eq!(status.state, "disabled");

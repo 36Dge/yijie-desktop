@@ -64,11 +64,11 @@ impl SidecarConfig {
         }))
     }
 
-    fn endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}/healthz", self.port)
+    fn endpoint(&self, path: &str) -> String {
+        format!("http://127.0.0.1:{}{path}", self.port)
     }
 
-    fn environment(&self) -> Vec<(&'static str, String)> {
+    fn environment(&self, instance_nonce: &str) -> Vec<(&'static str, String)> {
         let mut values = vec![
             ("YIJIE_ENV", "local".to_owned()),
             ("YIJIE_AGENT_HOST_PORT", self.port.to_string()),
@@ -82,6 +82,7 @@ impl SidecarConfig {
             ),
             ("YIJIE_AGENT_HOST_V2_TITLE_ENABLED", "false".to_owned()),
             ("YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED", "false".to_owned()),
+            ("YIJIE_AGENT_HOST_INSTANCE_NONCE", instance_nonce.to_owned()),
             ("PATH", "/usr/bin:/bin".to_owned()),
         ];
         if let Some(value) = &self.codex_binary {
@@ -103,13 +104,22 @@ pub enum SidecarState {
     Disabled,
     Stopped,
     Starting,
-    Healthy,
+    HostLive,
+    RuntimeReady,
     Failed,
 }
 
 struct SupervisorState {
     state: SidecarState,
     child: Option<Child>,
+    instance_nonce: Option<String>,
+}
+
+#[derive(Clone)]
+pub(super) struct HostConnection {
+    pub(super) port: u16,
+    pub(super) token_path: PathBuf,
+    pub(super) instance_nonce: String,
 }
 
 pub struct SidecarSupervisor {
@@ -127,6 +137,7 @@ impl SidecarSupervisor {
             SidecarState::Disabled
         };
         let client = reqwest::Client::builder()
+            .no_proxy()
             .connect_timeout(Duration::from_millis(250))
             .timeout(Duration::from_millis(500))
             .redirect(reqwest::redirect::Policy::none())
@@ -135,7 +146,11 @@ impl SidecarSupervisor {
         Ok(Self {
             config,
             client,
-            inner: Mutex::new(SupervisorState { state, child: None }),
+            inner: Mutex::new(SupervisorState {
+                state,
+                child: None,
+                instance_nonce: None,
+            }),
         })
     }
 
@@ -146,23 +161,25 @@ impl SidecarSupervisor {
     pub async fn start(&self) -> Result<SidecarState, ChatError> {
         let config = self.config.as_ref().ok_or(ChatError::Disabled)?;
         let mut state = self.inner.lock().await;
-        if state.state == SidecarState::Healthy {
+        if state.state == SidecarState::RuntimeReady {
             return Ok(state.state);
         }
         if state.child.is_some() {
             return Err(ChatError::SidecarUnavailable);
         }
         state.state = SidecarState::Starting;
+        let instance_nonce = uuid::Uuid::now_v7().to_string();
         let mut command = Command::new(&config.binary);
         command
             .env_clear()
-            .envs(config.environment())
+            .envs(config.environment(&instance_nonce))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .kill_on_drop(true);
         let child = command.spawn().map_err(|_| ChatError::SidecarUnavailable)?;
         state.child = Some(child);
+        state.instance_nonce = Some(instance_nonce.clone());
         let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
         loop {
             if state
@@ -173,18 +190,23 @@ impl SidecarSupervisor {
                 .is_some()
             {
                 state.child = None;
+                state.instance_nonce = None;
                 state.state = SidecarState::Failed;
                 return Err(ChatError::SidecarUnavailable);
             }
-            if self.health(config).await {
-                state.state = SidecarState::Healthy;
-                return Ok(state.state);
+            if self.liveness(config, &instance_nonce).await {
+                state.state = SidecarState::HostLive;
+                if self.runtime_ready(config, &instance_nonce).await {
+                    state.state = SidecarState::RuntimeReady;
+                    return Ok(state.state);
+                }
             }
             if tokio::time::Instant::now() >= deadline {
                 if let Some(child) = state.child.as_mut() {
                     terminate_child(child).await;
                 }
                 state.child = None;
+                state.instance_nonce = None;
                 state.state = SidecarState::Failed;
                 return Err(ChatError::SidecarUnavailable);
             }
@@ -198,6 +220,7 @@ impl SidecarSupervisor {
             terminate_child(child).await;
         }
         state.child = None;
+        state.instance_nonce = None;
         state.state = if self.config.is_some() {
             SidecarState::Stopped
         } else {
@@ -206,7 +229,24 @@ impl SidecarSupervisor {
         Ok(state.state)
     }
 
-    async fn health(&self, config: &SidecarConfig) -> bool {
+    pub(super) async fn connection(&self) -> Result<HostConnection, ChatError> {
+        let config = self.config.as_ref().ok_or(ChatError::Disabled)?;
+        let state = self.inner.lock().await;
+        if state.state != SidecarState::RuntimeReady || state.child.is_none() {
+            return Err(ChatError::SidecarUnavailable);
+        }
+        let instance_nonce = state
+            .instance_nonce
+            .clone()
+            .ok_or(ChatError::SidecarUnavailable)?;
+        Ok(HostConnection {
+            port: config.port,
+            token_path: config.host_home.join("api-token"),
+            instance_nonce,
+        })
+    }
+
+    async fn liveness(&self, config: &SidecarConfig, instance_nonce: &str) -> bool {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct HealthResponse {
@@ -214,17 +254,10 @@ impl SidecarSupervisor {
             status: String,
         }
 
-        let Ok(response) = self.client.get(config.endpoint()).send().await else {
+        let Ok(response) = self.client.get(config.endpoint("/healthz")).send().await else {
             return false;
         };
-        if !response.status().is_success()
-            || response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .is_none_or(|value| !value.starts_with("application/json"))
-            || response.content_length().is_none_or(|length| length > 1024)
-        {
+        if !valid_instance_response(&response, instance_nonce) || !response.status().is_success() {
             return false;
         }
         let Ok(body) = response.bytes().await else {
@@ -236,6 +269,46 @@ impl SidecarSupervisor {
         serde_json::from_slice::<HealthResponse>(&body)
             .is_ok_and(|health| health.service == "yijie-agent-host" && health.status == "ok")
     }
+
+    async fn runtime_ready(&self, config: &SidecarConfig, instance_nonce: &str) -> bool {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ReadyResponse {
+            status: String,
+            runtime_state: String,
+        }
+
+        let Ok(response) = self.client.get(config.endpoint("/readyz")).send().await else {
+            return false;
+        };
+        if !valid_instance_response(&response, instance_nonce) || !response.status().is_success() {
+            return false;
+        }
+        let Ok(body) = response.bytes().await else {
+            return false;
+        };
+        if body.len() > 1024 {
+            return false;
+        }
+        serde_json::from_slice::<ReadyResponse>(&body)
+            .is_ok_and(|ready| ready.status == "ready" && ready.runtime_state == "ready")
+    }
+}
+
+fn valid_instance_response(response: &reqwest::Response, instance_nonce: &str) -> bool {
+    response
+        .headers()
+        .get("X-Yijie-Host-Instance-Nonce")
+        .and_then(|value| value.to_str().ok())
+        == Some(instance_nonce)
+        && response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("application/json"))
+        && response
+            .content_length()
+            .is_some_and(|length| length <= 1024)
 }
 
 async fn terminate_child(child: &mut Child) {
@@ -333,6 +406,8 @@ fn validate_directory(path: &Path) -> Result<PathBuf, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn sidecar_environment_is_allowlisted_and_contains_no_provider_secret() {
@@ -344,14 +419,21 @@ mod tests {
             codex_manifest: None,
             codex_home: None,
         };
-        let environment = config.environment();
+        let environment = config.environment("019fbd88-cbc3-7bf1-934d-7b05cd693f80");
         let names = environment
             .iter()
             .map(|(name, _)| *name)
             .collect::<Vec<_>>();
         assert!(!names.iter().any(|name| name.contains("KEY")));
         assert!(!names.iter().any(|name| name.contains("MINIMAX")));
-        assert_eq!(config.endpoint(), "http://127.0.0.1:18080/healthz");
+        assert_eq!(
+            config.endpoint("/healthz"),
+            "http://127.0.0.1:18080/healthz"
+        );
+        assert!(environment.iter().any(|(name, value)| {
+            *name == "YIJIE_AGENT_HOST_INSTANCE_NONCE"
+                && value == "019fbd88-cbc3-7bf1-934d-7b05cd693f80"
+        }));
     }
 
     #[test]
@@ -369,5 +451,86 @@ mod tests {
             Err(ChatError::InvalidConfiguration)
         );
         fs::remove_file(path).unwrap();
+    }
+
+    async fn one_response(status: &str, nonce: &str, body: &str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let response = format!(
+			"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nX-Yijie-Host-Instance-Nonce: {nonce}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+			body.len()
+		);
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await;
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        port
+    }
+
+    fn probe(port: u16) -> (SidecarConfig, SidecarSupervisor) {
+        let config = SidecarConfig {
+            binary: PathBuf::from("/synthetic/host"),
+            host_home: PathBuf::from("/synthetic/home"),
+            port,
+            codex_binary: None,
+            codex_manifest: None,
+            codex_home: None,
+        };
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let supervisor = SidecarSupervisor {
+            config: None,
+            client,
+            inner: Mutex::new(SupervisorState {
+                state: SidecarState::Stopped,
+                child: None,
+                instance_nonce: None,
+            }),
+        };
+        (config, supervisor)
+    }
+
+    #[tokio::test]
+    async fn readiness_is_bound_to_spawn_nonce_and_separate_from_liveness() {
+        const EXPECTED: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f80";
+        let port = one_response(
+            "200 OK",
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f81",
+            r#"{"service":"yijie-agent-host","status":"ok"}"#,
+        )
+        .await;
+        let (config, supervisor) = probe(port);
+        assert!(!supervisor.liveness(&config, EXPECTED).await);
+
+        let port = one_response(
+            "200 OK",
+            EXPECTED,
+            r#"{"service":"yijie-agent-host","status":"ok"}"#,
+        )
+        .await;
+        let (config, supervisor) = probe(port);
+        assert!(supervisor.liveness(&config, EXPECTED).await);
+
+        let port = one_response(
+            "503 Service Unavailable",
+            EXPECTED,
+            r#"{"status":"not_ready","runtime_state":"starting"}"#,
+        )
+        .await;
+        let (config, supervisor) = probe(port);
+        assert!(!supervisor.runtime_ready(&config, EXPECTED).await);
+
+        let port = one_response(
+            "200 OK",
+            EXPECTED,
+            r#"{"status":"ready","runtime_state":"ready"}"#,
+        )
+        .await;
+        let (config, supervisor) = probe(port);
+        assert!(supervisor.runtime_ready(&config, EXPECTED).await);
     }
 }

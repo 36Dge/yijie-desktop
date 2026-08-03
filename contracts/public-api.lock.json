@@ -2,9 +2,9 @@
   "schema_version": 1,
   "contract_version": "0.3.0-candidate",
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "full_commit": "c000a0245acb5c3f7ead5d2a877fb60c281c588c",
+  "full_commit": "29317b6426578749dc698fc2ad32b986ee5c8e9f",
   "source_path": "openapi/public/public.yaml",
-  "source_sha256": "c7ab2577b26a0776a7c204d3b9ee38b424cbaf0b9b0dc33d99a6806dfced998b",
+  "source_sha256": "c8d9e6742802e0f0392ea8221a5fdd028f76107df893ab4c531da75f9e9e354b",
   "generator": {
     "package": "openapi-typescript",
     "version": "7.13.0",
@@ -12,7 +12,7 @@
     "command": "pnpm --dir tools/public-api-generator exec openapi-typescript openapi/public/public.yaml"
   },
   "generated_path": "src/api/generated/public.gen.ts",
-  "generated_sha256": "d3493a79ade649a17a78573ae0f9da3fa261f76c4472a151fbabd7056614d03b",
+  "generated_sha256": "e84b70be6505dc5c0fc1e4702018fad2839e1a3fe74d7730883151e49928b678",
   "fixtures": [
     {
       "path": "tests/fixtures/public/access/capability-v1-empty.json",
@@ -64,19 +64,19 @@
     },
     {
       "path": "tests/fixtures/public/tasks-v2/create-request.json",
-      "sha256": "513d2cdedceebd74bcfd24bf5e9fdbc007ae57970c3bf3ca149498e314670155"
+      "sha256": "7d366b3e44a9bd86a5c02638b152ac52d79580257ab735d634b01bc5bc73a178"
     },
     {
       "path": "tests/fixtures/public/tasks-v2/error-access-denied.json",
-      "sha256": "77404767c92f13bcee858055d104f6bdea2cd835a794ec2c5918646adc4385a8"
+      "sha256": "5333a781ddd9a81a290519f2948020eeec01889808b5d94e5e2f5f4d1438326f"
     },
     {
       "path": "tests/fixtures/public/tasks-v2/error-task-not-found.json",
-      "sha256": "99a99b93011756c3a5955ffb50f63de1d08d86bb6678640649e23260895a2ef9"
+      "sha256": "db2778cfce53c59b68c140d0c74a95ffa648e7cf20382ef74cf257039b2d0191"
     },
     {
       "path": "tests/fixtures/public/tasks-v2/task-response.json",
-      "sha256": "b777a5e87dfb798066b2b3cb5fc17cc66c18857e75df134361ffc9de541794b5"
+      "sha256": "b08848c4ec8b617cadf3024b723dc2067b84829091d102889a7b2b7eb249200e"
     }
   ]
 }

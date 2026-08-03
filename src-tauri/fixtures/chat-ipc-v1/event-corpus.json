@@ -1,0 +1,76 @@
+[
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "turnId": "019c1a00-0000-7000-8000-000000000006",
+    "projectionSequence": "1",
+    "eventId": "019c1a00-0000-7000-8000-000000000011",
+    "kind": "assistant_append",
+    "payload": { "text": "synthetic assistant append" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "turnId": "019c1a00-0000-7000-8000-000000000006",
+    "projectionSequence": "2",
+    "eventId": "019c1a00-0000-7000-8000-000000000012",
+    "kind": "reasoning_append",
+    "payload": { "itemOrdinal": 0, "contentIndex": 0, "text": "synthetic reasoning append" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "turnId": "019c1a00-0000-7000-8000-000000000006",
+    "projectionSequence": "3",
+    "eventId": "019c1a00-0000-7000-8000-000000000013",
+    "kind": "turn_state",
+    "payload": { "status": "streaming" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "turnId": "019c1a00-0000-7000-8000-000000000006",
+    "projectionSequence": "4",
+    "eventId": "019c1a00-0000-7000-8000-000000000014",
+    "kind": "turn_terminal",
+    "payload": { "status": "completed" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "projectionSequence": "5",
+    "eventId": "019c1a00-0000-7000-8000-000000000015",
+    "kind": "cleanup_state",
+    "payload": { "operationId": "019c1a00-0000-7000-8000-00000000000b", "state": "complete" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "projectionSequence": "6",
+    "eventId": "019c1a00-0000-7000-8000-000000000016",
+    "kind": "resync_required",
+    "payload": { "reason": "backpressure" }
+  },
+  {
+    "schemaVersion": 1,
+    "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "projectionSequence": "7",
+    "eventId": "019c1a00-0000-7000-8000-000000000017",
+    "kind": "context_invalidated",
+    "payload": { "reason": "authority_changed" }
+  }
+]

@@ -1,0 +1,236 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  CHAT_EVENT_CHANNEL,
+  CHAT_IPC_SCHEMA_VERSION,
+  ChatClientError,
+  ChatContractError,
+  parseBoundContextResponse,
+  parseCancelledResponse,
+  parseChatIpcError,
+  parseChatProjectionEvent,
+  parseCleanupResponse,
+  parseCreatedTurnResponse,
+  parseHistoryPageResponse,
+  parseOperationResponse,
+  parseOptionalCleanupResponse,
+  parseOptionalProjectResponse,
+  parseProjectListResponse,
+  parseProjectResponse,
+  parseReasoningResponse,
+  parseResyncResponse,
+  parseSessionPageResponse,
+  parseSubscriptionResponse,
+  type BoundChatContext,
+  type ChatCleanupStatus,
+  type ChatCreatedTurn,
+  type ChatHistoryPage,
+  type ChatProjectionEvent,
+  type ChatProject,
+  type ChatReasoningItem,
+  type ChatResyncProjection,
+  type ChatSessionPage,
+} from "../domain/chat-ipc";
+
+type InvokeFn = (command: string, arguments_?: Record<string, unknown>) => Promise<unknown>;
+type ListenFn = (
+  channel: string,
+  handler: (payload: unknown) => void,
+) => Promise<UnlistenFn>;
+
+export interface ChatClientTransport {
+  readonly invoke: InvokeFn;
+  readonly listen: ListenFn;
+}
+
+export interface ChatClient {
+  bindContext(tenantSelector: string): Promise<BoundChatContext>;
+  listProjects(contextId: string, signal?: AbortSignal): Promise<readonly ChatProject[]>;
+  pickProject(contextId: string, operationId: string): Promise<ChatProject | null>;
+  revalidateProject(contextId: string, projectId: string, operationId: string): Promise<ChatProject>;
+  setProjectPinned(contextId: string, projectId: string, pinned: boolean, operationId: string): Promise<string>;
+  removeProject(contextId: string, projectId: string, operationId: string): Promise<string>;
+  createSession(contextId: string, projectId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
+  submitTurn(contextId: string, sessionId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
+  listSessions(contextId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatSessionPage>;
+  loadHistory(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
+  loadReasoning(contextId: string, turnId: string, signal?: AbortSignal): Promise<readonly ChatReasoningItem[]>;
+  renameSession(contextId: string, sessionId: string, title: string, operationId: string): Promise<string>;
+  setSessionPinned(contextId: string, sessionId: string, pinned: boolean, operationId: string): Promise<string>;
+  interruptTurn(contextId: string, sessionId: string, operationId: string): Promise<ChatCreatedTurn>;
+  deleteSession(contextId: string, sessionId: string, operationId: string): Promise<ChatCleanupStatus>;
+  getCleanupStatus(contextId: string, operationId: string, signal?: AbortSignal): Promise<ChatCleanupStatus | null>;
+  subscribeSession(contextId: string, sessionId: string): Promise<string>;
+  resyncSession(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
+  unsubscribeSession(contextId: string, subscriptionId: string): Promise<boolean>;
+  cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
+  onEvent(
+    handler: (event: ChatProjectionEvent) => void,
+    onInvalid?: () => void,
+  ): Promise<UnlistenFn>;
+}
+
+const productionTransport: ChatClientTransport = {
+  invoke: (command, arguments_) => invoke<unknown>(command, arguments_),
+  listen: (channel, handler) => listen<unknown>(channel, (event) => handler(event.payload)),
+};
+
+function requestId(): string {
+  return crypto.randomUUID().toLowerCase();
+}
+
+function operationEnvelope(contextId: string, payload: Record<string, unknown>, id = requestId()) {
+  const compactPayload = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
+  return {
+    id,
+    request: {
+      schemaVersion: CHAT_IPC_SCHEMA_VERSION,
+      requestId: id,
+      contextId,
+      payload: compactPayload,
+    },
+  };
+}
+
+function mapFailure(error: unknown): never {
+  if (error instanceof ChatClientError) throw error;
+  try {
+    throw new ChatClientError(parseChatIpcError(error));
+  } catch (contractError: unknown) {
+    if (contractError instanceof ChatClientError) throw contractError;
+    throw new ChatClientError({
+      schemaVersion: 1,
+      code: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+  }
+}
+
+export function createChatClient(transport: ChatClientTransport = productionTransport): ChatClient {
+  async function run<T>(command: string, request: Record<string, unknown>, parse: (value: unknown) => T): Promise<T> {
+    try {
+      return parse(await transport.invoke(command, { request }));
+    } catch (error: unknown) {
+      mapFailure(error);
+    }
+  }
+
+  async function runRead<T>(
+    command: string,
+    contextId: string,
+    payload: Record<string, unknown>,
+    parse: (value: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const envelope = operationEnvelope(contextId, payload);
+    if (signal?.aborted) {
+      throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+    }
+    let abortHandler: (() => void) | undefined;
+    if (signal) {
+      abortHandler = () => {
+        const cancellation = operationEnvelope(contextId, { targetRequestId: envelope.id });
+        void transport.invoke("chat_cancel_request_v1", { request: cancellation.request });
+      };
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+    try {
+      const value = await run(command, envelope.request, parse);
+      if (signal?.aborted) {
+        throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+      }
+      return value;
+    } finally {
+      if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+    }
+  }
+
+  return {
+    bindContext(tenantSelector) {
+      const id = requestId();
+      return run(
+        "chat_bind_context_v1",
+        { schemaVersion: 1, requestId: id, payload: { tenantSelector } },
+        parseBoundContextResponse,
+      );
+    },
+    listProjects: (contextId, signal) => runRead("chat_list_projects_v1", contextId, {}, parseProjectListResponse, signal),
+    pickProject(contextId, operationId) {
+      const envelope = operationEnvelope(contextId, { operationId });
+      return run("chat_pick_project_v1", envelope.request, parseOptionalProjectResponse);
+    },
+    revalidateProject(contextId, projectId, operationId) {
+      const envelope = operationEnvelope(contextId, { projectId, operationId });
+      return run("chat_revalidate_project_v1", envelope.request, parseProjectResponse);
+    },
+    setProjectPinned(contextId, projectId, pinned, operationId) {
+      const envelope = operationEnvelope(contextId, { projectId, pinned, operationId });
+      return run("chat_set_project_pinned_v1", envelope.request, parseOperationResponse);
+    },
+    removeProject(contextId, projectId, operationId) {
+      const envelope = operationEnvelope(contextId, { projectId, operationId });
+      return run("chat_remove_project_v1", envelope.request, parseOperationResponse);
+    },
+    createSession(contextId, projectId, input, operationId) {
+      const envelope = operationEnvelope(contextId, { projectId, input, operationId });
+      return run("chat_create_session_v1", envelope.request, parseCreatedTurnResponse);
+    },
+    submitTurn(contextId, sessionId, input, operationId) {
+      const envelope = operationEnvelope(contextId, { sessionId, input, operationId });
+      return run("chat_submit_turn_v1", envelope.request, parseCreatedTurnResponse);
+    },
+    listSessions: (contextId, cursor, limit, signal) =>
+      runRead("chat_list_sessions_v1", contextId, { cursor, limit }, parseSessionPageResponse, signal),
+    loadHistory: (contextId, sessionId, cursor, limit, signal) =>
+      runRead("chat_load_history_v1", contextId, { sessionId, cursor, limit }, parseHistoryPageResponse, signal),
+    loadReasoning: (contextId, turnId, signal) =>
+      runRead("chat_load_reasoning_v1", contextId, { turnId }, parseReasoningResponse, signal),
+    renameSession(contextId, sessionId, title, operationId) {
+      const envelope = operationEnvelope(contextId, { sessionId, title, operationId });
+      return run("chat_rename_session_v1", envelope.request, parseOperationResponse);
+    },
+    setSessionPinned(contextId, sessionId, pinned, operationId) {
+      const envelope = operationEnvelope(contextId, { sessionId, pinned, operationId });
+      return run("chat_set_session_pinned_v1", envelope.request, parseOperationResponse);
+    },
+    interruptTurn(contextId, sessionId, operationId) {
+      const envelope = operationEnvelope(contextId, { sessionId, operationId });
+      return run("chat_interrupt_turn_v1", envelope.request, parseCreatedTurnResponse);
+    },
+    deleteSession(contextId, sessionId, operationId) {
+      const envelope = operationEnvelope(contextId, { sessionId, operationId });
+      return run("chat_delete_session_v1", envelope.request, parseCleanupResponse);
+    },
+    getCleanupStatus: (contextId, operationId, signal) =>
+      runRead("chat_get_cleanup_status_v1", contextId, { operationId }, parseOptionalCleanupResponse, signal),
+    subscribeSession(contextId, sessionId) {
+      const envelope = operationEnvelope(contextId, { sessionId });
+      return run("chat_subscribe_session_v1", envelope.request, parseSubscriptionResponse);
+    },
+    resyncSession: (contextId, sessionId, limit, signal) =>
+      runRead("chat_resync_session_v1", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponse, signal),
+    unsubscribeSession(contextId, subscriptionId) {
+      const envelope = operationEnvelope(contextId, { subscriptionId });
+      return run("chat_unsubscribe_session_v1", envelope.request, parseCancelledResponse);
+    },
+    cancelRequest(contextId, targetRequestId) {
+      const envelope = operationEnvelope(contextId, { targetRequestId });
+      return run("chat_cancel_request_v1", envelope.request, parseCancelledResponse);
+    },
+    async onEvent(handler, onInvalid) {
+      return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {
+        try {
+          handler(parseChatProjectionEvent(payload));
+        } catch (error: unknown) {
+          if (!(error instanceof ChatContractError)) throw error;
+          onInvalid?.();
+        }
+      });
+    },
+  };
+}
+
+export const chatClient = createChatClient();

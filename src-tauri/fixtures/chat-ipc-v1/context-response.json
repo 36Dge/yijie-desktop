@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "requestId": "019c1a00-0000-7000-8000-000000000001",
+  "data": {
+    "contextId": "019c1a00-0000-7000-8000-000000000003",
+    "expiresAtEpochSeconds": 1785758700,
+    "allowedActions": ["read_sessions", "read_projects"]
+  }
+}

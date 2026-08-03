@@ -5,7 +5,7 @@ use super::{
 };
 use crate::native_auth::loopback::LoopbackCallback;
 use crate::native_auth::transport::{OperationResponse, OperationTransport};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -15,6 +15,47 @@ const REFRESH_BEFORE_EXPIRY: Duration = Duration::from_secs(2 * 60);
 const REFRESH_IDLE_LIFETIME: u64 = 30 * 24 * 60 * 60;
 const REFRESH_ABSOLUTE_LIFETIME: u64 = 90 * 24 * 60 * 60;
 const CLOCK_SKEW_SECONDS: u64 = 5 * 60;
+const CHAT_PROJECTION_MAX_LIFETIME_SECONDS: i64 = 5 * 60;
+const CHAT_PROJECTION_MAX_CAPABILITIES: usize = 64;
+const CHAT_PROJECTION_MAX_CAPABILITY_BYTES: usize = 128;
+
+#[derive(Clone)]
+pub(crate) struct NativeChatProjection {
+    pub tenant_id: uuid::Uuid,
+    pub authorization_revision: u64,
+    pub expires_at: i64,
+    pub capabilities: Vec<String>,
+}
+
+impl std::fmt::Debug for NativeChatProjection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativeChatProjection")
+            .field("tenant_id", &"[RUST_BOUND]")
+            .field("authorization_revision", &self.authorization_revision)
+            .field("expires_at", &self.expires_at)
+            .field("capability_count", &self.capabilities.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeProjectionError {
+    Unauthenticated,
+    CapabilityDenied,
+    Invalid,
+    Unavailable,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapabilityProjectionBody {
+    schema_version: u64,
+    tenant_id: String,
+    authorization_revision: u64,
+    expires_at: String,
+    capabilities: Vec<String>,
+}
 
 pub struct NativeAuthRuntime {
     mode: RuntimeMode,
@@ -125,6 +166,63 @@ impl NativeAuthRuntime {
             .map_err(CommandError::from)
     }
 
+    pub(crate) async fn chat_projection(
+        &self,
+        tenant_selector: &str,
+        now_epoch_seconds: i64,
+    ) -> Result<NativeChatProjection, NativeProjectionError> {
+        let tenant_id = parse_chat_tenant(tenant_selector)?;
+        if now_epoch_seconds < 0 {
+            return Err(NativeProjectionError::Invalid);
+        }
+        let response = self
+            .service_native()
+            .map_err(map_projection_native_error)?
+            .get_my_capabilities(tenant_selector)
+            .await
+            .map_err(map_projection_native_error)?;
+        match response.status {
+            200 => {}
+            401 => return Err(NativeProjectionError::Unauthenticated),
+            403 => return Err(NativeProjectionError::CapabilityDenied),
+            400 => return Err(NativeProjectionError::Invalid),
+            500 | 503 => return Err(NativeProjectionError::Unavailable),
+            _ => return Err(NativeProjectionError::Invalid),
+        }
+        let body: CapabilityProjectionBody =
+            serde_json::from_value(response.body).map_err(|_| NativeProjectionError::Invalid)?;
+        let response_tenant = parse_chat_tenant(&body.tenant_id)?;
+        let expires_at =
+            parse_rfc3339_epoch_seconds(&body.expires_at).ok_or(NativeProjectionError::Invalid)?;
+        if body.schema_version != 1
+            || response_tenant != tenant_id
+            || body.authorization_revision == 0
+            || expires_at <= now_epoch_seconds
+            || expires_at
+                > now_epoch_seconds
+                    .checked_add(CHAT_PROJECTION_MAX_LIFETIME_SECONDS)
+                    .ok_or(NativeProjectionError::Invalid)?
+            || body.capabilities.is_empty()
+            || body.capabilities.len() > CHAT_PROJECTION_MAX_CAPABILITIES
+            || body.capabilities.iter().any(|capability| {
+                capability.is_empty()
+                    || capability.len() > CHAT_PROJECTION_MAX_CAPABILITY_BYTES
+                    || !valid_capability_key(capability)
+            })
+        {
+            return Err(NativeProjectionError::Invalid);
+        }
+        let mut capabilities = body.capabilities;
+        capabilities.sort();
+        capabilities.dedup();
+        Ok(NativeChatProjection {
+            tenant_id,
+            authorization_revision: body.authorization_revision,
+            expires_at,
+            capabilities,
+        })
+    }
+
     fn service(&self) -> Result<&Arc<AuthService>, CommandError> {
         self.service_native().map_err(CommandError::from)
     }
@@ -136,6 +234,146 @@ impl NativeAuthRuntime {
             RuntimeMode::Ready(service) => Ok(service),
         }
     }
+}
+
+fn map_projection_native_error(error: NativeAuthError) -> NativeProjectionError {
+    match error {
+        NativeAuthError::SignedOut | NativeAuthError::SessionExpired => {
+            NativeProjectionError::Unauthenticated
+        }
+        NativeAuthError::InvalidTenant | NativeAuthError::ResponseRejected => {
+            NativeProjectionError::Invalid
+        }
+        NativeAuthError::Disabled
+        | NativeAuthError::InvalidConfiguration
+        | NativeAuthError::LoginInProgress
+        | NativeAuthError::CallbackRejected
+        | NativeAuthError::AuthenticationFailed
+        | NativeAuthError::SecureStorageUnavailable
+        | NativeAuthError::TransportFailed => NativeProjectionError::Unavailable,
+    }
+}
+
+fn parse_chat_tenant(value: &str) -> Result<uuid::Uuid, NativeProjectionError> {
+    let parsed = uuid::Uuid::parse_str(value).map_err(|_| NativeProjectionError::Invalid)?;
+    if parsed.is_nil() || parsed.hyphenated().to_string() != value {
+        return Err(NativeProjectionError::Invalid);
+    }
+    Ok(parsed)
+}
+
+fn valid_capability_key(value: &str) -> bool {
+    let mut segments = value.split('.');
+    let mut count = 0_usize;
+    for segment in &mut segments {
+        count += 1;
+        let mut characters = segment.chars();
+        if !characters
+            .next()
+            .is_some_and(|character| character.is_ascii_lowercase())
+            || !characters.all(|character| {
+                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+            })
+        {
+            return false;
+        }
+    }
+    count >= 2
+}
+
+fn parse_rfc3339_epoch_seconds(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let year = parse_decimal(bytes.get(0..4)?)?;
+    let month = parse_decimal(bytes.get(5..7)?)?;
+    let day = parse_decimal(bytes.get(8..10)?)?;
+    let hour = parse_decimal(bytes.get(11..13)?)?;
+    let minute = parse_decimal(bytes.get(14..16)?)?;
+    let second = parse_decimal(bytes.get(17..19)?)?;
+    if year < 1970
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let mut index = 19_usize;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let fraction_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) && index - fraction_start < 9 {
+            index += 1;
+        }
+        if index == fraction_start || bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            return None;
+        }
+    }
+    let offset_seconds = if bytes.get(index) == Some(&b'Z') && index + 1 == bytes.len() {
+        0_i64
+    } else {
+        let sign = match bytes.get(index) {
+            Some(b'+') => 1_i64,
+            Some(b'-') => -1_i64,
+            _ => return None,
+        };
+        if index + 6 != bytes.len() || bytes.get(index + 3) != Some(&b':') {
+            return None;
+        }
+        let offset_hour = parse_decimal(bytes.get(index + 1..index + 3)?)?;
+        let offset_minute = parse_decimal(bytes.get(index + 4..index + 6)?)?;
+        if offset_hour > 23 || offset_minute > 59 {
+            return None;
+        }
+        sign * i64::from(offset_hour * 3600 + offset_minute * 60)
+    };
+    let days = days_from_civil(year, month, day)?;
+    days.checked_mul(86_400)?
+        .checked_add(i64::from(hour * 3600 + minute * 60 + second))?
+        .checked_sub(offset_seconds)
+}
+
+fn parse_decimal(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    bytes.iter().try_fold(0_u32, |value, digit| {
+        value.checked_mul(10)?.checked_add(u32::from(*digit - b'0'))
+    })
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100)) => {
+            29
+        }
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn days_from_civil(year: u32, month: u32, day: u32) -> Option<i64> {
+    let year = i64::from(year) - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era.checked_mul(146_097)?
+        .checked_add(day_of_era)?
+        .checked_sub(719_468)
 }
 
 impl AuthService {
@@ -600,6 +838,36 @@ mod tests {
             validate_stored_refresh(&extended, now),
             Err(NativeAuthError::SessionExpired)
         );
+    }
+
+    #[test]
+    fn chat_projection_time_and_capability_parsing_is_strict() {
+        assert_eq!(
+            parse_rfc3339_epoch_seconds("2026-08-03T12:34:56Z"),
+            Some(1_785_760_496)
+        );
+        assert_eq!(
+            parse_rfc3339_epoch_seconds("2026-08-03T20:34:56+08:00"),
+            Some(1_785_760_496)
+        );
+        assert_eq!(
+            parse_rfc3339_epoch_seconds("2024-02-29T00:00:00.123456789Z"),
+            Some(1_709_164_800)
+        );
+        for invalid in [
+            "2026-02-29T00:00:00Z",
+            "2026-08-03 12:34:56Z",
+            "2026-08-03T12:34:60Z",
+            "2026-08-03T12:34:56.1234567890Z",
+            "2026-08-03T12:34:56+24:00",
+        ] {
+            assert_eq!(parse_rfc3339_epoch_seconds(invalid), None, "{invalid}");
+        }
+        assert!(valid_capability_key("task.read"));
+        assert!(valid_capability_key("workspace.use"));
+        assert!(!valid_capability_key("task"));
+        assert!(!valid_capability_key("Task.read"));
+        assert!(!valid_capability_key("task..read"));
     }
 
     #[test]

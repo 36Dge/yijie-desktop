@@ -1,7 +1,7 @@
 pub mod chat;
 mod native_auth;
 
-use chat::ChatRuntime;
+use chat::{ChatIpcRuntime, ChatRuntime};
 use native_auth::{AuthStatus, CommandError, NativeAuthRuntime, OperationResponse};
 use tauri::{Manager, State};
 
@@ -20,8 +20,16 @@ async fn native_auth_login(
 #[tauri::command]
 async fn native_auth_logout(
     runtime: State<'_, NativeAuthRuntime>,
+    chat_runtime: State<'_, ChatRuntime>,
+    chat_ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<AuthStatus, CommandError> {
-    runtime.logout().await
+    let status = runtime.logout().await?;
+    if let Ok(manager) = chat_runtime.authorization_manager() {
+        let _ = manager.invalidate_all();
+    }
+    chat_ipc_runtime.invalidate_pending_bindings();
+    chat_ipc_runtime.invalidate_all();
+    Ok(status)
 }
 
 #[tauri::command]
@@ -50,6 +58,7 @@ async fn get_my_capabilities(
 pub fn run() {
     tauri::Builder::default()
         .manage(NativeAuthRuntime::from_environment())
+        .manage(ChatIpcRuntime::new())
         .setup(|app| {
             let app_data_directory = app
                 .path()
@@ -66,12 +75,28 @@ pub fn run() {
             list_my_tenants,
             get_my_capabilities,
             chat::chat_foundation_status,
-            chat::chat_pick_project,
-            chat::chat_revalidate_project,
-            chat::chat_list_projects,
-            chat::chat_remove_project,
             chat::chat_start_local_host,
-            chat::chat_stop_local_host
+            chat::chat_stop_local_host,
+            chat::ipc::chat_bind_context_v1,
+            chat::ipc::chat_list_projects_v1,
+            chat::ipc::chat_pick_project_v1,
+            chat::ipc::chat_revalidate_project_v1,
+            chat::ipc::chat_set_project_pinned_v1,
+            chat::ipc::chat_remove_project_v1,
+            chat::ipc::chat_create_session_v1,
+            chat::ipc::chat_submit_turn_v1,
+            chat::ipc::chat_list_sessions_v1,
+            chat::ipc::chat_load_history_v1,
+            chat::ipc::chat_load_reasoning_v1,
+            chat::ipc::chat_rename_session_v1,
+            chat::ipc::chat_set_session_pinned_v1,
+            chat::ipc::chat_interrupt_turn_v1,
+            chat::ipc::chat_delete_session_v1,
+            chat::ipc::chat_get_cleanup_status_v1,
+            chat::ipc::chat_subscribe_session_v1,
+            chat::ipc::chat_resync_session_v1,
+            chat::ipc::chat_cancel_request_v1,
+            chat::ipc::chat_unsubscribe_session_v1
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

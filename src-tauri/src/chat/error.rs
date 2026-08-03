@@ -16,6 +16,8 @@ pub enum ChatError {
     ProjectUnavailable,
     NativePickerUnavailable,
     SidecarUnavailable,
+    ConversationConflict,
+    OrchestrationUnavailable,
     CleanupIncomplete,
 }
 
@@ -35,6 +37,8 @@ impl ChatError {
             Self::ProjectUnavailable => "chat_project_unavailable",
             Self::NativePickerUnavailable => "chat_native_picker_unavailable",
             Self::SidecarUnavailable => "chat_sidecar_unavailable",
+            Self::ConversationConflict => "chat_conversation_conflict",
+            Self::OrchestrationUnavailable => "chat_orchestration_unavailable",
             Self::CleanupIncomplete => "chat_cleanup_incomplete",
         }
     }

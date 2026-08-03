@@ -1,0 +1,149 @@
+{
+  "projectList": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": [{
+      "projectId": "019c1a00-0000-7000-8000-000000000009",
+      "safeName": "Synthetic Project",
+      "pinnedAt": 1785758000,
+      "lastUsedAt": 1785758100,
+      "available": true
+    }]
+  },
+  "optionalProject": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": null
+  },
+  "project": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "projectId": "019c1a00-0000-7000-8000-000000000009",
+      "safeName": "Synthetic Project",
+      "pinnedAt": null,
+      "lastUsedAt": 1785758100,
+      "available": true
+    }
+  },
+  "operation": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": { "operationId": "019c1a00-0000-7000-8000-00000000000b" }
+  },
+  "createdTurn": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "sessionId": "019c1a00-0000-7000-8000-000000000005",
+      "turnId": "019c1a00-0000-7000-8000-000000000006",
+      "operationId": "019c1a00-0000-7000-8000-00000000000b"
+    }
+  },
+  "sessionPage": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "sessions": [{
+        "sessionId": "019c1a00-0000-7000-8000-000000000005",
+        "projectId": "019c1a00-0000-7000-8000-000000000009",
+        "title": "Synthetic Session",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1785758200,
+        "latestTurnStatus": "completed",
+        "projectAvailable": true
+      }],
+      "nextCursor": "abcdef0123456789"
+    }
+  },
+  "historyPage": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "turns": [{
+        "turnId": "019c1a00-0000-7000-8000-000000000006",
+        "status": "completed",
+        "terminalAt": 1785758300,
+        "reasoningStatus": "complete",
+        "reasoningReasonCode": null,
+        "messages": [{
+          "messageId": "019c1a00-0000-7000-8000-00000000000a",
+          "role": "assistant",
+          "content": "synthetic assistant fixture",
+          "status": "completed",
+          "ordinal": 1,
+          "createdAt": 1785758250
+        }],
+        "reasoning": [{
+          "itemOrdinal": 0,
+          "status": "complete",
+          "reasonCode": null,
+          "totalBytes": 27,
+          "partCount": 1,
+          "finalizedAtMs": 1785758300000
+        }]
+      }],
+      "nextCursor": null
+    }
+  },
+  "reasoningList": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": [{
+      "itemOrdinal": 0,
+      "status": "complete",
+      "reasonCode": null,
+      "finalizedAtMs": 1785758300000,
+      "parts": [{ "contentIndex": 0, "text": "synthetic reasoning fixture" }]
+    }]
+  },
+  "cleanup": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "operationId": "019c1a00-0000-7000-8000-00000000000b",
+      "desktopState": "complete",
+      "hostState": "complete",
+      "runtimeState": "complete",
+      "outcomeCode": "cleanup_complete",
+      "lastErrorCode": null,
+      "requestedAt": 1785758200,
+      "completedAt": 1785758300,
+      "expiresAt": 1788350300
+    }
+  },
+  "optionalCleanup": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": null
+  },
+  "subscription": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": { "subscriptionId": "019c1a00-0000-7000-8000-000000000004" }
+  },
+  "cancelled": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": { "cancelled": true }
+  },
+  "resync": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "session": {
+        "sessionId": "019c1a00-0000-7000-8000-000000000005",
+        "projectId": "019c1a00-0000-7000-8000-000000000009",
+        "title": "Synthetic Session",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1785758200,
+        "latestTurnStatus": "completed",
+        "projectAvailable": true
+      },
+      "history": { "turns": [], "nextCursor": null },
+      "cleanup": null
+    }
+  }
+}

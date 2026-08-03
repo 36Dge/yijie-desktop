@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "subscriptionId": "019c1a00-0000-7000-8000-000000000004",
+  "contextId": "019c1a00-0000-7000-8000-000000000003",
+  "sessionId": "019c1a00-0000-7000-8000-000000000005",
+  "turnId": "019c1a00-0000-7000-8000-000000000006",
+  "projectionSequence": "7",
+  "eventId": "019c1a00-0000-7000-8000-000000000007",
+  "kind": "reasoning_append",
+  "payload": {
+    "itemOrdinal": 0,
+    "contentIndex": 0,
+    "text": "synthetic reasoning fixture"
+  }
+}
