@@ -1,0 +1,10 @@
+{
+  "datasetId": "feat126-title-raw-v1",
+  "sourceRepository": "yijie-agent-host",
+  "sourceCommit": "8707dea552cff74121b89aa8045f27da2c8c9378",
+  "hashAlgorithm": "sha256",
+  "files": {
+    "desktop-consumer.json": "5ad29b750693ecf95a0cabab4fe7c2ada6f6dbb9b10f9f99c3d5c25654d32cf1",
+    "desktop-events.sse": "e8c2d5ebca2182b7b07ad30761c07b5986139f2ff8ec9bbbf9b4ecaae6d6a0e6"
+  }
+}

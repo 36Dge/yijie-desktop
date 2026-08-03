@@ -2,6 +2,8 @@ mod application;
 mod authorization;
 mod database;
 mod error;
+#[cfg(test)]
+mod feat126_eval_tests;
 mod host_bridge;
 mod host_domain;
 pub(crate) mod ipc;
