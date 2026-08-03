@@ -23,6 +23,8 @@ export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_interrupt_turn_v1",
   "chat_delete_session_v1",
   "chat_get_cleanup_status_v1",
+  "chat_get_local_readiness_v1",
+  "chat_request_local_recovery_v1",
   "chat_subscribe_session_v1",
   "chat_resync_session_v1",
   "chat_cancel_request_v1",
@@ -205,6 +207,41 @@ export interface ChatCreatedTurn {
   readonly sessionId: string;
   readonly turnId: string;
   readonly operationId: string;
+}
+
+export const CHAT_READINESS_ISSUE_CODES = Object.freeze([
+  "chat_host_starting",
+  "chat_host_unavailable",
+  "chat_runtime_starting",
+  "chat_runtime_unavailable",
+  "chat_runtime_version_mismatch",
+  "chat_storage_read_only",
+  "chat_storage_full",
+  "chat_storage_corrupt",
+  "chat_storage_migration_failed",
+  "chat_storage_unavailable",
+] as const);
+
+export const CHAT_READINESS_RECOVERIES = Object.freeze([
+  "none",
+  "retry",
+  "start_or_retry",
+  "free_space",
+  "repair_or_restore",
+  "restart_app",
+  "rebind_context",
+] as const);
+
+export interface ChatLocalReadiness {
+  readonly lifecycle: "starting" | "ready" | "blocked" | "recovering";
+  readonly host: "starting" | "ready" | "unavailable";
+  readonly runtime: "starting" | "ready" | "unavailable" | "version_mismatch";
+  readonly storage: "ready" | "read_only" | "full" | "corrupt" | "migration_failed" | "unavailable";
+  readonly canSend: boolean;
+  readonly issueCode: (typeof CHAT_READINESS_ISSUE_CODES)[number] | null;
+  readonly retryable: boolean;
+  readonly recovery: (typeof CHAT_READINESS_RECOVERIES)[number];
+  readonly retryAfterMs?: number;
 }
 
 export interface ChatResyncProjection {
@@ -530,6 +567,39 @@ export function parseCreatedTurnResponse(value: unknown): ChatCreatedTurn {
       turnId: uuid(created.turnId),
       operationId: uuid(created.operationId),
     });
+  });
+}
+
+export function parseLocalReadinessResponse(value: unknown): ChatLocalReadiness {
+  return responseData(value, (data) => {
+    const body = exactObject(
+      data,
+      ["lifecycle", "host", "runtime", "storage", "canSend", "issueCode", "retryable", "recovery"],
+      ["retryAfterMs"],
+    );
+    if (typeof body.canSend !== "boolean" || typeof body.retryable !== "boolean") {
+      throw new ChatContractError();
+    }
+    const result: ChatLocalReadiness = Object.freeze({
+      lifecycle: oneOf(body.lifecycle, ["starting", "ready", "blocked", "recovering"] as const),
+      host: oneOf(body.host, ["starting", "ready", "unavailable"] as const),
+      runtime: oneOf(body.runtime, ["starting", "ready", "unavailable", "version_mismatch"] as const),
+      storage: oneOf(body.storage, ["ready", "read_only", "full", "corrupt", "migration_failed", "unavailable"] as const),
+      canSend: body.canSend,
+      issueCode: nullable(body.issueCode, (entry) => oneOf(entry, CHAT_READINESS_ISSUE_CODES)),
+      retryable: body.retryable,
+      recovery: oneOf(body.recovery, CHAT_READINESS_RECOVERIES),
+      ...(body.retryAfterMs === undefined ? {} : { retryAfterMs: integer(body.retryAfterMs, 0, 60_000) }),
+    });
+    const allReady = result.host === "ready" && result.runtime === "ready" && result.storage === "ready";
+    if (
+      result.canSend !== allReady ||
+      (result.canSend && (result.lifecycle !== "ready" || result.issueCode !== null || result.recovery !== "none")) ||
+      (!result.canSend && result.issueCode === null)
+    ) {
+      throw new ChatContractError();
+    }
+    return result;
   });
 }
 

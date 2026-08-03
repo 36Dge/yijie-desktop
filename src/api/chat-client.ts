@@ -12,6 +12,7 @@ import {
   parseCleanupResponse,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
+  parseLocalReadinessResponse,
   parseOperationResponse,
   parseOptionalCleanupResponse,
   parseOptionalProjectResponse,
@@ -25,6 +26,7 @@ import {
   type ChatCleanupStatus,
   type ChatCreatedTurn,
   type ChatHistoryPage,
+  type ChatLocalReadiness,
   type ChatProjectionEvent,
   type ChatProject,
   type ChatReasoningItem,
@@ -60,6 +62,8 @@ export interface ChatClient {
   interruptTurn(contextId: string, sessionId: string, operationId: string): Promise<ChatCreatedTurn>;
   deleteSession(contextId: string, sessionId: string, operationId: string): Promise<ChatCleanupStatus>;
   getCleanupStatus(contextId: string, operationId: string, signal?: AbortSignal): Promise<ChatCleanupStatus | null>;
+  getLocalReadiness(contextId: string, signal?: AbortSignal): Promise<ChatLocalReadiness>;
+  requestLocalRecovery(contextId: string, operationId: string): Promise<ChatLocalReadiness>;
   subscribeSession(contextId: string, sessionId: string): Promise<string>;
   resyncSession(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
   unsubscribeSession(contextId: string, subscriptionId: string): Promise<boolean>;
@@ -206,6 +210,12 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     getCleanupStatus: (contextId, operationId, signal) =>
       runRead("chat_get_cleanup_status_v1", contextId, { operationId }, parseOptionalCleanupResponse, signal),
+    getLocalReadiness: (contextId, signal) =>
+      runRead("chat_get_local_readiness_v1", contextId, {}, parseLocalReadinessResponse, signal),
+    requestLocalRecovery(contextId, operationId) {
+      const envelope = operationEnvelope(contextId, { operationId, intent: "start_or_retry" });
+      return run("chat_request_local_recovery_v1", envelope.request, parseLocalReadinessResponse);
+    },
     subscribeSession(contextId, sessionId) {
       const envelope = operationEnvelope(contextId, { sessionId });
       return run("chat_subscribe_session_v1", envelope.request, parseSubscriptionResponse);

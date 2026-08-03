@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { KnownCapability } from "../domain/permissions";
 import {
   APP_ROUTE_RECORDS,
+  createAppRouteRecords,
   createAppRouter,
   focusRouteHeading,
   syncRouteTitle,
@@ -43,7 +44,7 @@ describe("app router", () => {
     [["task.read"] as const, "/tasks", "tasks"],
     [[] as const, "/settings", "settings"],
   ])("ROUTE-001 resolves the root policy for %j", async (capabilities, path, name) => {
-    const router = createAppRouter(createMemoryHistory(), boundary(capabilities));
+    const router = createAppRouter(createMemoryHistory(), boundary(capabilities), undefined, true);
 
     await router.push("/");
     await router.isReady();
@@ -53,9 +54,12 @@ describe("app router", () => {
   });
 
   it("ROUTE-002 keeps the default-off build on Settings core", async () => {
+    const { loaders, chat } = pageLoaders();
     const router = createAppRouter(
       createMemoryHistory(),
-      boundary(["task.create", "task.read"], { enabled: false }),
+      boundary(["task.create", "task.read"]),
+      loaders,
+      false,
     );
 
     await router.push("/");
@@ -64,6 +68,15 @@ describe("app router", () => {
 
     await router.push("/chat");
     expect(router.currentRoute.value.path).toBe("/settings");
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("ROUTE-003 gives a session deep link task.read capability and never task.create", async () => {
+    const router = createAppRouter(createMemoryHistory(), boundary(["task.read"]), undefined, true);
+    const sessionId = "019c1a00-0000-7000-8000-000000000005";
+    await router.push(`/chat/${sessionId}`);
+    await router.isReady();
+    expect(router.currentRoute.value.name).toBe("chat-session");
   });
 
   it.each([
@@ -71,7 +84,7 @@ describe("app router", () => {
     ["/tasks", "tasks", ["task.read"] as const],
     ["/settings", "settings", [] as const],
   ])("ROUTE-003 resolves the allowed direct entry %s", async (path, name, capabilities) => {
-    const router = createAppRouter(createMemoryHistory(), boundary(capabilities));
+    const router = createAppRouter(createMemoryHistory(), boundary(capabilities), undefined, true);
 
     await router.push(path);
     await router.isReady();
@@ -82,7 +95,7 @@ describe("app router", () => {
 
   it("ROUTE-004 redirects a denied deep link before its business page is instantiated", async () => {
     const { loaders, chat } = pageLoaders();
-    const router = createAppRouter(createMemoryHistory(), boundary(["task.read"]), loaders);
+    const router = createAppRouter(createMemoryHistory(), boundary(["task.read"]), loaders, true);
 
     await router.push("/chat");
     await router.isReady();
@@ -98,6 +111,7 @@ describe("app router", () => {
       createMemoryHistory(),
       boundary(["task.create"], { ready: false }),
       loaders,
+      true,
     );
 
     await router.push("/chat");
@@ -110,8 +124,6 @@ describe("app router", () => {
   it("ROUTE-006 exposes no route for unpublished business modules", () => {
     expect(APP_ROUTE_RECORDS.map((route) => route.path)).toEqual([
       "/",
-      "/chat",
-      "/tasks",
       "/settings",
       "/access-denied",
     ]);
@@ -122,7 +134,7 @@ describe("app router", () => {
 
   it("ROUTE-007 keeps route names, navigation keys, and document titles aligned", () => {
     expect(
-      APP_ROUTE_RECORDS.filter((route) => route.path !== "/").map((route) => ({
+      createAppRouteRecords(undefined, true).filter((route) => route.path !== "/").map((route) => ({
         path: route.path,
         name: route.name,
         navKey: route.meta?.navKey,
@@ -134,6 +146,12 @@ describe("app router", () => {
         name: "chat",
         navKey: "newTask",
         documentTitle: "新建任务 · 易界 AI",
+      },
+      {
+        path: "/chat/:sessionId",
+        name: "chat-session",
+        navKey: "newTask",
+        documentTitle: "任务对话 · 易界 AI",
       },
       {
         path: "/tasks",

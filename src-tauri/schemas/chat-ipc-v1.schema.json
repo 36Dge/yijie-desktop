@@ -22,6 +22,8 @@
     "chat_interrupt_turn_v1",
     "chat_delete_session_v1",
     "chat_get_cleanup_status_v1",
+    "chat_get_local_readiness_v1",
+    "chat_request_local_recovery_v1",
     "chat_subscribe_session_v1",
     "chat_resync_session_v1",
     "chat_cancel_request_v1",
@@ -44,6 +46,8 @@
     "chat_interrupt_turn_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/createdTurnResponse" },
     "chat_delete_session_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/cleanupResponse" },
     "chat_get_cleanup_status_v1": { "request": "#/$defs/cleanupStatusRequest", "response": "#/$defs/optionalCleanupResponse" },
+    "chat_get_local_readiness_v1": { "request": "#/$defs/emptyRequest", "response": "#/$defs/localReadinessResponse" },
+    "chat_request_local_recovery_v1": { "request": "#/$defs/recoveryRequest", "response": "#/$defs/localReadinessResponse" },
     "chat_subscribe_session_v1": { "request": "#/$defs/subscribeRequest", "response": "#/$defs/subscriptionResponse" },
     "chat_resync_session_v1": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/resyncResponse" },
     "chat_cancel_request_v1": { "request": "#/$defs/cancelRequest", "response": "#/$defs/cancelledResponse" },
@@ -153,6 +157,15 @@
       "additionalProperties": false,
       "required": ["operationId"],
       "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
+    },
+    "recoveryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId", "intent"],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "intent": { "const": "start_or_retry" }
+      }
     },
     "projectOperationPayload": {
       "type": "object",
@@ -280,6 +293,12 @@
       "allOf": [
         { "$ref": "#/$defs/commandRequest" },
         { "properties": { "payload": { "$ref": "#/$defs/operationOnlyPayload" } } }
+      ]
+    },
+    "recoveryRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/recoveryPayload" } } }
       ]
     },
     "projectOperationRequest": {
@@ -558,6 +577,25 @@
         "cleanup": { "anyOf": [{ "$ref": "#/$defs/cleanup" }, { "type": "null" }] }
       }
     },
+    "localReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lifecycle", "host", "runtime", "storage", "canSend", "issueCode", "retryable", "recovery"],
+      "properties": {
+        "lifecycle": { "enum": ["starting", "ready", "blocked", "recovering"] },
+        "host": { "enum": ["starting", "ready", "unavailable"] },
+        "runtime": { "enum": ["starting", "ready", "unavailable", "version_mismatch"] },
+        "storage": { "enum": ["ready", "read_only", "full", "corrupt", "migration_failed", "unavailable"] },
+        "canSend": { "type": "boolean" },
+        "issueCode": {
+          "type": ["string", "null"],
+          "enum": [null, "chat_host_starting", "chat_host_unavailable", "chat_runtime_starting", "chat_runtime_unavailable", "chat_runtime_version_mismatch", "chat_storage_read_only", "chat_storage_full", "chat_storage_corrupt", "chat_storage_migration_failed", "chat_storage_unavailable"]
+        },
+        "retryable": { "type": "boolean" },
+        "recovery": { "enum": ["none", "retry", "start_or_retry", "free_space", "repair_or_restore", "restart_app", "rebind_context"] },
+        "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 60000 }
+      }
+    },
     "boundContextResponse": {
       "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/boundContext" } } }]
     },
@@ -599,6 +637,9 @@
     },
     "resyncResponse": {
       "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/resync" } } }]
+    },
+    "localReadinessResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/localReadiness" } } }]
     },
     "error": {
       "type": "object",

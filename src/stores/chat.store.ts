@@ -7,6 +7,7 @@ import type {
   ChatAllowedAction,
   ChatCleanupStatus,
   ChatHistoryPage,
+  ChatLocalReadiness,
   ChatProjectionEvent,
   ChatProject,
   ChatReasoningItem,
@@ -37,6 +38,12 @@ export interface LiveReasoningPart {
   readonly contentIndex: number;
   readonly text: string;
 }
+
+export type DeleteDisposition = Readonly<{
+  kind: "cleanup_pending" | "navigate";
+  nextSessionId: string | null;
+  path: "/chat" | `/chat/${string}`;
+}>;
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -75,8 +82,11 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
     const liveTurnStatus = ref<string | null>(null);
     const cleanupStatus = shallowRef<ChatCleanupStatus | null>(null);
+    const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
+    const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
+    const canSend = computed(() => isReady.value && localReadiness.value?.canSend === true);
 
     let selectionEpoch = 0;
     let authorityEpoch = 0;
@@ -123,6 +133,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
       cleanupStatus.value = null;
+      deleteDisposition.value = null;
       subscriptionId = null;
       expectedSequence = 0n;
       seenEventIds.clear();
@@ -142,6 +153,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       projects.value = Object.freeze([]);
       sessions.value = Object.freeze([]);
       sessionsCursor.value = null;
+      localReadiness.value = null;
       phase.value = nextPhase;
       if (oldContext && oldSubscription) {
         void client.unsubscribeSession(oldContext, oldSubscription).catch(() => undefined);
@@ -285,7 +297,10 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const operation = event.payload.operationId;
       if (typeof operation !== "string") return requestResync();
       try {
-        cleanupStatus.value = await client.getCleanupStatus(context.value.contextId, operation);
+        if (cleanupStatus.value?.operationId !== operation) {
+          cleanupStatus.value = await client.getCleanupStatus(context.value.contextId, operation);
+        }
+        await refreshSelectedCleanup();
       } catch {
         requestResync();
       }
@@ -303,14 +318,16 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         context.value = bound;
         scheduleContextExpiry(bound);
         phase.value = "loading";
-        const [nextProjects, nextSessions] = await Promise.all([
+        const [nextProjects, nextSessions, nextReadiness] = await Promise.all([
           client.listProjects(bound.contextId),
           client.listSessions(bound.contextId),
+          client.getLocalReadiness(bound.contextId),
         ]);
         if (bindEpoch !== authorityEpoch || context.value?.contextId !== bound.contextId) return;
         projects.value = nextProjects;
         sessions.value = nextSessions.sessions;
         sessionsCursor.value = nextSessions.nextCursor;
+        localReadiness.value = nextReadiness;
         phase.value = "ready";
       } catch (error: unknown) {
         if (bindEpoch !== authorityEpoch) return;
@@ -359,6 +376,16 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         phase.value = phaseForError(error);
       }
+    }
+
+    async function clearSelectedSession(): Promise<void> {
+      const bound = context.value;
+      const oldSubscription = subscriptionId;
+      clearSelection();
+      if (bound && oldSubscription) {
+        await client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
+      }
+      if (context.value !== null) phase.value = "ready";
     }
 
     function applyResync(projection: ChatResyncProjection): void {
@@ -466,7 +493,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
 
     async function createSession(projectId: string, input: string): Promise<string | null> {
       const bound = context.value;
-      if (!bound || !hasAction("create_session") || !hasAction("use_project")) return null;
+      if (!bound || !canSend.value || !hasAction("create_session") || !hasAction("use_project")) return null;
       const created = await client.createSession(bound.contextId, projectId, input, operationId());
       await reloadSessions();
       await selectSession(created.sessionId);
@@ -476,7 +503,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     async function submitTurn(input: string): Promise<void> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("submit_turn")) return;
+      if (!bound || !sessionId || !canSend.value || !hasAction("submit_turn")) return;
       await client.submitTurn(bound.contextId, sessionId, input, operationId());
       await resyncSelected();
     }
@@ -488,6 +515,38 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       if (context.value?.contextId !== bound.contextId) return;
       sessions.value = page.sessions;
       sessionsCursor.value = page.nextCursor;
+    }
+
+    async function loadMoreSessions(): Promise<void> {
+      const bound = context.value;
+      const cursor = sessionsCursor.value;
+      if (!bound || !cursor) return;
+      const page = await client.listSessions(bound.contextId, cursor, 20);
+      if (context.value?.contextId !== bound.contextId || sessionsCursor.value !== cursor) return;
+      const known = new Set(sessions.value.map((session) => session.sessionId));
+      sessions.value = Object.freeze([
+        ...sessions.value,
+        ...page.sessions.filter((session) => !known.has(session.sessionId)),
+      ]);
+      sessionsCursor.value = page.nextCursor;
+    }
+
+    async function refreshLocalReadiness(): Promise<ChatLocalReadiness | null> {
+      const bound = context.value;
+      if (!bound) return null;
+      const projection = await client.getLocalReadiness(bound.contextId);
+      if (context.value?.contextId !== bound.contextId) return null;
+      localReadiness.value = projection;
+      return projection;
+    }
+
+    async function requestLocalRecovery(): Promise<ChatLocalReadiness | null> {
+      const bound = context.value;
+      if (!bound) return null;
+      const projection = await client.requestLocalRecovery(bound.contextId, operationId());
+      if (context.value?.contextId !== bound.contextId) return null;
+      localReadiness.value = projection;
+      return projection;
     }
 
     async function renameSelected(title: string): Promise<void> {
@@ -513,11 +572,87 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       await client.interruptTurn(bound.contextId, sessionId, operationId());
     }
 
-    async function deleteSelected(): Promise<void> {
+    function cleanupIsComplete(status: ChatCleanupStatus): boolean {
+      return status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete";
+    }
+
+    async function finishCompletedCleanup(
+      bound: BoundChatContext,
+      deletedSessionId: string,
+      status: ChatCleanupStatus,
+    ): Promise<DeleteDisposition> {
+      const oldSubscription = subscriptionId;
+      if (oldSubscription) {
+        await client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
+      }
+      clearSelection();
+      const [nextProjects, nextSessions] = await Promise.all([
+        client.listProjects(bound.contextId),
+        client.listSessions(bound.contextId),
+      ]);
+      if (context.value?.contextId !== bound.contextId) {
+        return Object.freeze({ kind: "navigate", nextSessionId: null, path: "/chat" });
+      }
+      projects.value = nextProjects;
+      sessions.value = Object.freeze(nextSessions.sessions.filter((session) => session.sessionId !== deletedSessionId));
+      sessionsCursor.value = nextSessions.nextCursor;
+      cleanupStatus.value = status;
+      const nextSessionId = sessions.value[0]?.sessionId ?? null;
+      const disposition: DeleteDisposition = Object.freeze({
+        kind: "navigate",
+        nextSessionId,
+        path: nextSessionId === null ? "/chat" : `/chat/${nextSessionId}`,
+      });
+      deleteDisposition.value = disposition;
+      return disposition;
+    }
+
+    async function deleteSelected(): Promise<DeleteDisposition | null> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("delete_session")) return;
-      cleanupStatus.value = await client.deleteSession(bound.contextId, sessionId, operationId());
+      if (!bound || !sessionId || !hasAction("delete_session")) return null;
+      const status = await client.deleteSession(bound.contextId, sessionId, operationId());
+      cleanupStatus.value = status;
+      if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+      const disposition: DeleteDisposition = Object.freeze({
+        kind: "cleanup_pending",
+        nextSessionId: null,
+        path: `/chat/${sessionId}`,
+      });
+      deleteDisposition.value = disposition;
+      return disposition;
+    }
+
+    async function refreshSelectedCleanup(): Promise<DeleteDisposition | null> {
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      const operation = cleanupStatus.value?.operationId;
+      if (!bound || !sessionId || !operation) return null;
+      const status = await client.getCleanupStatus(bound.contextId, operation);
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId || status === null) {
+        return null;
+      }
+      cleanupStatus.value = status;
+      if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+      return deleteDisposition.value;
+    }
+
+    async function pickProject(): Promise<ChatProject | null> {
+      const bound = context.value;
+      if (!bound || !hasAction("use_project")) return null;
+      const selected = await client.pickProject(bound.contextId, operationId());
+      if (context.value?.contextId !== bound.contextId) return null;
+      projects.value = await client.listProjects(bound.contextId);
+      return selected;
+    }
+
+    async function revalidateProject(projectId: string): Promise<ChatProject | null> {
+      const bound = context.value;
+      if (!bound || !hasAction("use_project")) return null;
+      const project = await client.revalidateProject(bound.contextId, projectId, operationId());
+      if (context.value?.contextId !== bound.contextId) return null;
+      projects.value = Object.freeze(projects.value.map((entry) => entry.projectId === project.projectId ? project : entry));
+      return project;
     }
 
     async function setProjectPinned(projectId: string, pinned: boolean): Promise<void> {
@@ -558,21 +693,31 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       liveReasoning,
       liveTurnStatus,
       cleanupStatus,
+      localReadiness,
+      deleteDisposition,
       lastErrorCode,
       isReady,
+      canSend,
       hasAction,
       bind,
       selectSession,
+      clearSelectedSession,
       resyncSelected,
       loadOlderHistory,
       loadReasoning,
       createSession,
       submitTurn,
       reloadSessions,
+      loadMoreSessions,
+      refreshLocalReadiness,
+      requestLocalRecovery,
       renameSelected,
       setSelectedPinned,
       interruptSelected,
       deleteSelected,
+      refreshSelectedCleanup,
+      pickProject,
+      revalidateProject,
       setProjectPinned,
       removeProject,
       clearForLogout,

@@ -8,6 +8,7 @@ import type {
 export interface PermissionPolicySnapshot {
   enabled: boolean;
   ready: boolean;
+  chatUiEnabled?: boolean;
   hasCapability(capability: KnownCapability): boolean;
 }
 
@@ -51,12 +52,19 @@ export function resolveNavigationVisibility(
   >) {
     visibility[key] = snapshot.hasCapability(capability);
   }
+  if (snapshot.chatUiEnabled === false) {
+    visibility.newTask = false;
+    visibility.taskHistory = false;
+  }
 
   return visibility;
 }
 
 export function resolveRootRoute(snapshot: PermissionPolicySnapshot): AppRoutePath {
   if (!snapshot.enabled || !snapshot.ready) {
+    return "/settings";
+  }
+  if (snapshot.chatUiEnabled === false) {
     return "/settings";
   }
   if (snapshot.hasCapability("task.create")) {
@@ -69,6 +77,9 @@ export function resolveRootRoute(snapshot: PermissionPolicySnapshot): AppRoutePa
 }
 
 export function requiredCapabilityForPath(path: string): KnownCapability | null {
+  if (/^\/chat\/[^/]+$/.test(path)) {
+    return "task.read";
+  }
   return ROUTE_CAPABILITIES[path as keyof typeof ROUTE_CAPABILITIES] ?? null;
 }
 
@@ -77,8 +88,10 @@ export function canRenderProtectedPath(
   snapshot: PermissionPolicySnapshot,
 ): boolean {
   const capability = requiredCapabilityForPath(path);
+  const chatUiAllowed = snapshot.chatUiEnabled !== false || (path !== "/chat" && path !== "/tasks" && !path.startsWith("/chat/"));
   return (
-    capability === null ||
+    chatUiAllowed && (capability === null ||
     (snapshot.enabled && snapshot.ready && snapshot.hasCapability(capability))
+    )
   );
 }

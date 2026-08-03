@@ -1,4 +1,4 @@
-use super::error::ChatError;
+use super::error::{map_sqlite_error, ChatError};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -511,7 +511,7 @@ impl ChatRepository {
         validate_owner_only_file(&database_path)?;
         let connection =
             Connection::open_with_flags(&database_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
+                .map_err(map_sqlite_error)?;
         apply_raw_key(&connection, key)?;
         connection
             .query_row("SELECT count(*) FROM sqlite_schema", [], |row| {
@@ -552,7 +552,7 @@ impl ChatRepository {
             &database_path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
         )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
+        .map_err(map_sqlite_error)?;
         apply_raw_key(&connection, key)?;
         connection
             .query_row("SELECT count(*) FROM sqlite_schema", [], |row| {
@@ -574,7 +574,25 @@ impl ChatRepository {
     pub fn schema_version(&self) -> Result<i64, ChatError> {
         self.connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .map_err(|_| ChatError::DatabaseUnavailable)
+            .map_err(map_sqlite_error)
+    }
+
+    pub fn probe_storage(&mut self) -> Result<(), ChatError> {
+        let integrity: String = self
+            .connection
+            .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        if integrity != "ok" {
+            return Err(ChatError::DatabaseCorrupt);
+        }
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE chat_schema_migrations SET applied_at=applied_at WHERE version=1",
+                [],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction.rollback().map_err(map_sqlite_error)
     }
 
     pub fn register_project(
@@ -3813,7 +3831,7 @@ fn map_constraint_or_database(error: rusqlite::Error) -> ChatError {
         {
             ChatError::ConversationConflict
         }
-        _ => ChatError::DatabaseUnavailable,
+        error => map_sqlite_error(error),
     }
 }
 
@@ -3945,7 +3963,7 @@ fn configure_connection(connection: &Connection) -> Result<(), ChatError> {
              PRAGMA journal_size_limit=1048576;
              PRAGMA trusted_schema=OFF;",
         )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
+        .map_err(map_sqlite_error)?;
     for (pragma, expected) in [
         ("foreign_keys", 1_i64),
         ("synchronous", 2),
@@ -3960,14 +3978,14 @@ fn configure_connection(connection: &Connection) -> Result<(), ChatError> {
         let query = format!("PRAGMA {pragma}");
         let actual: i64 = connection
             .query_row(&query, [], |row| row.get(0))
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
+            .map_err(map_sqlite_error)?;
         if actual != expected {
             return Err(ChatError::DatabaseUnavailable);
         }
     }
     let journal_mode: String = connection
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
+        .map_err(map_sqlite_error)?;
     if !journal_mode.eq_ignore_ascii_case("wal") {
         return Err(ChatError::DatabaseUnavailable);
     }

@@ -128,6 +128,20 @@
     "requestId": "019c1a00-0000-7000-8000-000000000001",
     "data": { "cancelled": true }
   },
+  "localReadiness": {
+    "schemaVersion": 1,
+    "requestId": "019c1a00-0000-7000-8000-000000000001",
+    "data": {
+      "lifecycle": "ready",
+      "host": "ready",
+      "runtime": "ready",
+      "storage": "ready",
+      "canSend": true,
+      "issueCode": null,
+      "retryable": false,
+      "recovery": "none"
+    }
+  },
   "resync": {
     "schemaVersion": 1,
     "requestId": "019c1a00-0000-7000-8000-000000000001",

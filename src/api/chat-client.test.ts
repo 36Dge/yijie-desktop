@@ -12,11 +12,14 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 describe("chat client", () => {
   it("sends only the closed versioned request envelope", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
-    const nativeInvoke = vi.fn(async () => ({
-      schemaVersion: 1,
-      requestId: REQUEST_ID,
-      data: { sessions: [], nextCursor: null },
-    }));
+    const nativeInvoke = vi.fn(async (command: string) => {
+      void command;
+      return {
+        schemaVersion: 1,
+        requestId: REQUEST_ID,
+        data: { sessions: [], nextCursor: null },
+      };
+    });
     const client = createChatClient(transport(nativeInvoke));
 
     await client.listSessions(CONTEXT_ID, undefined, 20);
@@ -81,5 +84,37 @@ describe("chat client", () => {
     await client.onEvent(vi.fn(), invalid);
     listener({ hostBearer: "secret" });
     expect(invalid).toHaveBeenCalledOnce();
+  });
+
+  it("uses the closed readiness and recovery commands instead of legacy Host commands", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async (command: string) => {
+      void command;
+      return {
+        schemaVersion: 1,
+        requestId: REQUEST_ID,
+        data: {
+          lifecycle: "blocked",
+          host: "unavailable",
+          runtime: "unavailable",
+          storage: "ready",
+          canSend: false,
+          issueCode: "chat_host_unavailable",
+          retryable: true,
+          recovery: "start_or_retry",
+          retryAfterMs: 1000,
+        },
+      };
+    });
+    const client = createChatClient(transport(nativeInvoke));
+
+    await client.getLocalReadiness(CONTEXT_ID);
+    await client.requestLocalRecovery(CONTEXT_ID, REQUEST_ID);
+
+    expect(nativeInvoke.mock.calls.map(([command]) => command)).toEqual([
+      "chat_get_local_readiness_v1",
+      "chat_request_local_recovery_v1",
+    ]);
+    expect(nativeInvoke).not.toHaveBeenCalledWith("chat_start_local_host", expect.anything());
   });
 });

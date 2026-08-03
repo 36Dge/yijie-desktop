@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { resolveNavigationVisibility } from "../../authorization/app-permission-policy";
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
+import { localChatUiEnabled } from "../../authorization/chat-ui-config";
 import { resolveAppNavigation } from "../../navigation/app-nav";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
@@ -17,6 +18,7 @@ const navigationEntries = computed(() =>
     resolveNavigationVisibility({
       enabled: authoritativePermissionUiEnabled,
       ready: permissionStore.isReady,
+      chatUiEnabled: localChatUiEnabled,
       hasCapability: permissionStore.hasCapability,
     }),
   ),

@@ -93,6 +93,8 @@ pub fn run() {
             chat::ipc::chat_interrupt_turn_v1,
             chat::ipc::chat_delete_session_v1,
             chat::ipc::chat_get_cleanup_status_v1,
+            chat::ipc::chat_get_local_readiness_v1,
+            chat::ipc::chat_request_local_recovery_v1,
             chat::ipc::chat_subscribe_session_v1,
             chat::ipc::chat_resync_session_v1,
             chat::ipc::chat_cancel_request_v1,

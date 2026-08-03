@@ -13,6 +13,7 @@ import {
   type PermissionPolicySnapshot,
 } from "../authorization/app-permission-policy";
 import { authoritativePermissionUiEnabled } from "../authorization/permission-ui-config";
+import { localChatUiEnabled } from "../authorization/chat-ui-config";
 import type { KnownCapability } from "../domain/permissions";
 import { usePermissionStore } from "../stores/permission.store";
 
@@ -64,14 +65,17 @@ function policySnapshot(boundary: RouterPermissionBoundary): PermissionPolicySna
 
 export function createAppRouteRecords(
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
+  chatUiEnabled = localChatUiEnabled,
 ): readonly RouteRecordRaw[] {
-  return [
+  const records: RouteRecordRaw[] = [
     {
       path: "/",
       name: "root",
       component: RootRoutePage,
       meta: { documentTitle: "易界 AI" },
     },
+  ];
+  if (chatUiEnabled) records.push(
     {
       path: "/chat",
       name: "chat",
@@ -79,6 +83,15 @@ export function createAppRouteRecords(
       meta: {
         navKey: "newTask",
         documentTitle: "新建任务 · 易界 AI",
+      },
+    },
+    {
+      path: "/chat/:sessionId",
+      name: "chat-session",
+      component: pageLoaders.chat,
+      meta: {
+        navKey: "newTask",
+        documentTitle: "任务对话 · 易界 AI",
       },
     },
     {
@@ -90,6 +103,8 @@ export function createAppRouteRecords(
         documentTitle: "任务记录 · 易界 AI",
       },
     },
+  );
+  records.push(
     {
       path: "/settings",
       name: "settings",
@@ -105,7 +120,8 @@ export function createAppRouteRecords(
       component: pageLoaders.accessDenied,
       meta: { documentTitle: "无权访问 · 易界 AI" },
     },
-  ];
+  );
+  return records;
 }
 
 export const APP_ROUTE_RECORDS = createAppRouteRecords();
@@ -131,10 +147,11 @@ export function createAppRouter(
   history: RouterHistory,
   permissionBoundary: RouterPermissionBoundary = productionPermissionBoundary,
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
+  chatUiEnabled = localChatUiEnabled,
 ) {
   const appRouter = createRouter({
     history,
-    routes: createAppRouteRecords(pageLoaders),
+    routes: createAppRouteRecords(pageLoaders, chatUiEnabled),
   });
 
   appRouter.beforeEach(async (route) => {
@@ -142,7 +159,11 @@ export function createAppRouter(
       if (permissionBoundary.enabled) {
         await permissionBoundary.ensureInitialized();
       }
-      return resolveRootRoute(policySnapshot(permissionBoundary));
+      return resolveRootRoute({ ...policySnapshot(permissionBoundary), chatUiEnabled });
+    }
+
+    if (!chatUiEnabled && (route.path === "/chat" || route.path === "/tasks" || route.path.startsWith("/chat/"))) {
+      return { path: "/settings", replace: true };
     }
 
     const requiredCapability = requiredCapabilityForPath(route.path);

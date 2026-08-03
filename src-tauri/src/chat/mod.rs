@@ -81,6 +81,58 @@ pub struct ChatFoundationStatus {
     pub sidecar: SidecarState,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatReadinessLifecycle {
+    Starting,
+    Ready,
+    Blocked,
+    Recovering,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatHostReadiness {
+    Starting,
+    Ready,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRuntimeReadiness {
+    Starting,
+    Ready,
+    Unavailable,
+    VersionMismatch,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatStorageReadiness {
+    Ready,
+    ReadOnly,
+    Full,
+    Corrupt,
+    MigrationFailed,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatLocalReadiness {
+    pub lifecycle: ChatReadinessLifecycle,
+    pub host: ChatHostReadiness,
+    pub runtime: ChatRuntimeReadiness,
+    pub storage: ChatStorageReadiness,
+    pub can_send: bool,
+    pub issue_code: Option<&'static str>,
+    pub retryable: bool,
+    pub recovery: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+}
+
 impl ChatRuntime {
     pub fn from_environment(app_data_directory: PathBuf) -> Self {
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
@@ -183,6 +235,110 @@ impl ChatRuntime {
                 })
             }
         }
+    }
+
+    async fn storage_readiness(&self) -> ChatStorageReadiness {
+        match self.database().await {
+            Ok(worker) => match worker.probe_storage().await {
+                Ok(_) => ChatStorageReadiness::Ready,
+                Err(error) => storage_readiness_for_error(error),
+            },
+            Err(error) => storage_readiness_for_error(error),
+        }
+    }
+
+    pub async fn local_readiness(&self, recovering: bool) -> ChatLocalReadiness {
+        let storage = self.storage_readiness().await;
+        let sidecar = match &self.sidecar {
+            Some(supervisor) => supervisor.status().await,
+            None => SidecarState::Disabled,
+        };
+        let bridge_ready = self.host_bridge.lock().await.is_some();
+        let (host, runtime) = match sidecar {
+            SidecarState::Starting => (ChatHostReadiness::Starting, ChatRuntimeReadiness::Starting),
+            SidecarState::HostLive => (ChatHostReadiness::Ready, ChatRuntimeReadiness::Starting),
+            SidecarState::RuntimeReady if bridge_ready => {
+                (ChatHostReadiness::Ready, ChatRuntimeReadiness::Ready)
+            }
+            SidecarState::RuntimeReady => {
+                (ChatHostReadiness::Unavailable, ChatRuntimeReadiness::Ready)
+            }
+            SidecarState::Disabled | SidecarState::Stopped | SidecarState::Failed => (
+                ChatHostReadiness::Unavailable,
+                ChatRuntimeReadiness::Unavailable,
+            ),
+        };
+
+        let issue = match storage {
+            ChatStorageReadiness::ReadOnly => {
+                Some(("chat_storage_read_only", false, "repair_or_restore", None))
+            }
+            ChatStorageReadiness::Full => Some(("chat_storage_full", true, "free_space", None)),
+            ChatStorageReadiness::Corrupt => {
+                Some(("chat_storage_corrupt", false, "repair_or_restore", None))
+            }
+            ChatStorageReadiness::MigrationFailed => {
+                Some(("chat_storage_migration_failed", false, "restart_app", None))
+            }
+            ChatStorageReadiness::Unavailable => {
+                Some(("chat_storage_unavailable", true, "retry", Some(1000)))
+            }
+            ChatStorageReadiness::Ready => match (host, runtime) {
+                (ChatHostReadiness::Starting, _) => {
+                    Some(("chat_host_starting", true, "start_or_retry", Some(250)))
+                }
+                (ChatHostReadiness::Unavailable, _) => {
+                    Some(("chat_host_unavailable", true, "start_or_retry", Some(1000)))
+                }
+                (_, ChatRuntimeReadiness::Starting) => {
+                    Some(("chat_runtime_starting", true, "start_or_retry", Some(250)))
+                }
+                (_, ChatRuntimeReadiness::Unavailable) => Some((
+                    "chat_runtime_unavailable",
+                    true,
+                    "start_or_retry",
+                    Some(1000),
+                )),
+                (_, ChatRuntimeReadiness::VersionMismatch) => {
+                    Some(("chat_runtime_version_mismatch", false, "restart_app", None))
+                }
+                (ChatHostReadiness::Ready, ChatRuntimeReadiness::Ready) => None,
+            },
+        };
+        let can_send = issue.is_none();
+        let (issue_code, retryable, recovery, retry_after_ms) = issue
+            .map(|(code, retryable, recovery, delay)| (Some(code), retryable, recovery, delay))
+            .unwrap_or((None, false, "none", None));
+        ChatLocalReadiness {
+            lifecycle: if can_send {
+                ChatReadinessLifecycle::Ready
+            } else if recovering {
+                ChatReadinessLifecycle::Recovering
+            } else if host == ChatHostReadiness::Starting
+                || runtime == ChatRuntimeReadiness::Starting
+            {
+                ChatReadinessLifecycle::Starting
+            } else {
+                ChatReadinessLifecycle::Blocked
+            },
+            host,
+            runtime,
+            storage,
+            can_send,
+            issue_code,
+            retryable,
+            recovery,
+            retry_after_ms,
+        }
+    }
+
+    pub async fn request_local_recovery(&self) -> ChatLocalReadiness {
+        let before = self.local_readiness(true).await;
+        if before.storage != ChatStorageReadiness::Ready {
+            return before;
+        }
+        let _ = self.start_sidecar().await;
+        self.local_readiness(false).await
     }
 
     async fn pick_project(&self) -> Result<Option<database::ProjectSummary>, ChatError> {
@@ -299,6 +455,29 @@ impl ChatRuntime {
     }
 }
 
+fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
+    match error {
+        ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
+        ChatError::DatabaseFull => ChatStorageReadiness::Full,
+        ChatError::DatabaseCorrupt | ChatError::DatabaseUnsafe => ChatStorageReadiness::Corrupt,
+        ChatError::MigrationFailed => ChatStorageReadiness::MigrationFailed,
+        ChatError::DatabaseUnavailable
+        | ChatError::DatabaseKeyMissing
+        | ChatError::SecureStorageUnavailable
+        | ChatError::Disabled
+        | ChatError::InvalidConfiguration
+        | ChatError::InvalidInput
+        | ChatError::NotFound
+        | ChatError::ScopeDenied
+        | ChatError::ProjectUnavailable
+        | ChatError::NativePickerUnavailable
+        | ChatError::SidecarUnavailable
+        | ChatError::ConversationConflict
+        | ChatError::OrchestrationUnavailable
+        | ChatError::CleanupIncomplete => ChatStorageReadiness::Unavailable,
+    }
+}
+
 #[tauri::command]
 pub async fn chat_foundation_status(
     runtime: State<'_, ChatRuntime>,
@@ -372,5 +551,28 @@ mod tests {
         assert_eq!(status.schema_version, None);
         assert_eq!(status.contract_commit, CONTRACT_COMMIT);
         assert_eq!(status.sidecar, SidecarState::Disabled);
+    }
+
+    #[tokio::test]
+    async fn disabled_runtime_projects_one_closed_non_sendable_readiness_state() {
+        let runtime = ChatRuntime {
+            mode: RuntimeMode::Disabled,
+            authorization: None,
+            worker: Mutex::new(None),
+            initialization: Mutex::new(()),
+            sidecar: None,
+            host_bridge: Mutex::new(None),
+        };
+        let readiness = runtime.local_readiness(false).await;
+        assert_eq!(readiness.lifecycle, ChatReadinessLifecycle::Blocked);
+        assert_eq!(readiness.host, ChatHostReadiness::Unavailable);
+        assert_eq!(readiness.runtime, ChatRuntimeReadiness::Unavailable);
+        assert_eq!(readiness.storage, ChatStorageReadiness::Unavailable);
+        assert!(!readiness.can_send);
+        assert_eq!(readiness.issue_code, Some("chat_storage_unavailable"));
+        let encoded = serde_json::to_string(&readiness).unwrap();
+        for forbidden in ["bearer", "sqlcipher", "projectPath", "binary", "token"] {
+            assert!(!encoded.contains(forbidden));
+        }
     }
 }

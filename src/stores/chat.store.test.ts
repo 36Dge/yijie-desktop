@@ -114,6 +114,26 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       expiresAt: null,
     }),
     getCleanupStatus: async () => null,
+    getLocalReadiness: async () => ({
+      lifecycle: "ready",
+      host: "ready",
+      runtime: "ready",
+      storage: "ready",
+      canSend: true,
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    }),
+    requestLocalRecovery: async () => ({
+      lifecycle: "ready",
+      host: "ready",
+      runtime: "ready",
+      storage: "ready",
+      canSend: true,
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    }),
     subscribeSession: async (_context, sessionId) => sessionId === SESSION_A
       ? "019c1a00-0000-7000-8000-00000000000a"
       : "019c1a00-0000-7000-8000-00000000000b",
@@ -332,5 +352,94 @@ describe("chat view-model store", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(store.context).toBeNull();
     expect(store.phase).toBe("resync-required");
+  });
+
+  it("blocks sends until the Rust readiness projection becomes sendable", async () => {
+    const submitTurn = vi.fn(async (_context: string, sessionId: string, _input: string, operation: string) => ({
+      sessionId, turnId: TURN_A, operationId: operation,
+    }));
+    const blocked = {
+      lifecycle: "blocked" as const,
+      host: "unavailable" as const,
+      runtime: "unavailable" as const,
+      storage: "ready" as const,
+      canSend: false,
+      issueCode: "chat_host_unavailable" as const,
+      retryable: true,
+      recovery: "start_or_retry" as const,
+    };
+    const ready = {
+      lifecycle: "ready" as const,
+      host: "ready" as const,
+      runtime: "ready" as const,
+      storage: "ready" as const,
+      canSend: true,
+      issueCode: null,
+      retryable: false,
+      recovery: "none" as const,
+    };
+    const { client } = fakeClient({
+      getLocalReadiness: async () => blocked,
+      requestLocalRecovery: async () => ready,
+      submitTurn,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    await store.submitTurn("not yet");
+    expect(submitTurn).not.toHaveBeenCalled();
+    await store.requestLocalRecovery();
+    await store.submitTurn("now ready");
+    expect(submitTurn).toHaveBeenCalledOnce();
+  });
+
+  it("appends session pages without duplicating the cursor boundary", async () => {
+    const listSessions = vi.fn(async (_context: string, cursor?: string) => cursor === undefined
+      ? { sessions: [session(SESSION_A)], nextCursor: "abcdef0123456789" }
+      : { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null });
+    const { client } = fakeClient({ listSessions });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.loadMoreSessions();
+
+    expect(store.sessions.map((value) => value.sessionId)).toEqual([SESSION_A, SESSION_B]);
+    expect(store.sessionsCursor).toBeNull();
+  });
+
+  it("clears a physically deleted selection and returns one closed navigation disposition", async () => {
+    let listCount = 0;
+    const complete = {
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+      desktopState: "complete" as const,
+      hostState: "complete" as const,
+      runtimeState: "complete" as const,
+      outcomeCode: "cleanup_complete",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: 2,
+      expiresAt: 3,
+    };
+    const { client } = fakeClient({
+      listSessions: async () => {
+        listCount += 1;
+        return listCount === 1
+          ? { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }
+          : { sessions: [session(SESSION_B)], nextCursor: null };
+      },
+      deleteSession: async () => complete,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const disposition = await store.deleteSelected();
+
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.sessions.map((value) => value.sessionId)).toEqual([SESSION_B]);
+    expect(disposition).toEqual({
+      kind: "navigate",
+      nextSessionId: SESSION_B,
+      path: `/chat/${SESSION_B}`,
+    });
   });
 });

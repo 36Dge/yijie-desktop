@@ -63,6 +63,10 @@ impl DatabaseWorker {
         self.call(|repository| repository.schema_version()).await
     }
 
+    pub async fn probe_storage(&self) -> Result<(), ChatError> {
+        self.call(|repository| repository.probe_storage()).await
+    }
+
     pub async fn register_project(
         &self,
         canonical_path: PathBuf,

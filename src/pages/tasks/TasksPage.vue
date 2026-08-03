@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { NCard, NList, NListItem, NSpace, NTag, NText } from "naive-ui";
-import { sampleTasks } from "../../domain/tasks";
+import { computed } from "vue";
+import { NButton, NCard, NEmpty, NList, NListItem, NSpace, NSpin, NTag, NText } from "naive-ui";
+import { RouterLink } from "vue-router";
+import { useChatStore } from "../../stores/chat.store";
+
+const chatStore = useChatStore();
+const loading = computed(() => chatStore.phase === "binding" || chatStore.phase === "loading");
+const canLoadMore = computed(() => chatStore.sessionsCursor !== null);
 </script>
 
 <template>
@@ -8,15 +14,24 @@ import { sampleTasks } from "../../domain/tasks";
     <div class="page__content">
       <h1 id="tasks-page-title" class="page__title">任务记录</h1>
       <n-card class="page__card" :bordered="false">
-        <n-list>
-          <n-list-item v-for="task in sampleTasks" :key="task.id">
+        <n-spin :show="loading">
+          <n-empty v-if="!loading && chatStore.sessions.length === 0" description="暂无本地任务记录" />
+          <n-list v-else>
+          <n-list-item v-for="session in chatStore.sessions" :key="session.sessionId">
             <n-space vertical size="small">
-              <n-tag size="small" type="info">{{ task.status }}</n-tag>
-              <n-text strong>{{ task.title }}</n-text>
-              <n-text depth="3">{{ task.description }}</n-text>
+              <n-tag v-if="session.latestTurnStatus" size="small" type="info">
+                {{ session.latestTurnStatus }}
+              </n-tag>
+              <n-text strong>
+                <RouterLink :to="`/chat/${session.sessionId}`">{{ session.title }}</RouterLink>
+              </n-text>
             </n-space>
           </n-list-item>
-        </n-list>
+          </n-list>
+          <n-button v-if="canLoadMore" quaternary @click="chatStore.loadMoreSessions">
+            加载更多
+          </n-button>
+        </n-spin>
       </n-card>
     </div>
   </section>

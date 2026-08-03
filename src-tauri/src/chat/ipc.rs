@@ -864,6 +864,19 @@ struct OperationOnlyPayload {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RecoveryIntent {
+    StartOrRetry,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecoveryPayload {
+    operation_id: Uuid,
+    intent: RecoveryIntent,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetProjectPinnedPayload {
     project_id: Uuid,
@@ -1322,6 +1335,9 @@ fn map_chat_error(error: ChatError, request_id: Option<Uuid>) -> ChatIpcError {
             ChatIpcError::new(request_id, "chat_cleanup_incomplete", true, "wait_cleanup")
         }
         ChatError::DatabaseUnavailable
+        | ChatError::DatabaseReadOnly
+        | ChatError::DatabaseFull
+        | ChatError::DatabaseCorrupt
         | ChatError::DatabaseKeyMissing
         | ChatError::DatabaseUnsafe
         | ChatError::MigrationFailed
@@ -1333,6 +1349,50 @@ fn map_chat_error(error: ChatError, request_id: Option<Uuid>) -> ChatIpcError {
         }
         ChatError::Disabled => ChatIpcError::temporarily_unavailable(request_id),
     }
+}
+
+#[tauri::command]
+pub async fn chat_get_local_readiness_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::ChatLocalReadiness>, ChatIpcError> {
+    let request: CommandRequest<EmptyPayload> = decode_request(request)?;
+    let manager = chat_runtime
+        .authorization_manager()
+        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        chat_runtime.local_readiness(false).await,
+    ))
+}
+
+#[tauri::command]
+pub async fn chat_request_local_recovery_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::ChatLocalReadiness>, ChatIpcError> {
+    let request: CommandRequest<RecoveryPayload> = decode_request(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)?;
+    let RecoveryIntent::StartOrRetry = request.payload.intent;
+    let manager = chat_runtime
+        .authorization_manager()
+        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        chat_runtime.request_local_recovery().await,
+    ))
 }
 
 fn validate_input(input: &str, request_id: Uuid) -> Result<(), ChatIpcError> {
@@ -1385,7 +1445,7 @@ mod tests {
     use super::*;
     use crate::chat::{LiveReasoningProjection, ReasoningPart};
 
-    const COMMAND_NAMES: [&str; 20] = [
+    const COMMAND_NAMES: [&str; 22] = [
         "chat_bind_context_v1",
         "chat_list_projects_v1",
         "chat_pick_project_v1",
@@ -1402,6 +1462,8 @@ mod tests {
         "chat_interrupt_turn_v1",
         "chat_delete_session_v1",
         "chat_get_cleanup_status_v1",
+        "chat_get_local_readiness_v1",
+        "chat_request_local_recovery_v1",
         "chat_subscribe_session_v1",
         "chat_resync_session_v1",
         "chat_cancel_request_v1",
@@ -1464,6 +1526,7 @@ mod tests {
             "bindPayload",
             "emptyPayload",
             "operationOnlyPayload",
+            "recoveryPayload",
             "projectOperationPayload",
             "setProjectPinnedPayload",
             "createSessionPayload",
@@ -1745,6 +1808,22 @@ mod tests {
             "cancelled",
             request_id,
             CancelledDto { cancelled: true },
+        );
+        assert_response(
+            &corpus,
+            "localReadiness",
+            request_id,
+            super::super::ChatLocalReadiness {
+                lifecycle: super::super::ChatReadinessLifecycle::Ready,
+                host: super::super::ChatHostReadiness::Ready,
+                runtime: super::super::ChatRuntimeReadiness::Ready,
+                storage: super::super::ChatStorageReadiness::Ready,
+                can_send: true,
+                issue_code: None,
+                retryable: false,
+                recovery: "none",
+                retry_after_ms: None,
+            },
         );
         assert_response(
             &corpus,

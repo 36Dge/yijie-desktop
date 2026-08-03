@@ -9,6 +9,9 @@ pub enum ChatError {
     DatabaseKeyMissing,
     DatabaseUnsafe,
     DatabaseUnavailable,
+    DatabaseReadOnly,
+    DatabaseFull,
+    DatabaseCorrupt,
     MigrationFailed,
     InvalidInput,
     NotFound,
@@ -30,6 +33,9 @@ impl ChatError {
             Self::DatabaseKeyMissing => "chat_database_key_missing",
             Self::DatabaseUnsafe => "chat_database_unsafe",
             Self::DatabaseUnavailable => "chat_database_unavailable",
+            Self::DatabaseReadOnly => "chat_database_read_only",
+            Self::DatabaseFull => "chat_database_full",
+            Self::DatabaseCorrupt => "chat_database_corrupt",
             Self::MigrationFailed => "chat_migration_failed",
             Self::InvalidInput => "chat_invalid_input",
             Self::NotFound => "chat_not_found",
@@ -52,6 +58,17 @@ impl Display for ChatError {
 
 impl std::error::Error for ChatError {}
 
+pub(crate) fn map_sqlite_error(error: rusqlite::Error) -> ChatError {
+    match error.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::ReadOnly) => ChatError::DatabaseReadOnly,
+        Some(rusqlite::ErrorCode::DiskFull) => ChatError::DatabaseFull,
+        Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {
+            ChatError::DatabaseCorrupt
+        }
+        _ => ChatError::DatabaseUnavailable,
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ChatCommandError {
     pub code: &'static str,
@@ -72,5 +89,18 @@ mod tests {
         let encoded = serde_json::to_string(&ChatCommandError::from(ChatError::DatabaseUnsafe))
             .expect("serialize command error");
         assert_eq!(encoded, r#"{"code":"chat_database_unsafe"}"#);
+    }
+
+    #[test]
+    fn sqlite_storage_failures_map_to_closed_content_free_states() {
+        for (code, expected) in [
+            (rusqlite::ffi::SQLITE_READONLY, ChatError::DatabaseReadOnly),
+            (rusqlite::ffi::SQLITE_FULL, ChatError::DatabaseFull),
+            (rusqlite::ffi::SQLITE_CORRUPT, ChatError::DatabaseCorrupt),
+            (rusqlite::ffi::SQLITE_NOTADB, ChatError::DatabaseCorrupt),
+        ] {
+            let error = rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None);
+            assert_eq!(map_sqlite_error(error), expected);
+        }
     }
 }

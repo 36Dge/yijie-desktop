@@ -12,6 +12,7 @@ import {
   parseCleanupResponse,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
+  parseLocalReadinessResponse,
   parseOperationResponse,
   parseOptionalCleanupResponse,
   parseOptionalProjectResponse,
@@ -51,7 +52,7 @@ describe("private chat IPC v1 contract", () => {
     }
     expect((definitions.event.oneOf as unknown[])).toHaveLength(7);
     for (const payload of [
-      "bindPayload", "emptyPayload", "operationOnlyPayload", "projectOperationPayload",
+      "bindPayload", "emptyPayload", "operationOnlyPayload", "recoveryPayload", "projectOperationPayload",
       "setProjectPinnedPayload", "createSessionPayload", "submitTurnPayload", "listSessionsPayload",
       "sessionReadPayload", "reasoningPayload", "renameSessionPayload", "setSessionPinnedPayload",
       "sessionOperationPayload", "cleanupStatusPayload", "subscribePayload", "unsubscribePayload",
@@ -86,6 +87,9 @@ describe("private chat IPC v1 contract", () => {
     expect(parseOptionalCleanupResponse(responses.optionalCleanup)).toBeNull();
     expect(parseSubscriptionResponse(responses.subscription)).toBe("019c1a00-0000-7000-8000-000000000004");
     expect(parseCancelledResponse(responses.cancelled)).toBe(true);
+    expect(parseLocalReadinessResponse(responses.localReadiness)).toMatchObject({
+      lifecycle: "ready", canSend: true, issueCode: null,
+    });
     expect(parseResyncResponse(responses.resync).session.title).toBe("Synthetic Session");
 
     const events = fixture("event-corpus.json") as unknown[];

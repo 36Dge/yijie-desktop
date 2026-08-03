@@ -1,4 +1,4 @@
-use super::error::ChatError;
+use super::error::{map_sqlite_error, ChatError};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, MAIN_DB};
 use rusqlite_migration::{HookError, HookResult, Migrations, M};
 use sha2::{Digest, Sha256};
@@ -50,11 +50,8 @@ pub fn validate_embedded_migrations() -> Result<(), ChatError> {
 }
 
 pub fn migrate(connection: &mut Connection) -> Result<(), ChatError> {
-    if connection
-        .is_readonly(MAIN_DB)
-        .map_err(|_| ChatError::MigrationFailed)?
-    {
-        return Err(ChatError::MigrationFailed);
+    if connection.is_readonly(MAIN_DB).map_err(map_sqlite_error)? {
+        return Err(ChatError::DatabaseReadOnly);
     }
     let current = user_version(connection)?;
     if current > LATEST_SCHEMA_VERSION {
@@ -63,7 +60,7 @@ pub fn migrate(connection: &mut Connection) -> Result<(), ChatError> {
     verify_ledger(connection, current)?;
     migrations()
         .to_latest(connection)
-        .map_err(|_| ChatError::MigrationFailed)?;
+        .map_err(map_migration_error)?;
     verify_ledger(connection, LATEST_SCHEMA_VERSION)?;
     let violation: Option<i64> = connection
         .query_row(
@@ -150,7 +147,14 @@ fn verify_ledger(connection: &Connection, current_version: i64) -> Result<(), Ch
 fn user_version(connection: &Connection) -> Result<i64, ChatError> {
     connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|_| ChatError::MigrationFailed)
+        .map_err(map_sqlite_error)
+}
+
+fn map_migration_error(error: rusqlite_migration::Error) -> ChatError {
+    match error {
+        rusqlite_migration::Error::RusqliteError { err, .. } => map_sqlite_error(err),
+        _ => ChatError::MigrationFailed,
+    }
 }
 
 pub fn catalog_digests() -> Vec<(&'static str, String)> {
@@ -365,13 +369,13 @@ mod tests {
         drop(writable);
         let mut readonly =
             Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-        assert_eq!(migrate(&mut readonly), Err(ChatError::MigrationFailed));
+        assert_eq!(migrate(&mut readonly), Err(ChatError::DatabaseReadOnly));
         drop(readonly);
 
         let corrupt_path = root.join("corrupt.db");
         fs::write(&corrupt_path, b"not-a-sqlite-database").unwrap();
         let mut corrupt = Connection::open(&corrupt_path).unwrap();
-        assert_eq!(migrate(&mut corrupt), Err(ChatError::MigrationFailed));
+        assert_eq!(migrate(&mut corrupt), Err(ChatError::DatabaseCorrupt));
         drop(corrupt);
         fs::remove_dir_all(root).unwrap();
     }
