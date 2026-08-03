@@ -13,6 +13,8 @@
   --yj-color-text-secondary: #526046;
   --yj-color-text-tertiary: #7a8670;
   --yj-color-text-disabled: #aeb7a5;
+  --yj-color-text-on-accent: #ffffff;
+  --yj-color-text-on-danger: #ffffff;
 
   --yj-color-bg-app: #f7f9f3;
   --yj-color-bg-page: #fafbf7;
@@ -27,6 +29,9 @@
   --yj-color-success: #16a34a;
   --yj-color-warning: #d97706;
   --yj-color-error: #dc2626;
+  --yj-color-error-soft: #fef2f2;
+  --yj-color-warning-soft: #fffbeb;
+  --yj-color-success-soft: #f0fdf4;
   --yj-color-icon-default: #526046;
   --yj-color-icon-muted: #7a8670;
 
@@ -83,6 +88,9 @@
   --yj-layout-form-max: 960px;
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
+  --yj-layout-chat-column-max: 880px;
+  --yj-layout-chat-composer-max: 880px;
+  --yj-layout-chat-sidebar-indent: 28px;
 
   --yj-logo-mark-sm: 24px;
   --yj-logo-mark-md: 32px;
@@ -104,6 +112,8 @@
   --yj-color-text-secondary: #c6d0bc;
   --yj-color-text-tertiary: #98a58e;
   --yj-color-text-disabled: #687460;
+  --yj-color-text-on-accent: #10170c;
+  --yj-color-text-on-danger: #ffffff;
 
   --yj-color-bg-app: #0f140c;
   --yj-color-bg-page: #141a10;
@@ -114,6 +124,10 @@
   --yj-color-border-subtle: rgba(221, 241, 183, 0.08);
   --yj-color-border-default: rgba(221, 241, 183, 0.14);
   --yj-color-border-strong: rgba(221, 241, 183, 0.24);
+
+  --yj-color-error-soft: rgba(220, 38, 38, 0.14);
+  --yj-color-warning-soft: rgba(217, 119, 6, 0.14);
+  --yj-color-success-soft: rgba(22, 163, 74, 0.14);
 
   --yj-color-icon-default: #c6d0bc;
   --yj-color-icon-muted: #98a58e;

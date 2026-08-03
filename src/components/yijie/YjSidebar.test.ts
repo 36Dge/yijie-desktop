@@ -59,4 +59,12 @@ describe("YjSidebar permission rendering", () => {
     expect(disabled.element.tagName).toBe("DIV");
     expect(wrapper.findAll("a").some((link) => link.text().includes("插件"))).toBe(false);
   });
+
+  it("FEAT-126 hides the sidebar visibility control when chat owns the fixed App Shell", async () => {
+    const wrapper = await mountSidebar(["task.create"]);
+    await wrapper.setProps({ allowToggle: false, currentPath: "/chat" });
+
+    expect(wrapper.find('[aria-label="收起侧栏"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="展开侧栏"]').exists()).toBe(false);
+  });
 });

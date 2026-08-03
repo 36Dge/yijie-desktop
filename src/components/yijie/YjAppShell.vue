@@ -12,6 +12,9 @@ import YjSidebar from "./YjSidebar.vue";
 const route = useRoute();
 const sidebarStore = useSidebarStore();
 const permissionStore = usePermissionStore();
+const isLocalChatRoute = computed(() => localChatUiEnabled && (
+  route.path === "/chat" || route.path.startsWith("/chat/")
+));
 const navigationEntries = computed(() =>
   resolveAppNavigation(
     undefined,
@@ -38,11 +41,13 @@ sidebarStore.hydrate(storage);
 </script>
 
 <template>
-  <div class="yj-app-shell">
+  <div class="yj-app-shell" :class="{ 'yj-app-shell--chat': isLocalChatRoute }">
     <YjSidebar
       :entries="navigationEntries"
-      :collapsed="sidebarStore.isCollapsed"
+      :collapsed="isLocalChatRoute ? false : sidebarStore.isCollapsed"
       :current-path="route.path"
+      :show-chat-tree="isLocalChatRoute"
+      :allow-toggle="!isLocalChatRoute"
       @toggle="sidebarStore.toggle"
     />
     <main class="yj-app-shell__content">
@@ -68,5 +73,9 @@ sidebarStore.hydrate(storage);
   flex: 1;
   overflow: auto;
   background: var(--yj-color-bg-page);
+}
+
+@media (max-width: 700px) {
+  .yj-app-shell--chat { min-width: 0; }
 }
 </style>

@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AppNavEntry } from "../../navigation/app-nav";
+import ChatSidebarTree from "../chat/ChatSidebarTree.vue";
 import YjIcon from "./YjIcon.vue";
 import YjLogo from "./YjLogo.vue";
 import YjNavItem from "./YjNavItem.vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   entries: readonly AppNavEntry[];
   collapsed: boolean;
   currentPath: string;
-}>();
+  showChatTree?: boolean;
+  allowToggle?: boolean;
+}>(), {
+  showChatTree: false,
+  allowToggle: true,
+});
 
 const emit = defineEmits<{
   toggle: [];
@@ -20,19 +26,23 @@ const bottomEntries = computed(() => props.entries.filter((entry) => entry.place
 const toggleLabel = computed(() => (props.collapsed ? "展开侧栏" : "收起侧栏"));
 
 function isSelected(entry: AppNavEntry): boolean {
-  return entry.kind === "item" && !entry.disabled && entry.to === props.currentPath;
+  if (entry.kind !== "item" || entry.disabled) return false;
+  return entry.key === "newTask"
+    ? props.currentPath === "/chat" || props.currentPath.startsWith("/chat/")
+    : entry.to === props.currentPath;
 }
 </script>
 
 <template>
   <aside
     class="yj-sidebar"
-    :class="{ 'yj-sidebar--collapsed': collapsed }"
+    :class="{ 'yj-sidebar--collapsed': collapsed, 'yj-sidebar--chat-tree': showChatTree }"
     :aria-label="collapsed ? '主导航（已收起）' : '主导航'"
   >
     <div class="yj-sidebar__brand">
       <YjLogo :variant="collapsed ? 'icon-only' : 'horizontal'" size="md" />
       <button
+        v-if="allowToggle"
         class="yj-sidebar__toggle"
         type="button"
         :aria-label="toggleLabel"
@@ -45,7 +55,7 @@ function isSelected(entry: AppNavEntry): boolean {
     </div>
 
     <nav class="yj-sidebar__navigation" aria-label="应用导航">
-      <ul class="yj-sidebar__list">
+      <ul class="yj-sidebar__list yj-sidebar__list--main">
         <li v-for="entry in mainEntries" :key="entry.key">
           <div v-if="entry.kind === 'divider'" class="yj-sidebar__divider" role="separator" />
           <YjNavItem
@@ -53,6 +63,10 @@ function isSelected(entry: AppNavEntry): boolean {
             :item="entry"
             :collapsed="collapsed"
             :selected="isSelected(entry)"
+          />
+          <ChatSidebarTree
+            v-if="showChatTree && entry.kind === 'item' && entry.key === 'newTask'"
+            :current-path="currentPath"
           />
         </li>
       </ul>
@@ -156,6 +170,13 @@ function isSelected(entry: AppNavEntry): boolean {
   list-style: none;
 }
 
+.yj-sidebar__list--main {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
 .yj-sidebar__list--bottom {
   margin-top: auto;
   padding-top: var(--yj-space-4);
@@ -165,5 +186,16 @@ function isSelected(entry: AppNavEntry): boolean {
   height: 1px;
   margin: var(--yj-space-3);
   background: var(--yj-color-border-subtle);
+}
+
+@media (max-width: 700px) {
+  .yj-sidebar--chat-tree {
+    width: 196px;
+    flex-basis: 196px;
+  }
+
+  .yj-sidebar--chat-tree .yj-sidebar__navigation {
+    padding-inline: var(--yj-space-2);
+  }
 }
 </style>

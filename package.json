@@ -32,11 +32,12 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
-    "@types/node": "24.13.3",
     "@eslint/js": "10.0.1",
     "@tauri-apps/cli": "^2",
+    "@types/node": "24.13.3",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/test-utils": "2.4.11",
+    "axe-core": "4.10.3",
     "eslint": "10.6.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-vue": "10.9.2",
