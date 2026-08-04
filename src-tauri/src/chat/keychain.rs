@@ -1,4 +1,5 @@
 use super::error::ChatError;
+use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const DATABASE_KEYCHAIN_SERVICE: &str = "com.yijie.ai.chat-db";
@@ -64,19 +65,21 @@ pub struct ProtectedReceiptKeyStore {
 
 #[cfg(target_os = "macos")]
 impl ProtectedDatabaseKeyStore {
-    pub fn new() -> Result<Self, ChatError> {
+    pub fn new(profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
         use keyring_core::api::CredentialStoreApi;
         use std::collections::HashMap;
 
         let store = apple_native_keyring_store::protected::Store::new()
             .map_err(|_| ChatError::SecureStorageUnavailable)?;
         let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+        let (service, account) = profile
+            .map(|profile| {
+                let namespace = profile.database_namespace();
+                (namespace.service(), namespace.account())
+            })
+            .unwrap_or((DATABASE_KEYCHAIN_SERVICE, DATABASE_KEYCHAIN_ACCOUNT));
         let entry = store
-            .build(
-                DATABASE_KEYCHAIN_SERVICE,
-                DATABASE_KEYCHAIN_ACCOUNT,
-                Some(&modifiers),
-            )
+            .build(service, account, Some(&modifiers))
             .map_err(|_| ChatError::SecureStorageUnavailable)?;
         Ok(Self {
             entry: std::sync::Arc::new(entry),
@@ -86,19 +89,21 @@ impl ProtectedDatabaseKeyStore {
 
 #[cfg(target_os = "macos")]
 impl ProtectedReceiptKeyStore {
-    pub fn new() -> Result<Self, ChatError> {
+    pub fn new(profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
         use keyring_core::api::CredentialStoreApi;
         use std::collections::HashMap;
 
         let store = apple_native_keyring_store::protected::Store::new()
             .map_err(|_| ChatError::SecureStorageUnavailable)?;
         let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+        let (service, account) = profile
+            .map(|profile| {
+                let namespace = profile.receipt_namespace();
+                (namespace.service(), namespace.account())
+            })
+            .unwrap_or((RECEIPT_KEYCHAIN_SERVICE, RECEIPT_KEYCHAIN_ACCOUNT));
         let entry = store
-            .build(
-                RECEIPT_KEYCHAIN_SERVICE,
-                RECEIPT_KEYCHAIN_ACCOUNT,
-                Some(&modifiers),
-            )
+            .build(service, account, Some(&modifiers))
             .map_err(|_| ChatError::SecureStorageUnavailable)?;
         Ok(Self {
             entry: std::sync::Arc::new(entry),
@@ -172,7 +177,7 @@ pub struct ProtectedReceiptKeyStore;
 
 #[cfg(not(target_os = "macos"))]
 impl ProtectedDatabaseKeyStore {
-    pub fn new() -> Result<Self, ChatError> {
+    pub fn new(_profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
         Err(ChatError::SecureStorageUnavailable)
     }
 }
@@ -186,7 +191,7 @@ impl DatabaseKeyStore for ProtectedDatabaseKeyStore {
 
 #[cfg(not(target_os = "macos"))]
 impl ProtectedReceiptKeyStore {
-    pub fn new() -> Result<Self, ChatError> {
+    pub fn new(_profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
         Err(ChatError::SecureStorageUnavailable)
     }
 }

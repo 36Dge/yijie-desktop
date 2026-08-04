@@ -1,5 +1,6 @@
 use super::error::NativeAuthError;
 use super::NativeAuthConfig;
+use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -106,27 +107,41 @@ pub trait RefreshTokenStore: Send + Sync {
 #[cfg(target_os = "macos")]
 pub struct ProtectedKeychainStore {
     entry: std::sync::Arc<keyring_core::Entry>,
-    legacy_entry: std::sync::Arc<keyring_core::Entry>,
+    legacy_entry: Option<std::sync::Arc<keyring_core::Entry>>,
 }
 
 #[cfg(target_os = "macos")]
 impl ProtectedKeychainStore {
-    pub fn new() -> Result<Self, NativeAuthError> {
+    pub(crate) fn new_with_test_profile(
+        profile: Option<&Feat126SecureStorageProfile>,
+    ) -> Result<Self, NativeAuthError> {
         use keyring_core::api::CredentialStoreApi;
         use std::collections::HashMap;
 
         let store = apple_native_keyring_store::protected::Store::new()
             .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
         let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+        let (service, account) = profile
+            .map(|profile| {
+                let namespace = profile.native_auth_namespace();
+                (namespace.service(), namespace.account())
+            })
+            .unwrap_or((KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT));
         let entry = store
-            .build(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, Some(&modifiers))
+            .build(service, account, Some(&modifiers))
             .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let legacy_entry = store
-            .build(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT, Some(&modifiers))
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+        let legacy_entry = if profile.is_some() {
+            None
+        } else {
+            Some(std::sync::Arc::new(
+                store
+                    .build(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT, Some(&modifiers))
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?,
+            ))
+        };
         Ok(Self {
             entry: std::sync::Arc::new(entry),
-            legacy_entry: std::sync::Arc::new(legacy_entry),
+            legacy_entry,
         })
     }
 }
@@ -150,13 +165,18 @@ impl RefreshTokenStore for ProtectedKeychainStore {
         let current = tokio::task::spawn_blocking(move || entry.get_secret())
             .await
             .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let legacy_entry = self.legacy_entry.clone();
+        let current = current.map(Zeroizing::new);
+        let Some(legacy_entry) = self.legacy_entry.clone() else {
+            return match current {
+                Ok(secret) => Ok(decode_refresh_token(secret.as_slice())),
+                Err(keyring_core::Error::NoEntry) => Ok(RefreshTokenRecord::Missing),
+                Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
+            };
+        };
         let legacy = tokio::task::spawn_blocking(move || legacy_entry.get_secret())
             .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-
-        let current = current.map(Zeroizing::new);
-        let legacy = legacy.map(Zeroizing::new);
+            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+            .map(Zeroizing::new);
         match (current, legacy) {
             (_, Ok(_legacy_secret)) => Ok(RefreshTokenRecord::Incompatible),
             (Ok(secret), Err(keyring_core::Error::NoEntry)) => {
@@ -174,7 +194,12 @@ impl RefreshTokenStore for ProtectedKeychainStore {
         let current = tokio::task::spawn_blocking(move || entry.delete_credential())
             .await
             .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let legacy_entry = self.legacy_entry.clone();
+        let Some(legacy_entry) = self.legacy_entry.clone() else {
+            return match current {
+                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+                Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
+            };
+        };
         let legacy = tokio::task::spawn_blocking(move || legacy_entry.delete_credential())
             .await
             .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
@@ -200,7 +225,9 @@ pub struct ProtectedKeychainStore;
 
 #[cfg(not(target_os = "macos"))]
 impl ProtectedKeychainStore {
-    pub fn new() -> Result<Self, NativeAuthError> {
+    pub(crate) fn new_with_test_profile(
+        _profile: Option<&Feat126SecureStorageProfile>,
+    ) -> Result<Self, NativeAuthError> {
         Err(NativeAuthError::SecureStorageUnavailable)
     }
 }

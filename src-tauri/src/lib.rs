@@ -1,5 +1,8 @@
 pub mod chat;
+mod feat126_secure_storage;
 mod native_auth;
+
+pub use feat126_secure_storage::feat126_secure_storage_test_control;
 
 use chat::{ChatIpcRuntime, ChatRuntime};
 use native_auth::{AuthStatus, CommandError, NativeAuthRuntime, OperationResponse};
@@ -56,15 +59,26 @@ async fn get_my_capabilities(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let secure_storage = feat126_secure_storage::Feat126SecureStorageBootstrap::from_environment();
+    let native_auth = NativeAuthRuntime::from_environment_with_test_profile(
+        secure_storage.profile(),
+        secure_storage.is_invalid(),
+    );
+    let chat_secure_storage = secure_storage.profile();
+    let chat_secure_storage_invalid = secure_storage.is_invalid();
     tauri::Builder::default()
-        .manage(NativeAuthRuntime::from_environment())
+        .manage(native_auth)
         .manage(ChatIpcRuntime::new())
-        .setup(|app| {
+        .setup(move |app| {
             let app_data_directory = app
                 .path()
                 .app_data_dir()
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
-            app.manage(ChatRuntime::from_environment(app_data_directory));
+            app.manage(ChatRuntime::from_environment(
+                app_data_directory,
+                chat_secure_storage.clone(),
+                chat_secure_storage_invalid,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -3,6 +3,7 @@ use super::{
     RefreshFailure, RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue,
     StoredRefreshToken,
 };
+use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::loopback::LoopbackCallback;
 use crate::native_auth::transport::{OperationResponse, OperationTransport};
 use serde::{Deserialize, Serialize};
@@ -104,7 +105,15 @@ pub enum AuthStatus {
 }
 
 impl NativeAuthRuntime {
-    pub fn from_environment() -> Self {
+    pub(crate) fn from_environment_with_test_profile(
+        profile: Option<std::sync::Arc<Feat126SecureStorageProfile>>,
+        secure_storage_invalid: bool,
+    ) -> Self {
+        if secure_storage_invalid {
+            return Self {
+                mode: RuntimeMode::Invalid,
+            };
+        }
         let mode = match NativeAuthConfig::from_environment() {
             Ok(None) => RuntimeMode::Disabled,
             Err(_) => RuntimeMode::Invalid,
@@ -112,7 +121,7 @@ impl NativeAuthRuntime {
                 let binding = RefreshTokenBinding::from_config(&config);
                 match (
                     OidcClient::new(config.clone()),
-                    ProtectedKeychainStore::new(),
+                    ProtectedKeychainStore::new_with_test_profile(profile.as_deref()),
                     OperationTransport::new(&config),
                 ) {
                     (Ok(oidc), Ok(store), Ok(transport)) => {

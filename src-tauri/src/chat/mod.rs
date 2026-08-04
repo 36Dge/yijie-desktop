@@ -13,6 +13,7 @@ mod native_project;
 mod sidecar;
 mod worker;
 
+use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 pub use application::{
     AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
     ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome, LiveReasoningProjection,
@@ -58,6 +59,7 @@ const CONTRACT_COMMIT: &str = "29317b6426578749dc698fc2ad32b986ee5c8e9f";
 struct LocalChatConfig {
     chat_directory: PathBuf,
     scope: database::ChatScope,
+    secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
 }
 
 enum RuntimeMode {
@@ -136,7 +138,11 @@ pub struct ChatLocalReadiness {
 }
 
 impl ChatRuntime {
-    pub fn from_environment(app_data_directory: PathBuf) -> Self {
+    pub(crate) fn from_environment(
+        app_data_directory: PathBuf,
+        secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
+        secure_storage_invalid: bool,
+    ) -> Self {
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
                 mode: RuntimeMode::Disabled,
@@ -147,23 +153,28 @@ impl ChatRuntime {
                 host_bridge: Mutex::new(None),
             };
         }
-        let mut mode = if std::env::var("YIJIE_ENV").as_deref() != Ok("local") {
-            RuntimeMode::Invalid
-        } else {
-            match (
-                std::env::var("YIJIE_CHAT_LOCAL_OWNER_USER_ID"),
-                std::env::var("YIJIE_CHAT_LOCAL_TENANT_ID"),
-            ) {
-                (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
-                    Ok(scope) => RuntimeMode::Local(LocalChatConfig {
-                        chat_directory: app_data_directory.join("chat"),
-                        scope,
-                    }),
-                    Err(_) => RuntimeMode::Invalid,
-                },
-                _ => RuntimeMode::Invalid,
-            }
-        };
+        let mut mode =
+            if secure_storage_invalid || std::env::var("YIJIE_ENV").as_deref() != Ok("local") {
+                RuntimeMode::Invalid
+            } else {
+                match (
+                    std::env::var("YIJIE_CHAT_LOCAL_OWNER_USER_ID"),
+                    std::env::var("YIJIE_CHAT_LOCAL_TENANT_ID"),
+                ) {
+                    (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
+                        Ok(scope) => RuntimeMode::Local(LocalChatConfig {
+                            chat_directory: secure_storage
+                                .as_ref()
+                                .map(|profile| profile.desktop_app_data().join("chat"))
+                                .unwrap_or_else(|| app_data_directory.join("chat")),
+                            scope,
+                            secure_storage: secure_storage.clone(),
+                        }),
+                        Err(_) => RuntimeMode::Invalid,
+                    },
+                    _ => RuntimeMode::Invalid,
+                }
+            };
         let sidecar = match SidecarSupervisor::from_environment() {
             Ok(supervisor) => Some(Arc::new(supervisor)),
             Err(_) => {
@@ -199,8 +210,9 @@ impl ChatRuntime {
             return Ok(worker);
         }
         let worker = tokio::task::spawn_blocking(move || {
-            let key_store = ProtectedDatabaseKeyStore::new()?;
-            let receipt_key_store = ProtectedReceiptKeyStore::new()?;
+            let key_store = ProtectedDatabaseKeyStore::new(config.secure_storage.as_deref())?;
+            let receipt_key_store =
+                ProtectedReceiptKeyStore::new(config.secure_storage.as_deref())?;
             DatabaseWorker::start(
                 config.chat_directory,
                 config.scope,
@@ -348,6 +360,13 @@ impl ChatRuntime {
         let Some(selection) = native_project::pick_project().await? else {
             return Ok(None);
         };
+        if let RuntimeMode::Local(config) = &self.mode {
+            if let Some(profile) = &config.secure_storage {
+                profile
+                    .validate_project_path(&selection.canonical_path)
+                    .map_err(|_| ChatError::ProjectUnavailable)?;
+            }
+        }
         worker
             .register_project(selection.canonical_path, selection.bookmark)
             .await
@@ -364,6 +383,13 @@ impl ChatRuntime {
             tokio::task::spawn_blocking(move || native_project::resolve_bookmark(&bookmark))
                 .await
                 .map_err(|_| ChatError::ProjectUnavailable)??;
+        if let RuntimeMode::Local(config) = &self.mode {
+            if let Some(profile) = &config.secure_storage {
+                profile
+                    .validate_project_path(&selection.canonical_path)
+                    .map_err(|_| ChatError::ProjectUnavailable)?;
+            }
+        }
         worker
             .refresh_project(project_id, selection.canonical_path, selection.bookmark)
             .await

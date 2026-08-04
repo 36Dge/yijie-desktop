@@ -76,6 +76,15 @@ impl SidecarConfig {
             return Err(ChatError::InvalidConfiguration);
         }
         let test_profile = load_feat126_test_profile()?;
+        if std::env::var("YIJIE_FEAT126_S10_SECURE_STORAGE_ENABLED").as_deref() == Ok("true") {
+            let secure_storage =
+                crate::feat126_secure_storage::Feat126SecureStorageProfile::from_environment()
+                    .map_err(|_| ChatError::InvalidConfiguration)?
+                    .ok_or(ChatError::InvalidConfiguration)?;
+            secure_storage
+                .validate_child_homes(&host_home, codex_home.as_deref())
+                .map_err(|_| ChatError::InvalidConfiguration)?;
+        }
         Ok(Some(Self {
             binary,
             host_home,
