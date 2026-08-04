@@ -1,3 +1,4 @@
+use super::config::AuthEnvironment;
 use super::{
     CommandError, NativeAuthConfig, NativeAuthError, OidcClient, ProtectedKeychainStore,
     RefreshFailure, RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue,
@@ -118,10 +119,15 @@ impl NativeAuthRuntime {
             Ok(None) => RuntimeMode::Disabled,
             Err(_) => RuntimeMode::Invalid,
             Ok(Some(config)) => {
+                if !test_storage_environment_allowed(profile.as_deref(), config.environment) {
+                    return Self {
+                        mode: RuntimeMode::Invalid,
+                    };
+                }
                 let binding = RefreshTokenBinding::from_config(&config);
                 match (
                     OidcClient::new(config.clone()),
-                    ProtectedKeychainStore::new_with_test_profile(profile.as_deref()),
+                    ProtectedKeychainStore::new_with_test_profile(profile.clone()),
                     OperationTransport::new(&config),
                 ) {
                     (Ok(oidc), Ok(store), Ok(transport)) => {
@@ -243,6 +249,14 @@ impl NativeAuthRuntime {
             RuntimeMode::Ready(service) => Ok(service),
         }
     }
+}
+
+fn test_storage_environment_allowed(
+    profile: Option<&Feat126SecureStorageProfile>,
+    environment: AuthEnvironment,
+) -> bool {
+    !profile.is_some_and(Feat126SecureStorageProfile::uses_ephemeral_backend)
+        || environment == AuthEnvironment::LocalIntegration
 }
 
 fn map_projection_native_error(error: NativeAuthError) -> NativeProjectionError {
@@ -716,6 +730,21 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
+
+    #[test]
+    fn ephemeral_secret_profile_is_rejected_for_production_auth() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        assert!(test_storage_environment_allowed(
+            Some(&profile),
+            AuthEnvironment::LocalIntegration
+        ));
+        assert!(!test_storage_environment_allowed(
+            Some(&profile),
+            AuthEnvironment::Production
+        ));
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
+    }
 
     struct TestStore {
         record: StdMutex<Option<RefreshTokenRecord>>,

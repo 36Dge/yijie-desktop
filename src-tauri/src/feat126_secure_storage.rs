@@ -1,28 +1,35 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use zeroize::{Zeroize, Zeroizing};
 
 const MASTER_ENV: &str = "YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED";
 const SECURE_STORAGE_ENV: &str = "YIJIE_FEAT126_S10_SECURE_STORAGE_ENABLED";
+const EPHEMERAL_STORAGE_ENV: &str = "YIJIE_FEAT126_S10_EPHEMERAL_SECRET_BACKEND_ENABLED";
 const RUN_ID_ENV: &str = "YIJIE_FEAT126_S10_RUN_ID";
 const RUN_ROOT_ENV: &str = "YIJIE_FEAT126_S10_RUN_ROOT";
 const FAKE_RESPONSES_ENV: &str = "YIJIE_FEAT126_FAKE_RESPONSES_BASE_URL";
 const HOST_HOME_ENV: &str = "YIJIE_AGENT_HOST_HOME";
 const CODEX_HOME_ENV: &str = "YIJIE_CODEX_HOME";
 const FAKE_RESPONSES_BASE_URL: &str = "http://127.0.0.1:18082/v1";
-const MANIFEST_SCHEMA_VERSION: u16 = 1;
+const KEYCHAIN_MANIFEST_SCHEMA_VERSION: u16 = 1;
+const EPHEMERAL_MANIFEST_SCHEMA_VERSION: u16 = 2;
 const MANIFEST_DIRECTORY: &str = "secure-storage";
 const MANIFEST_FILE: &str = "manifest.json";
+const EPHEMERAL_SECRET_DIRECTORY: &str = "ephemeral-secrets";
 const DESKTOP_APP_DATA_DIRECTORY: &str = "desktop-app-data";
 const HOST_HOME_DIRECTORY: &str = "host-home";
 const CODEX_HOME_DIRECTORY: &str = "codex-home";
 const PROJECT_DIRECTORY: &str = "project";
 const KEYCHAIN_ACCOUNT: &str = "default-v1";
 const NATIVE_AUTH_ACCOUNT: &str = "refresh-token-family-v2";
+const SECRET_FILE_MAGIC: &[u8; 8] = b"YJ126S1\0";
+const SECRET_FILE_HEADER_BYTES: usize = 14;
+const MAX_NATIVE_AUTH_SECRET_BYTES: usize = 16 << 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SecureStorageError {
@@ -30,6 +37,69 @@ pub(crate) enum SecureStorageError {
     Unavailable,
     ConcurrentRun,
     CleanupRefused,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StorageBackendKind {
+    ProtectedDataKeychain,
+    EphemeralFile,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EphemeralSecretRole {
+    ChatSqlcipher,
+    ReceiptHmac,
+    NativeAuth,
+}
+
+impl EphemeralSecretRole {
+    const ALL: [Self; 3] = [Self::ChatSqlcipher, Self::ReceiptHmac, Self::NativeAuth];
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::ChatSqlcipher => "chat_sqlcipher",
+            Self::ReceiptHmac => "receipt_hmac",
+            Self::NativeAuth => "native_auth",
+        }
+    }
+
+    const fn basename(self) -> &'static str {
+        match self {
+            Self::ChatSqlcipher => "chat-sqlcipher-v1.secret",
+            Self::ReceiptHmac => "receipt-hmac-v1.secret",
+            Self::NativeAuth => "native-auth-v1.secret",
+        }
+    }
+
+    const fn tag(self) -> u8 {
+        match self {
+            Self::ChatSqlcipher => 1,
+            Self::ReceiptHmac => 2,
+            Self::NativeAuth => 3,
+        }
+    }
+
+    const fn max_payload_bytes(self) -> usize {
+        match self {
+            Self::ChatSqlcipher | Self::ReceiptHmac => 32,
+            Self::NativeAuth => MAX_NATIVE_AUTH_SECRET_BYTES,
+        }
+    }
+
+    fn validate_payload(self, payload: &[u8]) -> Result<(), SecureStorageError> {
+        let valid = match self {
+            Self::ChatSqlcipher | Self::ReceiptHmac => payload.len() == 32,
+            Self::NativeAuth => {
+                !payload.is_empty() && payload.len() <= MAX_NATIVE_AUTH_SECRET_BYTES
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(SecureStorageError::InvalidConfiguration)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,8 +137,11 @@ pub(crate) struct Feat126SecureStorageProfile {
     codex_home: PathBuf,
     project: PathBuf,
     manifest_path: PathBuf,
+    secret_directory: PathBuf,
     namespaces: [KeychainNamespace; 3],
     descriptor_sha256: String,
+    secret_descriptor_sha256: String,
+    backend: StorageBackendKind,
 }
 
 impl std::fmt::Debug for Feat126SecureStorageProfile {
@@ -77,7 +150,9 @@ impl std::fmt::Debug for Feat126SecureStorageProfile {
             .debug_struct("Feat126SecureStorageProfile")
             .field("run_id", &self.run_id)
             .field("run_root", &"[RUN_SCOPED]")
+            .field("backend", &self.backend)
             .field("namespace_descriptor", &self.descriptor_sha256)
+            .field("secret_descriptor", &self.secret_descriptor_sha256)
             .finish()
     }
 }
@@ -124,6 +199,12 @@ struct SecureStorageManifest {
     phase: ManifestPhase,
     desktop_pid: Option<u32>,
     recovery_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    storage_backend: Option<StorageBackendKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secret_descriptor_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    secret_roles: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -152,21 +233,41 @@ pub struct SecureStorageEvidence {
     cleanup_complete: bool,
 }
 
+#[derive(Clone)]
+pub(crate) struct EphemeralSecretFile {
+    profile: Arc<Feat126SecureStorageProfile>,
+    role: EphemeralSecretRole,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for EphemeralSecretFile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EphemeralSecretFile")
+            .field("role", &self.role)
+            .field("path", &"[RUN_SCOPED]")
+            .finish()
+    }
+}
+
 impl Feat126SecureStorageProfile {
     pub(crate) fn from_environment() -> Result<Option<Self>, SecureStorageError> {
         let master = std::env::var(MASTER_ENV).unwrap_or_default();
         let secure_storage = std::env::var(SECURE_STORAGE_ENV).unwrap_or_default();
+        let ephemeral_storage = std::env::var(EPHEMERAL_STORAGE_ENV).unwrap_or_default();
         let run_id = std::env::var(RUN_ID_ENV).unwrap_or_default();
         let run_root = std::env::var(RUN_ROOT_ENV).unwrap_or_default();
         let fake_responses = std::env::var(FAKE_RESPONSES_ENV).unwrap_or_default();
 
-        if !secure_storage_gate(
+        let Some(backend) = storage_backend_gate(
             &master,
             &secure_storage,
+            &ephemeral_storage,
             !run_id.is_empty() || !run_root.is_empty() || !fake_responses.is_empty(),
-        )? {
+        )?
+        else {
             return Ok(None);
-        }
+        };
         let parsed =
             uuid::Uuid::parse_str(&run_id).map_err(|_| SecureStorageError::InvalidConfiguration)?;
         if parsed.is_nil()
@@ -203,6 +304,10 @@ impl Feat126SecureStorageProfile {
         ];
         let descriptor_sha256 = namespace_descriptor_sha256(&namespaces);
         let manifest_path = run_root.join(MANIFEST_DIRECTORY).join(MANIFEST_FILE);
+        let secret_directory = run_root
+            .join(MANIFEST_DIRECTORY)
+            .join(EPHEMERAL_SECRET_DIRECTORY);
+        let secret_descriptor_sha256 = ephemeral_secret_descriptor_sha256();
         Ok(Some(Self {
             run_id,
             run_root,
@@ -211,8 +316,11 @@ impl Feat126SecureStorageProfile {
             codex_home,
             project,
             manifest_path,
+            secret_directory,
             namespaces,
             descriptor_sha256,
+            secret_descriptor_sha256,
+            backend,
         }))
     }
 
@@ -230,6 +338,21 @@ impl Feat126SecureStorageProfile {
 
     pub(crate) fn native_auth_namespace(&self) -> &KeychainNamespace {
         &self.namespaces[2]
+    }
+
+    pub(crate) fn uses_ephemeral_backend(&self) -> bool {
+        self.backend == StorageBackendKind::EphemeralFile
+    }
+
+    pub(crate) fn ephemeral_secret_file(
+        self: &Arc<Self>,
+        role: EphemeralSecretRole,
+    ) -> Option<EphemeralSecretFile> {
+        self.uses_ephemeral_backend().then(|| EphemeralSecretFile {
+            profile: self.clone(),
+            role,
+            path: self.secret_directory.join(role.basename()),
+        })
     }
 
     pub(crate) fn validate_project_path(&self, path: &Path) -> Result<(), SecureStorageError> {
@@ -252,7 +375,7 @@ impl Feat126SecureStorageProfile {
     }
 
     fn prepare(&self) -> Result<(), SecureStorageError> {
-        for path in [
+        let mut paths = vec![
             &self.desktop_app_data,
             &self.host_home,
             &self.codex_home,
@@ -260,11 +383,20 @@ impl Feat126SecureStorageProfile {
             self.manifest_path
                 .parent()
                 .ok_or(SecureStorageError::InvalidConfiguration)?,
-        ] {
+        ];
+        if self.uses_ephemeral_backend() {
+            paths.push(&self.secret_directory);
+        }
+        for path in paths {
             create_or_validate_private_directory(path)?;
         }
-        let backend = PlatformExactKeychain::new()?;
-        self.prepare_with_backend(&backend)
+        match self.backend {
+            StorageBackendKind::ProtectedDataKeychain => {
+                let backend = PlatformExactKeychain::new()?;
+                self.prepare_with_backend(&backend)
+            }
+            StorageBackendKind::EphemeralFile => self.prepare_ephemeral(),
+        }
     }
 
     fn prepare_with_backend(&self, backend: &dyn ExactKeychain) -> Result<(), SecureStorageError> {
@@ -280,14 +412,17 @@ impl Feat126SecureStorageProfile {
                     return Err(SecureStorageError::InvalidConfiguration);
                 }
                 SecureStorageManifest {
-                    schema_version: MANIFEST_SCHEMA_VERSION,
+                    schema_version: KEYCHAIN_MANIFEST_SCHEMA_VERSION,
                     run_id: self.run_id.clone(),
                     owner_uid: effective_uid(),
                     namespace_descriptor_sha256: self.descriptor_sha256.clone(),
-                    directory_roles: directory_roles(),
+                    directory_roles: directory_roles(self.backend),
                     phase: ManifestPhase::Prepared,
                     desktop_pid: None,
                     recovery_count: 0,
+                    storage_backend: None,
+                    secret_descriptor_sha256: None,
+                    secret_roles: Vec::new(),
                 }
             }
             Some(manifest) => {
@@ -311,19 +446,96 @@ impl Feat126SecureStorageProfile {
         write_manifest(&self.manifest_path, &manifest)
     }
 
+    fn prepare_ephemeral(&self) -> Result<(), SecureStorageError> {
+        if !self.uses_ephemeral_backend() {
+            return Err(SecureStorageError::InvalidConfiguration);
+        }
+        validate_secret_directory_entries(&self.secret_directory)?;
+        let existing = read_manifest(&self.manifest_path)?;
+        let mut manifest = match existing {
+            None => {
+                let evidence = self.inventory_ephemeral(false)?;
+                if evidence
+                    .items
+                    .iter()
+                    .any(|item| item.state != InventoryState::Absent)
+                {
+                    return Err(SecureStorageError::InvalidConfiguration);
+                }
+                SecureStorageManifest {
+                    schema_version: EPHEMERAL_MANIFEST_SCHEMA_VERSION,
+                    run_id: self.run_id.clone(),
+                    owner_uid: effective_uid(),
+                    namespace_descriptor_sha256: self.descriptor_sha256.clone(),
+                    directory_roles: directory_roles(self.backend),
+                    phase: ManifestPhase::Prepared,
+                    desktop_pid: None,
+                    recovery_count: 0,
+                    storage_backend: Some(StorageBackendKind::EphemeralFile),
+                    secret_descriptor_sha256: Some(self.secret_descriptor_sha256.clone()),
+                    secret_roles: ephemeral_secret_roles(),
+                }
+            }
+            Some(manifest) => {
+                self.validate_manifest(&manifest)?;
+                if manifest.phase == ManifestPhase::Complete {
+                    return Err(SecureStorageError::CleanupRefused);
+                }
+                manifest
+            }
+        };
+        if self
+            .inventory_ephemeral(false)?
+            .items
+            .iter()
+            .any(|item| item.state == InventoryState::Present && !item.schema_valid)
+        {
+            return Err(SecureStorageError::InvalidConfiguration);
+        }
+        if let Some(pid) = manifest.desktop_pid {
+            if pid != std::process::id() && process_is_alive(pid) {
+                return Err(SecureStorageError::ConcurrentRun);
+            }
+            if pid != std::process::id() {
+                manifest.recovery_count = manifest.recovery_count.saturating_add(1);
+            }
+        }
+        manifest.phase = ManifestPhase::Active;
+        manifest.desktop_pid = Some(std::process::id());
+        write_manifest(&self.manifest_path, &manifest)
+    }
+
     fn validate_manifest(
         &self,
         manifest: &SecureStorageManifest,
     ) -> Result<(), SecureStorageError> {
-        if manifest.schema_version != MANIFEST_SCHEMA_VERSION
+        let expected_schema = match self.backend {
+            StorageBackendKind::ProtectedDataKeychain => KEYCHAIN_MANIFEST_SCHEMA_VERSION,
+            StorageBackendKind::EphemeralFile => EPHEMERAL_MANIFEST_SCHEMA_VERSION,
+        };
+        let backend_fields_valid = match self.backend {
+            StorageBackendKind::ProtectedDataKeychain => {
+                manifest.storage_backend.is_none()
+                    && manifest.secret_descriptor_sha256.is_none()
+                    && manifest.secret_roles.is_empty()
+            }
+            StorageBackendKind::EphemeralFile => {
+                manifest.storage_backend == Some(StorageBackendKind::EphemeralFile)
+                    && manifest.secret_descriptor_sha256.as_deref()
+                        == Some(self.secret_descriptor_sha256.as_str())
+                    && manifest.secret_roles == ephemeral_secret_roles()
+            }
+        };
+        if manifest.schema_version != expected_schema
             || manifest.run_id != self.run_id
             || manifest.owner_uid != effective_uid()
             || manifest.namespace_descriptor_sha256 != self.descriptor_sha256
-            || manifest.directory_roles != directory_roles()
+            || manifest.directory_roles != directory_roles(self.backend)
+            || !backend_fields_valid
         {
             return Err(SecureStorageError::InvalidConfiguration);
         }
-        for path in [
+        let mut paths = vec![
             &self.run_root,
             &self.desktop_app_data,
             &self.host_home,
@@ -332,7 +544,11 @@ impl Feat126SecureStorageProfile {
             self.manifest_path
                 .parent()
                 .ok_or(SecureStorageError::InvalidConfiguration)?,
-        ] {
+        ];
+        if self.uses_ephemeral_backend() {
+            paths.push(&self.secret_directory);
+        }
+        for path in paths {
             validate_private_directory(path)?;
         }
         Ok(())
@@ -353,7 +569,7 @@ impl Feat126SecureStorageProfile {
         }
         let encoded = serde_json::to_vec(&items).map_err(|_| SecureStorageError::Unavailable)?;
         Ok(SecureStorageEvidence {
-            schema_version: MANIFEST_SCHEMA_VERSION,
+            schema_version: KEYCHAIN_MANIFEST_SCHEMA_VERSION,
             run_id: self.run_id.clone(),
             namespace_descriptor_sha256: self.descriptor_sha256.clone(),
             status_digest_sha256: format!("{:x}", Sha256::digest(encoded)),
@@ -397,27 +613,489 @@ impl Feat126SecureStorageProfile {
         }
         Ok(evidence)
     }
+
+    fn inventory_ephemeral(
+        &self,
+        cleanup_complete: bool,
+    ) -> Result<SecureStorageEvidence, SecureStorageError> {
+        if !self.uses_ephemeral_backend() {
+            return Err(SecureStorageError::InvalidConfiguration);
+        }
+        validate_private_directory(&self.secret_directory)?;
+        validate_secret_directory_entries(&self.secret_directory)?;
+        let mut items = Vec::with_capacity(EphemeralSecretRole::ALL.len());
+        for role in EphemeralSecretRole::ALL {
+            let path = self.secret_directory.join(role.basename());
+            let (state, schema_valid) = inspect_secret_file(&path, role)?;
+            items.push(InventoryItemEvidence {
+                role: role.name(),
+                state,
+                schema_valid,
+            });
+        }
+        let encoded = serde_json::to_vec(&items).map_err(|_| SecureStorageError::Unavailable)?;
+        Ok(SecureStorageEvidence {
+            schema_version: EPHEMERAL_MANIFEST_SCHEMA_VERSION,
+            run_id: self.run_id.clone(),
+            namespace_descriptor_sha256: self.secret_descriptor_sha256.clone(),
+            status_digest_sha256: format!("{:x}", Sha256::digest(encoded)),
+            items,
+            cleanup_complete,
+        })
+    }
+
+    fn cleanup_ephemeral(
+        &self,
+        remove_root: bool,
+    ) -> Result<SecureStorageEvidence, SecureStorageError> {
+        let mut manifest =
+            read_manifest(&self.manifest_path)?.ok_or(SecureStorageError::CleanupRefused)?;
+        self.validate_manifest(&manifest)?;
+        if let Some(pid) = manifest.desktop_pid {
+            if process_is_alive(pid) {
+                return Err(SecureStorageError::ConcurrentRun);
+            }
+        }
+        validate_run_root_entries(self)?;
+        validate_manifest_directory_entries(self)?;
+        validate_secret_directory_entries(&self.secret_directory)?;
+        for role in EphemeralSecretRole::ALL {
+            validate_secret_file_for_delete(&self.secret_directory.join(role.basename()))?;
+        }
+        manifest.phase = ManifestPhase::CleanupPending;
+        manifest.desktop_pid = None;
+        write_manifest(&self.manifest_path, &manifest)?;
+        for role in EphemeralSecretRole::ALL {
+            remove_secret_file_if_present(&self.secret_directory.join(role.basename()))?;
+        }
+        let evidence = self.inventory_ephemeral(true)?;
+        if evidence
+            .items
+            .iter()
+            .any(|item| item.state != InventoryState::Absent)
+        {
+            return Err(SecureStorageError::CleanupRefused);
+        }
+        manifest.phase = ManifestPhase::Complete;
+        write_manifest(&self.manifest_path, &manifest)?;
+        if remove_root {
+            remove_verified_empty_run_root(self)?;
+        }
+        Ok(evidence)
+    }
 }
 
-fn secure_storage_gate(
+fn storage_backend_gate(
     master: &str,
     secure_storage: &str,
+    ephemeral_storage: &str,
     test_context_present: bool,
-) -> Result<bool, SecureStorageError> {
+) -> Result<Option<StorageBackendKind>, SecureStorageError> {
     if master != "true" {
         if (!master.is_empty() && master != "false")
             || (!secure_storage.is_empty() && secure_storage != "false")
+            || (!ephemeral_storage.is_empty() && ephemeral_storage != "false")
             || test_context_present
         {
             return Err(SecureStorageError::InvalidConfiguration);
         }
-        return Ok(false);
+        return Ok(None);
     }
-    match secure_storage {
-        "true" => Ok(true),
-        "" | "false" => Ok(false),
-        _ => Err(SecureStorageError::InvalidConfiguration),
+    if !matches!(secure_storage, "" | "false" | "true")
+        || !matches!(ephemeral_storage, "" | "false" | "true")
+        || (secure_storage == "true" && ephemeral_storage == "true")
+    {
+        return Err(SecureStorageError::InvalidConfiguration);
     }
+    match (secure_storage == "true", ephemeral_storage == "true") {
+        (true, false) => Ok(Some(StorageBackendKind::ProtectedDataKeychain)),
+        (false, true) => Ok(Some(StorageBackendKind::EphemeralFile)),
+        (false, false) => Ok(None),
+        (true, true) => Err(SecureStorageError::InvalidConfiguration),
+    }
+}
+
+impl EphemeralSecretFile {
+    pub(crate) fn load(&self) -> Result<Option<Zeroizing<Vec<u8>>>, SecureStorageError> {
+        self.validate_active_context()?;
+        read_secret_payload(&self.path, self.role)
+    }
+
+    pub(crate) fn create(&self, payload: &[u8]) -> Result<(), SecureStorageError> {
+        self.validate_active_context()?;
+        self.role.validate_payload(payload)?;
+        write_secret_payload(&self.path, self.role, payload, true)
+    }
+
+    pub(crate) fn replace(&self, payload: &[u8]) -> Result<(), SecureStorageError> {
+        self.validate_active_context()?;
+        self.role.validate_payload(payload)?;
+        write_secret_payload(&self.path, self.role, payload, false)
+    }
+
+    pub(crate) fn delete(&self) -> Result<(), SecureStorageError> {
+        self.validate_active_context()?;
+        remove_secret_file_if_present(&self.path)
+    }
+
+    fn validate_active_context(&self) -> Result<(), SecureStorageError> {
+        if !self.profile.uses_ephemeral_backend()
+            || self.path.parent() != Some(self.profile.secret_directory.as_path())
+            || self.path.file_name().and_then(|name| name.to_str()) != Some(self.role.basename())
+        {
+            return Err(SecureStorageError::InvalidConfiguration);
+        }
+        validate_private_directory(&self.profile.secret_directory)?;
+        let manifest = read_manifest(&self.profile.manifest_path)?
+            .ok_or(SecureStorageError::InvalidConfiguration)?;
+        self.profile.validate_manifest(&manifest)?;
+        if manifest.phase != ManifestPhase::Active
+            || manifest.desktop_pid != Some(std::process::id())
+        {
+            return Err(SecureStorageError::ConcurrentRun);
+        }
+        validate_secret_directory_entries(&self.profile.secret_directory)
+    }
+}
+
+fn encode_secret_file(
+    role: EphemeralSecretRole,
+    payload: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, SecureStorageError> {
+    role.validate_payload(payload)?;
+    let payload_len =
+        u32::try_from(payload.len()).map_err(|_| SecureStorageError::InvalidConfiguration)?;
+    let mut encoded = Zeroizing::new(Vec::with_capacity(SECRET_FILE_HEADER_BYTES + payload.len()));
+    encoded.extend_from_slice(SECRET_FILE_MAGIC);
+    encoded.push(role.tag());
+    encoded.push(0);
+    encoded.extend_from_slice(&payload_len.to_be_bytes());
+    encoded.extend_from_slice(payload);
+    Ok(encoded)
+}
+
+fn decode_secret_file(
+    role: EphemeralSecretRole,
+    encoded: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, SecureStorageError> {
+    if encoded.len() < SECRET_FILE_HEADER_BYTES
+        || &encoded[..SECRET_FILE_MAGIC.len()] != SECRET_FILE_MAGIC
+        || encoded[8] != role.tag()
+        || encoded[9] != 0
+    {
+        return Err(SecureStorageError::InvalidConfiguration);
+    }
+    let payload_len = u32::from_be_bytes(
+        encoded[10..14]
+            .try_into()
+            .map_err(|_| SecureStorageError::InvalidConfiguration)?,
+    ) as usize;
+    if encoded.len() != SECRET_FILE_HEADER_BYTES + payload_len {
+        return Err(SecureStorageError::InvalidConfiguration);
+    }
+    let payload = Zeroizing::new(encoded[SECRET_FILE_HEADER_BYTES..].to_vec());
+    role.validate_payload(payload.as_slice())?;
+    Ok(payload)
+}
+
+fn validate_secret_metadata(
+    metadata: &fs::Metadata,
+    expected_uid: u32,
+) -> Result<(), SecureStorageError> {
+    if !metadata.is_file()
+        || metadata.uid() != expected_uid
+        || metadata.mode() & 0o777 != 0o600
+        || metadata.nlink() != 1
+    {
+        return Err(SecureStorageError::InvalidConfiguration);
+    }
+    Ok(())
+}
+
+fn open_secret_file_for_read(
+    path: &Path,
+    role: EphemeralSecretRole,
+) -> Result<Option<fs::File>, SecureStorageError> {
+    let path_metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(SecureStorageError::InvalidConfiguration),
+    };
+    if path_metadata.file_type().is_symlink() {
+        return Err(SecureStorageError::InvalidConfiguration);
+    }
+    validate_secret_metadata(&path_metadata, effective_uid())?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| SecureStorageError::InvalidConfiguration)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| SecureStorageError::InvalidConfiguration)?;
+    validate_secret_metadata(&metadata, effective_uid())?;
+    if metadata.dev() != path_metadata.dev()
+        || metadata.ino() != path_metadata.ino()
+        || metadata.len() as usize > SECRET_FILE_HEADER_BYTES + role.max_payload_bytes()
+    {
+        return Err(SecureStorageError::InvalidConfiguration);
+    }
+    Ok(Some(file))
+}
+
+fn read_secret_payload(
+    path: &Path,
+    role: EphemeralSecretRole,
+) -> Result<Option<Zeroizing<Vec<u8>>>, SecureStorageError> {
+    let Some(mut file) = open_secret_file_for_read(path, role)? else {
+        return Ok(None);
+    };
+    let mut encoded = Zeroizing::new(Vec::new());
+    std::io::Read::by_ref(&mut file)
+        .take((SECRET_FILE_HEADER_BYTES + role.max_payload_bytes() + 1) as u64)
+        .read_to_end(&mut encoded)
+        .map_err(|_| SecureStorageError::Unavailable)?;
+    decode_secret_file(role, encoded.as_slice()).map(Some)
+}
+
+fn write_secret_payload(
+    path: &Path,
+    role: EphemeralSecretRole,
+    payload: &[u8],
+    require_absent: bool,
+) -> Result<(), SecureStorageError> {
+    let mut encoded = encode_secret_file(role, payload)?;
+    let existing = fs::symlink_metadata(path);
+    match existing {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(path)
+                .map_err(|_| SecureStorageError::Unavailable)?;
+            let result = file
+                .write_all(encoded.as_slice())
+                .and_then(|_| file.sync_all());
+            if result.is_err() {
+                encoded.zeroize();
+                return Err(SecureStorageError::Unavailable);
+            }
+            validate_secret_metadata(
+                &file
+                    .metadata()
+                    .map_err(|_| SecureStorageError::Unavailable)?,
+                effective_uid(),
+            )?;
+            Ok(())
+        }
+        Ok(metadata) if require_absent => {
+            validate_secret_metadata(&metadata, effective_uid())?;
+            Err(SecureStorageError::ConcurrentRun)
+        }
+        Ok(path_metadata) => {
+            if path_metadata.file_type().is_symlink() {
+                return Err(SecureStorageError::InvalidConfiguration);
+            }
+            validate_secret_metadata(&path_metadata, effective_uid())?;
+            if read_secret_payload(path, role)?.is_none() {
+                return Err(SecureStorageError::InvalidConfiguration);
+            }
+            let mut file = OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(path)
+                .map_err(|_| SecureStorageError::Unavailable)?;
+            let metadata = file
+                .metadata()
+                .map_err(|_| SecureStorageError::Unavailable)?;
+            validate_secret_metadata(&metadata, effective_uid())?;
+            if metadata.dev() != path_metadata.dev() || metadata.ino() != path_metadata.ino() {
+                return Err(SecureStorageError::InvalidConfiguration);
+            }
+            file.seek(SeekFrom::Start(0))
+                .and_then(|_| file.write_all(encoded.as_slice()))
+                .and_then(|_| file.set_len(encoded.len() as u64))
+                .and_then(|_| file.sync_all())
+                .map_err(|_| SecureStorageError::Unavailable)?;
+            Ok(())
+        }
+        Err(_) => Err(SecureStorageError::Unavailable),
+    }
+}
+
+fn inspect_secret_file(
+    path: &Path,
+    role: EphemeralSecretRole,
+) -> Result<(InventoryState, bool), SecureStorageError> {
+    match read_secret_payload(path, role) {
+        Ok(None) => Ok((InventoryState::Absent, true)),
+        Ok(Some(_)) => Ok((InventoryState::Present, true)),
+        Err(SecureStorageError::InvalidConfiguration) => {
+            validate_secret_file_for_delete(path)?;
+            Ok((InventoryState::Present, false))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn validate_secret_file_for_delete(path: &Path) -> Result<(), SecureStorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(SecureStorageError::CleanupRefused),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(SecureStorageError::CleanupRefused);
+    }
+    validate_secret_metadata(&metadata, effective_uid())
+        .map_err(|_| SecureStorageError::CleanupRefused)
+}
+
+fn remove_secret_file_if_present(path: &Path) -> Result<(), SecureStorageError> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(SecureStorageError::CleanupRefused),
+        Ok(_) => {
+            validate_secret_file_for_delete(path)?;
+            fs::remove_file(path).map_err(|_| SecureStorageError::CleanupRefused)
+        }
+    }
+}
+
+fn validate_secret_directory_entries(path: &Path) -> Result<(), SecureStorageError> {
+    let allowed: std::collections::HashSet<&'static str> = EphemeralSecretRole::ALL
+        .into_iter()
+        .map(EphemeralSecretRole::basename)
+        .collect();
+    for entry in fs::read_dir(path).map_err(|_| SecureStorageError::InvalidConfiguration)? {
+        let entry = entry.map_err(|_| SecureStorageError::InvalidConfiguration)?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| SecureStorageError::InvalidConfiguration)?;
+        if !allowed.contains(name.as_str()) {
+            return Err(SecureStorageError::InvalidConfiguration);
+        }
+    }
+    Ok(())
+}
+
+fn validate_run_root_entries(
+    profile: &Feat126SecureStorageProfile,
+) -> Result<(), SecureStorageError> {
+    let allowed = std::collections::HashSet::from([
+        DESKTOP_APP_DATA_DIRECTORY,
+        HOST_HOME_DIRECTORY,
+        CODEX_HOME_DIRECTORY,
+        PROJECT_DIRECTORY,
+        MANIFEST_DIRECTORY,
+    ]);
+    for entry in fs::read_dir(&profile.run_root).map_err(|_| SecureStorageError::CleanupRefused)? {
+        let name = entry
+            .map_err(|_| SecureStorageError::CleanupRefused)?
+            .file_name()
+            .into_string()
+            .map_err(|_| SecureStorageError::CleanupRefused)?;
+        if !allowed.contains(name.as_str()) {
+            return Err(SecureStorageError::CleanupRefused);
+        }
+    }
+    Ok(())
+}
+
+fn validate_manifest_directory_entries(
+    profile: &Feat126SecureStorageProfile,
+) -> Result<(), SecureStorageError> {
+    let directory = profile
+        .manifest_path
+        .parent()
+        .ok_or(SecureStorageError::CleanupRefused)?;
+    let allowed = std::collections::HashSet::from([MANIFEST_FILE, EPHEMERAL_SECRET_DIRECTORY]);
+    for entry in fs::read_dir(directory).map_err(|_| SecureStorageError::CleanupRefused)? {
+        let name = entry
+            .map_err(|_| SecureStorageError::CleanupRefused)?
+            .file_name()
+            .into_string()
+            .map_err(|_| SecureStorageError::CleanupRefused)?;
+        if !allowed.contains(name.as_str()) {
+            return Err(SecureStorageError::CleanupRefused);
+        }
+    }
+    Ok(())
+}
+
+fn remove_verified_empty_run_root(
+    profile: &Feat126SecureStorageProfile,
+) -> Result<(), SecureStorageError> {
+    validate_run_root(&profile.run_root)?;
+    validate_run_root_entries(profile)?;
+    validate_manifest_directory_entries(profile)?;
+    validate_secret_directory_entries(&profile.secret_directory)?;
+    if fs::read_dir(&profile.secret_directory)
+        .map_err(|_| SecureStorageError::CleanupRefused)?
+        .next()
+        .is_some()
+    {
+        return Err(SecureStorageError::CleanupRefused);
+    }
+    for path in [
+        &profile.desktop_app_data,
+        &profile.host_home,
+        &profile.codex_home,
+        &profile.project,
+    ] {
+        validate_private_directory(path)?;
+        if fs::read_dir(path)
+            .map_err(|_| SecureStorageError::CleanupRefused)?
+            .next()
+            .is_some()
+        {
+            return Err(SecureStorageError::CleanupRefused);
+        }
+    }
+    fs::remove_dir(&profile.secret_directory).map_err(|_| SecureStorageError::CleanupRefused)?;
+    for path in [
+        &profile.desktop_app_data,
+        &profile.host_home,
+        &profile.codex_home,
+        &profile.project,
+    ] {
+        fs::remove_dir(path).map_err(|_| SecureStorageError::CleanupRefused)?;
+    }
+    let manifest_directory = profile
+        .manifest_path
+        .parent()
+        .ok_or(SecureStorageError::CleanupRefused)?;
+    let manifest_metadata = fs::symlink_metadata(&profile.manifest_path)
+        .map_err(|_| SecureStorageError::CleanupRefused)?;
+    if manifest_metadata.file_type().is_symlink()
+        || !manifest_metadata.is_file()
+        || manifest_metadata.uid() != effective_uid()
+        || manifest_metadata.mode() & 0o077 != 0
+        || manifest_metadata.nlink() != 1
+    {
+        return Err(SecureStorageError::CleanupRefused);
+    }
+    let mut manifest_entry_count = 0;
+    for entry in fs::read_dir(manifest_directory).map_err(|_| SecureStorageError::CleanupRefused)? {
+        let name = entry
+            .map_err(|_| SecureStorageError::CleanupRefused)?
+            .file_name()
+            .into_string()
+            .map_err(|_| SecureStorageError::CleanupRefused)?;
+        if name != MANIFEST_FILE {
+            return Err(SecureStorageError::CleanupRefused);
+        }
+        manifest_entry_count += 1;
+    }
+    if manifest_entry_count != 1 {
+        return Err(SecureStorageError::CleanupRefused);
+    }
+    fs::remove_file(&profile.manifest_path).map_err(|_| SecureStorageError::CleanupRefused)?;
+    fs::remove_dir(manifest_directory).map_err(|_| SecureStorageError::CleanupRefused)?;
+    fs::remove_dir(&profile.run_root).map_err(|_| SecureStorageError::CleanupRefused)
 }
 
 trait ExactKeychain: Send + Sync {
@@ -521,17 +1199,39 @@ fn namespace_descriptor_sha256(namespaces: &[KeychainNamespace; 3]) -> String {
     format!("{:x}", digest.finalize())
 }
 
-fn directory_roles() -> Vec<String> {
-    [
+fn ephemeral_secret_descriptor_sha256() -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"feat126-ephemeral-secret-files-v1\0");
+    for role in EphemeralSecretRole::ALL {
+        digest.update(role.name().as_bytes());
+        digest.update(b"\0");
+        digest.update(role.basename().as_bytes());
+        digest.update(b"\0");
+        digest.update([role.tag()]);
+        digest.update(b"\0");
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn ephemeral_secret_roles() -> Vec<String> {
+    EphemeralSecretRole::ALL
+        .into_iter()
+        .map(|role| role.name().to_owned())
+        .collect()
+}
+
+fn directory_roles(backend: StorageBackendKind) -> Vec<String> {
+    let mut roles = vec![
         DESKTOP_APP_DATA_DIRECTORY,
         HOST_HOME_DIRECTORY,
         CODEX_HOME_DIRECTORY,
         PROJECT_DIRECTORY,
         MANIFEST_DIRECTORY,
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
+    ];
+    if backend == StorageBackendKind::EphemeralFile {
+        roles.push(EPHEMERAL_SECRET_DIRECTORY);
+    }
+    roles.into_iter().map(str::to_owned).collect()
 }
 
 fn require_exact_environment_path(name: &str, expected: &Path) -> Result<(), SecureStorageError> {
@@ -650,10 +1350,9 @@ pub fn feat126_secure_storage_test_control(
     let profile = Feat126SecureStorageProfile::from_environment()
         .map_err(|_| "secure_storage_invalid")?
         .ok_or("secure_storage_disabled")?;
-    let backend = PlatformExactKeychain::new().map_err(|_| "secure_storage_unavailable")?;
     match action {
         "prepare" => {
-            for path in [
+            let mut paths = vec![
                 &profile.desktop_app_data,
                 &profile.host_home,
                 &profile.codex_home,
@@ -662,15 +1361,33 @@ pub fn feat126_secure_storage_test_control(
                     .manifest_path
                     .parent()
                     .ok_or("secure_storage_invalid")?,
-            ] {
+            ];
+            if profile.uses_ephemeral_backend() {
+                paths.push(&profile.secret_directory);
+            }
+            for path in paths {
                 create_or_validate_private_directory(path).map_err(|_| "secure_storage_invalid")?;
             }
-            profile
-                .prepare_with_backend(&backend)
-                .map_err(|_| "secure_storage_prepare_failed")?;
-            profile
-                .inventory_with_backend(&backend, false)
-                .map_err(|_| "secure_storage_inventory_failed")
+            match profile.backend {
+                StorageBackendKind::ProtectedDataKeychain => {
+                    let backend =
+                        PlatformExactKeychain::new().map_err(|_| "secure_storage_unavailable")?;
+                    profile
+                        .prepare_with_backend(&backend)
+                        .map_err(|_| "secure_storage_prepare_failed")?;
+                    profile
+                        .inventory_with_backend(&backend, false)
+                        .map_err(|_| "secure_storage_inventory_failed")
+                }
+                StorageBackendKind::EphemeralFile => {
+                    profile
+                        .prepare_ephemeral()
+                        .map_err(|_| "secure_storage_prepare_failed")?;
+                    profile
+                        .inventory_ephemeral(false)
+                        .map_err(|_| "secure_storage_inventory_failed")
+                }
+            }
         }
         "inventory" => {
             let manifest = read_manifest(&profile.manifest_path)
@@ -679,21 +1396,96 @@ pub fn feat126_secure_storage_test_control(
             profile
                 .validate_manifest(&manifest)
                 .map_err(|_| "secure_storage_invalid")?;
-            profile
-                .inventory_with_backend(&backend, false)
-                .map_err(|_| "secure_storage_inventory_failed")
+            match profile.backend {
+                StorageBackendKind::ProtectedDataKeychain => {
+                    let backend =
+                        PlatformExactKeychain::new().map_err(|_| "secure_storage_unavailable")?;
+                    profile
+                        .inventory_with_backend(&backend, false)
+                        .map_err(|_| "secure_storage_inventory_failed")
+                }
+                StorageBackendKind::EphemeralFile => profile
+                    .inventory_ephemeral(false)
+                    .map_err(|_| "secure_storage_inventory_failed"),
+            }
         }
-        "cleanup" => profile
-            .cleanup_with_backend(&backend, true)
-            .map_err(|_| "secure_storage_cleanup_failed"),
+        "cleanup" => match profile.backend {
+            StorageBackendKind::ProtectedDataKeychain => {
+                let backend =
+                    PlatformExactKeychain::new().map_err(|_| "secure_storage_unavailable")?;
+                profile
+                    .cleanup_with_backend(&backend, true)
+                    .map_err(|_| "secure_storage_cleanup_failed")
+            }
+            StorageBackendKind::EphemeralFile => profile
+                .cleanup_ephemeral(true)
+                .map_err(|_| "secure_storage_cleanup_failed"),
+        },
         _ => Err("secure_storage_invalid_action"),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn ephemeral_test_profile() -> (PathBuf, Arc<Feat126SecureStorageProfile>) {
+    let root = std::env::temp_dir().join(format!("feat126-s10p2f-{}", uuid::Uuid::now_v7()));
+    fs::create_dir(&root).expect("create test run root");
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).expect("protect test run root");
+    let root = root.canonicalize().expect("canonical test run root");
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let prefix = format!("com.yijie.ai.test.feat126.{run_id}");
+    let namespaces = [
+        KeychainNamespace {
+            role: "chat_db",
+            service: format!("{prefix}.chat-db"),
+            account: KEYCHAIN_ACCOUNT,
+        },
+        KeychainNamespace {
+            role: "chat_receipt",
+            service: format!("{prefix}.chat-receipt"),
+            account: KEYCHAIN_ACCOUNT,
+        },
+        KeychainNamespace {
+            role: "native_auth",
+            service: format!("{prefix}.native-auth"),
+            account: NATIVE_AUTH_ACCOUNT,
+        },
+    ];
+    let profile = Arc::new(Feat126SecureStorageProfile {
+        run_id,
+        desktop_app_data: root.join(DESKTOP_APP_DATA_DIRECTORY),
+        host_home: root.join(HOST_HOME_DIRECTORY),
+        codex_home: root.join(CODEX_HOME_DIRECTORY),
+        project: root.join(PROJECT_DIRECTORY),
+        manifest_path: root.join(MANIFEST_DIRECTORY).join(MANIFEST_FILE),
+        secret_directory: root
+            .join(MANIFEST_DIRECTORY)
+            .join(EPHEMERAL_SECRET_DIRECTORY),
+        descriptor_sha256: namespace_descriptor_sha256(&namespaces),
+        secret_descriptor_sha256: ephemeral_secret_descriptor_sha256(),
+        namespaces,
+        backend: StorageBackendKind::EphemeralFile,
+        run_root: root.clone(),
+    });
+    profile.prepare().expect("prepare ephemeral test profile");
+    (root, profile)
+}
+
+#[cfg(test)]
+pub(crate) fn cleanup_ephemeral_test_profile(
+    profile: &Feat126SecureStorageProfile,
+) -> Result<SecureStorageEvidence, SecureStorageError> {
+    let mut manifest =
+        read_manifest(&profile.manifest_path)?.ok_or(SecureStorageError::InvalidConfiguration)?;
+    manifest.desktop_pid = None;
+    write_manifest(&profile.manifest_path, &manifest)?;
+    profile.cleanup_ephemeral(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
+    use std::process::Command;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -787,8 +1579,13 @@ mod tests {
             codex_home: root.join(CODEX_HOME_DIRECTORY),
             project: root.join(PROJECT_DIRECTORY),
             manifest_path: root.join(MANIFEST_DIRECTORY).join(MANIFEST_FILE),
+            secret_directory: root
+                .join(MANIFEST_DIRECTORY)
+                .join(EPHEMERAL_SECRET_DIRECTORY),
             descriptor_sha256: namespace_descriptor_sha256(&namespaces),
+            secret_descriptor_sha256: ephemeral_secret_descriptor_sha256(),
             namespaces,
+            backend: StorageBackendKind::ProtectedDataKeychain,
             run_root: root.clone(),
         };
         for path in [
@@ -993,7 +1790,10 @@ mod tests {
 
     #[test]
     fn directory_roles_are_closed_and_path_free() {
-        let expected: HashMap<_, _> = directory_roles().into_iter().enumerate().collect();
+        let expected: HashMap<_, _> = directory_roles(StorageBackendKind::ProtectedDataKeychain)
+            .into_iter()
+            .enumerate()
+            .collect();
         assert_eq!(expected.len(), 5);
         assert_eq!(
             expected.get(&0).map(String::as_str),
@@ -1004,19 +1804,29 @@ mod tests {
 
     #[test]
     fn secure_storage_requires_two_exact_true_gates_and_defaults_off() {
-        assert_eq!(secure_storage_gate("", "", false), Ok(false));
-        assert_eq!(secure_storage_gate("false", "false", false), Ok(false));
-        assert_eq!(secure_storage_gate("true", "", true), Ok(false));
-        assert_eq!(secure_storage_gate("true", "false", true), Ok(false));
-        assert_eq!(secure_storage_gate("true", "true", true), Ok(true));
-        for (master, secure, context) in [
-            ("TRUE", "true", true),
-            ("false", "true", true),
-            ("true", "1", true),
-            ("", "", true),
+        assert_eq!(storage_backend_gate("", "", "", false), Ok(None));
+        assert_eq!(
+            storage_backend_gate("false", "false", "false", false),
+            Ok(None)
+        );
+        assert_eq!(storage_backend_gate("true", "", "", true), Ok(None));
+        assert_eq!(
+            storage_backend_gate("true", "true", "false", true),
+            Ok(Some(StorageBackendKind::ProtectedDataKeychain))
+        );
+        assert_eq!(
+            storage_backend_gate("true", "false", "true", true),
+            Ok(Some(StorageBackendKind::EphemeralFile))
+        );
+        for (master, secure, ephemeral, context) in [
+            ("TRUE", "false", "true", true),
+            ("false", "false", "true", true),
+            ("true", "false", "1", true),
+            ("true", "true", "true", true),
+            ("", "", "", true),
         ] {
             assert_eq!(
-                secure_storage_gate(master, secure, context),
+                storage_backend_gate(master, secure, ephemeral, context),
                 Err(SecureStorageError::InvalidConfiguration)
             );
         }
@@ -1039,6 +1849,269 @@ mod tests {
             Err(SecureStorageError::InvalidConfiguration)
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ephemeral_files_are_closed_versioned_private_and_restart_stable() {
+        let (root, profile) = ephemeral_test_profile();
+        let chat = profile
+            .ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher)
+            .unwrap();
+        let receipt = profile
+            .ephemeral_secret_file(EphemeralSecretRole::ReceiptHmac)
+            .unwrap();
+        let native = profile
+            .ephemeral_secret_file(EphemeralSecretRole::NativeAuth)
+            .unwrap();
+        let mut chat_secret = [0_u8; 32];
+        let mut receipt_secret = [0_u8; 32];
+        getrandom::fill(&mut chat_secret).unwrap();
+        getrandom::fill(&mut receipt_secret).unwrap();
+        let native_secret = format!(
+            "{{\"schema_version\":2,\"refresh_token\":\"{}\"}}",
+            uuid::Uuid::now_v7()
+        );
+        chat.create(&chat_secret).unwrap();
+        receipt.create(&receipt_secret).unwrap();
+        native.create(native_secret.as_bytes()).unwrap();
+        assert_eq!(
+            chat.create(&chat_secret),
+            Err(SecureStorageError::ConcurrentRun)
+        );
+        assert_ne!(chat_secret, receipt_secret);
+        assert_eq!(chat.load().unwrap().unwrap().as_slice(), chat_secret);
+        assert_eq!(receipt.load().unwrap().unwrap().as_slice(), receipt_secret);
+        assert_eq!(
+            native.load().unwrap().unwrap().as_slice(),
+            native_secret.as_bytes()
+        );
+
+        for role in EphemeralSecretRole::ALL {
+            let metadata =
+                fs::symlink_metadata(profile.secret_directory.join(role.basename())).unwrap();
+            assert_eq!(metadata.mode() & 0o777, 0o600);
+            assert_eq!(metadata.nlink(), 1);
+        }
+        assert_eq!(
+            fs::symlink_metadata(&profile.secret_directory)
+                .unwrap()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        let evidence_json =
+            serde_json::to_string(&profile.inventory_ephemeral(false).unwrap()).unwrap();
+        assert!(!evidence_json.contains(root.to_str().unwrap()));
+        assert!(!evidence_json.contains(native_secret.as_str()));
+        assert!(!evidence_json.contains(".secret"));
+        assert_eq!(
+            profile.cleanup_ephemeral(false),
+            Err(SecureStorageError::ConcurrentRun)
+        );
+        assert!(chat.path.exists());
+
+        let mut manifest = read_manifest(&profile.manifest_path).unwrap().unwrap();
+        manifest.desktop_pid = Some(i32::MAX as u32);
+        write_manifest(&profile.manifest_path, &manifest).unwrap();
+        profile.prepare_ephemeral().unwrap();
+        assert_eq!(chat.load().unwrap().unwrap().as_slice(), chat_secret);
+        let evidence = cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(evidence.cleanup_complete);
+        assert!(!root.exists());
+        chat_secret.zeroize();
+        receipt_secret.zeroize();
+    }
+
+    #[test]
+    fn ephemeral_cross_run_and_manifest_authority_fail_closed() {
+        let (root_a, profile_a) = ephemeral_test_profile();
+        let (root_b, profile_b) = ephemeral_test_profile();
+        let file_a = profile_a
+            .ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher)
+            .unwrap();
+        file_a.create(&[7_u8; 32]).unwrap();
+        let file_b = profile_b
+            .ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher)
+            .unwrap();
+        assert!(file_b.load().unwrap().is_none());
+        let forged = EphemeralSecretFile {
+            profile: profile_b.clone(),
+            role: EphemeralSecretRole::ChatSqlcipher,
+            path: file_a.path.clone(),
+        };
+        assert_eq!(forged.load(), Err(SecureStorageError::InvalidConfiguration));
+
+        let mut manifest = read_manifest(&profile_a.manifest_path).unwrap().unwrap();
+        manifest.run_id = uuid::Uuid::now_v7().to_string();
+        manifest.desktop_pid = None;
+        write_manifest(&profile_a.manifest_path, &manifest).unwrap();
+        assert_eq!(
+            profile_a.cleanup_ephemeral(false),
+            Err(SecureStorageError::InvalidConfiguration)
+        );
+        assert!(file_a.path.exists());
+        fs::remove_dir_all(root_a).unwrap();
+        cleanup_ephemeral_test_profile(&profile_b).unwrap();
+        assert!(!root_b.exists());
+    }
+
+    #[test]
+    fn partial_secret_is_fail_closed_but_exact_cleanup_is_recoverable() {
+        let (root, profile) = ephemeral_test_profile();
+        let path = profile
+            .secret_directory
+            .join(EphemeralSecretRole::NativeAuth.basename());
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"partial").unwrap();
+        file.sync_all().unwrap();
+        let secret = profile
+            .ephemeral_secret_file(EphemeralSecretRole::NativeAuth)
+            .unwrap();
+        assert_eq!(secret.load(), Err(SecureStorageError::InvalidConfiguration));
+        assert_eq!(
+            profile.prepare_ephemeral(),
+            Err(SecureStorageError::InvalidConfiguration)
+        );
+        let evidence = profile.inventory_ephemeral(false).unwrap();
+        assert!(evidence.items.iter().any(|item| {
+            item.role == "native_auth"
+                && item.state == InventoryState::Present
+                && !item.schema_valid
+        }));
+        cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn unknown_symlink_hardlink_and_mode_drift_delete_nothing() {
+        for fault in ["unknown", "root_unknown", "symlink", "hardlink", "mode"] {
+            let (root, profile) = ephemeral_test_profile();
+            let chat = profile
+                .ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher)
+                .unwrap();
+            chat.create(&[9_u8; 32]).unwrap();
+            let mut manifest = read_manifest(&profile.manifest_path).unwrap().unwrap();
+            manifest.desktop_pid = None;
+            write_manifest(&profile.manifest_path, &manifest).unwrap();
+            let fault_path = match fault {
+                "unknown" => {
+                    let path = profile.secret_directory.join("foreign.secret");
+                    fs::write(&path, b"foreign").unwrap();
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+                    path
+                }
+                "root_unknown" => {
+                    let path = root.join("foreign-artifact");
+                    fs::write(&path, b"foreign").unwrap();
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+                    path
+                }
+                "symlink" => {
+                    let path = profile
+                        .secret_directory
+                        .join(EphemeralSecretRole::ReceiptHmac.basename());
+                    std::os::unix::fs::symlink(&chat.path, &path).unwrap();
+                    path
+                }
+                "hardlink" => {
+                    let path = profile
+                        .secret_directory
+                        .join(EphemeralSecretRole::ReceiptHmac.basename());
+                    fs::hard_link(&chat.path, &path).unwrap();
+                    path
+                }
+                "mode" => {
+                    fs::set_permissions(&chat.path, fs::Permissions::from_mode(0o644)).unwrap();
+                    chat.path.clone()
+                }
+                _ => unreachable!(),
+            };
+            assert!(profile.cleanup_ephemeral(false).is_err());
+            assert!(chat.path.exists());
+            match fault {
+                "mode" => {
+                    fs::set_permissions(&chat.path, fs::Permissions::from_mode(0o600)).unwrap();
+                }
+                _ => fs::remove_file(fault_path).unwrap(),
+            }
+            cleanup_ephemeral_test_profile(&profile).unwrap();
+            assert!(!root.exists());
+        }
+    }
+
+    #[test]
+    fn metadata_owner_nlink_and_mode_contract_is_exact() {
+        let (root, profile) = ephemeral_test_profile();
+        let chat = profile
+            .ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher)
+            .unwrap();
+        chat.create(&[3_u8; 32]).unwrap();
+        let metadata = fs::symlink_metadata(&chat.path).unwrap();
+        assert_eq!(validate_secret_metadata(&metadata, effective_uid()), Ok(()));
+        assert_eq!(
+            validate_secret_metadata(&metadata, effective_uid().saturating_add(1)),
+            Err(SecureStorageError::InvalidConfiguration)
+        );
+        cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn exact_environment_profile_is_validated_in_an_isolated_subprocess() {
+        let temporary_parent = std::env::temp_dir().canonicalize().unwrap();
+        let root = temporary_parent.join(format!("feat126-s10p2f-env-{}", uuid::Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let run_id = uuid::Uuid::now_v7().to_string();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .env("TMPDIR", &temporary_parent)
+            .env("FEAT126_S10P2F_CHILD", "true")
+            .env(MASTER_ENV, "true")
+            .env(SECURE_STORAGE_ENV, "false")
+            .env(EPHEMERAL_STORAGE_ENV, "true")
+            .env(RUN_ID_ENV, &run_id)
+            .env(RUN_ROOT_ENV, &root)
+            .env(FAKE_RESPONSES_ENV, FAKE_RESPONSES_BASE_URL)
+            .env(HOST_HOME_ENV, root.join(HOST_HOME_DIRECTORY))
+            .env(CODEX_HOME_ENV, root.join(CODEX_HOME_DIRECTORY))
+            .arg("--exact")
+            .arg("feat126_secure_storage::tests::ephemeral_environment_child")
+            .arg("--nocapture")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated environment child failed without emitting configuration values"
+        );
+        let manifest = read_manifest(&root.join(MANIFEST_DIRECTORY).join(MANIFEST_FILE))
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.run_id, run_id);
+        assert_eq!(
+            manifest.storage_backend,
+            Some(StorageBackendKind::EphemeralFile)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ephemeral_environment_child() {
+        if std::env::var("FEAT126_S10P2F_CHILD").as_deref() != Ok("true") {
+            return;
+        }
+        let profile = Feat126SecureStorageProfile::from_environment()
+            .unwrap()
+            .expect("ephemeral profile enabled");
+        assert!(profile.uses_ephemeral_backend());
+        profile.prepare().expect("prepare isolated profile");
+        assert!(profile.secret_directory.exists());
     }
 
     #[cfg(target_os = "macos")]

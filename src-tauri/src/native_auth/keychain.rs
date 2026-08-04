@@ -1,6 +1,8 @@
 use super::error::NativeAuthError;
 use super::NativeAuthConfig;
-use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+use crate::feat126_secure_storage::{
+    EphemeralSecretFile, EphemeralSecretRole, Feat126SecureStorageProfile,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -104,111 +106,181 @@ pub trait RefreshTokenStore: Send + Sync {
     async fn delete(&self) -> Result<(), NativeAuthError>;
 }
 
-#[cfg(target_os = "macos")]
 pub struct ProtectedKeychainStore {
-    entry: std::sync::Arc<keyring_core::Entry>,
-    legacy_entry: Option<std::sync::Arc<keyring_core::Entry>>,
+    backend: RefreshTokenBackend,
 }
 
-#[cfg(target_os = "macos")]
+enum RefreshTokenBackend {
+    Ephemeral(EphemeralSecretFile),
+    #[cfg(target_os = "macos")]
+    Protected {
+        entry: std::sync::Arc<keyring_core::Entry>,
+        legacy_entry: Option<std::sync::Arc<keyring_core::Entry>>,
+    },
+}
+
 impl ProtectedKeychainStore {
     pub(crate) fn new_with_test_profile(
-        profile: Option<&Feat126SecureStorageProfile>,
+        profile: Option<std::sync::Arc<Feat126SecureStorageProfile>>,
     ) -> Result<Self, NativeAuthError> {
-        use keyring_core::api::CredentialStoreApi;
-        use std::collections::HashMap;
+        if let Some(secret) = profile
+            .as_ref()
+            .and_then(|profile| profile.ephemeral_secret_file(EphemeralSecretRole::NativeAuth))
+        {
+            return Ok(Self {
+                backend: RefreshTokenBackend::Ephemeral(secret),
+            });
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use keyring_core::api::CredentialStoreApi;
+            use std::collections::HashMap;
 
-        let store = apple_native_keyring_store::protected::Store::new()
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
-        let (service, account) = profile
-            .map(|profile| {
-                let namespace = profile.native_auth_namespace();
-                (namespace.service(), namespace.account())
+            let store = apple_native_keyring_store::protected::Store::new()
+                .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+            let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+            let (service, account) = profile
+                .as_deref()
+                .map(|profile| {
+                    let namespace = profile.native_auth_namespace();
+                    (namespace.service(), namespace.account())
+                })
+                .unwrap_or((KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT));
+            let entry = store
+                .build(service, account, Some(&modifiers))
+                .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+            let legacy_entry = if profile.is_some() {
+                None
+            } else {
+                Some(std::sync::Arc::new(
+                    store
+                        .build(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT, Some(&modifiers))
+                        .map_err(|_| NativeAuthError::SecureStorageUnavailable)?,
+                ))
+            };
+            Ok(Self {
+                backend: RefreshTokenBackend::Protected {
+                    entry: std::sync::Arc::new(entry),
+                    legacy_entry,
+                },
             })
-            .unwrap_or((KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT));
-        let entry = store
-            .build(service, account, Some(&modifiers))
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let legacy_entry = if profile.is_some() {
-            None
-        } else {
-            Some(std::sync::Arc::new(
-                store
-                    .build(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT, Some(&modifiers))
-                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?,
-            ))
-        };
-        Ok(Self {
-            entry: std::sync::Arc::new(entry),
-            legacy_entry,
-        })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = profile;
+            Err(NativeAuthError::SecureStorageUnavailable)
+        }
     }
 }
 
-#[cfg(target_os = "macos")]
 #[async_trait]
 impl RefreshTokenStore for ProtectedKeychainStore {
     async fn save(&self, token: &StoredRefreshToken) -> Result<(), NativeAuthError> {
         let encoded = Zeroizing::new(
             serde_json::to_vec(token).map_err(|_| NativeAuthError::SecureStorageUnavailable)?,
         );
-        let entry = self.entry.clone();
-        tokio::task::spawn_blocking(move || entry.set_secret(encoded.as_slice()))
-            .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)
+        match &self.backend {
+            RefreshTokenBackend::Ephemeral(file) => {
+                let file = file.clone();
+                tokio::task::spawn_blocking(move || file.replace(encoded.as_slice()))
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)
+            }
+            #[cfg(target_os = "macos")]
+            RefreshTokenBackend::Protected { entry, .. } => {
+                let entry = entry.clone();
+                tokio::task::spawn_blocking(move || entry.set_secret(encoded.as_slice()))
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)
+            }
+        }
     }
 
     async fn load(&self) -> Result<RefreshTokenRecord, NativeAuthError> {
-        let entry = self.entry.clone();
-        let current = tokio::task::spawn_blocking(move || entry.get_secret())
-            .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let current = current.map(Zeroizing::new);
-        let Some(legacy_entry) = self.legacy_entry.clone() else {
-            return match current {
-                Ok(secret) => Ok(decode_refresh_token(secret.as_slice())),
-                Err(keyring_core::Error::NoEntry) => Ok(RefreshTokenRecord::Missing),
-                Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
-            };
-        };
-        let legacy = tokio::task::spawn_blocking(move || legacy_entry.get_secret())
-            .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
-            .map(Zeroizing::new);
-        match (current, legacy) {
-            (_, Ok(_legacy_secret)) => Ok(RefreshTokenRecord::Incompatible),
-            (Ok(secret), Err(keyring_core::Error::NoEntry)) => {
-                Ok(decode_refresh_token(secret.as_slice()))
+        match &self.backend {
+            RefreshTokenBackend::Ephemeral(file) => {
+                let file = file.clone();
+                let secret = tokio::task::spawn_blocking(move || file.load())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+                Ok(match secret {
+                    Some(secret) => decode_refresh_token(secret.as_slice()),
+                    None => RefreshTokenRecord::Missing,
+                })
             }
-            (Err(keyring_core::Error::NoEntry), Err(keyring_core::Error::NoEntry)) => {
-                Ok(RefreshTokenRecord::Missing)
+            #[cfg(target_os = "macos")]
+            RefreshTokenBackend::Protected {
+                entry,
+                legacy_entry,
+            } => {
+                let entry = entry.clone();
+                let current = tokio::task::spawn_blocking(move || entry.get_secret())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+                let current = current.map(Zeroizing::new);
+                let Some(legacy_entry) = legacy_entry.clone() else {
+                    return match current {
+                        Ok(secret) => Ok(decode_refresh_token(secret.as_slice())),
+                        Err(keyring_core::Error::NoEntry) => Ok(RefreshTokenRecord::Missing),
+                        Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
+                    };
+                };
+                let legacy = tokio::task::spawn_blocking(move || legacy_entry.get_secret())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+                    .map(Zeroizing::new);
+                match (current, legacy) {
+                    (_, Ok(_legacy_secret)) => Ok(RefreshTokenRecord::Incompatible),
+                    (Ok(secret), Err(keyring_core::Error::NoEntry)) => {
+                        Ok(decode_refresh_token(secret.as_slice()))
+                    }
+                    (Err(keyring_core::Error::NoEntry), Err(keyring_core::Error::NoEntry)) => {
+                        Ok(RefreshTokenRecord::Missing)
+                    }
+                    (_, Err(_)) => Err(NativeAuthError::SecureStorageUnavailable),
+                }
             }
-            (_, Err(_)) => Err(NativeAuthError::SecureStorageUnavailable),
         }
     }
 
     async fn delete(&self) -> Result<(), NativeAuthError> {
-        let entry = self.entry.clone();
-        let current = tokio::task::spawn_blocking(move || entry.delete_credential())
-            .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        let Some(legacy_entry) = self.legacy_entry.clone() else {
-            return match current {
-                Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-                Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
-            };
-        };
-        let legacy = tokio::task::spawn_blocking(move || legacy_entry.delete_credential())
-            .await
-            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
-        match (current, legacy) {
-            (
-                Ok(()) | Err(keyring_core::Error::NoEntry),
-                Ok(()) | Err(keyring_core::Error::NoEntry),
-            ) => Ok(()),
-            _ => Err(NativeAuthError::SecureStorageUnavailable),
+        match &self.backend {
+            RefreshTokenBackend::Ephemeral(file) => {
+                let file = file.clone();
+                tokio::task::spawn_blocking(move || file.delete())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)
+            }
+            #[cfg(target_os = "macos")]
+            RefreshTokenBackend::Protected {
+                entry,
+                legacy_entry,
+            } => {
+                let entry = entry.clone();
+                let current = tokio::task::spawn_blocking(move || entry.delete_credential())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+                let Some(legacy_entry) = legacy_entry.clone() else {
+                    return match current {
+                        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+                        Err(_) => Err(NativeAuthError::SecureStorageUnavailable),
+                    };
+                };
+                let legacy = tokio::task::spawn_blocking(move || legacy_entry.delete_credential())
+                    .await
+                    .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+                match (current, legacy) {
+                    (
+                        Ok(()) | Err(keyring_core::Error::NoEntry),
+                        Ok(()) | Err(keyring_core::Error::NoEntry),
+                    ) => Ok(()),
+                    _ => Err(NativeAuthError::SecureStorageUnavailable),
+                }
+            }
         }
     }
 }
@@ -217,18 +289,6 @@ fn decode_refresh_token(bytes: &[u8]) -> RefreshTokenRecord {
     match serde_json::from_slice(bytes) {
         Ok(token) => RefreshTokenRecord::Current(token),
         Err(_) => RefreshTokenRecord::Incompatible,
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub struct ProtectedKeychainStore;
-
-#[cfg(not(target_os = "macos"))]
-impl ProtectedKeychainStore {
-    pub(crate) fn new_with_test_profile(
-        _profile: Option<&Feat126SecureStorageProfile>,
-    ) -> Result<Self, NativeAuthError> {
-        Err(NativeAuthError::SecureStorageUnavailable)
     }
 }
 
@@ -284,6 +344,60 @@ mod tests {
         assert_eq!(KEYCHAIN_SERVICE, "ai.yijie.desktop.auth");
         assert_eq!(KEYCHAIN_ACCOUNT, "refresh-token-family-v2");
         assert_eq!(LEGACY_KEYCHAIN_ACCOUNT, "refresh-token-family");
+    }
+
+    #[tokio::test]
+    async fn ephemeral_native_auth_uses_strict_envelope_without_legacy_fallback() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let binding = binding(
+            "local-integration",
+            "https://localhost:9443/realms/yijie",
+            "yijie-desktop-local",
+        );
+        let mut synthetic_refresh_bytes = [0_u8; 32];
+        getrandom::fill(&mut synthetic_refresh_bytes).unwrap();
+        let synthetic_refresh = synthetic_refresh_bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let token = StoredRefreshToken::new(&binding, synthetic_refresh.clone(), 10, 20, 30);
+        let store = ProtectedKeychainStore::new_with_test_profile(Some(profile.clone())).unwrap();
+        assert!(matches!(
+            store.load().await.unwrap(),
+            RefreshTokenRecord::Missing
+        ));
+        store.save(&token).await.unwrap();
+
+        let restarted =
+            ProtectedKeychainStore::new_with_test_profile(Some(profile.clone())).unwrap();
+        match restarted.load().await.unwrap() {
+            RefreshTokenRecord::Current(loaded) => {
+                assert!(loaded.is_bound_to(&binding));
+                assert_eq!(loaded.refresh_token, synthetic_refresh);
+            }
+            _ => panic!("expected strict current refresh token"),
+        }
+        let mut rotated_refresh_bytes = [0_u8; 32];
+        getrandom::fill(&mut rotated_refresh_bytes).unwrap();
+        let rotated_refresh = rotated_refresh_bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let rotated = StoredRefreshToken::new(&binding, rotated_refresh.clone(), 40, 50, 60);
+        restarted.save(&rotated).await.unwrap();
+        match restarted.load().await.unwrap() {
+            RefreshTokenRecord::Current(loaded) => {
+                assert_eq!(loaded.refresh_token, rotated_refresh);
+            }
+            _ => panic!("expected rotated strict refresh token"),
+        }
+        restarted.delete().await.unwrap();
+        assert!(matches!(
+            restarted.load().await.unwrap(),
+            RefreshTokenRecord::Missing
+        ));
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
     }
 
     #[cfg(target_os = "macos")]

@@ -1,5 +1,8 @@
 use super::error::ChatError;
-use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+use crate::feat126_secure_storage::{
+    EphemeralSecretFile, EphemeralSecretRole, Feat126SecureStorageProfile,
+};
+use std::sync::Arc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const DATABASE_KEYCHAIN_SERVICE: &str = "com.yijie.ai.chat-db";
@@ -53,106 +56,166 @@ pub trait ReceiptKeyStore: Send + Sync {
     fn load_or_create(&self, database_exists: bool) -> Result<ReceiptKey, ChatError>;
 }
 
-#[cfg(target_os = "macos")]
-pub struct ProtectedDatabaseKeyStore {
-    entry: std::sync::Arc<keyring_core::Entry>,
+pub enum ProtectedDatabaseKeyStore {
+    Ephemeral(EphemeralSecretFile),
+    #[cfg(target_os = "macos")]
+    Protected(std::sync::Arc<keyring_core::Entry>),
 }
 
-#[cfg(target_os = "macos")]
-pub struct ProtectedReceiptKeyStore {
-    entry: std::sync::Arc<keyring_core::Entry>,
+pub enum ProtectedReceiptKeyStore {
+    Ephemeral(EphemeralSecretFile),
+    #[cfg(target_os = "macos")]
+    Protected(std::sync::Arc<keyring_core::Entry>),
 }
 
-#[cfg(target_os = "macos")]
 impl ProtectedDatabaseKeyStore {
-    pub fn new(profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
-        use keyring_core::api::CredentialStoreApi;
-        use std::collections::HashMap;
+    pub fn new(profile: Option<Arc<Feat126SecureStorageProfile>>) -> Result<Self, ChatError> {
+        if let Some(secret) = profile
+            .as_ref()
+            .and_then(|profile| profile.ephemeral_secret_file(EphemeralSecretRole::ChatSqlcipher))
+        {
+            return Ok(Self::Ephemeral(secret));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use keyring_core::api::CredentialStoreApi;
+            use std::collections::HashMap;
 
-        let store = apple_native_keyring_store::protected::Store::new()
-            .map_err(|_| ChatError::SecureStorageUnavailable)?;
-        let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
-        let (service, account) = profile
-            .map(|profile| {
-                let namespace = profile.database_namespace();
-                (namespace.service(), namespace.account())
-            })
-            .unwrap_or((DATABASE_KEYCHAIN_SERVICE, DATABASE_KEYCHAIN_ACCOUNT));
-        let entry = store
-            .build(service, account, Some(&modifiers))
-            .map_err(|_| ChatError::SecureStorageUnavailable)?;
-        Ok(Self {
-            entry: std::sync::Arc::new(entry),
-        })
+            let store = apple_native_keyring_store::protected::Store::new()
+                .map_err(|_| ChatError::SecureStorageUnavailable)?;
+            let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+            let (service, account) = profile
+                .as_deref()
+                .map(|profile| {
+                    let namespace = profile.database_namespace();
+                    (namespace.service(), namespace.account())
+                })
+                .unwrap_or((DATABASE_KEYCHAIN_SERVICE, DATABASE_KEYCHAIN_ACCOUNT));
+            let entry = store
+                .build(service, account, Some(&modifiers))
+                .map_err(|_| ChatError::SecureStorageUnavailable)?;
+            Ok(Self::Protected(std::sync::Arc::new(entry)))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = profile;
+            Err(ChatError::SecureStorageUnavailable)
+        }
     }
 }
 
-#[cfg(target_os = "macos")]
 impl ProtectedReceiptKeyStore {
-    pub fn new(profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
-        use keyring_core::api::CredentialStoreApi;
-        use std::collections::HashMap;
+    pub fn new(profile: Option<Arc<Feat126SecureStorageProfile>>) -> Result<Self, ChatError> {
+        if let Some(secret) = profile
+            .as_ref()
+            .and_then(|profile| profile.ephemeral_secret_file(EphemeralSecretRole::ReceiptHmac))
+        {
+            return Ok(Self::Ephemeral(secret));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use keyring_core::api::CredentialStoreApi;
+            use std::collections::HashMap;
 
-        let store = apple_native_keyring_store::protected::Store::new()
-            .map_err(|_| ChatError::SecureStorageUnavailable)?;
-        let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
-        let (service, account) = profile
-            .map(|profile| {
-                let namespace = profile.receipt_namespace();
-                (namespace.service(), namespace.account())
-            })
-            .unwrap_or((RECEIPT_KEYCHAIN_SERVICE, RECEIPT_KEYCHAIN_ACCOUNT));
-        let entry = store
-            .build(service, account, Some(&modifiers))
-            .map_err(|_| ChatError::SecureStorageUnavailable)?;
-        Ok(Self {
-            entry: std::sync::Arc::new(entry),
-        })
+            let store = apple_native_keyring_store::protected::Store::new()
+                .map_err(|_| ChatError::SecureStorageUnavailable)?;
+            let modifiers = HashMap::from([("access-policy", "when-unlocked-this-device-only")]);
+            let (service, account) = profile
+                .as_deref()
+                .map(|profile| {
+                    let namespace = profile.receipt_namespace();
+                    (namespace.service(), namespace.account())
+                })
+                .unwrap_or((RECEIPT_KEYCHAIN_SERVICE, RECEIPT_KEYCHAIN_ACCOUNT));
+            let entry = store
+                .build(service, account, Some(&modifiers))
+                .map_err(|_| ChatError::SecureStorageUnavailable)?;
+            Ok(Self::Protected(std::sync::Arc::new(entry)))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = profile;
+            Err(ChatError::SecureStorageUnavailable)
+        }
     }
 }
 
-#[cfg(target_os = "macos")]
 impl DatabaseKeyStore for ProtectedDatabaseKeyStore {
     fn load_or_create(&self, database_exists: bool) -> Result<DatabaseKey, ChatError> {
-        match self.entry.get_secret() {
-            Ok(secret) => decode_key(&secret),
-            Err(keyring_core::Error::NoEntry) if database_exists => {
-                Err(ChatError::DatabaseKeyMissing)
-            }
-            Err(keyring_core::Error::NoEntry) => {
-                let mut bytes = [0_u8; 32];
-                getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
-                if self.entry.set_secret(&bytes).is_err() {
-                    bytes.zeroize();
-                    return Err(ChatError::SecureStorageUnavailable);
+        match self {
+            Self::Ephemeral(file) => match file.load().map_err(map_ephemeral_error)? {
+                Some(secret) => decode_key(secret.as_slice()),
+                None if database_exists => Err(ChatError::DatabaseKeyMissing),
+                None => {
+                    let mut bytes = [0_u8; 32];
+                    getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
+                    if file.create(&bytes).is_err() {
+                        bytes.zeroize();
+                        return Err(ChatError::SecureStorageUnavailable);
+                    }
+                    Ok(DatabaseKey::from_bytes(bytes))
                 }
-                Ok(DatabaseKey::from_bytes(bytes))
-            }
-            Err(_) => Err(ChatError::SecureStorageUnavailable),
+            },
+            #[cfg(target_os = "macos")]
+            Self::Protected(entry) => match entry.get_secret() {
+                Ok(secret) => decode_key(&secret),
+                Err(keyring_core::Error::NoEntry) if database_exists => {
+                    Err(ChatError::DatabaseKeyMissing)
+                }
+                Err(keyring_core::Error::NoEntry) => {
+                    let mut bytes = [0_u8; 32];
+                    getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
+                    if entry.set_secret(&bytes).is_err() {
+                        bytes.zeroize();
+                        return Err(ChatError::SecureStorageUnavailable);
+                    }
+                    Ok(DatabaseKey::from_bytes(bytes))
+                }
+                Err(_) => Err(ChatError::SecureStorageUnavailable),
+            },
         }
     }
 }
 
-#[cfg(target_os = "macos")]
 impl ReceiptKeyStore for ProtectedReceiptKeyStore {
     fn load_or_create(&self, database_exists: bool) -> Result<ReceiptKey, ChatError> {
-        match self.entry.get_secret() {
-            Ok(secret) => decode_receipt_key(&secret),
-            Err(keyring_core::Error::NoEntry) if database_exists => {
-                Err(ChatError::DatabaseKeyMissing)
-            }
-            Err(keyring_core::Error::NoEntry) => {
-                let mut bytes = [0_u8; 32];
-                getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
-                if self.entry.set_secret(&bytes).is_err() {
-                    bytes.zeroize();
-                    return Err(ChatError::SecureStorageUnavailable);
+        match self {
+            Self::Ephemeral(file) => match file.load().map_err(map_ephemeral_error)? {
+                Some(secret) => decode_receipt_key(secret.as_slice()),
+                None if database_exists => Err(ChatError::DatabaseKeyMissing),
+                None => {
+                    let mut bytes = [0_u8; 32];
+                    getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
+                    if file.create(&bytes).is_err() {
+                        bytes.zeroize();
+                        return Err(ChatError::SecureStorageUnavailable);
+                    }
+                    Ok(ReceiptKey::from_bytes(bytes))
                 }
-                Ok(ReceiptKey::from_bytes(bytes))
-            }
-            Err(_) => Err(ChatError::SecureStorageUnavailable),
+            },
+            #[cfg(target_os = "macos")]
+            Self::Protected(entry) => match entry.get_secret() {
+                Ok(secret) => decode_receipt_key(&secret),
+                Err(keyring_core::Error::NoEntry) if database_exists => {
+                    Err(ChatError::DatabaseKeyMissing)
+                }
+                Err(keyring_core::Error::NoEntry) => {
+                    let mut bytes = [0_u8; 32];
+                    getrandom::fill(&mut bytes).map_err(|_| ChatError::SecureStorageUnavailable)?;
+                    if entry.set_secret(&bytes).is_err() {
+                        bytes.zeroize();
+                        return Err(ChatError::SecureStorageUnavailable);
+                    }
+                    Ok(ReceiptKey::from_bytes(bytes))
+                }
+                Err(_) => Err(ChatError::SecureStorageUnavailable),
+            },
         }
     }
+}
+
+fn map_ephemeral_error(_error: crate::feat126_secure_storage::SecureStorageError) -> ChatError {
+    ChatError::SecureStorageUnavailable
 }
 
 fn decode_key(bytes: &[u8]) -> Result<DatabaseKey, ChatError> {
@@ -167,40 +230,6 @@ fn decode_receipt_key(bytes: &[u8]) -> Result<ReceiptKey, ChatError> {
         .try_into()
         .map_err(|_| ChatError::SecureStorageUnavailable)?;
     Ok(ReceiptKey::from_bytes(key))
-}
-
-#[cfg(not(target_os = "macos"))]
-pub struct ProtectedDatabaseKeyStore;
-
-#[cfg(not(target_os = "macos"))]
-pub struct ProtectedReceiptKeyStore;
-
-#[cfg(not(target_os = "macos"))]
-impl ProtectedDatabaseKeyStore {
-    pub fn new(_profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
-        Err(ChatError::SecureStorageUnavailable)
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-impl DatabaseKeyStore for ProtectedDatabaseKeyStore {
-    fn load_or_create(&self, _database_exists: bool) -> Result<DatabaseKey, ChatError> {
-        Err(ChatError::SecureStorageUnavailable)
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-impl ProtectedReceiptKeyStore {
-    pub fn new(_profile: Option<&Feat126SecureStorageProfile>) -> Result<Self, ChatError> {
-        Err(ChatError::SecureStorageUnavailable)
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-impl ReceiptKeyStore for ProtectedReceiptKeyStore {
-    fn load_or_create(&self, _database_exists: bool) -> Result<ReceiptKey, ChatError> {
-        Err(ChatError::SecureStorageUnavailable)
-    }
 }
 
 #[cfg(test)]
@@ -227,5 +256,60 @@ mod tests {
             decode_receipt_key(b"receipt-canary"),
             Err(ChatError::SecureStorageUnavailable)
         ));
+    }
+
+    #[test]
+    fn ephemeral_chat_keys_are_random_separate_and_restart_stable() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let database = ProtectedDatabaseKeyStore::new(Some(profile.clone())).unwrap();
+        let receipt = ProtectedReceiptKeyStore::new(Some(profile.clone())).unwrap();
+        let first_database = database.load_or_create(false).unwrap();
+        let first_receipt = receipt.load_or_create(false).unwrap();
+        assert_ne!(first_database.expose(), first_receipt.expose());
+
+        let restarted_database = ProtectedDatabaseKeyStore::new(Some(profile.clone())).unwrap();
+        let restarted_receipt = ProtectedReceiptKeyStore::new(Some(profile.clone())).unwrap();
+        assert_eq!(
+            restarted_database.load_or_create(true).unwrap().expose(),
+            first_database.expose()
+        );
+        assert_eq!(
+            restarted_receipt.load_or_create(true).unwrap().expose(),
+            first_receipt.expose()
+        );
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
+    }
+
+    #[tokio::test]
+    async fn ephemeral_keys_reopen_the_same_sqlcipher_database() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let chat_directory = profile.desktop_app_data().join("chat");
+        let owner = uuid::Uuid::now_v7().to_string();
+        let tenant = uuid::Uuid::now_v7().to_string();
+        let first = crate::chat::worker::DatabaseWorker::start(
+            chat_directory.clone(),
+            crate::chat::database::ChatScope::new(owner.clone(), tenant.clone()).unwrap(),
+            Box::new(ProtectedDatabaseKeyStore::new(Some(profile.clone())).unwrap()),
+            Box::new(ProtectedReceiptKeyStore::new(Some(profile.clone())).unwrap()),
+        )
+        .unwrap();
+        let first_version = first.schema_version().await.unwrap();
+        drop(first);
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+
+        let restarted = crate::chat::worker::DatabaseWorker::start(
+            chat_directory.clone(),
+            crate::chat::database::ChatScope::new(owner, tenant).unwrap(),
+            Box::new(ProtectedDatabaseKeyStore::new(Some(profile.clone())).unwrap()),
+            Box::new(ProtectedReceiptKeyStore::new(Some(profile.clone())).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(restarted.schema_version().await.unwrap(), first_version);
+        drop(restarted);
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        std::fs::remove_dir_all(chat_directory).unwrap();
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile).unwrap();
+        assert!(!root.exists());
     }
 }

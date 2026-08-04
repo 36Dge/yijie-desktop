@@ -76,7 +76,16 @@ impl SidecarConfig {
             return Err(ChatError::InvalidConfiguration);
         }
         let test_profile = load_feat126_test_profile()?;
-        if std::env::var("YIJIE_FEAT126_S10_SECURE_STORAGE_ENABLED").as_deref() == Ok("true") {
+        let secure_storage =
+            std::env::var("YIJIE_FEAT126_S10_SECURE_STORAGE_ENABLED").unwrap_or_default();
+        let ephemeral_storage =
+            std::env::var("YIJIE_FEAT126_S10_EPHEMERAL_SECRET_BACKEND_ENABLED").unwrap_or_default();
+        if !matches!(secure_storage.as_str(), "" | "false" | "true")
+            || !matches!(ephemeral_storage.as_str(), "" | "false" | "true")
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        if secure_storage == "true" || ephemeral_storage == "true" {
             let secure_storage =
                 crate::feat126_secure_storage::Feat126SecureStorageProfile::from_environment()
                     .map_err(|_| ChatError::InvalidConfiguration)?

@@ -210,9 +210,8 @@ impl ChatRuntime {
             return Ok(worker);
         }
         let worker = tokio::task::spawn_blocking(move || {
-            let key_store = ProtectedDatabaseKeyStore::new(config.secure_storage.as_deref())?;
-            let receipt_key_store =
-                ProtectedReceiptKeyStore::new(config.secure_storage.as_deref())?;
+            let key_store = ProtectedDatabaseKeyStore::new(config.secure_storage.clone())?;
+            let receipt_key_store = ProtectedReceiptKeyStore::new(config.secure_storage.clone())?;
             DatabaseWorker::start(
                 config.chat_directory,
                 config.scope,
