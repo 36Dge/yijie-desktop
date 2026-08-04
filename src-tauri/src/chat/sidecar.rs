@@ -577,6 +577,7 @@ fn prepare_capture(
         stderr_truncated: false,
         log_limit_bytes: MAX_CHILD_LOG_BYTES,
     };
+    write_process_evidence(&process_manifest, &evidence)?;
     Ok(PreparedCapture {
         log_directory,
         process_manifest,
@@ -912,6 +913,10 @@ mod tests {
         };
         let nonce = "019fbd88-cbc3-7bf1-934d-7b05cd693f81";
         let prepared = prepare_capture(&config, nonce).unwrap();
+        let prepared_evidence: ProcessEvidence =
+            serde_json::from_slice(&fs::read(&prepared.process_manifest).unwrap()).unwrap();
+        assert_eq!(prepared_evidence.state, "prepared");
+        assert_eq!(prepared_evidence.pid, None);
         let environment = config.environment(
             nonce,
             Some(&prepared.log_directory),
