@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   CHAT_EVENT_CHANNEL,
+  CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_IPC_SCHEMA_VERSION,
   ChatClientError,
   ChatContractError,
@@ -10,6 +11,7 @@ import {
   parseChatIpcError,
   parseChatProjectionEvent,
   parseCleanupResponse,
+  parseControlPlaneEvent,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
   parseLocalReadinessResponse,
@@ -21,9 +23,11 @@ import {
   parseReasoningResponse,
   parseResyncResponse,
   parseSessionPageResponse,
+  parseSessionControlPlaneResponse,
   parseSubscriptionResponse,
   type BoundChatContext,
   type ChatCleanupStatus,
+  type ChatControlPlaneEvent,
   type ChatCreatedTurn,
   type ChatHistoryPage,
   type ChatLocalReadiness,
@@ -32,6 +36,7 @@ import {
   type ChatReasoningItem,
   type ChatResyncProjection,
   type ChatSessionPage,
+  type ChatSessionControlPlane,
 } from "../domain/chat-ipc";
 
 type InvokeFn = (command: string, arguments_?: Record<string, unknown>) => Promise<unknown>;
@@ -62,6 +67,7 @@ export interface ChatClient {
   interruptTurn(contextId: string, sessionId: string, operationId: string): Promise<ChatCreatedTurn>;
   deleteSession(contextId: string, sessionId: string, operationId: string): Promise<ChatCleanupStatus>;
   getCleanupStatus(contextId: string, operationId: string, signal?: AbortSignal): Promise<ChatCleanupStatus | null>;
+  getSessionControlPlane(contextId: string, sessionId: string, signal?: AbortSignal): Promise<ChatSessionControlPlane>;
   getLocalReadiness(contextId: string, signal?: AbortSignal): Promise<ChatLocalReadiness>;
   requestLocalRecovery(contextId: string, operationId: string): Promise<ChatLocalReadiness>;
   subscribeSession(contextId: string, sessionId: string): Promise<string>;
@@ -70,6 +76,10 @@ export interface ChatClient {
   cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
   onEvent(
     handler: (event: ChatProjectionEvent) => void,
+    onInvalid?: () => void,
+  ): Promise<UnlistenFn>;
+  onControlPlaneEvent(
+    handler: (event: ChatControlPlaneEvent) => void,
     onInvalid?: () => void,
   ): Promise<UnlistenFn>;
 }
@@ -210,6 +220,14 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     getCleanupStatus: (contextId, operationId, signal) =>
       runRead("chat_get_cleanup_status_v1", contextId, { operationId }, parseOptionalCleanupResponse, signal),
+    getSessionControlPlane: (contextId, sessionId, signal) =>
+      runRead(
+        "chat_get_session_control_plane_v1",
+        contextId,
+        { sessionId },
+        parseSessionControlPlaneResponse,
+        signal,
+      ),
     getLocalReadiness: (contextId, signal) =>
       runRead("chat_get_local_readiness_v1", contextId, {}, parseLocalReadinessResponse, signal),
     requestLocalRecovery(contextId, operationId) {
@@ -234,6 +252,16 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {
         try {
           handler(parseChatProjectionEvent(payload));
+        } catch (error: unknown) {
+          if (!(error instanceof ChatContractError)) throw error;
+          onInvalid?.();
+        }
+      });
+    },
+    async onControlPlaneEvent(handler, onInvalid) {
+      return transport.listen(CHAT_CONTROL_PLANE_EVENT_CHANNEL, (payload) => {
+        try {
+          handler(parseControlPlaneEvent(payload));
         } catch (error: unknown) {
           if (!(error instanceof ChatContractError)) throw error;
           onInvalid?.();

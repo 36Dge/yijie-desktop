@@ -1,9 +1,10 @@
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
     ActiveTurnContext, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState, DeletionStatus,
-    HistoryPage, OutboxKind, PendingConversation, ProjectSummary, ReasoningItem, ReasoningPart,
-    ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
-    StoredEventCursor, TerminalTurnCommit, TurnProgress,
+    HistoryPage, OutboxKind, PendingConversation, ProjectSummary, PublicTaskBindingState,
+    PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot,
+    SessionPage, SessionPageCursor, SessionSummary, StoredEventCursor, TerminalTurnCommit,
+    TurnProgress,
 };
 use super::error::ChatError;
 use super::host_bridge::{HostBridge, HostTrace};
@@ -13,6 +14,9 @@ use super::host_domain::{
     HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSessionState, HostTurnStatus,
 };
 use super::native_project;
+use super::public_tasks::{
+    PublicTaskControlPlane, PublicTaskCreateIntent, PublicTaskCreateOutcome, PublicTaskIssueCode,
+};
 use super::worker::DatabaseWorker;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
@@ -35,6 +39,7 @@ const PROGRESS_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 pub struct ConversationApplication {
     database: DatabaseWorker,
     host: Option<Arc<HostBridge>>,
+    public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
 }
 
 #[derive(Clone)]
@@ -78,8 +83,12 @@ impl AuthorizedConversationApplication {
     ) -> Result<PendingConversation, ChatError> {
         self.authorize(context_id, ChatAction::UseProject)?;
         self.authorize(context_id, ChatAction::CreateSession)?;
+        let authorization_revision = self
+            .authorization
+            .authorization_revision(context_id, ChatAction::CreateSession, unix_seconds()?)
+            .map_err(|_| ChatError::ScopeDenied)?;
         self.application
-            .create_local_session(project_id, input, operation_id)
+            .create_local_session(project_id, input, operation_id, authorization_revision)
             .await
     }
 
@@ -207,6 +216,17 @@ impl AuthorizedConversationApplication {
             .await
     }
 
+    pub async fn public_task_control_plane_status(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .public_task_control_plane_status(session_id)
+            .await
+    }
+
     pub async fn list_projects(&self, context_id: Uuid) -> Result<Vec<ProjectSummary>, ChatError> {
         self.authorize(context_id, ChatAction::ReadProjects)?;
         self.application.list_projects().await
@@ -240,11 +260,12 @@ impl Debug for ConversationApplication {
             .debug_struct("ConversationApplication")
             .field("database", &"[SQLCIPHER_WORKER]")
             .field("host_configured", &self.host.is_some())
+            .field("public_tasks_configured", &self.public_tasks.is_some())
             .finish()
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DispatchOutcome {
     Idle,
     SessionBound { session_id: Uuid },
@@ -252,6 +273,7 @@ pub enum DispatchOutcome {
     InterruptAccepted { session_id: Uuid },
     RetryScheduled { operation_id: Uuid },
     FailedSafely { operation_id: Uuid },
+    ControlPlaneChanged(PublicTaskControlPlaneStatus),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -473,10 +495,15 @@ impl Debug for ReducerOutcome {
 }
 
 impl ConversationApplication {
-    pub fn new(database: DatabaseWorker, host: Arc<HostBridge>) -> Self {
+    pub fn new(
+        database: DatabaseWorker,
+        host: Arc<HostBridge>,
+        public_tasks: Arc<dyn PublicTaskControlPlane>,
+    ) -> Self {
         Self {
             database,
             host: Some(host),
+            public_tasks: Some(public_tasks),
         }
     }
 
@@ -484,6 +511,7 @@ impl ConversationApplication {
         Self {
             database,
             host: None,
+            public_tasks: None,
         }
     }
 
@@ -491,14 +519,26 @@ impl ConversationApplication {
         self.host.as_deref().ok_or(ChatError::SidecarUnavailable)
     }
 
+    fn public_tasks(&self) -> Result<&dyn PublicTaskControlPlane, ChatError> {
+        self.public_tasks
+            .as_deref()
+            .ok_or(ChatError::OrchestrationUnavailable)
+    }
+
     pub async fn create_local_session(
         &self,
         project_id: Uuid,
         input: String,
         create_operation_id: Uuid,
+        authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
         self.database
-            .create_session_and_enqueue(project_id, input, create_operation_id)
+            .create_session_and_enqueue_with_authority(
+                project_id,
+                input,
+                create_operation_id,
+                authorization_revision,
+            )
             .await
     }
 
@@ -606,6 +646,24 @@ impl ConversationApplication {
         self.database.recovery_snapshot().await
     }
 
+    pub async fn public_task_control_plane_status(
+        &self,
+        session_id: Uuid,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.database
+            .public_task_control_plane_status(session_id)
+            .await
+    }
+
+    pub async fn resume_blocked_public_tasks(
+        &self,
+        authorization_revision: u64,
+    ) -> Result<usize, ChatError> {
+        self.database
+            .resume_blocked_public_tasks(authorization_revision, unix_seconds()?)
+            .await
+    }
+
     pub async fn resync_session(
         &self,
         session_id: Uuid,
@@ -662,6 +720,87 @@ impl ConversationApplication {
             .database
             .load_create_session_dispatch(claimed.operation_id)
             .await?;
+        let public_task_id = match dispatch.public_task_id {
+            Some(public_task_id) => public_task_id,
+            None => {
+                let intent = PublicTaskCreateIntent {
+                    operation_id: dispatch.operation_id,
+                    client_reference_id: dispatch.client_reference_id,
+                    authorization_revision: dispatch.authorization_revision,
+                };
+                match self.public_tasks()?.create_task(intent).await {
+                    PublicTaskCreateOutcome::Bound { public_task_id } => {
+                        let status = self
+                            .database
+                            .bind_public_task(dispatch.operation_id, public_task_id, now)
+                            .await?;
+                        debug_assert_eq!(status.state, PublicTaskBindingState::Bound);
+                        self.database
+                            .reschedule_outbox(dispatch.operation_id, now)
+                            .await?;
+                        return Ok(DispatchOutcome::ControlPlaneChanged(status));
+                    }
+                    PublicTaskCreateOutcome::BlockedAuth => {
+                        return self
+                            .transition_public_create(
+                                dispatch.operation_id,
+                                PublicTaskBindingState::BlockedAuth,
+                                PublicTaskIssueCode::Unauthenticated,
+                                None,
+                                now,
+                            )
+                            .await;
+                    }
+                    PublicTaskCreateOutcome::Denied => {
+                        return self
+                            .transition_public_create(
+                                dispatch.operation_id,
+                                PublicTaskBindingState::Denied,
+                                PublicTaskIssueCode::CapabilityDenied,
+                                None,
+                                now,
+                            )
+                            .await;
+                    }
+                    PublicTaskCreateOutcome::RetryWait => {
+                        let next = now
+                            .checked_add(RETRY_DELAY_SECONDS)
+                            .ok_or(ChatError::InvalidInput)?;
+                        return self
+                            .transition_public_create(
+                                dispatch.operation_id,
+                                PublicTaskBindingState::RetryWait,
+                                PublicTaskIssueCode::TemporarilyUnavailable,
+                                Some(next),
+                                now,
+                            )
+                            .await;
+                    }
+                    PublicTaskCreateOutcome::Conflict => {
+                        return self
+                            .transition_public_create(
+                                dispatch.operation_id,
+                                PublicTaskBindingState::Failed,
+                                PublicTaskIssueCode::Conflict,
+                                None,
+                                now,
+                            )
+                            .await;
+                    }
+                    PublicTaskCreateOutcome::ProtocolError => {
+                        return self
+                            .transition_public_create(
+                                dispatch.operation_id,
+                                PublicTaskBindingState::Failed,
+                                PublicTaskIssueCode::ProtocolError,
+                                None,
+                                now,
+                            )
+                            .await;
+                    }
+                }
+            }
+        };
         let bookmark = self
             .database
             .project_bookmark(dispatch.project_id.to_string())
@@ -676,11 +815,11 @@ impl ConversationApplication {
         };
         match self
             .host()?
-            .start_session(dispatch.task_id, &selection.canonical_path, &trace)
+            .start_session(public_task_id, &selection.canonical_path, &trace)
             .await
         {
             Ok(session)
-                if session.task_id == dispatch.task_id
+                if session.task_id == public_task_id
                     && session.state == HostSessionState::Idle
                     && session.model_ready
                     && session.codex_thread_id.is_some() =>
@@ -688,7 +827,7 @@ impl ConversationApplication {
                 self.database
                     .bind_host_session_and_enqueue_turn(
                         dispatch.operation_id,
-                        dispatch.task_id,
+                        public_task_id,
                         session.agent_session_id,
                         session.codex_thread_id.expect("checked above"),
                     )
@@ -708,6 +847,27 @@ impl ConversationApplication {
                     .await
             }
         }
+    }
+
+    async fn transition_public_create(
+        &self,
+        operation_id: Uuid,
+        state: PublicTaskBindingState,
+        issue_code: PublicTaskIssueCode,
+        next_attempt_at: Option<i64>,
+        now: i64,
+    ) -> Result<DispatchOutcome, ChatError> {
+        let status = self
+            .database
+            .transition_public_task_binding(
+                operation_id,
+                state,
+                issue_code.as_str().to_owned(),
+                next_attempt_at,
+                now,
+            )
+            .await?;
+        Ok(DispatchOutcome::ControlPlaneChanged(status))
     }
 
     async fn dispatch_turn(
@@ -1643,15 +1803,21 @@ mod tests {
     #[cfg(target_os = "macos")]
     use crate::chat::keychain::{DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore};
     #[cfg(target_os = "macos")]
+    use crate::chat::public_tasks::FixedPublicTaskControlPlane;
+    #[cfg(target_os = "macos")]
     use crate::chat::sidecar::HostConnection;
+    #[cfg(target_os = "macos")]
+    use crate::native_auth::{NativeAuthConfig, NativeAuthRuntime, OidcClient, SecretValue};
     #[cfg(target_os = "macos")]
     use std::fs;
     #[cfg(target_os = "macos")]
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     #[cfg(target_os = "macos")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     #[cfg(target_os = "macos")]
     use tokio::net::TcpListener;
+    #[cfg(target_os = "macos")]
+    use zeroize::Zeroizing;
 
     struct EventIdentity {
         stream_id: Uuid,
@@ -2172,6 +2338,329 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    fn s10p3_synthetic_password() -> Zeroizing<String> {
+        assert_eq!(
+            std::env::var("YIJIE_FEAT126_S10P3_REAL_MAIN_CHAIN").as_deref(),
+            Ok("true")
+        );
+        let path = std::env::var("YIJIE_FEAT126_S10_INFRA_SECRETS_PATH")
+            .expect("S10E ignored secrets path");
+        let metadata = fs::symlink_metadata(&path).expect("S10E secrets metadata");
+        assert!(metadata.file_type().is_file());
+        assert!(!metadata.file_type().is_symlink());
+        assert_eq!(metadata.mode() & 0o077, 0);
+        assert!(metadata.len() > 0 && metadata.len() <= 16 * 1024);
+        let contents = Zeroizing::new(fs::read_to_string(&path).expect("read S10E secrets"));
+        let mut password = None;
+        let mut names = std::collections::BTreeSet::new();
+        for line in contents.lines() {
+            let (name, value) = line.split_once('=').expect("closed secret entry");
+            assert!(names.insert(name));
+            assert!(!value.is_empty());
+            assert!(!value.chars().any(char::is_whitespace));
+            if name == "FEAT126_S10_SYNTHETIC_USER_A_PASSWORD" {
+                password = Some(Zeroizing::new(value.to_owned()));
+            }
+        }
+        assert_eq!(names.len(), 5);
+        password.expect("synthetic user A credential")
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn s10p3_authorization_code(
+        config: &NativeAuthConfig,
+        authorization_url: &url::Url,
+        expected_state: &str,
+        expected_issuer: &str,
+        password: &str,
+    ) -> SecretValue {
+        use reqwest::header::{COOKIE, LOCATION, SET_COOKIE};
+
+        let client = config
+            .harden_http_client(
+                reqwest::Client::builder()
+                    .https_only(true)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .connect_timeout(Duration::from_secs(5))
+                    .timeout(Duration::from_secs(10)),
+            )
+            .build()
+            .expect("synthetic login client");
+        let response = client
+            .get(authorization_url.clone())
+            .send()
+            .await
+            .expect("authorization page");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let cookies = response
+            .headers()
+            .get_all(SET_COOKIE)
+            .iter()
+            .map(|value| {
+                value
+                    .to_str()
+                    .expect("ASCII cookie")
+                    .split(';')
+                    .next()
+                    .expect("cookie pair")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        assert!(!cookies.is_empty());
+        let body = response.bytes().await.expect("authorization body");
+        assert!(body.len() <= 256 * 1024);
+        let body = std::str::from_utf8(&body).expect("UTF-8 authorization page");
+        let form = body.find("id=\"kc-form-login\"").expect("login form");
+        let action = body[form..]
+            .find("action=\"")
+            .map(|offset| form + offset + "action=\"".len())
+            .expect("login action");
+        let end = body[action..]
+            .find('"')
+            .map(|offset| action + offset)
+            .expect("login action end");
+        let action = body[action..end].replace("&amp;", "&");
+        assert!(!action.contains('&') || !action.contains("&amp;"));
+        let action = url::Url::parse(&action).expect("absolute login action");
+        assert_eq!(action.scheme(), "https");
+        assert_eq!(action.origin(), config.issuer.origin());
+        assert!(action.path().contains("/login-actions/authenticate"));
+
+        let response = client
+            .post(action)
+            .header(COOKIE, cookies)
+            .form(&[
+                ("username", "feat125-synthetic-user-a"),
+                ("password", password),
+                ("credentialId", ""),
+            ])
+            .send()
+            .await
+            .expect("submit synthetic login");
+        assert!(response.status().is_redirection());
+        let location = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("authorization callback");
+        let callback = url::Url::parse(location).expect("callback URL");
+        assert_eq!(callback.scheme(), "http");
+        assert_eq!(callback.host_str(), Some("127.0.0.1"));
+        assert_eq!(callback.path(), "/oauth/callback");
+        let query = callback
+            .query_pairs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            query.get("state").map(|value| value.as_ref()),
+            Some(expected_state)
+        );
+        assert_eq!(
+            query.get("iss").map(|value| value.as_ref()),
+            Some(expected_issuer)
+        );
+        SecretValue::new(query.get("code").expect("authorization code").to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn s10p3_access_claim_summary(encoded: &str) -> serde_json::Value {
+        fn decode_base64url(value: &str) -> Vec<u8> {
+            let mut output = Vec::with_capacity(value.len() * 3 / 4);
+            let mut accumulator = 0_u32;
+            let mut bits = 0_u8;
+            for byte in value.bytes() {
+                let digit = match byte {
+                    b'A'..=b'Z' => byte - b'A',
+                    b'a'..=b'z' => byte - b'a' + 26,
+                    b'0'..=b'9' => byte - b'0' + 52,
+                    b'-' => 62,
+                    b'_' => 63,
+                    _ => panic!("invalid base64url token segment"),
+                };
+                accumulator = (accumulator << 6) | u32::from(digit);
+                bits += 6;
+                if bits >= 8 {
+                    bits -= 8;
+                    output.push((accumulator >> bits) as u8);
+                    accumulator &= (1_u32 << bits).saturating_sub(1);
+                }
+            }
+            output
+        }
+
+        let mut segments = encoded.split('.');
+        let _header = segments.next().expect("JWT header");
+        let claims = segments.next().expect("JWT claims");
+        assert!(segments.next().is_some());
+        assert!(segments.next().is_none());
+        let claims: serde_json::Value =
+            serde_json::from_slice(&decode_base64url(claims)).expect("JWT claims JSON");
+        serde_json::json!({
+            "iss": claims.get("iss"),
+            "sub": claims.get("sub"),
+            "aud": claims.get("aud"),
+            "iat": claims.get("iat"),
+            "nbf": claims.get("nbf"),
+            "exp": claims.get("exp"),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "S10P3 local integration: requires the explicit S10E synthetic API/identity profile"]
+    async fn s10p3_real_desktop_rust_path_binds_public_task_before_host_and_retains_public_row() {
+        const OWNER: &str = "12500000-0000-4000-8000-000000000001";
+        const TENANT: &str = "12500000-0000-4000-8000-100000000001";
+        const TOKEN: &str = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+
+        let password = s10p3_synthetic_password();
+        let config = NativeAuthConfig::from_environment()
+            .expect("native auth configuration")
+            .expect("native auth enabled");
+        let oidc = OidcClient::new(config.clone()).expect("OIDC client");
+        let attempt = oidc
+            .begin_login("http://127.0.0.1/oauth/callback".to_owned())
+            .await
+            .expect("begin synthetic login");
+        let code = s10p3_authorization_code(
+            &config,
+            &attempt.authorization_url,
+            attempt.expected_state.expose(),
+            &attempt.expected_issuer,
+            password.as_str(),
+        )
+        .await;
+        let tokens = oidc
+            .exchange_code(attempt, code)
+            .await
+            .expect("exchange synthetic code");
+        let claims = s10p3_access_claim_summary(tokens.access_token.expose());
+        assert_eq!(
+            claims["iss"],
+            serde_json::json!("https://localhost:8443/realms/yijie-local")
+        );
+        assert_eq!(claims["sub"], serde_json::json!(OWNER));
+        assert!(
+            claims["aud"] == serde_json::json!("https://api.yijie.ai")
+                || claims["aud"] == serde_json::json!(["https://api.yijie.ai"]),
+            "content-free access claim summary: {claims}"
+        );
+        assert!(claims["iat"].is_number());
+        assert!(claims["nbf"].is_number());
+        assert!(claims["exp"].is_number());
+        let native_auth = NativeAuthRuntime::from_test_oidc_tokens(config, oidc, tokens)
+            .await
+            .expect("native auth runtime");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let projection = native_auth
+            .chat_projection(TENANT, now)
+            .await
+            .expect("real capability projection");
+        assert!(projection
+            .capabilities
+            .iter()
+            .any(|value| value == "task.create"));
+
+        let root = std::env::temp_dir().join(format!("yijie-s10p3-real-{}", Uuid::now_v7()));
+        let project_path = root.join("synthetic-project");
+        let host_directory = root.join("host");
+        fs::create_dir_all(&project_path).unwrap();
+        fs::create_dir(&host_directory).unwrap();
+        fs::set_permissions(&host_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = host_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let selection = native_project::create_selection(&project_path)
+            .unwrap()
+            .unwrap();
+        let database = DatabaseWorker::start(
+            root.join("chat"),
+            super::super::database::ChatScope::new(OWNER.to_owned(), TENANT.to_owned()).unwrap(),
+            Box::new(TestKeyStore),
+            Box::new(TestKeyStore),
+        )
+        .unwrap();
+        let project = database
+            .register_project(selection.canonical_path, selection.bookmark)
+            .await
+            .unwrap();
+        let provider = Arc::new(
+            super::super::public_tasks::NativePublicTaskControlPlane::new(
+                native_auth,
+                Uuid::parse_str(OWNER).unwrap(),
+                Uuid::parse_str(TENANT).unwrap(),
+            ),
+        );
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port: 9,
+                    token_path,
+                    instance_nonce: "019fbd88-cbc3-7bf1-934d-7b05cd693f98".to_owned(),
+                })
+                .unwrap(),
+            ),
+            provider,
+        );
+        let operation_id = Uuid::now_v7();
+        let pending = application
+            .create_local_session(
+                Uuid::parse_str(&project.id).unwrap(),
+                "S10P3 synthetic local-only canary".to_owned(),
+                operation_id,
+                projection.authorization_revision,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::ControlPlaneChanged(PublicTaskControlPlaneStatus {
+                session_id: pending.session_id,
+                state: PublicTaskBindingState::Bound,
+                issue_code: None,
+            })
+        );
+        assert_eq!(
+            application
+                .public_task_control_plane_status(pending.session_id)
+                .await
+                .unwrap()
+                .state,
+            PublicTaskBindingState::Bound
+        );
+
+        let delete_operation = Uuid::now_v7();
+        application
+            .begin_session_deletion(pending.session_id, delete_operation)
+            .await
+            .unwrap();
+        assert!(matches!(
+            application.run_background_once().await.unwrap(),
+            CoordinatorOutcome::CleanupComplete(_)
+        ));
+        assert!(application
+            .list_sessions(None, None)
+            .await
+            .unwrap()
+            .sessions
+            .is_empty());
+        assert_eq!(
+            application
+                .public_task_control_plane_status(pending.session_id)
+                .await,
+            Err(ChatError::NotFound)
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
     fn sse_event(
         stream_id: Uuid,
         sequence: u64,
@@ -2238,7 +2727,7 @@ mod tests {
             .create_session_and_enqueue(project_id, "首条消息".to_owned(), create_operation_id)
             .await
             .unwrap();
-        let task_id = pending.task_id;
+        let task_id = Uuid::now_v7();
         let agent_session_id = Uuid::now_v7();
         let thread_id = Uuid::now_v7();
         let runtime_turn_id = Uuid::now_v7();
@@ -2338,8 +2827,26 @@ mod tests {
             })
             .unwrap(),
         );
-        let application = ConversationApplication::new(database.clone(), bridge);
-        assert_eq!(pending.task_id, pending.session_id);
+        let public_tasks = Arc::new(FixedPublicTaskControlPlane::new([
+            PublicTaskCreateOutcome::Bound {
+                public_task_id: task_id,
+            },
+        ]));
+        let application =
+            ConversationApplication::new(database.clone(), bridge, public_tasks.clone());
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::ControlPlaneChanged(PublicTaskControlPlaneStatus {
+                session_id: pending.session_id,
+                state: PublicTaskBindingState::Bound,
+                issue_code: None,
+            })
+        );
+        let public_calls = public_tasks.calls();
+        assert_eq!(public_calls.len(), 1);
+        assert_eq!(public_calls[0].operation_id, create_operation_id);
+        assert_eq!(public_calls[0].authorization_revision, 1);
+        assert_ne!(public_calls[0].client_reference_id, pending.session_id);
         assert_eq!(
             application.dispatch_next().await.unwrap(),
             DispatchOutcome::SessionBound {
@@ -2430,11 +2937,25 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let public_task_id = Uuid::now_v7();
+        database
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .await
+            .unwrap();
+        database
+            .reschedule_outbox(create.operation_id, now)
+            .await
+            .unwrap();
+        let create = database
+            .claim_next_conversation_outbox(now, 30)
+            .await
+            .unwrap()
+            .unwrap();
         let agent_session_id = Uuid::now_v7();
         database
             .bind_host_session_and_enqueue_turn(
                 create.operation_id,
-                pending.task_id,
+                public_task_id,
                 agent_session_id,
                 Uuid::now_v7(),
             )
@@ -2496,6 +3017,7 @@ mod tests {
                 })
                 .unwrap(),
             ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
         );
         application
             .begin_session_deletion(pending.session_id, operation_id)

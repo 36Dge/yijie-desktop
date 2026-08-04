@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatClient } from "../api/chat-client";
 import type {
+  ChatControlPlaneEvent,
   ChatProjectionEvent,
   ChatResyncProjection,
   ChatSession,
@@ -75,10 +76,12 @@ function event(
 function fakeClient(overrides: Partial<ChatClient> = {}): {
   client: ChatClient;
   emit: (event: ChatProjectionEvent) => void;
+  emitControlPlane: (event: ChatControlPlaneEvent) => void;
   invalidate: () => void;
 } {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
   let invalidHandler: () => void = () => undefined;
+  let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   const client: ChatClient = {
     bindContext: async () => ({
       contextId: CONTEXT,
@@ -114,6 +117,13 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       expiresAt: null,
     }),
     getCleanupStatus: async () => null,
+    getSessionControlPlane: async (_context, sessionId) => ({
+      sessionId,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    }),
     getLocalReadiness: async () => ({
       lifecycle: "ready",
       host: "ready",
@@ -145,9 +155,18 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       invalidHandler = onInvalid ?? (() => undefined);
       return () => undefined;
     },
+    onControlPlaneEvent: async (handler) => {
+      controlPlaneHandler = handler;
+      return () => undefined;
+    },
     ...overrides,
   };
-  return { client, emit: (value) => eventHandler(value), invalidate: () => invalidHandler() };
+  return {
+    client,
+    emit: (value) => eventHandler(value),
+    emitControlPlane: (value) => controlPlaneHandler(value),
+    invalidate: () => invalidHandler(),
+  };
 }
 
 function createStore(client: ChatClient) {
@@ -232,6 +251,57 @@ describe("chat view-model store", () => {
     }
     expect(resync).toHaveBeenCalledTimes(2);
     expect(store.liveAssistantText).toBe("");
+  });
+
+  it("keeps control-plane projection authoritative across duplicate, gap, and stale events", async () => {
+    let projectedState: "pending" | "bound" | "retry_wait" = "pending";
+    const getSessionControlPlane = vi.fn(async (_context: string, sessionId: string) => ({
+      sessionId,
+      state: projectedState,
+      issueCode: projectedState === "retry_wait" ? "chat_temporarily_unavailable" as const : null,
+      retryable: projectedState === "retry_wait",
+      recovery: projectedState === "retry_wait" ? "retry" as const : "none" as const,
+    }));
+    const { client, emitControlPlane } = fakeClient({ getSessionControlPlane });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.controlPlane?.state).toBe("pending");
+    expect(store.canSend).toBe(false);
+
+    projectedState = "bound";
+    const bound: ChatControlPlaneEvent = {
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    };
+    emitControlPlane(bound);
+    emitControlPlane(bound);
+    expect(store.controlPlane?.state).toBe("bound");
+    expect(store.canSend).toBe(true);
+
+    emitControlPlane({ ...bound, sequence: "2", sessionId: SESSION_B });
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.controlPlane?.state).toBe("bound");
+
+    projectedState = "retry_wait";
+    emitControlPlane({
+      ...bound,
+      sequence: "3",
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(getSessionControlPlane).toHaveBeenCalledTimes(2);
+    expect(store.controlPlane?.state).toBe("retry_wait");
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+    expect(store.canSend).toBe(false);
   });
 
   it("resubscribes and reloads the authoritative snapshot on backpressure", async () => {

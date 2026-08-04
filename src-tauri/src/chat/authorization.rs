@@ -290,6 +290,31 @@ impl ChatAuthorizationManager {
         Ok(())
     }
 
+    pub(crate) fn authorization_revision(
+        &self,
+        context_id: Uuid,
+        action: ChatAction,
+        now: i64,
+    ) -> Result<u64, AuthorizationFailure> {
+        self.authorize_detailed(context_id, action, now)?;
+        let state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?;
+        let record = state
+            .contexts
+            .get(&context_id)
+            .ok_or(AuthorizationFailure::ContextInvalid)?;
+        if record.process_epoch != self.inner.process_epoch
+            || record.authorization_revision != state.highest_revision
+            || record.expires_at <= now
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        Ok(record.authorization_revision)
+    }
+
     pub(crate) fn allowed_actions(
         &self,
         context_id: Uuid,

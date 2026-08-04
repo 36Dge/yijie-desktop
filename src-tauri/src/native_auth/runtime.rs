@@ -6,7 +6,9 @@ use super::{
 };
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::loopback::LoopbackCallback;
-use crate::native_auth::transport::{OperationResponse, OperationTransport};
+use crate::native_auth::transport::{
+    OperationResponse, OperationTransport, PublicTaskErrorCode, PublicTaskTransportOutcome,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -59,14 +61,26 @@ struct CapabilityProjectionBody {
     capabilities: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct NativeAuthRuntime {
     mode: RuntimeMode,
 }
 
+#[derive(Clone)]
 enum RuntimeMode {
     Disabled,
     Invalid,
     Ready(Arc<AuthService>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativePublicTaskOutcome {
+    Bound(uuid::Uuid),
+    BlockedAuth,
+    Denied,
+    RetryWait,
+    Conflict,
+    ProtocolError,
 }
 
 struct AuthService {
@@ -238,6 +252,100 @@ impl NativeAuthRuntime {
         })
     }
 
+    pub(crate) async fn create_chat_public_task(
+        &self,
+        expected_owner_user_id: uuid::Uuid,
+        expected_tenant_id: uuid::Uuid,
+        expected_authorization_revision: u64,
+        operation_id: uuid::Uuid,
+        client_reference_id: uuid::Uuid,
+    ) -> NativePublicTaskOutcome {
+        if expected_owner_user_id.is_nil()
+            || expected_tenant_id.is_nil()
+            || expected_authorization_revision == 0
+            || operation_id.is_nil()
+            || client_reference_id.is_nil()
+        {
+            return NativePublicTaskOutcome::ProtocolError;
+        }
+        let now = match epoch_seconds().and_then(|value| {
+            i64::try_from(value).map_err(|_| NativeAuthError::AuthenticationFailed)
+        }) {
+            Ok(now) => now,
+            Err(_) => return NativePublicTaskOutcome::RetryWait,
+        };
+        let projection = match self
+            .chat_projection(&expected_tenant_id.hyphenated().to_string(), now)
+            .await
+        {
+            Ok(projection) => projection,
+            Err(NativeProjectionError::Unauthenticated) => {
+                return NativePublicTaskOutcome::BlockedAuth
+            }
+            Err(NativeProjectionError::CapabilityDenied) => return NativePublicTaskOutcome::Denied,
+            Err(NativeProjectionError::Unavailable) => return NativePublicTaskOutcome::RetryWait,
+            Err(NativeProjectionError::Invalid) => return NativePublicTaskOutcome::ProtocolError,
+        };
+        if projection.tenant_id != expected_tenant_id
+            || projection.authorization_revision != expected_authorization_revision
+        {
+            return NativePublicTaskOutcome::BlockedAuth;
+        }
+        if !projection
+            .capabilities
+            .iter()
+            .any(|capability| capability == "task.create")
+        {
+            return NativePublicTaskOutcome::Denied;
+        }
+        let service = match self.service_native() {
+            Ok(service) => service,
+            Err(NativeAuthError::SignedOut | NativeAuthError::SessionExpired) => {
+                return NativePublicTaskOutcome::BlockedAuth
+            }
+            Err(_) => return NativePublicTaskOutcome::RetryWait,
+        };
+        match service
+            .create_public_task(expected_tenant_id, operation_id, client_reference_id)
+            .await
+        {
+            Ok(PublicTaskTransportOutcome::Created(task))
+                if task.tenant_id == expected_tenant_id
+                    && task.created_by_user_id == expected_owner_user_id
+                    && task.client_reference_id == client_reference_id =>
+            {
+                NativePublicTaskOutcome::Bound(task.id)
+            }
+            Ok(PublicTaskTransportOutcome::Created(_)) => NativePublicTaskOutcome::ProtocolError,
+            Ok(PublicTaskTransportOutcome::Rejected {
+                status: 401,
+                code: PublicTaskErrorCode::Unauthenticated,
+            }) => NativePublicTaskOutcome::BlockedAuth,
+            Ok(PublicTaskTransportOutcome::Rejected {
+                status: 403,
+                code: PublicTaskErrorCode::AccessDenied,
+            }) => NativePublicTaskOutcome::Denied,
+            Ok(PublicTaskTransportOutcome::Rejected {
+                status: 409,
+                code: PublicTaskErrorCode::IdempotencyConflict,
+            }) => NativePublicTaskOutcome::Conflict,
+            Ok(PublicTaskTransportOutcome::Rejected {
+                status: 500 | 503, ..
+            }) => NativePublicTaskOutcome::RetryWait,
+            Ok(PublicTaskTransportOutcome::Rejected { status: 400, .. }) => {
+                NativePublicTaskOutcome::ProtocolError
+            }
+            Ok(PublicTaskTransportOutcome::Rejected { .. }) => {
+                NativePublicTaskOutcome::ProtocolError
+            }
+            Err(NativeAuthError::SignedOut | NativeAuthError::SessionExpired) => {
+                NativePublicTaskOutcome::BlockedAuth
+            }
+            Err(NativeAuthError::TransportFailed) => NativePublicTaskOutcome::RetryWait,
+            Err(_) => NativePublicTaskOutcome::ProtocolError,
+        }
+    }
+
     fn service(&self) -> Result<&Arc<AuthService>, CommandError> {
         self.service_native().map_err(CommandError::from)
     }
@@ -248,6 +356,97 @@ impl NativeAuthRuntime {
             RuntimeMode::Invalid => Err(NativeAuthError::InvalidConfiguration),
             RuntimeMode::Ready(service) => Ok(service),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn from_test_oidc_tokens(
+        config: NativeAuthConfig,
+        oidc: OidcClient,
+        tokens: super::oidc::IssuedTokens,
+    ) -> Result<Self, NativeAuthError> {
+        let binding = RefreshTokenBinding::from_config(&config);
+        let now = epoch_seconds()?;
+        let expires_at = Instant::now()
+            .checked_add(tokens.expires_in)
+            .ok_or(NativeAuthError::AuthenticationFailed)?;
+        let absolute_expires_at_epoch_seconds = now
+            .checked_add(REFRESH_ABSOLUTE_LIFETIME)
+            .ok_or(NativeAuthError::AuthenticationFailed)?;
+        let stored = StoredRefreshToken::new(
+            &binding,
+            tokens.refresh_token.expose().to_owned(),
+            now,
+            now,
+            absolute_expires_at_epoch_seconds,
+        );
+        let store = Arc::new(TestRefreshTokenStore::new(&stored)?);
+        let transport = OperationTransport::new(&config)?;
+        Ok(Self {
+            mode: RuntimeMode::Ready(Arc::new(AuthService {
+                oidc,
+                binding,
+                store,
+                transport,
+                access: Mutex::new(Some(AccessSession {
+                    token: tokens.access_token,
+                    expires_at,
+                })),
+                storage_blocked: Mutex::new(false),
+                login_lock: Mutex::new(()),
+                refresh_lock: Mutex::new(()),
+            })),
+        })
+    }
+}
+
+#[cfg(test)]
+struct TestRefreshTokenStore {
+    encoded: std::sync::Mutex<Option<Vec<u8>>>,
+}
+
+#[cfg(test)]
+impl TestRefreshTokenStore {
+    fn new(token: &StoredRefreshToken) -> Result<Self, NativeAuthError> {
+        Ok(Self {
+            encoded: std::sync::Mutex::new(Some(
+                serde_json::to_vec(token).map_err(|_| NativeAuthError::SecureStorageUnavailable)?,
+            )),
+        })
+    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl RefreshTokenStore for TestRefreshTokenStore {
+    async fn save(&self, token: &StoredRefreshToken) -> Result<(), NativeAuthError> {
+        let encoded =
+            serde_json::to_vec(token).map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+        *self
+            .encoded
+            .lock()
+            .map_err(|_| NativeAuthError::SecureStorageUnavailable)? = Some(encoded);
+        Ok(())
+    }
+
+    async fn load(&self) -> Result<RefreshTokenRecord, NativeAuthError> {
+        let guard = self
+            .encoded
+            .lock()
+            .map_err(|_| NativeAuthError::SecureStorageUnavailable)?;
+        let Some(encoded) = guard.as_deref() else {
+            return Ok(RefreshTokenRecord::Missing);
+        };
+        serde_json::from_slice(encoded)
+            .map(RefreshTokenRecord::Current)
+            .map_err(|_| NativeAuthError::SecureStorageUnavailable)
+    }
+
+    async fn delete(&self) -> Result<(), NativeAuthError> {
+        *self
+            .encoded
+            .lock()
+            .map_err(|_| NativeAuthError::SecureStorageUnavailable)? = None;
+        Ok(())
     }
 }
 
@@ -434,6 +633,39 @@ impl AuthService {
             .get_my_capabilities(tenant_id, &retry_token)
             .await?;
         if retry.status == 401 && self.clear_rejected_session(&retry_token).await? {
+            return Err(NativeAuthError::SignedOut);
+        }
+        Ok(retry)
+    }
+
+    async fn create_public_task(
+        &self,
+        tenant_id: uuid::Uuid,
+        operation_id: uuid::Uuid,
+        client_reference_id: uuid::Uuid,
+    ) -> Result<PublicTaskTransportOutcome, NativeAuthError> {
+        let first_token = self.access_token(None).await?;
+        let first = self
+            .transport
+            .create_task_v2(tenant_id, operation_id, client_reference_id, &first_token)
+            .await?;
+        if !matches!(
+            first,
+            PublicTaskTransportOutcome::Rejected { status: 401, .. }
+        ) {
+            return Ok(first);
+        }
+
+        let retry_token = self.access_token(Some(&first_token)).await?;
+        let retry = self
+            .transport
+            .create_task_v2(tenant_id, operation_id, client_reference_id, &retry_token)
+            .await?;
+        if matches!(
+            retry,
+            PublicTaskTransportOutcome::Rejected { status: 401, .. }
+        ) && self.clear_rejected_session(&retry_token).await?
+        {
             return Err(NativeAuthError::SignedOut);
         }
         Ok(retry)

@@ -48,7 +48,9 @@ const activeProject = computed(() => chatStore.projects.find((project) =>
 const displayTurns = computed(() => sortHistoryTurns(chatStore.history?.turns ?? []));
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
-const stableError = computed(() => errorNotice(actionErrorCode.value ?? chatStore.lastErrorCode));
+const stableError = computed(() => errorNotice(
+  actionErrorCode.value ?? chatStore.controlPlane?.issueCode ?? chatStore.lastErrorCode,
+));
 const isStreaming = computed(() => chatStore.phase === "streaming");
 const isHistoryLoading = computed(() => isSessionRoute.value && (
   chatStore.phase === "resyncing" ||

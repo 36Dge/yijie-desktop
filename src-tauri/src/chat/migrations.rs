@@ -10,6 +10,8 @@ const APPLICATION_DOMAIN_SQL: &str =
     include_str!("../../migrations/chat/0003_chat_application_domain.sql");
 const S7C_ORCHESTRATION_SQL: &str =
     include_str!("../../migrations/chat/0004_chat_s7c_orchestration.sql");
+const PUBLIC_TASK_CONTROL_PLANE_SQL: &str =
+    include_str!("../../migrations/chat/0005_chat_public_task_control_plane.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -18,7 +20,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 4] = [
+const CATALOG: [CatalogEntry; 5] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -38,6 +40,11 @@ const CATALOG: [CatalogEntry; 4] = [
         version: 4,
         name: "0004_chat_s7c_orchestration",
         sql: S7C_ORCHESTRATION_SQL,
+    },
+    CatalogEntry {
+        version: 5,
+        name: "0005_chat_public_task_control_plane",
+        sql: PUBLIC_TASK_CONTROL_PLANE_SQL,
     },
 ];
 
@@ -356,6 +363,113 @@ mod tests {
                 Some("legacy_job_missing_session_id".to_owned())
             )
         );
+        assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn populated_v4_migrates_to_terminal_content_free_control_plane_state() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrations()
+            .to_version(&mut connection, 4)
+            .expect("create v4");
+        let project_id = Uuid::now_v7().to_string();
+        let session_id = Uuid::now_v7().to_string();
+        let turn_id = Uuid::now_v7().to_string();
+        let operation_id = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'Synthetic', ?4, X'01', 1)",
+                params![project_id, owner, tenant, "a".repeat(64)],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'Existing', 'fallback', 'not_started', 1, 2)",
+                params![session_id, owner, tenant, project_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'queued')",
+                params![turn_id, session_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_outbox(
+                   operation_id, session_id, kind, state, attempt_count,
+                   next_attempt_at, payload_version, encrypted_payload
+                 ) VALUES (?1, ?2, 'create_session', 'pending', 0, 1, 1, X'01')",
+                params![operation_id, session_id],
+            )
+            .unwrap();
+
+        migrate(&mut connection).expect("migrate populated v4");
+        migrate(&mut connection).expect("repeat current startup");
+
+        let binding: (String, String, String, String, Option<String>) = connection
+            .query_row(
+                "SELECT client_reference_id, create_operation_id, host_operation_id,
+                        state, last_error_code
+                 FROM chat_public_task_bindings WHERE session_id=?1",
+                [session_id.clone()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            binding,
+            (
+                session_id.clone(),
+                session_id.clone(),
+                session_id,
+                "failed".to_owned(),
+                Some("chat_protocol_error".to_owned()),
+            )
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM chat_outbox WHERE operation_id=?1",
+                    [operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "failed"
+        );
+        let columns = connection
+            .prepare("SELECT name FROM pragma_table_info('chat_public_task_bindings')")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for forbidden in [
+            "prompt",
+            "message",
+            "assistant",
+            "reasoning",
+            "title",
+            "path",
+        ] {
+            assert!(!columns.iter().any(|column| column.contains(forbidden)));
+        }
         assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
     }
 

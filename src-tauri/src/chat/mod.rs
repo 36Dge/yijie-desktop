@@ -10,10 +10,12 @@ pub(crate) mod ipc;
 mod keychain;
 mod migrations;
 mod native_project;
+mod public_tasks;
 mod sidecar;
 mod worker;
 
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+use crate::native_auth::NativeAuthRuntime;
 pub use application::{
     AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
     ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome, LiveReasoningProjection,
@@ -26,9 +28,10 @@ pub use database::{
     ActiveTurnContext, ChatRepository, ChatScope, ClaimedDeletion, ClaimedOutbox,
     CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, HistoryMessage, HistoryPage,
     HistoryReasoningMetadata, HistoryTurn, InterruptTurnDispatch, OutboxKind, OutboxState,
-    PendingConversation, ProjectSummary, ReasoningItem, ReasoningPart, ReasoningStatus,
-    RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary, SessionTitleSource,
-    StartTurnDispatch, StoredEventCursor, TerminalTurnCommit, TurnProgress,
+    PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
+    ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot, SessionPage,
+    SessionPageCursor, SessionSummary, SessionTitleSource, StartTurnDispatch, StoredEventCursor,
+    TerminalTurnCommit, TurnProgress,
 };
 pub use error::{ChatCommandError, ChatError};
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
@@ -45,6 +48,10 @@ pub use keychain::{
 };
 use keychain::{ProtectedDatabaseKeyStore, ProtectedReceiptKeyStore};
 pub use migrations::{catalog_digests, validate_embedded_migrations, LATEST_SCHEMA_VERSION};
+pub use public_tasks::{
+    NativePublicTaskControlPlane, PublicTaskControlPlane, PublicTaskCreateIntent,
+    PublicTaskCreateOutcome, PublicTaskIssueCode,
+};
 use serde::Serialize;
 use sidecar::{SidecarState, SidecarSupervisor};
 use std::path::PathBuf;
@@ -60,6 +67,7 @@ struct LocalChatConfig {
     chat_directory: PathBuf,
     scope: database::ChatScope,
     secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
+    public_tasks: Arc<dyn PublicTaskControlPlane>,
 }
 
 enum RuntimeMode {
@@ -142,6 +150,7 @@ impl ChatRuntime {
         app_data_directory: PathBuf,
         secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
         secure_storage_invalid: bool,
+        native_auth: NativeAuthRuntime,
     ) -> Self {
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
@@ -153,28 +162,37 @@ impl ChatRuntime {
                 host_bridge: Mutex::new(None),
             };
         }
-        let mut mode =
-            if secure_storage_invalid || std::env::var("YIJIE_ENV").as_deref() != Ok("local") {
-                RuntimeMode::Invalid
-            } else {
-                match (
-                    std::env::var("YIJIE_CHAT_LOCAL_OWNER_USER_ID"),
-                    std::env::var("YIJIE_CHAT_LOCAL_TENANT_ID"),
-                ) {
-                    (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
-                        Ok(scope) => RuntimeMode::Local(LocalChatConfig {
+        let mut mode = if secure_storage_invalid
+            || std::env::var("YIJIE_ENV").as_deref() != Ok("local")
+        {
+            RuntimeMode::Invalid
+        } else {
+            match (
+                std::env::var("YIJIE_CHAT_LOCAL_OWNER_USER_ID"),
+                std::env::var("YIJIE_CHAT_LOCAL_TENANT_ID"),
+            ) {
+                (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
+                    Ok(scope) => match (scope.owner_uuid(), scope.tenant_uuid()) {
+                        (Ok(owner_user_id), Ok(tenant_id)) => RuntimeMode::Local(LocalChatConfig {
                             chat_directory: secure_storage
                                 .as_ref()
                                 .map(|profile| profile.desktop_app_data().join("chat"))
                                 .unwrap_or_else(|| app_data_directory.join("chat")),
+                            public_tasks: Arc::new(NativePublicTaskControlPlane::new(
+                                native_auth.clone(),
+                                owner_user_id,
+                                tenant_id,
+                            )),
                             scope,
                             secure_storage: secure_storage.clone(),
                         }),
-                        Err(_) => RuntimeMode::Invalid,
+                        _ => RuntimeMode::Invalid,
                     },
-                    _ => RuntimeMode::Invalid,
-                }
-            };
+                    Err(_) => RuntimeMode::Invalid,
+                },
+                _ => RuntimeMode::Invalid,
+            }
+        };
         let sidecar = match SidecarSupervisor::from_environment() {
             Ok(supervisor) => Some(Arc::new(supervisor)),
             Err(_) => {
@@ -463,7 +481,12 @@ impl ChatRuntime {
     ) -> Result<ConversationApplication, ChatError> {
         let database = self.database().await?;
         let host = self.local_host_bridge().await?;
-        Ok(ConversationApplication::new(database, host))
+        let public_tasks = match &self.mode {
+            RuntimeMode::Local(config) => config.public_tasks.clone(),
+            RuntimeMode::Disabled => return Err(ChatError::Disabled),
+            RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
+        };
+        Ok(ConversationApplication::new(database, host, public_tasks))
     }
 
     pub async fn local_offline_conversation_application(

@@ -1,8 +1,9 @@
 use super::database::{
     ActiveTurnContext, ChatRepository, ChatScope, ClaimedDeletion, ClaimedOutbox,
     CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, HistoryPage, InterruptTurnDispatch,
-    OutboxState, PendingConversation, ProjectSummary, ReasoningItem, RecoverySnapshot, SessionPage,
-    SessionPageCursor, SessionSummary, StartTurnDispatch, TerminalTurnCommit, TurnProgress,
+    OutboxState, PendingConversation, ProjectSummary, PublicTaskBindingState,
+    PublicTaskControlPlaneStatus, ReasoningItem, RecoverySnapshot, SessionPage, SessionPageCursor,
+    SessionSummary, StartTurnDispatch, TerminalTurnCommit, TurnProgress,
 };
 use super::error::ChatError;
 use super::keychain::{DatabaseKeyStore, ReceiptKeyStore};
@@ -118,8 +119,24 @@ impl DatabaseWorker {
         input: String,
         operation_id: uuid::Uuid,
     ) -> Result<PendingConversation, ChatError> {
+        self.create_session_and_enqueue_with_authority(project_id, input, operation_id, 1)
+            .await
+    }
+
+    pub async fn create_session_and_enqueue_with_authority(
+        &self,
+        project_id: uuid::Uuid,
+        input: String,
+        operation_id: uuid::Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
         self.call(move |repository| {
-            repository.create_session_and_enqueue(project_id, &input, operation_id)
+            repository.create_session_and_enqueue_with_authority(
+                project_id,
+                &input,
+                operation_id,
+                authorization_revision,
+            )
         })
         .await
     }
@@ -149,6 +166,57 @@ impl DatabaseWorker {
     ) -> Result<CreateSessionDispatch, ChatError> {
         self.call(move |repository| repository.load_create_session_dispatch(operation_id))
             .await
+    }
+
+    pub async fn bind_public_task(
+        &self,
+        create_operation_id: uuid::Uuid,
+        public_task_id: uuid::Uuid,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.call(move |repository| {
+            repository.bind_public_task(create_operation_id, public_task_id, now)
+        })
+        .await
+    }
+
+    pub async fn transition_public_task_binding(
+        &self,
+        create_operation_id: uuid::Uuid,
+        state: PublicTaskBindingState,
+        issue_code: String,
+        next_attempt_at: Option<i64>,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.call(move |repository| {
+            repository.transition_public_task_binding(
+                create_operation_id,
+                state,
+                &issue_code,
+                next_attempt_at,
+                now,
+            )
+        })
+        .await
+    }
+
+    pub async fn public_task_control_plane_status(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.call(move |repository| repository.public_task_control_plane_status(session_id))
+            .await
+    }
+
+    pub async fn resume_blocked_public_tasks(
+        &self,
+        authorization_revision: u64,
+        now: i64,
+    ) -> Result<usize, ChatError> {
+        self.call(move |repository| {
+            repository.resume_blocked_public_tasks(authorization_revision, now)
+        })
+        .await
     }
 
     pub async fn bind_host_session_and_enqueue_turn(

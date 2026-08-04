@@ -5,6 +5,7 @@
   "description": "Desktop-owned private IPC. This schema is not a public API contract.",
   "x-yijie-schema-version": 1,
   "x-yijie-event-channel": "yijie.chat.event.v1",
+  "x-yijie-control-plane-event-channel": "yijie.chat.control-plane.event.v1",
   "x-yijie-command-names": [
     "chat_bind_context_v1",
     "chat_list_projects_v1",
@@ -22,6 +23,7 @@
     "chat_interrupt_turn_v1",
     "chat_delete_session_v1",
     "chat_get_cleanup_status_v1",
+    "chat_get_session_control_plane_v1",
     "chat_get_local_readiness_v1",
     "chat_request_local_recovery_v1",
     "chat_subscribe_session_v1",
@@ -46,6 +48,7 @@
     "chat_interrupt_turn_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/createdTurnResponse" },
     "chat_delete_session_v1": { "request": "#/$defs/sessionOperationRequest", "response": "#/$defs/cleanupResponse" },
     "chat_get_cleanup_status_v1": { "request": "#/$defs/cleanupStatusRequest", "response": "#/$defs/optionalCleanupResponse" },
+    "chat_get_session_control_plane_v1": { "request": "#/$defs/sessionControlPlaneRequest", "response": "#/$defs/sessionControlPlaneResponse" },
     "chat_get_local_readiness_v1": { "request": "#/$defs/emptyRequest", "response": "#/$defs/localReadinessResponse" },
     "chat_request_local_recovery_v1": { "request": "#/$defs/recoveryRequest", "response": "#/$defs/localReadinessResponse" },
     "chat_subscribe_session_v1": { "request": "#/$defs/subscribeRequest", "response": "#/$defs/subscriptionResponse" },
@@ -265,6 +268,12 @@
       "required": ["operationId"],
       "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
     },
+    "sessionControlPlanePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "$ref": "#/$defs/uuid" } }
+    },
     "subscribePayload": {
       "type": "object",
       "additionalProperties": false,
@@ -365,6 +374,12 @@
       "allOf": [
         { "$ref": "#/$defs/commandRequest" },
         { "properties": { "payload": { "$ref": "#/$defs/cleanupStatusPayload" } } }
+      ]
+    },
+    "sessionControlPlaneRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/commandRequest" },
+        { "properties": { "payload": { "$ref": "#/$defs/sessionControlPlanePayload" } } }
       ]
     },
     "subscribeRequest": {
@@ -539,6 +554,21 @@
       }
     },
     "cleanupSurfaceState": { "enum": ["pending", "complete", "incomplete", "not_attempted"] },
+    "sessionControlPlane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "state", "issueCode", "retryable", "recovery"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "state": { "enum": ["pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
+        "issueCode": {
+          "type": ["string", "null"],
+          "enum": [null, "chat_unauthenticated", "chat_capability_denied", "chat_temporarily_unavailable", "chat_conflict", "chat_protocol_error"]
+        },
+        "retryable": { "type": "boolean" },
+        "recovery": { "enum": ["none", "sign_in", "retry", "resync"] }
+      }
+    },
     "operation": {
       "type": "object",
       "additionalProperties": false,
@@ -628,6 +658,9 @@
     },
     "optionalCleanupResponse": {
       "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "anyOf": [{ "$ref": "#/$defs/cleanup" }, { "type": "null" }] } } }]
+    },
+    "sessionControlPlaneResponse": {
+      "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/sessionControlPlane" } } }]
     },
     "subscriptionResponse": {
       "allOf": [{ "$ref": "#/$defs/commandResponse" }, { "properties": { "data": { "$ref": "#/$defs/subscription" } } }]
@@ -773,6 +806,23 @@
         { "$ref": "#/$defs/resyncRequiredEvent" },
         { "$ref": "#/$defs/contextInvalidatedEvent" }
       ]
+    },
+    "controlPlaneEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sequence", "sessionId", "state", "issueCode", "retryable", "recovery"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "sequence": { "$ref": "#/$defs/uint64String" },
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "state": { "enum": ["pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
+        "issueCode": {
+          "type": ["string", "null"],
+          "enum": [null, "chat_unauthenticated", "chat_capability_denied", "chat_temporarily_unavailable", "chat_conflict", "chat_protocol_error"]
+        },
+        "retryable": { "type": "boolean" },
+        "recovery": { "enum": ["none", "sign_in", "retry", "resync"] }
+      }
     }
   }
 }

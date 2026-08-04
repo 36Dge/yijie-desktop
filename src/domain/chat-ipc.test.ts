@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CHAT_COMMAND_NAMES,
+  CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_ERROR_CODES,
   CHAT_EVENT_CHANNEL,
   ChatContractError,
@@ -10,6 +11,7 @@ import {
   parseChatIpcError,
   parseChatProjectionEvent,
   parseCleanupResponse,
+  parseControlPlaneEvent,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
   parseLocalReadinessResponse,
@@ -21,6 +23,7 @@ import {
   parseReasoningResponse,
   parseResyncResponse,
   parseSessionPageResponse,
+  parseSessionControlPlaneResponse,
   parseSubscriptionResponse,
 } from "./chat-ipc";
 
@@ -37,6 +40,7 @@ describe("private chat IPC v1 contract", () => {
     ) as Record<string, unknown>;
     expect(schema["x-yijie-schema-version"]).toBe(1);
     expect(schema["x-yijie-event-channel"]).toBe(CHAT_EVENT_CHANNEL);
+    expect(schema["x-yijie-control-plane-event-channel"]).toBe(CHAT_CONTROL_PLANE_EVENT_CHANNEL);
     expect(schema["x-yijie-command-names"]).toEqual(CHAT_COMMAND_NAMES);
     expect(schema["x-yijie-error-codes"]).toEqual(CHAT_ERROR_CODES);
     const contracts = schema["x-yijie-command-contracts"] as Record<string, Record<string, string>>;
@@ -58,6 +62,7 @@ describe("private chat IPC v1 contract", () => {
       "sessionOperationPayload", "cleanupStatusPayload", "subscribePayload", "unsubscribePayload",
       "cancelPayload", "assistantPayload", "reasoningAppendPayload", "turnStatePayload",
       "turnTerminalPayload", "cleanupEventPayload", "resyncRequiredPayload", "contextInvalidatedPayload",
+      "sessionControlPlanePayload", "sessionControlPlane", "controlPlaneEvent",
     ]) {
       expect(definitions[payload]?.additionalProperties).toBe(false);
     }
@@ -91,6 +96,22 @@ describe("private chat IPC v1 contract", () => {
       lifecycle: "ready", canSend: true, issueCode: null,
     });
     expect(parseResyncResponse(responses.resync).session.title).toBe("Synthetic Session");
+    expect(parseSessionControlPlaneResponse(fixture("control-plane-response.json"))).toEqual({
+      sessionId: "019c1a00-0000-7000-8000-000000000005",
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    expect(parseControlPlaneEvent(fixture("control-plane-event.json"))).toEqual({
+      schemaVersion: 1,
+      sequence: "7",
+      sessionId: "019c1a00-0000-7000-8000-000000000005",
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
 
     const events = fixture("event-corpus.json") as unknown[];
     expect(events.map((event) => parseChatProjectionEvent(event).kind)).toEqual([
@@ -120,6 +141,14 @@ describe("private chat IPC v1 contract", () => {
     const oversizedUnicode = fixture("reasoning-event.json") as Record<string, unknown>;
     (oversizedUnicode.payload as Record<string, unknown>).text = "界".repeat(6 * 1024);
     expect(() => parseChatProjectionEvent(oversizedUnicode)).toThrow(ChatContractError);
+
+    const leakedPublicId = fixture("control-plane-event.json") as Record<string, unknown>;
+    leakedPublicId.publicTaskId = "019c1a00-0000-7000-8000-000000000099";
+    expect(() => parseControlPlaneEvent(leakedPublicId)).toThrow(ChatContractError);
+
+    const inconsistent = fixture("control-plane-response.json") as Record<string, unknown>;
+    (inconsistent.data as Record<string, unknown>).recovery = "none";
+    expect(() => parseSessionControlPlaneResponse(inconsistent)).toThrow(ChatContractError);
   });
 
   it("uses decimal strings for u64 event sequence and rejects historical Host item IDs", () => {

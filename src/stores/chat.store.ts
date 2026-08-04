@@ -6,6 +6,7 @@ import type {
   BoundChatContext,
   ChatAllowedAction,
   ChatCleanupStatus,
+  ChatControlPlaneEvent,
   ChatHistoryPage,
   ChatLocalReadiness,
   ChatProjectionEvent,
@@ -13,6 +14,7 @@ import type {
   ChatReasoningItem,
   ChatResyncProjection,
   ChatSession,
+  ChatSessionControlPlane,
 } from "../domain/chat-ipc";
 import { ChatClientError } from "../domain/chat-ipc";
 
@@ -82,11 +84,16 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
     const liveTurnStatus = ref<string | null>(null);
     const cleanupStatus = shallowRef<ChatCleanupStatus | null>(null);
+    const controlPlane = shallowRef<ChatSessionControlPlane | null>(null);
     const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
     const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
-    const canSend = computed(() => isReady.value && localReadiness.value?.canSend === true);
+    const canSend = computed(() =>
+      isReady.value &&
+      localReadiness.value?.canSend === true &&
+      (selectedSessionId.value === null || controlPlane.value?.state === "bound"),
+    );
 
     let selectionEpoch = 0;
     let authorityEpoch = 0;
@@ -95,6 +102,9 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     let expectedSequence = 0n;
     let eventUnlisten: UnlistenFn | null = null;
     let eventListenerPromise: Promise<void> | null = null;
+    let controlPlaneUnlisten: UnlistenFn | null = null;
+    let controlPlaneListenerPromise: Promise<void> | null = null;
+    let controlPlaneSequence: bigint | null = null;
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let resyncPromise: Promise<void> | null = null;
@@ -133,6 +143,8 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
       cleanupStatus.value = null;
+      controlPlane.value = null;
+      controlPlaneSequence = null;
       deleteDisposition.value = null;
       subscriptionId = null;
       expectedSequence = 0n;
@@ -205,6 +217,83 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         });
       eventListenerPromise = pending;
       return pending;
+    }
+
+    async function ensureControlPlaneListener(): Promise<void> {
+      if (controlPlaneUnlisten !== null) return;
+      if (controlPlaneListenerPromise !== null) return controlPlaneListenerPromise;
+      const generation = listenerEpoch;
+      const pending = client.onControlPlaneEvent(handleControlPlaneEvent, requestControlPlaneResync)
+        .then((unlisten) => {
+          if (generation !== listenerEpoch) {
+            unlisten();
+          } else if (controlPlaneUnlisten === null) {
+            controlPlaneUnlisten = unlisten;
+          } else {
+            unlisten();
+          }
+        })
+        .finally(() => {
+          if (controlPlaneListenerPromise === pending) controlPlaneListenerPromise = null;
+        });
+      controlPlaneListenerPromise = pending;
+      return pending;
+    }
+
+    function applyControlPlaneStatus(status: ChatSessionControlPlane): void {
+      if (status.sessionId !== selectedSessionId.value) return;
+      controlPlane.value = status;
+      if (status.issueCode !== null) {
+        lastErrorCode.value = status.issueCode;
+      } else if (
+        lastErrorCode.value !== null &&
+        [
+          "chat_unauthenticated",
+          "chat_capability_denied",
+          "chat_temporarily_unavailable",
+          "chat_conflict",
+          "chat_protocol_error",
+        ].includes(lastErrorCode.value)
+      ) {
+        lastErrorCode.value = null;
+      }
+    }
+
+    function handleControlPlaneEvent(event: ChatControlPlaneEvent): void {
+      if (event.sessionId !== selectedSessionId.value || context.value === null) return;
+      const sequence = BigInt(event.sequence);
+      if (controlPlaneSequence !== null) {
+        if (sequence <= controlPlaneSequence) return;
+        if (sequence !== controlPlaneSequence + 1n) return requestControlPlaneResync();
+      }
+      controlPlaneSequence = sequence;
+      applyControlPlaneStatus(event);
+    }
+
+    function requestControlPlaneResync(): void {
+      controlPlaneSequence = null;
+      void refreshControlPlane();
+    }
+
+    async function refreshControlPlane(): Promise<ChatSessionControlPlane | null> {
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      if (!bound || !sessionId) return null;
+      try {
+        const status = await client.getSessionControlPlane(bound.contextId, sessionId);
+        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) {
+          return null;
+        }
+        applyControlPlaneStatus(status);
+        return status;
+      } catch (error: unknown) {
+        if (context.value?.contextId === bound.contextId && selectedSessionId.value === sessionId) {
+          lastErrorCode.value = error instanceof ChatClientError
+            ? error.shape.code
+            : "chat_protocol_error";
+        }
+        return null;
+      }
     }
 
     function reasoningKey(itemOrdinal: number, contentIndex: number): string {
@@ -311,7 +400,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const bindEpoch = authorityEpoch;
       lastErrorCode.value = null;
       try {
-        await ensureEventListener();
+        await Promise.all([ensureEventListener(), ensureControlPlaneListener()]);
         if (bindEpoch !== authorityEpoch) return;
         const bound = await client.bindContext(tenantSelector);
         if (bindEpoch !== authorityEpoch) return;
@@ -362,6 +451,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         const projection = await client.resyncSession(bound.contextId, sessionId, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
         applyResync(projection);
+        await refreshControlPlane();
         bufferingEvents = false;
         const pending = bufferedEvents;
         bufferedEvents = [];
@@ -429,6 +519,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         .then(({ projection, nextSubscription }) => {
           if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
           applyResync(projection);
+          void refreshControlPlane();
           const pending = bufferedEvents;
           bufferedEvents = [];
           bufferingEvents = false;
@@ -679,6 +770,8 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       listenerEpoch += 1;
       eventUnlisten?.();
       eventUnlisten = null;
+      controlPlaneUnlisten?.();
+      controlPlaneUnlisten = null;
     }
 
     return {
@@ -693,6 +786,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       liveReasoning,
       liveTurnStatus,
       cleanupStatus,
+      controlPlane,
       localReadiness,
       deleteDisposition,
       lastErrorCode,
@@ -716,6 +810,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       interruptSelected,
       deleteSelected,
       refreshSelectedCleanup,
+      refreshControlPlane,
       pickProject,
       revalidateProject,
       setProjectPinned,

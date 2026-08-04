@@ -117,4 +117,54 @@ describe("chat client", () => {
     ]);
     expect(nativeInvoke).not.toHaveBeenCalledWith("chat_start_local_host", expect.anything());
   });
+
+  it("uses the closed control-plane command and rejects leaked Public IDs on its event channel", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const sessionId = "019c1a00-0000-7000-8000-000000000005";
+    let listener!: (payload: unknown) => void;
+    const invalid = vi.fn();
+    const invoke = vi.fn(async () => ({
+      schemaVersion: 1,
+      requestId: REQUEST_ID,
+      data: {
+        sessionId,
+        state: "bound",
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      },
+    }));
+    const client = createChatClient({
+      invoke,
+      listen: async (_channel, handler) => {
+        listener = handler;
+        return () => undefined;
+      },
+    });
+
+    await expect(client.getSessionControlPlane(CONTEXT_ID, sessionId)).resolves.toMatchObject({
+      sessionId,
+      state: "bound",
+    });
+    expect(invoke).toHaveBeenCalledWith("chat_get_session_control_plane_v1", {
+      request: {
+        schemaVersion: 1,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { sessionId },
+      },
+    });
+    await client.onControlPlaneEvent(vi.fn(), invalid);
+    listener({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+      publicTaskId: "019c1a00-0000-7000-8000-000000000099",
+    });
+    expect(invalid).toHaveBeenCalledOnce();
+  });
 });

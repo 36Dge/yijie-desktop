@@ -43,6 +43,10 @@ impl ChatScope {
     pub(crate) fn tenant_uuid(&self) -> Result<Uuid, ChatError> {
         parse_uuid_value(&self.tenant_id)
     }
+
+    pub(crate) fn owner_uuid(&self) -> Result<Uuid, ChatError> {
+        parse_uuid_value(&self.owner_user_id)
+    }
 }
 
 #[derive(Clone, Serialize, PartialEq, Eq)]
@@ -113,6 +117,38 @@ pub enum OutboxState {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublicTaskBindingState {
+    Pending,
+    Inflight,
+    Bound,
+    BlockedAuth,
+    RetryWait,
+    Denied,
+    Failed,
+}
+
+impl PublicTaskBindingState {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Inflight => "inflight",
+            Self::Bound => "bound",
+            Self::BlockedAuth => "blocked_auth",
+            Self::RetryWait => "retry_wait",
+            Self::Denied => "denied",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicTaskControlPlaneStatus {
+    pub session_id: Uuid,
+    pub state: PublicTaskBindingState,
+    pub issue_code: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingConversation {
     pub session_id: Uuid,
@@ -134,8 +170,10 @@ pub struct ClaimedOutbox {
 pub struct CreateSessionDispatch {
     pub operation_id: Uuid,
     pub session_id: Uuid,
-    pub task_id: Uuid,
     pub project_id: Uuid,
+    pub client_reference_id: Uuid,
+    pub public_task_id: Option<Uuid>,
+    pub authorization_revision: u64,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -779,18 +817,32 @@ impl ChatRepository {
         input: &str,
         create_operation_id: Uuid,
     ) -> Result<PendingConversation, ChatError> {
+        self.create_session_and_enqueue_with_authority(project_id, input, create_operation_id, 1)
+    }
+
+    pub fn create_session_and_enqueue_with_authority(
+        &mut self,
+        project_id: Uuid,
+        input: &str,
+        create_operation_id: Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
         validate_non_nil(project_id)?;
         validate_non_nil(create_operation_id)?;
+        if authorization_revision == 0 {
+            return Err(ChatError::InvalidInput);
+        }
         validate_message(input)?;
         let now = unix_seconds()?;
         let transaction = self
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if let Some((stored_session_id, version, payload)) = transaction
+        if let Some((stored_session_id, version, payload, stored_revision)) = transaction
             .query_row(
-                "SELECT o.session_id, o.payload_version, o.encrypted_payload
+                "SELECT o.session_id, o.payload_version, o.encrypted_payload, b.authorization_revision
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id
                  WHERE o.operation_id=?1 AND o.kind='create_session'
                    AND s.owner_user_id=?2 AND s.tenant_id=?3",
                 params![
@@ -803,6 +855,7 @@ impl ChatRepository {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, i64>(3)?,
                     ))
                 },
             )
@@ -827,6 +880,7 @@ impl ChatRepository {
             if payload.session_id.to_string() != stored_session_id
                 || payload.task_id != payload.session_id
                 || stored_project_and_input != Some((project_id.to_string(), input.to_owned()))
+                || stored_revision != i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?
             {
                 return Err(ChatError::ConversationConflict);
             }
@@ -857,6 +911,7 @@ impl ChatRepository {
         }
         let session_id = Uuid::now_v7();
         let task_id = session_id;
+        let client_reference_id = Uuid::now_v7();
         let turn_id = Uuid::now_v7();
         let turn_operation_id = Uuid::now_v7();
         let message_id = Uuid::now_v7();
@@ -873,6 +928,21 @@ impl ChatRepository {
                     self.scope.tenant_id,
                     project_id.to_string(),
                     title,
+                    now
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_public_task_bindings(
+                   session_id, client_reference_id, create_operation_id, host_operation_id,
+                   state, authorization_revision, attempt_count, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?3, 'pending', ?4, 0, ?5, ?5)",
+                params![
+                    session_id.to_string(),
+                    client_reference_id.to_string(),
+                    create_operation_id.to_string(),
+                    i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?,
                     now
                 ],
             )
@@ -1070,6 +1140,19 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         transaction
             .execute(
+                "UPDATE chat_public_task_bindings
+                 SET state='failed', lease_expires_at=NULL, next_attempt_at=NULL,
+                     last_error_code='chat_temporarily_unavailable', updated_at=?1
+                 WHERE create_operation_id IN (
+                   SELECT operation_id FROM chat_outbox
+                   WHERE kind='create_session' AND attempt_count>=?2
+                     AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?1))
+                 ) AND state!='bound'",
+                params![now, OUTBOX_MAX_ATTEMPTS],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
                 "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE kind IN ('create_session', 'start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
@@ -1083,6 +1166,11 @@ impl ChatRepository {
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
                  WHERE s.owner_user_id=?1 AND s.tenant_id=?2
                    AND o.kind IN ('create_session', 'start_turn', 'interrupt_turn')
+                   AND (o.kind!='create_session' OR EXISTS(
+                     SELECT 1 FROM chat_public_task_bindings b
+                     WHERE b.create_operation_id=o.operation_id
+                       AND b.state IN ('pending', 'inflight', 'bound', 'retry_wait')
+                   ))
                    AND (o.kind='interrupt_turn' OR NOT EXISTS(
                      SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=o.session_id
                    ))
@@ -1120,6 +1208,18 @@ impl ChatRepository {
         if changed != 1 {
             return Err(ChatError::ConversationConflict);
         }
+        if kind == "create_session" {
+            transaction
+                .execute(
+                    "UPDATE chat_public_task_bindings
+                     SET state='inflight', attempt_count=attempt_count+1,
+                         lease_expires_at=?1, next_attempt_at=NULL, last_error_code=NULL,
+                         updated_at=?2
+                     WHERE create_operation_id=?3 AND state IN ('pending', 'inflight', 'retry_wait')",
+                    params![lease_expires_at, now, operation_id],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -1137,19 +1237,51 @@ impl ChatRepository {
         operation_id: Uuid,
     ) -> Result<CreateSessionDispatch, ChatError> {
         validate_non_nil(operation_id)?;
-        let (session_id, project_id, version, payload): (String, String, i64, Vec<u8>) = self
+        let (
+            session_id,
+            project_id,
+            version,
+            payload,
+            client_reference_id,
+            public_task_id,
+            authorization_revision,
+            binding_state,
+        ): (
+            String,
+            String,
+            i64,
+            Vec<u8>,
+            String,
+            Option<String>,
+            i64,
+            String,
+        ) = self
             .connection
             .query_row(
-                "SELECT s.id, s.project_id, o.payload_version, o.encrypted_payload
+                "SELECT s.id, s.project_id, o.payload_version, o.encrypted_payload,
+                        b.client_reference_id, b.public_task_id, b.authorization_revision, b.state
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id
                  WHERE o.operation_id=?1 AND o.kind='create_session' AND o.state='inflight'
+                   AND b.create_operation_id=o.operation_id
                    AND s.owner_user_id=?2 AND s.tenant_id=?3",
                 params![
                     operation_id.to_string(),
                     self.scope.owner_user_id,
                     self.scope.tenant_id
                 ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
@@ -1159,15 +1291,273 @@ impl ChatRepository {
         }
         let payload: CreateSessionPayloadV1 = decode_payload(&payload)?;
         let parsed_session = parse_uuid_value(&session_id)?;
-        if payload.session_id != parsed_session || payload.task_id != parsed_session {
+        if payload.session_id != parsed_session
+            || payload.task_id != parsed_session
+            || authorization_revision <= 0
+            || !matches!(binding_state.as_str(), "inflight" | "bound")
+            || (binding_state == "bound") != public_task_id.is_some()
+        {
             return Err(ChatError::DatabaseUnavailable);
         }
         Ok(CreateSessionDispatch {
             operation_id,
             session_id: parsed_session,
-            task_id: payload.task_id,
             project_id: parse_uuid_value(&project_id)?,
+            client_reference_id: parse_uuid_value(&client_reference_id)?,
+            public_task_id: public_task_id
+                .map(|value| parse_uuid_value(&value))
+                .transpose()?,
+            authorization_revision: u64::try_from(authorization_revision)
+                .map_err(|_| ChatError::DatabaseUnavailable)?,
         })
+    }
+
+    pub fn bind_public_task(
+        &mut self,
+        create_operation_id: Uuid,
+        public_task_id: Uuid,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        validate_non_nil(create_operation_id)?;
+        validate_non_nil(public_task_id)?;
+        if now < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let row: Option<(String, String, Option<String>)> = transaction
+            .query_row(
+                "SELECT b.session_id, b.state, b.public_task_id
+                 FROM chat_public_task_bindings b
+                 JOIN chat_sessions s ON s.id=b.session_id
+                 WHERE b.create_operation_id=?1
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    create_operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let (session_id, state, existing_public_task_id) = row.ok_or(ChatError::NotFound)?;
+        if transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_deletion_jobs WHERE session_id=?1)",
+                [&session_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+        {
+            return Err(ChatError::ConversationConflict);
+        }
+        if state == "bound" {
+            let public_task_id = public_task_id.to_string();
+            if existing_public_task_id.as_deref() != Some(public_task_id.as_str()) {
+                return Err(ChatError::ConversationConflict);
+            }
+        } else if state == "inflight" {
+            let changed = transaction
+                .execute(
+                    "UPDATE chat_public_task_bindings
+                     SET public_task_id=?1, state='bound', lease_expires_at=NULL,
+                         next_attempt_at=NULL, last_error_code=NULL, updated_at=?2, bound_at=?2
+                     WHERE create_operation_id=?3 AND state='inflight'",
+                    params![
+                        public_task_id.to_string(),
+                        now,
+                        create_operation_id.to_string()
+                    ],
+                )
+                .map_err(map_constraint_or_database)?;
+            if changed != 1 {
+                return Err(ChatError::ConversationConflict);
+            }
+        } else {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(PublicTaskControlPlaneStatus {
+            session_id: parse_uuid_value(&session_id)?,
+            state: PublicTaskBindingState::Bound,
+            issue_code: None,
+        })
+    }
+
+    pub fn transition_public_task_binding(
+        &mut self,
+        create_operation_id: Uuid,
+        state: PublicTaskBindingState,
+        issue_code: &str,
+        next_attempt_at: Option<i64>,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        validate_non_nil(create_operation_id)?;
+        if now < 0
+            || !matches!(
+                state,
+                PublicTaskBindingState::BlockedAuth
+                    | PublicTaskBindingState::RetryWait
+                    | PublicTaskBindingState::Denied
+                    | PublicTaskBindingState::Failed
+            )
+            || !matches!(
+                issue_code,
+                "chat_unauthenticated"
+                    | "chat_capability_denied"
+                    | "chat_temporarily_unavailable"
+                    | "chat_conflict"
+                    | "chat_protocol_error"
+            )
+            || (state == PublicTaskBindingState::RetryWait) != next_attempt_at.is_some()
+            || next_attempt_at.is_some_and(|value| value <= now)
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let session_id: String = transaction
+            .query_row(
+                "SELECT b.session_id FROM chat_public_task_bindings b
+                 JOIN chat_sessions s ON s.id=b.session_id
+                 WHERE b.create_operation_id=?1 AND b.state='inflight'
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    create_operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::ConversationConflict)?;
+        let outbox_state = if state == PublicTaskBindingState::RetryWait {
+            "pending"
+        } else {
+            "failed"
+        };
+        transaction
+            .execute(
+                "UPDATE chat_public_task_bindings
+                 SET state=?1, lease_expires_at=NULL, next_attempt_at=?2,
+                     last_error_code=?3, updated_at=?4
+                 WHERE create_operation_id=?5 AND state='inflight'",
+                params![
+                    state.as_str(),
+                    next_attempt_at,
+                    issue_code,
+                    now,
+                    create_operation_id.to_string()
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "UPDATE chat_outbox SET state=?1, next_attempt_at=?2
+                 WHERE operation_id=?3 AND kind='create_session' AND state='inflight'",
+                params![
+                    outbox_state,
+                    next_attempt_at,
+                    create_operation_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(PublicTaskControlPlaneStatus {
+            session_id: parse_uuid_value(&session_id)?,
+            state,
+            issue_code: Some(issue_code.to_owned()),
+        })
+    }
+
+    pub fn public_task_control_plane_status(
+        &self,
+        session_id: Uuid,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        validate_non_nil(session_id)?;
+        let row: Option<(String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT b.state, b.last_error_code
+                 FROM chat_public_task_bindings b
+                 JOIN chat_sessions s ON s.id=b.session_id
+                 WHERE b.session_id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let (state, issue_code) = row.ok_or(ChatError::NotFound)?;
+        Ok(PublicTaskControlPlaneStatus {
+            session_id,
+            state: parse_public_task_binding_state(&state)?,
+            issue_code,
+        })
+    }
+
+    pub fn resume_blocked_public_tasks(
+        &mut self,
+        authorization_revision: u64,
+        now: i64,
+    ) -> Result<usize, ChatError> {
+        if authorization_revision == 0 || now < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let changed = transaction
+            .execute(
+                "UPDATE chat_public_task_bindings
+                 SET state='pending', authorization_revision=?1, attempt_count=0,
+                     lease_expires_at=NULL, next_attempt_at=NULL, last_error_code=NULL,
+                     updated_at=?2
+                 WHERE state='blocked_auth' AND session_id IN (
+                   SELECT id FROM chat_sessions WHERE owner_user_id=?3 AND tenant_id=?4
+                 ) AND NOT EXISTS(
+                   SELECT 1 FROM chat_deletion_jobs d
+                   WHERE d.session_id=chat_public_task_bindings.session_id
+                 )",
+                params![
+                    i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?,
+                    now,
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "UPDATE chat_outbox SET state='pending', attempt_count=0, next_attempt_at=?1
+                 WHERE kind='create_session' AND operation_id IN (
+                   SELECT create_operation_id FROM chat_public_task_bindings
+                   WHERE state='pending' AND authorization_revision=?2
+                 )",
+                params![
+                    now,
+                    i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(changed)
     }
 
     pub fn bind_host_session_and_enqueue_turn(
@@ -1190,18 +1580,35 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let (session_id, state, version, payload): (String, String, i64, Vec<u8>) = transaction
+        let (session_id, state, version, payload, bound_public_task_id): (
+            String,
+            String,
+            i64,
+            Vec<u8>,
+            String,
+        ) = transaction
             .query_row(
-                "SELECT o.session_id, o.state, o.payload_version, o.encrypted_payload
+                "SELECT o.session_id, o.state, o.payload_version, o.encrypted_payload,
+                        b.public_task_id
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id
                  WHERE o.operation_id=?1 AND o.kind='create_session'
+                   AND b.create_operation_id=o.operation_id AND b.state='bound'
                    AND s.owner_user_id=?2 AND s.tenant_id=?3",
                 params![
                     create_operation_id.to_string(),
                     self.scope.owner_user_id,
                     self.scope.tenant_id
                 ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
@@ -1210,7 +1617,9 @@ impl ChatRepository {
             return Err(ChatError::DatabaseUnavailable);
         }
         let create: CreateSessionPayloadV1 = decode_payload(&payload)?;
-        if create.session_id.to_string() != session_id || create.task_id != task_id {
+        if create.session_id.to_string() != session_id
+            || parse_uuid_value(&bound_public_task_id)? != task_id
+        {
             return Err(ChatError::ConversationConflict);
         }
         let existing: (Option<String>, Option<String>) = transaction
@@ -1736,6 +2145,7 @@ impl ChatRepository {
             String,
             String,
             String,
+            String,
             Option<String>,
             Option<i64>,
             Option<String>,
@@ -1743,9 +2153,10 @@ impl ChatRepository {
         let row: ActiveRow = self
             .connection
             .query_row(
-                "SELECT s.id, t.id, t.operation_id, s.agent_session_id, s.runtime_thread_id,
+                "SELECT s.id, b.public_task_id, t.id, t.operation_id, s.agent_session_id, s.runtime_thread_id,
                         t.runtime_turn_id, COALESCE(m.content, ''), c.stream_id, c.sequence, c.event_id
                  FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
                  LEFT JOIN chat_messages m ON m.turn_id=t.id AND m.role='assistant'
                  LEFT JOIN chat_event_cursors c ON c.session_id=s.id
                  WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
@@ -1767,13 +2178,14 @@ impl ChatRepository {
                         row.get(7)?,
                         row.get(8)?,
                         row.get(9)?,
+                        row.get(10)?,
                     ))
                 },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .ok_or(ChatError::NotFound)?;
-        let cursor = match (row.7, row.8, row.9) {
+        let cursor = match (row.8, row.9, row.10) {
             (Some(stream_id), Some(sequence), Some(event_id)) => Some(StoredEventCursor {
                 stream_id: parse_uuid_value(&stream_id)?,
                 sequence: u64::try_from(sequence).map_err(|_| ChatError::DatabaseUnavailable)?,
@@ -1784,13 +2196,13 @@ impl ChatRepository {
         };
         Ok(ActiveTurnContext {
             session_id: parse_uuid_value(&row.0)?,
-            task_id: parse_uuid_value(&row.0)?,
-            turn_id: parse_uuid_value(&row.1)?,
-            turn_operation_id: parse_uuid_value(&row.2)?,
-            agent_session_id: parse_uuid_value(&row.3)?,
-            codex_thread_id: parse_uuid_value(&row.4)?,
-            runtime_turn_id: parse_uuid_value(&row.5)?,
-            assistant_text: row.6,
+            task_id: parse_uuid_value(&row.1)?,
+            turn_id: parse_uuid_value(&row.2)?,
+            turn_operation_id: parse_uuid_value(&row.3)?,
+            agent_session_id: parse_uuid_value(&row.4)?,
+            codex_thread_id: parse_uuid_value(&row.5)?,
+            runtime_turn_id: parse_uuid_value(&row.6)?,
+            assistant_text: row.7,
             cursor,
         })
     }
@@ -3236,6 +3648,7 @@ impl ChatRepository {
             ("chat_turns", "session_id"),
             ("chat_event_cursors", "session_id"),
             ("chat_outbox", "session_id"),
+            ("chat_public_task_bindings", "session_id"),
         ] {
             let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
             let count: i64 = transaction
@@ -3482,6 +3895,19 @@ fn parse_outbox_state(value: &str) -> Result<OutboxState, ChatError> {
         "inflight" => Ok(OutboxState::Inflight),
         "done" => Ok(OutboxState::Done),
         "failed" => Ok(OutboxState::Failed),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_public_task_binding_state(value: &str) -> Result<PublicTaskBindingState, ChatError> {
+    match value {
+        "pending" => Ok(PublicTaskBindingState::Pending),
+        "inflight" => Ok(PublicTaskBindingState::Inflight),
+        "bound" => Ok(PublicTaskBindingState::Bound),
+        "blocked_auth" => Ok(PublicTaskBindingState::BlockedAuth),
+        "retry_wait" => Ok(PublicTaskBindingState::RetryWait),
+        "denied" => Ok(PublicTaskBindingState::Denied),
+        "failed" => Ok(PublicTaskBindingState::Failed),
         _ => Err(ChatError::DatabaseUnavailable),
     }
 }
@@ -4136,13 +4562,28 @@ mod tests {
         let dispatch = repository
             .load_create_session_dispatch(create.operation_id)
             .unwrap();
-        assert_eq!(dispatch.task_id, pending.task_id);
+        assert_eq!(dispatch.public_task_id, None);
+        let public_task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .unwrap();
+        repository
+            .reschedule_outbox(create.operation_id, now)
+            .unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .expect("bound create outbox");
+        let dispatch = repository
+            .load_create_session_dispatch(create.operation_id)
+            .unwrap();
+        assert_eq!(dispatch.public_task_id, Some(public_task_id));
         let agent_session_id = Uuid::now_v7();
         let thread_id = Uuid::now_v7();
         repository
             .bind_host_session_and_enqueue_turn(
                 create.operation_id,
-                dispatch.task_id,
+                public_task_id,
                 agent_session_id,
                 thread_id,
             )
@@ -4423,6 +4864,16 @@ mod tests {
         let now = unix_seconds().unwrap();
         bind_and_accept_first_turn(&mut repository, &pending, now);
         let context = repository.active_turn_context(pending.session_id).unwrap();
+        let persisted_public_task_id: String = repository
+            .connection
+            .query_row(
+                "SELECT public_task_id FROM chat_public_task_bindings WHERE session_id=?1",
+                [pending.session_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(context.task_id.to_string(), persisted_public_task_id);
+        assert_ne!(context.task_id, pending.session_id);
         assert!(context.assistant_text.is_empty());
         assert_eq!(
             repository.outbox_state(pending.turn_operation_id).unwrap(),
@@ -4510,6 +4961,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(first.attempt_count, 1);
+        let first_dispatch = repository
+            .load_create_session_dispatch(operation_id)
+            .unwrap();
+        assert_eq!(first_dispatch.operation_id, operation_id);
+        assert_eq!(first_dispatch.public_task_id, None);
+        assert_eq!(first_dispatch.authorization_revision, 1);
+        let client_reference_id = first_dispatch.client_reference_id;
         drop(repository);
 
         let mut reopened = open_repository_for_scope(&root, 19, chat_scope);
@@ -4523,6 +4981,10 @@ mod tests {
             .unwrap();
         assert_eq!(recovered.operation_id, operation_id);
         assert_eq!(recovered.attempt_count, 2);
+        let recovered_dispatch = reopened.load_create_session_dispatch(operation_id).unwrap();
+        assert_eq!(recovered_dispatch.client_reference_id, client_reference_id);
+        assert_eq!(recovered_dispatch.operation_id, operation_id);
+        assert_eq!(recovered_dispatch.public_task_id, None);
         assert_eq!(
             reopened
                 .connection
@@ -4530,6 +4992,162 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             1
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_task_binding_recovery_is_authority_bound_and_delete_wins_late_response() {
+        let root = std::env::temp_dir().join(format!("yijie-s10p3-binding-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let chat_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 31, chat_scope.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let operation_id = Uuid::now_v7();
+        let pending = repository
+            .create_session_and_enqueue_with_authority(
+                project_id,
+                "仅保存在 SQLCipher 的本地正文",
+                operation_id,
+                7,
+            )
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        let dispatch = repository
+            .load_create_session_dispatch(operation_id)
+            .unwrap();
+        assert_eq!(dispatch.authorization_revision, 7);
+        assert_eq!(dispatch.operation_id, operation_id);
+        assert_eq!(dispatch.public_task_id, None);
+
+        let blocked = repository
+            .transition_public_task_binding(
+                operation_id,
+                PublicTaskBindingState::BlockedAuth,
+                "chat_unauthenticated",
+                None,
+                now,
+            )
+            .unwrap();
+        assert_eq!(blocked.session_id, pending.session_id);
+        assert_eq!(blocked.state, PublicTaskBindingState::BlockedAuth);
+        assert!(repository
+            .claim_next_conversation_outbox(now + 30, 30)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repository.resume_blocked_public_tasks(8, now + 1).unwrap(),
+            1
+        );
+        let resumed = repository
+            .claim_next_conversation_outbox(now + 1, 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.operation_id, operation_id);
+        let resumed_dispatch = repository
+            .load_create_session_dispatch(operation_id)
+            .unwrap();
+        assert_eq!(resumed_dispatch.authorization_revision, 8);
+        assert_eq!(
+            resumed_dispatch.client_reference_id,
+            dispatch.client_reference_id
+        );
+
+        repository
+            .transition_public_task_binding(
+                operation_id,
+                PublicTaskBindingState::RetryWait,
+                "chat_temporarily_unavailable",
+                Some(now + 60),
+                now + 2,
+            )
+            .unwrap();
+        let deletion_operation = Uuid::now_v7();
+        repository
+            .begin_session_deletion(pending.session_id, deletion_operation, now + 3)
+            .unwrap();
+        assert_eq!(
+            repository.bind_public_task(operation_id, Uuid::now_v7(), now + 4),
+            Err(ChatError::ConversationConflict)
+        );
+        repository
+            .delete_session_local(&pending.session_id.to_string())
+            .unwrap();
+        assert_eq!(
+            repository.public_task_control_plane_status(pending.session_id),
+            Err(ChatError::NotFound)
+        );
+
+        drop(repository);
+        let foreign_scope = scope();
+        let reopened = open_repository_for_scope(&root, 31, foreign_scope);
+        assert_eq!(
+            reopened.public_task_control_plane_status(pending.session_id),
+            Err(ChatError::NotFound)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_task_retry_budget_fails_closed_without_starting_host() {
+        let root = std::env::temp_dir().join(format!("yijie-s10p3-budget-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 32);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let operation_id = Uuid::now_v7();
+        let pending = repository
+            .create_session_and_enqueue(project_id, "本地正文 canary", operation_id)
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_outbox SET attempt_count=?1, state='pending', next_attempt_at=?2
+                 WHERE operation_id=?3",
+                params![OUTBOX_MAX_ATTEMPTS, now, operation_id.to_string()],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_public_task_bindings SET attempt_count=?1, state='pending'
+                 WHERE create_operation_id=?2",
+                params![OUTBOX_MAX_ATTEMPTS, operation_id.to_string()],
+            )
+            .unwrap();
+
+        assert!(repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repository.outbox_state(operation_id).unwrap(),
+            OutboxState::Failed
+        );
+        assert_eq!(
+            repository
+                .public_task_control_plane_status(pending.session_id)
+                .unwrap(),
+            PublicTaskControlPlaneStatus {
+                session_id: pending.session_id,
+                state: PublicTaskBindingState::Failed,
+                issue_code: Some("chat_temporarily_unavailable".to_owned()),
+            }
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM chat_sessions WHERE agent_session_id IS NOT NULL",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
         );
         fs::remove_dir_all(root).unwrap();
     }

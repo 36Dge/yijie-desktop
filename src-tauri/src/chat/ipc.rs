@@ -1,13 +1,14 @@
 use super::application::{
     AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
-    CoordinatorOutcome, LiveTurnProjection, TurnProjectionSink,
+    CoordinatorOutcome, DispatchOutcome, LiveTurnProjection, TurnProjectionSink,
 };
 use super::authorization::{
     AuthoritativeChatProjection, AuthorizationFailure, ChatAction, ChatAuthorizationManager,
 };
 use super::database::{
-    CleanupSurfaceState, DeletionStatus, HistoryPage, ProjectSummary, ReasoningItem,
-    ReasoningStatus, SessionPage, SessionPageCursor, SessionSummary, SessionTitleSource,
+    CleanupSurfaceState, DeletionStatus, HistoryPage, ProjectSummary, PublicTaskBindingState,
+    PublicTaskControlPlaneStatus, ReasoningItem, ReasoningStatus, SessionPage, SessionPageCursor,
+    SessionSummary, SessionTitleSource,
 };
 use super::{ChatError, ChatRuntime};
 use crate::native_auth::{NativeAuthRuntime, NativeProjectionError};
@@ -24,6 +25,7 @@ use uuid::Uuid;
 
 pub const CHAT_IPC_SCHEMA_VERSION: u8 = 1;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie.chat.event.v1";
+pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie.chat.control-plane.event.v1";
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TITLE_BYTES: usize = 1024;
@@ -287,6 +289,7 @@ struct EventBridgeState {
     authorization: Option<ChatAuthorizationManager>,
     subscriptions: HashMap<Uuid, SubscriptionRecord>,
     cleanup_sessions: HashMap<Uuid, Uuid>,
+    control_plane_sequence: u64,
 }
 
 struct SubscriptionRecord {
@@ -321,6 +324,7 @@ impl ChatEventBridge {
                 authorization: None,
                 subscriptions: HashMap::new(),
                 cleanup_sessions: HashMap::new(),
+                control_plane_sequence: 0,
             })),
         }
     }
@@ -439,6 +443,46 @@ impl ChatEventBridge {
         }
         Ok(())
     }
+
+    fn publish_control_plane(
+        &self,
+        projection: &PublicTaskControlPlaneStatus,
+    ) -> Result<(), ChatError> {
+        let now = unix_seconds()?;
+        let (app, event) = {
+            let mut state = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let app = state
+                .app
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorization = state
+                .authorization
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorized = state.subscriptions.values().any(|record| {
+                record.session_id == projection.session_id
+                    && authorization
+                        .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
+                        .is_ok()
+            });
+            if !authorized {
+                return Ok(());
+            }
+            state.control_plane_sequence = state
+                .control_plane_sequence
+                .checked_add(1)
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            (
+                app,
+                ControlPlaneEventDto::from_status(state.control_plane_sequence, projection),
+            )
+        };
+        app.emit(CHAT_CONTROL_PLANE_EVENT_CHANNEL, event)
+            .map_err(|_| ChatError::OrchestrationUnavailable)
+    }
 }
 
 impl TurnProjectionSink for ChatEventBridge {
@@ -520,6 +564,11 @@ impl TurnProjectionSink for ChatEventBridge {
     }
 
     fn publish_coordinator(&self, outcome: &CoordinatorOutcome) -> Result<(), ChatError> {
+        if let CoordinatorOutcome::Dispatched(DispatchOutcome::ControlPlaneChanged(status)) =
+            outcome
+        {
+            return self.publish_control_plane(status);
+        }
         let now = unix_seconds()?;
         let (operation_id, status, terminal) = match outcome {
             CoordinatorOutcome::CleanupRetryScheduled { operation_id } => {
@@ -952,6 +1001,12 @@ struct CleanupStatusPayload {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SessionControlPlanePayload {
+    session_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SubscribePayload {
     session_id: Uuid,
 }
@@ -1121,6 +1176,70 @@ pub(crate) struct CreatedSessionDto {
     session_id: String,
     turn_id: String,
     operation_id: String,
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ControlPlaneDto {
+    session_id: String,
+    state: &'static str,
+    issue_code: Option<String>,
+    retryable: bool,
+    recovery: &'static str,
+}
+
+impl ControlPlaneDto {
+    fn from_status(status: &PublicTaskControlPlaneStatus) -> Self {
+        let projected_state = match status.state {
+            PublicTaskBindingState::Pending | PublicTaskBindingState::Inflight => "pending",
+            PublicTaskBindingState::Bound => "bound",
+            PublicTaskBindingState::BlockedAuth => "blocked_auth",
+            PublicTaskBindingState::RetryWait => "retry_wait",
+            PublicTaskBindingState::Denied => "denied",
+            PublicTaskBindingState::Failed => "failed",
+        };
+        let (retryable, recovery) = match status.state {
+            PublicTaskBindingState::Pending | PublicTaskBindingState::Bound => (false, "none"),
+            PublicTaskBindingState::Inflight | PublicTaskBindingState::RetryWait => (true, "retry"),
+            PublicTaskBindingState::BlockedAuth => (false, "sign_in"),
+            PublicTaskBindingState::Denied => (false, "none"),
+            PublicTaskBindingState::Failed => (false, "resync"),
+        };
+        Self {
+            session_id: status.session_id.to_string(),
+            state: projected_state,
+            issue_code: status.issue_code.clone(),
+            retryable,
+            recovery,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ControlPlaneEventDto {
+    schema_version: u8,
+    sequence: String,
+    session_id: String,
+    state: &'static str,
+    issue_code: Option<String>,
+    retryable: bool,
+    recovery: &'static str,
+}
+
+impl ControlPlaneEventDto {
+    fn from_status(sequence: u64, status: &PublicTaskControlPlaneStatus) -> Self {
+        let projection = ControlPlaneDto::from_status(status);
+        Self {
+            schema_version: CHAT_IPC_SCHEMA_VERSION,
+            sequence: sequence.to_string(),
+            session_id: projection.session_id,
+            state: projection.state,
+            issue_code: projection.issue_code,
+            retryable: projection.retryable,
+            recovery: projection.recovery,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -1445,7 +1564,7 @@ mod tests {
     use super::*;
     use crate::chat::{LiveReasoningProjection, ReasoningPart};
 
-    const COMMAND_NAMES: [&str; 22] = [
+    const COMMAND_NAMES: [&str; 23] = [
         "chat_bind_context_v1",
         "chat_list_projects_v1",
         "chat_pick_project_v1",
@@ -1462,6 +1581,7 @@ mod tests {
         "chat_interrupt_turn_v1",
         "chat_delete_session_v1",
         "chat_get_cleanup_status_v1",
+        "chat_get_session_control_plane_v1",
         "chat_get_local_readiness_v1",
         "chat_request_local_recovery_v1",
         "chat_subscribe_session_v1",
@@ -1477,6 +1597,10 @@ mod tests {
                 .expect("schema json");
         assert_eq!(schema["x-yijie-schema-version"], 1);
         assert_eq!(schema["x-yijie-event-channel"], CHAT_EVENT_CHANNEL);
+        assert_eq!(
+            schema["x-yijie-control-plane-event-channel"],
+            CHAT_CONTROL_PLANE_EVENT_CHANNEL
+        );
         assert_eq!(
             schema["x-yijie-command-names"],
             serde_json::to_value(COMMAND_NAMES).unwrap()
@@ -1538,6 +1662,7 @@ mod tests {
             "setSessionPinnedPayload",
             "sessionOperationPayload",
             "cleanupStatusPayload",
+            "sessionControlPlanePayload",
             "subscribePayload",
             "unsubscribePayload",
             "cancelPayload",
@@ -1555,6 +1680,11 @@ mod tests {
                 "payload must be closed: {payload}"
             );
         }
+
+        assert_eq!(
+            definitions["controlPlaneEvent"]["additionalProperties"],
+            Value::Bool(false)
+        );
 
         let bind: Value =
             serde_json::from_str(include_str!("../../fixtures/chat-ipc-v1/bind-request.json"))
@@ -1666,6 +1796,39 @@ mod tests {
             "../../fixtures/chat-ipc-v1/response-corpus.json"
         ))
         .unwrap();
+        let control_status = PublicTaskControlPlaneStatus {
+            session_id: Uuid::parse_str(session_id).unwrap(),
+            state: PublicTaskBindingState::RetryWait,
+            issue_code: Some("chat_temporarily_unavailable".to_owned()),
+        };
+        let control_response: Value = serde_json::from_str(include_str!(
+            "../../fixtures/chat-ipc-v1/control-plane-response.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(CommandResponse::new(
+                request_id,
+                ControlPlaneDto::from_status(&control_status),
+            ))
+            .unwrap(),
+            control_response
+        );
+        let control_event: Value = serde_json::from_str(include_str!(
+            "../../fixtures/chat-ipc-v1/control-plane-event.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(ControlPlaneEventDto::from_status(
+                7,
+                &PublicTaskControlPlaneStatus {
+                    session_id: Uuid::parse_str(session_id).unwrap(),
+                    state: PublicTaskBindingState::Bound,
+                    issue_code: None,
+                },
+            ))
+            .unwrap(),
+            control_event
+        );
         assert_response(
             &corpus,
             "projectList",
@@ -2055,6 +2218,11 @@ pub async fn chat_bind_context_v1(
         .chat_projection(&request.payload.tenant_selector, now)
         .await
         .map_err(|error| map_native_projection_error(error, request.request_id))?;
+    let native_authorization_revision = native.authorization_revision;
+    let native_can_create_task = native
+        .capabilities
+        .iter()
+        .any(|capability| capability == "task.create");
     let manager = chat_runtime
         .authorization_manager()
         .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
@@ -2072,12 +2240,28 @@ pub async fn chat_bind_context_v1(
     let context = manager
         .bind(projection, now)
         .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    let offline = chat_runtime
+        .local_offline_conversation_application()
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    if native_can_create_task {
+        offline
+            .resume_blocked_public_tasks(native_authorization_revision)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    }
     ipc_runtime
         .inner
         .event_bridge
-        .configure(app, manager.clone())
+        .configure(app.clone(), manager.clone())
         .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))?;
     ipc_runtime.invalidate_all();
+    if let Ok(application) = chat_runtime.local_conversation_application().await {
+        ipc_runtime
+            .ensure_coordinator(app, application, manager.clone())
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    }
     let allowed_actions = manager
         .allowed_actions(context.context_id, now)
         .map_err(|failure| match failure {
@@ -2603,6 +2787,33 @@ pub async fn chat_get_cleanup_status_v1(
     Ok(CommandResponse::new(
         request.request_id,
         status.map(cleanup_dto),
+    ))
+}
+
+#[tauri::command]
+pub async fn chat_get_session_control_plane_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<ControlPlaneDto>, ChatIpcError> {
+    let request: CommandRequest<SessionControlPlanePayload> = decode_request(request)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id).await?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )?;
+    ipc_runtime.begin_read(request.request_id)?;
+    let result = authorized
+        .public_task_control_plane_status(request.context_id, request.payload.session_id)
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let status = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    finished?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        ControlPlaneDto::from_status(&status),
     ))
 }
 

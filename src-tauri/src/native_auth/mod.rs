@@ -14,7 +14,7 @@ pub use keychain::{
     StoredRefreshToken,
 };
 pub use oidc::{OidcClient, RefreshFailure};
-pub(crate) use runtime::NativeProjectionError;
 pub use runtime::{AuthStatus, NativeAuthRuntime};
+pub(crate) use runtime::{NativeProjectionError, NativePublicTaskOutcome};
 pub use secret::SecretValue;
 pub use transport::OperationResponse;

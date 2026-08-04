@@ -1,5 +1,6 @@
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
 export const CHAT_EVENT_CHANNEL = "yijie.chat.event.v1" as const;
+export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie.chat.control-plane.event.v1" as const;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
@@ -23,6 +24,7 @@ export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_interrupt_turn_v1",
   "chat_delete_session_v1",
   "chat_get_cleanup_status_v1",
+  "chat_get_session_control_plane_v1",
   "chat_get_local_readiness_v1",
   "chat_request_local_recovery_v1",
   "chat_subscribe_session_v1",
@@ -207,6 +209,43 @@ export interface ChatCreatedTurn {
   readonly sessionId: string;
   readonly turnId: string;
   readonly operationId: string;
+}
+
+export const CHAT_CONTROL_PLANE_STATES = Object.freeze([
+  "pending",
+  "bound",
+  "blocked_auth",
+  "retry_wait",
+  "denied",
+  "failed",
+] as const);
+
+export const CHAT_CONTROL_PLANE_ISSUES = Object.freeze([
+  "chat_unauthenticated",
+  "chat_capability_denied",
+  "chat_temporarily_unavailable",
+  "chat_conflict",
+  "chat_protocol_error",
+] as const);
+
+export const CHAT_CONTROL_PLANE_RECOVERIES = Object.freeze([
+  "none",
+  "sign_in",
+  "retry",
+  "resync",
+] as const);
+
+export interface ChatSessionControlPlane {
+  readonly sessionId: string;
+  readonly state: (typeof CHAT_CONTROL_PLANE_STATES)[number];
+  readonly issueCode: (typeof CHAT_CONTROL_PLANE_ISSUES)[number] | null;
+  readonly retryable: boolean;
+  readonly recovery: (typeof CHAT_CONTROL_PLANE_RECOVERIES)[number];
+}
+
+export interface ChatControlPlaneEvent extends ChatSessionControlPlane {
+  readonly schemaVersion: 1;
+  readonly sequence: string;
 }
 
 export const CHAT_READINESS_ISSUE_CODES = Object.freeze([
@@ -567,6 +606,59 @@ export function parseCreatedTurnResponse(value: unknown): ChatCreatedTurn {
       turnId: uuid(created.turnId),
       operationId: uuid(created.operationId),
     });
+  });
+}
+
+function parseSessionControlPlane(value: unknown): ChatSessionControlPlane {
+  const body = exactObject(value, ["sessionId", "state", "issueCode", "retryable", "recovery"]);
+  if (typeof body.retryable !== "boolean") throw new ChatContractError();
+  const result: ChatSessionControlPlane = Object.freeze({
+    sessionId: uuid(body.sessionId),
+    state: oneOf(body.state, CHAT_CONTROL_PLANE_STATES),
+    issueCode: nullable(body.issueCode, (entry) => oneOf(entry, CHAT_CONTROL_PLANE_ISSUES)),
+    retryable: body.retryable,
+    recovery: oneOf(body.recovery, CHAT_CONTROL_PLANE_RECOVERIES),
+  });
+  const consistent =
+    ((result.state === "pending" || result.state === "bound") &&
+      result.issueCode === null && !result.retryable && result.recovery === "none") ||
+    (result.state === "blocked_auth" && result.issueCode === "chat_unauthenticated" &&
+      !result.retryable && result.recovery === "sign_in") ||
+    (result.state === "retry_wait" && result.issueCode === "chat_temporarily_unavailable" &&
+      result.retryable && result.recovery === "retry") ||
+    (result.state === "denied" && result.issueCode === "chat_capability_denied" &&
+      !result.retryable && result.recovery === "none") ||
+    (result.state === "failed" &&
+      (result.issueCode === "chat_conflict" || result.issueCode === "chat_protocol_error") &&
+      !result.retryable && result.recovery === "resync");
+  if (!consistent) throw new ChatContractError();
+  return result;
+}
+
+export function parseSessionControlPlaneResponse(value: unknown): ChatSessionControlPlane {
+  return responseData(value, parseSessionControlPlane);
+}
+
+export function parseControlPlaneEvent(value: unknown): ChatControlPlaneEvent {
+  const event = exactObject(value, [
+    "schemaVersion", "sequence", "sessionId", "state", "issueCode", "retryable", "recovery",
+  ]);
+  if (event.schemaVersion !== CHAT_IPC_SCHEMA_VERSION ||
+      typeof event.sequence !== "string" || !SEQUENCE_PATTERN.test(event.sequence)) {
+    throw new ChatContractError();
+  }
+  const sequence = BigInt(event.sequence);
+  if (sequence === 0n || sequence > MAX_SAFE_EVENT_SEQUENCE) throw new ChatContractError();
+  return Object.freeze({
+    schemaVersion: 1,
+    sequence: event.sequence,
+    ...parseSessionControlPlane({
+      sessionId: event.sessionId,
+      state: event.state,
+      issueCode: event.issueCode,
+      retryable: event.retryable,
+      recovery: event.recovery,
+    }),
   });
 }
 
