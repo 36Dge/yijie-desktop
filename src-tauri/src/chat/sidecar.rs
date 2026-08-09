@@ -190,8 +190,28 @@ pub enum SidecarState {
 struct SupervisorState {
     state: SidecarState,
     child: Option<Child>,
+    child_identity: Option<OwnedProcessIdentity>,
     instance_nonce: Option<String>,
     capture: Option<ProcessCapture>,
+    cleanup_unknown: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OwnedProcessIdentity {
+    pid: u32,
+    ppid: u32,
+    binary: PathBuf,
+    process_binary: PathBuf,
+    binary_sha256: String,
+    instance_nonce: String,
+    start_time_seconds: u64,
+    start_time_microseconds: u64,
+}
+
+enum SpawnIdentityOutcome {
+    Owned(OwnedProcessIdentity),
+    Exited(ExitStatus),
+    Unknown,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -270,8 +290,10 @@ impl SidecarSupervisor {
             inner: Mutex::new(SupervisorState {
                 state,
                 child: None,
+                child_identity: None,
                 instance_nonce: None,
                 capture: None,
+                cleanup_unknown: false,
             }),
         })
     }
@@ -285,6 +307,9 @@ impl SidecarSupervisor {
         let config = self.config.as_ref().ok_or(ChatError::Disabled)?;
         self.refresh_child_state().await;
         let mut state = self.inner.lock().await;
+        if state.cleanup_unknown {
+            return Err(ChatError::CleanupIncomplete);
+        }
         if state.state == SidecarState::RuntimeReady {
             return Ok(state.state);
         }
@@ -292,7 +317,14 @@ impl SidecarSupervisor {
             return Err(ChatError::SidecarUnavailable);
         }
         state.state = SidecarState::Starting;
-        let instance_nonce = uuid::Uuid::now_v7().to_string();
+        let instance_nonce = match generate_instance_nonce(config.test_profile.is_some()) {
+            Ok(nonce) => nonce,
+            Err(error) => {
+                state.state = SidecarState::Failed;
+                return Err(error);
+            }
+        };
+        let binary_sha256 = file_sha256(&config.binary)?;
         let prepared = if config.test_profile.is_some() {
             Some(prepare_capture(config, &instance_nonce)?)
         } else {
@@ -331,6 +363,7 @@ impl SidecarSupervisor {
                 return Err(ChatError::SidecarUnavailable);
             }
         };
+        let child_pid = child.id().ok_or(ChatError::SidecarUnavailable)?;
         let capture = if let Some(mut prepared) = prepared {
             prepared.evidence.pid = child.id();
             prepared.evidence.state = "starting".to_owned();
@@ -349,19 +382,52 @@ impl SidecarSupervisor {
         state.child = Some(child);
         state.instance_nonce = Some(instance_nonce.clone());
         state.capture = capture;
-        let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
-        loop {
-            if let Some(exit_status) = state
+        let child_identity = match observe_spawn_identity(
+            state
                 .child
                 .as_mut()
-                .and_then(|child| child.try_wait().ok())
-                .flatten()
-            {
+                .expect("spawned child is retained until identity capture"),
+            child_pid,
+            &config.binary,
+            &binary_sha256,
+            &instance_nonce,
+        )
+        .await
+        {
+            SpawnIdentityOutcome::Owned(identity) => identity,
+            SpawnIdentityOutcome::Exited(exit_status) => {
                 state.child = None;
                 state.instance_nonce = None;
                 finalize_capture(&mut state, Some(exit_status), "exited_during_startup").await;
                 state.state = SidecarState::Failed;
                 return Err(ChatError::SidecarUnavailable);
+            }
+            SpawnIdentityOutcome::Unknown => {
+                retain_unknown_child(&mut state, "spawn_identity_unknown");
+                return Err(ChatError::CleanupIncomplete);
+            }
+        };
+        state.child_identity = Some(child_identity);
+        let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
+        loop {
+            let child_status = match state.child.as_mut() {
+                Some(child) => child.try_wait(),
+                None => Ok(None),
+            };
+            match child_status {
+                Ok(Some(exit_status)) => {
+                    state.child = None;
+                    state.child_identity = None;
+                    state.instance_nonce = None;
+                    finalize_capture(&mut state, Some(exit_status), "exited_during_startup").await;
+                    state.state = SidecarState::Failed;
+                    return Err(ChatError::SidecarUnavailable);
+                }
+                Err(_) => {
+                    retain_unknown_child(&mut state, "startup_status_unknown");
+                    return Err(ChatError::CleanupIncomplete);
+                }
+                Ok(None) => {}
             }
             if self.liveness(config, &instance_nonce).await {
                 state.state = SidecarState::HostLive;
@@ -375,11 +441,17 @@ impl SidecarSupervisor {
                 }
             }
             if tokio::time::Instant::now() >= deadline {
-                let exit_status = match state.child.as_mut() {
-                    Some(child) => terminate_child(child).await,
-                    None => None,
+                let identity = state.child_identity.clone();
+                let exit_status = match (state.child.as_mut(), identity.as_ref()) {
+                    (Some(child), Some(identity)) => terminate_child(child, identity).await,
+                    _ => None,
                 };
+                if exit_status.is_none() && state.child.is_some() {
+                    retain_unknown_child(&mut state, "startup_timeout_cleanup_unknown");
+                    return Err(ChatError::CleanupIncomplete);
+                }
                 state.child = None;
+                state.child_identity = None;
                 state.instance_nonce = None;
                 finalize_capture(&mut state, exit_status, "startup_timeout").await;
                 state.state = SidecarState::Failed;
@@ -391,11 +463,49 @@ impl SidecarSupervisor {
 
     pub async fn stop(&self) -> Result<SidecarState, ChatError> {
         let mut state = self.inner.lock().await;
-        let exit_status = match state.child.as_mut() {
-            Some(child) => terminate_child(child).await,
-            None => None,
+        if state.cleanup_unknown {
+            return Err(ChatError::CleanupIncomplete);
+        }
+        let identity = state.child_identity.clone();
+        let had_child = state.child.is_some();
+        let exit_status = match (state.child.as_mut(), identity.as_ref()) {
+            (Some(child), Some(identity)) => terminate_child(child, identity).await,
+            _ => None,
         };
+        if had_child && exit_status.is_none() {
+            retain_unknown_child(&mut state, "stop_outcome_unknown");
+            return Err(ChatError::CleanupIncomplete);
+        }
         state.child = None;
+        state.child_identity = None;
+        state.instance_nonce = None;
+        finalize_capture(&mut state, exit_status, "stopped").await;
+        state.state = if self.config.is_some() {
+            SidecarState::Stopped
+        } else {
+            SidecarState::Disabled
+        };
+        Ok(state.state)
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub async fn stop_strict_for_driver(&self) -> Result<SidecarState, ChatError> {
+        let mut state = self.inner.lock().await;
+        if state.cleanup_unknown {
+            return Err(ChatError::CleanupIncomplete);
+        }
+        let had_child = state.child.is_some();
+        let identity = state.child_identity.clone();
+        let exit_status = match (state.child.as_mut(), identity.as_ref()) {
+            (Some(child), Some(identity)) => terminate_child(child, identity).await,
+            _ => None,
+        };
+        if !strict_driver_stop_outcome_known(had_child, exit_status.as_ref()) {
+            retain_unknown_child(&mut state, "stop_outcome_unknown");
+            return Err(ChatError::CleanupIncomplete);
+        }
+        state.child = None;
+        state.child_identity = None;
         state.instance_nonce = None;
         finalize_capture(&mut state, exit_status, "stopped").await;
         state.state = if self.config.is_some() {
@@ -426,16 +536,20 @@ impl SidecarSupervisor {
 
     async fn refresh_child_state(&self) {
         let mut state = self.inner.lock().await;
-        let exit_status = state
-            .child
-            .as_mut()
-            .and_then(|child| child.try_wait().ok())
-            .flatten();
-        if let Some(exit_status) = exit_status {
-            state.child = None;
-            state.instance_nonce = None;
-            finalize_capture(&mut state, Some(exit_status), "unexpected_exit").await;
-            state.state = SidecarState::Failed;
+        let child_status = match state.child.as_mut() {
+            Some(child) => child.try_wait(),
+            None => Ok(None),
+        };
+        match child_status {
+            Ok(Some(exit_status)) => {
+                state.child = None;
+                state.child_identity = None;
+                state.instance_nonce = None;
+                finalize_capture(&mut state, Some(exit_status), "unexpected_exit").await;
+                state.state = SidecarState::Failed;
+            }
+            Err(_) => retain_unknown_child(&mut state, "status_unknown"),
+            Ok(None) => {}
         }
     }
 
@@ -488,6 +602,23 @@ impl SidecarSupervisor {
     }
 }
 
+fn generate_instance_nonce(test_profile: bool) -> Result<String, ChatError> {
+    if !test_profile {
+        return Ok(uuid::Uuid::now_v7().to_string());
+    }
+
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| ChatError::SidecarUnavailable)?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(uuid::Uuid::from_bytes(bytes).to_string())
+}
+
+#[cfg(feature = "feat126-s10-driver")]
+fn strict_driver_stop_outcome_known(had_child: bool, exit_status: Option<&ExitStatus>) -> bool {
+    !had_child || exit_status.is_some()
+}
+
 fn valid_instance_response(response: &reqwest::Response, instance_nonce: &str) -> bool {
     response
         .headers()
@@ -504,20 +635,212 @@ fn valid_instance_response(response: &reqwest::Response, instance_nonce: &str) -
             .is_some_and(|length| length <= 1024)
 }
 
-async fn terminate_child(child: &mut Child) -> Option<ExitStatus> {
-    if let Some(process_id) = child.id() {
-        unsafe {
-            libc::kill(process_id as i32, libc::SIGTERM);
-        }
+async fn terminate_child(child: &mut Child, expected: &OwnedProcessIdentity) -> Option<ExitStatus> {
+    match child.try_wait() {
+        Ok(Some(status)) => return Some(status),
+        Ok(None) => {}
+        Err(_) => return None,
+    }
+    if child.id() != Some(expected.pid)
+        || owned_process_identity_matches(expected).ok() != Some(true)
+        || unsafe { libc::kill(expected.pid as i32, libc::SIGTERM) } != 0
+    {
+        return None;
     }
     match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
         Ok(Ok(status)) => Some(status),
         Ok(Err(_)) => None,
         Err(_) => {
-            let _ = child.start_kill();
-            child.wait().await.ok()
+            match child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) => {}
+                Err(_) => return None,
+            }
+            if child.id() != Some(expected.pid)
+                || owned_process_identity_matches(expected).ok() != Some(true)
+                || child.start_kill().is_err()
+            {
+                return None;
+            }
+            tokio::time::timeout(Duration::from_secs(3), child.wait())
+                .await
+                .ok()
+                .and_then(Result::ok)
         }
     }
+}
+
+fn retain_unknown_child(state: &mut SupervisorState, final_state: &str) {
+    if let Some(child) = state.child.take() {
+        std::mem::forget(child);
+    }
+    state.child_identity = None;
+    state.instance_nonce = None;
+    state.cleanup_unknown = true;
+    state.state = SidecarState::Failed;
+    if let Some(mut capture) = state.capture.take() {
+        capture.stdout_task.abort();
+        capture.stderr_task.abort();
+        capture.evidence.state = final_state.to_owned();
+        let _ = write_process_evidence(&capture.evidence_path, &capture.evidence);
+    }
+}
+
+fn owned_process_identity_matches(expected: &OwnedProcessIdentity) -> Result<bool, ()> {
+    if expected.pid <= 1 || expected.pid > i32::MAX as u32 {
+        return Err(());
+    }
+    let (ppid, start_time_seconds, start_time_microseconds) = process_start_identity(expected.pid)?;
+    let binary = process_binary_path(expected.pid)?;
+    let binary_sha256 = file_sha256(&expected.binary).map_err(|_| ())?;
+    Ok(owned_process_identity_fields_match(
+        expected,
+        ppid,
+        &binary,
+        &binary_sha256,
+        start_time_seconds,
+        start_time_microseconds,
+    ))
+}
+
+fn capture_owned_process_identity(
+    pid: u32,
+    expected_binary: &Path,
+    expected_binary_sha256: &str,
+    instance_nonce: &str,
+) -> Result<OwnedProcessIdentity, ()> {
+    if pid <= 1 || pid > i32::MAX as u32 {
+        return Err(());
+    }
+    let (ppid, start_time_seconds, start_time_microseconds) = process_start_identity(pid)?;
+    let process_binary = process_binary_path(pid)?;
+    if ppid != std::process::id()
+        || process_binary != expected_binary
+        || start_time_seconds == 0
+        || !uuid::Uuid::parse_str(instance_nonce).is_ok_and(|nonce| !nonce.is_nil())
+    {
+        return Err(());
+    }
+    Ok(OwnedProcessIdentity {
+        pid,
+        ppid,
+        binary: expected_binary.to_path_buf(),
+        process_binary,
+        binary_sha256: expected_binary_sha256.to_owned(),
+        instance_nonce: instance_nonce.to_owned(),
+        start_time_seconds,
+        start_time_microseconds,
+    })
+}
+
+async fn observe_spawn_identity(
+    child: &mut Child,
+    pid: u32,
+    expected_binary: &Path,
+    expected_binary_sha256: &str,
+    instance_nonce: &str,
+) -> SpawnIdentityOutcome {
+    let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(exit_status)) => return SpawnIdentityOutcome::Exited(exit_status),
+            Err(_) => return SpawnIdentityOutcome::Unknown,
+            Ok(None) => {}
+        }
+        if let Ok(identity) = capture_owned_process_identity(
+            pid,
+            expected_binary,
+            expected_binary_sha256,
+            instance_nonce,
+        ) {
+            return SpawnIdentityOutcome::Owned(identity);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return SpawnIdentityOutcome::Unknown;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+fn owned_process_identity_fields_match(
+    expected: &OwnedProcessIdentity,
+    ppid: u32,
+    process_binary: &Path,
+    binary_sha256: &str,
+    start_time_seconds: u64,
+    start_time_microseconds: u64,
+) -> bool {
+    ppid == expected.ppid
+        && process_binary == expected.process_binary
+        && binary_sha256 == expected.binary_sha256
+        && expected.start_time_seconds != 0
+        && start_time_seconds == expected.start_time_seconds
+        && start_time_microseconds == expected.start_time_microseconds
+        && uuid::Uuid::parse_str(&expected.instance_nonce).is_ok_and(|nonce| !nonce.is_nil())
+}
+
+#[cfg(target_os = "macos")]
+fn process_binary_path(pid: u32) -> Result<PathBuf, ()> {
+    const MAX_PATH_BYTES: usize = 4096;
+    let mut buffer = vec![0_u8; MAX_PATH_BYTES];
+    let length = unsafe {
+        libc::proc_pidpath(
+            pid as libc::c_int,
+            buffer.as_mut_ptr().cast(),
+            MAX_PATH_BYTES as u32,
+        )
+    };
+    if length <= 0 || length as usize >= buffer.len() {
+        return Err(());
+    }
+    buffer.truncate(length as usize);
+    let path = std::str::from_utf8(&buffer).map_err(|_| ())?;
+    fs::canonicalize(path).map_err(|_| ())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_binary_path(pid: u32) -> Result<PathBuf, ()> {
+    fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn process_start_identity(pid: u32) -> Result<(u32, u64, u64), ()> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let expected_size = std::mem::size_of::<libc::proc_bsdinfo>();
+    let actual_size = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            expected_size as libc::c_int,
+        )
+    };
+    if actual_size != expected_size as libc::c_int {
+        return Err(());
+    }
+    let info = unsafe { info.assume_init() };
+    if info.pbi_pid != pid || info.pbi_ppid == 0 || info.pbi_start_tvsec == 0 {
+        return Err(());
+    }
+    Ok((info.pbi_ppid, info.pbi_start_tvsec, info.pbi_start_tvusec))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_start_identity(pid: u32) -> Result<(u32, u64, u64), ()> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| ())?;
+    let fields = stat
+        .rsplit_once(')')
+        .ok_or(())?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let ppid = fields.get(1).ok_or(())?.parse::<u32>().map_err(|_| ())?;
+    let start_ticks = fields.get(19).ok_or(())?.parse::<u64>().map_err(|_| ())?;
+    if ppid == 0 || start_ticks == 0 {
+        return Err(());
+    }
+    Ok((ppid, start_ticks, 0))
 }
 
 fn load_feat126_test_profile() -> Result<Option<FEAT126TestProfile>, ChatError> {
@@ -854,6 +1177,98 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn strict_driver_stop_never_reports_an_unknown_child_outcome_as_complete() {
+        assert!(!strict_driver_stop_outcome_known(true, None));
+        assert!(strict_driver_stop_outcome_known(false, None));
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn pid_reuse_or_start_identity_drift_is_never_treated_as_owned() {
+        let expected = OwnedProcessIdentity {
+            pid: 42,
+            ppid: 7,
+            binary: PathBuf::from("/synthetic/host"),
+            process_binary: PathBuf::from("/synthetic/host"),
+            binary_sha256: "a".repeat(64),
+            instance_nonce: "019fbd88-cbc3-4bf1-934d-7b05cd693f80".to_owned(),
+            start_time_seconds: 100,
+            start_time_microseconds: 200,
+        };
+        assert!(owned_process_identity_fields_match(
+            &expected,
+            7,
+            Path::new("/synthetic/host"),
+            &"a".repeat(64),
+            100,
+            200,
+        ));
+        assert!(!owned_process_identity_fields_match(
+            &expected,
+            7,
+            Path::new("/synthetic/host"),
+            &"a".repeat(64),
+            100,
+            201,
+        ));
+        assert!(!owned_process_identity_fields_match(
+            &expected,
+            8,
+            Path::new("/synthetic/host"),
+            &"a".repeat(64),
+            100,
+            200,
+        ));
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[tokio::test]
+    async fn strict_termination_rechecks_live_spawn_identity_before_signalling() {
+        let binary = fs::canonicalize("/bin/sleep").unwrap();
+        let nonce = generate_instance_nonce(true).unwrap();
+        let mut child = Command::new(&binary)
+            .arg("30")
+            .env_clear()
+            .env("YIJIE_AGENT_HOST_INSTANCE_NONCE", &nonce)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let binary_sha256 = file_sha256(&binary).unwrap();
+        let expected =
+            capture_owned_process_identity(pid, &binary, &binary_sha256, &nonce).unwrap();
+        assert_eq!(process_binary_path(pid).unwrap(), expected.process_binary);
+        assert_eq!(file_sha256(&binary).unwrap(), expected.binary_sha256);
+        assert!(owned_process_identity_matches(&expected).unwrap());
+
+        let reused = OwnedProcessIdentity {
+            start_time_microseconds: expected.start_time_microseconds.saturating_add(1),
+            ..expected.clone()
+        };
+        assert!(terminate_child(&mut child, &reused).await.is_none());
+        assert!(child.try_wait().unwrap().is_none());
+        assert!(terminate_child(&mut child, &expected).await.is_some());
+    }
+
+    #[test]
+    fn test_profile_nonce_is_canonical_uuid_v4_and_production_nonce_stays_uuid_v7() {
+        for _ in 0..16 {
+            let test_nonce = generate_instance_nonce(true).unwrap();
+            let parsed_test = uuid::Uuid::parse_str(&test_nonce).unwrap();
+            assert_eq!(parsed_test.hyphenated().to_string(), test_nonce);
+            assert_eq!(parsed_test.get_version_num(), 4);
+            assert_eq!(parsed_test.as_bytes()[8] & 0xc0, 0x80);
+
+            let production_nonce = generate_instance_nonce(false).unwrap();
+            let parsed_production = uuid::Uuid::parse_str(&production_nonce).unwrap();
+            assert_eq!(parsed_production.hyphenated().to_string(), production_nonce);
+            assert_eq!(parsed_production.get_version_num(), 7);
+        }
+    }
+
     #[test]
     fn sidecar_environment_is_allowlisted_and_contains_no_provider_secret() {
         let config = SidecarConfig {
@@ -1031,8 +1446,10 @@ mod tests {
             inner: Mutex::new(SupervisorState {
                 state: SidecarState::Stopped,
                 child: None,
+                child_identity: None,
                 instance_nonce: None,
                 capture: None,
+                cleanup_unknown: false,
             }),
         };
         for _ in 0..2 {
@@ -1110,8 +1527,10 @@ mod tests {
             inner: Mutex::new(SupervisorState {
                 state: SidecarState::Stopped,
                 child: None,
+                child_identity: None,
                 instance_nonce: None,
                 capture: None,
+                cleanup_unknown: false,
             }),
         };
         assert_eq!(
@@ -1261,8 +1680,10 @@ mod tests {
             inner: Mutex::new(SupervisorState {
                 state: SidecarState::Stopped,
                 child: None,
+                child_identity: None,
                 instance_nonce: None,
                 capture: None,
+                cleanup_unknown: false,
             }),
         };
         (config, supervisor)

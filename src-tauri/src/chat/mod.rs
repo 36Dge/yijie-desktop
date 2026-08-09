@@ -60,6 +60,30 @@ use tauri::State;
 use tokio::sync::Mutex;
 use worker::DatabaseWorker;
 
+// The feature handler deliberately omits these production commands. Referencing the function
+// items keeps their normal compile coverage without making them invokable from the WebView.
+#[cfg(feature = "feat126-s10-driver")]
+pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
+    let _ = ipc::chat_pick_project_v1;
+    let _ = ipc::chat_set_project_pinned_v1;
+    let _ = ipc::chat_remove_project_v1;
+    let _ = ipc::chat_create_session_v1;
+    let _ = ipc::chat_submit_turn_v1;
+    let _ = ipc::chat_list_sessions_v1;
+    let _ = ipc::chat_load_history_v1;
+    let _ = ipc::chat_load_reasoning_v1;
+    let _ = ipc::chat_rename_session_v1;
+    let _ = ipc::chat_set_session_pinned_v1;
+    let _ = ipc::chat_interrupt_turn_v1;
+    let _ = ipc::chat_delete_session_v1;
+    let _ = ipc::chat_get_cleanup_status_v1;
+    let _ = ipc::chat_get_session_control_plane_v1;
+    let _ = ipc::chat_resync_session_v1;
+    let _ = ipc::chat_subscribe_session_v1;
+    let _ = ipc::chat_unsubscribe_session_v1;
+    let _ = ipc::chat_cancel_request_v1;
+}
+
 const CONTRACT_COMMIT: &str = "29317b6426578749dc698fc2ad32b986ee5c8e9f";
 
 #[derive(Clone)]
@@ -388,6 +412,75 @@ impl ChatRuntime {
             .register_project(selection.canonical_path, selection.bookmark)
             .await
             .map(Some)
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_register_project(
+        &self,
+    ) -> Result<database::ProjectSummary, ChatError> {
+        let profile = match &self.mode {
+            RuntimeMode::Local(config) => config
+                .secure_storage
+                .clone()
+                .ok_or(ChatError::InvalidConfiguration)?,
+            RuntimeMode::Disabled => return Err(ChatError::Disabled),
+            RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
+        };
+        let project_path = profile.project_path().to_path_buf();
+        profile
+            .validate_project_path(&project_path)
+            .map_err(|_| ChatError::ProjectUnavailable)?;
+        let selection = tokio::task::spawn_blocking(move || {
+            native_project::create_selection(&project_path)?.ok_or(ChatError::ProjectUnavailable)
+        })
+        .await
+        .map_err(|_| ChatError::ProjectUnavailable)??;
+        self.database()
+            .await?
+            .register_project(selection.canonical_path, selection.bookmark)
+            .await
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_verify_project_and_readiness(
+        &self,
+        project_id: &str,
+    ) -> Result<(), ChatError> {
+        let parsed = uuid::Uuid::parse_str(project_id).map_err(|_| ChatError::InvalidInput)?;
+        if parsed.is_nil() || parsed.hyphenated().to_string() != project_id {
+            return Err(ChatError::InvalidInput);
+        }
+        let project = self.revalidate_project(project_id.to_owned()).await?;
+        if project.id != project_id || !project.available {
+            return Err(ChatError::ProjectUnavailable);
+        }
+        let readiness = self.local_readiness(false).await;
+        if readiness.lifecycle != ChatReadinessLifecycle::Ready
+            || readiness.host != ChatHostReadiness::Ready
+            || readiness.runtime != ChatRuntimeReadiness::Ready
+            || readiness.storage != ChatStorageReadiness::Ready
+            || !readiness.can_send
+        {
+            return Err(ChatError::SidecarUnavailable);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_stop_owned_host(&self) -> Result<(), ChatError> {
+        match self.mode {
+            RuntimeMode::Local(_) => {
+                *self.host_bridge.lock().await = None;
+                self.sidecar
+                    .as_ref()
+                    .ok_or(ChatError::InvalidConfiguration)?
+                    .stop_strict_for_driver()
+                    .await
+                    .map(|_| ())
+            }
+            RuntimeMode::Disabled => Err(ChatError::Disabled),
+            RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
+        }
     }
 
     async fn revalidate_project(

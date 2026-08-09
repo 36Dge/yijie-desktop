@@ -333,6 +333,16 @@ impl Feat126SecureStorageProfile {
         &self.run_id
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn project_path(&self) -> &Path {
+        &self.project
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn expected_infra_secrets_path(&self) -> PathBuf {
+        self.run_root.join("infra-secrets.env")
+    }
+
     pub(crate) fn database_namespace(&self) -> &KeychainNamespace {
         &self.namespaces[0]
     }
@@ -1429,6 +1439,13 @@ pub fn feat126_secure_storage_test_control(
             }
             StorageBackendKind::EphemeralFile => profile
                 .cleanup_ephemeral(true)
+                .map_err(|_| "secure_storage_cleanup_failed"),
+        },
+        #[cfg(feature = "feat126-s10-driver")]
+        "cleanup-preserve-run-root" => match profile.backend {
+            StorageBackendKind::ProtectedDataKeychain => Err("secure_storage_invalid_action"),
+            StorageBackendKind::EphemeralFile => profile
+                .cleanup_ephemeral(false)
                 .map_err(|_| "secure_storage_cleanup_failed"),
         },
         _ => Err("secure_storage_invalid_action"),

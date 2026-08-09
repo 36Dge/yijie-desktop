@@ -78,6 +78,11 @@ impl OidcClient {
         })
     }
 
+    #[cfg(any(test, feature = "feat126-s10-driver"))]
+    pub(crate) fn feat126_config(&self) -> &NativeAuthConfig {
+        &self.config
+    }
+
     pub async fn begin_login(&self, redirect_uri: String) -> Result<LoginAttempt, NativeAuthError> {
         let jwks = self.fetch_jwks().await?;
         let client = self.build_client(jwks.clone(), Some(redirect_uri))?;

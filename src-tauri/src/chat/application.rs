@@ -1807,17 +1807,17 @@ mod tests {
     #[cfg(target_os = "macos")]
     use crate::chat::sidecar::HostConnection;
     #[cfg(target_os = "macos")]
-    use crate::native_auth::{NativeAuthConfig, NativeAuthRuntime, OidcClient, SecretValue};
+    use crate::native_auth::{
+        synthetic_authorization_code_tokens, NativeAuthConfig, NativeAuthRuntime, OidcClient,
+    };
     #[cfg(target_os = "macos")]
     use std::fs;
     #[cfg(target_os = "macos")]
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
     #[cfg(target_os = "macos")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     #[cfg(target_os = "macos")]
     use tokio::net::TcpListener;
-    #[cfg(target_os = "macos")]
-    use zeroize::Zeroizing;
 
     struct EventIdentity {
         stream_id: Uuid,
@@ -2338,131 +2338,6 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    fn s10p3_synthetic_password() -> Zeroizing<String> {
-        assert_eq!(
-            std::env::var("YIJIE_FEAT126_S10P3_REAL_MAIN_CHAIN").as_deref(),
-            Ok("true")
-        );
-        let path = std::env::var("YIJIE_FEAT126_S10_INFRA_SECRETS_PATH")
-            .expect("S10E ignored secrets path");
-        let metadata = fs::symlink_metadata(&path).expect("S10E secrets metadata");
-        assert!(metadata.file_type().is_file());
-        assert!(!metadata.file_type().is_symlink());
-        assert_eq!(metadata.mode() & 0o077, 0);
-        assert!(metadata.len() > 0 && metadata.len() <= 16 * 1024);
-        let contents = Zeroizing::new(fs::read_to_string(&path).expect("read S10E secrets"));
-        let mut password = None;
-        let mut names = std::collections::BTreeSet::new();
-        for line in contents.lines() {
-            let (name, value) = line.split_once('=').expect("closed secret entry");
-            assert!(names.insert(name));
-            assert!(!value.is_empty());
-            assert!(!value.chars().any(char::is_whitespace));
-            if name == "FEAT126_S10_SYNTHETIC_USER_A_PASSWORD" {
-                password = Some(Zeroizing::new(value.to_owned()));
-            }
-        }
-        assert_eq!(names.len(), 5);
-        password.expect("synthetic user A credential")
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn s10p3_authorization_code(
-        config: &NativeAuthConfig,
-        authorization_url: &url::Url,
-        expected_state: &str,
-        expected_issuer: &str,
-        password: &str,
-    ) -> SecretValue {
-        use reqwest::header::{COOKIE, LOCATION, SET_COOKIE};
-
-        let client = config
-            .harden_http_client(
-                reqwest::Client::builder()
-                    .https_only(true)
-                    .redirect(reqwest::redirect::Policy::none())
-                    .connect_timeout(Duration::from_secs(5))
-                    .timeout(Duration::from_secs(10)),
-            )
-            .build()
-            .expect("synthetic login client");
-        let response = client
-            .get(authorization_url.clone())
-            .send()
-            .await
-            .expect("authorization page");
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
-        let cookies = response
-            .headers()
-            .get_all(SET_COOKIE)
-            .iter()
-            .map(|value| {
-                value
-                    .to_str()
-                    .expect("ASCII cookie")
-                    .split(';')
-                    .next()
-                    .expect("cookie pair")
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-        assert!(!cookies.is_empty());
-        let body = response.bytes().await.expect("authorization body");
-        assert!(body.len() <= 256 * 1024);
-        let body = std::str::from_utf8(&body).expect("UTF-8 authorization page");
-        let form = body.find("id=\"kc-form-login\"").expect("login form");
-        let action = body[form..]
-            .find("action=\"")
-            .map(|offset| form + offset + "action=\"".len())
-            .expect("login action");
-        let end = body[action..]
-            .find('"')
-            .map(|offset| action + offset)
-            .expect("login action end");
-        let action = body[action..end].replace("&amp;", "&");
-        assert!(!action.contains('&') || !action.contains("&amp;"));
-        let action = url::Url::parse(&action).expect("absolute login action");
-        assert_eq!(action.scheme(), "https");
-        assert_eq!(action.origin(), config.issuer.origin());
-        assert!(action.path().contains("/login-actions/authenticate"));
-
-        let response = client
-            .post(action)
-            .header(COOKIE, cookies)
-            .form(&[
-                ("username", "feat125-synthetic-user-a"),
-                ("password", password),
-                ("credentialId", ""),
-            ])
-            .send()
-            .await
-            .expect("submit synthetic login");
-        assert!(response.status().is_redirection());
-        let location = response
-            .headers()
-            .get(LOCATION)
-            .and_then(|value| value.to_str().ok())
-            .expect("authorization callback");
-        let callback = url::Url::parse(location).expect("callback URL");
-        assert_eq!(callback.scheme(), "http");
-        assert_eq!(callback.host_str(), Some("127.0.0.1"));
-        assert_eq!(callback.path(), "/oauth/callback");
-        let query = callback
-            .query_pairs()
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            query.get("state").map(|value| value.as_ref()),
-            Some(expected_state)
-        );
-        assert_eq!(
-            query.get("iss").map(|value| value.as_ref()),
-            Some(expected_issuer)
-        );
-        SecretValue::new(query.get("code").expect("authorization code").to_string())
-    }
-
-    #[cfg(target_os = "macos")]
     fn s10p3_access_claim_summary(encoded: &str) -> serde_json::Value {
         fn decode_base64url(value: &str) -> Vec<u8> {
             let mut output = Vec::with_capacity(value.len() * 3 / 4);
@@ -2513,27 +2388,17 @@ mod tests {
         const TENANT: &str = "12500000-0000-4000-8000-100000000001";
         const TOKEN: &str = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
 
-        let password = s10p3_synthetic_password();
+        assert_eq!(
+            std::env::var("YIJIE_FEAT126_S10P3_REAL_MAIN_CHAIN").as_deref(),
+            Ok("true")
+        );
         let config = NativeAuthConfig::from_environment()
             .expect("native auth configuration")
             .expect("native auth enabled");
         let oidc = OidcClient::new(config.clone()).expect("OIDC client");
-        let attempt = oidc
-            .begin_login("http://127.0.0.1/oauth/callback".to_owned())
+        let tokens = synthetic_authorization_code_tokens(&oidc)
             .await
-            .expect("begin synthetic login");
-        let code = s10p3_authorization_code(
-            &config,
-            &attempt.authorization_url,
-            attempt.expected_state.expose(),
-            &attempt.expected_issuer,
-            password.as_str(),
-        )
-        .await;
-        let tokens = oidc
-            .exchange_code(attempt, code)
-            .await
-            .expect("exchange synthetic code");
+            .expect("synthetic authorization-code and PKCE login");
         let claims = s10p3_access_claim_summary(tokens.access_token.expose());
         assert_eq!(
             claims["iss"],
@@ -2962,7 +2827,7 @@ mod tests {
             .await
             .unwrap();
         let turn = database
-            .claim_next_conversation_outbox(now, 30)
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
             .await
             .unwrap()
             .unwrap();

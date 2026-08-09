@@ -6,6 +6,8 @@ use super::{
 };
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::loopback::LoopbackCallback;
+#[cfg(feature = "feat126-s10-driver")]
+use crate::native_auth::synthetic_authorization_code_tokens;
 use crate::native_auth::transport::{
     OperationResponse, OperationTransport, PublicTaskErrorCode, PublicTaskTransportOutcome,
 };
@@ -193,6 +195,11 @@ impl NativeAuthRuntime {
             .get_my_capabilities(tenant_id)
             .await
             .map_err(CommandError::from)
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, NativeAuthError> {
+        self.service_native()?.feat126_s10_driver_login().await
     }
 
     pub(crate) async fn chat_projection(
@@ -686,6 +693,23 @@ impl AuthService {
             )
             .await?;
         let tokens = self.oidc.exchange_code(attempt, callback_code.code).await?;
+        self.install_issued_tokens(tokens).await
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, NativeAuthError> {
+        let _login_guard = self
+            .login_lock
+            .try_lock()
+            .map_err(|_| NativeAuthError::LoginInProgress)?;
+        let tokens = synthetic_authorization_code_tokens(&self.oidc).await?;
+        self.install_issued_tokens(tokens).await
+    }
+
+    async fn install_issued_tokens(
+        &self,
+        tokens: super::oidc::IssuedTokens,
+    ) -> Result<AuthStatus, NativeAuthError> {
         let issued_refresh = tokens.refresh_token.clone();
         let _refresh_guard = self.refresh_lock.lock().await;
         let now = match epoch_seconds() {
