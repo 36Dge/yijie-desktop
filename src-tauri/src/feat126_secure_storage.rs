@@ -328,6 +328,11 @@ impl Feat126SecureStorageProfile {
         &self.desktop_app_data
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     pub(crate) fn database_namespace(&self) -> &KeychainNamespace {
         &self.namespaces[0]
     }
@@ -361,6 +366,11 @@ impl Feat126SecureStorageProfile {
             return Err(SecureStorageError::InvalidConfiguration);
         }
         Ok(())
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn validate_fixed_project(&self) -> Result<(), SecureStorageError> {
+        self.validate_project_path(&self.project)
     }
 
     pub(crate) fn validate_child_homes(

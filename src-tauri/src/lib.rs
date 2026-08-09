@@ -1,4 +1,6 @@
 pub mod chat;
+#[cfg(feature = "feat126-s10-driver")]
+mod feat126_s10_driver;
 mod feat126_secure_storage;
 mod native_auth;
 
@@ -67,7 +69,7 @@ pub fn run() {
     let chat_native_auth = native_auth.clone();
     let chat_secure_storage = secure_storage.profile();
     let chat_secure_storage_invalid = secure_storage.is_invalid();
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
         .setup(move |app| {
@@ -82,41 +84,79 @@ pub fn run() {
                 chat_native_auth.clone(),
             ));
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            runtime_health,
-            native_auth_login,
-            native_auth_logout,
-            native_auth_status,
-            list_my_tenants,
-            get_my_capabilities,
-            chat::chat_foundation_status,
-            chat::chat_start_local_host,
-            chat::chat_stop_local_host,
-            chat::ipc::chat_bind_context_v1,
-            chat::ipc::chat_list_projects_v1,
-            chat::ipc::chat_pick_project_v1,
-            chat::ipc::chat_revalidate_project_v1,
-            chat::ipc::chat_set_project_pinned_v1,
-            chat::ipc::chat_remove_project_v1,
-            chat::ipc::chat_create_session_v1,
-            chat::ipc::chat_submit_turn_v1,
-            chat::ipc::chat_list_sessions_v1,
-            chat::ipc::chat_load_history_v1,
-            chat::ipc::chat_load_reasoning_v1,
-            chat::ipc::chat_rename_session_v1,
-            chat::ipc::chat_set_session_pinned_v1,
-            chat::ipc::chat_interrupt_turn_v1,
-            chat::ipc::chat_delete_session_v1,
-            chat::ipc::chat_get_cleanup_status_v1,
-            chat::ipc::chat_get_session_control_plane_v1,
-            chat::ipc::chat_get_local_readiness_v1,
-            chat::ipc::chat_request_local_recovery_v1,
-            chat::ipc::chat_subscribe_session_v1,
-            chat::ipc::chat_resync_session_v1,
-            chat::ipc::chat_cancel_request_v1,
-            chat::ipc::chat_unsubscribe_session_v1
-        ])
+        });
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        runtime_health,
+        native_auth_login,
+        native_auth_logout,
+        native_auth_status,
+        list_my_tenants,
+        get_my_capabilities,
+        chat::chat_foundation_status,
+        chat::chat_start_local_host,
+        chat::chat_stop_local_host,
+        chat::ipc::chat_bind_context_v1,
+        chat::ipc::chat_list_projects_v1,
+        chat::ipc::chat_pick_project_v1,
+        chat::ipc::chat_revalidate_project_v1,
+        chat::ipc::chat_set_project_pinned_v1,
+        chat::ipc::chat_remove_project_v1,
+        chat::ipc::chat_create_session_v1,
+        chat::ipc::chat_submit_turn_v1,
+        chat::ipc::chat_list_sessions_v1,
+        chat::ipc::chat_load_history_v1,
+        chat::ipc::chat_load_reasoning_v1,
+        chat::ipc::chat_rename_session_v1,
+        chat::ipc::chat_set_session_pinned_v1,
+        chat::ipc::chat_interrupt_turn_v1,
+        chat::ipc::chat_delete_session_v1,
+        chat::ipc::chat_get_cleanup_status_v1,
+        chat::ipc::chat_get_session_control_plane_v1,
+        chat::ipc::chat_get_local_readiness_v1,
+        chat::ipc::chat_request_local_recovery_v1,
+        chat::ipc::chat_subscribe_session_v1,
+        chat::ipc::chat_resync_session_v1,
+        chat::ipc::chat_cancel_request_v1,
+        chat::ipc::chat_unsubscribe_session_v1
+    ]);
+    #[cfg(feature = "feat126-s10-driver")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        runtime_health,
+        native_auth_login,
+        native_auth_logout,
+        native_auth_status,
+        list_my_tenants,
+        get_my_capabilities,
+        chat::chat_foundation_status,
+        chat::chat_start_local_host,
+        chat::chat_stop_local_host,
+        chat::ipc::chat_bind_context_v1,
+        chat::ipc::chat_list_projects_v1,
+        chat::ipc::chat_pick_project_v1,
+        chat::ipc::chat_revalidate_project_v1,
+        chat::ipc::chat_set_project_pinned_v1,
+        chat::ipc::chat_remove_project_v1,
+        chat::ipc::chat_create_session_v1,
+        chat::ipc::chat_submit_turn_v1,
+        chat::ipc::chat_list_sessions_v1,
+        chat::ipc::chat_load_history_v1,
+        chat::ipc::chat_load_reasoning_v1,
+        chat::ipc::chat_rename_session_v1,
+        chat::ipc::chat_set_session_pinned_v1,
+        chat::ipc::chat_interrupt_turn_v1,
+        chat::ipc::chat_delete_session_v1,
+        chat::ipc::chat_get_cleanup_status_v1,
+        chat::ipc::chat_get_session_control_plane_v1,
+        chat::ipc::chat_get_local_readiness_v1,
+        chat::ipc::chat_request_local_recovery_v1,
+        chat::ipc::chat_subscribe_session_v1,
+        chat::ipc::chat_resync_session_v1,
+        chat::ipc::chat_cancel_request_v1,
+        chat::ipc::chat_unsubscribe_session_v1,
+        feat126_s10_driver::feat126_s10_driver_probe
+    ]);
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
