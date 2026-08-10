@@ -276,7 +276,7 @@ impl Feat126SecureStorageProfile {
         {
             return Err(SecureStorageError::InvalidConfiguration);
         }
-        let run_root = validate_run_root(Path::new(&run_root))?;
+        let run_root = validate_profile_run_root(Path::new(&run_root), backend, &run_id)?;
         let desktop_app_data = run_root.join(DESKTOP_APP_DATA_DIRECTORY);
         let host_home = run_root.join(HOST_HOME_DIRECTORY);
         let codex_home = run_root.join(CODEX_HOME_DIRECTORY);
@@ -628,7 +628,7 @@ impl Feat126SecureStorageProfile {
         manifest.phase = ManifestPhase::Complete;
         write_manifest(&self.manifest_path, &manifest)?;
         if remove_root {
-            validate_run_root(&self.run_root)?;
+            validate_profile_run_root(&self.run_root, self.backend, &self.run_id)?;
             fs::remove_dir_all(&self.run_root).map_err(|_| SecureStorageError::CleanupRefused)?;
         }
         Ok(evidence)
@@ -1049,7 +1049,7 @@ fn validate_manifest_directory_entries(
 fn remove_verified_empty_run_root(
     profile: &Feat126SecureStorageProfile,
 ) -> Result<(), SecureStorageError> {
-    validate_run_root(&profile.run_root)?;
+    validate_profile_run_root(&profile.run_root, profile.backend, &profile.run_id)?;
     validate_run_root_entries(profile)?;
     validate_manifest_directory_entries(profile)?;
     validate_secret_directory_entries(&profile.secret_directory)?;
@@ -1262,6 +1262,7 @@ fn require_exact_environment_path(name: &str, expected: &Path) -> Result<(), Sec
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_run_root(path: &Path) -> Result<PathBuf, SecureStorageError> {
     let path = validate_private_directory(path)?;
     let temporary_root = std::env::temp_dir()
@@ -1271,6 +1272,51 @@ fn validate_run_root(path: &Path) -> Result<PathBuf, SecureStorageError> {
         return Err(SecureStorageError::InvalidConfiguration);
     }
     Ok(path)
+}
+
+fn validate_profile_run_root(
+    path: &Path,
+    backend: StorageBackendKind,
+    run_id: &str,
+) -> Result<PathBuf, SecureStorageError> {
+    let path = validate_private_directory(path)?;
+    let temporary_root = std::env::temp_dir()
+        .canonicalize()
+        .map_err(|_| SecureStorageError::InvalidConfiguration)?;
+    if run_root_location_allowed(&path, &temporary_root, backend, run_id) {
+        Ok(path)
+    } else {
+        Err(SecureStorageError::InvalidConfiguration)
+    }
+}
+
+fn run_root_location_allowed(
+    path: &Path,
+    temporary_root: &Path,
+    backend: StorageBackendKind,
+    run_id: &str,
+) -> bool {
+    if path != temporary_root && path.starts_with(temporary_root) {
+        return true;
+    }
+    #[cfg(feature = "feat126-s10-driver")]
+    {
+        let canonical_v4 = uuid::Uuid::parse_str(run_id).is_ok_and(|value| {
+            value.get_version_num() == 4 && value.hyphenated().to_string() == run_id
+        });
+        let suffix = Path::new("yijie-infra")
+            .join("environments")
+            .join("local")
+            .join("generated")
+            .join("feat-126-s10")
+            .join(run_id);
+        backend == StorageBackendKind::EphemeralFile && canonical_v4 && path.ends_with(suffix)
+    }
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    {
+        let _ = (backend, run_id);
+        false
+    }
 }
 
 fn validate_private_directory(path: &Path) -> Result<PathBuf, SecureStorageError> {
@@ -1813,6 +1859,56 @@ mod tests {
             validate_run_root(Path::new("/")),
             Err(SecureStorageError::InvalidConfiguration)
         );
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn driver_accepts_only_the_canonical_infra_ephemeral_run_root_suffix() {
+        let run_id = "12600000-0000-4000-8000-000000000071";
+        let temporary_root = Path::new("/private/tmp");
+        let canonical = Path::new("/workspace/yijie-infra/environments/local/generated")
+            .join("feat-126-s10")
+            .join(run_id);
+        assert!(run_root_location_allowed(
+            &canonical,
+            temporary_root,
+            StorageBackendKind::EphemeralFile,
+            run_id,
+        ));
+        assert!(!run_root_location_allowed(
+            &canonical,
+            temporary_root,
+            StorageBackendKind::ProtectedDataKeychain,
+            run_id,
+        ));
+        for invalid in [
+            Path::new("/workspace/yijie-desktop/environments/local/generated")
+                .join("feat-126-s10")
+                .join(run_id),
+            Path::new("/workspace/yijie-infra/environments/local/generated")
+                .join("feat-126-s10-other")
+                .join(run_id),
+            Path::new("/workspace/yijie-infra/environments/local/generated")
+                .join("feat-126-s10")
+                .join("12600000-0000-4000-8000-000000000072"),
+        ] {
+            assert!(!run_root_location_allowed(
+                &invalid,
+                temporary_root,
+                StorageBackendKind::EphemeralFile,
+                run_id,
+            ));
+        }
+        let version_seven_run_id = "12600000-0000-7000-8000-000000000071";
+        let version_seven = Path::new("/workspace/yijie-infra/environments/local/generated")
+            .join("feat-126-s10")
+            .join(version_seven_run_id);
+        assert!(!run_root_location_allowed(
+            &version_seven,
+            temporary_root,
+            StorageBackendKind::EphemeralFile,
+            version_seven_run_id,
+        ));
     }
 
     #[test]
