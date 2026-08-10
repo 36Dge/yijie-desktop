@@ -1,19 +1,28 @@
 import { invoke } from "@tauri-apps/api/core";
 
 const root = document.querySelector("#app");
-if (root === null) throw new Error("application_root_missing");
+const featureDriverEnabled = import.meta.env.VITE_FEAT126_S10_DRIVER === "true";
 
-if (import.meta.env.VITE_FEAT126_S10_DRIVER === "true") {
-  void import("./feat126/s10b-driver").then(({ mountFeat126S10Driver }) =>
-    mountFeat126S10Driver(root),
-  ).catch(async () => {
-    try {
-      await invoke("feat126_s10_driver_fail_closed");
-    } catch {
-      window.close();
-    }
-  });
+if (featureDriverEnabled) {
+  if (root === null) {
+    void invoke("feat126_s10_driver_fail_closed", {
+      failureClass: "driver_frontend_startup_invalid",
+    }).catch(() => window.close());
+  } else {
+    void import("./feat126/s10b-driver").then(({ mountFeat126S10Driver }) =>
+      mountFeat126S10Driver(root),
+    ).catch(async () => {
+      try {
+        await invoke("feat126_s10_driver_fail_closed", {
+          failureClass: "driver_frontend_startup_invalid",
+        });
+      } catch {
+        window.close();
+      }
+    });
+  }
 } else {
+  if (root === null) throw new Error("application_root_missing");
   void (async () => {
     const [{ createApp }, { createPinia }, { default: App }, { router }] = await Promise.all([
       import("vue"),

@@ -36,6 +36,27 @@ const FIXED_TENANT: &str = "12500000-0000-4000-8000-100000000001";
 const CONTROL_READ_FD: i32 = 3;
 const CONTROL_WRITE_FD: i32 = 4;
 const MAX_FRAME_BYTES: usize = 1024;
+const STARTUP_FAILURE_CLASSES: &[&str] = &[
+    "driver_app_data_invalid",
+    "driver_authority_invalid",
+    "driver_bind_failed",
+    "driver_control_channel_invalid",
+    "driver_control_monitor_invalid",
+    "driver_control_projection_invalid",
+    "driver_frontend_startup_invalid",
+    "driver_login_failed",
+    "driver_login_projection_invalid",
+    "driver_nonce_invalid",
+    "driver_profile_invalid",
+    "driver_project_invalid",
+    "driver_project_projection_invalid",
+    "driver_project_revalidation_failed",
+    "driver_readiness_failed",
+    "driver_ready_emit_failed",
+    "driver_run_id_invalid",
+    "driver_secret_authority_invalid",
+    "driver_tauri_startup_invalid",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DriverPhase {
@@ -56,6 +77,13 @@ enum ControlOutcome {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartupTerminal {
+    Pending,
+    Ready,
+    Failed,
+}
+
 struct DriverState {
     phase: DriverPhase,
     project_id: Option<String>,
@@ -72,6 +100,7 @@ struct DriverInner {
     outbound: StdMutex<File>,
     outcome: watch::Sender<ControlOutcome>,
     monitor_started: AtomicBool,
+    startup_terminal: StdMutex<StartupTerminal>,
 }
 
 #[derive(Clone)]
@@ -96,6 +125,16 @@ struct OutboundFrame<'a> {
     nonce: &'a str,
     sequence: u64,
     kind: &'static str,
+}
+
+#[derive(Serialize)]
+struct StartupFailureFrame<'a> {
+    schema_version: u8,
+    run_id: &'a str,
+    nonce: &'a str,
+    sequence: u64,
+    kind: &'static str,
+    failure_class: &'a str,
 }
 
 #[derive(Serialize)]
@@ -170,6 +209,7 @@ impl Feat126S10DriverRuntime {
                 outbound: StdMutex::new(outbound),
                 outcome,
                 monitor_started: AtomicBool::new(false),
+                startup_terminal: StdMutex::new(StartupTerminal::Pending),
             }),
         })
     }
@@ -207,11 +247,26 @@ impl Feat126S10DriverRuntime {
             if valid_abort && stopped {
                 runtime.inner.outcome.send_replace(ControlOutcome::Abort);
             } else {
+                runtime.emit_startup_failure("driver_control_monitor_invalid");
                 runtime.fail().await;
                 app.exit(1);
             }
         });
         Ok(())
+    }
+
+    pub(crate) fn emit_startup_failure(&self, failure_class: &str) {
+        if !STARTUP_FAILURE_CLASSES.contains(&failure_class) {
+            return;
+        }
+        let Ok(mut terminal) = self.inner.startup_terminal.lock() else {
+            return;
+        };
+        if *terminal != StartupTerminal::Pending {
+            return;
+        }
+        *terminal = StartupTerminal::Failed;
+        let _ = self.write_startup_failure(failure_class);
     }
 
     async fn require_phase(&self, expected: DriverPhase) -> Result<(), &'static str> {
@@ -345,8 +400,17 @@ impl Feat126S10DriverRuntime {
         {
             return Err("driver_state_invalid");
         }
+        let mut terminal = self
+            .inner
+            .startup_terminal
+            .lock()
+            .map_err(|_| "driver_state_invalid")?;
+        if *terminal != StartupTerminal::Pending {
+            return Err("driver_state_invalid");
+        }
         self.write_frame(1, "component_ready")?;
         state.phase = DriverPhase::Ready;
+        *terminal = StartupTerminal::Ready;
         Ok(())
     }
 
@@ -421,6 +485,62 @@ impl Feat126S10DriverRuntime {
             .and_then(|_| outbound.flush())
             .map_err(|_| "driver_control_write_failed")
     }
+
+    fn write_startup_failure(&self, failure_class: &str) -> Result<(), &'static str> {
+        let encoded =
+            encode_startup_failure_frame(&self.inner.run_id, &self.inner.nonce, failure_class)?;
+        let mut outbound = self
+            .inner
+            .outbound
+            .lock()
+            .map_err(|_| "driver_control_write_failed")?;
+        outbound
+            .write_all(&encoded)
+            .and_then(|_| outbound.flush())
+            .map_err(|_| "driver_control_write_failed")
+    }
+}
+
+fn encode_startup_failure_frame(
+    run_id: &str,
+    nonce: &str,
+    failure_class: &str,
+) -> Result<Vec<u8>, &'static str> {
+    validate_uuid_v4(run_id).map_err(|_| "driver_control_write_failed")?;
+    validate_uuid_v4(nonce).map_err(|_| "driver_control_write_failed")?;
+    if !STARTUP_FAILURE_CLASSES.contains(&failure_class) {
+        return Err("driver_control_write_failed");
+    }
+    let mut encoded = serde_json::to_vec(&StartupFailureFrame {
+        schema_version: 1,
+        run_id,
+        nonce,
+        sequence: 1,
+        kind: "startup_failed",
+        failure_class,
+    })
+    .map_err(|_| "driver_control_write_failed")?;
+    encoded.push(b'\n');
+    if encoded.len() > MAX_FRAME_BYTES {
+        return Err("driver_control_write_failed");
+    }
+    Ok(encoded)
+}
+
+pub(crate) fn emit_startup_failure_from_environment(failure_class: &str) {
+    let Ok(run_id) = std::env::var(RUN_ENV) else {
+        return;
+    };
+    let Ok(nonce) = std::env::var(NONCE_ENV) else {
+        return;
+    };
+    let Ok(mut outbound) = inherited_control_fd(CONTROL_WRITE_FD) else {
+        return;
+    };
+    let Ok(encoded) = encode_startup_failure_frame(&run_id, &nonce, failure_class) else {
+        return;
+    };
+    let _ = outbound.write_all(&encoded).and_then(|_| outbound.flush());
 }
 
 #[tauri::command]
@@ -665,7 +785,14 @@ pub(crate) async fn feat126_s10_driver_fail_closed(
     app: AppHandle,
     driver: State<'_, Feat126S10DriverRuntime>,
     chat: State<'_, ChatRuntime>,
+    failure_class: String,
 ) -> Result<(), String> {
+    let failure_class = if STARTUP_FAILURE_CLASSES.contains(&failure_class.as_str()) {
+        failure_class.as_str()
+    } else {
+        "driver_frontend_startup_invalid"
+    };
+    driver.emit_startup_failure(failure_class);
     driver.fail().await;
     let result = chat
         .feat126_s10_stop_owned_host()
@@ -833,10 +960,29 @@ mod tests {
                     outbound: StdMutex::new(outbound),
                     outcome,
                     monitor_started: AtomicBool::new(false),
+                    startup_terminal: StdMutex::new(StartupTerminal::Pending),
                 }),
             },
             path,
         )
+    }
+
+    async fn prepare_runtime_for_ready(runtime: &Feat126S10DriverRuntime) {
+        runtime
+            .transition(DriverPhase::Created, DriverPhase::Authenticated)
+            .await
+            .unwrap();
+        runtime
+            .set_project("019fbd88-cbc3-7bf1-934d-7b05cd693f99".to_owned())
+            .await
+            .unwrap();
+        runtime
+            .transition(DriverPhase::ProjectRegistered, DriverPhase::Bound)
+            .await
+            .unwrap();
+        let mut state = runtime.inner.state.lock().await;
+        state.project_revalidated = true;
+        state.recovery_requested = true;
     }
 
     #[test]
@@ -890,6 +1036,109 @@ mod tests {
     }
 
     #[test]
+    fn startup_failure_frame_is_bounded_and_content_free() {
+        let encoded =
+            encode_startup_failure_frame(RUN_ID, NONCE, "driver_profile_invalid").unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&encoded[..encoded.len() - 1]).unwrap();
+        assert_eq!(value["kind"], "startup_failed");
+        assert_eq!(value["sequence"], 1);
+        assert_eq!(value["failure_class"], "driver_profile_invalid");
+        assert_eq!(value.as_object().unwrap().len(), 6);
+        assert!(encoded.len() <= MAX_FRAME_BYTES);
+        assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_bind_failed").is_ok());
+        assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_control_eof").is_err());
+    }
+
+    #[test]
+    fn startup_failure_is_one_shot_and_preserves_the_first_closed_leaf() {
+        let (runtime, output) = runtime_with_output();
+        runtime.emit_startup_failure("driver_control_monitor_invalid");
+        runtime.emit_startup_failure("driver_profile_invalid");
+
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let frames = encoded.lines().collect::<Vec<_>>();
+        assert_eq!(frames.len(), 1);
+        let failure: serde_json::Value = serde_json::from_str(frames[0]).unwrap();
+        assert_eq!(failure["kind"], "startup_failed");
+        assert_eq!(failure["failure_class"], "driver_control_monitor_invalid");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_failure_first_rejects_a_later_ready_terminal() {
+        let (runtime, output) = runtime_with_output();
+        prepare_runtime_for_ready(&runtime).await;
+        runtime.emit_startup_failure("driver_control_monitor_invalid");
+
+        assert_eq!(runtime.emit_ready().await, Err("driver_state_invalid"));
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let frames = encoded.lines().collect::<Vec<_>>();
+        assert_eq!(frames.len(), 1);
+        let failure: serde_json::Value = serde_json::from_str(frames[0]).unwrap();
+        assert_eq!(failure["kind"], "startup_failed");
+        assert_eq!(failure["failure_class"], "driver_control_monitor_invalid");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[tokio::test]
+    async fn ready_first_suppresses_a_later_startup_failure() {
+        let (runtime, output) = runtime_with_output();
+        prepare_runtime_for_ready(&runtime).await;
+        runtime.emit_ready().await.unwrap();
+        runtime.emit_startup_failure("driver_frontend_startup_invalid");
+
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let frames = encoded.lines().collect::<Vec<_>>();
+        assert_eq!(frames.len(), 1);
+        let ready: serde_json::Value = serde_json::from_str(frames[0]).unwrap();
+        assert_eq!(ready["kind"], "component_ready");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_ready_and_failure_emit_exactly_one_startup_terminal() {
+        let (runtime, output) = runtime_with_output();
+        prepare_runtime_for_ready(&runtime).await;
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let ready_runtime = runtime.clone();
+        let ready_barrier = barrier.clone();
+        let ready = tokio::spawn(async move {
+            ready_barrier.wait().await;
+            ready_runtime.emit_ready().await
+        });
+        let failure_runtime = runtime.clone();
+        let failure_barrier = barrier.clone();
+        let failure = tokio::spawn(async move {
+            failure_barrier.wait().await;
+            failure_runtime.emit_startup_failure("driver_control_monitor_invalid");
+        });
+        barrier.wait().await;
+        let (ready_result, failure_result) = tokio::join!(ready, failure);
+        let ready_result = ready_result.unwrap();
+        failure_result.unwrap();
+
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let frames = encoded.lines().collect::<Vec<_>>();
+        assert_eq!(frames.len(), 1);
+        let terminal: serde_json::Value = serde_json::from_str(frames[0]).unwrap();
+        match terminal["kind"].as_str().unwrap() {
+            "component_ready" => assert_eq!(ready_result, Ok(())),
+            "startup_failed" => {
+                assert_eq!(ready_result, Err("driver_state_invalid"));
+                assert_eq!(terminal["failure_class"], "driver_control_monitor_invalid");
+            }
+            kind => panic!("unexpected startup terminal: {kind}"),
+        }
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
     fn canonical_authority_requires_uuid_v4() {
         assert!(validate_uuid_v4(RUN_ID).is_ok());
         assert!(validate_uuid_v4("019fbd88-cbc3-7bf1-934d-7b05cd693f80").is_err());
@@ -911,27 +1160,12 @@ mod tests {
             runtime.begin_abort().await,
             Err("driver_control_order_invalid")
         );
-        runtime
-            .transition(DriverPhase::Created, DriverPhase::Authenticated)
-            .await
-            .unwrap();
-        runtime
-            .set_project("019fbd88-cbc3-7bf1-934d-7b05cd693f99".to_owned())
-            .await
-            .unwrap();
-        runtime
-            .transition(DriverPhase::ProjectRegistered, DriverPhase::Bound)
-            .await
-            .unwrap();
-        {
-            let mut state = runtime.inner.state.lock().await;
-            state.project_revalidated = true;
-            state.recovery_requested = true;
-        }
+        prepare_runtime_for_ready(&runtime).await;
         runtime.emit_ready().await.unwrap();
         runtime.begin_abort().await.unwrap();
         runtime.inner.outcome.send_replace(ControlOutcome::Abort);
         runtime.emit_abort_complete().await.unwrap();
+        runtime.emit_startup_failure("driver_frontend_startup_invalid");
 
         let encoded = std::fs::read_to_string(&output).unwrap();
         let frames = encoded.lines().collect::<Vec<_>>();

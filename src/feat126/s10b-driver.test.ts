@@ -3,7 +3,9 @@ import { createPinia } from "pinia";
 import type { ChatClient } from "../api/chat-client";
 import { createChatStoreDefinition, useChatStore } from "../stores/chat.store";
 import {
+  classifyFeat126DriverFailure,
   createFeat126DriverTransport,
+  failClosedFeat126DriverOnce,
   runFeat126S10Driver,
   type DriverInvoke,
   type S10BPiniaDriverStore,
@@ -130,6 +132,76 @@ describe("FEAT-126 S10BO2 driver", () => {
     };
     await expect(runFeat126S10Driver(store, driverInvoke)).rejects.toThrow("driver_readiness_failed");
     expect(calls).not.toContain("feat126_s10_driver_component_ready");
+  });
+
+  it("projects only closed startup leaves and never forwards an unknown error", () => {
+    expect(classifyFeat126DriverFailure(new Error("driver_readiness_failed")))
+      .toBe("driver_readiness_failed");
+    expect(classifyFeat126DriverFailure(new Error("token=must-not-cross-the-boundary")))
+      .toBe("driver_frontend_startup_invalid");
+    expect(classifyFeat126DriverFailure("driver_login_failed"))
+      .toBe("driver_frontend_startup_invalid");
+  });
+
+  it("attempts fail-closed exactly once and closes locally when IPC is unavailable", async () => {
+    const calls: Array<readonly [string, Record<string, unknown> | undefined]> = [];
+    let closeCount = 0;
+    await failClosedFeat126DriverOnce(
+      "driver_frontend_startup_invalid",
+      async (command, arguments_) => {
+        calls.push([command, arguments_]);
+        throw new Error("untrusted IPC detail");
+      },
+      () => { closeCount += 1; },
+    );
+    expect(calls).toEqual([[
+      "feat126_s10_driver_fail_closed",
+      { failureClass: "driver_frontend_startup_invalid" },
+    ]]);
+    expect(closeCount).toBe(1);
+  });
+
+  it("preserves the first failing startup stage and does not continue toward ready", async () => {
+    const calls: string[] = [];
+    const store: S10BPiniaDriverStore = {
+      phase: "ready",
+      context: { allowedActions: ["use_project"] },
+      async bind() { calls.push("bind"); },
+      async revalidateProject() { calls.push("revalidate"); return null; },
+      async requestLocalRecovery() { calls.push("recovery"); return null; },
+      async dispose() {},
+    };
+    await expect(runFeat126S10Driver(store, async (command) => {
+      calls.push(command);
+      throw new Error("untrusted native detail");
+    })).rejects.toThrow("driver_login_failed");
+    expect(calls).toEqual(["feat126_s10_driver_login"]);
+  });
+
+  it("classifies component-ready emission failure before waiting for abort", async () => {
+    const calls: string[] = [];
+    const store: S10BPiniaDriverStore = {
+      phase: "ready",
+      context: { allowedActions: ["use_project"] },
+      async bind() {},
+      async revalidateProject(projectId) { return { projectId, available: true }; },
+      async requestLocalRecovery() {
+        return { lifecycle: "ready", host: "ready", runtime: "ready", storage: "ready", canSend: true };
+      },
+      async dispose() {},
+    };
+    await expect(runFeat126S10Driver(store, async (command) => {
+      calls.push(command);
+      if (command === "feat126_s10_driver_login") {
+        return { schemaVersion: 1, status: "signed_in", flow: "authorization_code", pkceMethod: "S256" };
+      }
+      if (command === "feat126_s10_driver_register_project") {
+        return { schemaVersion: 1, projectId: PROJECT_ID, capability: "local_only" };
+      }
+      if (command === "feat126_s10_driver_component_ready") throw new Error("write failed");
+      return undefined;
+    })).rejects.toThrow("driver_ready_emit_failed");
+    expect(calls).not.toContain("feat126_s10_driver_wait_abort");
   });
 
   it("rejects unknown fields in native driver projections", async () => {

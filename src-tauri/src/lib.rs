@@ -75,9 +75,15 @@ pub fn run() {
     chat::feat126_s10_driver_unregistered_command_guard();
     let secure_storage = feat126_secure_storage::Feat126SecureStorageBootstrap::from_environment();
     #[cfg(feature = "feat126-s10-driver")]
-    let driver =
-        feat126_s10_driver::Feat126S10DriverRuntime::from_environment(secure_storage.profile())
-            .unwrap_or_else(|_| std::process::exit(1));
+    let driver = match feat126_s10_driver::Feat126S10DriverRuntime::from_environment(
+        secure_storage.profile(),
+    ) {
+        Ok(driver) => driver,
+        Err(failure_class) => {
+            feat126_s10_driver::emit_startup_failure_from_environment(failure_class);
+            std::process::exit(1);
+        }
+    };
     let native_auth = NativeAuthRuntime::from_environment_with_test_profile(
         secure_storage.profile(),
         secure_storage.is_invalid(),
@@ -89,12 +95,19 @@ pub fn run() {
         .manage(native_auth)
         .manage(ChatIpcRuntime::new());
     #[cfg(feature = "feat126-s10-driver")]
+    let startup_failure_driver = driver.clone();
+    #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.manage(driver);
     let builder = builder.setup(move |app| {
-        let app_data_directory = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
+        let app_data_directory = match app.path().app_data_dir() {
+            Ok(path) => path,
+            Err(error) => {
+                #[cfg(feature = "feat126-s10-driver")]
+                app.state::<feat126_s10_driver::Feat126S10DriverRuntime>()
+                    .emit_startup_failure("driver_app_data_invalid");
+                return Err(Box::new(error) as Box<dyn std::error::Error>);
+            }
+        };
         app.manage(ChatRuntime::from_environment(
             app_data_directory,
             chat_secure_storage.clone(),
@@ -102,11 +115,12 @@ pub fn run() {
             chat_native_auth.clone(),
         ));
         #[cfg(feature = "feat126-s10-driver")]
-        if app
+        if let Err(failure_class) = app
             .state::<feat126_s10_driver::Feat126S10DriverRuntime>()
             .start_control_monitor(app.handle().clone())
-            .is_err()
         {
+            app.state::<feat126_s10_driver::Feat126S10DriverRuntime>()
+                .emit_startup_failure(failure_class);
             std::process::exit(1);
         }
         Ok(())
@@ -161,6 +175,12 @@ pub fn run() {
         feat126_s10_driver::feat126_s10_driver_abort_complete,
         feat126_s10_driver::feat126_s10_driver_fail_closed
     ]);
+    #[cfg(feature = "feat126-s10-driver")]
+    if builder.run(tauri::generate_context!()).is_err() {
+        startup_failure_driver.emit_startup_failure("driver_tauri_startup_invalid");
+        std::process::exit(1);
+    }
+    #[cfg(not(feature = "feat126-s10-driver"))]
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

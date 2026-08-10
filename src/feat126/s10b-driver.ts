@@ -7,6 +7,20 @@ import { createChatStoreDefinition } from "../stores/chat.store";
 
 const TRUSTED_BIND_MARKER = "feat126-driver-owned-authority";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DRIVER_FAILURE_CLASSES = Object.freeze([
+  "driver_bind_failed",
+  "driver_control_projection_invalid",
+  "driver_frontend_startup_invalid",
+  "driver_login_failed",
+  "driver_login_projection_invalid",
+  "driver_project_invalid",
+  "driver_project_projection_invalid",
+  "driver_project_revalidation_failed",
+  "driver_readiness_failed",
+  "driver_ready_emit_failed",
+] as const);
+
+export type DriverFailureClass = (typeof DRIVER_FAILURE_CLASSES)[number];
 
 type DriverLoginProjection = Readonly<{
   schemaVersion: 1;
@@ -56,6 +70,35 @@ const DriverRoot = defineComponent({
 function exactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return value !== null && !Array.isArray(value) && typeof value === "object" &&
     JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+export function classifyFeat126DriverFailure(error: unknown): DriverFailureClass {
+  const message = error instanceof Error ? error.message : "";
+  return DRIVER_FAILURE_CLASSES.find((failureClass) => failureClass === message) ??
+    "driver_frontend_startup_invalid";
+}
+
+export async function failClosedFeat126DriverOnce(
+  failureClass: DriverFailureClass,
+  driverInvoke: DriverInvoke = invoke,
+  closeWindow: () => void = () => window.close(),
+): Promise<void> {
+  try {
+    await driverInvoke("feat126_s10_driver_fail_closed", { failureClass });
+  } catch {
+    closeWindow();
+  }
+}
+
+async function driverStage<T>(
+  failureClass: DriverFailureClass,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new Error(failureClass);
+  }
 }
 
 function parseLogin(value: unknown): DriverLoginProjection {
@@ -120,24 +163,36 @@ export async function runFeat126S10Driver(
   driverInvoke: DriverInvoke = invoke,
 ): Promise<Readonly<{ projectId: string }>> {
   if (import.meta.env.VITE_FEAT126_S10_DRIVER !== "true") throw new Error("driver_not_enabled");
-  parseLogin(await driverInvoke("feat126_s10_driver_login"));
-  const project = parseProject(await driverInvoke("feat126_s10_driver_register_project"));
-  await store.bind(TRUSTED_BIND_MARKER);
+  parseLogin(await driverStage("driver_login_failed", async () =>
+    await driverInvoke("feat126_s10_driver_login"),
+  ));
+  const project = parseProject(await driverStage("driver_project_invalid", async () =>
+    await driverInvoke("feat126_s10_driver_register_project"),
+  ));
+  await driverStage("driver_bind_failed", async () => await store.bind(TRUSTED_BIND_MARKER));
   if (store.context === null || store.phase !== "ready" ||
     !store.context.allowedActions.includes("use_project")) {
     throw new Error("driver_bind_failed");
   }
-  const revalidated = await store.revalidateProject(project.projectId);
+  const revalidated = await driverStage("driver_project_revalidation_failed", async () =>
+    await store.revalidateProject(project.projectId),
+  );
   if (revalidated?.projectId !== project.projectId || revalidated.available !== true) {
     throw new Error("driver_project_revalidation_failed");
   }
-  const readiness = await store.requestLocalRecovery();
+  const readiness = await driverStage("driver_readiness_failed", async () =>
+    await store.requestLocalRecovery(),
+  );
   if (readiness?.lifecycle !== "ready" || readiness.host !== "ready" ||
     readiness.runtime !== "ready" || readiness.storage !== "ready" || readiness.canSend !== true) {
     throw new Error("driver_readiness_failed");
   }
-  await driverInvoke("feat126_s10_driver_component_ready");
-  parseControl(await driverInvoke("feat126_s10_driver_wait_abort"));
+  await driverStage("driver_ready_emit_failed", async () => {
+    await driverInvoke("feat126_s10_driver_component_ready");
+  });
+  parseControl(await driverStage("driver_control_projection_invalid", async () =>
+    await driverInvoke("feat126_s10_driver_wait_abort"),
+  ));
   return Object.freeze({ projectId: project.projectId });
 }
 
@@ -158,9 +213,9 @@ export async function mountFeat126S10Driver(root: Element): Promise<void> {
     await store.dispose();
     application.unmount();
     await invoke("feat126_s10_driver_abort_complete");
-  } catch {
+  } catch (error) {
     await store.dispose().catch(() => undefined);
     if (mounted) application.unmount();
-    await invoke("feat126_s10_driver_fail_closed").catch(() => undefined);
+    await failClosedFeat126DriverOnce(classifyFeat126DriverFailure(error));
   }
 }
