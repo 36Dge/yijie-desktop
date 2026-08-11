@@ -49,6 +49,7 @@ describe("FEAT-126 S10BO2 driver", () => {
 
     await expect(runFeat126S10Driver(store, driverInvoke)).resolves.toEqual({ projectId: PROJECT_ID });
     expect(order).toEqual([
+      "feat126_s10_driver_startup_stage",
       "feat126_s10_driver_login",
       "feat126_s10_driver_register_project",
       "bind:feat126-driver-owned-authority",
@@ -174,8 +175,28 @@ describe("FEAT-126 S10BO2 driver", () => {
     await expect(runFeat126S10Driver(store, async (command) => {
       calls.push(command);
       throw new Error("untrusted native detail");
-    })).rejects.toThrow("driver_login_failed");
-    expect(calls).toEqual(["feat126_s10_driver_login"]);
+    })).rejects.toThrow("driver_frontend_startup_invalid");
+    expect(calls).toEqual(["feat126_s10_driver_startup_stage"]);
+  });
+
+  it("binds the first frontend IPC to the exact content-free bootstrap stage", async () => {
+    const calls: Array<readonly [string, Record<string, unknown> | undefined]> = [];
+    const store: S10BPiniaDriverStore = {
+      phase: "ready",
+      context: { allowedActions: ["use_project"] },
+      async bind() {},
+      async revalidateProject() { return null; },
+      async requestLocalRecovery() { return null; },
+      async dispose() {},
+    };
+    await expect(runFeat126S10Driver(store, async (command, arguments_) => {
+      calls.push([command, arguments_]);
+      throw new Error("closed");
+    })).rejects.toThrow("driver_frontend_startup_invalid");
+    expect(calls).toEqual([[
+      "feat126_s10_driver_startup_stage",
+      { stage: "frontend_bootstrap" },
+    ]]);
   });
 
   it("classifies component-ready emission failure before waiting for abort", async () => {

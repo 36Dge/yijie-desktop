@@ -10,13 +10,16 @@ use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::{AuthStatus, NativeAuthRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{AppHandle, Manager, State};
+use std::time::Duration;
+use tauri::webview::PageLoadEvent;
+use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::{watch, Mutex};
 use uuid::Uuid;
 
@@ -36,6 +39,19 @@ const FIXED_TENANT: &str = "12500000-0000-4000-8000-100000000001";
 const CONTROL_READ_FD: i32 = 3;
 const CONTROL_WRITE_FD: i32 = 4;
 const MAX_FRAME_BYTES: usize = 1024;
+const STARTUP_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(50);
+const STARTUP_SETUP_ENTERED: u8 = 1 << 0;
+const STARTUP_APP_HANDLE_READY: u8 = 1 << 1;
+const STARTUP_PAGE_LOAD_STARTED: u8 = 1 << 2;
+const STARTUP_PAGE_LOAD_FINISHED: u8 = 1 << 3;
+const STARTUP_FRONTEND_BOOTSTRAP: u8 = 1 << 4;
+const STARTUP_FIRST_DRIVER_IPC: u8 = 1 << 5;
+const STARTUP_READY_REQUIRED: u8 = STARTUP_SETUP_ENTERED
+    | STARTUP_APP_HANDLE_READY
+    | STARTUP_PAGE_LOAD_STARTED
+    | STARTUP_FRONTEND_BOOTSTRAP
+    | STARTUP_FIRST_DRIVER_IPC;
+static SETUP_PANIC_HOOK_LOCK: StdMutex<()> = StdMutex::new(());
 const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_app_data_invalid",
     "driver_authority_invalid",
@@ -44,6 +60,8 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_control_monitor_invalid",
     "driver_control_projection_invalid",
     "driver_frontend_startup_invalid",
+    "driver_frontend_bootstrap_timeout",
+    "driver_frontend_ipc_timeout",
     "driver_login_failed",
     "driver_login_projection_invalid",
     "driver_nonce_invalid",
@@ -55,6 +73,10 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_ready_emit_failed",
     "driver_run_id_invalid",
     "driver_secret_authority_invalid",
+    "driver_setup_panic",
+    "driver_setup_timeout",
+    "driver_page_load_timeout",
+    "driver_startup_timeout",
     "driver_tauri_startup_invalid",
 ];
 
@@ -97,10 +119,11 @@ struct DriverInner {
     nonce: String,
     state: Mutex<DriverState>,
     inbound: StdMutex<Option<File>>,
-    outbound: StdMutex<File>,
+    outbound: StdMutex<Option<File>>,
     outcome: watch::Sender<ControlOutcome>,
     monitor_started: AtomicBool,
     startup_terminal: StdMutex<StartupTerminal>,
+    startup_stages: AtomicU8,
 }
 
 #[derive(Clone)]
@@ -206,12 +229,126 @@ impl Feat126S10DriverRuntime {
                     recovery_requested: false,
                 }),
                 inbound: StdMutex::new(Some(inbound)),
-                outbound: StdMutex::new(outbound),
+                outbound: StdMutex::new(Some(outbound)),
                 outcome,
                 monitor_started: AtomicBool::new(false),
                 startup_terminal: StdMutex::new(StartupTerminal::Pending),
+                startup_stages: AtomicU8::new(0),
             }),
         })
+    }
+
+    pub(crate) fn start_startup_watchdog(&self) {
+        self.start_startup_watchdog_with(STARTUP_WATCHDOG_TIMEOUT, || std::process::exit(1));
+    }
+
+    fn start_startup_watchdog_with<F>(&self, timeout: Duration, terminate: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let runtime = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if runtime.emit_startup_timeout_failure() {
+                terminate();
+            }
+        });
+    }
+
+    pub(crate) fn record_setup_entry(&self) {
+        self.inner
+            .startup_stages
+            .fetch_or(STARTUP_SETUP_ENTERED, Ordering::SeqCst);
+    }
+
+    pub(crate) fn record_app_handle_ready<R: Runtime>(
+        &self,
+        _app: &AppHandle<R>,
+    ) -> Result<(), &'static str> {
+        if self.inner.startup_stages.load(Ordering::SeqCst) & STARTUP_SETUP_ENTERED == 0 {
+            return Err("driver_tauri_startup_invalid");
+        }
+        self.inner
+            .startup_stages
+            .fetch_or(STARTUP_APP_HANDLE_READY, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) fn record_page_load(&self, event: PageLoadEvent) {
+        let stage = match event {
+            PageLoadEvent::Started => STARTUP_PAGE_LOAD_STARTED,
+            PageLoadEvent::Finished => STARTUP_PAGE_LOAD_STARTED | STARTUP_PAGE_LOAD_FINISHED,
+        };
+        self.inner.startup_stages.fetch_or(stage, Ordering::SeqCst);
+    }
+
+    fn record_frontend_bootstrap(&self, stage: &str) -> Result<(), &'static str> {
+        if stage != "frontend_bootstrap"
+            || self.inner.startup_stages.load(Ordering::SeqCst) & STARTUP_APP_HANDLE_READY == 0
+        {
+            return Err("driver_frontend_startup_invalid");
+        }
+        self.inner
+            .startup_stages
+            .fetch_or(STARTUP_FRONTEND_BOOTSTRAP, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn record_first_driver_ipc(&self) -> Result<(), &'static str> {
+        if self.inner.startup_stages.load(Ordering::SeqCst) & STARTUP_FRONTEND_BOOTSTRAP == 0 {
+            return Err("driver_frontend_startup_invalid");
+        }
+        self.inner
+            .startup_stages
+            .fetch_or(STARTUP_FIRST_DRIVER_IPC, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub(crate) fn guard_setup<T, F>(&self, operation: F) -> Result<T, Box<dyn Error>>
+    where
+        F: FnOnce() -> Result<T, Box<dyn Error>>,
+    {
+        let hook_guard = SETUP_PANIC_HOOK_LOCK.lock().map_err(|_| {
+            self.emit_startup_failure("driver_setup_panic");
+            std::io::Error::other("driver_setup_panic")
+        })?;
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation));
+        std::panic::set_hook(previous_hook);
+        drop(hook_guard);
+        match result {
+            Ok(result) => result,
+            Err(_) => {
+                self.emit_startup_failure("driver_setup_panic");
+                Err(std::io::Error::other("driver_setup_panic").into())
+            }
+        }
+    }
+
+    fn startup_timeout_failure_class(&self) -> &'static str {
+        let stages = self.inner.startup_stages.load(Ordering::SeqCst);
+        if stages & STARTUP_SETUP_ENTERED == 0 || stages & STARTUP_APP_HANDLE_READY == 0 {
+            return "driver_setup_timeout";
+        }
+        if stages & STARTUP_PAGE_LOAD_STARTED == 0 {
+            return "driver_page_load_timeout";
+        }
+        if stages & STARTUP_FRONTEND_BOOTSTRAP == 0 {
+            return if stages & STARTUP_PAGE_LOAD_FINISHED == 0 {
+                "driver_page_load_timeout"
+            } else {
+                "driver_frontend_bootstrap_timeout"
+            };
+        }
+        if stages & STARTUP_FIRST_DRIVER_IPC == 0 {
+            return "driver_frontend_ipc_timeout";
+        }
+        "driver_startup_timeout"
+    }
+
+    fn emit_startup_timeout_failure(&self) -> bool {
+        self.emit_startup_failure(self.startup_timeout_failure_class())
     }
 
     pub(crate) fn start_control_monitor(&self, app: AppHandle) -> Result<(), &'static str> {
@@ -255,18 +392,19 @@ impl Feat126S10DriverRuntime {
         Ok(())
     }
 
-    pub(crate) fn emit_startup_failure(&self, failure_class: &str) {
+    pub(crate) fn emit_startup_failure(&self, failure_class: &str) -> bool {
         if !STARTUP_FAILURE_CLASSES.contains(&failure_class) {
-            return;
+            return false;
         }
         let Ok(mut terminal) = self.inner.startup_terminal.lock() else {
-            return;
+            return false;
         };
         if *terminal != StartupTerminal::Pending {
-            return;
+            return false;
         }
         *terminal = StartupTerminal::Failed;
         let _ = self.write_startup_failure(failure_class);
+        true
     }
 
     async fn require_phase(&self, expected: DriverPhase) -> Result<(), &'static str> {
@@ -397,6 +535,8 @@ impl Feat126S10DriverRuntime {
             || !state.project_revalidated
             || !state.recovery_requested
             || *self.inner.outcome.borrow() != ControlOutcome::Pending
+            || self.inner.startup_stages.load(Ordering::SeqCst) & STARTUP_READY_REQUIRED
+                != STARTUP_READY_REQUIRED
         {
             return Err("driver_state_invalid");
         }
@@ -475,29 +615,41 @@ impl Feat126S10DriverRuntime {
         if encoded.len() > MAX_FRAME_BYTES {
             return Err("driver_control_write_failed");
         }
-        let mut outbound = self
+        let mut outbound_guard = self
             .inner
             .outbound
             .lock()
             .map_err(|_| "driver_control_write_failed")?;
-        outbound
+        let outbound = outbound_guard
+            .as_mut()
+            .ok_or("driver_control_write_failed")?;
+        let result = outbound
             .write_all(&encoded)
             .and_then(|_| outbound.flush())
-            .map_err(|_| "driver_control_write_failed")
+            .map_err(|_| "driver_control_write_failed");
+        if kind == "abort_complete" {
+            outbound_guard.take();
+        }
+        result
     }
 
     fn write_startup_failure(&self, failure_class: &str) -> Result<(), &'static str> {
         let encoded =
             encode_startup_failure_frame(&self.inner.run_id, &self.inner.nonce, failure_class)?;
-        let mut outbound = self
+        let mut outbound_guard = self
             .inner
             .outbound
             .lock()
             .map_err(|_| "driver_control_write_failed")?;
-        outbound
+        let outbound = outbound_guard
+            .as_mut()
+            .ok_or("driver_control_write_failed")?;
+        let result = outbound
             .write_all(&encoded)
             .and_then(|_| outbound.flush())
-            .map_err(|_| "driver_control_write_failed")
+            .map_err(|_| "driver_control_write_failed");
+        outbound_guard.take();
+        result
     }
 }
 
@@ -544,10 +696,21 @@ pub(crate) fn emit_startup_failure_from_environment(failure_class: &str) {
 }
 
 #[tauri::command]
+pub(crate) async fn feat126_s10_driver_startup_stage(
+    driver: State<'_, Feat126S10DriverRuntime>,
+    stage: String,
+) -> Result<(), String> {
+    driver
+        .record_frontend_bootstrap(&stage)
+        .map_err(str::to_owned)
+}
+
+#[tauri::command]
 pub(crate) async fn feat126_s10_driver_login(
     driver: State<'_, Feat126S10DriverRuntime>,
     auth: State<'_, NativeAuthRuntime>,
 ) -> Result<DriverLoginProjection, String> {
+    driver.record_first_driver_ipc().map_err(str::to_owned)?;
     driver
         .require_phase(DriverPhase::Created)
         .await
@@ -919,6 +1082,8 @@ fn decode_control_frame(
 
 #[cfg(test)]
 mod tests {
+    #![allow(unexpected_cfgs)]
+
     use super::*;
     use std::fs::OpenOptions;
     use std::io::Cursor;
@@ -957,10 +1122,11 @@ mod tests {
                         recovery_requested: false,
                     }),
                     inbound: StdMutex::new(Some(inbound)),
-                    outbound: StdMutex::new(outbound),
+                    outbound: StdMutex::new(Some(outbound)),
                     outcome,
                     monitor_started: AtomicBool::new(false),
                     startup_terminal: StdMutex::new(StartupTerminal::Pending),
+                    startup_stages: AtomicU8::new(0),
                 }),
             },
             path,
@@ -968,6 +1134,10 @@ mod tests {
     }
 
     async fn prepare_runtime_for_ready(runtime: &Feat126S10DriverRuntime) {
+        runtime
+            .inner
+            .startup_stages
+            .store(STARTUP_READY_REQUIRED, Ordering::SeqCst);
         runtime
             .transition(DriverPhase::Created, DriverPhase::Authenticated)
             .await
@@ -1056,12 +1226,115 @@ mod tests {
         runtime.emit_startup_failure("driver_control_monitor_invalid");
         runtime.emit_startup_failure("driver_profile_invalid");
 
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
         let encoded = std::fs::read_to_string(&output).unwrap();
         let frames = encoded.lines().collect::<Vec<_>>();
         assert_eq!(frames.len(), 1);
         let failure: serde_json::Value = serde_json::from_str(frames[0]).unwrap();
         assert_eq!(failure["kind"], "startup_failed");
         assert_eq!(failure["failure_class"], "driver_control_monitor_invalid");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn startup_watchdog_projects_the_first_missing_content_free_stage() {
+        let (runtime, output) = runtime_with_output();
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_setup_timeout"
+        );
+        runtime.record_setup_entry();
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_setup_timeout"
+        );
+        runtime
+            .inner
+            .startup_stages
+            .fetch_or(STARTUP_APP_HANDLE_READY, Ordering::SeqCst);
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_page_load_timeout"
+        );
+        runtime.record_page_load(PageLoadEvent::Finished);
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_frontend_bootstrap_timeout"
+        );
+        runtime
+            .record_frontend_bootstrap("frontend_bootstrap")
+            .unwrap();
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_frontend_ipc_timeout"
+        );
+        runtime.record_first_driver_ipc().unwrap();
+        assert_eq!(
+            runtime.startup_timeout_failure_class(),
+            "driver_startup_timeout"
+        );
+        assert!(runtime.emit_startup_timeout_failure());
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let failure: serde_json::Value = serde_json::from_str(encoded.trim_end()).unwrap();
+        assert_eq!(failure["failure_class"], "driver_startup_timeout");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn startup_watchdog_emits_and_closes_fd4_before_termination() {
+        let (runtime, output) = runtime_with_output();
+        let (terminated, observed) = std::sync::mpsc::sync_channel(1);
+        runtime.start_startup_watchdog_with(Duration::from_millis(20), move || {
+            terminated.send(()).unwrap();
+        });
+        observed.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let failure: serde_json::Value = serde_json::from_str(encoded.trim_end()).unwrap();
+        assert_eq!(failure["failure_class"], "driver_setup_timeout");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[cfg(tauri_dep_test)]
+    #[test]
+    fn real_tauri_setup_fixture_records_an_app_handle_without_external_io() {
+        let (runtime, output) = runtime_with_output();
+        let setup_runtime = runtime.clone();
+        let mut app = tauri::test::mock_builder()
+            .setup(move |app| {
+                setup_runtime.record_setup_entry();
+                setup_runtime
+                    .record_app_handle_ready(app.handle())
+                    .map_err(std::io::Error::other)?;
+                Ok(())
+            })
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        #[allow(deprecated)]
+        app.run_iteration(|_, _| {});
+        let stages = runtime.inner.startup_stages.load(Ordering::SeqCst);
+        assert_eq!(
+            stages & (STARTUP_SETUP_ENTERED | STARTUP_APP_HANDLE_READY),
+            STARTUP_SETUP_ENTERED | STARTUP_APP_HANDLE_READY
+        );
+        drop(app);
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn setup_panic_is_closed_without_forwarding_the_panic_value() {
+        let (runtime, output) = runtime_with_output();
+        let result = runtime
+            .guard_setup(|| -> Result<(), Box<dyn Error>> { panic!("sensitive setup detail") });
+        assert!(result.is_err());
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let failure: serde_json::Value = serde_json::from_str(encoded.trim_end()).unwrap();
+        assert_eq!(failure["failure_class"], "driver_setup_panic");
+        assert!(!encoded.contains("sensitive setup detail"));
         drop(runtime);
         std::fs::remove_file(output).unwrap();
     }
@@ -1167,6 +1440,7 @@ mod tests {
         runtime.emit_abort_complete().await.unwrap();
         runtime.emit_startup_failure("driver_frontend_startup_invalid");
 
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
         let encoded = std::fs::read_to_string(&output).unwrap();
         let frames = encoded.lines().collect::<Vec<_>>();
         assert_eq!(frames.len(), 2);

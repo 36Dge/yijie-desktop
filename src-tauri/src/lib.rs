@@ -84,6 +84,8 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    #[cfg(feature = "feat126-s10-driver")]
+    driver.start_startup_watchdog();
     let native_auth = NativeAuthRuntime::from_environment_with_test_profile(
         secure_storage.profile(),
         secure_storage.is_invalid(),
@@ -97,33 +99,63 @@ pub fn run() {
     #[cfg(feature = "feat126-s10-driver")]
     let startup_failure_driver = driver.clone();
     #[cfg(feature = "feat126-s10-driver")]
+    let page_load_driver = driver.clone();
+    #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.manage(driver);
+    #[cfg(feature = "feat126-s10-driver")]
+    let builder = builder.on_page_load(move |_webview, payload| {
+        page_load_driver.record_page_load(payload.event());
+    });
     let builder = builder.setup(move |app| {
-        let app_data_directory = match app.path().app_data_dir() {
-            Ok(path) => path,
-            Err(error) => {
-                #[cfg(feature = "feat126-s10-driver")]
-                app.state::<feat126_s10_driver::Feat126S10DriverRuntime>()
-                    .emit_startup_failure("driver_app_data_invalid");
-                return Err(Box::new(error) as Box<dyn std::error::Error>);
-            }
-        };
-        app.manage(ChatRuntime::from_environment(
-            app_data_directory,
-            chat_secure_storage.clone(),
-            chat_secure_storage_invalid,
-            chat_native_auth.clone(),
-        ));
         #[cfg(feature = "feat126-s10-driver")]
-        if let Err(failure_class) = app
-            .state::<feat126_s10_driver::Feat126S10DriverRuntime>()
-            .start_control_monitor(app.handle().clone())
         {
-            app.state::<feat126_s10_driver::Feat126S10DriverRuntime>()
-                .emit_startup_failure(failure_class);
-            std::process::exit(1);
+            let setup_driver = app
+                .state::<feat126_s10_driver::Feat126S10DriverRuntime>()
+                .inner()
+                .clone();
+            setup_driver.record_setup_entry();
+            if let Err(failure_class) = setup_driver.record_app_handle_ready(app.handle()) {
+                setup_driver.emit_startup_failure(failure_class);
+                return Err(std::io::Error::other(failure_class).into());
+            }
+            setup_driver.guard_setup(|| {
+                let app_data_directory = match app.path().app_data_dir() {
+                    Ok(path) => path,
+                    Err(error) => {
+                        setup_driver.emit_startup_failure("driver_app_data_invalid");
+                        return Err(Box::new(error) as Box<dyn std::error::Error>);
+                    }
+                };
+                app.manage(ChatRuntime::from_environment(
+                    app_data_directory,
+                    chat_secure_storage.clone(),
+                    chat_secure_storage_invalid,
+                    chat_native_auth.clone(),
+                ));
+                if let Err(failure_class) = setup_driver.start_control_monitor(app.handle().clone())
+                {
+                    setup_driver.emit_startup_failure(failure_class);
+                    return Err(std::io::Error::other(failure_class).into());
+                }
+                Ok(())
+            })
         }
-        Ok(())
+        #[cfg(not(feature = "feat126-s10-driver"))]
+        {
+            let app_data_directory = match app.path().app_data_dir() {
+                Ok(path) => path,
+                Err(error) => {
+                    return Err(Box::new(error) as Box<dyn std::error::Error>);
+                }
+            };
+            app.manage(ChatRuntime::from_environment(
+                app_data_directory,
+                chat_secure_storage.clone(),
+                chat_secure_storage_invalid,
+                chat_native_auth.clone(),
+            ));
+            Ok(())
+        }
     });
     #[cfg(not(feature = "feat126-s10-driver"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -162,6 +194,7 @@ pub fn run() {
     ]);
     #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        feat126_s10_driver::feat126_s10_driver_startup_stage,
         feat126_s10_driver::feat126_s10_driver_login,
         feat126_s10_driver::feat126_s10_driver_register_project,
         feat126_s10_driver::feat126_s10_driver_bind,

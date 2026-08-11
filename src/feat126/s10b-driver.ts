@@ -163,6 +163,9 @@ export async function runFeat126S10Driver(
   driverInvoke: DriverInvoke = invoke,
 ): Promise<Readonly<{ projectId: string }>> {
   if (import.meta.env.VITE_FEAT126_S10_DRIVER !== "true") throw new Error("driver_not_enabled");
+  await driverStage("driver_frontend_startup_invalid", async () =>
+    await driverInvoke("feat126_s10_driver_startup_stage", { stage: "frontend_bootstrap" }),
+  );
   parseLogin(await driverStage("driver_login_failed", async () =>
     await driverInvoke("feat126_s10_driver_login"),
   ));
