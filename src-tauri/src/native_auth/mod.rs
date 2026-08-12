@@ -21,5 +21,7 @@ pub(crate) use runtime::{NativeProjectionError, NativePublicTaskOutcome};
 pub use secret::SecretValue;
 #[cfg(any(test, feature = "feat126-s10-driver"))]
 pub(crate) use synthetic_agent::synthetic_authorization_code_tokens;
+#[cfg(feature = "feat126-s10-driver")]
+pub(crate) use synthetic_agent::SyntheticLoginFailure;
 #[cfg(not(feature = "feat126-s10-driver"))]
 pub use transport::OperationResponse;

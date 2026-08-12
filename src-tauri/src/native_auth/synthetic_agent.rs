@@ -28,19 +28,66 @@ const SECRET_KEYS: [&str; 5] = [
     "FEAT126_S10_SYNTHETIC_USER_B_PASSWORD",
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SyntheticLoginFailure {
+    SecretAuthority,
+    AuthorizationStart,
+    AuthorizationRequest,
+    AuthorizationPage,
+    LoginForm,
+    CredentialSubmit,
+    CredentialRejected,
+    Callback,
+    TokenExchange,
+}
+
+impl SyntheticLoginFailure {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 9] = [
+        Self::SecretAuthority,
+        Self::AuthorizationStart,
+        Self::AuthorizationRequest,
+        Self::AuthorizationPage,
+        Self::LoginForm,
+        Self::CredentialSubmit,
+        Self::CredentialRejected,
+        Self::Callback,
+        Self::TokenExchange,
+    ];
+
+    pub(crate) const fn failure_class(self) -> &'static str {
+        match self {
+            Self::SecretAuthority => "driver_login_secret_invalid",
+            Self::AuthorizationStart => "driver_login_authorization_start_failed",
+            Self::AuthorizationRequest => "driver_login_authorization_request_invalid",
+            Self::AuthorizationPage => "driver_login_authorization_page_failed",
+            Self::LoginForm => "driver_login_form_invalid",
+            Self::CredentialSubmit => "driver_login_credential_submit_failed",
+            Self::CredentialRejected => "driver_login_credentials_rejected",
+            Self::Callback => "driver_login_callback_rejected",
+            Self::TokenExchange => "driver_login_token_exchange_failed",
+        }
+    }
+}
+
 pub(crate) async fn synthetic_authorization_code_tokens(
     oidc: &OidcClient,
-) -> Result<IssuedTokens, NativeAuthError> {
+) -> Result<IssuedTokens, SyntheticLoginFailure> {
     let secret_path =
-        std::env::var(SECRET_PATH_ENV).map_err(|_| NativeAuthError::InvalidConfiguration)?;
-    let password = read_synthetic_password(Path::new(&secret_path))?;
-    let attempt = oidc.begin_login(CALLBACK_URI.to_owned()).await?;
+        std::env::var(SECRET_PATH_ENV).map_err(|_| SyntheticLoginFailure::SecretAuthority)?;
+    let password = read_synthetic_password(Path::new(&secret_path))
+        .map_err(|_| SyntheticLoginFailure::SecretAuthority)?;
+    let attempt = oidc
+        .begin_login(CALLBACK_URI.to_owned())
+        .await
+        .map_err(|_| SyntheticLoginFailure::AuthorizationStart)?;
     validate_authorization_request(
         oidc.feat126_config(),
         &attempt.authorization_url,
         attempt.expected_state.expose(),
         &attempt.expected_issuer,
-    )?;
+    )
+    .map_err(|_| SyntheticLoginFailure::AuthorizationRequest)?;
     let code = authorization_code(
         oidc.feat126_config(),
         &attempt.authorization_url,
@@ -49,7 +96,9 @@ pub(crate) async fn synthetic_authorization_code_tokens(
         password.as_str(),
     )
     .await?;
-    oidc.exchange_code(attempt, code).await
+    oidc.exchange_code(attempt, code)
+        .await
+        .map_err(|_| SyntheticLoginFailure::TokenExchange)
 }
 
 fn validate_authorization_request(
@@ -203,7 +252,7 @@ async fn authorization_code(
     expected_state: &str,
     expected_issuer: &str,
     password: &str,
-) -> Result<SecretValue, NativeAuthError> {
+) -> Result<SecretValue, SyntheticLoginFailure> {
     let client = config
         .harden_http_client(
             reqwest::Client::builder()
@@ -213,18 +262,18 @@ async fn authorization_code(
                 .timeout(Duration::from_secs(10)),
         )
         .build()
-        .map_err(|_| NativeAuthError::InvalidConfiguration)?;
+        .map_err(|_| SyntheticLoginFailure::AuthorizationPage)?;
     let response = client
         .get(authorization_url.clone())
         .send()
         .await
-        .map_err(|_| NativeAuthError::AuthenticationFailed)?;
+        .map_err(|_| SyntheticLoginFailure::AuthorizationPage)?;
     if response.status() != reqwest::StatusCode::OK
         || response
             .content_length()
             .is_some_and(|length| length > MAX_AUTHORIZATION_BODY_BYTES as u64)
     {
-        return Err(NativeAuthError::AuthenticationFailed);
+        return Err(SyntheticLoginFailure::AuthorizationPage);
     }
     let cookies = response
         .headers()
@@ -239,22 +288,23 @@ async fn authorization_code(
                 .map(str::to_owned)
         })
         .collect::<Option<Vec<_>>>()
-        .ok_or(NativeAuthError::AuthenticationFailed)?
+        .ok_or(SyntheticLoginFailure::AuthorizationPage)?
         .join("; ");
     if cookies.is_empty() || cookies.len() > MAX_COOKIE_BYTES {
-        return Err(NativeAuthError::AuthenticationFailed);
+        return Err(SyntheticLoginFailure::AuthorizationPage);
     }
     let body = response
         .bytes()
         .await
-        .map_err(|_| NativeAuthError::AuthenticationFailed)?;
+        .map_err(|_| SyntheticLoginFailure::AuthorizationPage)?;
     if body.is_empty() || body.len() > MAX_AUTHORIZATION_BODY_BYTES {
-        return Err(NativeAuthError::AuthenticationFailed);
+        return Err(SyntheticLoginFailure::AuthorizationPage);
     }
     let action = login_action(
-        std::str::from_utf8(&body).map_err(|_| NativeAuthError::AuthenticationFailed)?,
+        std::str::from_utf8(&body).map_err(|_| SyntheticLoginFailure::LoginForm)?,
         config,
-    )?;
+    )
+    .map_err(|_| SyntheticLoginFailure::LoginForm)?;
 
     let response = client
         .post(action)
@@ -266,16 +316,17 @@ async fn authorization_code(
         ])
         .send()
         .await
-        .map_err(|_| NativeAuthError::AuthenticationFailed)?;
+        .map_err(|_| SyntheticLoginFailure::CredentialSubmit)?;
     if !response.status().is_redirection() {
-        return Err(NativeAuthError::AuthenticationFailed);
+        return Err(SyntheticLoginFailure::CredentialRejected);
     }
     let location = response
         .headers()
         .get(LOCATION)
         .and_then(|value| value.to_str().ok())
-        .ok_or(NativeAuthError::AuthenticationFailed)?;
+        .ok_or(SyntheticLoginFailure::Callback)?;
     callback_code(location, expected_state, expected_issuer)
+        .map_err(|_| SyntheticLoginFailure::Callback)
 }
 
 fn login_action(body: &str, config: &NativeAuthConfig) -> Result<Url, NativeAuthError> {
@@ -405,6 +456,21 @@ mod tests {
             .enumerate()
             .map(|(index, key)| format!("{key}={}\n", format!("{index:x}").repeat(64)))
             .collect()
+    }
+
+    #[test]
+    fn synthetic_login_failures_are_closed_stage_only_classes() {
+        let classes = SyntheticLoginFailure::ALL.map(SyntheticLoginFailure::failure_class);
+        assert_eq!(
+            classes.len(),
+            classes.into_iter().collect::<BTreeSet<_>>().len()
+        );
+        assert!(classes.into_iter().all(|class| {
+            class.starts_with("driver_login_")
+                && class
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+        }));
     }
 
     #[test]

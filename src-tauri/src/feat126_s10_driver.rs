@@ -7,6 +7,8 @@
 
 use crate::chat::{ChatIpcRuntime, ChatRuntime};
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+#[cfg(test)]
+use crate::native_auth::SyntheticLoginFailure;
 use crate::native_auth::{AuthStatus, NativeAuthRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -63,7 +65,20 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_frontend_bootstrap_timeout",
     "driver_frontend_ipc_timeout",
     "driver_login_failed",
+    "driver_login_authorization_page_failed",
+    "driver_login_authorization_request_invalid",
+    "driver_login_authorization_start_failed",
+    "driver_login_callback_rejected",
+    "driver_login_concurrent",
+    "driver_login_credential_submit_failed",
+    "driver_login_credentials_rejected",
+    "driver_login_form_invalid",
     "driver_login_projection_invalid",
+    "driver_login_runtime_invalid",
+    "driver_login_secret_invalid",
+    "driver_login_session_failed",
+    "driver_login_storage_failed",
+    "driver_login_token_exchange_failed",
     "driver_nonce_invalid",
     "driver_profile_invalid",
     "driver_project_invalid",
@@ -718,7 +733,7 @@ pub(crate) async fn feat126_s10_driver_login(
     if auth
         .feat126_s10_driver_login()
         .await
-        .map_err(|_| "driver_login_failed".to_owned())?
+        .map_err(str::to_owned)?
         != AuthStatus::SignedIn
     {
         return Err("driver_login_failed".to_owned());
@@ -1218,6 +1233,18 @@ mod tests {
         assert!(encoded.len() <= MAX_FRAME_BYTES);
         assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_bind_failed").is_ok());
         assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_control_eof").is_err());
+    }
+
+    #[test]
+    fn every_synthetic_login_stage_is_an_fd4_startup_leaf() {
+        for failure in SyntheticLoginFailure::ALL {
+            let failure_class = failure.failure_class();
+            assert!(STARTUP_FAILURE_CLASSES.contains(&failure_class));
+            let frame = encode_startup_failure_frame(RUN_ID, NONCE, failure_class).unwrap();
+            let value: Value = serde_json::from_slice(&frame).unwrap();
+            assert_eq!(value["failure_class"], failure_class);
+            assert_eq!(value.as_object().unwrap().len(), 6);
+        }
     }
 
     #[test]

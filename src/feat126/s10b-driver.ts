@@ -7,11 +7,27 @@ import { createChatStoreDefinition } from "../stores/chat.store";
 
 const TRUSTED_BIND_MARKER = "feat126-driver-owned-authority";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DRIVER_LOGIN_FAILURE_CLASSES = Object.freeze([
+  "driver_login_authorization_page_failed",
+  "driver_login_authorization_request_invalid",
+  "driver_login_authorization_start_failed",
+  "driver_login_callback_rejected",
+  "driver_login_concurrent",
+  "driver_login_credential_submit_failed",
+  "driver_login_credentials_rejected",
+  "driver_login_failed",
+  "driver_login_form_invalid",
+  "driver_login_runtime_invalid",
+  "driver_login_secret_invalid",
+  "driver_login_session_failed",
+  "driver_login_storage_failed",
+  "driver_login_token_exchange_failed",
+] as const);
 const DRIVER_FAILURE_CLASSES = Object.freeze([
   "driver_bind_failed",
   "driver_control_projection_invalid",
   "driver_frontend_startup_invalid",
-  "driver_login_failed",
+  ...DRIVER_LOGIN_FAILURE_CLASSES,
   "driver_login_projection_invalid",
   "driver_project_invalid",
   "driver_project_projection_invalid",
@@ -96,8 +112,19 @@ async function driverStage<T>(
 ): Promise<T> {
   try {
     return await operation();
-  } catch {
-    throw new Error(failureClass);
+  } catch (error) {
+    throw Object.assign(new Error(failureClass), { cause: error });
+  }
+}
+
+async function driverLoginStage(operation: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return await operation();
+  } catch (error) {
+    const detail = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+    const failureClass = DRIVER_LOGIN_FAILURE_CLASSES.find((candidate) => candidate === detail) ??
+      "driver_login_failed";
+    throw Object.assign(new Error(failureClass), { cause: error });
   }
 }
 
@@ -166,9 +193,7 @@ export async function runFeat126S10Driver(
   await driverStage("driver_frontend_startup_invalid", async () =>
     await driverInvoke("feat126_s10_driver_startup_stage", { stage: "frontend_bootstrap" }),
   );
-  parseLogin(await driverStage("driver_login_failed", async () =>
-    await driverInvoke("feat126_s10_driver_login"),
-  ));
+  parseLogin(await driverLoginStage(async () => await driverInvoke("feat126_s10_driver_login")));
   const project = parseProject(await driverStage("driver_project_invalid", async () =>
     await driverInvoke("feat126_s10_driver_register_project"),
   ));

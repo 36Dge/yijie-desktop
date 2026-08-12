@@ -6,11 +6,11 @@ use super::{
 };
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::loopback::LoopbackCallback;
-#[cfg(feature = "feat126-s10-driver")]
-use crate::native_auth::synthetic_authorization_code_tokens;
 use crate::native_auth::transport::{
     OperationResponse, OperationTransport, PublicTaskErrorCode, PublicTaskTransportOutcome,
 };
+#[cfg(feature = "feat126-s10-driver")]
+use crate::native_auth::{synthetic_authorization_code_tokens, SyntheticLoginFailure};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -198,8 +198,11 @@ impl NativeAuthRuntime {
     }
 
     #[cfg(feature = "feat126-s10-driver")]
-    pub(crate) async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, NativeAuthError> {
-        self.service_native()?.feat126_s10_driver_login().await
+    pub(crate) async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, &'static str> {
+        self.service_native()
+            .map_err(|_| "driver_login_runtime_invalid")?
+            .feat126_s10_driver_login()
+            .await
     }
 
     pub(crate) async fn chat_projection(
@@ -697,13 +700,21 @@ impl AuthService {
     }
 
     #[cfg(feature = "feat126-s10-driver")]
-    async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, NativeAuthError> {
+    async fn feat126_s10_driver_login(&self) -> Result<AuthStatus, &'static str> {
         let _login_guard = self
             .login_lock
             .try_lock()
-            .map_err(|_| NativeAuthError::LoginInProgress)?;
-        let tokens = synthetic_authorization_code_tokens(&self.oidc).await?;
-        self.install_issued_tokens(tokens).await
+            .map_err(|_| "driver_login_concurrent")?;
+        let tokens = synthetic_authorization_code_tokens(&self.oidc)
+            .await
+            .map_err(SyntheticLoginFailure::failure_class)?;
+        self.install_issued_tokens(tokens).await.map_err(|error| {
+            if error == NativeAuthError::SecureStorageUnavailable {
+                "driver_login_storage_failed"
+            } else {
+                "driver_login_session_failed"
+            }
+        })
     }
 
     async fn install_issued_tokens(

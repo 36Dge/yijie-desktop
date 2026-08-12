@@ -144,6 +144,27 @@ describe("FEAT-126 S10BO2 driver", () => {
       .toBe("driver_frontend_startup_invalid");
   });
 
+  it("preserves only reviewed native login stage leaves", async () => {
+    const store: S10BPiniaDriverStore = {
+      phase: "ready",
+      context: { allowedActions: ["use_project"] },
+      async bind() {},
+      async revalidateProject() { return null; },
+      async requestLocalRecovery() { return null; },
+      async dispose() {},
+    };
+    await expect(runFeat126S10Driver(store, async (command) => {
+      if (command === "feat126_s10_driver_startup_stage") return undefined;
+      throw "driver_login_credentials_rejected";
+    })).rejects.toThrow("driver_login_credentials_rejected");
+    const unknown = runFeat126S10Driver(store, async (command) => {
+      if (command === "feat126_s10_driver_startup_stage") return undefined;
+      throw "token=must-not-cross-the-boundary";
+    });
+    await expect(unknown).rejects.toThrow("driver_login_failed");
+    await expect(unknown).rejects.not.toThrow("token=must-not-cross-the-boundary");
+  });
+
   it("attempts fail-closed exactly once and closes locally when IPC is unavailable", async () => {
     const calls: Array<readonly [string, Record<string, unknown> | undefined]> = [];
     let closeCount = 0;
