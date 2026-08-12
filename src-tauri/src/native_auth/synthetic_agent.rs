@@ -20,6 +20,7 @@ const MAX_SECRET_FILE_BYTES: u64 = 4 * 1024;
 const MAX_AUTHORIZATION_BODY_BYTES: usize = 256 * 1024;
 const MAX_COOKIE_BYTES: usize = 16 * 1024;
 const MAX_CODE_BYTES: usize = 4 * 1024;
+const KEYCLOAK_SESSION_STATE_BYTES: usize = 24;
 const SECRET_KEYS: [&str; 5] = [
     "FEAT126_S10_API_DB_PASSWORD",
     "FEAT126_S10_KEYCLOAK_DB_PASSWORD",
@@ -401,9 +402,11 @@ fn callback_code(
         return Err(NativeAuthError::CallbackRejected);
     }
     if let Some(session_state) = query.get("session_state") {
-        let parsed =
-            uuid::Uuid::parse_str(session_state).map_err(|_| NativeAuthError::CallbackRejected)?;
-        if parsed.is_nil() || parsed.hyphenated().to_string() != session_state.as_ref() {
+        if session_state.len() != KEYCLOAK_SESSION_STATE_BYTES
+            || !session_state
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
             return Err(NativeAuthError::CallbackRejected);
         }
     }
@@ -515,11 +518,32 @@ mod tests {
         );
         assert!(callback_code(&valid, "wrong-state", issuer).is_err());
         assert!(callback_code(&valid, "state-value", "https://other.example").is_err());
-        let with_session = valid.replace(
+        let with_uuid_session = valid.replace(
             "&iss=",
             "&session_state=019fbd88-cbc3-4bf1-934d-7b05cd693f80&iss=",
         );
-        assert!(callback_code(&with_session, "state-value", issuer).is_ok());
+        assert!(callback_code(&with_uuid_session, "state-value", issuer).is_err());
+        let with_opaque_session =
+            valid.replace("&iss=", "&session_state=AbCdEfGhIjKlMnOpQrStUvWx&iss=");
+        assert!(callback_code(&with_opaque_session, "state-value", issuer).is_ok());
+        assert!(callback_code(
+            &valid.replace("&iss=", "&session_state=&iss="),
+            "state-value",
+            issuer,
+        )
+        .is_err());
+        assert!(callback_code(
+            &valid.replace("&iss=", &format!("&session_state={}&iss=", "a".repeat(25))),
+            "state-value",
+            issuer,
+        )
+        .is_err());
+        assert!(callback_code(
+            &valid.replace("&iss=", "&session_state=invalid%20session&iss="),
+            "state-value",
+            issuer,
+        )
+        .is_err());
         assert!(
             callback_code(&format!("{valid}&state=state-value"), "state-value", issuer,).is_err()
         );
