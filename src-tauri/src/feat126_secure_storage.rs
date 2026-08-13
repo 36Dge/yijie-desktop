@@ -334,6 +334,11 @@ impl Feat126SecureStorageProfile {
     }
 
     #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn run_root(&self) -> &Path {
+        &self.run_root
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
     pub(crate) fn project_path(&self) -> &Path {
         &self.project
     }

@@ -204,6 +204,12 @@ pub fn run() {
         feat126_s10_driver::feat126_s10_driver_revalidate_project,
         feat126_s10_driver::feat126_s10_driver_request_local_recovery,
         feat126_s10_driver::feat126_s10_driver_component_ready,
+        feat126_s10_driver::feat126_s10_driver_case_result,
+        feat126_s10_driver::feat126_s10_driver_r8_observation,
+        feat126_s10_driver::feat126_s10_driver_r8_phase,
+        feat126_s10_driver::feat126_s10_driver_wait_case,
+        feat126_s10_driver::feat126_s10_driver_planned_restart,
+        feat126_s10_driver::feat126_s10_driver_chat,
         feat126_s10_driver::feat126_s10_driver_wait_abort,
         feat126_s10_driver::feat126_s10_driver_abort_complete,
         feat126_s10_driver::feat126_s10_driver_fail_closed

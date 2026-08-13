@@ -483,6 +483,36 @@ impl ChatRuntime {
         }
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_close_owned_runtime(&self) -> Result<(), ChatError> {
+        self.feat126_s10_stop_owned_host().await?;
+        self.worker.lock().await.take();
+        Ok(())
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_run_r8_probe(
+        &self,
+    ) -> Result<database::R8ProbeProjection, ChatError> {
+        let (profile, scope) = match &self.mode {
+            RuntimeMode::Local(config) => (
+                config
+                    .secure_storage
+                    .clone()
+                    .ok_or(ChatError::InvalidConfiguration)?,
+                config.scope.clone(),
+            ),
+            RuntimeMode::Disabled => return Err(ChatError::Disabled),
+            RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
+        };
+        let probe_root = profile.run_root().join("r8-probe");
+        tokio::task::spawn_blocking(move || {
+            database::ChatRepository::run_r8_probe_at(&probe_root, scope)
+        })
+        .await
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+    }
+
     async fn revalidate_project(
         &self,
         project_id: String,

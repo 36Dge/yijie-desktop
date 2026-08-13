@@ -24,6 +24,91 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use uuid::Uuid;
 
+#[cfg(feature = "feat126-s10-driver")]
+pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
+    let identity = ProbeEventIdentity {
+        stream_id: Uuid::from_u128(0x7000),
+        task_id: Uuid::from_u128(0x7001),
+        agent_session_id: Uuid::from_u128(0x7002),
+        thread_id: Uuid::from_u128(0x7003),
+        turn_id: Uuid::from_u128(0x7004),
+    };
+    let context = ActiveTurnContext {
+        session_id: identity.task_id,
+        task_id: identity.task_id,
+        turn_id: Uuid::from_u128(0x7005),
+        turn_operation_id: Uuid::from_u128(0x7006),
+        agent_session_id: identity.agent_session_id,
+        codex_thread_id: identity.thread_id,
+        runtime_turn_id: identity.turn_id,
+        assistant_text: String::new(),
+        cursor: None,
+    };
+    let mut reducer = TurnEventReducer::new(context)?;
+    let mut last_event_id = None;
+    for sequence in 1..=5_000_u64 {
+        let event_id = Uuid::from_u128(0x8000 + u128::from(sequence));
+        let event = HostEvent {
+            cursor: HostEventCursor::new(identity.stream_id, sequence)
+                .map_err(|_| ChatError::DatabaseUnavailable)?,
+            event_type: "synthetic".to_owned(),
+            event_id,
+            task_id: identity.task_id,
+            agent_session_id: identity.agent_session_id,
+            codex_thread_id: identity.thread_id,
+            turn_id: Some(identity.turn_id),
+            item_id: Some("synthetic".to_owned()),
+            occurred_at: "2026-08-13T00:00:00Z".to_owned(),
+            kind: HostEventKind::AgentMessageDelta {
+                delta: "x".to_owned(),
+            },
+        };
+        if !matches!(
+            reducer.apply(
+                event,
+                i64::try_from(sequence).map_err(|_| ChatError::InvalidInput)?
+            )?,
+            ReducerOutcome::Progress
+        ) {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        last_event_id = Some(event_id);
+    }
+    let Some(last_event_id) = last_event_id else {
+        return Err(ChatError::DatabaseUnavailable);
+    };
+    for _ in 0..5_000_u64 {
+        let event = HostEvent {
+            cursor: HostEventCursor::new(identity.stream_id, 5_000)
+                .map_err(|_| ChatError::DatabaseUnavailable)?,
+            event_type: "synthetic".to_owned(),
+            event_id: last_event_id,
+            task_id: identity.task_id,
+            agent_session_id: identity.agent_session_id,
+            codex_thread_id: identity.thread_id,
+            turn_id: Some(identity.turn_id),
+            item_id: Some("synthetic".to_owned()),
+            occurred_at: "2026-08-13T00:00:00Z".to_owned(),
+            kind: HostEventKind::AgentMessageDelta {
+                delta: "x".to_owned(),
+            },
+        };
+        if !matches!(reducer.apply(event, 1)?, ReducerOutcome::Duplicate) {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+    }
+    Ok(10_000)
+}
+
+#[cfg(feature = "feat126-s10-driver")]
+struct ProbeEventIdentity {
+    stream_id: Uuid,
+    task_id: Uuid,
+    agent_session_id: Uuid,
+    thread_id: Uuid,
+    turn_id: Uuid,
+}
+
 const OUTBOX_LEASE_SECONDS: i64 = 30;
 const RETRY_DELAY_SECONDS: i64 = 5;
 const MAX_ASSISTANT_BYTES: usize = 1024 * 1024;

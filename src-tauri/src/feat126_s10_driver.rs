@@ -12,17 +12,18 @@ use crate::native_auth::SyntheticLoginFailure;
 use crate::native_auth::{AuthStatus, NativeAuthRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Manager, Runtime, State};
-use tokio::sync::{watch, Mutex};
+use tauri::{AppHandle, Runtime, State};
+use tokio::sync::{mpsc, watch, Mutex};
 use uuid::Uuid;
 
 const MASTER_ENV: &str = "YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED";
@@ -31,6 +32,7 @@ const EPHEMERAL_ENV: &str = "YIJIE_FEAT126_S10_EPHEMERAL_SECRET_BACKEND_ENABLED"
 const REAL_CHAIN_ENV: &str = "YIJIE_FEAT126_S10P3_REAL_MAIN_CHAIN";
 const RUN_ENV: &str = "YIJIE_FEAT126_S10_RUN_ID";
 const NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
+const R8_ENV: &str = "YIJIE_FEAT126_S10_R8_ENABLED";
 const SECRET_PATH_ENV: &str = "YIJIE_FEAT126_S10_INFRA_SECRETS_PATH";
 const LOCAL_ENABLED_ENV: &str = "YIJIE_CHAT_LOCAL_ENABLED";
 const OWNER_ENV: &str = "YIJIE_CHAT_LOCAL_OWNER_USER_ID";
@@ -94,6 +96,48 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_startup_timeout",
     "driver_tauri_startup_invalid",
 ];
+const R8_OBSERVATION_KEYS: &[(&str, &[&str])] = &[
+    (
+        "s10b_005_planned_restart",
+        &[
+            "history_page_20",
+            "history_page_50",
+            "restart_closed",
+            "resync_same_session",
+            "cursor_monotonic",
+        ],
+    ),
+    (
+        "s10b_006",
+        &[
+            "fallback_title",
+            "user_rename_wins",
+            "session_pin",
+            "project_pin",
+            "stable_sort",
+        ],
+    ),
+    (
+        "s10b_007",
+        &[
+            "gap_recovery",
+            "reconnect",
+            "race_closed",
+            "no_late_commit",
+            "cursor_resync",
+        ],
+    ),
+    (
+        "s10b_011",
+        &[
+            "metadata_p95_200ms",
+            "history_p95_300ms",
+            "reducer_10000",
+            "db_1m_messages",
+            "idempotency_10000",
+        ],
+    ),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DriverPhase {
@@ -110,8 +154,15 @@ enum DriverPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ControlOutcome {
     Pending,
+    PlannedRestart,
     Abort,
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlTerminal {
+    PlannedRestart,
+    Abort,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,6 +190,12 @@ struct DriverInner {
     monitor_started: AtomicBool,
     startup_terminal: StdMutex<StartupTerminal>,
     startup_stages: AtomicU8,
+    r8_enabled: bool,
+    r8_case_index: AtomicU8,
+    r8_case_offset: u8,
+    r8_phase: &'static str,
+    r8_commands: Mutex<mpsc::Receiver<String>>,
+    r8_command_sender: mpsc::Sender<String>,
 }
 
 #[derive(Clone)]
@@ -154,6 +211,8 @@ struct ControlFrame {
     nonce: String,
     sequence: u64,
     kind: String,
+    #[serde(default)]
+    case_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -164,6 +223,149 @@ struct OutboundFrame<'a> {
     sequence: u64,
     kind: &'static str,
 }
+
+#[derive(Serialize)]
+struct CaseResultFrame<'a> {
+    schema_version: u8,
+    run_id: &'a str,
+    nonce: &'a str,
+    sequence: u64,
+    kind: &'static str,
+    case_id: &'a str,
+    status: &'static str,
+    assertion_count: usize,
+    assertion_set_sha256: &'a str,
+}
+
+const R8_ASSERTIONS: &[(&str, &[&str])] = &[
+    (
+        "s10b_002",
+        &[
+            "opaque_project",
+            "single_session",
+            "single_turn",
+            "completed_terminal",
+        ],
+    ),
+    (
+        "s10b_003",
+        &[
+            "assistant_plaintext",
+            "reasoning_complete",
+            "reasoning_ordered",
+            "terminal_exact",
+        ],
+    ),
+    (
+        "s10b_004",
+        &[
+            "interrupt_terminal",
+            "incomplete_answer",
+            "incomplete_reasoning",
+            "terminal_once",
+        ],
+    ),
+    (
+        "s10b_005_planned_restart",
+        &[
+            "history_page_20",
+            "history_page_50",
+            "restart_closed",
+            "resync_same_session",
+            "cursor_monotonic",
+        ],
+    ),
+    (
+        "s10b_006",
+        &[
+            "fallback_title",
+            "user_rename_wins",
+            "session_pin",
+            "project_pin",
+            "stable_sort",
+        ],
+    ),
+    (
+        "s10b_007",
+        &[
+            "gap_recovery",
+            "reconnect",
+            "race_closed",
+            "no_late_commit",
+            "cursor_resync",
+        ],
+    ),
+    (
+        "s10b_008",
+        &[
+            "desktop_delete",
+            "host_delete",
+            "runtime_delete",
+            "receipt_closed",
+            "restart_unreadable",
+        ],
+    ),
+    (
+        "s10b_009",
+        &[
+            "public_task_content_free",
+            "audit_content_free",
+            "counts_bound",
+            "path_absent",
+            "title_absent",
+        ],
+    ),
+    (
+        "s10b_010",
+        &[
+            "log_content_free",
+            "bbolt_content_free",
+            "audit_content_free",
+            "telemetry_content_free",
+            "process_output_content_free",
+        ],
+    ),
+    (
+        "s10b_011",
+        &[
+            "metadata_p95_200ms",
+            "history_p95_300ms",
+            "reducer_10000",
+            "db_1m_messages",
+            "idempotency_10000",
+        ],
+    ),
+];
+
+fn r8_assertions(case_id: &str) -> Result<&'static [&'static str], &'static str> {
+    R8_ASSERTIONS
+        .iter()
+        .find(|(id, _)| *id == case_id)
+        .map(|(_, values)| *values)
+        .ok_or("driver_case_result_invalid")
+}
+
+fn r8_assertion_digest(assertions: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for assertion in assertions {
+        hasher.update(assertion.as_bytes());
+        hasher.update(b"\n");
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+const R8_CASES: &[&str] = &[
+    "s10b_002",
+    "s10b_003",
+    "s10b_004",
+    "s10b_005_planned_restart",
+    "s10b_006",
+    "s10b_007",
+    "s10b_008",
+    "s10b_009",
+    "s10b_010",
+    "s10b_011",
+];
 
 #[derive(Serialize)]
 struct StartupFailureFrame<'a> {
@@ -232,6 +434,17 @@ impl Feat126S10DriverRuntime {
         let inbound = inherited_control_fd(CONTROL_READ_FD)?;
         let outbound = inherited_control_fd(CONTROL_WRITE_FD)?;
         let (outcome, _) = watch::channel(ControlOutcome::Pending);
+        let r8_enabled = std::env::var(R8_ENV).as_deref() == Ok("true");
+        let (r8_phase, r8_case_offset) = if r8_enabled {
+            match std::env::var("YIJIE_FEAT126_S10_R8_PHASE").as_deref() {
+                Ok("before_restart") => ("before_restart", 0),
+                Ok("after_restart") => ("after_restart", 3),
+                _ => return Err("driver_authority_invalid"),
+            }
+        } else {
+            ("disabled", 0)
+        };
+        let (r8_command_sender, r8_commands) = mpsc::channel(1);
         Ok(Self {
             inner: Arc::new(DriverInner {
                 run_id,
@@ -249,6 +462,12 @@ impl Feat126S10DriverRuntime {
                 monitor_started: AtomicBool::new(false),
                 startup_terminal: StdMutex::new(StartupTerminal::Pending),
                 startup_stages: AtomicU8::new(0),
+                r8_enabled,
+                r8_case_index: AtomicU8::new(0),
+                r8_case_offset,
+                r8_phase,
+                r8_commands: Mutex::new(r8_commands),
+                r8_command_sender,
             }),
         })
     }
@@ -380,24 +599,29 @@ impl Feat126S10DriverRuntime {
         let runtime = self.clone();
         tauri::async_runtime::spawn(async move {
             let read_runtime = runtime.clone();
-            let frame = tokio::task::spawn_blocking(move || {
-                read_control_frame(
+            let r8_phase = runtime.inner.r8_phase;
+            let frames = tokio::task::spawn_blocking(move || {
+                read_control_frames(
                     inbound,
                     &read_runtime.inner.run_id,
                     &read_runtime.inner.nonce,
+                    r8_phase,
+                    read_runtime.inner.r8_command_sender.clone(),
                 )
             })
             .await
-            .ok()
-            .and_then(Result::ok);
-            let valid_abort = frame.is_some() && runtime.begin_abort().await.is_ok();
-            let stopped = app
-                .state::<ChatRuntime>()
-                .feat126_s10_stop_owned_host()
-                .await
-                .is_ok();
-            if valid_abort && stopped {
-                runtime.inner.outcome.send_replace(ControlOutcome::Abort);
+            .ok();
+            let terminal = frames.and_then(Result::ok);
+            let valid = match terminal {
+                Some(ControlTerminal::Abort) => runtime.begin_abort().await.is_ok(),
+                Some(ControlTerminal::PlannedRestart) => true,
+                None => false,
+            };
+            if valid {
+                runtime.inner.outcome.send_replace(match terminal {
+                    Some(ControlTerminal::PlannedRestart) => ControlOutcome::PlannedRestart,
+                    _ => ControlOutcome::Abort,
+                });
             } else {
                 runtime.emit_startup_failure("driver_control_monitor_invalid");
                 runtime.fail().await;
@@ -589,6 +813,7 @@ impl Feat126S10DriverRuntime {
         loop {
             match *outcome.borrow_and_update() {
                 ControlOutcome::Abort => return Ok(()),
+                ControlOutcome::PlannedRestart => return Err("driver_control_failed"),
                 ControlOutcome::Failed => return Err("driver_control_failed"),
                 ControlOutcome::Pending => {}
             }
@@ -606,7 +831,12 @@ impl Feat126S10DriverRuntime {
         {
             return Err("driver_state_invalid");
         }
-        self.write_frame(2, "abort_complete")?;
+        let sequence = if self.inner.r8_enabled {
+            u64::from(self.inner.r8_case_index.load(Ordering::SeqCst)) + 2
+        } else {
+            2
+        };
+        self.write_frame(sequence, "abort_complete")?;
         state.phase = DriverPhase::Closed;
         Ok(())
     }
@@ -646,6 +876,96 @@ impl Feat126S10DriverRuntime {
             outbound_guard.take();
         }
         result
+    }
+
+    pub(crate) async fn emit_case_result(
+        &self,
+        case_id: &str,
+        status: &str,
+        assertions: &[String],
+        assertion_count: usize,
+        assertion_set_sha256: &str,
+    ) -> Result<(), &'static str> {
+        if !self.inner.r8_enabled || status != "passed" {
+            return Err("driver_case_result_invalid");
+        }
+        let index = self.inner.r8_case_index.load(Ordering::SeqCst) as usize;
+        let global_index = self.inner.r8_case_offset as usize + index;
+        if R8_CASES.get(global_index).copied() != Some(case_id) {
+            return Err("driver_case_result_invalid");
+        }
+        let expected = r8_assertions(case_id)?;
+        if assertion_count != expected.len()
+            || assertions.len() != expected.len()
+            || assertions
+                .iter()
+                .map(String::as_str)
+                .ne(expected.iter().copied())
+            || assertion_set_sha256 != r8_assertion_digest(expected)
+        {
+            return Err("driver_case_result_invalid");
+        }
+        let sequence = (index as u64) + 2;
+        let mut encoded = serde_json::to_vec(&CaseResultFrame {
+            schema_version: 1,
+            run_id: &self.inner.run_id,
+            nonce: &self.inner.nonce,
+            sequence,
+            kind: "case_result",
+            case_id,
+            status: "passed",
+            assertion_count,
+            assertion_set_sha256,
+        })
+        .map_err(|_| "driver_control_write_failed")?;
+        encoded.push(b'\n');
+        if encoded.len() > MAX_FRAME_BYTES {
+            return Err("driver_control_write_failed");
+        }
+        let mut outbound_guard = self
+            .inner
+            .outbound
+            .lock()
+            .map_err(|_| "driver_control_write_failed")?;
+        let outbound = outbound_guard
+            .as_mut()
+            .ok_or("driver_control_write_failed")?;
+        outbound
+            .write_all(&encoded)
+            .and_then(|_| outbound.flush())
+            .map_err(|_| "driver_control_write_failed")?;
+        self.inner.r8_case_index.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn wait_case(&self) -> Result<String, &'static str> {
+        if !self.inner.r8_enabled {
+            return Err("driver_control_order_invalid");
+        }
+        self.inner
+            .r8_commands
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or("driver_control_eof")
+    }
+
+    async fn wait_for_planned_restart(&self) -> Result<(), &'static str> {
+        let mut outcome = self.inner.outcome.subscribe();
+        loop {
+            match *outcome.borrow_and_update() {
+                ControlOutcome::PlannedRestart => return Ok(()),
+                ControlOutcome::Abort | ControlOutcome::Failed => {
+                    return Err("driver_control_failed")
+                }
+                ControlOutcome::Pending => {}
+            }
+            outcome
+                .changed()
+                .await
+                .map_err(|_| "driver_control_failed")?;
+        }
     }
 
     fn write_startup_failure(&self, failure_class: &str) -> Result<(), &'static str> {
@@ -927,6 +1247,215 @@ pub(crate) async fn feat126_s10_driver_component_ready(
 }
 
 #[tauri::command]
+pub(crate) async fn feat126_s10_driver_case_result(
+    driver: State<'_, Feat126S10DriverRuntime>,
+    case_id: String,
+    status: String,
+    assertions: Vec<String>,
+    assertion_count: usize,
+    assertion_set_sha256: String,
+) -> Result<(), String> {
+    driver
+        .emit_case_result(
+            &case_id,
+            &status,
+            &assertions,
+            assertion_count,
+            &assertion_set_sha256,
+        )
+        .await
+        .map_err(str::to_owned)
+}
+
+#[tauri::command]
+pub(crate) async fn feat126_s10_driver_r8_observation(
+    case_id: String,
+    observations: Value,
+    driver: State<'_, Feat126S10DriverRuntime>,
+    chat: State<'_, ChatRuntime>,
+) -> Result<Value, String> {
+    if !driver.inner.r8_enabled {
+        return Err("driver_control_order_invalid".to_owned());
+    }
+    let index = driver.inner.r8_case_index.load(Ordering::SeqCst) as usize;
+    let global_index = driver.inner.r8_case_offset as usize + index;
+    if R8_CASES.get(global_index).copied() != Some(case_id.as_str()) {
+        return Err("driver_case_result_invalid".to_owned());
+    }
+    let expected = R8_OBSERVATION_KEYS
+        .iter()
+        .find(|(candidate, _)| *candidate == case_id)
+        .map(|(_, keys)| *keys)
+        .ok_or("driver_case_result_invalid")?;
+    let object = observations
+        .as_object()
+        .ok_or("driver_case_result_invalid")?;
+    if object.len() != expected.len()
+        || expected
+            .iter()
+            .any(|key| object.get(*key) != Some(&Value::Bool(true)))
+    {
+        return Err("driver_case_result_invalid".to_owned());
+    }
+    if case_id == "s10b_011" {
+        let probe = chat
+            .feat126_s10_run_r8_probe()
+            .await
+            .map_err(|_| "driver_case_failed".to_owned())?;
+        if probe.metadata_p95_ms > 200
+            || probe.history_p95_ms > 300
+            || probe.reducer_observations != 10_000
+            || probe.session_count != 10_000
+            || probe.message_count != 1_000_000
+            || probe.idempotency_pairs != 10_000
+            || probe.duplicate_count != 0
+        {
+            return Err("driver_case_failed".to_owned());
+        }
+    }
+    Ok(json!({
+        "caseId": case_id,
+        "observations": object,
+        "schemaVersion": 1,
+        "status": "passed",
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn feat126_s10_driver_r8_phase(
+    driver: State<'_, Feat126S10DriverRuntime>,
+) -> Result<Value, String> {
+    if !driver.inner.r8_enabled {
+        return Err("driver_control_order_invalid".to_owned());
+    }
+    Ok(json!({ "schemaVersion": 1, "phase": driver.inner.r8_phase }))
+}
+
+#[tauri::command]
+pub(crate) async fn feat126_s10_driver_wait_case(
+    driver: State<'_, Feat126S10DriverRuntime>,
+) -> Result<Value, String> {
+    let case_id = driver.wait_case().await.map_err(str::to_owned)?;
+    Ok(json!({ "kind": "mode_transition", "caseId": case_id }))
+}
+
+#[tauri::command]
+pub(crate) async fn feat126_s10_driver_chat(
+    command: String,
+    request: Value,
+    app: AppHandle,
+    driver: State<'_, Feat126S10DriverRuntime>,
+    chat: State<'_, ChatRuntime>,
+    ipc: State<'_, ChatIpcRuntime>,
+) -> Result<Value, String> {
+    if !driver.inner.r8_enabled {
+        return Err("driver_command_forbidden".to_owned());
+    }
+    driver
+        .validate_bound_request(&request)
+        .await
+        .map_err(str::to_owned)?;
+    macro_rules! value {
+        ($future:expr) => {
+            serde_json::to_value($future.await.map_err(|_| "driver_case_failed".to_owned())?)
+                .map_err(|_| "driver_case_failed".to_owned())
+        };
+    }
+    match command.as_str() {
+        "chat_pick_project_v1" => value!(crate::chat::ipc::chat_pick_project_v1(request, chat)),
+        "chat_set_project_pinned_v1" => {
+            value!(crate::chat::ipc::chat_set_project_pinned_v1(request, chat))
+        }
+        "chat_create_session_v1" => value!(crate::chat::ipc::chat_create_session_v1(
+            request, app, chat, ipc
+        )),
+        "chat_submit_turn_v1" => value!(crate::chat::ipc::chat_submit_turn_v1(
+            request, app, chat, ipc
+        )),
+        "chat_list_sessions_v1" => {
+            value!(crate::chat::ipc::chat_list_sessions_v1(request, chat, ipc))
+        }
+        "chat_load_history_v1" => {
+            value!(crate::chat::ipc::chat_load_history_v1(request, chat, ipc))
+        }
+        "chat_load_reasoning_v1" => {
+            value!(crate::chat::ipc::chat_load_reasoning_v1(request, chat, ipc))
+        }
+        "chat_rename_session_v1" => value!(crate::chat::ipc::chat_rename_session_v1(request, chat)),
+        "chat_set_session_pinned_v1" => {
+            value!(crate::chat::ipc::chat_set_session_pinned_v1(request, chat))
+        }
+        "chat_interrupt_turn_v1" => value!(crate::chat::ipc::chat_interrupt_turn_v1(
+            request, app, chat, ipc
+        )),
+        "chat_delete_session_v1" => value!(crate::chat::ipc::chat_delete_session_v1(
+            request, app, chat, ipc
+        )),
+        "chat_get_cleanup_status_v1" => value!(crate::chat::ipc::chat_get_cleanup_status_v1(
+            request, chat, ipc
+        )),
+        "chat_get_session_control_plane_v1" => value!(
+            crate::chat::ipc::chat_get_session_control_plane_v1(request, chat, ipc)
+        ),
+        "chat_subscribe_session_v1" => value!(crate::chat::ipc::chat_subscribe_session_v1(
+            request, app, chat, ipc
+        )),
+        "chat_resync_session_v1" => {
+            value!(crate::chat::ipc::chat_resync_session_v1(request, chat, ipc))
+        }
+        "chat_unsubscribe_session_v1" => value!(crate::chat::ipc::chat_unsubscribe_session_v1(
+            request, chat, ipc
+        )),
+        "chat_cancel_request_v1" => {
+            value!(crate::chat::ipc::chat_cancel_request_v1(request, chat, ipc))
+        }
+        _ => Err("driver_command_forbidden".to_owned()),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn feat126_s10_driver_planned_restart(
+    app: AppHandle,
+    driver: State<'_, Feat126S10DriverRuntime>,
+    auth: State<'_, NativeAuthRuntime>,
+    chat: State<'_, ChatRuntime>,
+    ipc: State<'_, ChatIpcRuntime>,
+) -> Result<(), String> {
+    if driver.inner.r8_phase != "before_restart"
+        || driver.inner.r8_case_index.load(Ordering::SeqCst) != 3
+    {
+        return Err("driver_control_order_invalid".to_owned());
+    }
+    driver
+        .wait_for_planned_restart()
+        .await
+        .map_err(str::to_owned)?;
+    ipc.feat126_s10_shutdown()
+        .await
+        .map_err(|_| "driver_abort_failed".to_owned())?;
+    chat.feat126_s10_close_owned_runtime()
+        .await
+        .map_err(|_| "driver_abort_failed".to_owned())?;
+    auth.logout()
+        .await
+        .map_err(|_| "driver_auth_cleanup_failed".to_owned())?;
+    if let Ok(manager) = chat.authorization_manager() {
+        manager
+            .invalidate_all()
+            .map_err(|_| "driver_auth_cleanup_failed".to_owned())?;
+    }
+    let sequence = u64::from(driver.inner.r8_case_index.load(Ordering::SeqCst)) + 2;
+    driver
+        .write_frame(sequence, "planned_restart")
+        .map_err(str::to_owned)?;
+    if let Ok(mut outbound) = driver.inner.outbound.lock() {
+        outbound.take();
+    }
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 pub(crate) async fn feat126_s10_driver_wait_abort(
     driver: State<'_, Feat126S10DriverRuntime>,
 ) -> Result<DriverControlProjection, String> {
@@ -942,14 +1471,20 @@ pub(crate) async fn feat126_s10_driver_abort_complete(
     chat: State<'_, ChatRuntime>,
     ipc: State<'_, ChatIpcRuntime>,
 ) -> Result<(), String> {
+    ipc.feat126_s10_shutdown()
+        .await
+        .map_err(|_| "driver_abort_failed".to_owned())?;
+    chat.feat126_s10_close_owned_runtime()
+        .await
+        .map_err(|_| "driver_abort_failed".to_owned())?;
     auth.logout()
         .await
         .map_err(|_| "driver_auth_cleanup_failed".to_owned())?;
     if let Ok(manager) = chat.authorization_manager() {
-        let _ = manager.invalidate_all();
+        manager
+            .invalidate_all()
+            .map_err(|_| "driver_auth_cleanup_failed".to_owned())?;
     }
-    ipc.invalidate_pending_bindings();
-    ipc.invalidate_all();
     driver.emit_abort_complete().await.map_err(str::to_owned)?;
     tauri::async_runtime::spawn(async move {
         tokio::task::yield_now().await;
@@ -1067,6 +1602,76 @@ fn read_control_frame(
     decode_control_frame(&encoded, run_id, nonce)
 }
 
+fn read_control_frames(
+    reader: File,
+    run_id: &str,
+    nonce: &str,
+    r8_phase: &str,
+    sender: mpsc::Sender<String>,
+) -> Result<ControlTerminal, &'static str> {
+    if r8_phase == "disabled" {
+        read_control_frame(reader, run_id, nonce)?;
+        return Ok(ControlTerminal::Abort);
+    }
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::with_capacity(256);
+    let expected_cases = match r8_phase {
+        "before_restart" => &R8_CASES[..3],
+        "after_restart" => &R8_CASES[3..],
+        _ => return Err("driver_control_frame_invalid"),
+    };
+    let mut sequence = 0_u64;
+    let mut case_index = 0_usize;
+    loop {
+        line.clear();
+        let bytes = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|_| "driver_control_read_failed")?;
+        if bytes == 0 {
+            return Err("driver_control_eof");
+        }
+        if line.len() > MAX_FRAME_BYTES {
+            return Err("driver_control_frame_invalid");
+        }
+        let frame: ControlFrame =
+            serde_json::from_slice(&line).map_err(|_| "driver_control_frame_invalid")?;
+        sequence += 1;
+        if frame.schema_version != 1
+            || frame.run_id != run_id
+            || frame.nonce != nonce
+            || frame.sequence != sequence
+        {
+            return Err("driver_control_frame_invalid");
+        }
+        let terminal_kind = if r8_phase == "before_restart" {
+            "planned_restart"
+        } else {
+            "abort"
+        };
+        if frame.kind == terminal_kind
+            && frame.case_id.is_none()
+            && case_index == expected_cases.len()
+        {
+            return Ok(if r8_phase == "before_restart" {
+                ControlTerminal::PlannedRestart
+            } else {
+                ControlTerminal::Abort
+            });
+        }
+        if frame.kind != "mode_transition" {
+            return Err("driver_control_frame_invalid");
+        }
+        let case_id = frame.case_id.ok_or("driver_control_frame_invalid")?;
+        if expected_cases.get(case_index).copied() != Some(case_id.as_str()) {
+            return Err("driver_control_frame_invalid");
+        }
+        sender
+            .blocking_send(case_id)
+            .map_err(|_| "driver_control_monitor_invalid")?;
+        case_index += 1;
+    }
+}
+
 fn decode_control_frame(
     encoded: &[u8],
     run_id: &str,
@@ -1089,6 +1694,7 @@ fn decode_control_frame(
         || frame.nonce != nonce
         || frame.sequence != 1
         || frame.kind != "abort"
+        || frame.case_id.is_some()
     {
         return Err("driver_control_frame_invalid");
     }
@@ -1101,7 +1707,7 @@ mod tests {
 
     use super::*;
     use std::fs::OpenOptions;
-    use std::io::Cursor;
+    use std::io::{Cursor, Seek};
     use std::os::unix::fs::OpenOptionsExt;
 
     const RUN_ID: &str = "019fbd88-cbc3-4bf1-934d-7b05cd693f80";
@@ -1124,6 +1730,7 @@ mod tests {
             .unwrap();
         let inbound = File::open("/dev/null").unwrap();
         let (outcome, _) = watch::channel(ControlOutcome::Pending);
+        let (r8_command_sender, r8_commands) = mpsc::channel(1);
         (
             Feat126S10DriverRuntime {
                 inner: Arc::new(DriverInner {
@@ -1142,6 +1749,51 @@ mod tests {
                     monitor_started: AtomicBool::new(false),
                     startup_terminal: StdMutex::new(StartupTerminal::Pending),
                     startup_stages: AtomicU8::new(0),
+                    r8_enabled: false,
+                    r8_case_index: AtomicU8::new(0),
+                    r8_case_offset: 0,
+                    r8_phase: "disabled",
+                    r8_commands: Mutex::new(r8_commands),
+                    r8_command_sender,
+                }),
+            },
+            path,
+        )
+    }
+
+    fn runtime_with_r8_output(
+        phase: &'static str,
+        offset: u8,
+    ) -> (Feat126S10DriverRuntime, PathBuf) {
+        let (runtime, path) = runtime_with_output();
+        let outbound = runtime.inner.outbound.lock().unwrap().take();
+        let inbound = runtime.inner.inbound.lock().unwrap().take();
+        let (outcome, _) = watch::channel(ControlOutcome::Pending);
+        let (sender, receiver) = mpsc::channel(16);
+        (
+            Feat126S10DriverRuntime {
+                inner: Arc::new(DriverInner {
+                    run_id: RUN_ID.to_owned(),
+                    nonce: NONCE.to_owned(),
+                    state: Mutex::new(DriverState {
+                        phase: DriverPhase::Ready,
+                        project_id: Some("019fbd88-cbc3-7bf1-934d-7b05cd693f99".to_owned()),
+                        context_id: Some("019fbd88-cbc3-7bf1-934d-7b05cd693f98".to_owned()),
+                        project_revalidated: true,
+                        recovery_requested: true,
+                    }),
+                    inbound: StdMutex::new(inbound),
+                    outbound: StdMutex::new(outbound),
+                    outcome,
+                    monitor_started: AtomicBool::new(false),
+                    startup_terminal: StdMutex::new(StartupTerminal::Ready),
+                    startup_stages: AtomicU8::new(STARTUP_READY_REQUIRED),
+                    r8_enabled: true,
+                    r8_case_index: AtomicU8::new(0),
+                    r8_case_offset: offset,
+                    r8_phase: phase,
+                    r8_commands: Mutex::new(receiver),
+                    r8_command_sender: sender,
                 }),
             },
             path,
@@ -1218,6 +1870,98 @@ mod tests {
             ),
             Err("driver_control_frame_invalid")
         );
+    }
+
+    #[test]
+    fn r8_control_reader_accepts_only_the_frozen_two_phase_order() {
+        for (phase, cases, terminal) in [
+            ("before_restart", &R8_CASES[..3], "planned_restart"),
+            ("after_restart", &R8_CASES[3..], "abort"),
+        ] {
+            let path = std::env::temp_dir().join(format!("yijie-s10-r8-input-{}", Uuid::now_v7()));
+            let mut file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap();
+            for (index, case_id) in cases.iter().enumerate() {
+                writeln!(
+                    file,
+                    "{{\"schema_version\":1,\"run_id\":\"{RUN_ID}\",\"nonce\":\"{NONCE}\",\"sequence\":{},\"kind\":\"mode_transition\",\"case_id\":\"{case_id}\"}}",
+                    index + 1,
+                )
+                .unwrap();
+            }
+            writeln!(
+                file,
+                "{{\"schema_version\":1,\"run_id\":\"{RUN_ID}\",\"nonce\":\"{NONCE}\",\"sequence\":{},\"kind\":\"{terminal}\"}}",
+                cases.len() + 1,
+            )
+            .unwrap();
+            file.rewind().unwrap();
+            let (sender, mut receiver) = mpsc::channel(16);
+            assert_eq!(
+                read_control_frames(file, RUN_ID, NONCE, phase, sender).unwrap(),
+                if phase == "before_restart" {
+                    ControlTerminal::PlannedRestart
+                } else {
+                    ControlTerminal::Abort
+                },
+            );
+            let mut observed = Vec::new();
+            while let Ok(case_id) = receiver.try_recv() {
+                observed.push(case_id);
+            }
+            assert_eq!(observed, cases);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn r8_case_results_use_phase_local_sequences_before_the_terminal_frame() {
+        for (phase, offset, cases, terminal) in [
+            ("before_restart", 0, &R8_CASES[..3], "planned_restart"),
+            ("after_restart", 3, &R8_CASES[3..], "abort_complete"),
+        ] {
+            let (runtime, output) = runtime_with_r8_output(phase, offset);
+            for case_id in cases {
+                let expected = r8_assertions(case_id).unwrap();
+                runtime
+                    .emit_case_result(
+                        case_id,
+                        "passed",
+                        &expected
+                            .iter()
+                            .map(|value| (*value).to_owned())
+                            .collect::<Vec<_>>(),
+                        expected.len(),
+                        &r8_assertion_digest(expected),
+                    )
+                    .await
+                    .unwrap();
+            }
+            runtime
+                .write_frame(cases.len() as u64 + 2, terminal)
+                .unwrap();
+            runtime.inner.outbound.lock().unwrap().take();
+            let frames = std::fs::read_to_string(&output)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(frames.len(), cases.len() + 1);
+            for (index, case_id) in cases.iter().enumerate() {
+                assert_eq!(frames[index]["sequence"], (index + 2) as u64);
+                assert_eq!(frames[index]["kind"], "case_result");
+                assert_eq!(frames[index]["case_id"], *case_id);
+            }
+            assert_eq!(frames.last().unwrap()["kind"], terminal);
+            assert_eq!(frames.last().unwrap()["sequence"], cases.len() as u64 + 2);
+            drop(runtime);
+            std::fs::remove_file(output).unwrap();
+        }
     }
 
     #[test]

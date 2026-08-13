@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_FEAT126_S10_DRIVER?: string;
+  readonly VITE_FEAT126_S10_R8?: string;
   readonly VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED?: string;
 }
 

@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
@@ -23,6 +25,14 @@ const MAX_PAGE_SIZE: usize = 50;
 const OUTBOX_MAX_ATTEMPTS: i64 = 16;
 const OUTBOX_PAYLOAD_VERSION: i64 = 1;
 const DELETION_RECEIPT_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+#[cfg(feature = "feat126-s10-driver")]
+const R8_SESSION_COUNT: u64 = 10_000;
+#[cfg(feature = "feat126-s10-driver")]
+const R8_TURN_COUNT: u64 = 500_000;
+#[cfg(feature = "feat126-s10-driver")]
+const R8_MESSAGE_COUNT: u64 = 1_000_000;
+#[cfg(feature = "feat126-s10-driver")]
+const R8_IDEMPOTENCY_PAIR_COUNT: u64 = 10_000;
 
 #[derive(Clone)]
 pub struct ChatScope {
@@ -476,6 +486,21 @@ pub struct ChatRepository {
     receipt_key: ReceiptKey,
 }
 
+#[cfg(feature = "feat126-s10-driver")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct R8ProbeProjection {
+    pub schema_version: u8,
+    pub status: &'static str,
+    pub metadata_p95_ms: u64,
+    pub history_p95_ms: u64,
+    pub reducer_observations: u64,
+    pub session_count: u64,
+    pub message_count: u64,
+    pub idempotency_pairs: u64,
+    pub duplicate_count: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReasoningStatus {
     Complete,
@@ -631,6 +656,293 @@ impl ChatRepository {
             )
             .map_err(map_sqlite_error)?;
         transaction.rollback().map_err(map_sqlite_error)
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub fn run_r8_probe_at(
+        chat_directory: &Path,
+        scope: ChatScope,
+    ) -> Result<R8ProbeProjection, ChatError> {
+        let result = (|| {
+            let mut scale = ChatRepository::open(
+                &chat_directory.join("scale"),
+                &DatabaseKey::from_bytes([0x41; 32]),
+                ReceiptKey::from_bytes([0x42; 32]),
+                scope.clone(),
+            )?;
+            let mut idempotency = ChatRepository::open(
+                &chat_directory.join("idempotency"),
+                &DatabaseKey::from_bytes([0x43; 32]),
+                ReceiptKey::from_bytes([0x44; 32]),
+                scope,
+            )?;
+            let scale_projection = scale.run_r8_scale_probe()?;
+            let duplicate_count = idempotency.run_r8_idempotency_probe()?;
+            let reducer_observations = super::application::run_r8_reducer_probe()?;
+            let session_count = scale
+                .connection
+                .query_row("SELECT count(*) FROM chat_sessions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(map_sqlite_error)
+                .and_then(|value| {
+                    u64::try_from(value).map_err(|_| ChatError::DatabaseUnavailable)
+                })?;
+            let message_count = scale
+                .connection
+                .query_row("SELECT count(*) FROM chat_messages", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(map_sqlite_error)
+                .and_then(|value| {
+                    u64::try_from(value).map_err(|_| ChatError::DatabaseUnavailable)
+                })?;
+            let turn_count = scale
+                .connection
+                .query_row("SELECT count(*) FROM chat_turns", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(map_sqlite_error)
+                .and_then(|value| {
+                    u64::try_from(value).map_err(|_| ChatError::DatabaseUnavailable)
+                })?;
+            if session_count != R8_SESSION_COUNT
+                || turn_count != R8_TURN_COUNT
+                || message_count != R8_MESSAGE_COUNT
+            {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            drop(scale);
+            drop(idempotency);
+            Ok(R8ProbeProjection {
+                schema_version: 1,
+                status: "passed",
+                metadata_p95_ms: scale_projection.0,
+                history_p95_ms: scale_projection.1,
+                reducer_observations,
+                session_count,
+                message_count,
+                idempotency_pairs: R8_IDEMPOTENCY_PAIR_COUNT,
+                duplicate_count,
+            })
+        })();
+        let cleanup = if chat_directory.exists() {
+            fs::remove_dir_all(chat_directory).map_err(|_| ChatError::DatabaseUnsafe)
+        } else {
+            Ok(())
+        };
+        match (result, cleanup) {
+            (Ok(projection), Ok(())) => Ok(projection),
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+        }
+    }
+
+    fn run_r8_scale_probe(&mut self) -> Result<(u64, u64), ChatError> {
+        let project_id = Uuid::from_u128(0x1000).to_string();
+        let owner = self.scope.owner_user_id.clone();
+        let tenant = self.scope.tenant_id.clone();
+        let now = 1_i64;
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO chat_projects(id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at)
+                 VALUES (?1, ?2, ?3, 'synthetic', ?4, ?5, ?6)",
+                params![project_id, owner, tenant, "a".repeat(64), vec![1_u8], now],
+            )
+            .map_err(map_sqlite_error)?;
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "WITH RECURSIVE numbers(n) AS (
+                   SELECT 0 UNION ALL SELECT n + 1 FROM numbers WHERE n < 9999
+                 )
+                 INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 )
+                 SELECT printf('%08x-0000-4000-8000-%012x', 1048576 + n, n), ?1, ?2, ?3,
+                        'synthetic', 'fallback', 'not_started', ?4, ?4
+                 FROM numbers",
+                params![&owner, &tenant, &project_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "WITH RECURSIVE
+                   sessions(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM sessions WHERE n < 9999),
+                   ordinals(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM ordinals WHERE n < 49)
+                 INSERT INTO chat_turns(id, session_id, operation_id, status, terminal_at)
+                 SELECT printf('%08x-0000-4000-8001-%012x', 2097152 + sessions.n * 50 + ordinals.n, sessions.n * 50 + ordinals.n),
+                        printf('%08x-0000-4000-8000-%012x', 1048576 + sessions.n, sessions.n),
+                        printf('%08x-0000-4000-8002-%012x', 4194304 + sessions.n * 50 + ordinals.n, sessions.n * 50 + ordinals.n),
+                        'completed', ?1
+                 FROM sessions CROSS JOIN ordinals",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "WITH RECURSIVE
+                   sessions(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM sessions WHERE n < 9999),
+                   ordinals(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM ordinals WHERE n < 49)
+                 INSERT INTO chat_messages(id, session_id, turn_id, role, content, status, ordinal, created_at)
+                 SELECT printf('%08x-0000-4000-8003-%012x', 3145728 + sessions.n * 100 + ordinals.n * 2, sessions.n * 100 + ordinals.n * 2),
+                        printf('%08x-0000-4000-8000-%012x', 1048576 + sessions.n, sessions.n),
+                        printf('%08x-0000-4000-8001-%012x', 2097152 + sessions.n * 50 + ordinals.n, sessions.n * 50 + ordinals.n),
+                        'user', 'synthetic', 'committed', ordinals.n * 2, ?1
+                 FROM sessions CROSS JOIN ordinals",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "WITH RECURSIVE
+                   sessions(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM sessions WHERE n < 9999),
+                   ordinals(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM ordinals WHERE n < 49)
+                 INSERT INTO chat_messages(id, session_id, turn_id, role, content, status, ordinal, created_at)
+                 SELECT printf('%08x-0000-4000-8004-%012x', 5242880 + sessions.n * 100 + ordinals.n * 2, sessions.n * 100 + ordinals.n * 2 + 1),
+                        printf('%08x-0000-4000-8000-%012x', 1048576 + sessions.n, sessions.n),
+                        printf('%08x-0000-4000-8001-%012x', 2097152 + sessions.n * 50 + ordinals.n, sessions.n * 50 + ordinals.n),
+                        'assistant', 'synthetic', 'committed', ordinals.n * 2 + 1, ?1
+                 FROM sessions CROSS JOIN ordinals",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        let mut metadata_runs = Vec::with_capacity(30);
+        let mut history_runs = Vec::with_capacity(30);
+        let probe_session = Uuid::parse_str("00100000-0000-4000-8000-000000000000")
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        for _ in 0..30 {
+            let started = Instant::now();
+            if self.list_sessions(None, Some(50))?.sessions.len() > 50 {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            metadata_runs.push(started.elapsed());
+            let started = Instant::now();
+            let page = self.load_history(probe_session, None, Some(50))?;
+            let message_count = page
+                .turns
+                .iter()
+                .map(|turn| turn.messages.len())
+                .sum::<usize>();
+            if page.turns.len() != 50 || message_count != 100 {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            history_runs.push(started.elapsed());
+        }
+        metadata_runs.sort_unstable();
+        history_runs.sort_unstable();
+        let p95 = |runs: &[Duration]| -> u64 {
+            let index = ((runs.len() * 95).div_ceil(100)).saturating_sub(1);
+            runs.get(index).copied().unwrap_or_default().as_millis() as u64
+        };
+        Ok((p95(&metadata_runs), p95(&history_runs)))
+    }
+
+    fn run_r8_idempotency_probe(&mut self) -> Result<u64, ChatError> {
+        let project_id = Uuid::from_u128(0x5000).to_string();
+        let project = Uuid::from_u128(0x5000);
+        let now = 1_i64;
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO chat_projects(id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at)
+                 VALUES (?1, ?2, ?3, 'synthetic', ?4, ?5, ?6)",
+                params![project_id, self.scope.owner_user_id, self.scope.tenant_id, "b".repeat(64), vec![1_u8], now],
+            )
+            .map_err(map_sqlite_error)?;
+        let database_directory = self
+            .database_path
+            .parent()
+            .ok_or(ChatError::DatabaseUnavailable)?
+            .to_path_buf();
+        let left_repository = ChatRepository::open(
+            &database_directory,
+            &DatabaseKey::from_bytes([0x43; 32]),
+            ReceiptKey::from_bytes([0x44; 32]),
+            self.scope.clone(),
+        )?;
+        let right_repository = ChatRepository::open(
+            &database_directory,
+            &DatabaseKey::from_bytes([0x43; 32]),
+            ReceiptKey::from_bytes([0x44; 32]),
+            self.scope.clone(),
+        )?;
+        let left_barrier = Arc::new(Barrier::new(3));
+        let right_barrier = Arc::clone(&left_barrier);
+        let start_barrier = Arc::clone(&left_barrier);
+        let left = thread::spawn(move || {
+            Self::run_r8_idempotency_worker(
+                left_repository,
+                0,
+                R8_IDEMPOTENCY_PAIR_COUNT as u128,
+                left_barrier,
+                project,
+            )
+        });
+        let right = thread::spawn(move || {
+            Self::run_r8_idempotency_worker(
+                right_repository,
+                0,
+                R8_IDEMPOTENCY_PAIR_COUNT as u128,
+                right_barrier,
+                project,
+            )
+        });
+        start_barrier.wait();
+        let left_duplicates = left.join().map_err(|_| ChatError::DatabaseUnavailable)??;
+        let right_duplicates = right.join().map_err(|_| ChatError::DatabaseUnavailable)??;
+        if left_duplicates != right_duplicates {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let created: i64 = self
+            .connection
+            .query_row(
+                "SELECT count(*) FROM chat_sessions WHERE project_id=?1",
+                [project.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        if created != i64::try_from(R8_IDEMPOTENCY_PAIR_COUNT).unwrap_or_default() {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        Ok(0)
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    fn run_r8_idempotency_worker(
+        mut repository: ChatRepository,
+        start: u128,
+        count: u128,
+        barrier: Arc<Barrier>,
+        project: Uuid,
+    ) -> Result<Vec<(Uuid, Uuid)>, ChatError> {
+        let mut results = Vec::with_capacity(count as usize);
+        barrier.wait();
+        for index in start..start + count {
+            let operation_id = Uuid::from_u128(0x6000 + index);
+            let mut attempts = 0_u16;
+            let pending = loop {
+                attempts = attempts.saturating_add(1);
+                match repository.create_session_and_enqueue_with_authority(
+                    project,
+                    "synthetic idempotency probe",
+                    operation_id,
+                    1,
+                ) {
+                    Ok(value) => break value,
+                    Err(ChatError::ConversationConflict | ChatError::DatabaseUnavailable)
+                        if attempts < 1_000 =>
+                    {
+                        thread::yield_now();
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            results.push((pending.session_id, pending.turn_id));
+        }
+        Ok(results)
     }
 
     pub fn register_project(
@@ -5587,5 +5899,24 @@ mod tests {
         ] {
             assert!(!debug.contains(canary));
         }
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn r8_native_probe_measures_the_frozen_scale_without_content_projection() {
+        let root = std::env::temp_dir().join(format!("feat126-r8-probe-{}", Uuid::now_v7()));
+        let projection = ChatRepository::run_r8_probe_at(&root, scope()).unwrap();
+        assert_eq!(projection.schema_version, 1);
+        assert_eq!(projection.status, "passed");
+        assert!(projection.metadata_p95_ms <= 200);
+        assert!(projection.history_p95_ms <= 300);
+        assert_eq!(projection.reducer_observations, 10_000);
+        assert_eq!(projection.session_count, 10_000);
+        assert_eq!(projection.message_count, 1_000_000);
+        assert_eq!(projection.idempotency_pairs, 10_000);
+        assert_eq!(projection.duplicate_count, 0);
+        assert!(!root.exists());
+        let encoded = serde_json::to_string(&projection).unwrap();
+        assert!(!encoded.contains("synthetic idempotency probe"));
     }
 }

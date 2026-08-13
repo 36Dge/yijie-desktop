@@ -6,15 +6,28 @@ import {
   classifyFeat126DriverFailure,
   createFeat126DriverTransport,
   failClosedFeat126DriverOnce,
+  FEAT126_R8_CASES,
+  runFeat126S10R8,
   runFeat126S10Driver,
   type DriverInvoke,
   type S10BPiniaDriverStore,
 } from "./s10b-driver";
+import type {
+  ChatCleanupStatus,
+  ChatHistoryPage,
+  ChatProject,
+  ChatReasoningItem,
+  ChatSession,
+  ChatSessionControlPlane,
+} from "../domain/chat-ipc";
 
 const PROJECT_ID = "019fbd88-cbc3-7bf1-934d-7b05cd693f99";
 
 describe("FEAT-126 S10BO2 driver", () => {
-  beforeEach(() => vi.stubEnv("VITE_FEAT126_S10_DRIVER", "true"));
+  beforeEach(() => {
+    vi.stubEnv("VITE_FEAT126_S10_DRIVER", "true");
+    vi.stubEnv("VITE_FEAT126_S10_R8", "false");
+  });
   afterEach(() => vi.unstubAllEnvs());
 
   it("executes the closed login, project, bind, recovery and abort flow", async () => {
@@ -98,6 +111,184 @@ describe("FEAT-126 S10BO2 driver", () => {
       .rejects.toThrow("driver_command_forbidden");
     await expect(transport.invoke("chat_delete_session_v1", { request }))
       .rejects.toThrow("driver_command_forbidden");
+  });
+
+  it("routes only the reviewed production chat commands in R8 mode", async () => {
+    vi.stubEnv("VITE_FEAT126_S10_R8", "true");
+    const calls: Array<readonly [string, Record<string, unknown> | undefined]> = [];
+    const transport = createFeat126DriverTransport(async (command, arguments_) => {
+      calls.push([command, arguments_]);
+      return { schemaVersion: 1 };
+    });
+    const request = { schemaVersion: 1, requestId: crypto.randomUUID(), contextId: crypto.randomUUID(), payload: {} };
+    await transport.invoke("chat_get_session_control_plane_v1", { request });
+    expect(calls).toEqual([["feat126_s10_driver_chat", {
+      command: "chat_get_session_control_plane_v1",
+      request,
+    }]]);
+    await expect(transport.invoke("runtime_health", { request }))
+      .rejects.toThrow("driver_command_forbidden");
+  });
+
+  it("executes the frozen R8 cases in two exact phases with terminal assertions", async () => {
+    type MutableR8Store = S10BPiniaDriverStore & {
+      selectedSessionId: string | null;
+      sessions: ChatSession[];
+      projects: ChatProject[];
+      history: ChatHistoryPage | null;
+      cleanupStatus: ChatCleanupStatus | null;
+      controlPlane: ChatSessionControlPlane | null;
+      reasoning: Map<string, readonly ChatReasoningItem[]>;
+      createSession(projectId: string, input: string): Promise<string | null>;
+      submitTurn(input: string): Promise<void>;
+      loadOlderHistory(): Promise<void>;
+      loadReasoning(turnId: string): Promise<readonly ChatReasoningItem[]>;
+      renameSelected(title: string): Promise<void>;
+      setSelectedPinned(pinned: boolean): Promise<void>;
+      setProjectPinned(projectId: string, pinned: boolean): Promise<void>;
+      resyncSelected(): Promise<void>;
+      reloadSessions(): Promise<void>;
+      refreshControlPlane(): Promise<ChatSessionControlPlane | null>;
+      refreshSelectedCleanup(): Promise<Readonly<{ kind: string }> | null>;
+      interruptSelected(): Promise<void>;
+      deleteSelected(): Promise<Readonly<{ kind: string }> | null>;
+      selectSession(sessionId: string): Promise<void>;
+    };
+    const turn = (ordinal: number, status: string, reasoningStatus: string) => Object.freeze({
+      turnId: `019fbd88-cbc3-7bf1-934d-7b05cd693f${ordinal.toString().padStart(2, "0")}`,
+      status,
+      terminalAt: 1,
+      reasoningStatus,
+      reasoningReasonCode: reasoningStatus === "complete" ? null : "stream_gap",
+      messages: Object.freeze([]),
+      reasoning: Object.freeze([]),
+    });
+    const makeStore = (restored = false): MutableR8Store => {
+      const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
+      const initialTurns = restored
+        ? [turn(1, "completed", "complete"), turn(2, "completed", "complete"), turn(3, "failed", "incomplete")]
+        : [];
+      const store = {
+        phase: "ready",
+        context: { allowedActions: ["use_project"] },
+        selectedSessionId: restored ? sessionId : null,
+        sessions: restored ? [{
+          sessionId, projectId: PROJECT_ID, title: "fallback", titleSource: "fallback" as const,
+          pinnedAt: null, lastActivityAt: 1, latestTurnStatus: "failed", projectAvailable: true,
+        }] : [],
+        projects: [{ projectId: PROJECT_ID, safeName: "project", pinnedAt: null, lastUsedAt: 1, available: true }],
+        history: restored ? { turns: Object.freeze(initialTurns), nextCursor: null } : null,
+        cleanupStatus: null,
+        controlPlane: restored ? { sessionId, state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const } : null,
+        reasoning: new Map<string, readonly ChatReasoningItem[]>(),
+        async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
+        async createSession(projectId: string) {
+          const isFault = this.sessions.length === 0 && restored;
+          const nextId = isFault ? "019fbd88-cbc3-7bf1-934d-7b05cd693f92" : sessionId;
+          const status = isFault ? "failed" : "completed";
+          const reasoningStatus = isFault ? "unavailable" : "complete";
+          this.selectedSessionId = nextId;
+          this.sessions = [{
+            sessionId: nextId, projectId, title: "fallback", titleSource: "fallback",
+            pinnedAt: null, lastActivityAt: 1, latestTurnStatus: status, projectAvailable: true,
+          }];
+          const nextTurn = turn(isFault ? 5 : 1, status, reasoningStatus);
+          this.history = { turns: Object.freeze([nextTurn]), nextCursor: null };
+          this.controlPlane = { sessionId: nextId, state: "bound", issueCode: null, retryable: false, recovery: "none" };
+          this.reasoning.set(nextTurn.turnId, Object.freeze([{
+            itemOrdinal: 0, status: isFault ? "unavailable" : "complete",
+            reasonCode: isFault ? "limit_exceeded" : null, finalizedAtMs: 1,
+            parts: isFault ? Object.freeze([]) : Object.freeze([{ contentIndex: 0, text: "synthetic" }]),
+          }]));
+          return nextId;
+        },
+        async submitTurn(input: string) {
+          const incomplete = input.includes("004");
+          const disconnected = input.includes("007");
+          const status = incomplete ? "failed" : disconnected ? "interrupted" : "completed";
+          const reasoningStatus = status === "completed" ? "complete" : "incomplete";
+          const nextTurn = turn((this.history?.turns.length ?? 0) + 1, status, reasoningStatus);
+          this.history = { turns: Object.freeze([...(this.history?.turns ?? []), nextTurn]), nextCursor: null };
+          this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: status }));
+          this.reasoning.set(nextTurn.turnId, Object.freeze([{
+            itemOrdinal: 0, status: reasoningStatus as "complete" | "incomplete",
+            reasonCode: reasoningStatus === "complete" ? null : "stream_gap", finalizedAtMs: 1,
+            parts: Object.freeze([{ contentIndex: 0, text: "synthetic" }]),
+          }]));
+        },
+        async loadOlderHistory() {},
+        async loadHistoryPage(limit: number) {
+          return {
+            page: { turns: Object.freeze((this.history?.turns ?? []).slice(0, limit)), nextCursor: null },
+            cursorMonotonic: true,
+            pagesDisjoint: true,
+          };
+        },
+        async loadReasoning(turnId: string) { return this.reasoning.get(turnId) ?? Object.freeze([]); },
+        async renameSelected(title: string) { this.sessions = this.sessions.map((session) => ({ ...session, title, titleSource: "user" as const })); },
+        async setSelectedPinned(pinned: boolean) { this.sessions = this.sessions.map((session) => ({ ...session, pinnedAt: pinned ? 1 : null })); },
+        async setProjectPinned(projectId: string, pinned: boolean) { this.projects = this.projects.map((project) => project.projectId === projectId ? { ...project, pinnedAt: pinned ? 1 : null } : project); },
+        async resyncSelected() {}, async reloadSessions() {},
+        async refreshControlPlane() { return this.controlPlane; },
+        async refreshSelectedCleanup() { return { kind: "navigate" }; },
+        async interruptSelected() {},
+        async deleteSelected() {
+          this.cleanupStatus = { operationId: crypto.randomUUID(), desktopState: "complete", hostState: "complete", runtimeState: "complete", outcomeCode: "complete", lastErrorCode: null, requestedAt: 1, completedAt: 2, expiresAt: null };
+          this.selectedSessionId = null; this.sessions = []; this.history = null; this.controlPlane = null;
+          return { kind: "navigate" };
+        },
+        async selectSession(next: string) { this.selectedSessionId = next; },
+      } satisfies MutableR8Store;
+      for (const existing of initialTurns) {
+        store.reasoning.set(existing.turnId, Object.freeze([{
+          itemOrdinal: 0, status: existing.reasoningStatus as "complete" | "incomplete",
+          reasonCode: existing.reasoningReasonCode, finalizedAtMs: 1,
+          parts: Object.freeze([{ contentIndex: 0, text: "synthetic" }]),
+        }]));
+      }
+      return store;
+    };
+    const executePhase = async (phase: "before_restart" | "after_restart", store: MutableR8Store) => {
+      const expected = phase === "before_restart" ? FEAT126_R8_CASES.slice(0, 3) : FEAT126_R8_CASES.slice(3);
+      const pending = [...expected];
+      const observed: string[] = [];
+      const invoke: DriverInvoke = async (command, arguments_) => {
+        if (command === "feat126_s10_driver_wait_case") return { kind: "mode_transition", caseId: pending.shift() };
+        if (command === "feat126_s10_driver_r8_observation") {
+          const caseId = String(arguments_?.caseId);
+          const observations = arguments_?.observations as Record<string, boolean>;
+          return { caseId, observations, schemaVersion: 1, status: "passed" };
+        }
+        if (command === "feat126_s10_driver_case_result") { observed.push(String(arguments_?.caseId)); return undefined; }
+        if (command === "feat126_s10_driver_planned_restart") { observed.push("planned_restart"); return undefined; }
+        throw new Error("unexpected_command");
+      };
+      await expect(runFeat126S10R8(store, PROJECT_ID, invoke, phase)).resolves.toEqual(expected);
+      expect(observed).toEqual(phase === "before_restart" ? [...expected, "planned_restart"] : expected);
+    };
+    await executePhase("before_restart", makeStore(false));
+    await executePhase("after_restart", makeStore(true));
+  });
+
+  it("fails closed when a native R8 observation is not true", async () => {
+    const invoke: DriverInvoke = async (command, arguments_) => {
+      if (command === "feat126_s10_driver_wait_case") return { kind: "mode_transition", caseId: "s10b_006" };
+      if (command === "feat126_s10_driver_r8_observation") {
+        return { caseId: arguments_?.caseId, observations: { ...(arguments_?.observations as Record<string, boolean>), stable_sort: false }, schemaVersion: 1, status: "passed" };
+      }
+      throw new Error("unexpected_command");
+    };
+    const store = {
+      phase: "ready", context: { allowedActions: ["use_project"] }, selectedSessionId: "session",
+      sessions: [{ sessionId: "session", projectId: PROJECT_ID, title: "title", titleSource: "user" as const, pinnedAt: 1, lastActivityAt: 1, latestTurnStatus: "interrupted", projectAvailable: true }],
+      projects: [{ projectId: PROJECT_ID, safeName: "project", pinnedAt: 1, lastUsedAt: 1, available: true }],
+      history: { turns: [{ turnId: "turn", status: "interrupted", terminalAt: 1, reasoningStatus: "incomplete", reasoningReasonCode: "stream_gap", messages: [], reasoning: [] }], nextCursor: null },
+      cleanupStatus: null, controlPlane: { sessionId: "session", state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const },
+      async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
+      async loadHistoryPage() { return null; }, async createSession() { return null; }, async submitTurn() {}, async loadOlderHistory() {}, async loadReasoning() { return []; },
+      async renameSelected() {}, async setSelectedPinned() {}, async setProjectPinned() {}, async resyncSelected() {}, async reloadSessions() {}, async refreshControlPlane() { return null; }, async refreshSelectedCleanup() { return null; }, async interruptSelected() {}, async deleteSelected() { return null; }, async selectSession() {},
+    } satisfies S10BPiniaDriverStore & Record<string, unknown>;
+    await expect(runFeat126S10R8(store, PROJECT_ID, invoke, "after_restart")).rejects.toThrow("driver_case_failed");
   });
 
   it("does not subscribe the feature WebView to arbitrary application events", async () => {

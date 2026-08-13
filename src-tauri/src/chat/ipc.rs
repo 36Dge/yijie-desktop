@@ -261,6 +261,16 @@ impl ChatIpcRuntime {
         self.inner.bind_generation.fetch_add(1, Ordering::SeqCst);
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_s10_shutdown(&self) -> Result<(), ChatError> {
+        if let Some(coordinator) = self.inner.coordinator.lock().await.take() {
+            coordinator.stop().await?;
+        }
+        self.invalidate_pending_bindings();
+        self.invalidate_all();
+        Ok(())
+    }
+
     fn begin_binding(&self) -> u64 {
         self.inner
             .bind_generation

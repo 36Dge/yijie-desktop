@@ -564,6 +564,30 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
     }
 
+    async function loadHistoryPage(limit: number): Promise<Readonly<{
+      page: ChatHistoryPage;
+      cursorMonotonic: boolean;
+      pagesDisjoint: boolean;
+    }> | null> {
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      if (!bound || !sessionId || !Number.isSafeInteger(limit) || limit <= 0 || limit > 50) return null;
+      try {
+        const page = await client.loadHistory(bound.contextId, sessionId, undefined, limit);
+        if (!page.nextCursor) return { page, cursorMonotonic: true, pagesDisjoint: true };
+        const next = await client.loadHistory(bound.contextId, sessionId, page.nextCursor, limit);
+        const firstIds = new Set(page.turns.map((turn) => turn.turnId));
+        const pagesDisjoint = next.turns.every((turn) => !firstIds.has(turn.turnId));
+        return {
+          page,
+          cursorMonotonic: next.nextCursor === null || next.nextCursor !== page.nextCursor,
+          pagesDisjoint,
+        };
+      } catch {
+        return null;
+      }
+    }
+
     async function loadReasoning(turnId: string): Promise<readonly ChatReasoningItem[]> {
       const bound = context.value;
       if (!bound) return Object.freeze([]);
@@ -798,6 +822,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       clearSelectedSession,
       resyncSelected,
       loadOlderHistory,
+      loadHistoryPage,
       loadReasoning,
       createSession,
       submitTurn,
