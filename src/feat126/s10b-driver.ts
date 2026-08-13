@@ -43,6 +43,7 @@ const DRIVER_FAILURE_CLASSES = Object.freeze([
   "driver_project_revalidation_failed",
   "driver_readiness_failed",
   "driver_ready_emit_failed",
+  "driver_case_failed",
   "driver_case_result_failed",
   "driver_case_create_failed",
 ] as const);

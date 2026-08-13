@@ -96,6 +96,13 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_startup_timeout",
     "driver_tauri_startup_invalid",
 ];
+const POST_READY_FAILURE_CLASSES: &[&str] = &[
+    "driver_case_create_failed",
+    "driver_case_failed",
+    "driver_case_result_failed",
+    "driver_control_projection_invalid",
+    "driver_frontend_startup_invalid",
+];
 const R8_OBSERVATION_KEYS: &[(&str, &[&str])] = &[
     (
         "s10b_005_planned_restart",
@@ -189,6 +196,7 @@ struct DriverInner {
     outcome: watch::Sender<ControlOutcome>,
     monitor_started: AtomicBool,
     startup_terminal: StdMutex<StartupTerminal>,
+    post_ready_terminal: AtomicBool,
     startup_stages: AtomicU8,
     r8_enabled: bool,
     r8_case_index: AtomicU8,
@@ -378,6 +386,16 @@ struct StartupFailureFrame<'a> {
 }
 
 #[derive(Serialize)]
+struct PostReadyFailureFrame<'a> {
+    schema_version: u8,
+    run_id: &'a str,
+    nonce: &'a str,
+    sequence: u64,
+    kind: &'static str,
+    failure_class: &'a str,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DriverLoginProjection {
     schema_version: u8,
@@ -461,6 +479,7 @@ impl Feat126S10DriverRuntime {
                 outcome,
                 monitor_started: AtomicBool::new(false),
                 startup_terminal: StdMutex::new(StartupTerminal::Pending),
+                post_ready_terminal: AtomicBool::new(false),
                 startup_stages: AtomicU8::new(0),
                 r8_enabled,
                 r8_case_index: AtomicU8::new(0),
@@ -622,8 +641,7 @@ impl Feat126S10DriverRuntime {
                     Some(ControlTerminal::PlannedRestart) => ControlOutcome::PlannedRestart,
                     _ => ControlOutcome::Abort,
                 });
-            } else {
-                runtime.emit_startup_failure("driver_control_monitor_invalid");
+            } else if runtime.emit_control_monitor_failure() {
                 runtime.fail().await;
                 app.exit(1);
             }
@@ -644,6 +662,43 @@ impl Feat126S10DriverRuntime {
         *terminal = StartupTerminal::Failed;
         let _ = self.write_startup_failure(failure_class);
         true
+    }
+
+    pub(crate) fn emit_post_ready_failure(&self, failure_class: &str) -> bool {
+        if !POST_READY_FAILURE_CLASSES.contains(&failure_class) {
+            return false;
+        }
+        let Ok(startup_terminal) = self.inner.startup_terminal.lock() else {
+            return false;
+        };
+        if *startup_terminal != StartupTerminal::Ready {
+            return false;
+        }
+        drop(startup_terminal);
+        if self
+            .inner
+            .post_ready_terminal
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+        let _ = self.write_claimed_post_ready_failure(failure_class);
+        true
+    }
+
+    fn emit_control_monitor_failure(&self) -> bool {
+        let ready = self
+            .inner
+            .startup_terminal
+            .lock()
+            .map(|terminal| *terminal == StartupTerminal::Ready)
+            .unwrap_or(false);
+        if ready {
+            self.emit_post_ready_failure("driver_control_projection_invalid")
+        } else {
+            self.emit_startup_failure("driver_control_monitor_invalid")
+        }
     }
 
     async fn require_phase(&self, expected: DriverPhase) -> Result<(), &'static str> {
@@ -831,12 +886,7 @@ impl Feat126S10DriverRuntime {
         {
             return Err("driver_state_invalid");
         }
-        let sequence = if self.inner.r8_enabled {
-            u64::from(self.inner.r8_case_index.load(Ordering::SeqCst)) + 2
-        } else {
-            2
-        };
-        self.write_frame(sequence, "abort_complete")?;
+        self.write_post_ready_terminal("abort_complete")?;
         state.phase = DriverPhase::Closed;
         Ok(())
     }
@@ -868,13 +918,51 @@ impl Feat126S10DriverRuntime {
         let outbound = outbound_guard
             .as_mut()
             .ok_or("driver_control_write_failed")?;
-        let result = outbound
+        outbound
             .write_all(&encoded)
             .and_then(|_| outbound.flush())
-            .map_err(|_| "driver_control_write_failed");
-        if kind == "abort_complete" {
-            outbound_guard.take();
+            .map_err(|_| "driver_control_write_failed")
+    }
+
+    fn write_post_ready_terminal(&self, kind: &'static str) -> Result<(), &'static str> {
+        if !["abort_complete", "planned_restart"].contains(&kind)
+            || self
+                .inner
+                .post_ready_terminal
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+        {
+            return Err("driver_control_order_invalid");
         }
+        let mut outbound_guard = self
+            .inner
+            .outbound
+            .lock()
+            .map_err(|_| "driver_control_write_failed")?;
+        let sequence = if self.inner.r8_enabled {
+            u64::from(self.inner.r8_case_index.load(Ordering::SeqCst)) + 2
+        } else {
+            2
+        };
+        let mut encoded = serde_json::to_vec(&OutboundFrame {
+            schema_version: 1,
+            run_id: &self.inner.run_id,
+            nonce: &self.inner.nonce,
+            sequence,
+            kind,
+        })
+        .map_err(|_| "driver_control_write_failed")?;
+        encoded.push(b'\n');
+        if encoded.len() > MAX_FRAME_BYTES {
+            return Err("driver_control_write_failed");
+        }
+        let result = outbound_guard
+            .as_mut()
+            .ok_or("driver_control_write_failed")?
+            .write_all(&encoded)
+            .and_then(|_| outbound_guard.as_mut().unwrap().flush())
+            .map_err(|_| "driver_control_write_failed");
+        outbound_guard.take();
         result
     }
 
@@ -927,6 +1015,9 @@ impl Feat126S10DriverRuntime {
             .outbound
             .lock()
             .map_err(|_| "driver_control_write_failed")?;
+        if self.inner.post_ready_terminal.load(Ordering::SeqCst) {
+            return Err("driver_control_order_invalid");
+        }
         let outbound = outbound_guard
             .as_mut()
             .ok_or("driver_control_write_failed")?;
@@ -986,6 +1077,29 @@ impl Feat126S10DriverRuntime {
         outbound_guard.take();
         result
     }
+    fn write_claimed_post_ready_failure(&self, failure_class: &str) -> Result<(), &'static str> {
+        let mut outbound_guard = self
+            .inner
+            .outbound
+            .lock()
+            .map_err(|_| "driver_control_write_failed")?;
+        let sequence = u64::from(self.inner.r8_case_index.load(Ordering::SeqCst)) + 2;
+        let encoded = encode_post_ready_failure_frame(
+            &self.inner.run_id,
+            &self.inner.nonce,
+            sequence,
+            failure_class,
+        )?;
+        let outbound = outbound_guard
+            .as_mut()
+            .ok_or("driver_control_write_failed")?;
+        let result = outbound
+            .write_all(&encoded)
+            .and_then(|_| outbound.flush())
+            .map_err(|_| "driver_control_write_failed");
+        outbound_guard.take();
+        result
+    }
 }
 
 fn encode_startup_failure_frame(
@@ -1004,6 +1118,33 @@ fn encode_startup_failure_frame(
         nonce,
         sequence: 1,
         kind: "startup_failed",
+        failure_class,
+    })
+    .map_err(|_| "driver_control_write_failed")?;
+    encoded.push(b'\n');
+    if encoded.len() > MAX_FRAME_BYTES {
+        return Err("driver_control_write_failed");
+    }
+    Ok(encoded)
+}
+
+fn encode_post_ready_failure_frame(
+    run_id: &str,
+    nonce: &str,
+    sequence: u64,
+    failure_class: &str,
+) -> Result<Vec<u8>, &'static str> {
+    validate_uuid_v4(run_id).map_err(|_| "driver_control_write_failed")?;
+    validate_uuid_v4(nonce).map_err(|_| "driver_control_write_failed")?;
+    if sequence < 2 || !POST_READY_FAILURE_CLASSES.contains(&failure_class) {
+        return Err("driver_control_write_failed");
+    }
+    let mut encoded = serde_json::to_vec(&PostReadyFailureFrame {
+        schema_version: 1,
+        run_id,
+        nonce,
+        sequence,
+        kind: "component_failed",
         failure_class,
     })
     .map_err(|_| "driver_control_write_failed")?;
@@ -1444,13 +1585,9 @@ pub(crate) async fn feat126_s10_driver_planned_restart(
             .invalidate_all()
             .map_err(|_| "driver_auth_cleanup_failed".to_owned())?;
     }
-    let sequence = u64::from(driver.inner.r8_case_index.load(Ordering::SeqCst)) + 2;
     driver
-        .write_frame(sequence, "planned_restart")
+        .write_post_ready_terminal("planned_restart")
         .map_err(str::to_owned)?;
-    if let Ok(mut outbound) = driver.inner.outbound.lock() {
-        outbound.take();
-    }
     app.exit(0);
     Ok(())
 }
@@ -1500,12 +1637,30 @@ pub(crate) async fn feat126_s10_driver_fail_closed(
     chat: State<'_, ChatRuntime>,
     failure_class: String,
 ) -> Result<(), String> {
-    let failure_class = if STARTUP_FAILURE_CLASSES.contains(&failure_class.as_str()) {
-        failure_class.as_str()
+    let post_ready = driver
+        .inner
+        .startup_terminal
+        .lock()
+        .map(|terminal| *terminal == StartupTerminal::Ready)
+        .unwrap_or(false);
+    let emitted = if post_ready {
+        let failure_class = if POST_READY_FAILURE_CLASSES.contains(&failure_class.as_str()) {
+            failure_class.as_str()
+        } else {
+            "driver_case_failed"
+        };
+        driver.emit_post_ready_failure(failure_class)
     } else {
-        "driver_frontend_startup_invalid"
+        let failure_class = if STARTUP_FAILURE_CLASSES.contains(&failure_class.as_str()) {
+            failure_class.as_str()
+        } else {
+            "driver_frontend_startup_invalid"
+        };
+        driver.emit_startup_failure(failure_class)
     };
-    driver.emit_startup_failure(failure_class);
+    if !emitted {
+        return Ok(());
+    }
     driver.fail().await;
     let result = chat
         .feat126_s10_stop_owned_host()
@@ -1748,6 +1903,7 @@ mod tests {
                     outcome,
                     monitor_started: AtomicBool::new(false),
                     startup_terminal: StdMutex::new(StartupTerminal::Pending),
+                    post_ready_terminal: AtomicBool::new(false),
                     startup_stages: AtomicU8::new(0),
                     r8_enabled: false,
                     r8_case_index: AtomicU8::new(0),
@@ -1787,6 +1943,7 @@ mod tests {
                     outcome,
                     monitor_started: AtomicBool::new(false),
                     startup_terminal: StdMutex::new(StartupTerminal::Ready),
+                    post_ready_terminal: AtomicBool::new(false),
                     startup_stages: AtomicU8::new(STARTUP_READY_REQUIRED),
                     r8_enabled: true,
                     r8_case_index: AtomicU8::new(0),
@@ -1980,6 +2137,57 @@ mod tests {
     }
 
     #[test]
+    fn post_ready_failure_frame_is_content_free_and_closes_fd4() {
+        let (runtime, output) = runtime_with_r8_output("after_restart", 3);
+        let encoded =
+            encode_post_ready_failure_frame(RUN_ID, NONCE, 2, "driver_case_failed").unwrap();
+        let value: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value["kind"], "component_failed");
+        assert_eq!(value["sequence"], 2);
+        assert_eq!(value["failure_class"], "driver_case_failed");
+        assert_eq!(value.as_object().unwrap().len(), 6);
+        assert!(!encoded.windows(3).any(|window| window == b"/tmp"));
+        assert!(runtime.emit_post_ready_failure("driver_case_failed"));
+        assert!(!runtime.emit_post_ready_failure("driver_case_result_failed"));
+        assert_eq!(
+            runtime.write_post_ready_terminal("abort_complete"),
+            Err("driver_control_order_invalid")
+        );
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
+        let frame: Value =
+            serde_json::from_str(std::fs::read_to_string(output).unwrap().trim()).unwrap();
+        assert_eq!(frame["kind"], "component_failed");
+    }
+
+    #[tokio::test]
+    async fn post_ready_success_terminal_suppresses_later_frames() {
+        let (runtime, output) = runtime_with_r8_output("after_restart", 3);
+        runtime.write_post_ready_terminal("abort_complete").unwrap();
+        assert!(!runtime.emit_post_ready_failure("driver_case_failed"));
+        let expected = r8_assertions("s10b_005_planned_restart").unwrap();
+        assert_eq!(
+            runtime
+                .emit_case_result(
+                    "s10b_005_planned_restart",
+                    "passed",
+                    &expected
+                        .iter()
+                        .map(|value| (*value).to_owned())
+                        .collect::<Vec<_>>(),
+                    expected.len(),
+                    &r8_assertion_digest(expected),
+                )
+                .await,
+            Err("driver_control_order_invalid")
+        );
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
+        let frames = std::fs::read_to_string(output).unwrap();
+        assert_eq!(frames.lines().count(), 1);
+        let frame: Value = serde_json::from_str(frames.trim()).unwrap();
+        assert_eq!(frame["kind"], "abort_complete");
+    }
+
+    #[test]
     fn every_synthetic_login_stage_is_an_fd4_startup_leaf() {
         for failure in SyntheticLoginFailure::ALL {
             let failure_class = failure.failure_class();
@@ -1989,6 +2197,29 @@ mod tests {
             assert_eq!(value["failure_class"], failure_class);
             assert_eq!(value.as_object().unwrap().len(), 6);
         }
+    }
+
+    #[test]
+    fn control_monitor_failure_uses_the_reached_terminal_phase() {
+        let (startup, startup_output) = runtime_with_output();
+        assert!(startup.emit_control_monitor_failure());
+        let startup_frame: Value =
+            serde_json::from_str(std::fs::read_to_string(startup_output).unwrap().trim()).unwrap();
+        assert_eq!(startup_frame["kind"], "startup_failed");
+        assert_eq!(
+            startup_frame["failure_class"],
+            "driver_control_monitor_invalid"
+        );
+
+        let (ready, ready_output) = runtime_with_r8_output("after_restart", 3);
+        assert!(ready.emit_control_monitor_failure());
+        let ready_frame: Value =
+            serde_json::from_str(std::fs::read_to_string(ready_output).unwrap().trim()).unwrap();
+        assert_eq!(ready_frame["kind"], "component_failed");
+        assert_eq!(
+            ready_frame["failure_class"],
+            "driver_control_projection_invalid"
+        );
     }
 
     #[test]

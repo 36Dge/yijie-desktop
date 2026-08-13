@@ -7,9 +7,13 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "feat126-s10-driver")]
 use std::sync::{Arc, Barrier};
+#[cfg(feature = "feat126-s10-driver")]
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "feat126-s10-driver")]
+use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
@@ -738,6 +742,7 @@ impl ChatRepository {
         }
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
     fn run_r8_scale_probe(&mut self) -> Result<(u64, u64), ChatError> {
         let project_id = Uuid::from_u128(0x1000).to_string();
         let owner = self.scope.owner_user_id.clone();
@@ -840,6 +845,7 @@ impl ChatRepository {
         Ok((p95(&metadata_runs), p95(&history_runs)))
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
     fn run_r8_idempotency_probe(&mut self) -> Result<u64, ChatError> {
         let project_id = Uuid::from_u128(0x5000).to_string();
         let project = Uuid::from_u128(0x5000);

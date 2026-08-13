@@ -288,7 +288,19 @@ describe("FEAT-126 S10BO2 driver", () => {
       async loadHistoryPage() { return null; }, async createSession() { return null; }, async submitTurn() {}, async loadOlderHistory() {}, async loadReasoning() { return []; },
       async renameSelected() {}, async setSelectedPinned() {}, async setProjectPinned() {}, async resyncSelected() {}, async reloadSessions() {}, async refreshControlPlane() { return null; }, async refreshSelectedCleanup() { return null; }, async interruptSelected() {}, async deleteSelected() { return null; }, async selectSession() {},
     } satisfies S10BPiniaDriverStore & Record<string, unknown>;
-    await expect(runFeat126S10R8(store, PROJECT_ID, invoke, "after_restart")).rejects.toThrow("driver_case_failed");
+    const failure = await runFeat126S10R8(store, PROJECT_ID, invoke, "after_restart")
+      .then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("driver_case_failed");
+    const projected: Array<readonly [string, Record<string, unknown> | undefined]> = [];
+    await failClosedFeat126DriverOnce(
+      classifyFeat126DriverFailure(failure),
+      async (command, arguments_) => { projected.push([command, arguments_]); },
+    );
+    expect(projected).toEqual([[
+      "feat126_s10_driver_fail_closed",
+      { failureClass: "driver_case_failed" },
+    ]]);
   });
 
   it("does not subscribe the feature WebView to arbitrary application events", async () => {
