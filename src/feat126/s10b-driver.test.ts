@@ -341,9 +341,11 @@ describe("FEAT-126 S10BO2 driver", () => {
   it("projects only closed startup leaves and never forwards an unknown error", () => {
     expect(classifyFeat126DriverFailure(new Error("driver_readiness_failed")))
       .toBe("driver_readiness_failed");
+    expect(classifyFeat126DriverFailure("driver_case_failed"))
+      .toBe("driver_case_failed");
     expect(classifyFeat126DriverFailure(new Error("token=must-not-cross-the-boundary")))
       .toBe("driver_frontend_startup_invalid");
-    expect(classifyFeat126DriverFailure("driver_login_failed"))
+    expect(classifyFeat126DriverFailure("token=must-not-cross-the-boundary"))
       .toBe("driver_frontend_startup_invalid");
   });
 

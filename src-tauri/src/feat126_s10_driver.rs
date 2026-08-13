@@ -772,6 +772,18 @@ impl Feat126S10DriverRuntime {
         Ok(request_id)
     }
 
+    async fn validate_r8_chat_request(&self, request: &Value) -> Result<Uuid, &'static str> {
+        let (request_id, context_id, _) = decode_driver_request(request)?;
+        let context_id = context_id.hyphenated().to_string();
+        let state = self.inner.state.lock().await;
+        if !matches!(state.phase, DriverPhase::Bound | DriverPhase::Ready)
+            || state.context_id.as_deref() != Some(context_id.as_str())
+        {
+            return Err("driver_context_invalid");
+        }
+        Ok(request_id)
+    }
+
     async fn validate_project_request(&self, request: &Value) -> Result<(), &'static str> {
         let (_, _, payload) = decode_driver_request(request)?;
         if payload.len() != 2
@@ -1493,7 +1505,7 @@ pub(crate) async fn feat126_s10_driver_chat(
         return Err("driver_command_forbidden".to_owned());
     }
     driver
-        .validate_bound_request(&request)
+        .validate_r8_chat_request(&request)
         .await
         .map_err(str::to_owned)?;
     macro_rules! value {
@@ -1977,6 +1989,39 @@ mod tests {
         let mut state = runtime.inner.state.lock().await;
         state.project_revalidated = true;
         state.recovery_requested = true;
+    }
+
+    fn driver_request(context_id: &str) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "requestId": "019fbd88-cbc3-7bf1-934d-7b05cd693f97",
+            "contextId": context_id,
+            "payload": {},
+        })
+    }
+
+    #[tokio::test]
+    async fn r8_chat_requests_remain_authorized_after_component_ready() {
+        let (runtime, path) = runtime_with_r8_output("before_restart", 0);
+        let context_id = runtime.inner.state.lock().await.context_id.clone().unwrap();
+        assert!(runtime
+            .validate_r8_chat_request(&driver_request(&context_id))
+            .await
+            .is_ok());
+        assert_eq!(
+            runtime
+                .validate_bound_request(&driver_request(&context_id))
+                .await,
+            Err("driver_context_invalid")
+        );
+        assert_eq!(
+            runtime
+                .validate_r8_chat_request(&driver_request(RUN_ID))
+                .await,
+            Err("driver_context_invalid")
+        );
+        drop(runtime);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

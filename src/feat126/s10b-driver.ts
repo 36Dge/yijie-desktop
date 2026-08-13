@@ -160,7 +160,7 @@ function exactObject(value: unknown, keys: readonly string[]): value is Record<s
 }
 
 export function classifyFeat126DriverFailure(error: unknown): DriverFailureClass {
-  const message = error instanceof Error ? error.message : "";
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return DRIVER_FAILURE_CLASSES.find((failureClass) => failureClass === message) ??
     "driver_frontend_startup_invalid";
 }
