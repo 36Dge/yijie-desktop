@@ -129,6 +129,8 @@ type R8Store = Readonly<{
   history: ChatHistoryPage | null;
   cleanupStatus: ChatCleanupStatus | null;
   controlPlane: ChatSessionControlPlane | null;
+  liveReasoning: readonly unknown[];
+  liveTurnStatus: string | null;
 }>;
 
 const DRIVER_COMMANDS = Object.freeze({
@@ -342,10 +344,30 @@ async function pollR8(
   throw new Error("driver_case_failed");
 }
 
-async function waitR8InterruptibleOrTerminal(store: R8Store): Promise<void> {
-  await pollR8(store, () =>
-    ["streaming", "stopping", "failed", "interrupted"].includes(latestR8Turn(store).status),
-  );
+const R8_TERMINAL_STATUSES = Object.freeze(["completed", "failed", "interrupted"]);
+
+function observedR8TerminalStatus(store: R8Store): string | null {
+  if (store.liveTurnStatus !== null && R8_TERMINAL_STATUSES.includes(store.liveTurnStatus)) {
+    return store.liveTurnStatus;
+  }
+  const persisted = latestR8Turn(store).status;
+  return R8_TERMINAL_STATUSES.includes(persisted) ? persisted : null;
+}
+
+function r8InterruptibleWithReasoning(store: R8Store): boolean {
+  return ["streaming", "stopping"].includes(latestR8Turn(store).status) &&
+    store.liveReasoning.length > 0;
+}
+
+async function waitR8ReasoningOrTerminal(store: R8Store): Promise<void> {
+  for (let attempt = 0; attempt < R8_POLL_ATTEMPTS; attempt += 1) {
+    // Check before resync so an observed live prefix is not cleared by the snapshot refresh.
+    if (observedR8TerminalStatus(store) !== null || r8InterruptibleWithReasoning(store)) return;
+    await store.resyncSelected();
+    if (observedR8TerminalStatus(store) !== null || r8InterruptibleWithReasoning(store)) return;
+    await delay(R8_POLL_DELAY_MS);
+  }
+  throw new Error("driver_case_failed");
 }
 
 function selectedR8Session(store: R8Store): ChatSession {
@@ -429,8 +451,11 @@ export async function runFeat126S10R8(
     await emitR8CaseResult(driverInvoke, "s10b_003"); completed.push("s10b_003");
     await waitR8Case(driverInvoke, "s10b_004");
     await r8.submitTurn("Synthetic FEAT-126 case 004 incomplete stream.");
-    await waitR8InterruptibleOrTerminal(r8);
-    if (!["failed", "interrupted"].includes(latestR8Turn(r8).status)) {
+    await waitR8ReasoningOrTerminal(r8);
+    const observedTerminal = observedR8TerminalStatus(r8);
+    requireR8(observedTerminal !== "completed");
+    if (observedTerminal === null) {
+      requireR8(r8InterruptibleWithReasoning(r8));
       try {
         requireR8(await r8.interruptSelected());
       } catch {

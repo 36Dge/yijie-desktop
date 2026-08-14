@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia } from "pinia";
 import type { ChatClient } from "../api/chat-client";
-import { createChatStoreDefinition, useChatStore } from "../stores/chat.store";
+import { createChatStoreDefinition, useChatStore, type LiveReasoningPart } from "../stores/chat.store";
 import {
   classifyFeat126DriverFailure,
   createFeat126DriverTransport,
@@ -138,6 +138,8 @@ describe("FEAT-126 S10BO2 driver", () => {
       history: ChatHistoryPage | null;
       cleanupStatus: ChatCleanupStatus | null;
       controlPlane: ChatSessionControlPlane | null;
+      liveReasoning: LiveReasoningPart[];
+      liveTurnStatus: string | null;
       reasoning: Map<string, readonly ChatReasoningItem[]>;
       createSession(projectId: string, input: string): Promise<string | null>;
       submitTurn(input: string): Promise<void>;
@@ -154,6 +156,7 @@ describe("FEAT-126 S10BO2 driver", () => {
       deleteSelected(): Promise<Readonly<{ kind: string }> | null>;
       selectSession(sessionId: string): Promise<void>;
       interruptCallCount: number;
+      interruptObservedReasoningCount: number;
     };
     const turn = (ordinal: number, status: string, reasoningStatus: string) => Object.freeze({
       turnId: `019fbd88-cbc3-7bf1-934d-7b05cd693f${ordinal.toString().padStart(2, "0")}`,
@@ -188,8 +191,11 @@ describe("FEAT-126 S10BO2 driver", () => {
         history: restored ? { turns: Object.freeze(initialTurns), nextCursor: null } : null,
         cleanupStatus: null,
         controlPlane: restored ? { sessionId, state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const } : null,
+        liveReasoning: [],
+        liveTurnStatus: null,
         reasoning: new Map<string, readonly ChatReasoningItem[]>(),
         interruptCallCount: 0,
+        interruptObservedReasoningCount: 0,
         async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
         async createSession(projectId: string) {
           const isFault = this.sessions.length === 0 && restored;
@@ -227,11 +233,16 @@ describe("FEAT-126 S10BO2 driver", () => {
           const nextTurn = turn((this.history?.turns.length ?? 0) + 1, status, reasoningStatus);
           this.history = { turns: Object.freeze([...(this.history?.turns ?? []), nextTurn]), nextCursor: null };
           this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: status }));
-          this.reasoning.set(nextTurn.turnId, Object.freeze([{
+          const reasoning = Object.freeze([{
             itemOrdinal: 0, status: reasoningStatus as "complete" | "incomplete",
             reasonCode: reasoningStatus === "complete" ? null : "stream_gap", finalizedAtMs: 1,
             parts: Object.freeze([{ contentIndex: 0, text: "synthetic" }]),
-          }]));
+          }]);
+          if (!delayedInterruptible || !incomplete) this.reasoning.set(nextTurn.turnId, reasoning);
+          if (naturalTerminalWinsInterrupt && incomplete) {
+            this.liveReasoning = [{ itemOrdinal: 0, contentIndex: 0, text: "synthetic" }];
+            this.liveTurnStatus = "streaming";
+          }
         },
         async loadOlderHistory() {},
         async loadHistoryPage(limit: number) {
@@ -256,6 +267,10 @@ describe("FEAT-126 S10BO2 driver", () => {
             nextCursor: this.history?.nextCursor ?? null,
           };
           this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "streaming" }));
+          queueMicrotask(() => {
+            this.liveReasoning = [{ itemOrdinal: 0, contentIndex: 0, text: "synthetic" }];
+            this.liveTurnStatus = "streaming";
+          });
         },
         async reloadSessions() {
           const turns = this.history?.turns ?? [];
@@ -272,6 +287,7 @@ describe("FEAT-126 S10BO2 driver", () => {
         async interruptSelected() {
           if (!incompleteInterruptPending) return false;
           this.interruptCallCount += 1;
+          this.interruptObservedReasoningCount = this.liveReasoning.length;
           incompleteInterruptPending = false;
           const turns = this.history?.turns ?? [];
           this.history = {
@@ -281,6 +297,14 @@ describe("FEAT-126 S10BO2 driver", () => {
             nextCursor: this.history?.nextCursor ?? null,
           };
           this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "failed" }));
+          this.liveTurnStatus = "failed";
+          const interruptedTurn = turns[turns.length - 1];
+          if (interruptedTurn !== undefined && this.liveReasoning.length > 0) {
+            this.reasoning.set(interruptedTurn.turnId, Object.freeze([{
+              itemOrdinal: 0, status: "incomplete", reasonCode: "turn_interrupted", finalizedAtMs: 1,
+              parts: Object.freeze([{ contentIndex: 0, text: "synthetic" }]),
+            }]));
+          }
           if (naturalTerminalWinsInterrupt) throw new Error("chat_conflict");
           return true;
         },
@@ -324,6 +348,8 @@ describe("FEAT-126 S10BO2 driver", () => {
     const delayedInterruptible = makeStore(false, false, false, true);
     await executePhase("before_restart", delayedInterruptible);
     expect(delayedInterruptible.interruptCallCount).toBe(1);
+    expect(delayedInterruptible.interruptObservedReasoningCount).toBe(1);
+    expect(await delayedInterruptible.loadReasoning(delayedInterruptible.history!.turns[2]!.turnId)).toHaveLength(1);
     await executePhase("after_restart", makeStore(true));
   });
 
