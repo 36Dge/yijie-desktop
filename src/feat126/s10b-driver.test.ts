@@ -259,14 +259,6 @@ describe("FEAT-126 S10BO2 driver", () => {
         async resyncSelected() {
           if (!queuedInterruptPending) return;
           queuedInterruptPending = false;
-          const turns = this.history?.turns ?? [];
-          this.history = {
-            turns: Object.freeze(turns.map((existing, index) => index === turns.length - 1
-              ? Object.freeze({ ...existing, status: "streaming" })
-              : existing)),
-            nextCursor: this.history?.nextCursor ?? null,
-          };
-          this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "streaming" }));
           queueMicrotask(() => {
             this.liveReasoning = [{ itemOrdinal: 0, contentIndex: 0, text: "synthetic" }];
             this.liveTurnStatus = "streaming";

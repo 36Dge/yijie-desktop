@@ -355,7 +355,8 @@ function observedR8TerminalStatus(store: R8Store): string | null {
 }
 
 function r8InterruptibleWithReasoning(store: R8Store): boolean {
-  return ["streaming", "stopping"].includes(latestR8Turn(store).status) &&
+  return [latestR8Turn(store).status, store.liveTurnStatus]
+    .some((status) => status !== null && ["streaming", "stopping"].includes(status)) &&
     store.liveReasoning.length > 0;
 }
 
