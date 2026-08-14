@@ -220,6 +220,10 @@ impl NativeAuthRuntime {
             .get_my_capabilities(tenant_selector)
             .await
             .map_err(map_projection_native_error)?;
+        let observed_at = epoch_seconds()
+            .ok()
+            .and_then(|value| i64::try_from(value).ok())
+            .ok_or(NativeProjectionError::Invalid)?;
         match response.status {
             200 => {}
             401 => return Err(NativeProjectionError::Unauthenticated),
@@ -236,11 +240,7 @@ impl NativeAuthRuntime {
         if body.schema_version != 1
             || response_tenant != tenant_id
             || body.authorization_revision == 0
-            || expires_at <= now_epoch_seconds
-            || expires_at
-                > now_epoch_seconds
-                    .checked_add(CHAT_PROJECTION_MAX_LIFETIME_SECONDS)
-                    .ok_or(NativeProjectionError::Invalid)?
+            || !valid_projection_window(now_epoch_seconds, observed_at, expires_at)
             || body.capabilities.is_empty()
             || body.capabilities.len() > CHAT_PROJECTION_MAX_CAPABILITIES
             || body.capabilities.iter().any(|capability| {
@@ -511,6 +511,15 @@ fn valid_capability_key(value: &str) -> bool {
         }
     }
     count >= 2
+}
+
+fn valid_projection_window(requested_at: i64, observed_at: i64, expires_at: i64) -> bool {
+    requested_at >= 0
+        && observed_at >= requested_at
+        && expires_at > observed_at
+        && observed_at
+            .checked_add(CHAT_PROJECTION_MAX_LIFETIME_SECONDS)
+            .is_some_and(|maximum| expires_at <= maximum)
 }
 
 fn parse_rfc3339_epoch_seconds(value: &str) -> Option<i64> {
@@ -1173,6 +1182,32 @@ mod tests {
         assert!(!valid_capability_key("task"));
         assert!(!valid_capability_key("Task.read"));
         assert!(!valid_capability_key("task..read"));
+    }
+
+    #[test]
+    fn chat_projection_window_uses_response_observation_time() {
+        let requested_at = 1_785_760_496;
+        let observed_at = requested_at + 1;
+        assert!(valid_projection_window(
+            requested_at,
+            observed_at,
+            requested_at + CHAT_PROJECTION_MAX_LIFETIME_SECONDS + 1,
+        ));
+        assert!(!valid_projection_window(
+            requested_at,
+            observed_at,
+            observed_at + CHAT_PROJECTION_MAX_LIFETIME_SECONDS + 1,
+        ));
+        assert!(!valid_projection_window(
+            requested_at,
+            requested_at - 1,
+            requested_at + CHAT_PROJECTION_MAX_LIFETIME_SECONDS,
+        ));
+        assert!(!valid_projection_window(
+            requested_at,
+            observed_at,
+            observed_at
+        ));
     }
 
     #[test]
