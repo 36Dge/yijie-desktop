@@ -159,7 +159,7 @@ const DRIVER_COMMANDS = Object.freeze({
 } as const);
 
 const R8_CHAT_COMMANDS = new Set([
-  "chat_pick_project_v1", "chat_set_project_pinned_v1", "chat_create_session_v1",
+  "chat_list_projects_v1", "chat_pick_project_v1", "chat_set_project_pinned_v1", "chat_create_session_v1",
   "chat_submit_turn_v1", "chat_list_sessions_v1", "chat_load_history_v1",
   "chat_load_reasoning_v1", "chat_rename_session_v1", "chat_set_session_pinned_v1",
   "chat_interrupt_turn_v1", "chat_delete_session_v1", "chat_get_cleanup_status_v1",

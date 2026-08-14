@@ -126,10 +126,17 @@ describe("FEAT-126 S10BO2 driver", () => {
     });
     const request = { schemaVersion: 1, requestId: crypto.randomUUID(), contextId: crypto.randomUUID(), payload: {} };
     await transport.invoke("chat_get_session_control_plane_v1", { request });
-    expect(calls).toEqual([["feat126_s10_driver_chat", {
-      command: "chat_get_session_control_plane_v1",
-      request,
-    }]]);
+    await transport.invoke("chat_list_projects_v1", { request });
+    expect(calls).toEqual([
+      ["feat126_s10_driver_chat", {
+        command: "chat_get_session_control_plane_v1",
+        request,
+      }],
+      ["feat126_s10_driver_chat", {
+        command: "chat_list_projects_v1",
+        request,
+      }],
+    ]);
     await expect(transport.invoke("runtime_health", { request }))
       .rejects.toThrow("driver_command_forbidden");
   });

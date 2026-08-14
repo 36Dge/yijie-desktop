@@ -1525,6 +1525,9 @@ pub(crate) async fn feat126_s10_driver_chat(
         };
     }
     match command.as_str() {
+        "chat_list_projects_v1" => {
+            value!(crate::chat::ipc::chat_list_projects_v1(request, chat, ipc))
+        }
         "chat_pick_project_v1" => value!(crate::chat::ipc::chat_pick_project_v1(request, chat)),
         "chat_set_project_pinned_v1" => {
             value!(crate::chat::ipc::chat_set_project_pinned_v1(request, chat))
