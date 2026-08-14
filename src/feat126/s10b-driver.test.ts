@@ -7,6 +7,7 @@ import {
   createFeat126DriverTransport,
   failClosedFeat126DriverOnce,
   FEAT126_R8_CASES,
+  r8ObservationTimeoutMs,
   runFeat126S10R8,
   runFeat126S10Driver,
   type DriverInvoke,
@@ -33,6 +34,11 @@ describe("FEAT-126 S10BO2 driver", () => {
     vi.stubEnv("VITE_FEAT126_S10_R8", "false");
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it("reserves the long IPC budget only for the frozen S10B-011 scale probe", () => {
+    expect(r8ObservationTimeoutMs("s10b_010")).toBe(10_000);
+    expect(r8ObservationTimeoutMs("s10b_011")).toBe(100_000);
+  });
 
   it("executes the closed login, project, bind, recovery and abort flow", async () => {
     const order: string[] = [];

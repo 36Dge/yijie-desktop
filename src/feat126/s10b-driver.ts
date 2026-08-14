@@ -340,7 +340,7 @@ async function requireR8Observation(
   const result = await boundedR8Operation(async () => await driverInvoke(
     "feat126_s10_driver_r8_observation",
     { caseId, observations },
-  ));
+  ), r8ObservationTimeoutMs(caseId));
   if (!exactObject(result, ["caseId", "observations", "schemaVersion", "status"]) ||
     result.schemaVersion !== 1 || result.status !== "passed" || result.caseId !== caseId ||
     !exactObject(result.observations, Object.keys(observations)) ||
@@ -375,7 +375,12 @@ async function waitR8Case(driverInvoke: DriverInvoke, expected: R8CaseId): Promi
 
 const R8_POLL_DELAY_MS = 100;
 const R8_OPERATION_TIMEOUT_MS = 10_000;
+const R8_SCALE_PROBE_TIMEOUT_MS = 100_000;
 const R8_POLL_TIMEOUT_MS = 20_000;
+
+export function r8ObservationTimeoutMs(caseId: R8CaseId): number {
+  return caseId === "s10b_011" ? R8_SCALE_PROBE_TIMEOUT_MS : R8_OPERATION_TIMEOUT_MS;
+}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
