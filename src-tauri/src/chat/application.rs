@@ -1247,18 +1247,37 @@ impl ConversationApplication {
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
     ) -> Result<(), ChatError> {
-        let context = self.database.active_turn_context(session_id).await?;
+        let mut context = self.database.active_turn_context(session_id).await?;
         let cursor = context
             .cursor
             .as_ref()
             .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
             .transpose()
             .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        let mut stream = self
-            .host()?
+        let host = self.host()?;
+        let mut stream = match host
             .open_event_stream_v2(context.agent_session_id, cursor)
             .await
-            .map_err(map_host_error)?;
+        {
+            Ok(stream) => stream,
+            Err(error)
+                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
+            {
+                let stream = host
+                    .open_event_stream_v2(context.agent_session_id, None)
+                    .await
+                    .map_err(map_host_error)?;
+                let expected = context
+                    .cursor
+                    .take()
+                    .ok_or(ChatError::ConversationConflict)?;
+                self.database
+                    .clear_event_cursor_after_stream_change(session_id, expected)
+                    .await?;
+                stream
+            }
+            Err(error) => return Err(map_host_error(error)),
+        };
         let mut reducer = TurnEventReducer::new(context)?;
         let mut progress_dirty = false;
         let mut unflushed_events = 0_usize;
@@ -2835,6 +2854,198 @@ mod tests {
         assert!(!requests[3].contains("model"));
         assert!(!requests[3].contains("reasoning_effort"));
         assert!(requests[5].contains("event_schema_version=2"));
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn host_restart_rebases_one_stale_stream_cursor_and_commits_failed_terminal() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa0";
+        const TOKEN: &str = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+        let root = std::env::temp_dir().join(format!("yijie-r8-stream-rebase-{}", Uuid::now_v7()));
+        let project_path = root.join("project");
+        let token_directory = root.join("host");
+        fs::create_dir_all(&project_path).unwrap();
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let selection = native_project::create_selection(&project_path)
+            .unwrap()
+            .unwrap();
+        let database = DatabaseWorker::start(
+            root.join("chat"),
+            super::super::database::ChatScope::new(
+                Uuid::now_v7().to_string(),
+                Uuid::now_v7().to_string(),
+            )
+            .unwrap(),
+            Box::new(TestKeyStore),
+            Box::new(TestKeyStore),
+        )
+        .unwrap();
+        let project = database
+            .register_project(selection.canonical_path, selection.bookmark)
+            .await
+            .unwrap();
+        let pending = database
+            .create_session_and_enqueue(
+                Uuid::parse_str(&project.id).unwrap(),
+                "synthetic restart turn".to_owned(),
+                Uuid::now_v7(),
+            )
+            .await
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let create = database
+            .claim_next_conversation_outbox(now, 30)
+            .await
+            .unwrap()
+            .unwrap();
+        let task_id = Uuid::now_v7();
+        database
+            .bind_public_task(create.operation_id, task_id, now)
+            .await
+            .unwrap();
+        database
+            .reschedule_outbox(create.operation_id, now)
+            .await
+            .unwrap();
+        let create = database
+            .claim_next_conversation_outbox(now, 30)
+            .await
+            .unwrap()
+            .unwrap();
+        let agent_session_id = Uuid::now_v7();
+        let thread_id = Uuid::now_v7();
+        database
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                task_id,
+                agent_session_id,
+                thread_id,
+            )
+            .await
+            .unwrap();
+        let turn = database
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .await
+            .unwrap()
+            .unwrap();
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let active = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let old_cursor = StoredEventCursor {
+            stream_id: Uuid::now_v7(),
+            sequence: 9,
+            event_id: Uuid::now_v7(),
+        };
+        database
+            .persist_turn_progress(TurnProgress {
+                local_turn_id: active.turn_id,
+                assistant_text: "synthetic partial".to_owned(),
+                cursor: old_cursor.clone(),
+            })
+            .await
+            .unwrap();
+
+        let new_stream_id = Uuid::now_v7();
+        let identity = EventIdentity {
+            stream_id: new_stream_id,
+            task_id,
+            agent_session_id,
+            thread_id,
+            turn_id: runtime_turn_id,
+        };
+        let sse_body = sse_event(
+            new_stream_id,
+            1,
+            &identity,
+            None,
+            "turn.completed",
+            true,
+            serde_json::json!({"status": "failed"}),
+        );
+        let stream_id_header = new_stream_id.to_string();
+        let stream_response = http_response(
+            "200 OK",
+            &[
+                ("Content-Type", "text/event-stream"),
+                ("Cache-Control", "no-store"),
+                ("X-Accel-Buffering", "no"),
+                ("X-Yijie-Event-Schema-Version", "2"),
+                ("X-Yijie-Event-Stream-ID", &stream_id_header),
+            ],
+            &sse_body,
+        );
+        let changed_response = json_response(
+            "409 Conflict",
+            r#"{"error":{"code":"event_stream_changed","message":"event stream changed after Host restart"}}"#,
+        );
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            changed_response,
+            ready_response(NONCE),
+            stream_response,
+        ])
+        .await;
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        application
+            .stream_active_turn(pending.session_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            database.outbox_state(turn.operation_id).await.unwrap(),
+            super::super::database::OutboxState::Done
+        );
+        assert_eq!(
+            database.active_turn_context(pending.session_id).await,
+            Err(ChatError::NotFound)
+        );
+        let history = application
+            .load_history(pending.session_id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].messages[1].content, "synthetic partial");
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        let stale_request = requests[1].to_ascii_lowercase();
+        let fresh_request = requests[3].to_ascii_lowercase();
+        assert!(stale_request.contains(&format!(
+            "last-event-id: {}:{}",
+            old_cursor.stream_id, old_cursor.sequence
+        )));
+        assert!(!fresh_request.contains("last-event-id:"));
+        assert!(
+            requests[1].starts_with(&format!("GET /v2/agent-sessions/{agent_session_id}/events"))
+        );
+        assert!(
+            requests[3].starts_with(&format!("GET /v2/agent-sessions/{agent_session_id}/events"))
+        );
 
         drop(application);
         drop(database);

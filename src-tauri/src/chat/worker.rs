@@ -313,6 +313,17 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn clear_event_cursor_after_stream_change(
+        &self,
+        session_id: uuid::Uuid,
+        expected: super::database::StoredEventCursor,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.clear_event_cursor_after_stream_change(session_id, &expected)
+        })
+        .await
+    }
+
     pub async fn persist_turn_progress(&self, progress: TurnProgress) -> Result<(), ChatError> {
         self.call(move |repository| repository.persist_turn_progress(&progress))
             .await

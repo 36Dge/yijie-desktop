@@ -2533,6 +2533,39 @@ impl ChatRepository {
         })
     }
 
+    pub fn clear_event_cursor_after_stream_change(
+        &mut self,
+        session_id: Uuid,
+        expected: &StoredEventCursor,
+    ) -> Result<(), ChatError> {
+        validate_non_nil(session_id)?;
+        validate_cursor(expected)?;
+        let changed = self
+            .connection
+            .execute(
+                "DELETE FROM chat_event_cursors
+                 WHERE session_id=?1 AND stream_id=?2 AND sequence=?3 AND event_id=?4
+                   AND EXISTS (
+                     SELECT 1 FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
+                     WHERE s.id=?1 AND s.owner_user_id=?5 AND s.tenant_id=?6
+                       AND t.status IN ('streaming', 'stopping')
+                   )",
+                params![
+                    session_id.to_string(),
+                    expected.stream_id.to_string(),
+                    i64::try_from(expected.sequence).map_err(|_| ChatError::InvalidInput)?,
+                    expected.event_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        Ok(())
+    }
+
     pub fn persist_turn_progress(&mut self, progress: &TurnProgress) -> Result<(), ChatError> {
         validate_non_nil(progress.local_turn_id)?;
         validate_message_output(&progress.assistant_text)?;
