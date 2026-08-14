@@ -130,7 +130,7 @@ describe("FEAT-126 S10BO2 driver", () => {
       .rejects.toThrow("driver_command_forbidden");
   });
 
-  it("executes the frozen R8 cases in two exact phases with terminal assertions", async () => {
+  it("executes the frozen R8 cases and accepts a natural terminal that wins the interrupt race", async () => {
     type MutableR8Store = S10BPiniaDriverStore & {
       selectedSessionId: string | null;
       sessions: ChatSession[];
@@ -163,8 +163,9 @@ describe("FEAT-126 S10BO2 driver", () => {
       messages: Object.freeze([]),
       reasoning: Object.freeze([]),
     });
-    const makeStore = (restored = false): MutableR8Store => {
+    const makeStore = (restored = false, naturalTerminalWinsInterrupt = false): MutableR8Store => {
       const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
+      let incompleteInterruptPending = false;
       const initialTurns = restored
         ? [turn(1, "completed", "complete"), turn(2, "completed", "complete"), turn(3, "failed", "incomplete")]
         : [];
@@ -205,7 +206,10 @@ describe("FEAT-126 S10BO2 driver", () => {
         async submitTurn(input: string) {
           const incomplete = input.includes("004");
           const disconnected = input.includes("007");
-          const status = incomplete ? "failed" : disconnected ? "interrupted" : "completed";
+          incompleteInterruptPending = incomplete && naturalTerminalWinsInterrupt;
+          const status = incompleteInterruptPending
+            ? "in_progress"
+            : incomplete ? "failed" : disconnected ? "interrupted" : "completed";
           const reasoningStatus = status === "completed" ? "complete" : "incomplete";
           const nextTurn = turn((this.history?.turns.length ?? 0) + 1, status, reasoningStatus);
           this.history = { turns: Object.freeze([...(this.history?.turns ?? []), nextTurn]), nextCursor: null };
@@ -231,7 +235,19 @@ describe("FEAT-126 S10BO2 driver", () => {
         async resyncSelected() {}, async reloadSessions() {},
         async refreshControlPlane() { return this.controlPlane; },
         async refreshSelectedCleanup() { return { kind: "navigate" }; },
-        async interruptSelected() {},
+        async interruptSelected() {
+          if (!incompleteInterruptPending) return;
+          incompleteInterruptPending = false;
+          const turns = this.history?.turns ?? [];
+          this.history = {
+            turns: Object.freeze(turns.map((existing, index) => index === turns.length - 1
+              ? Object.freeze({ ...existing, status: "failed" })
+              : existing)),
+            nextCursor: this.history?.nextCursor ?? null,
+          };
+          this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "failed" }));
+          throw new Error("chat_conflict");
+        },
         async deleteSelected() {
           this.cleanupStatus = { operationId: crypto.randomUUID(), desktopState: "complete", hostState: "complete", runtimeState: "complete", outcomeCode: "complete", lastErrorCode: null, requestedAt: 1, completedAt: 2, expiresAt: null };
           this.selectedSessionId = null; this.sessions = []; this.history = null; this.controlPlane = null;
@@ -267,6 +283,7 @@ describe("FEAT-126 S10BO2 driver", () => {
       expect(observed).toEqual(phase === "before_restart" ? [...expected, "planned_restart"] : expected);
     };
     await executePhase("before_restart", makeStore(false));
+    await executePhase("before_restart", makeStore(false, true));
     await executePhase("after_restart", makeStore(true));
   });
 

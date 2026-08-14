@@ -423,7 +423,16 @@ export async function runFeat126S10R8(
     await waitR8Case(driverInvoke, "s10b_004");
     await r8.submitTurn("Synthetic FEAT-126 case 004 incomplete stream.");
     if (!["failed", "interrupted"].includes(latestR8Turn(r8).status)) {
-      await r8.interruptSelected();
+      try {
+        await r8.interruptSelected();
+      } catch {
+        try {
+          await r8.resyncSelected();
+        } catch {
+          throw new Error("driver_case_failed");
+        }
+        requireR8(["failed", "interrupted"].includes(latestR8Turn(r8).status));
+      }
     }
     await waitR8Terminal(r8, ["failed", "interrupted"]);
     const incompleteTurn = latestR8Turn(r8);
