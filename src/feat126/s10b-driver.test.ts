@@ -150,9 +150,10 @@ describe("FEAT-126 S10BO2 driver", () => {
       reloadSessions(): Promise<void>;
       refreshControlPlane(): Promise<ChatSessionControlPlane | null>;
       refreshSelectedCleanup(): Promise<Readonly<{ kind: string }> | null>;
-      interruptSelected(): Promise<void>;
+      interruptSelected(): Promise<boolean>;
       deleteSelected(): Promise<Readonly<{ kind: string }> | null>;
       selectSession(sessionId: string): Promise<void>;
+      interruptCallCount: number;
     };
     const turn = (ordinal: number, status: string, reasoningStatus: string) => Object.freeze({
       turnId: `019fbd88-cbc3-7bf1-934d-7b05cd693f${ordinal.toString().padStart(2, "0")}`,
@@ -167,9 +168,11 @@ describe("FEAT-126 S10BO2 driver", () => {
       restored = false,
       naturalTerminalWinsInterrupt = false,
       staleInitialSessionProjection = false,
+      delayedInterruptible = false,
     ): MutableR8Store => {
       const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
       let incompleteInterruptPending = false;
+      let queuedInterruptPending = false;
       const initialTurns = restored
         ? [turn(1, "completed", "complete"), turn(2, "completed", "complete"), turn(3, "failed", "incomplete")]
         : [];
@@ -186,6 +189,7 @@ describe("FEAT-126 S10BO2 driver", () => {
         cleanupStatus: null,
         controlPlane: restored ? { sessionId, state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const } : null,
         reasoning: new Map<string, readonly ChatReasoningItem[]>(),
+        interruptCallCount: 0,
         async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
         async createSession(projectId: string) {
           const isFault = this.sessions.length === 0 && restored;
@@ -212,9 +216,12 @@ describe("FEAT-126 S10BO2 driver", () => {
         async submitTurn(input: string) {
           const incomplete = input.includes("004");
           const disconnected = input.includes("007");
-          incompleteInterruptPending = incomplete && naturalTerminalWinsInterrupt;
-          const status = incompleteInterruptPending
-            ? "in_progress"
+          incompleteInterruptPending = incomplete && (naturalTerminalWinsInterrupt || delayedInterruptible);
+          queuedInterruptPending = incomplete && delayedInterruptible;
+          const status = queuedInterruptPending
+            ? "queued"
+            : incompleteInterruptPending
+            ? "streaming"
             : incomplete ? "failed" : disconnected ? "interrupted" : "completed";
           const reasoningStatus = status === "completed" ? "complete" : "incomplete";
           const nextTurn = turn((this.history?.turns.length ?? 0) + 1, status, reasoningStatus);
@@ -238,7 +245,18 @@ describe("FEAT-126 S10BO2 driver", () => {
         async renameSelected(title: string) { this.sessions = this.sessions.map((session) => ({ ...session, title, titleSource: "user" as const })); },
         async setSelectedPinned(pinned: boolean) { this.sessions = this.sessions.map((session) => ({ ...session, pinnedAt: pinned ? 1 : null })); },
         async setProjectPinned(projectId: string, pinned: boolean) { this.projects = this.projects.map((project) => project.projectId === projectId ? { ...project, pinnedAt: pinned ? 1 : null } : project); },
-        async resyncSelected() {},
+        async resyncSelected() {
+          if (!queuedInterruptPending) return;
+          queuedInterruptPending = false;
+          const turns = this.history?.turns ?? [];
+          this.history = {
+            turns: Object.freeze(turns.map((existing, index) => index === turns.length - 1
+              ? Object.freeze({ ...existing, status: "streaming" })
+              : existing)),
+            nextCursor: this.history?.nextCursor ?? null,
+          };
+          this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "streaming" }));
+        },
         async reloadSessions() {
           const turns = this.history?.turns ?? [];
           const latest = turns[turns.length - 1]?.status;
@@ -252,7 +270,8 @@ describe("FEAT-126 S10BO2 driver", () => {
         async refreshControlPlane() { return this.controlPlane; },
         async refreshSelectedCleanup() { return { kind: "navigate" }; },
         async interruptSelected() {
-          if (!incompleteInterruptPending) return;
+          if (!incompleteInterruptPending) return false;
+          this.interruptCallCount += 1;
           incompleteInterruptPending = false;
           const turns = this.history?.turns ?? [];
           this.history = {
@@ -262,7 +281,8 @@ describe("FEAT-126 S10BO2 driver", () => {
             nextCursor: this.history?.nextCursor ?? null,
           };
           this.sessions = this.sessions.map((session) => ({ ...session, latestTurnStatus: "failed" }));
-          throw new Error("chat_conflict");
+          if (naturalTerminalWinsInterrupt) throw new Error("chat_conflict");
+          return true;
         },
         async deleteSelected() {
           this.cleanupStatus = { operationId: crypto.randomUUID(), desktopState: "complete", hostState: "complete", runtimeState: "complete", outcomeCode: "complete", lastErrorCode: null, requestedAt: 1, completedAt: 2, expiresAt: null };
@@ -301,6 +321,9 @@ describe("FEAT-126 S10BO2 driver", () => {
     await executePhase("before_restart", makeStore(false));
     await executePhase("before_restart", makeStore(false, true));
     await executePhase("before_restart", makeStore(false, false, true));
+    const delayedInterruptible = makeStore(false, false, false, true);
+    await executePhase("before_restart", delayedInterruptible);
+    expect(delayedInterruptible.interruptCallCount).toBe(1);
     await executePhase("after_restart", makeStore(true));
   });
 

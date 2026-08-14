@@ -680,11 +680,12 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       await reloadSessions();
     }
 
-    async function interruptSelected(): Promise<void> {
+    async function interruptSelected(): Promise<boolean> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("interrupt_turn")) return;
+      if (!bound || !sessionId || !hasAction("interrupt_turn")) return false;
       await client.interruptTurn(bound.contextId, sessionId, operationId());
+      return true;
     }
 
     function cleanupIsComplete(status: ChatCleanupStatus): boolean {

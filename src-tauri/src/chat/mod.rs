@@ -84,7 +84,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_cancel_request_v1;
 }
 
-const CONTRACT_COMMIT: &str = "21ce4fd2641b34906e7a12a5de4f680bf3d3b212";
+const CONTRACT_COMMIT: &str = "50ae02dbbd74d80802a1dcb25dc41e08e55886bc";
 
 #[derive(Clone)]
 struct LocalChatConfig {

@@ -120,7 +120,7 @@ type R8Store = Readonly<{
   reloadSessions(): Promise<void>;
   refreshControlPlane(): Promise<ChatSessionControlPlane | null>;
   refreshSelectedCleanup(): Promise<Readonly<{ kind: string }> | null>;
-  interruptSelected(): Promise<void>;
+  interruptSelected(): Promise<boolean>;
   deleteSelected(): Promise<Readonly<{ kind: string }> | null>;
   selectSession(sessionId: string): Promise<void>;
   selectedSessionId: string | null;
@@ -342,6 +342,12 @@ async function pollR8(
   throw new Error("driver_case_failed");
 }
 
+async function waitR8InterruptibleOrTerminal(store: R8Store): Promise<void> {
+  await pollR8(store, () =>
+    ["streaming", "stopping", "failed", "interrupted"].includes(latestR8Turn(store).status),
+  );
+}
+
 function selectedR8Session(store: R8Store): ChatSession {
   const selected = store.sessions.find((session) => session.sessionId === store.selectedSessionId);
   requireR8(selected !== undefined);
@@ -423,9 +429,10 @@ export async function runFeat126S10R8(
     await emitR8CaseResult(driverInvoke, "s10b_003"); completed.push("s10b_003");
     await waitR8Case(driverInvoke, "s10b_004");
     await r8.submitTurn("Synthetic FEAT-126 case 004 incomplete stream.");
+    await waitR8InterruptibleOrTerminal(r8);
     if (!["failed", "interrupted"].includes(latestR8Turn(r8).status)) {
       try {
-        await r8.interruptSelected();
+        requireR8(await r8.interruptSelected());
       } catch {
         try {
           await r8.resyncSelected();

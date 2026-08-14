@@ -200,6 +200,34 @@ describe("chat view-model store", () => {
     }
   });
 
+  it("reports whether an interrupt request crossed the authority boundary", async () => {
+    const interruptTurn = vi.fn(async (_context: string, sessionId: string, operationId: string) => ({
+      sessionId,
+      turnId: TURN_A,
+      operationId,
+    }));
+    const { client } = fakeClient({ interruptTurn });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await expect(store.interruptSelected()).resolves.toBe(true);
+    expect(interruptTurn).toHaveBeenCalledOnce();
+
+    const denied = fakeClient({
+      bindContext: async () => ({
+        contextId: CONTEXT,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ["read_sessions", "read_projects"],
+      }),
+      interruptTurn,
+    });
+    const deniedStore = createStore(denied.client);
+    await deniedStore.bind(TENANT);
+    await deniedStore.selectSession(SESSION_A);
+    await expect(deniedStore.interruptSelected()).resolves.toBe(false);
+    expect(interruptTurn).toHaveBeenCalledOnce();
+  });
+
   it("drops a late A resync after selecting B", async () => {
     const delayedA = new Deferred<ChatResyncProjection>();
     const { client } = fakeClient({

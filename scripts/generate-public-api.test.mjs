@@ -5,7 +5,7 @@ const validLock = {
   schema_version: 1,
   contract_version: "0.3.0-candidate",
   repository: "https://github.com/36Dge/yijie-contracts.git",
-  full_commit: "21ce4fd2641b34906e7a12a5de4f680bf3d3b212",
+  full_commit: "50ae02dbbd74d80802a1dcb25dc41e08e55886bc",
   source_path: "openapi/public/public.yaml",
   source_sha256: "b".repeat(64),
   generator: {
