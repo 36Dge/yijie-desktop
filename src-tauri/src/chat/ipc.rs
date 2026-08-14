@@ -24,8 +24,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub const CHAT_IPC_SCHEMA_VERSION: u8 = 1;
-pub const CHAT_EVENT_CHANNEL: &str = "yijie.chat.event.v1";
-pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie.chat.control-plane.event.v1";
+pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
+pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TITLE_BYTES: usize = 1024;
@@ -1611,6 +1611,14 @@ mod tests {
             schema["x-yijie-control-plane-event-channel"],
             CHAT_CONTROL_PLANE_EVENT_CHANNEL
         );
+        for channel in [CHAT_EVENT_CHANNEL, CHAT_CONTROL_PLANE_EVENT_CHANNEL] {
+            assert!(
+                channel
+                    .chars()
+                    .all(|value| value.is_ascii_alphanumeric() || "-/:_".contains(value)),
+                "Tauri event channel must use its closed EventName character set"
+            );
+        }
         assert_eq!(
             schema["x-yijie-command-names"],
             serde_json::to_value(COMMAND_NAMES).unwrap()

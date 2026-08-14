@@ -4,8 +4,8 @@
   "title": "Yijie Desktop Private Chat IPC v1",
   "description": "Desktop-owned private IPC. This schema is not a public API contract.",
   "x-yijie-schema-version": 1,
-  "x-yijie-event-channel": "yijie.chat.event.v1",
-  "x-yijie-control-plane-event-channel": "yijie.chat.control-plane.event.v1",
+  "x-yijie-event-channel": "yijie:chat:event:v1",
+  "x-yijie-control-plane-event-channel": "yijie:chat:control-plane:event:v1",
   "x-yijie-command-names": [
     "chat_bind_context_v1",
     "chat_list_projects_v1",

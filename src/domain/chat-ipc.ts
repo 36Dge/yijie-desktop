@@ -1,6 +1,6 @@
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
-export const CHAT_EVENT_CHANNEL = "yijie.chat.event.v1" as const;
-export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie.chat.control-plane.event.v1" as const;
+export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
+export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;

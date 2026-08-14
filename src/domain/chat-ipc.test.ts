@@ -41,6 +41,8 @@ describe("private chat IPC v1 contract", () => {
     expect(schema["x-yijie-schema-version"]).toBe(1);
     expect(schema["x-yijie-event-channel"]).toBe(CHAT_EVENT_CHANNEL);
     expect(schema["x-yijie-control-plane-event-channel"]).toBe(CHAT_CONTROL_PLANE_EVENT_CHANNEL);
+    expect(CHAT_EVENT_CHANNEL).toMatch(/^[A-Za-z0-9/:_-]+$/);
+    expect(CHAT_CONTROL_PLANE_EVENT_CHANNEL).toMatch(/^[A-Za-z0-9/:_-]+$/);
     expect(schema["x-yijie-command-names"]).toEqual(CHAT_COMMAND_NAMES);
     expect(schema["x-yijie-error-codes"]).toEqual(CHAT_ERROR_CODES);
     const contracts = schema["x-yijie-command-contracts"] as Record<string, Record<string, string>>;
