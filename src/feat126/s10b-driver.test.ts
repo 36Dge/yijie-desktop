@@ -494,6 +494,13 @@ describe("FEAT-126 S10BO2 driver", () => {
       .toBe("driver_readiness_failed");
     expect(classifyFeat126DriverFailure("driver_case_failed"))
       .toBe("driver_case_failed");
+    for (const failureClass of [
+      "driver_case_session_rename_failed",
+      "driver_case_session_pin_failed",
+      "driver_case_project_pin_failed",
+    ] as const) {
+      expect(classifyFeat126DriverFailure(new Error(failureClass))).toBe(failureClass);
+    }
     expect(classifyFeat126DriverFailure(new Error("token=must-not-cross-the-boundary")))
       .toBe("driver_frontend_startup_invalid");
     expect(classifyFeat126DriverFailure("token=must-not-cross-the-boundary"))

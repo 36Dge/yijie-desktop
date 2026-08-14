@@ -58,6 +58,9 @@ const DRIVER_FAILURE_CLASSES = Object.freeze([
   "driver_case_failed",
   "driver_case_result_failed",
   "driver_case_create_failed",
+  "driver_case_session_rename_failed",
+  "driver_case_session_pin_failed",
+  "driver_case_project_pin_failed",
 ] as const);
 
 export type DriverFailureClass = (typeof DRIVER_FAILURE_CLASSES)[number];
@@ -547,7 +550,15 @@ export async function runFeat126S10R8(
   });
   await emitR8CaseResult(driverInvoke, "s10b_005_planned_restart"); completed.push("s10b_005_planned_restart");
   await waitR8Case(driverInvoke, "s10b_006");
-  await r8.renameSelected("Synthetic FEAT-126 case"); await r8.setSelectedPinned(true); await r8.setProjectPinned(projectId, true);
+  await driverStage("driver_case_session_rename_failed", async () =>
+    await r8.renameSelected("Synthetic FEAT-126 case"),
+  );
+  await driverStage("driver_case_session_pin_failed", async () =>
+    await r8.setSelectedPinned(true),
+  );
+  await driverStage("driver_case_project_pin_failed", async () =>
+    await r8.setProjectPinned(projectId, true),
+  );
   const renamed = selectedR8Session(r8);
   requireR8(renamed.titleSource === "user" && renamed.pinnedAt !== null);
   requireR8(r8.projects.find((project) => project.projectId === projectId)?.pinnedAt !== null);

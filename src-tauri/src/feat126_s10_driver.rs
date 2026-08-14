@@ -107,7 +107,10 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
 const POST_READY_FAILURE_CLASSES: &[&str] = &[
     "driver_case_create_failed",
     "driver_case_failed",
+    "driver_case_project_pin_failed",
     "driver_case_result_failed",
+    "driver_case_session_pin_failed",
+    "driver_case_session_rename_failed",
     "driver_control_projection_invalid",
     "driver_frontend_startup_invalid",
 ];
@@ -2203,6 +2206,13 @@ mod tests {
     #[test]
     fn post_ready_failure_frame_is_content_free_and_closes_fd4() {
         let (runtime, output) = runtime_with_r8_output("after_restart", 3);
+        for failure_class in [
+            "driver_case_session_rename_failed",
+            "driver_case_session_pin_failed",
+            "driver_case_project_pin_failed",
+        ] {
+            assert!(encode_post_ready_failure_frame(RUN_ID, NONCE, 2, failure_class).is_ok());
+        }
         let encoded =
             encode_post_ready_failure_frame(RUN_ID, NONCE, 2, "driver_case_failed").unwrap();
         let value: Value = serde_json::from_slice(&encoded).unwrap();
