@@ -824,7 +824,7 @@ impl ChatIpcError {
         }
     }
 
-    fn request_invalid(request_id: Option<Uuid>) -> Self {
+    pub(crate) fn request_invalid(request_id: Option<Uuid>) -> Self {
         Self::new(request_id, "chat_request_invalid", false, "fix_request")
     }
 

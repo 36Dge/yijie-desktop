@@ -35,6 +35,13 @@ export type ChatViewPhase =
   | "signed-out"
   | "unavailable";
 
+export type ChatBindFailureStage =
+  | "event_listener"
+  | "context"
+  | "projects"
+  | "sessions"
+  | "readiness";
+
 export interface LiveReasoningPart {
   readonly itemOrdinal: number;
   readonly contentIndex: number;
@@ -88,6 +95,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
     const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
+    const lastBindFailureStage = ref<ChatBindFailureStage | null>(null);
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
     const canSend = computed(() =>
       isReady.value &&
@@ -399,18 +407,30 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       clearAuthority("binding");
       const bindEpoch = authorityEpoch;
       lastErrorCode.value = null;
+      lastBindFailureStage.value = null;
+      const atBindStage = async <T>(stage: ChatBindFailureStage, operation: Promise<T>): Promise<T> => {
+        try {
+          return await operation;
+        } catch (error) {
+          if (lastBindFailureStage.value === null) lastBindFailureStage.value = stage;
+          throw error;
+        }
+      };
       try {
-        await Promise.all([ensureEventListener(), ensureControlPlaneListener()]);
+        await Promise.all([
+          atBindStage("event_listener", ensureEventListener()),
+          atBindStage("event_listener", ensureControlPlaneListener()),
+        ]);
         if (bindEpoch !== authorityEpoch) return;
-        const bound = await client.bindContext(tenantSelector);
+        const bound = await atBindStage("context", client.bindContext(tenantSelector));
         if (bindEpoch !== authorityEpoch) return;
         context.value = bound;
         scheduleContextExpiry(bound);
         phase.value = "loading";
         const [nextProjects, nextSessions, nextReadiness] = await Promise.all([
-          client.listProjects(bound.contextId),
-          client.listSessions(bound.contextId),
-          client.getLocalReadiness(bound.contextId),
+          atBindStage("projects", client.listProjects(bound.contextId)),
+          atBindStage("sessions", client.listSessions(bound.contextId)),
+          atBindStage("readiness", client.getLocalReadiness(bound.contextId)),
         ]);
         if (bindEpoch !== authorityEpoch || context.value?.contextId !== bound.contextId) return;
         projects.value = nextProjects;
@@ -815,6 +835,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       localReadiness,
       deleteDisposition,
       lastErrorCode,
+      lastBindFailureStage,
       isReady,
       canSend,
       hasAction,

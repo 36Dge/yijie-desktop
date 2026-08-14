@@ -435,6 +435,38 @@ describe("FEAT-126 S10BO2 driver", () => {
     expect(calls).not.toContain("feat126_s10_driver_component_ready");
   });
 
+  it.each([
+    ["event_listener", null, "driver_bind_event_failed"],
+    ["context", "chat_unauthenticated", "driver_bind_context_unauthenticated"],
+    ["context", "chat_capability_denied", "driver_bind_context_denied"],
+    ["context", "chat_temporarily_unavailable", "driver_bind_context_unavailable"],
+    ["context", "chat_request_invalid", "driver_bind_context_invalid"],
+    ["projects", null, "driver_bind_project_snapshot_failed"],
+    ["sessions", null, "driver_bind_session_snapshot_failed"],
+    ["readiness", null, "driver_bind_readiness_snapshot_failed"],
+  ] as const)("projects the closed %s bind leaf", async (stage, errorCode, failureClass) => {
+    const store: S10BPiniaDriverStore = {
+      phase: "unavailable",
+      context: null,
+      lastBindFailureStage: stage,
+      lastErrorCode: errorCode,
+      async bind() {},
+      async revalidateProject() { return null; },
+      async requestLocalRecovery() { return null; },
+      async dispose() {},
+    };
+    await expect(runFeat126S10Driver(store, async (command) => {
+      if (command === "feat126_s10_driver_startup_stage") return undefined;
+      if (command === "feat126_s10_driver_login") {
+        return { schemaVersion: 1, status: "signed_in", flow: "authorization_code", pkceMethod: "S256" };
+      }
+      if (command === "feat126_s10_driver_register_project") {
+        return { schemaVersion: 1, projectId: PROJECT_ID, capability: "local_only" };
+      }
+      return undefined;
+    })).rejects.toThrow(failureClass);
+  });
+
   it("projects only closed startup leaves and never forwards an unknown error", () => {
     expect(classifyFeat126DriverFailure(new Error("driver_readiness_failed")))
       .toBe("driver_readiness_failed");

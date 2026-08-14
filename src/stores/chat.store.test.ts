@@ -7,6 +7,7 @@ import type {
   ChatResyncProjection,
   ChatSession,
 } from "../domain/chat-ipc";
+import { ChatClientError } from "../domain/chat-ipc";
 import { createChatStoreDefinition } from "./chat.store";
 
 const NOW = Date.parse("2026-08-03T12:00:00Z");
@@ -197,6 +198,30 @@ describe("chat view-model store", () => {
     const serialized = JSON.stringify(store.$state).toLowerCase();
     for (const forbidden of ["owneruserid", "bearer", "sqlcipher", "/private/", "runtimeid", "hostid"]) {
       expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it("retains only the closed bind failure stage and error code", async () => {
+    const unavailable = () => new ChatClientError({
+      schemaVersion: 1,
+      code: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+      retryAfterMs: 1000,
+    });
+    const cases: ReadonlyArray<readonly [string, Partial<ChatClient>]> = [
+      ["event_listener", { onEvent: async () => { throw unavailable(); } }],
+      ["context", { bindContext: async () => { throw unavailable(); } }],
+      ["projects", { listProjects: async () => { throw unavailable(); } }],
+      ["sessions", { listSessions: async () => { throw unavailable(); } }],
+      ["readiness", { getLocalReadiness: async () => { throw unavailable(); } }],
+    ];
+    for (const [stage, overrides] of cases) {
+      const store = createStore(fakeClient(overrides).client);
+      await store.bind(TENANT);
+      expect(store.lastBindFailureStage).toBe(stage);
+      expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+      await store.dispose();
     }
   });
 

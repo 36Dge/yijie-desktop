@@ -60,6 +60,14 @@ const STARTUP_FAILURE_CLASSES: &[&str] = &[
     "driver_app_data_invalid",
     "driver_authority_invalid",
     "driver_bind_failed",
+    "driver_bind_context_denied",
+    "driver_bind_context_invalid",
+    "driver_bind_context_unauthenticated",
+    "driver_bind_context_unavailable",
+    "driver_bind_event_failed",
+    "driver_bind_project_snapshot_failed",
+    "driver_bind_readiness_snapshot_failed",
+    "driver_bind_session_snapshot_failed",
     "driver_control_channel_invalid",
     "driver_control_monitor_invalid",
     "driver_control_projection_invalid",
@@ -1254,25 +1262,24 @@ pub(crate) async fn feat126_s10_driver_bind(
     auth: State<'_, NativeAuthRuntime>,
     chat: State<'_, ChatRuntime>,
     ipc: State<'_, ChatIpcRuntime>,
-) -> Result<Value, String> {
+) -> Result<Value, crate::chat::ipc::ChatIpcError> {
+    let request_id = Uuid::now_v7();
     driver
         .require_phase(DriverPhase::ProjectRegistered)
         .await
-        .map_err(str::to_owned)?;
-    let request_id = Uuid::now_v7();
+        .map_err(|_| crate::chat::ipc::ChatIpcError::request_invalid(Some(request_id)))?;
     let request = json!({
         "schemaVersion": 1,
         "requestId": request_id,
         "payload": { "tenantSelector": FIXED_TENANT },
     });
-    let response = crate::chat::ipc::chat_bind_context_v1(request, app, auth, chat, ipc)
-        .await
-        .map_err(|_| "driver_bind_failed".to_owned())?;
-    let response = serde_json::to_value(response).map_err(|_| "driver_bind_failed".to_owned())?;
+    let response = crate::chat::ipc::chat_bind_context_v1(request, app, auth, chat, ipc).await?;
+    let response = serde_json::to_value(response)
+        .map_err(|_| crate::chat::ipc::ChatIpcError::request_invalid(Some(request_id)))?;
     driver
         .bind_context(&response)
         .await
-        .map_err(str::to_owned)?;
+        .map_err(|_| crate::chat::ipc::ChatIpcError::request_invalid(Some(request_id)))?;
     Ok(response)
 }
 
@@ -2178,6 +2185,18 @@ mod tests {
         assert_eq!(value.as_object().unwrap().len(), 6);
         assert!(encoded.len() <= MAX_FRAME_BYTES);
         assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_bind_failed").is_ok());
+        for failure_class in [
+            "driver_bind_context_denied",
+            "driver_bind_context_invalid",
+            "driver_bind_context_unauthenticated",
+            "driver_bind_context_unavailable",
+            "driver_bind_event_failed",
+            "driver_bind_project_snapshot_failed",
+            "driver_bind_readiness_snapshot_failed",
+            "driver_bind_session_snapshot_failed",
+        ] {
+            assert!(encode_startup_failure_frame(RUN_ID, NONCE, failure_class).is_ok());
+        }
         assert!(encode_startup_failure_frame(RUN_ID, NONCE, "driver_control_eof").is_err());
     }
 

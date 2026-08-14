@@ -13,7 +13,10 @@ import {
   type ChatSession,
   type ChatSessionControlPlane,
 } from "../domain/chat-ipc";
-import { createChatStoreDefinition } from "../stores/chat.store";
+import {
+  createChatStoreDefinition,
+  type ChatBindFailureStage,
+} from "../stores/chat.store";
 
 const TRUSTED_BIND_MARKER = "feat126-driver-owned-authority";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -35,6 +38,14 @@ const DRIVER_LOGIN_FAILURE_CLASSES = Object.freeze([
 ] as const);
 const DRIVER_FAILURE_CLASSES = Object.freeze([
   "driver_bind_failed",
+  "driver_bind_context_denied",
+  "driver_bind_context_invalid",
+  "driver_bind_context_unauthenticated",
+  "driver_bind_context_unavailable",
+  "driver_bind_event_failed",
+  "driver_bind_project_snapshot_failed",
+  "driver_bind_readiness_snapshot_failed",
+  "driver_bind_session_snapshot_failed",
   "driver_control_projection_invalid",
   "driver_frontend_startup_invalid",
   ...DRIVER_LOGIN_FAILURE_CLASSES,
@@ -69,6 +80,8 @@ type DriverControlProjection = Readonly<{ kind: "abort" }>;
 export type S10BPiniaDriverStore = Readonly<{
   readonly phase: string;
   readonly context: Readonly<{ allowedActions: readonly string[] }> | null;
+  readonly lastBindFailureStage?: ChatBindFailureStage | null;
+  readonly lastErrorCode?: string | null;
   bind(tenantSelector: string): Promise<void>;
   revalidateProject(projectId: string): Promise<Readonly<{ projectId: string; available: boolean }> | null>;
   requestLocalRecovery(): Promise<Readonly<{
@@ -199,6 +212,33 @@ async function driverLoginStage(operation: () => Promise<unknown>): Promise<unkn
     const failureClass = DRIVER_LOGIN_FAILURE_CLASSES.find((candidate) => candidate === detail) ??
       "driver_login_failed";
     throw Object.assign(new Error(failureClass), { cause: error });
+  }
+}
+
+function bindFailureClass(store: S10BPiniaDriverStore): DriverFailureClass {
+  switch (store.lastBindFailureStage) {
+    case "event_listener":
+      return "driver_bind_event_failed";
+    case "projects":
+      return "driver_bind_project_snapshot_failed";
+    case "sessions":
+      return "driver_bind_session_snapshot_failed";
+    case "readiness":
+      return "driver_bind_readiness_snapshot_failed";
+    case "context":
+      switch (store.lastErrorCode) {
+        case "chat_unauthenticated": return "driver_bind_context_unauthenticated";
+        case "chat_capability_denied": return "driver_bind_context_denied";
+        case "chat_temporarily_unavailable": return "driver_bind_context_unavailable";
+        case "chat_request_invalid":
+        case "chat_context_invalid":
+        case "chat_protocol_error":
+          return "driver_bind_context_invalid";
+        default:
+          return "driver_bind_failed";
+      }
+    default:
+      return "driver_bind_failed";
   }
 }
 
@@ -588,7 +628,7 @@ export async function runFeat126S10Driver(
   await driverStage("driver_bind_failed", async () => await store.bind(TRUSTED_BIND_MARKER));
   if (store.context === null || store.phase !== "ready" ||
     !store.context.allowedActions.includes("use_project")) {
-    throw new Error("driver_bind_failed");
+    throw new Error(bindFailureClass(store));
   }
   const revalidated = await driverStage("driver_project_revalidation_failed", async () =>
     await store.revalidateProject(project.projectId),
