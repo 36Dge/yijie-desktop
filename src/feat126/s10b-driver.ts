@@ -523,13 +523,13 @@ export async function runFeat126S10R8(
     await driverInvoke("feat126_s10_driver_planned_restart");
     return Object.freeze(completed);
   }
+  await waitR8Case(driverInvoke, "s10b_005_planned_restart");
   await r8.reloadSessions();
   const existingSession = r8.sessions[0]?.sessionId;
   if (!existingSession) throw new Error("driver_case_create_failed");
   await r8.selectSession(existingSession);
   requireR8(r8.selectedSessionId === existingSession);
   requireR8((r8.history?.turns.length ?? 0) === 3);
-  await waitR8Case(driverInvoke, "s10b_005_planned_restart");
   await r8.loadOlderHistory(); await r8.resyncSelected();
   requireR8(r8.selectedSessionId === existingSession);
   requireR8((r8.history?.turns.length ?? 0) === 3);

@@ -324,8 +324,13 @@ describe("FEAT-126 S10BO2 driver", () => {
       const expected = phase === "before_restart" ? FEAT126_R8_CASES.slice(0, 3) : FEAT126_R8_CASES.slice(3);
       const pending = [...expected];
       const observed: string[] = [];
+      let afterRestartCaseAuthorized = false;
       const invoke: DriverInvoke = async (command, arguments_) => {
-        if (command === "feat126_s10_driver_wait_case") return { kind: "mode_transition", caseId: pending.shift() };
+        if (command === "feat126_s10_driver_wait_case") {
+          const caseId = pending.shift();
+          if (caseId === "s10b_005_planned_restart") afterRestartCaseAuthorized = true;
+          return { kind: "mode_transition", caseId };
+        }
         if (command === "feat126_s10_driver_r8_observation") {
           const caseId = String(arguments_?.caseId);
           const observations = arguments_?.observations as Record<string, boolean>;
@@ -335,7 +340,18 @@ describe("FEAT-126 S10BO2 driver", () => {
         if (command === "feat126_s10_driver_planned_restart") { observed.push("planned_restart"); return undefined; }
         throw new Error("unexpected_command");
       };
-      await expect(runFeat126S10R8(store, PROJECT_ID, invoke, phase)).resolves.toEqual(expected);
+      const phaseStore = phase === "after_restart" ? new Proxy(store, {
+        get(target, property, receiver) {
+          if (property === "reloadSessions") {
+            return async () => {
+              expect(afterRestartCaseAuthorized).toBe(true);
+              return await target.reloadSessions();
+            };
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      }) : store;
+      await expect(runFeat126S10R8(phaseStore, PROJECT_ID, invoke, phase)).resolves.toEqual(expected);
       expect(observed).toEqual(phase === "before_restart" ? [...expected, "planned_restart"] : expected);
     };
     await executePhase("before_restart", makeStore(false));
@@ -351,7 +367,9 @@ describe("FEAT-126 S10BO2 driver", () => {
 
   it("fails closed when a native R8 observation is not true", async () => {
     const invoke: DriverInvoke = async (command, arguments_) => {
-      if (command === "feat126_s10_driver_wait_case") return { kind: "mode_transition", caseId: "s10b_006" };
+      if (command === "feat126_s10_driver_wait_case") {
+        return { kind: "mode_transition", caseId: "s10b_005_planned_restart" };
+      }
       if (command === "feat126_s10_driver_r8_observation") {
         return { caseId: arguments_?.caseId, observations: { ...(arguments_?.observations as Record<string, boolean>), stable_sort: false }, schemaVersion: 1, status: "passed" };
       }
@@ -361,7 +379,11 @@ describe("FEAT-126 S10BO2 driver", () => {
       phase: "ready", context: { allowedActions: ["use_project"] }, selectedSessionId: "session",
       sessions: [{ sessionId: "session", projectId: PROJECT_ID, title: "title", titleSource: "user" as const, pinnedAt: 1, lastActivityAt: 1, latestTurnStatus: "interrupted", projectAvailable: true }],
       projects: [{ projectId: PROJECT_ID, safeName: "project", pinnedAt: 1, lastUsedAt: 1, available: true }],
-      history: { turns: [{ turnId: "turn", status: "interrupted", terminalAt: 1, reasoningStatus: "incomplete", reasoningReasonCode: "stream_gap", messages: [], reasoning: [] }], nextCursor: null },
+      history: { turns: [
+        { turnId: "turn-1", status: "completed", terminalAt: 1, reasoningStatus: "complete", reasoningReasonCode: null, messages: [], reasoning: [] },
+        { turnId: "turn-2", status: "completed", terminalAt: 2, reasoningStatus: "complete", reasoningReasonCode: null, messages: [], reasoning: [] },
+        { turnId: "turn-3", status: "interrupted", terminalAt: 3, reasoningStatus: "incomplete", reasoningReasonCode: "stream_gap", messages: [], reasoning: [] },
+      ], nextCursor: null },
       cleanupStatus: null, controlPlane: { sessionId: "session", state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const },
       async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
       async loadHistoryPage() { return null; }, async createSession() { return null; }, async submitTurn() {}, async loadOlderHistory() {}, async loadReasoning() { return []; },
