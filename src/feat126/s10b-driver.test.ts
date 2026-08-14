@@ -12,6 +12,10 @@ import {
   type DriverInvoke,
   type S10BPiniaDriverStore,
 } from "./s10b-driver";
+import {
+  CHAT_CONTROL_PLANE_EVENT_CHANNEL,
+  CHAT_EVENT_CHANNEL,
+} from "../domain/chat-ipc";
 import type {
   ChatCleanupStatus,
   ChatHistoryPage,
@@ -378,11 +382,29 @@ describe("FEAT-126 S10BO2 driver", () => {
     ]]);
   });
 
-  it("does not subscribe the feature WebView to arbitrary application events", async () => {
-    const transport = createFeat126DriverTransport();
+  it("subscribes only to approved chat channels and forwards payloads with unlisten", async () => {
+    const subscriptions: Array<readonly [string, (payload: unknown) => void]> = [];
+    const unlisten = vi.fn();
+    const transport = createFeat126DriverTransport(undefined, async (channel, handler) => {
+      subscriptions.push([channel, handler]);
+      return unlisten;
+    });
     await expect(transport.listen("unreviewed.event", () => undefined))
       .rejects.toThrow("driver_event_channel_forbidden");
-    await expect(transport.listen("yijie.chat.event.v1", () => undefined)).resolves.toEqual(expect.any(Function));
+    expect(subscriptions).toHaveLength(0);
+    const received: unknown[] = [];
+    const stopEvents = await transport.listen(CHAT_EVENT_CHANNEL, (payload) => received.push(payload));
+    const stopControlPlane = await transport.listen(CHAT_CONTROL_PLANE_EVENT_CHANNEL, (payload) => received.push(payload));
+    expect(subscriptions.map(([channel]) => channel)).toEqual([
+      CHAT_EVENT_CHANNEL,
+      CHAT_CONTROL_PLANE_EVENT_CHANNEL,
+    ]);
+    subscriptions[0]![1]({ kind: "reasoning_append" });
+    subscriptions[1]![1]({ state: "bound" });
+    expect(received).toEqual([{ kind: "reasoning_append" }, { state: "bound" }]);
+    stopEvents();
+    stopControlPlane();
+    expect(unlisten).toHaveBeenCalledTimes(2);
   });
 
   it("fails before ready emission when project or readiness evidence is not exact", async () => {

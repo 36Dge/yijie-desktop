@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createPinia } from "pinia";
 import { createApp, defineComponent, h } from "vue";
 import { createChatClient, type ChatClientTransport } from "../api/chat-client";
@@ -235,7 +236,13 @@ function trustedBindRequest(arguments_: Record<string, unknown> | undefined): bo
     exactObject(payload, ["tenantSelector"]) && payload.tenantSelector === TRUSTED_BIND_MARKER;
 }
 
-export function createFeat126DriverTransport(driverInvoke: DriverInvoke = invoke): ChatClientTransport {
+const driverListen: ChatClientTransport["listen"] = (channel, handler) =>
+  listen<unknown>(channel, (event) => handler(event.payload));
+
+export function createFeat126DriverTransport(
+  driverInvoke: DriverInvoke = invoke,
+  eventListen: ChatClientTransport["listen"] = driverListen,
+): ChatClientTransport {
   const transport: ChatClientTransport = {
     invoke(command: string, arguments_?: Record<string, unknown>) {
       if (command === "chat_bind_context_v1") {
@@ -252,11 +259,11 @@ export function createFeat126DriverTransport(driverInvoke: DriverInvoke = invoke
       }
       return driverInvoke(driverCommand, arguments_);
     },
-    async listen(channel: string) {
+    listen(channel: string, handler: (payload: unknown) => void) {
       if (channel !== CHAT_EVENT_CHANNEL && channel !== CHAT_CONTROL_PLANE_EVENT_CHANNEL) {
-        throw new Error("driver_event_channel_forbidden");
+        return Promise.reject(new Error("driver_event_channel_forbidden"));
       }
-      return () => undefined;
+      return eventListen(channel, handler);
     },
   };
   return Object.freeze(transport);
