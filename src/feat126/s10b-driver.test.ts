@@ -163,7 +163,11 @@ describe("FEAT-126 S10BO2 driver", () => {
       messages: Object.freeze([]),
       reasoning: Object.freeze([]),
     });
-    const makeStore = (restored = false, naturalTerminalWinsInterrupt = false): MutableR8Store => {
+    const makeStore = (
+      restored = false,
+      naturalTerminalWinsInterrupt = false,
+      staleInitialSessionProjection = false,
+    ): MutableR8Store => {
       const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
       let incompleteInterruptPending = false;
       const initialTurns = restored
@@ -191,7 +195,9 @@ describe("FEAT-126 S10BO2 driver", () => {
           this.selectedSessionId = nextId;
           this.sessions = [{
             sessionId: nextId, projectId, title: "fallback", titleSource: "fallback",
-            pinnedAt: null, lastActivityAt: 1, latestTurnStatus: status, projectAvailable: true,
+            pinnedAt: null, lastActivityAt: 1,
+            latestTurnStatus: staleInitialSessionProjection && !isFault ? "queued" : status,
+            projectAvailable: true,
           }];
           const nextTurn = turn(isFault ? 5 : 1, status, reasoningStatus);
           this.history = { turns: Object.freeze([nextTurn]), nextCursor: null };
@@ -232,7 +238,17 @@ describe("FEAT-126 S10BO2 driver", () => {
         async renameSelected(title: string) { this.sessions = this.sessions.map((session) => ({ ...session, title, titleSource: "user" as const })); },
         async setSelectedPinned(pinned: boolean) { this.sessions = this.sessions.map((session) => ({ ...session, pinnedAt: pinned ? 1 : null })); },
         async setProjectPinned(projectId: string, pinned: boolean) { this.projects = this.projects.map((project) => project.projectId === projectId ? { ...project, pinnedAt: pinned ? 1 : null } : project); },
-        async resyncSelected() {}, async reloadSessions() {},
+        async resyncSelected() {},
+        async reloadSessions() {
+          const turns = this.history?.turns ?? [];
+          const latest = turns[turns.length - 1]?.status;
+          if (latest !== undefined) {
+            this.sessions = this.sessions.map((session) => ({
+              ...session,
+              latestTurnStatus: latest,
+            }));
+          }
+        },
         async refreshControlPlane() { return this.controlPlane; },
         async refreshSelectedCleanup() { return { kind: "navigate" }; },
         async interruptSelected() {
@@ -284,6 +300,7 @@ describe("FEAT-126 S10BO2 driver", () => {
     };
     await executePhase("before_restart", makeStore(false));
     await executePhase("before_restart", makeStore(false, true));
+    await executePhase("before_restart", makeStore(false, false, true));
     await executePhase("after_restart", makeStore(true));
   });
 

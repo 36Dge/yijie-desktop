@@ -409,6 +409,7 @@ export async function runFeat126S10R8(
     const sessionId = await r8.createSession(projectId, "请为合成任务000整理订单风险并给出只读检查清单。");
     if (!sessionId) throw new Error("driver_case_create_failed");
     await waitR8Terminal(r8, ["completed"]);
+    await r8.reloadSessions();
     requireR8(r8.selectedSessionId === sessionId);
     requireR8(selectedR8Session(r8).latestTurnStatus === "completed");
     requireR8(latestR8Turn(r8).status === "completed");

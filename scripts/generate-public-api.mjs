@@ -12,7 +12,7 @@ const lockPath = path.join(repositoryRoot, "contracts/public-api.lock.json");
 const generatorRoot = path.join(repositoryRoot, "tools/public-api-generator");
 const checkOnly = process.argv.includes("--check");
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const PINNED_COMMIT = "29317b6426578749dc698fc2ad32b986ee5c8e9f";
+const PINNED_COMMIT = "21ce4fd2641b34906e7a12a5de4f680bf3d3b212";
 const PINNED_GENERATOR_COMMAND =
   "pnpm --dir tools/public-api-generator exec openapi-typescript openapi/public/public.yaml";
 const PINNED_FIXTURE_PATHS = new Set([
