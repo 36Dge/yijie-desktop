@@ -256,6 +256,14 @@ pub struct RecoverySnapshot {
     pub deletions: Vec<DeletionStatus>,
 }
 
+#[cfg(feature = "feat126-s10-driver")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Feat126ResumeCandidate {
+    pub task_id: Uuid,
+    pub agent_session_id: Uuid,
+    pub codex_thread_id: Uuid,
+}
+
 impl std::fmt::Debug for StartTurnDispatch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -3922,6 +3930,46 @@ impl ChatRepository {
         })
     }
 
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) fn feat126_resume_candidates(
+        &self,
+    ) -> Result<Vec<Feat126ResumeCandidate>, ChatError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT b.public_task_id, s.agent_session_id, s.runtime_thread_id
+                 FROM chat_sessions s
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
+                 WHERE s.owner_user_id=?1 AND s.tenant_id=?2
+                   AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL
+                 ORDER BY s.id",
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let candidates = statement
+            .query_map(
+                params![self.scope.owner_user_id, self.scope.tenant_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .map(|row| {
+                let (task_id, agent_session_id, codex_thread_id) =
+                    row.map_err(|_| ChatError::DatabaseUnavailable)?;
+                Ok(Feat126ResumeCandidate {
+                    task_id: parse_uuid_value(&task_id)?,
+                    agent_session_id: parse_uuid_value(&agent_session_id)?,
+                    codex_thread_id: parse_uuid_value(&codex_thread_id)?,
+                })
+            })
+            .collect();
+        candidates
+    }
+
     pub fn purge_expired_deletion_receipts(&mut self, now: i64) -> Result<usize, ChatError> {
         if now < 0 {
             return Err(ChatError::InvalidInput);
@@ -5905,6 +5953,51 @@ mod tests {
         ] {
             assert!(!debug.contains(canary));
         }
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn r8_restart_candidates_preserve_exact_persisted_host_identity_after_terminal_turn() {
+        let root = std::env::temp_dir().join(format!("feat126-r8-resume-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 42);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let (agent_session_id, codex_thread_id) =
+            bind_and_accept_first_turn(&mut repository, &pending, now);
+        let task_id = repository
+            .active_turn_context(pending.session_id)
+            .unwrap()
+            .task_id;
+        repository
+            .commit_terminal_turn(&TerminalTurnCommit {
+                local_turn_id: pending.turn_id,
+                terminal_status: "failed".to_owned(),
+                terminal_at: now,
+                assistant_text: String::new(),
+                cursor: StoredEventCursor {
+                    stream_id: Uuid::now_v7(),
+                    sequence: 1,
+                    event_id: Uuid::now_v7(),
+                },
+                reasoning_status: ReasoningStatus::Unavailable,
+                reasoning_reason_code: Some("reasoning_not_emitted".to_owned()),
+                reasoning_items: Vec::new(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            repository.feat126_resume_candidates().unwrap(),
+            vec![Feat126ResumeCandidate {
+                task_id,
+                agent_session_id,
+                codex_thread_id,
+            }]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(feature = "feat126-s10-driver")]

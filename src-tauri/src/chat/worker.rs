@@ -1,3 +1,5 @@
+#[cfg(feature = "feat126-s10-driver")]
+use super::database::Feat126ResumeCandidate;
 use super::database::{
     ActiveTurnContext, ChatRepository, ChatScope, ClaimedDeletion, ClaimedOutbox,
     CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, HistoryPage, InterruptTurnDispatch,
@@ -483,6 +485,14 @@ impl DatabaseWorker {
 
     pub async fn recovery_snapshot(&self) -> Result<RecoverySnapshot, ChatError> {
         self.call(|repository| repository.recovery_snapshot()).await
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    pub(crate) async fn feat126_resume_candidates(
+        &self,
+    ) -> Result<Vec<Feat126ResumeCandidate>, ChatError> {
+        self.call(|repository| repository.feat126_resume_candidates())
+            .await
     }
 
     pub async fn purge_expired_deletion_receipts(&self, now: i64) -> Result<usize, ChatError> {

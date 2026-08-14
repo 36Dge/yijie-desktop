@@ -392,8 +392,28 @@ impl ChatRuntime {
         if before.storage != ChatStorageReadiness::Ready {
             return before;
         }
-        let _ = self.start_sidecar().await;
+        if self.start_sidecar().await.is_err() {
+            return self.local_readiness(false).await;
+        }
+        #[cfg(feature = "feat126-s10-driver")]
+        if self.feat126_resume_bound_sessions().await.is_err() {
+            *self.host_bridge.lock().await = None;
+        }
         self.local_readiness(false).await
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    async fn feat126_resume_bound_sessions(&self) -> Result<(), ChatError> {
+        let candidates = self.database().await?.feat126_resume_candidates().await?;
+        let host = self.local_host_bridge().await?;
+        for candidate in candidates {
+            let resumed = host
+                .resume_session(candidate.agent_session_id, &HostTrace::default())
+                .await
+                .map_err(|_| ChatError::SidecarUnavailable)?;
+            validate_feat126_resumed_session(&candidate, &resumed)?;
+        }
+        Ok(())
     }
 
     async fn pick_project(&self) -> Result<Option<database::ProjectSummary>, ChatError> {
@@ -628,6 +648,24 @@ impl ChatRuntime {
     }
 }
 
+#[cfg(feature = "feat126-s10-driver")]
+fn validate_feat126_resumed_session(
+    candidate: &database::Feat126ResumeCandidate,
+    resumed: &HostSession,
+) -> Result<(), ChatError> {
+    if resumed.task_id != candidate.task_id
+        || resumed.agent_session_id != candidate.agent_session_id
+        || resumed.codex_thread_id != Some(candidate.codex_thread_id)
+        || resumed.active_turn_id.is_some()
+        || resumed.state != HostSessionState::Idle
+        || !resumed.model_ready
+        || resumed.failure_code.is_some()
+    {
+        return Err(ChatError::SidecarUnavailable);
+    }
+    Ok(())
+}
+
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
     match error {
         ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
@@ -708,6 +746,50 @@ pub async fn chat_stop_local_host(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "feat126-s10-driver")]
+    use uuid::Uuid;
+
+    #[cfg(feature = "feat126-s10-driver")]
+    fn resumed_session(candidate: &database::Feat126ResumeCandidate) -> HostSession {
+        HostSession {
+            task_id: candidate.task_id,
+            agent_session_id: candidate.agent_session_id,
+            codex_thread_id: Some(candidate.codex_thread_id),
+            active_turn_id: None,
+            state: HostSessionState::Idle,
+            cwd: PathBuf::from("/private/tmp/feat126-synthetic-project"),
+            model_ready: true,
+            failure_code: None,
+            created_at: "2026-08-15T00:00:00Z".to_owned(),
+            updated_at: "2026-08-15T00:00:01Z".to_owned(),
+        }
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn r8_resume_projection_accepts_only_exact_idle_terminal_identity() {
+        let candidate = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+        };
+        let valid = resumed_session(&candidate);
+        assert_eq!(validate_feat126_resumed_session(&candidate, &valid), Ok(()));
+
+        let mut mismatched = resumed_session(&candidate);
+        mismatched.codex_thread_id = Some(Uuid::now_v7());
+        assert_eq!(
+            validate_feat126_resumed_session(&candidate, &mismatched),
+            Err(ChatError::SidecarUnavailable)
+        );
+        let mut active = resumed_session(&candidate);
+        active.active_turn_id = Some(Uuid::now_v7());
+        active.state = HostSessionState::Active;
+        assert_eq!(
+            validate_feat126_resumed_session(&candidate, &active),
+            Err(ChatError::SidecarUnavailable)
+        );
+    }
 
     #[tokio::test]
     async fn disabled_foundation_does_not_open_database_or_sidecar() {

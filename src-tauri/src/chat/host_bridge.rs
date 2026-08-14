@@ -1072,6 +1072,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resume_posts_exact_session_identity_and_requires_idle_model_ready_projection() {
+        let token = TestToken::new(0o600);
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response("200 OK", &session_body()),
+        ])
+        .await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        let session_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f22").unwrap();
+        let resumed = bridge
+            .resume_session(session_id, &HostTrace::default())
+            .await
+            .unwrap();
+        assert_eq!(resumed.agent_session_id, session_id);
+        assert_eq!(resumed.state, HostSessionState::Idle);
+        assert!(resumed.model_ready);
+        assert!(resumed.active_turn_id.is_none());
+        assert!(resumed.failure_code.is_none());
+
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "POST /v1/agent-sessions/{session_id}/resume HTTP/1.1"
+        )));
+        assert!(requests[1].ends_with("\r\n\r\n{}"));
+    }
+
+    #[tokio::test]
     async fn nonce_mismatch_fails_before_token_read_or_protected_request() {
         let token = TestToken::new(0o644);
         let (port, server) =
