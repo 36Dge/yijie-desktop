@@ -20,7 +20,7 @@ use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Runtime, State};
 use tokio::sync::{mpsc, watch, Mutex};
@@ -44,6 +44,7 @@ const CONTROL_READ_FD: i32 = 3;
 const CONTROL_WRITE_FD: i32 = 4;
 const MAX_FRAME_BYTES: usize = 1024;
 const STARTUP_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(50);
+const POST_READY_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(90);
 const STARTUP_SETUP_ENTERED: u8 = 1 << 0;
 const STARTUP_APP_HANDLE_READY: u8 = 1 << 1;
 const STARTUP_PAGE_LOAD_STARTED: u8 = 1 << 2;
@@ -515,6 +516,43 @@ impl Feat126S10DriverRuntime {
             std::thread::sleep(timeout);
             if runtime.emit_startup_timeout_failure() {
                 terminate();
+            }
+        });
+    }
+
+    fn start_post_ready_watchdog(&self) {
+        if self.inner.r8_enabled {
+            self.start_post_ready_watchdog_with(POST_READY_WATCHDOG_TIMEOUT, || {
+                std::process::exit(1)
+            });
+        }
+    }
+
+    fn start_post_ready_watchdog_with<F>(&self, timeout: Duration, terminate: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let runtime = self.clone();
+        std::thread::spawn(move || {
+            let mut observed_case_index = runtime.inner.r8_case_index.load(Ordering::SeqCst);
+            let mut last_progress = Instant::now();
+            let sample_interval = timeout.min(Duration::from_secs(1));
+            loop {
+                std::thread::sleep(sample_interval);
+                if runtime.inner.post_ready_terminal.load(Ordering::SeqCst) {
+                    return;
+                }
+                let current_case_index = runtime.inner.r8_case_index.load(Ordering::SeqCst);
+                if current_case_index != observed_case_index {
+                    observed_case_index = current_case_index;
+                    last_progress = Instant::now();
+                }
+                if last_progress.elapsed() >= timeout {
+                    if runtime.emit_post_ready_failure("driver_case_failed") {
+                        terminate();
+                    }
+                    return;
+                }
             }
         });
     }
@@ -1406,7 +1444,9 @@ pub(crate) async fn feat126_s10_driver_component_ready(
     chat.feat126_s10_verify_project_and_readiness(&project_id)
         .await
         .map_err(|_| "driver_readiness_failed".to_owned())?;
-    driver.emit_ready().await.map_err(str::to_owned)
+    driver.emit_ready().await.map_err(str::to_owned)?;
+    driver.start_post_ready_watchdog();
+    Ok(())
 }
 
 #[tauri::command]
@@ -2234,6 +2274,23 @@ mod tests {
         let frame: Value =
             serde_json::from_str(std::fs::read_to_string(output).unwrap().trim()).unwrap();
         assert_eq!(frame["kind"], "component_failed");
+    }
+
+    #[test]
+    fn post_ready_watchdog_emits_and_closes_fd4_before_termination() {
+        let (runtime, output) = runtime_with_r8_output("after_restart", 3);
+        let (terminated, observed) = std::sync::mpsc::sync_channel(1);
+        runtime.start_post_ready_watchdog_with(Duration::from_millis(20), move || {
+            terminated.send(()).unwrap();
+        });
+        observed.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let failure: Value = serde_json::from_str(encoded.trim_end()).unwrap();
+        assert_eq!(failure["kind"], "component_failed");
+        assert_eq!(failure["failure_class"], "driver_case_failed");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
     }
 
     #[tokio::test]

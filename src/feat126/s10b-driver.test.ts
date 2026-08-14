@@ -372,6 +372,125 @@ describe("FEAT-126 S10BO2 driver", () => {
     await executePhase("after_restart", makeStore(true));
   });
 
+  it("fails the real R8 disconnect case when submit or resync stops advancing", async () => {
+    vi.useFakeTimers();
+    try {
+      type MutableDisconnectStore = S10BPiniaDriverStore & {
+        selectedSessionId: string | null;
+        sessions: ChatSession[];
+        projects: ChatProject[];
+        history: ChatHistoryPage;
+        cleanupStatus: ChatCleanupStatus | null;
+        controlPlane: ChatSessionControlPlane;
+        liveReasoning: readonly LiveReasoningPart[];
+        liveTurnStatus: string | null;
+        submitCalls: number;
+        createSession(projectId: string, input: string): Promise<string | null>;
+        submitTurn(input: string): Promise<void>;
+        loadOlderHistory(): Promise<void>;
+        loadReasoning(turnId: string): Promise<readonly ChatReasoningItem[]>;
+        renameSelected(title: string): Promise<void>;
+        setSelectedPinned(pinned: boolean): Promise<void>;
+        setProjectPinned(projectId: string, pinned: boolean): Promise<void>;
+        resyncSelected(): Promise<void>;
+        reloadSessions(): Promise<void>;
+        refreshControlPlane(): Promise<ChatSessionControlPlane | null>;
+        refreshSelectedCleanup(): Promise<Readonly<{ kind: string }> | null>;
+        interruptSelected(): Promise<boolean>;
+        deleteSelected(): Promise<Readonly<{ kind: string }> | null>;
+        selectSession(sessionId: string): Promise<void>;
+      };
+      const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
+      const turn = (ordinal: number, status: string) => Object.freeze({
+        turnId: `019fbd88-cbc3-7bf1-934d-7b05cd693f${ordinal.toString().padStart(2, "0")}`,
+        status,
+        terminalAt: 1,
+        reasoningStatus: status === "completed" ? "complete" : "incomplete",
+        reasoningReasonCode: status === "completed" ? null : "stream_gap",
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+      });
+      const store: MutableDisconnectStore = {
+        phase: "ready",
+        context: { allowedActions: ["use_project"] },
+        selectedSessionId: sessionId,
+        sessions: [{
+          sessionId, projectId: PROJECT_ID, title: "fallback", titleSource: "fallback" as const,
+          pinnedAt: null, lastActivityAt: 1, latestTurnStatus: "failed", projectAvailable: true,
+        }],
+        projects: [{ projectId: PROJECT_ID, safeName: "project", pinnedAt: null, lastUsedAt: 1, available: true }],
+        history: {
+          turns: Object.freeze([turn(1, "completed"), turn(2, "completed"), turn(3, "failed")]),
+          nextCursor: null,
+        },
+        cleanupStatus: null,
+        controlPlane: { sessionId, state: "bound" as const, issueCode: null, retryable: false, recovery: "none" as const },
+        liveReasoning: Object.freeze([]),
+        liveTurnStatus: null,
+        submitCalls: 0,
+        async bind() {}, async revalidateProject() { return null; }, async requestLocalRecovery() { return null; }, async dispose() {},
+        async createSession() { return null; },
+        async submitTurn() {
+          this.submitCalls += 1;
+          await new Promise<void>(() => undefined);
+        },
+        async loadOlderHistory() {},
+        async loadHistoryPage(limit: number) {
+          return {
+            page: { turns: Object.freeze(this.history.turns.slice(0, limit)), nextCursor: null },
+            cursorMonotonic: true,
+            pagesDisjoint: true,
+          };
+        },
+        async loadReasoning() { return Object.freeze([]); },
+        async renameSelected(title: string) {
+          this.sessions = this.sessions.map((session) => ({ ...session, title, titleSource: "user" as const }));
+        },
+        async setSelectedPinned(pinned: boolean) {
+          this.sessions = this.sessions.map((session) => ({ ...session, pinnedAt: pinned ? 1 : null }));
+        },
+        async setProjectPinned(projectId: string, pinned: boolean) {
+          this.projects = this.projects.map((project) =>
+            project.projectId === projectId ? { ...project, pinnedAt: pinned ? 1 : null } : project);
+        },
+        async resyncSelected() {}, async reloadSessions() {}, async refreshControlPlane() { return this.controlPlane; },
+        async refreshSelectedCleanup() { return null; }, async interruptSelected() { return false; },
+        async deleteSelected() { return null; }, async selectSession(next: string) { this.selectedSessionId = next; },
+      };
+      const pendingCases = ["s10b_005_planned_restart", "s10b_006", "s10b_007"];
+      const emitted: string[] = [];
+      const driverInvoke: DriverInvoke = async (command, arguments_) => {
+        if (command === "feat126_s10_driver_wait_case") {
+          return { kind: "mode_transition", caseId: pendingCases.shift() };
+        }
+        if (command === "feat126_s10_driver_r8_observation") {
+          return {
+            caseId: arguments_?.caseId,
+            observations: arguments_?.observations,
+            schemaVersion: 1,
+            status: "passed",
+          };
+        }
+        if (command === "feat126_s10_driver_case_result") {
+          emitted.push(String(arguments_?.caseId));
+          return undefined;
+        }
+        throw new Error("unexpected_command");
+      };
+      const execution = runFeat126S10R8(store, PROJECT_ID, driverInvoke, "after_restart");
+      for (let attempt = 0; attempt < 50 && store.submitCalls === 0; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(store.submitCalls).toBe(1);
+      const rejection = expect(execution).rejects.toThrow("driver_case_failed");
+      await vi.advanceTimersByTimeAsync(10_001);
+      await rejection;
+      expect(emitted).toEqual(["s10b_005_planned_restart", "s10b_006"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when a native R8 observation is not true", async () => {
     const invoke: DriverInvoke = async (command, arguments_) => {
       if (command === "feat126_s10_driver_wait_case") {

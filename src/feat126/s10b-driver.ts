@@ -322,13 +322,13 @@ async function emitR8CaseResult(driverInvoke: DriverInvoke, caseId: R8CaseId): P
   await driverStage("driver_case_result_failed", async () => {
     const assertions = R8_ASSERTIONS[caseId];
     const assertionSetSha256 = await computeAssertionSetSha256(assertions);
-    await driverInvoke("feat126_s10_driver_case_result", {
+    await boundedR8Operation(async () => await driverInvoke("feat126_s10_driver_case_result", {
       caseId,
       status: "passed",
       assertions,
       assertionCount: assertions.length,
       assertionSetSha256,
-    });
+    }));
   });
 }
 
@@ -337,10 +337,10 @@ async function requireR8Observation(
   caseId: R8CaseId,
   observations: Record<string, boolean>,
 ): Promise<void> {
-  const result = await driverInvoke("feat126_s10_driver_r8_observation", {
-    caseId,
-    observations,
-  });
+  const result = await boundedR8Operation(async () => await driverInvoke(
+    "feat126_s10_driver_r8_observation",
+    { caseId, observations },
+  ));
   if (!exactObject(result, ["caseId", "observations", "schemaVersion", "status"]) ||
     result.schemaVersion !== 1 || result.status !== "passed" || result.caseId !== caseId ||
     !exactObject(result.observations, Object.keys(observations)) ||
@@ -367,14 +367,32 @@ function parseR8CaseCommand(value: unknown, expected: R8CaseId): void {
 }
 
 async function waitR8Case(driverInvoke: DriverInvoke, expected: R8CaseId): Promise<void> {
-  parseR8CaseCommand(await driverInvoke("feat126_s10_driver_wait_case"), expected);
+  parseR8CaseCommand(await boundedR8Operation(
+    async () => await driverInvoke("feat126_s10_driver_wait_case"),
+    90_000,
+  ), expected);
 }
 
-const R8_POLL_ATTEMPTS = 100;
 const R8_POLL_DELAY_MS = 100;
+const R8_OPERATION_TIMEOUT_MS = 10_000;
+const R8_POLL_TIMEOUT_MS = 20_000;
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function boundedR8Operation<T>(operation: () => Promise<T>, timeoutMs = R8_OPERATION_TIMEOUT_MS): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("driver_case_failed")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function requireR8(condition: boolean): asserts condition {
@@ -386,10 +404,12 @@ async function pollR8(
   predicate: () => boolean,
   refresh: () => Promise<void> = () => store.resyncSelected(),
 ): Promise<void> {
-  for (let attempt = 0; attempt < R8_POLL_ATTEMPTS; attempt += 1) {
-    await refresh();
+  const deadline = Date.now() + R8_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    await boundedR8Operation(refresh, Math.min(R8_OPERATION_TIMEOUT_MS, remaining));
     if (predicate()) return;
-    await delay(R8_POLL_DELAY_MS);
+    await delay(Math.min(R8_POLL_DELAY_MS, Math.max(0, deadline - Date.now())));
   }
   throw new Error("driver_case_failed");
 }
@@ -411,12 +431,14 @@ function r8InterruptibleWithReasoning(store: R8Store): boolean {
 }
 
 async function waitR8ReasoningOrTerminal(store: R8Store): Promise<void> {
-  for (let attempt = 0; attempt < R8_POLL_ATTEMPTS; attempt += 1) {
+  const deadline = Date.now() + R8_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     // Check before resync so an observed live prefix is not cleared by the snapshot refresh.
     if (observedR8TerminalStatus(store) !== null || r8InterruptibleWithReasoning(store)) return;
-    await store.resyncSelected();
+    const remaining = deadline - Date.now();
+    await boundedR8Operation(() => store.resyncSelected(), Math.min(R8_OPERATION_TIMEOUT_MS, remaining));
     if (observedR8TerminalStatus(store) !== null || r8InterruptibleWithReasoning(store)) return;
-    await delay(R8_POLL_DELAY_MS);
+    await delay(Math.min(R8_POLL_DELAY_MS, Math.max(0, deadline - Date.now())));
   }
   throw new Error("driver_case_failed");
 }
@@ -482,36 +504,39 @@ export async function runFeat126S10R8(
 ): Promise<readonly R8CaseId[]> {
   const r8 = store as S10BPiniaDriverStore & R8Store;
   const completed: R8CaseId[] = [];
-  const phase = selectedPhase ?? parseR8Phase(await driverInvoke("feat126_s10_driver_r8_phase"));
+  const phase = selectedPhase ?? parseR8Phase(await boundedR8Operation(
+    async () => await driverInvoke("feat126_s10_driver_r8_phase"),
+  ));
   if (phase === "before_restart") {
     await waitR8Case(driverInvoke, "s10b_002");
-    const sessionId = await r8.createSession(projectId, "请为合成任务000整理订单风险并给出只读检查清单。");
+    const sessionId = await boundedR8Operation(async () =>
+      await r8.createSession(projectId, "请为合成任务000整理订单风险并给出只读检查清单。"));
     if (!sessionId) throw new Error("driver_case_create_failed");
     await waitR8Terminal(r8, ["completed"]);
-    await r8.reloadSessions();
+    await boundedR8Operation(async () => await r8.reloadSessions());
     requireR8(r8.selectedSessionId === sessionId);
     requireR8(selectedR8Session(r8).latestTurnStatus === "completed");
     requireR8(latestR8Turn(r8).status === "completed");
     await emitR8CaseResult(driverInvoke, "s10b_002"); completed.push("s10b_002");
     await waitR8Case(driverInvoke, "s10b_003");
-    await r8.submitTurn("Synthetic FEAT-126 case 003 valid raw stream.");
+    await boundedR8Operation(async () => await r8.submitTurn("Synthetic FEAT-126 case 003 valid raw stream."));
     await waitR8Terminal(r8, ["completed"]);
     const completedTurn = latestR8Turn(r8);
     requireR8(completedTurn.reasoningStatus === "complete");
-    requireCompleteReasoning(await r8.loadReasoning(completedTurn.turnId));
+    requireCompleteReasoning(await boundedR8Operation(async () => await r8.loadReasoning(completedTurn.turnId)));
     await emitR8CaseResult(driverInvoke, "s10b_003"); completed.push("s10b_003");
     await waitR8Case(driverInvoke, "s10b_004");
-    await r8.submitTurn("Synthetic FEAT-126 case 004 incomplete stream.");
+    await boundedR8Operation(async () => await r8.submitTurn("Synthetic FEAT-126 case 004 incomplete stream."));
     await waitR8ReasoningOrTerminal(r8);
     const observedTerminal = observedR8TerminalStatus(r8);
     requireR8(observedTerminal !== "completed");
     if (observedTerminal === null) {
       requireR8(r8InterruptibleWithReasoning(r8));
       try {
-        requireR8(await r8.interruptSelected());
+        requireR8(await boundedR8Operation(async () => await r8.interruptSelected()));
       } catch {
         try {
-          await r8.resyncSelected();
+          await boundedR8Operation(async () => await r8.resyncSelected());
         } catch {
           throw new Error("driver_case_failed");
         }
@@ -521,25 +546,29 @@ export async function runFeat126S10R8(
     await waitR8Terminal(r8, ["failed", "interrupted"]);
     const incompleteTurn = latestR8Turn(r8);
     requireR8(incompleteTurn.reasoningStatus !== "complete");
-    requireIncompleteReasoning(await r8.loadReasoning(incompleteTurn.turnId));
+    requireIncompleteReasoning(await boundedR8Operation(async () => await r8.loadReasoning(incompleteTurn.turnId)));
     await emitR8CaseResult(driverInvoke, "s10b_004"); completed.push("s10b_004");
-    await driverInvoke("feat126_s10_driver_planned_restart");
+    await boundedR8Operation(
+      async () => await driverInvoke("feat126_s10_driver_planned_restart"),
+      90_000,
+    );
     return Object.freeze(completed);
   }
   await waitR8Case(driverInvoke, "s10b_005_planned_restart");
-  await r8.reloadSessions();
+  await boundedR8Operation(async () => await r8.reloadSessions());
   const existingSession = r8.sessions[0]?.sessionId;
   if (!existingSession) throw new Error("driver_case_create_failed");
-  await r8.selectSession(existingSession);
+  await boundedR8Operation(async () => await r8.selectSession(existingSession));
   requireR8(r8.selectedSessionId === existingSession);
   requireR8((r8.history?.turns.length ?? 0) === 3);
-  await r8.loadOlderHistory(); await r8.resyncSelected();
+  await boundedR8Operation(async () => await r8.loadOlderHistory());
+  await boundedR8Operation(async () => await r8.resyncSelected());
   requireR8(r8.selectedSessionId === existingSession);
   requireR8((r8.history?.turns.length ?? 0) === 3);
   requireR8(r8.history?.turns.map((turn) => turn.status).join(",") === "completed,completed,failed" ||
     r8.history?.turns.map((turn) => turn.status).join(",") === "completed,completed,interrupted");
-  const page20 = await r8.loadHistoryPage?.(20) ?? null;
-  const page50 = await r8.loadHistoryPage?.(50) ?? null;
+  const page20 = await boundedR8Operation(async () => await r8.loadHistoryPage?.(20) ?? null);
+  const page50 = await boundedR8Operation(async () => await r8.loadHistoryPage?.(50) ?? null);
   await requireR8Observation(driverInvoke, "s10b_005_planned_restart", {
     history_page_20: page20 !== null && page20.page.turns.length <= 20,
     history_page_50: page50 !== null && page50.page.turns.length <= 50,
@@ -551,13 +580,13 @@ export async function runFeat126S10R8(
   await emitR8CaseResult(driverInvoke, "s10b_005_planned_restart"); completed.push("s10b_005_planned_restart");
   await waitR8Case(driverInvoke, "s10b_006");
   await driverStage("driver_case_session_rename_failed", async () =>
-    await r8.renameSelected("Synthetic FEAT-126 case"),
+    await boundedR8Operation(async () => await r8.renameSelected("Synthetic FEAT-126 case")),
   );
   await driverStage("driver_case_session_pin_failed", async () =>
-    await r8.setSelectedPinned(true),
+    await boundedR8Operation(async () => await r8.setSelectedPinned(true)),
   );
   await driverStage("driver_case_project_pin_failed", async () =>
-    await r8.setProjectPinned(projectId, true),
+    await boundedR8Operation(async () => await r8.setProjectPinned(projectId, true)),
   );
   const renamed = selectedR8Session(r8);
   requireR8(renamed.titleSource === "user" && renamed.pinnedAt !== null);
@@ -573,12 +602,12 @@ export async function runFeat126S10R8(
   });
   await emitR8CaseResult(driverInvoke, "s10b_006"); completed.push("s10b_006");
   await waitR8Case(driverInvoke, "s10b_007");
-  await r8.submitTurn("Synthetic FEAT-126 case 007 reconnect.");
+  await boundedR8Operation(async () => await r8.submitTurn("Synthetic FEAT-126 case 007 reconnect."));
   await waitR8Terminal(r8, ["interrupted", "failed"]);
   requireR8(latestR8Turn(r8).status !== "completed");
-  await r8.resyncSelected();
+  await boundedR8Operation(async () => await r8.resyncSelected());
   const terminalProjection = r8TurnProjection(r8);
-  await r8.resyncSelected();
+  await boundedR8Operation(async () => await r8.resyncSelected());
   const resyncedProjection = r8TurnProjection(r8);
   await requireR8Observation(driverInvoke, "s10b_007", {
     gap_recovery: r8.controlPlane?.state === "bound",
@@ -591,25 +620,29 @@ export async function runFeat126S10R8(
   await waitR8Case(driverInvoke, "s10b_008");
   const deletedSessionId = r8.selectedSessionId;
   requireR8(deletedSessionId !== null);
-  const disposition = await r8.deleteSelected();
+  const disposition = await boundedR8Operation(async () => await r8.deleteSelected());
   requireR8(disposition !== null);
   await pollR8(r8, () => {
     const status = r8.cleanupStatus;
     return status?.desktopState === "complete" && status.hostState === "complete" &&
       status.runtimeState === "complete" && r8.selectedSessionId === null;
   }, async () => {
-    if (r8.selectedSessionId !== null) await r8.refreshSelectedCleanup();
-    await r8.reloadSessions();
+    if (r8.selectedSessionId !== null) {
+      await boundedR8Operation(async () => await r8.refreshSelectedCleanup());
+    }
+    await boundedR8Operation(async () => await r8.reloadSessions());
   });
   requireR8(!r8.sessions.some((session) => session.sessionId === deletedSessionId));
   await emitR8CaseResult(driverInvoke, "s10b_008"); completed.push("s10b_008");
   for (const caseId of ["s10b_009", "s10b_010"] as const) {
-    await waitR8Case(driverInvoke, caseId); await r8.reloadSessions();
+    await waitR8Case(driverInvoke, caseId);
+    await boundedR8Operation(async () => await r8.reloadSessions());
     requireR8(!r8.sessions.some((session) => session.sessionId === deletedSessionId));
     await emitR8CaseResult(driverInvoke, caseId); completed.push(caseId);
   }
   await waitR8Case(driverInvoke, "s10b_011");
-  const faultSessionId = await r8.createSession(projectId, "Synthetic FEAT-126 case 011 capacity fault.");
+  const faultSessionId = await boundedR8Operation(async () =>
+    await r8.createSession(projectId, "Synthetic FEAT-126 case 011 capacity fault."));
   requireR8(faultSessionId !== null);
   await waitR8Terminal(r8, ["failed", "interrupted"]);
   requireR8(latestR8Turn(r8).status !== "completed");
@@ -659,12 +692,19 @@ export async function runFeat126S10Driver(
   });
   let r8Phase: R8Phase | null = null;
   if (import.meta.env.VITE_FEAT126_S10_R8 === "true") {
-    r8Phase = parseR8Phase(await driverInvoke("feat126_s10_driver_r8_phase"));
+    r8Phase = parseR8Phase(await boundedR8Operation(
+      async () => await driverInvoke("feat126_s10_driver_r8_phase"),
+    ));
     await runFeat126S10R8(store, project.projectId, driverInvoke, r8Phase);
   }
   if (r8Phase !== "before_restart") {
     parseControl(await driverStage("driver_control_projection_invalid", async () =>
-      await driverInvoke("feat126_s10_driver_wait_abort"),
+      r8Phase === null
+        ? await driverInvoke("feat126_s10_driver_wait_abort")
+        : await boundedR8Operation(
+          async () => await driverInvoke("feat126_s10_driver_wait_abort"),
+          90_000,
+        ),
     ));
   }
   return Object.freeze(r8Phase === "before_restart"
