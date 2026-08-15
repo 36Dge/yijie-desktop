@@ -37,6 +37,10 @@ const R8_TURN_COUNT: u64 = 500_000;
 const R8_MESSAGE_COUNT: u64 = 1_000_000;
 #[cfg(feature = "feat126-s10-driver")]
 const R8_IDEMPOTENCY_PAIR_COUNT: u64 = 10_000;
+#[cfg(feature = "feat126-s10-driver")]
+const R8_IDEMPOTENCY_RETRY_TIMEOUT: Duration = Duration::from_secs(90);
+#[cfg(feature = "feat126-s10-driver")]
+const R8_IDEMPOTENCY_RETRY_DELAY: Duration = Duration::from_micros(100);
 
 #[derive(Clone)]
 pub struct ChatScope {
@@ -933,27 +937,22 @@ impl ChatRepository {
     ) -> Result<Vec<(Uuid, Uuid)>, ChatError> {
         let mut results = Vec::with_capacity(count as usize);
         barrier.wait();
+        let retry_deadline = Instant::now() + R8_IDEMPOTENCY_RETRY_TIMEOUT;
         for index in start..start + count {
             let operation_id = Uuid::from_u128(0x6000 + index);
-            let mut attempts = 0_u16;
-            let pending = loop {
-                attempts = attempts.saturating_add(1);
-                match repository.create_session_and_enqueue_with_authority(
-                    project,
-                    "synthetic idempotency probe",
-                    operation_id,
-                    1,
-                ) {
-                    Ok(value) => break value,
-                    Err(ChatError::ConversationConflict | ChatError::DatabaseUnavailable)
-                        if attempts < 1_000 =>
-                    {
-                        thread::yield_now();
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                }
-            };
+            let pending = retry_r8_sqlite_busy_until(
+                retry_deadline,
+                || {
+                    repository.create_session_and_enqueue_with_authority(
+                        project,
+                        "synthetic idempotency probe",
+                        operation_id,
+                        1,
+                    )
+                },
+                Instant::now,
+                thread::sleep,
+            )?;
             results.push((pending.session_id, pending.turn_id));
         }
         Ok(results)
@@ -1160,10 +1159,7 @@ impl ChatRepository {
         }
         validate_message(input)?;
         let now = unix_seconds()?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
         if let Some((stored_session_id, version, payload, stored_revision)) = transaction
             .query_row(
                 "SELECT o.session_id, o.payload_version, o.encrypted_payload, b.authorization_revision
@@ -1186,7 +1182,7 @@ impl ChatRepository {
                 },
             )
             .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .map_err(map_sqlite_error)?
         {
             if version != OUTBOX_PAYLOAD_VERSION {
                 return Err(ChatError::DatabaseUnavailable);
@@ -1202,7 +1198,7 @@ impl ChatRepository {
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
+                .map_err(map_sqlite_error)?;
             if payload.session_id.to_string() != stored_session_id
                 || payload.task_id != payload.session_id
                 || stored_project_and_input != Some((project_id.to_string(), input.to_owned()))
@@ -1231,7 +1227,7 @@ impl ChatRepository {
                 ],
                 |row| row.get(0),
             )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
+            .map_err(map_sqlite_error)?;
         if !project_exists {
             return Err(ChatError::NotFound);
         }
@@ -1319,9 +1315,7 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction.commit().map_err(map_sqlite_error)?;
         Ok(PendingConversation {
             session_id,
             task_id,
@@ -4649,6 +4643,38 @@ fn load_history_reasoning_metadata(
     Ok(())
 }
 
+#[cfg(feature = "feat126-s10-driver")]
+fn retry_r8_sqlite_busy_until<T, F, N, S>(
+    deadline: Instant,
+    mut operation: F,
+    mut now: N,
+    mut sleep: S,
+) -> Result<T, ChatError>
+where
+    F: FnMut() -> Result<T, ChatError>,
+    N: FnMut() -> Instant,
+    S: FnMut(Duration),
+{
+    let mut retrying = false;
+    loop {
+        if retrying && deadline.saturating_duration_since(now()).is_zero() {
+            return Err(ChatError::DatabaseBusy);
+        }
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error @ ChatError::DatabaseBusy) => {
+                let remaining = deadline.saturating_duration_since(now());
+                if remaining <= R8_IDEMPOTENCY_RETRY_DELAY {
+                    return Err(error);
+                }
+                sleep(R8_IDEMPOTENCY_RETRY_DELAY);
+                retrying = true;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn map_constraint_or_database(error: rusqlite::Error) -> ChatError {
     match error {
         rusqlite::Error::SqliteFailure(ref inner, _)
@@ -6031,6 +6057,84 @@ mod tests {
             }]
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn r8_database_retry_uses_busy_taxonomy_and_one_monotonic_deadline() {
+        use std::cell::Cell;
+
+        let started = Instant::now();
+        let now = Cell::new(started);
+        let calls = Cell::new(0_u8);
+        let slept = Cell::new(Duration::ZERO);
+        let value = retry_r8_sqlite_busy_until(
+            started + Duration::from_micros(300),
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() <= 2 {
+                    Err(ChatError::DatabaseBusy)
+                } else {
+                    Ok(7_u8)
+                }
+            },
+            || now.get(),
+            |duration| {
+                slept.set(slept.get() + duration);
+                now.set(now.get() + duration);
+            },
+        )
+        .unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(calls.get(), 3);
+        assert_eq!(slept.get(), Duration::from_micros(200));
+
+        for terminal in [
+            ChatError::ConversationConflict,
+            ChatError::DatabaseUnavailable,
+        ] {
+            let calls = Cell::new(0_u8);
+            let result = retry_r8_sqlite_busy_until(
+                started + Duration::from_secs(1),
+                || {
+                    calls.set(calls.get() + 1);
+                    Err::<(), _>(terminal)
+                },
+                || started,
+                |_| panic!("terminal database failures must not sleep"),
+            );
+            assert_eq!(result, Err(terminal));
+            assert_eq!(calls.get(), 1);
+        }
+
+        let now = Cell::new(started);
+        let calls = Cell::new(0_u8);
+        let result = retry_r8_sqlite_busy_until(
+            started + Duration::from_micros(150),
+            || {
+                calls.set(calls.get() + 1);
+                Err::<(), _>(ChatError::DatabaseBusy)
+            },
+            || now.get(),
+            |duration| now.set(now.get() + duration),
+        );
+        assert_eq!(result, Err(ChatError::DatabaseBusy));
+        assert_eq!(calls.get(), 2);
+        assert_eq!(now.get(), started + Duration::from_micros(100));
+
+        let now = Cell::new(started);
+        let calls = Cell::new(0_u8);
+        let result = retry_r8_sqlite_busy_until(
+            started + Duration::from_micros(300),
+            || {
+                calls.set(calls.get() + 1);
+                Err::<(), _>(ChatError::DatabaseBusy)
+            },
+            || now.get(),
+            |duration| now.set(now.get() + duration + Duration::from_micros(300)),
+        );
+        assert_eq!(result, Err(ChatError::DatabaseBusy));
+        assert_eq!(calls.get(), 1);
     }
 
     #[cfg(feature = "feat126-s10-driver")]

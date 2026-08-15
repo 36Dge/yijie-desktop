@@ -8,6 +8,7 @@ pub enum ChatError {
     SecureStorageUnavailable,
     DatabaseKeyMissing,
     DatabaseUnsafe,
+    DatabaseBusy,
     DatabaseUnavailable,
     DatabaseReadOnly,
     DatabaseFull,
@@ -32,6 +33,7 @@ impl ChatError {
             Self::SecureStorageUnavailable => "chat_secure_storage_unavailable",
             Self::DatabaseKeyMissing => "chat_database_key_missing",
             Self::DatabaseUnsafe => "chat_database_unsafe",
+            Self::DatabaseBusy => "chat_database_unavailable",
             Self::DatabaseUnavailable => "chat_database_unavailable",
             Self::DatabaseReadOnly => "chat_database_read_only",
             Self::DatabaseFull => "chat_database_full",
@@ -60,6 +62,9 @@ impl std::error::Error for ChatError {}
 
 pub(crate) fn map_sqlite_error(error: rusqlite::Error) -> ChatError {
     match error.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+            ChatError::DatabaseBusy
+        }
         Some(rusqlite::ErrorCode::ReadOnly) => ChatError::DatabaseReadOnly,
         Some(rusqlite::ErrorCode::DiskFull) => ChatError::DatabaseFull,
         Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {
@@ -89,11 +94,16 @@ mod tests {
         let encoded = serde_json::to_string(&ChatCommandError::from(ChatError::DatabaseUnsafe))
             .expect("serialize command error");
         assert_eq!(encoded, r#"{"code":"chat_database_unsafe"}"#);
+        let busy = serde_json::to_string(&ChatCommandError::from(ChatError::DatabaseBusy))
+            .expect("serialize busy command error");
+        assert_eq!(busy, r#"{"code":"chat_database_unavailable"}"#);
     }
 
     #[test]
     fn sqlite_storage_failures_map_to_closed_content_free_states() {
         for (code, expected) in [
+            (rusqlite::ffi::SQLITE_BUSY, ChatError::DatabaseBusy),
+            (rusqlite::ffi::SQLITE_LOCKED, ChatError::DatabaseBusy),
             (rusqlite::ffi::SQLITE_READONLY, ChatError::DatabaseReadOnly),
             (rusqlite::ffi::SQLITE_FULL, ChatError::DatabaseFull),
             (rusqlite::ffi::SQLITE_CORRUPT, ChatError::DatabaseCorrupt),

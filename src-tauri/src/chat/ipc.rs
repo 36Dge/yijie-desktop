@@ -1463,7 +1463,8 @@ fn map_chat_error(error: ChatError, request_id: Option<Uuid>) -> ChatIpcError {
         ChatError::CleanupIncomplete => {
             ChatIpcError::new(request_id, "chat_cleanup_incomplete", true, "wait_cleanup")
         }
-        ChatError::DatabaseUnavailable
+        ChatError::DatabaseBusy
+        | ChatError::DatabaseUnavailable
         | ChatError::DatabaseReadOnly
         | ChatError::DatabaseFull
         | ChatError::DatabaseCorrupt

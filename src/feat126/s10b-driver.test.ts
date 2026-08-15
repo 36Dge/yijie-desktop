@@ -4,11 +4,13 @@ import type { ChatClient } from "../api/chat-client";
 import { createChatStoreDefinition, useChatStore, type LiveReasoningPart } from "../stores/chat.store";
 import {
   classifyFeat126DriverFailure,
+  createR8ScaleCaseDeadline,
   createFeat126DriverTransport,
   failClosedFeat126DriverOnce,
   FEAT126_R8_CASES,
   r8ObservationTimeoutMs,
   runFeat126S10R8,
+  runFeat126S10R8ScaleCase,
   runFeat126S10Driver,
   type DriverInvoke,
   type S10BPiniaDriverStore,
@@ -38,6 +40,107 @@ describe("FEAT-126 S10BO2 driver", () => {
   it("reserves the long IPC budget only for the frozen S10B-011 scale probe", () => {
     expect(r8ObservationTimeoutMs("s10b_010")).toBe(10_000);
     expect(r8ObservationTimeoutMs("s10b_011")).toBe(100_000);
+  });
+
+  it("uses one monotonic S10B-011 deadline and preserves watchdog margin", () => {
+    let now = 500;
+    const deadline = createR8ScaleCaseDeadline(() => now);
+    expect(deadline.remainingMs()).toBe(120_000);
+    expect(r8ObservationTimeoutMs("s10b_011", deadline)).toBe(100_000);
+    now += 15_000;
+    expect(deadline.remainingMs()).toBe(105_000);
+    expect(r8ObservationTimeoutMs("s10b_011", deadline)).toBe(100_000);
+    now += 90_000;
+    expect(deadline.remainingMs()).toBe(15_000);
+    expect(r8ObservationTimeoutMs("s10b_011", deadline)).toBe(15_000);
+    now += 15_001;
+    expect(deadline.remainingMs()).toBe(0);
+  });
+
+  it("spends the same fake-clock deadline across the complete S10B-011 pipeline", async () => {
+    let now = 1_000;
+    const deadline = createR8ScaleCaseDeadline(() => now);
+    const remaining: Array<readonly [string, number]> = [];
+    const sessionId = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
+    const failedTurn = Object.freeze({
+      turnId: "019fbd88-cbc3-7bf1-934d-7b05cd693f92",
+      status: "failed",
+      terminalAt: 1,
+      reasoningStatus: "unavailable",
+      reasoningReasonCode: "limit_exceeded",
+      messages: Object.freeze([]),
+      reasoning: Object.freeze([]),
+    });
+    const store = {
+      selectedSessionId: sessionId,
+      sessions: Object.freeze([]),
+      projects: Object.freeze([]),
+      history: Object.freeze({ turns: Object.freeze([failedTurn]), nextCursor: null }),
+      cleanupStatus: null,
+      controlPlane: Object.freeze({
+        sessionId,
+        state: "bound" as const,
+        issueCode: null,
+        retryable: false,
+        recovery: "none" as const,
+      }),
+      liveReasoning: Object.freeze([]),
+      liveTurnStatus: null,
+      async createSession() {
+        remaining.push(["create", deadline.remainingMs()]);
+        now += 10_000;
+        return sessionId;
+      },
+      async resyncSelected() {
+        remaining.push(["poll", deadline.remainingMs()]);
+        now += 5_000;
+      },
+      async submitTurn() { throw new Error("unexpected operation"); },
+      async loadOlderHistory() { throw new Error("unexpected operation"); },
+      async loadReasoning() { throw new Error("unexpected operation"); },
+      async renameSelected() { throw new Error("unexpected operation"); },
+      async setSelectedPinned() { throw new Error("unexpected operation"); },
+      async setProjectPinned() { throw new Error("unexpected operation"); },
+      async reloadSessions() { throw new Error("unexpected operation"); },
+      async refreshControlPlane() { throw new Error("unexpected operation"); },
+      async refreshSelectedCleanup() { throw new Error("unexpected operation"); },
+      async interruptSelected() { throw new Error("unexpected operation"); },
+      async deleteSelected() { throw new Error("unexpected operation"); },
+      async selectSession() { throw new Error("unexpected operation"); },
+    };
+    const driverInvoke: DriverInvoke = async (command, arguments_) => {
+      if (command === "feat126_s10_driver_wait_case") {
+        remaining.push(["wait", deadline.remainingMs()]);
+        now += 10_000;
+        return { kind: "mode_transition", caseId: "s10b_011" };
+      }
+      if (command === "feat126_s10_driver_r8_observation") {
+        remaining.push(["observation", deadline.remainingMs()]);
+        now += 80_000;
+        return {
+          caseId: "s10b_011",
+          observations: arguments_?.observations,
+          schemaVersion: 1,
+          status: "passed",
+        };
+      }
+      if (command === "feat126_s10_driver_case_result") {
+        remaining.push(["result", deadline.remainingMs()]);
+        now += 10_000;
+        return undefined;
+      }
+      throw new Error("unexpected command");
+    };
+
+    await runFeat126S10R8ScaleCase(store, PROJECT_ID, driverInvoke, deadline);
+    expect(remaining).toEqual([
+      ["wait", 120_000],
+      ["create", 110_000],
+      ["poll", 100_000],
+      ["observation", 95_000],
+      ["result", 15_000],
+    ]);
+    expect(deadline.remainingMs()).toBe(5_000);
   });
 
   it("executes the closed login, project, bind, recovery and abort flow", async () => {

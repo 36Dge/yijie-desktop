@@ -318,29 +318,34 @@ async function computeAssertionSetSha256(assertions: readonly string[]): Promise
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-async function emitR8CaseResult(driverInvoke: DriverInvoke, caseId: R8CaseId): Promise<void> {
-  await driverStage("driver_case_result_failed", async () => {
+async function emitR8CaseResult(
+  driverInvoke: DriverInvoke,
+  caseId: R8CaseId,
+  deadline?: R8MonotonicDeadline,
+): Promise<void> {
+  await driverStage("driver_case_result_failed", async () => await boundedR8Operation(async () => {
     const assertions = R8_ASSERTIONS[caseId];
     const assertionSetSha256 = await computeAssertionSetSha256(assertions);
-    await boundedR8Operation(async () => await driverInvoke("feat126_s10_driver_case_result", {
+    await driverInvoke("feat126_s10_driver_case_result", {
       caseId,
       status: "passed",
       assertions,
       assertionCount: assertions.length,
       assertionSetSha256,
-    }));
-  });
+    });
+  }, R8_OPERATION_TIMEOUT_MS, deadline));
 }
 
 async function requireR8Observation(
   driverInvoke: DriverInvoke,
   caseId: R8CaseId,
   observations: Record<string, boolean>,
+  deadline?: R8MonotonicDeadline,
 ): Promise<void> {
   const result = await boundedR8Operation(async () => await driverInvoke(
     "feat126_s10_driver_r8_observation",
     { caseId, observations },
-  ), r8ObservationTimeoutMs(caseId));
+  ), r8ObservationTimeoutMs(caseId, deadline), deadline);
   if (!exactObject(result, ["caseId", "observations", "schemaVersion", "status"]) ||
     result.schemaVersion !== 1 || result.status !== "passed" || result.caseId !== caseId ||
     !exactObject(result.observations, Object.keys(observations)) ||
@@ -366,33 +371,69 @@ function parseR8CaseCommand(value: unknown, expected: R8CaseId): void {
   }
 }
 
-async function waitR8Case(driverInvoke: DriverInvoke, expected: R8CaseId): Promise<void> {
+async function waitR8Case(
+  driverInvoke: DriverInvoke,
+  expected: R8CaseId,
+  deadline?: R8MonotonicDeadline,
+): Promise<void> {
   parseR8CaseCommand(await boundedR8Operation(
     async () => await driverInvoke("feat126_s10_driver_wait_case"),
     90_000,
+    deadline,
   ), expected);
 }
 
 const R8_POLL_DELAY_MS = 100;
 const R8_OPERATION_TIMEOUT_MS = 10_000;
 const R8_SCALE_PROBE_TIMEOUT_MS = 100_000;
+const R8_SCALE_CASE_TIMEOUT_MS = 120_000;
 const R8_POLL_TIMEOUT_MS = 20_000;
 
-export function r8ObservationTimeoutMs(caseId: R8CaseId): number {
-  return caseId === "s10b_011" ? R8_SCALE_PROBE_TIMEOUT_MS : R8_OPERATION_TIMEOUT_MS;
+export function r8ObservationTimeoutMs(
+  caseId: R8CaseId,
+  deadline?: R8MonotonicDeadline,
+): number {
+  const operationLimit = caseId === "s10b_011" ? R8_SCALE_PROBE_TIMEOUT_MS : R8_OPERATION_TIMEOUT_MS;
+  return deadline === undefined
+    ? operationLimit
+    : Math.max(0, Math.ceil(Math.min(operationLimit, deadline.remainingMs())));
+}
+
+export type R8MonotonicDeadline = Readonly<{
+  remainingMs(): number;
+}>;
+
+export function createR8ScaleCaseDeadline(
+  now: () => number = () => performance.now(),
+): R8MonotonicDeadline {
+  const expiresAt = now() + R8_SCALE_CASE_TIMEOUT_MS;
+  return Object.freeze({
+    remainingMs: () => Math.max(0, expiresAt - now()),
+  });
 }
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function boundedR8Operation<T>(operation: () => Promise<T>, timeoutMs = R8_OPERATION_TIMEOUT_MS): Promise<T> {
+function boundedTimeoutMs(timeoutMs: number, deadline?: R8MonotonicDeadline): number {
+  const remaining = deadline?.remainingMs() ?? timeoutMs;
+  if (!Number.isFinite(remaining) || remaining <= 0) throw new Error("driver_case_failed");
+  return Math.max(1, Math.ceil(Math.min(timeoutMs, remaining)));
+}
+
+async function boundedR8Operation<T>(
+  operation: () => Promise<T>,
+  timeoutMs = R8_OPERATION_TIMEOUT_MS,
+  deadline?: R8MonotonicDeadline,
+): Promise<T> {
+  const effectiveTimeoutMs = boundedTimeoutMs(timeoutMs, deadline);
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       operation(),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("driver_case_failed")), timeoutMs);
+        timeout = setTimeout(() => reject(new Error("driver_case_failed")), effectiveTimeoutMs);
       }),
     ]);
   } finally {
@@ -408,15 +449,21 @@ async function pollR8(
   store: R8Store,
   predicate: () => boolean,
   refresh: () => Promise<void> = () => store.resyncSelected(),
+  deadline: R8MonotonicDeadline = createR8PollDeadline(),
 ): Promise<void> {
-  const deadline = Date.now() + R8_POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const remaining = deadline - Date.now();
-    await boundedR8Operation(refresh, Math.min(R8_OPERATION_TIMEOUT_MS, remaining));
+  while (deadline.remainingMs() > 0) {
+    await boundedR8Operation(refresh, R8_OPERATION_TIMEOUT_MS, deadline);
     if (predicate()) return;
-    await delay(Math.min(R8_POLL_DELAY_MS, Math.max(0, deadline - Date.now())));
+    await delay(Math.min(R8_POLL_DELAY_MS, deadline.remainingMs()));
   }
   throw new Error("driver_case_failed");
+}
+
+function createR8PollDeadline(): R8MonotonicDeadline {
+  const expiresAt = performance.now() + R8_POLL_TIMEOUT_MS;
+  return Object.freeze({
+    remainingMs: () => Math.max(0, expiresAt - performance.now()),
+  });
 }
 
 const R8_TERMINAL_STATUSES = Object.freeze(["completed", "failed", "interrupted"]);
@@ -482,13 +529,40 @@ function latestR8Turn(store: R8Store) {
   return turn;
 }
 
-async function waitR8Terminal(store: R8Store, statuses: readonly string[]): Promise<void> {
+async function waitR8Terminal(
+  store: R8Store,
+  statuses: readonly string[],
+  deadline?: R8MonotonicDeadline,
+): Promise<void> {
   await pollR8(store, () => {
     const turns = store.history?.turns ?? [];
     const status = turns[turns.length - 1]?.status;
     return typeof status === "string" && statuses.includes(status);
-  });
+  }, undefined, deadline);
   requireR8(store.controlPlane?.state === "bound");
+}
+
+export async function runFeat126S10R8ScaleCase(
+  r8: R8Store,
+  projectId: string,
+  driverInvoke: DriverInvoke,
+  deadline: R8MonotonicDeadline = createR8ScaleCaseDeadline(),
+): Promise<void> {
+  await waitR8Case(driverInvoke, "s10b_011", deadline);
+  const faultSessionId = await boundedR8Operation(async () =>
+    await r8.createSession(projectId, "Synthetic FEAT-126 case 011 capacity fault."),
+  R8_OPERATION_TIMEOUT_MS, deadline);
+  requireR8(faultSessionId !== null);
+  await waitR8Terminal(r8, ["failed", "interrupted"], deadline);
+  requireR8(latestR8Turn(r8).status !== "completed");
+  await requireR8Observation(driverInvoke, "s10b_011", {
+    metadata_p95_200ms: true,
+    history_p95_300ms: true,
+    reducer_10000: true,
+    db_1m_messages: true,
+    idempotency_10000: true,
+  }, deadline);
+  await emitR8CaseResult(driverInvoke, "s10b_011", deadline);
 }
 
 function requireCompleteReasoning(items: readonly ChatReasoningItem[]): void {
@@ -645,20 +719,7 @@ export async function runFeat126S10R8(
     requireR8(!r8.sessions.some((session) => session.sessionId === deletedSessionId));
     await emitR8CaseResult(driverInvoke, caseId); completed.push(caseId);
   }
-  await waitR8Case(driverInvoke, "s10b_011");
-  const faultSessionId = await boundedR8Operation(async () =>
-    await r8.createSession(projectId, "Synthetic FEAT-126 case 011 capacity fault."));
-  requireR8(faultSessionId !== null);
-  await waitR8Terminal(r8, ["failed", "interrupted"]);
-  requireR8(latestR8Turn(r8).status !== "completed");
-  await requireR8Observation(driverInvoke, "s10b_011", {
-    metadata_p95_200ms: true,
-    history_p95_300ms: true,
-    reducer_10000: true,
-    db_1m_messages: true,
-    idempotency_10000: true,
-  });
-  await emitR8CaseResult(driverInvoke, "s10b_011"); completed.push("s10b_011");
+  await runFeat126S10R8ScaleCase(r8, projectId, driverInvoke); completed.push("s10b_011");
   return Object.freeze(completed);
 }
 

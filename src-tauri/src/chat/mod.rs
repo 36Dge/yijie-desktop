@@ -84,7 +84,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_cancel_request_v1;
 }
 
-const CONTRACT_COMMIT: &str = "50ae02dbbd74d80802a1dcb25dc41e08e55886bc";
+const CONTRACT_COMMIT: &str = "98e89d8cccfe15256f09e9329d4bc1980d6da578";
 
 #[derive(Clone)]
 struct LocalChatConfig {
@@ -672,7 +672,8 @@ fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
         ChatError::DatabaseFull => ChatStorageReadiness::Full,
         ChatError::DatabaseCorrupt | ChatError::DatabaseUnsafe => ChatStorageReadiness::Corrupt,
         ChatError::MigrationFailed => ChatStorageReadiness::MigrationFailed,
-        ChatError::DatabaseUnavailable
+        ChatError::DatabaseBusy
+        | ChatError::DatabaseUnavailable
         | ChatError::DatabaseKeyMissing
         | ChatError::SecureStorageUnavailable
         | ChatError::Disabled

@@ -44,7 +44,7 @@ const CONTROL_READ_FD: i32 = 3;
 const CONTROL_WRITE_FD: i32 = 4;
 const MAX_FRAME_BYTES: usize = 1024;
 const STARTUP_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(50);
-const POST_READY_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(90);
+const POST_READY_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(130);
 const STARTUP_SETUP_ENTERED: u8 = 1 << 0;
 const STARTUP_APP_HANDLE_READY: u8 = 1 << 1;
 const STARTUP_PAGE_LOAD_STARTED: u8 = 1 << 2;
@@ -2291,6 +2291,11 @@ mod tests {
         assert_eq!(failure["failure_class"], "driver_case_failed");
         drop(runtime);
         std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn post_ready_watchdog_budget_exceeds_the_canonical_case_timeout() {
+        assert!(POST_READY_WATCHDOG_TIMEOUT > Duration::from_secs(120));
     }
 
     #[tokio::test]
