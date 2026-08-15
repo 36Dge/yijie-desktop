@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const FEAT126_FAKE_RESPONSES_BASE_URL: &str = "http://127.0.0.1:18082/v1";
+const FEAT126_DRIVER_NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
 const MAX_CHILD_LOG_BYTES: u64 = 256 << 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +22,7 @@ struct FEAT126TestProfile {
     run_id: String,
     fake_responses_base_url: String,
     run_root: PathBuf,
+    instance_nonce: String,
 }
 
 #[derive(Clone)]
@@ -38,9 +40,10 @@ impl SidecarConfig {
     pub fn from_environment() -> Result<Option<Self>, ChatError> {
         if std::env::var("YIJIE_CHAT_LOCAL_HOST_ENABLED").as_deref() != Ok("true") {
             if std::env::var("YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED").as_deref() == Ok("true")
-                || std::env::var("YIJIE_FEAT126_S10_RUN_ID").is_ok()
-                || std::env::var("YIJIE_FEAT126_FAKE_RESPONSES_BASE_URL").is_ok()
-                || std::env::var("YIJIE_FEAT126_S10_RUN_ROOT").is_ok()
+                || std::env::var_os("YIJIE_FEAT126_S10_RUN_ID").is_some()
+                || std::env::var_os("YIJIE_FEAT126_FAKE_RESPONSES_BASE_URL").is_some()
+                || std::env::var_os("YIJIE_FEAT126_S10_RUN_ROOT").is_some()
+                || std::env::var_os(FEAT126_DRIVER_NONCE_ENV).is_some()
             {
                 return Err(ChatError::InvalidConfiguration);
             }
@@ -317,7 +320,7 @@ impl SidecarSupervisor {
             return Err(ChatError::SidecarUnavailable);
         }
         state.state = SidecarState::Starting;
-        let instance_nonce = match generate_instance_nonce(config.test_profile.is_some()) {
+        let instance_nonce = match resolve_instance_nonce(config.test_profile.as_ref()) {
             Ok(nonce) => nonce,
             Err(error) => {
                 state.state = SidecarState::Failed;
@@ -602,16 +605,22 @@ impl SidecarSupervisor {
     }
 }
 
-fn generate_instance_nonce(test_profile: bool) -> Result<String, ChatError> {
-    if !test_profile {
+fn resolve_instance_nonce(test_profile: Option<&FEAT126TestProfile>) -> Result<String, ChatError> {
+    let Some(profile) = test_profile else {
         return Ok(uuid::Uuid::now_v7().to_string());
+    };
+    if !is_canonical_uuid_v4(&profile.instance_nonce) {
+        return Err(ChatError::InvalidConfiguration);
     }
+    Ok(profile.instance_nonce.clone())
+}
 
-    let mut bytes = [0_u8; 16];
-    getrandom::fill(&mut bytes).map_err(|_| ChatError::SidecarUnavailable)?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Ok(uuid::Uuid::from_bytes(bytes).to_string())
+fn is_canonical_uuid_v4(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok_and(|parsed| {
+        parsed.get_version_num() == 4
+            && parsed.as_bytes()[8] & 0xc0 == 0x80
+            && parsed.hyphenated().to_string() == value
+    })
 }
 
 #[cfg(feature = "feat126-s10-driver")]
@@ -848,11 +857,20 @@ fn load_feat126_test_profile() -> Result<Option<FEAT126TestProfile>, ChatError> 
     const RUN_ID: &str = "YIJIE_FEAT126_S10_RUN_ID";
     const BASE_URL: &str = "YIJIE_FEAT126_FAKE_RESPONSES_BASE_URL";
     const RUN_ROOT: &str = "YIJIE_FEAT126_S10_RUN_ROOT";
-    let master = std::env::var(MASTER).unwrap_or_default();
-    let run_id = std::env::var(RUN_ID).unwrap_or_default();
-    let base_url = std::env::var(BASE_URL).unwrap_or_default();
-    let run_root = std::env::var(RUN_ROOT).unwrap_or_default();
-    validate_feat126_test_profile_values(&master, &run_id, &base_url, &run_root)
+    let master = read_profile_environment(MASTER)?;
+    let run_id = read_profile_environment(RUN_ID)?;
+    let base_url = read_profile_environment(BASE_URL)?;
+    let run_root = read_profile_environment(RUN_ROOT)?;
+    let instance_nonce = read_profile_environment(FEAT126_DRIVER_NONCE_ENV)?;
+    validate_feat126_test_profile_values(&master, &run_id, &base_url, &run_root, &instance_nonce)
+}
+
+fn read_profile_environment(name: &str) -> Result<String, ChatError> {
+    match std::env::var(name) {
+        Ok(value) => Ok(value),
+        Err(std::env::VarError::NotPresent) => Ok(String::new()),
+        Err(std::env::VarError::NotUnicode(_)) => Err(ChatError::InvalidConfiguration),
+    }
 }
 
 fn validate_feat126_test_profile_values(
@@ -860,12 +878,14 @@ fn validate_feat126_test_profile_values(
     run_id: &str,
     base_url: &str,
     run_root: &str,
+    instance_nonce: &str,
 ) -> Result<Option<FEAT126TestProfile>, ChatError> {
     if master != "true" {
         if (!master.is_empty() && master != "false")
             || !run_id.is_empty()
             || !base_url.is_empty()
             || !run_root.is_empty()
+            || !instance_nonce.is_empty()
         {
             return Err(ChatError::InvalidConfiguration);
         }
@@ -875,6 +895,7 @@ fn validate_feat126_test_profile_values(
     if parsed.is_nil()
         || parsed.to_string() != run_id
         || base_url != FEAT126_FAKE_RESPONSES_BASE_URL
+        || !is_canonical_uuid_v4(instance_nonce)
     {
         return Err(ChatError::InvalidConfiguration);
     }
@@ -884,6 +905,7 @@ fn validate_feat126_test_profile_values(
         run_id: run_id.to_owned(),
         fake_responses_base_url: base_url.to_owned(),
         run_root,
+        instance_nonce: instance_nonce.to_owned(),
     }))
 }
 
@@ -1227,19 +1249,18 @@ mod tests {
     #[tokio::test]
     async fn strict_termination_rechecks_live_spawn_identity_before_signalling() {
         let binary = fs::canonicalize("/bin/sleep").unwrap();
-        let nonce = generate_instance_nonce(true).unwrap();
+        let nonce = "12600000-0000-4000-8000-000000000001";
         let mut child = Command::new(&binary)
             .arg("30")
             .env_clear()
-            .env("YIJIE_AGENT_HOST_INSTANCE_NONCE", &nonce)
+            .env("YIJIE_AGENT_HOST_INSTANCE_NONCE", nonce)
             .kill_on_drop(true)
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
         let binary_sha256 = file_sha256(&binary).unwrap();
-        let expected =
-            capture_owned_process_identity(pid, &binary, &binary_sha256, &nonce).unwrap();
+        let expected = capture_owned_process_identity(pid, &binary, &binary_sha256, nonce).unwrap();
         assert_eq!(process_binary_path(pid).unwrap(), expected.process_binary);
         assert_eq!(file_sha256(&binary).unwrap(), expected.binary_sha256);
         assert!(owned_process_identity_matches(&expected).unwrap());
@@ -1254,15 +1275,34 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_nonce_is_canonical_uuid_v4_and_production_nonce_stays_uuid_v7() {
-        for _ in 0..16 {
-            let test_nonce = generate_instance_nonce(true).unwrap();
-            let parsed_test = uuid::Uuid::parse_str(&test_nonce).unwrap();
-            assert_eq!(parsed_test.hyphenated().to_string(), test_nonce);
-            assert_eq!(parsed_test.get_version_num(), 4);
-            assert_eq!(parsed_test.as_bytes()[8] & 0xc0, 0x80);
+    fn test_profile_consumes_infra_nonce_and_default_nonce_stays_uuid_v7() {
+        const FIRST: &str = "12600000-0000-4000-8000-000000000001";
+        const SECOND: &str = "12600000-0000-4000-8000-000000000002";
+        let first_lifecycle = FEAT126TestProfile {
+            run_id: "12600000-0000-4000-8000-100000000001".to_owned(),
+            fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
+            run_root: PathBuf::from("/synthetic/first"),
+            instance_nonce: FIRST.to_owned(),
+        };
+        let second_lifecycle = FEAT126TestProfile {
+            instance_nonce: SECOND.to_owned(),
+            ..first_lifecycle.clone()
+        };
+        assert_eq!(
+            resolve_instance_nonce(Some(&first_lifecycle)).unwrap(),
+            FIRST
+        );
+        assert_eq!(
+            resolve_instance_nonce(Some(&second_lifecycle)).unwrap(),
+            SECOND
+        );
+        assert_ne!(
+            first_lifecycle.instance_nonce,
+            second_lifecycle.instance_nonce
+        );
 
-            let production_nonce = generate_instance_nonce(false).unwrap();
+        for _ in 0..16 {
+            let production_nonce = resolve_instance_nonce(None).unwrap();
             let parsed_production = uuid::Uuid::parse_str(&production_nonce).unwrap();
             assert_eq!(parsed_production.hyphenated().to_string(), production_nonce);
             assert_eq!(parsed_production.get_version_num(), 7);
@@ -1300,21 +1340,42 @@ mod tests {
     #[test]
     fn feat126_test_profile_is_exact_closed_and_allowlisted() {
         const RUN_ID: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f80";
+        const NONCE: &str = "12600000-0000-4000-8000-000000000001";
         let root = private_test_directory("profile");
         assert!(validate_feat126_test_profile_values(
             "true",
             RUN_ID,
             FEAT126_FAKE_RESPONSES_BASE_URL,
             root.to_str().unwrap(),
+            NONCE,
         )
         .unwrap()
         .is_some());
         for values in [
-            ("TRUE", RUN_ID, FEAT126_FAKE_RESPONSES_BASE_URL),
-            ("false", RUN_ID, FEAT126_FAKE_RESPONSES_BASE_URL),
-            ("true", "not-a-uuid", FEAT126_FAKE_RESPONSES_BASE_URL),
-            ("true", RUN_ID, "http://localhost:18082/v1"),
-            ("true", RUN_ID, "https://127.0.0.1:18082/v1"),
+            ("TRUE", RUN_ID, FEAT126_FAKE_RESPONSES_BASE_URL, NONCE),
+            ("false", RUN_ID, FEAT126_FAKE_RESPONSES_BASE_URL, NONCE),
+            ("true", "not-a-uuid", FEAT126_FAKE_RESPONSES_BASE_URL, NONCE),
+            ("true", RUN_ID, "http://localhost:18082/v1", NONCE),
+            ("true", RUN_ID, "https://127.0.0.1:18082/v1", NONCE),
+            ("true", RUN_ID, FEAT126_FAKE_RESPONSES_BASE_URL, ""),
+            (
+                "true",
+                RUN_ID,
+                FEAT126_FAKE_RESPONSES_BASE_URL,
+                "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            ),
+            (
+                "true",
+                RUN_ID,
+                FEAT126_FAKE_RESPONSES_BASE_URL,
+                "12600000-0000-4000-800A-000000000001",
+            ),
+            (
+                "true",
+                RUN_ID,
+                FEAT126_FAKE_RESPONSES_BASE_URL,
+                "12600000-0000-4000-0000-000000000001",
+            ),
         ] {
             assert_eq!(
                 validate_feat126_test_profile_values(
@@ -1322,10 +1383,15 @@ mod tests {
                     values.1,
                     values.2,
                     root.to_str().unwrap(),
+                    values.3,
                 ),
                 Err(ChatError::InvalidConfiguration)
             );
         }
+        assert_eq!(
+            validate_feat126_test_profile_values("false", "", "", "", NONCE),
+            Err(ChatError::InvalidConfiguration)
+        );
 
         let binary = root.join("agent-host");
         fs::write(&binary, b"synthetic executable").unwrap();
@@ -1334,6 +1400,7 @@ mod tests {
             run_id: RUN_ID.to_owned(),
             fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
             run_root: root.clone(),
+            instance_nonce: NONCE.to_owned(),
         };
         let config = SidecarConfig {
             binary,
@@ -1344,7 +1411,7 @@ mod tests {
             codex_home: Some(root.join("codex-home")),
             test_profile: Some(profile),
         };
-        let nonce = "019fbd88-cbc3-7bf1-934d-7b05cd693f81";
+        let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
         let prepared_evidence: ProcessEvidence =
             serde_json::from_slice(&fs::read(&prepared.process_manifest).unwrap()).unwrap();
@@ -1414,8 +1481,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_profile_child_crash_records_content_free_evidence_and_can_restart() {
+    async fn distinct_test_profile_lifecycles_record_content_free_child_crash_evidence() {
         const RUN_ID: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f80";
+        const NONCES: [&str; 2] = [
+            "12600000-0000-4000-8000-000000000001",
+            "12600000-0000-4000-8000-000000000002",
+        ];
         let root = private_test_directory("child-crash");
         for name in ["host-home", "codex-home"] {
             create_private_directory(&root.join(name)).unwrap();
@@ -1427,32 +1498,33 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
-        let config = SidecarConfig {
-            binary,
-            host_home: root.join("host-home"),
-            port: 18081,
-            codex_binary: None,
-            codex_manifest: None,
-            codex_home: None,
-            test_profile: Some(FEAT126TestProfile {
-                run_id: RUN_ID.to_owned(),
-                fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
-                run_root: root.clone(),
-            }),
-        };
-        let supervisor = SidecarSupervisor {
-            config: Some(config),
-            client: reqwest::Client::builder().no_proxy().build().unwrap(),
-            inner: Mutex::new(SupervisorState {
-                state: SidecarState::Stopped,
-                child: None,
-                child_identity: None,
-                instance_nonce: None,
-                capture: None,
-                cleanup_unknown: false,
-            }),
-        };
-        for _ in 0..2 {
+        for nonce in NONCES {
+            let config = SidecarConfig {
+                binary: binary.clone(),
+                host_home: root.join("host-home"),
+                port: 18081,
+                codex_binary: None,
+                codex_manifest: None,
+                codex_home: None,
+                test_profile: Some(FEAT126TestProfile {
+                    run_id: RUN_ID.to_owned(),
+                    fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
+                    run_root: root.clone(),
+                    instance_nonce: nonce.to_owned(),
+                }),
+            };
+            let supervisor = SidecarSupervisor {
+                config: Some(config),
+                client: reqwest::Client::builder().no_proxy().build().unwrap(),
+                inner: Mutex::new(SupervisorState {
+                    state: SidecarState::Stopped,
+                    child: None,
+                    child_identity: None,
+                    instance_nonce: None,
+                    capture: None,
+                    cleanup_unknown: false,
+                }),
+            };
             assert_eq!(supervisor.start().await, Err(ChatError::SidecarUnavailable));
             assert_eq!(supervisor.status().await, SidecarState::Failed);
         }
@@ -1466,6 +1538,11 @@ mod tests {
             let evidence_bytes = fs::read(directory.join("process.json")).unwrap();
             let evidence: ProcessEvidence = serde_json::from_slice(&evidence_bytes).unwrap();
             assert_eq!(evidence.run_id, RUN_ID);
+            assert!(NONCES.contains(&evidence.instance_nonce.as_str()));
+            assert_eq!(
+                directory.file_name().unwrap(),
+                evidence.instance_nonce.as_str()
+            );
             assert_eq!(evidence.state, "exited_during_startup");
             assert_eq!(evidence.exit_code, Some(7));
             assert!(evidence.pid.is_some());
@@ -1490,6 +1567,7 @@ mod tests {
             return;
         }
         const RUN_ID: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f80";
+        const NONCE: &str = "12600000-0000-4000-8000-000000000001";
         let host_binary = PathBuf::from(
             std::env::var("YIJIE_FEAT126_INTEGRATION_HOST_BINARY").expect("Host binary path"),
         );
@@ -1513,6 +1591,7 @@ mod tests {
                 run_id: RUN_ID.to_owned(),
                 fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
                 run_root: root.clone(),
+                instance_nonce: NONCE.to_owned(),
             }),
         };
         let supervisor = SidecarSupervisor {

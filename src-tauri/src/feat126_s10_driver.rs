@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::error::Error;
 use std::fs::File;
+use std::future::Future;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tokio::sync::{mpsc, watch, Mutex};
 use uuid::Uuid;
 
@@ -45,6 +46,7 @@ const CONTROL_WRITE_FD: i32 = 4;
 const MAX_FRAME_BYTES: usize = 1024;
 const STARTUP_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(50);
 const POST_READY_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(130);
+const CONTROL_FAILURE_HOST_STOP_TIMEOUT: Duration = Duration::from_secs(7);
 const STARTUP_SETUP_ENTERED: u8 = 1 << 0;
 const STARTUP_APP_HANDLE_READY: u8 = 1 << 1;
 const STARTUP_PAGE_LOAD_STARTED: u8 = 1 << 2;
@@ -690,9 +692,19 @@ impl Feat126S10DriverRuntime {
                     Some(ControlTerminal::PlannedRestart) => ControlOutcome::PlannedRestart,
                     _ => ControlOutcome::Abort,
                 });
-            } else if runtime.emit_control_monitor_failure() {
-                runtime.fail().await;
-                app.exit(1);
+            } else {
+                let cleanup_app = app.clone();
+                let stop_owned_host = async move {
+                    let chat = cleanup_app.try_state::<ChatRuntime>().ok_or(())?;
+                    chat.feat126_s10_stop_owned_host().await.map_err(|_| ())
+                };
+                close_control_monitor_failure(
+                    &runtime,
+                    stop_owned_host,
+                    move |exit_code| app.exit(exit_code),
+                    CONTROL_FAILURE_HOST_STOP_TIMEOUT,
+                )
+                .await;
             }
         });
         Ok(())
@@ -1161,6 +1173,25 @@ impl Feat126S10DriverRuntime {
         outbound_guard.take();
         result
     }
+}
+
+async fn close_control_monitor_failure<StopFuture, Exit>(
+    runtime: &Feat126S10DriverRuntime,
+    stop_owned_host: StopFuture,
+    exit: Exit,
+    stop_timeout: Duration,
+) -> bool
+where
+    StopFuture: Future<Output = Result<(), ()>>,
+    Exit: FnOnce(i32),
+{
+    if !runtime.emit_control_monitor_failure() {
+        return false;
+    }
+    runtime.fail().await;
+    let _ = tokio::time::timeout(stop_timeout, stop_owned_host).await;
+    exit(1);
+    true
 }
 
 fn encode_startup_failure_frame(
@@ -2359,6 +2390,114 @@ mod tests {
             ready_frame["failure_class"],
             "driver_control_projection_invalid"
         );
+    }
+
+    #[tokio::test]
+    async fn control_monitor_failure_closes_terminal_before_host_stop_and_exit() {
+        let (runtime, output) = runtime_with_r8_output("after_restart", 3);
+        let steps = Arc::new(StdMutex::new(Vec::new()));
+        let stop_runtime = runtime.clone();
+        let stop_output = output.clone();
+        let stop_steps = steps.clone();
+        let stop_owned_host = async move {
+            assert!(stop_runtime.inner.outbound.lock().unwrap().is_none());
+            let encoded = std::fs::read_to_string(stop_output).unwrap();
+            let failure: Value = serde_json::from_str(encoded.trim()).unwrap();
+            assert_eq!(failure["kind"], "component_failed");
+            assert_eq!(
+                failure["failure_class"],
+                "driver_control_projection_invalid"
+            );
+            assert_eq!(
+                stop_runtime.inner.state.lock().await.phase,
+                DriverPhase::Failed
+            );
+            stop_steps.lock().unwrap().push("terminal_flush_close");
+            stop_steps.lock().unwrap().push("strict_host_stop");
+            Ok(())
+        };
+        let exit_steps = steps.clone();
+
+        assert!(
+            close_control_monitor_failure(
+                &runtime,
+                stop_owned_host,
+                move |code| {
+                    assert_eq!(code, 1);
+                    exit_steps.lock().unwrap().push("app_exit");
+                },
+                Duration::from_secs(1),
+            )
+            .await
+        );
+        assert_eq!(
+            *steps.lock().unwrap(),
+            ["terminal_flush_close", "strict_host_stop", "app_exit"]
+        );
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[tokio::test]
+    async fn control_monitor_host_stop_failure_still_exits_fail_closed() {
+        let (runtime, output) = runtime_with_output();
+        let steps = Arc::new(StdMutex::new(Vec::new()));
+        let stop_steps = steps.clone();
+        let stop_owned_host = async move {
+            stop_steps.lock().unwrap().push("strict_host_stop_failed");
+            Err(())
+        };
+        let exit_steps = steps.clone();
+
+        assert!(
+            close_control_monitor_failure(
+                &runtime,
+                stop_owned_host,
+                move |code| {
+                    assert_eq!(code, 1);
+                    exit_steps.lock().unwrap().push("app_exit");
+                },
+                Duration::from_secs(1),
+            )
+            .await
+        );
+        assert_eq!(
+            *steps.lock().unwrap(),
+            ["strict_host_stop_failed", "app_exit"]
+        );
+        assert_eq!(*runtime.inner.outcome.borrow(), ControlOutcome::Failed);
+        assert!(runtime.inner.outbound.lock().unwrap().is_none());
+        let encoded = std::fs::read_to_string(&output).unwrap();
+        let failure: Value = serde_json::from_str(encoded.trim()).unwrap();
+        assert_eq!(failure["kind"], "startup_failed");
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[tokio::test]
+    async fn control_monitor_host_stop_timeout_still_exits_fail_closed() {
+        let (runtime, output) = runtime_with_output();
+        let exited = Arc::new(AtomicBool::new(false));
+        let exit_observer = exited.clone();
+
+        assert!(tokio::time::timeout(
+            Duration::from_secs(1),
+            close_control_monitor_failure(
+                &runtime,
+                std::future::pending::<Result<(), ()>>(),
+                move |code| {
+                    assert_eq!(code, 1);
+                    exit_observer.store(true, Ordering::SeqCst);
+                },
+                Duration::from_millis(10),
+            )
+        )
+        .await
+        .unwrap());
+        assert!(exited.load(Ordering::SeqCst));
+        assert_eq!(*runtime.inner.outcome.borrow(), ControlOutcome::Failed);
+        drop(runtime);
+        std::fs::remove_file(output).unwrap();
     }
 
     #[test]
