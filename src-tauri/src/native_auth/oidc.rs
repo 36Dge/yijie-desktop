@@ -78,8 +78,7 @@ impl OidcClient {
         })
     }
 
-    #[cfg(any(test, feature = "feat126-s10-driver"))]
-    pub(crate) fn feat126_config(&self) -> &NativeAuthConfig {
+    pub(crate) fn native_auth_config(&self) -> &NativeAuthConfig {
         &self.config
     }
 

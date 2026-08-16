@@ -136,7 +136,9 @@ describe("permission store", () => {
   });
 
   it("requires an explicit choice for multiple memberships", async () => {
-    const getMyCapabilities = vi.fn(async (tenantId: string) => projection(tenantId, 7, []));
+    const getMyCapabilities = vi.fn(
+      async (tenantId: string) => projection(tenantId, 7, []),
+    );
     const store = createStore({
       listMyTenants: async () => TENANTS,
       getMyCapabilities,
@@ -152,6 +154,7 @@ describe("permission store", () => {
     expect(store.selectedTenantId).toBe(TENANT_B);
     expect(store.capabilities).toEqual([]);
     expect(getMyCapabilities).toHaveBeenCalledTimes(1);
+    expect(getMyCapabilities.mock.calls[0]).toEqual([TENANT_B, expect.any(AbortSignal)]);
   });
 
   it("rejects a tenant that was not returned by discovery", async () => {

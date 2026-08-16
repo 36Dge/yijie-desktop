@@ -10,9 +10,21 @@ use chat::{ChatIpcRuntime, ChatRuntime};
 use native_auth::NativeAuthRuntime;
 #[cfg(not(feature = "feat126-s10-driver"))]
 use native_auth::{AuthStatus, CommandError, OperationResponse};
+#[cfg(not(feature = "feat126-s10-driver"))]
+use serde::Deserialize;
 use tauri::Manager;
 #[cfg(not(feature = "feat126-s10-driver"))]
 use tauri::State;
+#[cfg(not(feature = "feat126-s10-driver"))]
+use zeroize::ZeroizeOnDrop;
+
+#[cfg(not(feature = "feat126-s10-driver"))]
+#[derive(Deserialize, ZeroizeOnDrop)]
+#[serde(deny_unknown_fields)]
+struct LocalWhitelistLoginRequest {
+    username: String,
+    password: String,
+}
 
 #[cfg(not(feature = "feat126-s10-driver"))]
 #[tauri::command]
@@ -26,6 +38,17 @@ async fn native_auth_login(
     runtime: State<'_, NativeAuthRuntime>,
 ) -> Result<AuthStatus, CommandError> {
     runtime.login().await
+}
+
+#[cfg(not(feature = "feat126-s10-driver"))]
+#[tauri::command]
+async fn native_auth_local_whitelist_login(
+    request: LocalWhitelistLoginRequest,
+    runtime: State<'_, NativeAuthRuntime>,
+) -> Result<AuthStatus, CommandError> {
+    runtime
+        .local_whitelist_login(&request.username, &request.password)
+        .await
 }
 
 #[cfg(not(feature = "feat126-s10-driver"))]
@@ -161,6 +184,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         runtime_health,
         native_auth_login,
+        native_auth_local_whitelist_login,
         native_auth_logout,
         native_auth_status,
         list_my_tenants,

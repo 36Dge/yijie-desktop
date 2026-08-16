@@ -1,8 +1,8 @@
 use super::config::AuthEnvironment;
 use super::{
-    CommandError, NativeAuthConfig, NativeAuthError, OidcClient, ProtectedKeychainStore,
-    RefreshFailure, RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue,
-    StoredRefreshToken,
+    local_whitelist_authorization_code_tokens, CommandError, LocalWhitelistConfig,
+    NativeAuthConfig, NativeAuthError, OidcClient, ProtectedKeychainStore, RefreshFailure,
+    RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue, StoredRefreshToken,
 };
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::loopback::LoopbackCallback;
@@ -91,6 +91,7 @@ struct AuthService {
     store: Arc<dyn RefreshTokenStore>,
     transport: OperationTransport,
     access: Mutex<Option<AccessSession>>,
+    local_whitelist: Option<LocalWhitelistConfig>,
     storage_blocked: Mutex<bool>,
     login_lock: Mutex<()>,
     refresh_lock: Mutex<()>,
@@ -140,6 +141,15 @@ impl NativeAuthRuntime {
                         mode: RuntimeMode::Invalid,
                     };
                 }
+                let local_whitelist =
+                    match LocalWhitelistConfig::from_environment(config.environment) {
+                        Ok(config) => config,
+                        Err(_) => {
+                            return Self {
+                                mode: RuntimeMode::Invalid,
+                            }
+                        }
+                    };
                 let binding = RefreshTokenBinding::from_config(&config);
                 match (
                     OidcClient::new(config.clone()),
@@ -153,6 +163,7 @@ impl NativeAuthRuntime {
                             store: Arc::new(store),
                             transport,
                             access: Mutex::new(None),
+                            local_whitelist,
                             storage_blocked: Mutex::new(false),
                             login_lock: Mutex::new(()),
                             refresh_lock: Mutex::new(()),
@@ -167,6 +178,17 @@ impl NativeAuthRuntime {
 
     pub async fn login(&self) -> Result<AuthStatus, CommandError> {
         self.service()?.login().await.map_err(CommandError::from)
+    }
+
+    pub async fn local_whitelist_login(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<AuthStatus, CommandError> {
+        self.service()?
+            .local_whitelist_login(username, password)
+            .await
+            .map_err(CommandError::from)
     }
 
     pub async fn logout(&self) -> Result<AuthStatus, CommandError> {
@@ -401,6 +423,7 @@ impl NativeAuthRuntime {
                     token: tokens.access_token,
                     expires_at,
                 })),
+                local_whitelist: None,
                 storage_blocked: Mutex::new(false),
                 login_lock: Mutex::new(()),
                 refresh_lock: Mutex::new(()),
@@ -705,6 +728,30 @@ impl AuthService {
             )
             .await?;
         let tokens = self.oidc.exchange_code(attempt, callback_code.code).await?;
+        self.install_issued_tokens(tokens).await
+    }
+
+    async fn local_whitelist_login(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<AuthStatus, NativeAuthError> {
+        let config = self
+            .local_whitelist
+            .as_ref()
+            .ok_or(NativeAuthError::Disabled)?;
+        let _login_guard = self
+            .login_lock
+            .try_lock()
+            .map_err(|_| NativeAuthError::LoginInProgress)?;
+        let backend_password = config.backend_password(username, password)?;
+        let tokens =
+            local_whitelist_authorization_code_tokens(&self.oidc, backend_password.as_str())
+                .await
+                .map_err(|_| NativeAuthError::AuthenticationFailed)?;
+        // The backend password is only needed to complete the synthetic OIDC
+        // exchange. Do not keep it alive while tokens are persisted/installed.
+        drop(backend_password);
         self.install_issued_tokens(tokens).await
     }
 
@@ -1108,6 +1155,7 @@ mod tests {
             store: store.clone(),
             transport: OperationTransport::new(&config).expect("operation transport"),
             access: Mutex::new(None),
+            local_whitelist: None,
             storage_blocked: Mutex::new(false),
             login_lock: Mutex::new(()),
             refresh_lock: Mutex::new(()),

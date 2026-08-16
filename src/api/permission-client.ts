@@ -380,7 +380,7 @@ export function createPermissionClient(
     async getMyCapabilities(
       tenantId: string,
       signal?: AbortSignal,
-      nowEpochMs = Date.now(),
+      nowEpochMs?: number,
     ): Promise<PermissionProjection> {
       let canonicalTenantId: string;
       try {
@@ -393,7 +393,7 @@ export function createPermissionClient(
       if (envelope.status !== 200) {
         throw errorForEnvelope(envelope, intent);
       }
-      return decodeProjection(envelope.body, canonicalTenantId, nowEpochMs);
+      return decodeProjection(envelope.body, canonicalTenantId, nowEpochMs ?? Date.now());
     },
   };
 }

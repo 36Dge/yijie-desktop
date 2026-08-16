@@ -13,6 +13,7 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_REJECTED_CONNECTIONS: usize = 8;
+const KEYCLOAK_SESSION_STATE_BYTES: usize = 24;
 
 pub struct LoopbackCallback {
     listener: TcpListener,
@@ -177,11 +178,13 @@ fn parse_request(
     let mut code = None;
     let mut state = None;
     let mut issuer = None;
+    let mut session_state = None;
     for (name, value) in url.query_pairs() {
         match name.as_ref() {
             "code" if code.is_none() => code = Some(value.into_owned()),
             "state" if state.is_none() => state = Some(value.into_owned()),
             "iss" if issuer.is_none() => issuer = Some(value.into_owned()),
+            "session_state" if session_state.is_none() => session_state = Some(value.into_owned()),
             _ => return Err(CallbackParseError::Rejected),
         }
     }
@@ -198,6 +201,14 @@ fn parse_request(
         return Err(CallbackParseError::Rejected);
     }
     if issuer.is_some_and(|value| value != expected_issuer) {
+        return Err(CallbackParseError::Rejected);
+    }
+    if session_state.is_some_and(|value| {
+        value.len() != KEYCLOAK_SESSION_STATE_BYTES
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    }) {
         return Err(CallbackParseError::Rejected);
     }
     Ok(SecretValue::new(code))
@@ -329,6 +340,27 @@ mod tests {
             parse_request(&wrong, 43123, "s", "https://identity.example/").unwrap_err(),
             CallbackParseError::Rejected
         );
+    }
+
+    #[test]
+    fn accepts_only_a_valid_optional_keycloak_session_state() {
+        let valid = request(
+            "/oauth/callback?code=a&state=s&session_state=AbCdEf0123456789-_ghijkl",
+            43123,
+        );
+        assert!(parse_request(&valid, 43123, "s", "https://identity.example/").is_ok());
+
+        for target in [
+            "/oauth/callback?code=a&state=s&session_state=short",
+            "/oauth/callback?code=a&state=s&session_state=AbCdEf0123456789-_ghijk!",
+            "/oauth/callback?code=a&state=s&session_state=AbCdEf0123456789-_ghijkl&session_state=AbCdEf0123456789-_ghijkl",
+        ] {
+            assert_eq!(
+                parse_request(&request(target, 43123), 43123, "s", "https://identity.example/")
+                    .unwrap_err(),
+                CallbackParseError::Rejected
+            );
+        }
     }
 
     #[test]

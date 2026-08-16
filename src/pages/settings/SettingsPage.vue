@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { NCard, NText } from "naive-ui";
 import { nativeAuthClient } from "../../api/native-auth-client";
+import { localWhitelistLoginEnabled } from "../../authorization/local-whitelist-login-config";
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
 import type { PermissionPhase } from "../../domain/permissions";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -10,6 +11,10 @@ const permissionStore = usePermissionStore();
 const operationPending = ref(false);
 const operationMessage = ref<string | null>(null);
 const signedOut = ref(false);
+const localUsername = ref("");
+const localPassword = ref("");
+const localUsernameError = ref<string | null>(null);
+const localPasswordError = ref<string | null>(null);
 
 const selectedTenant = computed(() =>
   permissionStore.tenants.find(
@@ -26,6 +31,13 @@ const showTenantSelector = computed(
 );
 const statusCopy = computed(() =>
   statusForPhase(signedOut.value ? "unauthorized" : permissionStore.phase),
+);
+const showLocalWhitelistForm = computed(() =>
+  localWhitelistLoginEnabled && (
+    !authoritativePermissionUiEnabled ||
+    signedOut.value ||
+    !["ready", "ready-empty", "discovering", "loading"].includes(permissionStore.phase)
+  ),
 );
 
 function statusForPhase(phase: PermissionPhase): { title: string; detail: string } {
@@ -88,6 +100,46 @@ async function login(): Promise<void> {
     }
   } catch {
     operationMessage.value = "登录未完成，请检查本地身份环境后重试。";
+  } finally {
+    operationPending.value = false;
+  }
+}
+
+async function localWhitelistLogin(): Promise<void> {
+  if (operationPending.value) {
+    return;
+  }
+  localUsernameError.value = localUsername.value.length === 0 ? "请输入本地白名单账号。" : null;
+  localPasswordError.value = localPassword.value.length === 0 ? "请输入本地白名单密码。" : null;
+  if (localUsernameError.value || localPasswordError.value) {
+    return;
+  }
+
+  let username = localUsername.value;
+  let password = localPassword.value;
+  // Remove the credentials from the reactive DOM state before any network or
+  // permission projection work begins.
+  localUsername.value = "";
+  localPassword.value = "";
+  operationPending.value = true;
+  operationMessage.value = null;
+  const loginRequest = nativeAuthClient.localWhitelistLogin({ username, password });
+  // Intentionally release these credential references before awaiting native work.
+  // eslint-disable-next-line no-useless-assignment
+  username = "";
+  // eslint-disable-next-line no-useless-assignment
+  password = "";
+  try {
+    await loginRequest;
+    signedOut.value = false;
+    permissionStore.clearForLogout();
+    if (authoritativePermissionUiEnabled) {
+      await permissionStore.ensureInitialized();
+    } else {
+      operationMessage.value = "登录已完成；权威权限界面仍保持安全关闭。";
+    }
+  } catch {
+    operationMessage.value = "本地登录未完成，请检查账号、密码和本地服务配置。";
   } finally {
     operationPending.value = false;
   }
@@ -225,6 +277,72 @@ async function selectTenant(tenantId: string): Promise<void> {
             </button>
           </div>
         </div>
+
+        <form
+          v-if="showLocalWhitelistForm"
+          class="local-login-form"
+          aria-labelledby="local-login-title"
+          novalidate
+          @submit.prevent="localWhitelistLogin"
+        >
+          <h2 id="local-login-title">本地白名单登录</h2>
+          <div class="local-login-form__field">
+            <label for="local-login-username">账号</label>
+            <input
+              id="local-login-username"
+              v-model="localUsername"
+              class="local-login-form__input"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              :disabled="operationPending"
+              :aria-invalid="localUsernameError !== null"
+              :aria-describedby="localUsernameError ? 'local-login-username-error' : undefined"
+              maxlength="64"
+              @input="localUsernameError = null"
+            >
+            <p
+              v-if="localUsernameError"
+              id="local-login-username-error"
+              class="local-login-form__error"
+              role="alert"
+            >
+              {{ localUsernameError }}
+            </p>
+          </div>
+          <div class="local-login-form__field">
+            <label for="local-login-password">密码</label>
+            <input
+              id="local-login-password"
+              v-model="localPassword"
+              class="local-login-form__input"
+              type="password"
+              autocomplete="new-password"
+              :disabled="operationPending"
+              :aria-invalid="localPasswordError !== null"
+              :aria-describedby="localPasswordError ? 'local-login-password-error' : undefined"
+              maxlength="256"
+              @input="localPasswordError = null"
+            >
+            <p
+              v-if="localPasswordError"
+              id="local-login-password-error"
+              class="local-login-form__error"
+              role="alert"
+            >
+              {{ localPasswordError }}
+            </p>
+          </div>
+          <div class="access-state__actions">
+            <button
+              class="button button--primary"
+              type="submit"
+              :disabled="operationPending"
+            >
+              登录
+            </button>
+          </div>
+        </form>
       </n-card>
 
       <n-card class="page__card" title="Sidecar" :bordered="false">
@@ -354,6 +472,59 @@ async function selectTenant(tenantId: string): Promise<void> {
 }
 
 .access-state__error {
+  margin: 0;
+  color: var(--yj-color-error);
+}
+
+.local-login-form {
+  display: grid;
+  max-width: 480px;
+  margin-top: var(--yj-space-5);
+  padding-top: var(--yj-space-5);
+  border-top: 1px solid var(--yj-color-border-default);
+  gap: var(--yj-space-4);
+}
+
+.local-login-form h2 {
+  margin: 0;
+  color: var(--yj-color-text-primary);
+  font-size: var(--yj-font-size-section-title);
+}
+
+.local-login-form__field {
+  display: grid;
+  gap: var(--yj-space-2);
+}
+
+.local-login-form__field label {
+  color: var(--yj-color-text-secondary);
+  font-weight: var(--yj-font-weight-semibold);
+}
+
+.local-login-form__input {
+  width: 100%;
+  min-height: var(--yj-space-10);
+  padding: var(--yj-space-2) var(--yj-space-3);
+  border: 1px solid var(--yj-color-border-default);
+  border-radius: var(--yj-radius-md);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-bg-card);
+  box-sizing: border-box;
+}
+
+.local-login-form__input:focus-visible {
+  border-color: var(--yj-color-brand-border);
+  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline-offset: var(--yj-space-1);
+}
+
+.local-login-form__input:disabled {
+  color: var(--yj-color-text-disabled);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.local-login-form__error {
   margin: 0;
   color: var(--yj-color-error);
 }

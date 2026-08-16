@@ -98,6 +98,28 @@ describe("permission contract consumer", () => {
     });
   });
 
+  it("measures the projection lifetime after the native response arrives", async () => {
+    const responseAt = NOW + 25;
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      const client = createPermissionClient(async <T>() => {
+        vi.setSystemTime(responseAt);
+        return envelope(200, {
+          ...fixture("capability-v1-ready.json"),
+          expires_at: new Date(responseAt + 5 * 60_000).toISOString(),
+        }) as T;
+      });
+
+      await expect(client.getMyCapabilities(TENANT_A)).resolves.toMatchObject({
+        tenantId: TENANT_A,
+        authorizationRevision: 42,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tolerates additive response fields without creating permissions", async () => {
     const tenantBody = {
       ...fixture("tenant-list-v1-single.json"),

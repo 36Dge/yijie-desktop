@@ -139,11 +139,7 @@ export function createPermissionStoreDefinition(
       const { epoch, controller } = startRequest("loading");
       selectedTenantId.value = selected.tenantId;
       try {
-        const projection = await client.getMyCapabilities(
-          selected.tenantId,
-          controller.signal,
-          Date.now(),
-        );
+        const projection = await client.getMyCapabilities(selected.tenantId, controller.signal);
         if (!isCurrent(epoch, controller)) {
           return;
         }

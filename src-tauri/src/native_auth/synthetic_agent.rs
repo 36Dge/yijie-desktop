@@ -1,26 +1,36 @@
 use super::oidc::IssuedTokens;
 use super::{NativeAuthConfig, NativeAuthError, OidcClient, SecretValue};
 use reqwest::header::{COOKIE, LOCATION, SET_COOKIE};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(any(test, feature = "feat126-s10-driver"))]
+use std::collections::BTreeSet;
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 use std::fs::File;
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 use std::io::Read;
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "feat126-s10-driver")))]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 use std::path::Path;
 use std::time::Duration;
 use subtle::ConstantTimeEq;
 use url::Url;
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 use zeroize::Zeroizing;
 
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 const SECRET_PATH_ENV: &str = "YIJIE_FEAT126_S10_INFRA_SECRETS_PATH";
 const SYNTHETIC_USERNAME: &str = "feat125-synthetic-user-a";
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 const SYNTHETIC_PASSWORD_KEY: &str = "FEAT126_S10_SYNTHETIC_USER_A_PASSWORD";
 const CALLBACK_URI: &str = "http://127.0.0.1/oauth/callback";
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 const MAX_SECRET_FILE_BYTES: u64 = 4 * 1024;
 const MAX_AUTHORIZATION_BODY_BYTES: usize = 256 * 1024;
 const MAX_COOKIE_BYTES: usize = 16 * 1024;
 const MAX_CODE_BYTES: usize = 4 * 1024;
 const KEYCLOAK_SESSION_STATE_BYTES: usize = 24;
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 const SECRET_KEYS: [&str; 5] = [
     "FEAT126_S10_API_DB_PASSWORD",
     "FEAT126_S10_KEYCLOAK_DB_PASSWORD",
@@ -31,6 +41,7 @@ const SECRET_KEYS: [&str; 5] = [
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SyntheticLoginFailure {
+    #[cfg(any(test, feature = "feat126-s10-driver"))]
     SecretAuthority,
     AuthorizationStart,
     AuthorizationRequest,
@@ -56,8 +67,10 @@ impl SyntheticLoginFailure {
         Self::TokenExchange,
     ];
 
+    #[cfg(any(test, feature = "feat126-s10-driver"))]
     pub(crate) const fn failure_class(self) -> &'static str {
         match self {
+            #[cfg(any(test, feature = "feat126-s10-driver"))]
             Self::SecretAuthority => "driver_login_secret_invalid",
             Self::AuthorizationStart => "driver_login_authorization_start_failed",
             Self::AuthorizationRequest => "driver_login_authorization_request_invalid",
@@ -71,6 +84,7 @@ impl SyntheticLoginFailure {
     }
 }
 
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 pub(crate) async fn synthetic_authorization_code_tokens(
     oidc: &OidcClient,
 ) -> Result<IssuedTokens, SyntheticLoginFailure> {
@@ -78,23 +92,39 @@ pub(crate) async fn synthetic_authorization_code_tokens(
         std::env::var(SECRET_PATH_ENV).map_err(|_| SyntheticLoginFailure::SecretAuthority)?;
     let password = read_synthetic_password(Path::new(&secret_path))
         .map_err(|_| SyntheticLoginFailure::SecretAuthority)?;
+    authorization_code_tokens(oidc, SYNTHETIC_USERNAME, password.as_str()).await
+}
+
+pub(crate) async fn local_whitelist_authorization_code_tokens(
+    oidc: &OidcClient,
+    backend_password: &str,
+) -> Result<IssuedTokens, SyntheticLoginFailure> {
+    authorization_code_tokens(oidc, SYNTHETIC_USERNAME, backend_password).await
+}
+
+async fn authorization_code_tokens(
+    oidc: &OidcClient,
+    username: &str,
+    password: &str,
+) -> Result<IssuedTokens, SyntheticLoginFailure> {
     let attempt = oidc
         .begin_login(CALLBACK_URI.to_owned())
         .await
         .map_err(|_| SyntheticLoginFailure::AuthorizationStart)?;
     validate_authorization_request(
-        oidc.feat126_config(),
+        oidc.native_auth_config(),
         &attempt.authorization_url,
         attempt.expected_state.expose(),
         &attempt.expected_issuer,
     )
     .map_err(|_| SyntheticLoginFailure::AuthorizationRequest)?;
     let code = authorization_code(
-        oidc.feat126_config(),
+        oidc.native_auth_config(),
         &attempt.authorization_url,
         attempt.expected_state.expose(),
         &attempt.expected_issuer,
-        password.as_str(),
+        username,
+        password,
     )
     .await?;
     oidc.exchange_code(attempt, code)
@@ -170,6 +200,7 @@ fn validate_authorization_request(
     Ok(())
 }
 
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 fn read_synthetic_password(path: &Path) -> Result<Zeroizing<String>, NativeAuthError> {
     if !path.is_absolute() {
         return Err(NativeAuthError::InvalidConfiguration);
@@ -210,6 +241,7 @@ fn read_synthetic_password(path: &Path) -> Result<Zeroizing<String>, NativeAuthE
     parse_synthetic_password(&contents)
 }
 
+#[cfg(any(test, feature = "feat126-s10-driver"))]
 fn parse_synthetic_password(contents: &str) -> Result<Zeroizing<String>, NativeAuthError> {
     let expected = SECRET_KEYS.into_iter().collect::<BTreeSet<_>>();
     let mut entries = BTreeMap::new();
@@ -252,6 +284,7 @@ async fn authorization_code(
     authorization_url: &Url,
     expected_state: &str,
     expected_issuer: &str,
+    username: &str,
     password: &str,
 ) -> Result<SecretValue, SyntheticLoginFailure> {
     let client = config
@@ -311,7 +344,7 @@ async fn authorization_code(
         .post(action)
         .header(COOKIE, cookies)
         .form(&[
-            ("username", SYNTHETIC_USERNAME),
+            ("username", username),
             ("password", password),
             ("credentialId", ""),
         ])

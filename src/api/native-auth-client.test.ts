@@ -37,4 +37,20 @@ describe("native auth client", () => {
       message: "native-auth-login-failed",
     });
   });
+
+  it("AUTH-UI-004 sends local credentials only to the dedicated command", async () => {
+    const invoke = vi.fn(async () => "signed_in");
+    const client = createNativeAuthClient(invoke);
+
+    await expect(client.localWhitelistLogin({
+      username: "local-test-user",
+      password: "local-test-password",
+    })).resolves.toBe("signed_in");
+    expect(invoke).toHaveBeenCalledWith("native_auth_local_whitelist_login", {
+      request: {
+        username: "local-test-user",
+        password: "local-test-password",
+      },
+    });
+  });
 });
