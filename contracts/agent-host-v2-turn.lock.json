@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.3.0-candidate",
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "full_commit": "747cf740f2d91e76e5c1a130e8e009f1efa821b8",
+  "source": {
+    "path": "openapi/agent-host/agent-host.yaml",
+    "sha256": "3d2f2273160aa05112f63d67f170229780d4526d679cd449a267890a933ea177"
+  },
+  "operation": {
+    "method": "post",
+    "path": "/v2/agent-sessions/{agent_session_id}/turns",
+    "operation_id": "startAgentTurnV2",
+    "request_schema": "#/components/schemas/StartTurnV2Request"
+  },
+  "canonical_fixture": {
+    "source_path": "tests/fixtures/agent/host-v2/turn-request.json",
+    "source_sha256": "ec464ce56f749852e65be8d1472d8f5d8cccc82c89d2dd16fab33fbdbe62decc",
+    "snapshot_path": "src-tauri/fixtures/agent-host-v2/turn-request.json",
+    "snapshot_sha256": "ec464ce56f749852e65be8d1472d8f5d8cccc82c89d2dd16fab33fbdbe62decc"
+  },
+  "parser": {
+    "package": "@redocly/openapi-core",
+    "version": "1.34.18",
+    "api": "parseYaml",
+    "provided_by": "openapi-typescript@7.13.0"
+  },
+  "consumer": {
+    "mode": "hand-written-rust-adapter",
+    "adapter_path": "src-tauri/src/chat/host_bridge.rs",
+    "adapter_sha256": "c6e90e0e8eff736101fd2cf9eea39cf70064f9c59ab0bcd90b2e2fc9286e221d",
+    "readiness_path": "src-tauri/src/chat/mod.rs",
+    "readiness_sha256": "9a0702519eb8ad39cab72aa6adf5b1e2bdc72103b84c92cc0b38e0f05b0a444a",
+    "public_lock_path": "contracts/public-api.lock.json",
+    "serialization_test": "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection",
+    "approved_rust_generator": "N/A",
+    "generator_rationale": "No Rust OpenAPI generator is approved for the Desktop Tauri boundary; serde is reviewed and tested against the pinned schema and canonical fixture.",
+    "canonical_projection_omits_optional_fields": [
+      "trace_id",
+      "request_id",
+      "tenant_id",
+      "user_id",
+      "reasoning_effort"
+    ]
+  },
+  "exception": {
+    "id": "EXC-127-002",
+    "scope": "Temporary hand-written Rust Agent Host v2 turn request adapter with pinned schema and fixture conformance evidence.",
+    "owner": "段成威",
+    "approved_on": "2026-08-19",
+    "expires_on": "2026-11-17",
+    "status": "active",
+    "removal_trigger": "Remove or re-review this exception when an approved Rust OpenAPI generator becomes available, the pinned request schema changes, or before any signed or release candidate."
+  }
+}

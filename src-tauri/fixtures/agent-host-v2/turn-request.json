@@ -1,0 +1,33 @@
+{
+  "operation_id": "019fbd88-cbc3-7bf1-934d-7b05cd693f60",
+  "trace_id": "trace-feat-127",
+  "request_id": "request-feat-127",
+  "tenant_id": "tenant-local",
+  "user_id": "user-local",
+  "content_blocks": [
+    {
+      "type": "text",
+      "text": "Compare the attached quarterly total with the image."
+    },
+    {
+      "type": "file",
+      "attachment_id": "019fbd88-cbc3-7bf1-934d-7b05cd693f61",
+      "name": "quarterly-total.csv",
+      "media_type": "text/csv",
+      "size_bytes": 20,
+      "sha256": "7c7c58d54de2f1f1e5d95d22656ef4ce9cd239f7d7aa7bf62194d1d999a571fd",
+      "context_chunks": [
+        "quarter,total\nQ1,42"
+      ]
+    },
+    {
+      "type": "image",
+      "attachment_id": "019fbd88-cbc3-7bf1-934d-7b05cd693f62",
+      "media_type": "image/png",
+      "size_bytes": 68,
+      "sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+      "data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+  ],
+  "reasoning_effort": "high"
+}

@@ -825,6 +825,29 @@ describe("chat view-model store", () => {
     expect(store.canAttach).toBe(false);
   });
 
+  it("rejects an eleventh dropped attachment without mutating the full draft", async () => {
+    const importAttachments = vi.fn<ChatClient["importAttachments"]>(async () => []);
+    const store = createStore(fakeClient({ importAttachments }).client);
+    await store.bind(TENANT);
+
+    const fullDraft = Object.freeze(Array.from(
+      { length: CHAT_DRAFT_ATTACHMENT_LIMIT },
+      (_, index): ChatAttachment => Object.freeze({
+        ...attachment(),
+        attachmentId: `019c1a00-0000-7000-8000-${String(20 + index).padStart(12, "0")}`,
+      }),
+    ));
+    store.draftAttachments = fullDraft;
+    expect(store.canAttach).toBe(false);
+
+    await expect(store.importAttachmentPaths(["/transient/eleventh.pdf"]))
+      .resolves.toEqual([]);
+
+    expect(store.attachmentErrorCode).toBe("too_many");
+    expect(importAttachments).not.toHaveBeenCalled();
+    expect(store.draftAttachments).toEqual(fullDraft);
+  });
+
   it("accepts only ordered aggregate import events and requires terminal dismissal before recovery", async () => {
     const delayedImport = new Deferred<readonly ChatAttachment[]>();
     const pickAttachments = vi.fn(async () => delayedImport.promise);
@@ -981,6 +1004,45 @@ describe("chat view-model store", () => {
     expect(restartedProcess.draftAttachments).toEqual([attachment()]);
     expect(listDraftAttachments).toHaveBeenNthCalledWith(2, CONTEXT, CHAT_NEW_DRAFT_TARGET);
     expect(removeAttachment).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a successfully removed native draft after restart", async () => {
+    let persistedDrafts: readonly ChatAttachment[] = Object.freeze([attachment()]);
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(
+      async (_context, target) => target.type === "new" ? persistedDrafts : [],
+    );
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>(
+      async (_context, _target, attachmentId, operation) => {
+        persistedDrafts = Object.freeze(
+          persistedDrafts.filter((candidate) => candidate.attachmentId !== attachmentId),
+        );
+        return operation;
+      },
+    );
+    const { client } = fakeClient({ listDraftAttachments, removeAttachment });
+
+    const firstProcess = createStore(client);
+    await firstProcess.bind(TENANT);
+    expect(firstProcess.draftAttachments).toEqual([attachment()]);
+
+    await firstProcess.removeDraftAttachment(attachment().attachmentId);
+
+    expect(firstProcess.draftAttachments).toEqual([]);
+    expect(removeAttachment).toHaveBeenCalledWith(
+      CONTEXT,
+      CHAT_NEW_DRAFT_TARGET,
+      attachment().attachmentId,
+      "019c1a00-0000-7000-8000-00000000000c",
+    );
+
+    await firstProcess.dispose();
+    setActivePinia(createPinia());
+    const restartedProcess = createStore(client);
+    await restartedProcess.bind(TENANT);
+
+    expect(restartedProcess.draftAttachments).toEqual([]);
+    expect(listDraftAttachments).toHaveBeenNthCalledWith(2, CONTEXT, CHAT_NEW_DRAFT_TARGET);
+    expect(removeAttachment).toHaveBeenCalledOnce();
   });
 
   it("loads only the selected target while preserving drafts owned by the previous route", async () => {

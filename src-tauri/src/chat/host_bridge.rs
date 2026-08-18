@@ -1333,6 +1333,59 @@ mod tests {
         assert!(validate_turn_v2_blocks(&invalid).is_err());
     }
 
+    #[test]
+    fn start_turn_v2_adapter_serializes_canonical_contract_projection() {
+        let mut expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../fixtures/agent-host-v2/turn-request.json"
+        ))
+        .unwrap();
+        let expected_object = expected.as_object_mut().unwrap();
+        for optional_field in [
+            "trace_id",
+            "request_id",
+            "tenant_id",
+            "user_id",
+            "reasoning_effort",
+        ] {
+            expected_object.remove(optional_field);
+        }
+
+        let blocks = vec![
+            HostTurnInputBlock::Text {
+                text: "Compare the attached quarterly total with the image.".to_owned(),
+            },
+            HostTurnInputBlock::File {
+                attachment_id: Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f61")
+                    .unwrap(),
+                safe_name: "quarterly-total.csv".to_owned(),
+                media_type: "text/csv".to_owned(),
+                size_bytes: 20,
+                sha256: "7c7c58d54de2f1f1e5d95d22656ef4ce9cd239f7d7aa7bf62194d1d999a571fd"
+                    .to_owned(),
+                context_chunks: vec!["quarter,total\nQ1,42".to_owned()],
+            },
+            HostTurnInputBlock::Image {
+                attachment_id: Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f62")
+                    .unwrap(),
+                media_type: "image/png".to_owned(),
+                size_bytes: 68,
+                sha256: "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+                    .to_owned(),
+                data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                    .to_owned(),
+            },
+        ];
+        validate_turn_v2_blocks(&blocks).unwrap();
+        let trace = HostTrace::default();
+        let request = StartTurnV2Request {
+            operation_id: Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f60").unwrap(),
+            trace: &trace,
+            content_blocks: &blocks,
+        };
+
+        assert_eq!(serde_json::to_value(request).unwrap(), expected);
+    }
+
     #[tokio::test]
     async fn accepted_v2_turn_with_invalid_response_is_retryable_but_conflict_stays_typed() {
         let token = TestToken::new(0o600);
