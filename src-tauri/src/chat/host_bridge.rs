@@ -1,22 +1,30 @@
+use super::attachment::validate_image_content;
+use super::database::HostTurnInputBlock;
 use super::host_domain::{
     parse_cleanup_reason, parse_cleanup_surface, parse_host_error_code, protocol_error,
     HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupSurfaces, HostErrorCode,
     HostEvent, HostEventCursor, HostSession, HostSessionFailure, HostSessionState, SseDecoder,
 };
 use super::sidecar::HostConnection;
+use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use reqwest::{Client, Method, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt::{Debug, Formatter};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 const MAX_JSON_BYTES: usize = 1024 * 1024;
+const MAX_TURN_V2_JSON_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TURN_V2_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
+const MAX_TURN_V2_FILE_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -121,6 +129,14 @@ struct StartTurnRequest<'a> {
     #[serde(flatten)]
     trace: &'a HostTrace,
     input: &'a str,
+}
+
+#[derive(Serialize)]
+struct StartTurnV2Request<'a> {
+    operation_id: Uuid,
+    #[serde(flatten)]
+    trace: &'a HostTrace,
+    content_blocks: &'a [HostTurnInputBlock],
 }
 
 #[derive(Serialize)]
@@ -336,6 +352,40 @@ impl HostBridge {
         parse_required_uuid(&wire.turn_id)
     }
 
+    pub async fn start_turn_v2(
+        &self,
+        session_id: Uuid,
+        operation_id: Uuid,
+        content_blocks: &[HostTurnInputBlock],
+        trace: &HostTrace,
+    ) -> Result<Uuid, HostBridgeError> {
+        require_non_nil(session_id)?;
+        require_non_nil(operation_id)?;
+        validate_trace(trace)?;
+        validate_turn_v2_blocks(content_blocks)?;
+        let response = self
+            .send_json_with_limit(
+                Method::POST,
+                &format!("/v2/agent-sessions/{session_id}/turns"),
+                &StartTurnV2Request {
+                    operation_id,
+                    trace,
+                    content_blocks,
+                },
+                MAX_TURN_V2_JSON_BYTES,
+            )
+            .await?;
+        if response.status() != StatusCode::ACCEPTED {
+            return Err(parse_rejection(response).await);
+        }
+        let response = read_json_body(response)
+            .await
+            .map_err(|_| accepted_response_invalid())?;
+        let wire: StartTurnResponse =
+            serde_json::from_slice(&response).map_err(|_| accepted_response_invalid())?;
+        parse_required_uuid(&wire.turn_id).map_err(|_| accepted_response_invalid())
+    }
+
     pub async fn interrupt_turn(
         &self,
         session_id: Uuid,
@@ -480,8 +530,19 @@ impl HostBridge {
         path_and_query: &str,
         payload: &T,
     ) -> Result<Response, HostBridgeError> {
+        self.send_json_with_limit(method, path_and_query, payload, MAX_JSON_BYTES)
+            .await
+    }
+
+    async fn send_json_with_limit<T: Serialize + ?Sized>(
+        &self,
+        method: Method,
+        path_and_query: &str,
+        payload: &T,
+        limit: usize,
+    ) -> Result<Response, HostBridgeError> {
         let body = serde_json::to_vec(payload).map_err(|_| protocol_error())?;
-        if body.len() > MAX_JSON_BYTES {
+        if body.len() > limit {
             return Err(protocol_error());
         }
         self.authorized_request(method, path_and_query)
@@ -683,6 +744,7 @@ fn parse_rejection_body(status: StatusCode, body: &[u8]) -> HostBridgeError {
             code,
             HostErrorCode::TaskSessionExists
                 | HostErrorCode::TurnActive
+                | HostErrorCode::TurnOperationConflict
                 | HostErrorCode::TurnNotActive
                 | HostErrorCode::SessionNotUsable
                 | HostErrorCode::EventStreamChanged
@@ -759,6 +821,125 @@ fn validate_trace(trace: &HostTrace) -> Result<(), HostBridgeError> {
         require_non_nil(value)?;
     }
     Ok(())
+}
+
+fn validate_turn_v2_blocks(blocks: &[HostTurnInputBlock]) -> Result<(), HostBridgeError> {
+    if blocks.is_empty() || blocks.len() > 16 {
+        return Err(protocol_error());
+    }
+    let mut attachment_count = 0_usize;
+    let mut image_bytes = 0_usize;
+    let mut file_context_bytes = 0_usize;
+    for block in blocks {
+        match block {
+            HostTurnInputBlock::Text { text } => {
+                if text.trim().is_empty() || text.len() > MAX_JSON_BYTES || text.contains('\0') {
+                    return Err(protocol_error());
+                }
+            }
+            HostTurnInputBlock::File {
+                attachment_id,
+                safe_name,
+                media_type,
+                size_bytes,
+                sha256,
+                context_chunks,
+            } => {
+                attachment_count += 1;
+                require_non_nil(*attachment_id)?;
+                if !valid_safe_attachment_name(safe_name)
+                    || !matches!(
+                        media_type.as_str(),
+                        "application/pdf"
+                            | "text/plain"
+                            | "text/markdown"
+                            | "text/csv"
+                            | "application/json"
+                            | "application/yaml"
+                            | "application/xml"
+                            | "text/html"
+                            | "application/rtf"
+                            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                    || !(1..=MAX_TURN_V2_ATTACHMENT_BYTES).contains(size_bytes)
+                    || !valid_sha256(sha256)
+                    || context_chunks.is_empty()
+                    || context_chunks.len() > 32
+                {
+                    return Err(protocol_error());
+                }
+                for chunk in context_chunks {
+                    if chunk.trim().is_empty() || chunk.len() > 16 * 1024 || chunk.contains('\0') {
+                        return Err(protocol_error());
+                    }
+                    file_context_bytes = file_context_bytes
+                        .checked_add(chunk.len())
+                        .ok_or_else(protocol_error)?;
+                }
+            }
+            HostTurnInputBlock::Image {
+                attachment_id,
+                media_type,
+                size_bytes,
+                sha256,
+                data_url,
+            } => {
+                attachment_count += 1;
+                require_non_nil(*attachment_id)?;
+                if !matches!(
+                    media_type.as_str(),
+                    "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+                ) || !(1..=MAX_TURN_V2_ATTACHMENT_BYTES).contains(size_bytes)
+                    || !valid_sha256(sha256)
+                {
+                    return Err(protocol_error());
+                }
+                let prefix = format!("data:{media_type};base64,");
+                let encoded = data_url.strip_prefix(&prefix).ok_or_else(protocol_error)?;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .map_err(|_| protocol_error())?;
+                if bytes.len() != *size_bytes
+                    || base64::engine::general_purpose::STANDARD.encode(&bytes) != encoded
+                    || format!("{:x}", Sha256::digest(&bytes)) != *sha256
+                    || validate_image_content(media_type, &bytes).is_err()
+                {
+                    return Err(protocol_error());
+                }
+                image_bytes = image_bytes
+                    .checked_add(bytes.len())
+                    .ok_or_else(protocol_error)?;
+            }
+        }
+    }
+    if attachment_count > 10
+        || image_bytes > MAX_TURN_V2_ATTACHMENT_BYTES
+        || file_context_bytes > MAX_TURN_V2_FILE_CONTEXT_BYTES
+    {
+        return Err(protocol_error());
+    }
+    Ok(())
+}
+
+fn valid_safe_attachment_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value.trim() == value
+        && value != "."
+        && value != ".."
+        && !value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\'))
+        && value.nfc().collect::<String>() == value
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_error_message(value: &str) -> Result<(), HostBridgeError> {
@@ -845,6 +1026,10 @@ const fn instance_error() -> HostBridgeError {
 
 const fn transport_error() -> HostBridgeError {
     HostBridgeError::new(HostBridgeErrorKind::Transport)
+}
+
+const fn accepted_response_invalid() -> HostBridgeError {
+    HostBridgeError::new(HostBridgeErrorKind::AcceptedResponseInvalid)
 }
 
 #[cfg(test)]
@@ -1072,6 +1257,141 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn multimodal_turn_uses_exact_v2_wire_shape_and_revalidates_image_integrity() {
+        let token = TestToken::new(0o600);
+        let turn_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f24").unwrap();
+        let session_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f22").unwrap();
+        let operation_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f60").unwrap();
+        let file_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f61").unwrap();
+        let image_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f62").unwrap();
+        let image = crate::chat::attachment::test_image_bytes("png");
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&image);
+        let blocks = vec![
+            HostTurnInputBlock::Text {
+                text: "Compare the attachment".to_owned(),
+            },
+            HostTurnInputBlock::File {
+                attachment_id: file_id,
+                safe_name: "quarterly-total.csv".to_owned(),
+                media_type: "text/csv".to_owned(),
+                size_bytes: 19,
+                sha256: format!("{:x}", Sha256::digest(b"quarter,total\nQ1,42")),
+                context_chunks: vec!["quarter,total Q1,42".to_owned()],
+            },
+            HostTurnInputBlock::Image {
+                attachment_id: image_id,
+                media_type: "image/png".to_owned(),
+                size_bytes: image.len(),
+                sha256: format!("{:x}", Sha256::digest(&image)),
+                data_url: format!("data:image/png;base64,{encoded}"),
+            },
+        ];
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": turn_id}).to_string(),
+            ),
+        ])
+        .await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        assert!(bridge
+            .start_turn_v2(session_id, Uuid::nil(), &blocks, &HostTrace::default())
+            .await
+            .is_err());
+        assert_eq!(
+            bridge
+                .start_turn_v2(session_id, operation_id, &blocks, &HostTrace::default(),)
+                .await
+                .unwrap(),
+            turn_id
+        );
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "POST /v2/agent-sessions/{session_id}/turns HTTP/1.1"
+        )));
+        let body = requests[1].split("\r\n\r\n").nth(1).unwrap();
+        let value: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(value["operation_id"], operation_id.to_string());
+        assert_eq!(
+            value["content_blocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|block| block["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["text", "file", "image"]
+        );
+        assert_eq!(value["content_blocks"][1]["name"], "quarterly-total.csv");
+        assert_eq!(value["content_blocks"][2]["size_bytes"], image.len());
+        assert!(value.get("reasoning_effort").is_none());
+
+        let mut invalid = blocks;
+        if let HostTurnInputBlock::Image { sha256, .. } = &mut invalid[2] {
+            *sha256 = "0".repeat(64);
+        }
+        assert!(validate_turn_v2_blocks(&invalid).is_err());
+    }
+
+    #[tokio::test]
+    async fn accepted_v2_turn_with_invalid_response_is_retryable_but_conflict_stays_typed() {
+        let token = TestToken::new(0o600);
+        let session_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f22").unwrap();
+        let operation_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f60").unwrap();
+        let blocks = vec![HostTurnInputBlock::Text {
+            text: "retry the identical canonical input".to_owned(),
+        }];
+        let invalid_responses = [
+            response(
+                "202 Accepted",
+                &[("Content-Type", "application/json")],
+                r#"{"turn_id":"019fbd88-cbc3-7bf1-934d-7b05cd693f24"}"#,
+            ),
+            response(
+                "202 Accepted",
+                &[("Cache-Control", "no-store")],
+                r#"{"turn_id":"019fbd88-cbc3-7bf1-934d-7b05cd693f24"}"#,
+            ),
+            json_response("202 Accepted", r#"{"turn_id":"#),
+            json_response("202 Accepted", r#"{}"#),
+            json_response(
+                "202 Accepted",
+                r#"{"turn_id":"00000000-0000-0000-0000-000000000000"}"#,
+            ),
+        ];
+        let mut responses = Vec::new();
+        for invalid in invalid_responses {
+            responses.push(ready_response(NONCE));
+            responses.push(invalid);
+        }
+        responses.push(ready_response(NONCE));
+        responses.push(json_response(
+            "409 Conflict",
+            r#"{"error":{"code":"turn_operation_conflict","message":"canonical input changed"}}"#,
+        ));
+        let (port, server) = serve(responses).await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+
+        for _ in 0..5 {
+            let error = bridge
+                .start_turn_v2(session_id, operation_id, &blocks, &HostTrace::default())
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), HostBridgeErrorKind::AcceptedResponseInvalid);
+            assert_eq!(error.code(), None);
+        }
+        let conflict = bridge
+            .start_turn_v2(session_id, operation_id, &blocks, &HostTrace::default())
+            .await
+            .unwrap_err();
+        assert_eq!(conflict.kind(), HostBridgeErrorKind::Rejected);
+        assert_eq!(conflict.code(), Some(HostErrorCode::TurnOperationConflict));
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 12);
+    }
+
+    #[tokio::test]
     async fn resume_posts_exact_session_identity_and_requires_idle_model_ready_projection() {
         let token = TestToken::new(0o600);
         let (port, server) = serve(vec![
@@ -1197,6 +1517,27 @@ mod tests {
         assert!(!format!("{error:?}").contains("RAW_ERROR_CANARY_126"));
         assert!(!error.to_string().contains("RAW_ERROR_CANARY_126"));
         let _ = server.await.unwrap();
+    }
+
+    #[test]
+    fn turn_operation_conflict_is_typed_only_for_http_conflict() {
+        let body =
+            br#"{"error":{"code":"turn_operation_conflict","message":"canonical input changed"}}"#;
+        let conflict = parse_rejection_body(StatusCode::CONFLICT, body);
+        assert_eq!(conflict.kind(), HostBridgeErrorKind::Rejected);
+        assert_eq!(conflict.code(), Some(HostErrorCode::TurnOperationConflict));
+
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::NOT_FOUND,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            let rejected = parse_rejection_body(status, body);
+            assert_eq!(rejected.kind(), HostBridgeErrorKind::Protocol);
+            assert_eq!(rejected.code(), None);
+        }
     }
 
     #[tokio::test]

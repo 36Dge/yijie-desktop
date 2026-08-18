@@ -135,6 +135,10 @@ impl SidecarConfig {
                 "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
                 test_enabled.to_string(),
             ),
+            (
+                "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
+                "true".to_owned(),
+            ),
             ("YIJIE_AGENT_HOST_INSTANCE_NONCE", instance_nonce.to_owned()),
             ("PATH", "/usr/bin:/bin".to_owned()),
         ];
@@ -1325,6 +1329,20 @@ mod tests {
             .iter()
             .map(|(name, _)| *name)
             .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "YIJIE_ENV",
+                "YIJIE_AGENT_HOST_PORT",
+                "YIJIE_AGENT_HOST_HOME",
+                "YIJIE_AGENT_HOST_V2_RAW_REASONING_ENABLED",
+                "YIJIE_AGENT_HOST_V2_TITLE_ENABLED",
+                "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
+                "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
+                "YIJIE_AGENT_HOST_INSTANCE_NONCE",
+                "PATH",
+            ]
+        );
         assert!(!names.iter().any(|name| name.contains("KEY")));
         assert!(!names.iter().any(|name| name.contains("MINIMAX")));
         assert_eq!(
@@ -1334,6 +1352,9 @@ mod tests {
         assert!(environment.iter().any(|(name, value)| {
             *name == "YIJIE_AGENT_HOST_INSTANCE_NONCE"
                 && value == "019fbd88-cbc3-7bf1-934d-7b05cd693f80"
+        }));
+        assert!(environment.iter().any(|(name, value)| {
+            *name == "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED" && value == "true"
         }));
     }
 
@@ -1433,6 +1454,7 @@ mod tests {
             "YIJIE_AGENT_HOST_V2_RAW_REASONING_ENABLED",
             "YIJIE_AGENT_HOST_V2_TITLE_ENABLED",
             "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
+            "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
             "YIJIE_AGENT_HOST_INSTANCE_NONCE",
             "PATH",
             "YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED",
@@ -1454,6 +1476,9 @@ mod tests {
         }));
         assert!(environment.iter().any(|(name, value)| {
             *name == "YIJIE_AGENT_HOST_V2_TITLE_ENABLED" && value == "false"
+        }));
+        assert!(environment.iter().any(|(name, value)| {
+            *name == "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED" && value == "true"
         }));
         assert!(!names
             .iter()

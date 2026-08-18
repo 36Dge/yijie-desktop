@@ -1,0 +1,588 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-ipc-v2.schema.json",
+  "title": "Yijie Desktop Private Chat IPC v2",
+  "description": "Desktop-owned private multimodal Chat IPC. This schema is not a public API contract.",
+  "x-yijie-schema-version": 2,
+  "x-yijie-public-chat-time-projection": "Unix epoch seconds are converted to RFC3339 date-time strings at the public ChatMessage boundary.",
+  "x-yijie-attachment-import-event-channel": "yijie:chat:attachment-import:event:v2",
+  "x-yijie-command-names": [
+    "chat_pick_attachments_v2",
+    "chat_import_attachments_v2",
+    "chat_list_draft_attachments_v2",
+    "chat_remove_attachment_v2",
+    "chat_create_session_v2",
+    "chat_submit_turn_v2",
+    "chat_load_history_v2",
+    "chat_resync_session_v2"
+  ],
+  "x-yijie-command-contracts": {
+    "chat_pick_attachments_v2": { "request": "#/$defs/pickAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
+    "chat_import_attachments_v2": { "request": "#/$defs/importAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
+    "chat_list_draft_attachments_v2": { "request": "#/$defs/listDraftAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
+    "chat_remove_attachment_v2": { "request": "#/$defs/removeAttachmentRequest", "response": "#/$defs/operationResponse" },
+    "chat_create_session_v2": { "request": "#/$defs/createSessionRequest", "response": "#/$defs/createdTurnResponse" },
+    "chat_submit_turn_v2": { "request": "#/$defs/submitTurnRequest", "response": "#/$defs/createdTurnResponse" },
+    "chat_load_history_v2": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/historyPageResponse" },
+    "chat_resync_session_v2": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/resyncResponse" }
+  },
+  "x-yijie-error-codes": [
+    "chat_unauthenticated",
+    "chat_context_invalid",
+    "chat_capability_denied",
+    "chat_resource_not_found",
+    "chat_project_invalid",
+    "chat_cursor_invalid",
+    "chat_request_invalid",
+    "chat_request_cancelled",
+    "chat_conflict",
+    "chat_turn_active",
+    "chat_host_not_ready",
+    "chat_storage_unavailable",
+    "chat_protocol_error",
+    "chat_limit_exceeded",
+    "chat_cleanup_incomplete",
+    "chat_temporarily_unavailable"
+  ],
+  "x-yijie-attachment-issues": [
+    "too_many",
+    "too_large",
+    "archive_unsupported",
+    "unsupported",
+    "invalid_content",
+    "parse_failed"
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "opaqueCursor": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "epochSeconds": { "type": "integer", "minimum": 1 },
+    "nullableEpochSeconds": { "type": ["integer", "null"], "minimum": 1 },
+    "epochMilliseconds": { "type": "integer", "minimum": 0 },
+    "nullableEpochMilliseconds": { "type": ["integer", "null"], "minimum": 0 },
+    "boundedStatus": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "boundedReasonCode": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+    "textInput": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536,
+      "x-yijie-max-utf8-bytes": 65536,
+      "x-yijie-forbid-nul": true
+    },
+    "safeName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$"
+    },
+    "imageMediaType": {
+      "enum": ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    },
+    "fileMediaType": {
+      "enum": [
+        "application/pdf",
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "application/json",
+        "application/yaml",
+        "application/xml",
+        "text/html",
+        "application/rtf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      ]
+    },
+    "mediaType": {
+      "oneOf": [
+        { "$ref": "#/$defs/imageMediaType" },
+        { "$ref": "#/$defs/fileMediaType" }
+      ]
+    },
+    "attachmentStatus": {
+      "enum": ["queued", "importing", "parsing", "indexing", "ready", "bound", "error_terminal", "expired"]
+    },
+    "attachmentImportStage": {
+      "enum": ["queued", "importing", "parsing", "indexing", "ready", "error_terminal"]
+    },
+    "attachmentImportIssue": {
+      "enum": ["too_many", "too_large", "archive_unsupported", "unsupported", "invalid_content", "parse_failed", "unavailable"]
+    },
+    "attachmentImportEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "contextId", "operationId", "sequence", "stage", "itemCount", "issue"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "sequence": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+        "stage": { "$ref": "#/$defs/attachmentImportStage" },
+        "itemCount": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "issue": {
+          "oneOf": [
+            { "$ref": "#/$defs/attachmentImportIssue" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "stage": { "const": "error_terminal" } } },
+          "then": { "properties": { "issue": { "$ref": "#/$defs/attachmentImportIssue" } } },
+          "else": { "properties": { "issue": { "type": "null" } } }
+        }
+      ]
+    },
+    "draftTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "new" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "sessionId"],
+          "properties": {
+            "type": { "const": "session" },
+            "sessionId": { "$ref": "#/$defs/uuid" }
+          }
+        }
+      ]
+    },
+    "pickAttachmentsPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draftTarget", "operationId", "remainingCapacity"],
+      "properties": {
+        "draftTarget": { "$ref": "#/$defs/draftTarget" },
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "remainingCapacity": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "importAttachmentsPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "draftTarget", "operationId", "remainingCapacity"],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 4096, "x-yijie-absolute-path": true, "x-yijie-forbid-nul": true }
+        },
+        "draftTarget": { "$ref": "#/$defs/draftTarget" },
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "remainingCapacity": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "listDraftAttachmentsPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draftTarget"],
+      "properties": {
+        "draftTarget": { "$ref": "#/$defs/draftTarget" }
+      }
+    },
+    "removeAttachmentPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attachmentId", "draftTarget", "operationId"],
+      "properties": {
+        "attachmentId": { "$ref": "#/$defs/uuid" },
+        "draftTarget": { "$ref": "#/$defs/draftTarget" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "textTurnBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "$ref": "#/$defs/textInput" }
+      }
+    },
+    "fileTurnBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "attachmentId"],
+      "properties": {
+        "type": { "const": "file" },
+        "attachmentId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "imageTurnBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "attachmentId"],
+      "properties": {
+        "type": { "const": "image" },
+        "attachmentId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "turnContentBlock": {
+      "oneOf": [
+        { "$ref": "#/$defs/textTurnBlock" },
+        { "$ref": "#/$defs/fileTurnBlock" },
+        { "$ref": "#/$defs/imageTurnBlock" }
+      ]
+    },
+    "createSessionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectId", "contentBlocks", "operationId"],
+      "properties": {
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "contentBlocks": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/turnContentBlock" } },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "submitTurnPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "contentBlocks", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "contentBlocks": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/turnContentBlock" } },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "sessionReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "cursor": { "$ref": "#/$defs/opaqueCursor" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "pickAttachmentsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/pickAttachmentsPayload" }
+      }
+    },
+    "importAttachmentsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/importAttachmentsPayload" }
+      }
+    },
+    "listDraftAttachmentsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/listDraftAttachmentsPayload" }
+      }
+    },
+    "removeAttachmentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/removeAttachmentPayload" }
+      }
+    },
+    "createSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/createSessionPayload" }
+      }
+    },
+    "submitTurnRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/submitTurnPayload" }
+      }
+    },
+    "sessionReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/sessionReadPayload" }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attachmentId", "type", "name", "mediaType", "sizeBytes", "status", "expiresAt"],
+      "properties": {
+        "attachmentId": { "$ref": "#/$defs/uuid" },
+        "type": { "enum": ["file", "image"] },
+        "name": { "$ref": "#/$defs/safeName" },
+        "mediaType": { "$ref": "#/$defs/mediaType" },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "status": { "$ref": "#/$defs/attachmentStatus" },
+        "expiresAt": { "$ref": "#/$defs/epochSeconds" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "image" } } },
+          "then": { "properties": { "mediaType": { "$ref": "#/$defs/imageMediaType" } } },
+          "else": { "properties": { "mediaType": { "$ref": "#/$defs/fileMediaType" } } }
+        }
+      ]
+    },
+    "textMessageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1048576, "x-yijie-forbid-nul": true }
+      }
+    },
+    "fileMessageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "attachmentId", "name", "mediaType", "sizeBytes", "status", "expiresAt"],
+      "properties": {
+        "type": { "const": "file" },
+        "attachmentId": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/safeName" },
+        "mediaType": { "$ref": "#/$defs/fileMediaType" },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "status": { "enum": ["bound", "expired"] },
+        "expiresAt": { "$ref": "#/$defs/epochSeconds" }
+      }
+    },
+    "imageMessageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "attachmentId", "name", "mediaType", "sizeBytes", "status", "expiresAt"],
+      "properties": {
+        "type": { "const": "image" },
+        "attachmentId": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/safeName" },
+        "mediaType": { "$ref": "#/$defs/imageMediaType" },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "status": { "enum": ["bound", "expired"] },
+        "expiresAt": { "$ref": "#/$defs/epochSeconds" }
+      }
+    },
+    "messageContentBlock": {
+      "oneOf": [
+        { "$ref": "#/$defs/textMessageBlock" },
+        { "$ref": "#/$defs/fileMessageBlock" },
+        { "$ref": "#/$defs/imageMessageBlock" }
+      ]
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "role", "content", "contentBlocks", "status", "ordinal", "createdAt"],
+      "properties": {
+        "messageId": { "$ref": "#/$defs/uuid" },
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "type": "string", "maxLength": 1048576, "x-yijie-forbid-nul": true },
+        "contentBlocks": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/messageContentBlock" } },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/epochSeconds" }
+      }
+    },
+    "reasoningMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemOrdinal", "status", "reasonCode", "totalBytes", "partCount", "finalizedAtMs"],
+      "properties": {
+        "itemOrdinal": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "status": { "enum": ["complete", "incomplete", "unavailable"] },
+        "reasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "totalBytes": { "type": "integer", "minimum": 0, "maximum": 131072 },
+        "partCount": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "finalizedAtMs": { "$ref": "#/$defs/epochMilliseconds" }
+      }
+    },
+    "historyTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode", "messages", "reasoning"],
+      "properties": {
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "terminalAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "reasoningStatus": { "$ref": "#/$defs/boundedStatus" },
+        "reasoningReasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "messages": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/message" } },
+        "reasoning": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/reasoningMetadata" } }
+      }
+    },
+    "historyPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turns", "nextCursor"],
+      "properties": {
+        "turns": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/historyTurn" } },
+        "nextCursor": { "oneOf": [{ "$ref": "#/$defs/opaqueCursor" }, { "type": "null" }] }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "projectId", "title", "titleSource", "pinnedAt", "lastActivityAt", "latestTurnStatus", "projectAvailable"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "projectId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 1024, "x-yijie-forbid-nul": true },
+        "titleSource": { "enum": ["fallback", "model", "user"] },
+        "pinnedAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "lastActivityAt": { "$ref": "#/$defs/epochSeconds" },
+        "latestTurnStatus": { "oneOf": [{ "$ref": "#/$defs/boundedStatus" }, { "type": "null" }] },
+        "projectAvailable": { "type": "boolean" }
+      }
+    },
+    "cleanupStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId", "desktopState", "hostState", "runtimeState", "outcomeCode", "lastErrorCode", "requestedAt", "completedAt", "expiresAt"],
+      "properties": {
+        "operationId": { "$ref": "#/$defs/uuid" },
+        "desktopState": { "enum": ["pending", "complete", "incomplete", "not_attempted"] },
+        "hostState": { "enum": ["pending", "complete", "incomplete", "not_attempted"] },
+        "runtimeState": { "enum": ["pending", "complete", "incomplete", "not_attempted"] },
+        "outcomeCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "lastErrorCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "requestedAt": { "$ref": "#/$defs/epochSeconds" },
+        "completedAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "expiresAt": { "$ref": "#/$defs/nullableEpochSeconds" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId"],
+      "properties": { "operationId": { "$ref": "#/$defs/uuid" } }
+    },
+    "createdTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "operationId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "operationId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "resync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session", "history", "cleanup"],
+      "properties": {
+        "session": { "$ref": "#/$defs/session" },
+        "history": { "$ref": "#/$defs/historyPage" },
+        "cleanup": { "oneOf": [{ "$ref": "#/$defs/cleanupStatus" }, { "type": "null" }] }
+      }
+    },
+    "attachmentListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "type": "array", "maxItems": 10, "uniqueItems": true, "items": { "$ref": "#/$defs/attachment" } }
+      }
+    },
+    "operationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/operation" }
+      }
+    },
+    "createdTurnResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/createdTurn" }
+      }
+    },
+    "historyPageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/historyPage" }
+      }
+    },
+    "resyncResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/resync" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "code", "retryable", "recovery"],
+      "properties": {
+        "schemaVersion": { "const": 2 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "code": { "enum": ["chat_unauthenticated", "chat_context_invalid", "chat_capability_denied", "chat_resource_not_found", "chat_project_invalid", "chat_cursor_invalid", "chat_request_invalid", "chat_request_cancelled", "chat_conflict", "chat_turn_active", "chat_host_not_ready", "chat_storage_unavailable", "chat_protocol_error", "chat_limit_exceeded", "chat_cleanup_incomplete", "chat_temporarily_unavailable"] },
+        "retryable": { "type": "boolean" },
+        "recovery": { "enum": ["none", "sign_in", "rebind_context", "request_permission", "fix_request", "reload", "resync", "retry", "start_host", "wait_cleanup", "reduce_input", "reselect_project"] },
+        "attachmentIssue": { "enum": ["too_many", "too_large", "archive_unsupported", "unsupported", "invalid_content", "parse_failed"] },
+        "attachmentItemCount": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 60000 }
+      }
+    }
+  }
+}

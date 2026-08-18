@@ -4,9 +4,37 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChatHistoryPage, ChatProject, ChatSession } from "../../domain/chat-ipc";
+import {
+  CHAT_NEW_DRAFT_TARGET,
+  ChatClientError,
+  chatSessionDraftTarget,
+    type ChatAttachment,
+    type ChatAttachmentImportEvent,
+  type ChatHistoryPage,
+  type ChatProject,
+  type ChatSession,
+} from "../../domain/chat-ipc";
 import { useChatStore } from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
+
+type MockDragDropPayload =
+  | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
+  | { type: "over"; position: { x: number; y: number } }
+  | { type: "leave" };
+
+const dragDropMock = vi.hoisted(() => ({
+  handler: null as null | ((event: { payload: MockDragDropPayload }) => void),
+  unlisten: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    onDragDropEvent: async (handler: typeof dragDropMock.handler) => {
+      dragDropMock.handler = handler;
+      return dragDropMock.unlisten;
+    },
+  }),
+}));
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
@@ -17,6 +45,14 @@ const PROJECT: ChatProject = {
   safeName: "Synthetic Workspace",
   pinnedAt: null,
   lastUsedAt: 1,
+  available: true,
+};
+
+const SECOND_PROJECT: ChatProject = {
+  projectId: "019c1a00-0000-7000-8000-000000000009",
+  safeName: "Second Synthetic Workspace",
+  pinnedAt: null,
+  lastUsedAt: 2,
   available: true,
 };
 
@@ -31,6 +67,16 @@ const SESSION: ChatSession = {
   projectAvailable: true,
 };
 
+const READY_ATTACHMENT: ChatAttachment = {
+  attachmentId: "019c1a00-0000-7000-8000-000000000010",
+  type: "file",
+  name: "synthetic-brief.pdf",
+  mediaType: "application/pdf",
+  sizeBytes: 4096,
+  status: "ready",
+  expiresAt: 2_000_000_000,
+};
+
 const HISTORY: ChatHistoryPage = {
   turns: [{
     turnId: TURN_ID,
@@ -39,7 +85,18 @@ const HISTORY: ChatHistoryPage = {
     reasoningStatus: "complete",
     reasoningReasonCode: null,
     messages: [
-      { messageId: "019c1a00-0000-7000-8000-000000000004", role: "user", content: "检查标题", status: "complete", ordinal: 1, createdAt: 1 },
+      {
+        messageId: "019c1a00-0000-7000-8000-000000000004",
+        role: "user",
+        content: "检查标题",
+        contentBlocks: [
+          { type: "text", text: "检查标题" },
+          { ...READY_ATTACHMENT, status: "bound" },
+        ],
+        status: "complete",
+        ordinal: 1,
+        createdAt: 1,
+      },
       { messageId: "019c1a00-0000-7000-8000-000000000005", role: "assistant", content: "标题检查完成", status: "complete", ordinal: 2, createdAt: 2 },
     ],
     reasoning: [{ itemOrdinal: 0, status: "complete", reasonCode: null, totalBytes: 12, partCount: 1, finalizedAtMs: 2 }],
@@ -65,6 +122,8 @@ async function mountPage(path: string, active = false) {
   store.projects = [PROJECT];
   store.sessions = active ? [SESSION] : [];
   store.selectedSessionId = active ? SESSION_ID : null;
+  store.draftTarget = active ? chatSessionDraftTarget(SESSION_ID) : CHAT_NEW_DRAFT_TARGET;
+  store.draftTargetReady = true;
   store.history = active ? HISTORY : null;
   store.localReadiness = {
     lifecycle: "ready", host: "ready", runtime: "ready", storage: "ready",
@@ -86,6 +145,8 @@ async function mountPage(path: string, active = false) {
 }
 
 afterEach(() => {
+  dragDropMock.handler = null;
+  dragDropMock.unlisten.mockClear();
   document.body.innerHTML = "";
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -103,7 +164,29 @@ describe("FEAT-126 ChatPage", () => {
     expect(createSession).toHaveBeenCalledWith(PROJECT_ID, "检查标题");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="添加图片或文件"]').exists()).toBe(true);
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音输入/);
+  });
+
+  it("uses the project strip as the native project selection entry", async () => {
+    const { wrapper, store, router } = await mountPage("/chat");
+    const pickProject = vi.spyOn(store, "pickProject").mockImplementation(async () => {
+      store.projects = [PROJECT, SECOND_PROJECT];
+      return SECOND_PROJECT;
+    });
+    const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);
+    expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
+    expect(wrapper.find("select").exists()).toBe(false);
+    await wrapper.get(".chat-composer__project--button").trigger("click");
+    await flushPromises();
+    expect(pickProject).toHaveBeenCalledTimes(1);
+    expect(wrapper.get(".chat-composer__project").text()).toBe("Second Synthetic Workspace");
+
+    await wrapper.get("textarea").setValue("使用新项目");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新项目");
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
   it("keeps input and displays stable recovery copy when create fails", async () => {
@@ -119,10 +202,34 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).not.toContain("/private/path");
   });
 
+  it("routes the stable retry action to failed draft recovery before reopening the composer", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    const retryDraftRecovery = vi.spyOn(store, "retryDraftRecovery").mockImplementation(async () => {
+      store.draftTargetReady = true;
+      store.lastErrorCode = null;
+      store.phase = "ready";
+      return true;
+    });
+    store.draftTargetReady = false;
+    store.lastErrorCode = "chat_temporarily_unavailable";
+    store.phase = "unavailable";
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    await wrapper.get(".chat-notice__action").trigger("click");
+    await flushPromises();
+
+    expect(retryDraftRecovery).toHaveBeenCalledOnce();
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
+  });
+
   it("renders historical and streaming assistant/raw reasoning as literal selectable text", async () => {
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
     expect(wrapper.text()).toContain("检查标题");
     expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.text()).toContain("synthetic-brief.pdf");
+    expect(wrapper.text()).toContain("文件 · 4 KB");
     expect(wrapper.text()).toContain("模型推理记录");
     expect(wrapper.find('[aria-label="复制"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label*="赞"]').exists()).toBe(false);
@@ -134,6 +241,166 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("<script>not executable</script>");
     expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
+  });
+
+  it("selects through the unified plus entry and permits an attachment-only task", async () => {
+    const { wrapper, store, router } = await mountPage("/chat");
+    vi.spyOn(store, "pickAttachments").mockImplementation(async () => {
+      store.draftAttachments = [READY_ATTACHMENT];
+      return [READY_ATTACHMENT];
+    });
+    const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);
+
+    await wrapper.get('[aria-label="添加图片或文件"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("synthetic-brief.pdf");
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+
+    expect(createSession).toHaveBeenCalledWith(PROJECT_ID, "");
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+  });
+
+  it("projects native attachment progress into the real composer", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    store.attachmentImporting = true;
+    store.attachmentImportAttempt = {
+      schemaVersion: 2,
+      contextId: store.context!.contextId,
+      operationId: "019c1a00-0000-7000-8000-000000000011",
+      sequence: "3",
+      stage: "indexing",
+      itemCount: 3,
+      issue: null,
+    } satisfies ChatAttachmentImportEvent;
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("3 个附件 · 正在建立索引");
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("keeps attachment rejection guidance local to the composer", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    vi.spyOn(store, "pickAttachments").mockImplementation(async () => {
+      store.attachmentErrorCode = "archive_unsupported";
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_request_invalid",
+        retryable: false,
+        recovery: "fix_request",
+        attachmentIssue: "archive_unsupported",
+      });
+    });
+
+    await wrapper.get('[aria-label="添加图片或文件"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("暂不支持压缩包，请先解压后选择文件");
+    expect(wrapper.text()).not.toContain("请检查文本长度后重试");
+  });
+
+  it("disables the plus entry and ignores dropped paths when sending becomes unavailable", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    const pickAttachments = vi.spyOn(store, "pickAttachments");
+    const importAttachmentPaths = vi.spyOn(store, "importAttachmentPaths");
+
+    vi.spyOn(wrapper.get(".chat-composer").element, "getBoundingClientRect").mockReturnValue({
+      left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300, x: 100, y: 100,
+      toJSON: () => ({}),
+    });
+    dragDropMock.handler?.({ payload: { type: "enter", paths: [], position: { x: 400, y: 300 } } });
+    await flushPromises();
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(true);
+
+    store.localReadiness = {
+      lifecycle: "blocked", host: "unavailable", runtime: "unavailable", storage: "ready",
+      canSend: false, issueCode: "chat_host_unavailable", retryable: true, recovery: "start_or_retry",
+    };
+    await flushPromises();
+
+    const addButton = wrapper.get('[aria-label="添加图片或文件"]');
+    expect(addButton.attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
+    await addButton.trigger("click");
+    dragDropMock.handler?.({
+      payload: { type: "drop", paths: ["/private/synthetic.pdf"], position: { x: 400, y: 300 } },
+    });
+    await flushPromises();
+    expect(pickAttachments).not.toHaveBeenCalled();
+    expect(importAttachmentPaths).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plus entry and native drop path disabled during a local submission", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    let resolveCreate!: (sessionId: string | null) => void;
+    const pendingCreate = new Promise<string | null>((resolve) => { resolveCreate = resolve; });
+    vi.spyOn(store, "createSession").mockReturnValue(pendingCreate);
+    const importAttachmentPaths = vi.spyOn(store, "importAttachmentPaths");
+    vi.spyOn(wrapper.get(".chat-composer").element, "getBoundingClientRect").mockReturnValue({
+      left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300, x: 100, y: 100,
+      toJSON: () => ({}),
+    });
+
+    await wrapper.get("textarea").setValue("pending local submit");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    dragDropMock.handler?.({ payload: { type: "enter", paths: [], position: { x: 400, y: 300 } } });
+    dragDropMock.handler?.({
+      payload: { type: "drop", paths: ["/private/during-submit.pdf"], position: { x: 400, y: 300 } },
+    });
+    await flushPromises();
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
+    expect(importAttachmentPaths).not.toHaveBeenCalled();
+
+    resolveCreate(null);
+    await flushPromises();
+  });
+
+  it("accepts native drops only inside the composer logical bounds", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    const importAttachmentPaths = vi.spyOn(store, "importAttachmentPaths").mockResolvedValue([]);
+    vi.spyOn(wrapper.get(".chat-composer").element, "getBoundingClientRect").mockReturnValue({
+      left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300, x: 100, y: 100,
+      toJSON: () => ({}),
+    });
+
+    dragDropMock.handler?.({ payload: { type: "over", position: { x: 80, y: 80 } } });
+    await flushPromises();
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
+    dragDropMock.handler?.({
+      payload: { type: "drop", paths: ["/private/outside.pdf"], position: { x: 80, y: 80 } },
+    });
+    await flushPromises();
+    expect(importAttachmentPaths).not.toHaveBeenCalled();
+
+    dragDropMock.handler?.({ payload: { type: "over", position: { x: 400, y: 300 } } });
+    await flushPromises();
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(true);
+    dragDropMock.handler?.({
+      payload: { type: "drop", paths: ["/private/inside.pdf"], position: { x: 400, y: 300 } },
+    });
+    await flushPromises();
+    expect(importAttachmentPaths).toHaveBeenCalledWith(["/private/inside.pdf"]);
+    expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
+  });
+
+  it("holds the attachment entry closed without the relevant create permission", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    store.context = {
+      contextId: store.context?.contextId ?? "019c1a00-0000-7000-8000-000000000006",
+      expiresAtEpochSeconds: 2_000_000_000,
+      allowedActions: ["read_sessions", "read_projects"],
+    };
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    dragDropMock.handler?.({
+      payload: { type: "drop", paths: ["/private/denied.pdf"], position: { x: 400, y: 300 } },
+    });
+    await flushPromises();
+    expect(store.draftAttachments).toEqual([]);
   });
 
   it("opens the read-only permission policy without exposing writable approval", async () => {

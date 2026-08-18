@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
 import { useRoute, useRouter } from "vue-router";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
-import type { ChatHistoryTurn, ChatReasoningItem } from "../../domain/chat-ipc";
+import type {
+  ChatAttachment,
+  ChatHistoryTurn,
+  ChatMessage,
+  ChatMessageContentBlock,
+  ChatReasoningItem,
+} from "../../domain/chat-ipc";
 import { ChatClientError } from "../../domain/chat-ipc";
 import {
   cleanupNotice,
@@ -26,10 +34,13 @@ const submitting = ref(false);
 const actionErrorCode = ref<string | null>(null);
 const transientNotice = ref<string | null>(null);
 const permissionDialogOpen = ref(false);
+const dragActive = ref(false);
 const reasoningItems = ref<Readonly<Record<string, readonly ChatReasoningItem[]>>>({});
 const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
+let dragDropUnlisten: UnlistenFn | null = null;
+let dragDropDisposed = false;
 const {
   showBottomButton,
   update: updateScrollPosition,
@@ -57,6 +68,9 @@ const isHistoryLoading = computed(() => isSessionRoute.value && (
   (chatStore.history === null && ["binding", "loading", "ready"].includes(chatStore.phase))
 ));
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
+const attachmentInteractionAllowed = computed(() =>
+  chatStore.canAttach && !submitting.value && !isStreaming.value,
+);
 const statusAnnouncement = computed(() => {
   if (chatStore.phase === "resyncing") return "正在同步任务历史";
   if (isStreaming.value) return "模型正在生成回答";
@@ -87,6 +101,13 @@ watch(
 );
 
 watch(
+  attachmentInteractionAllowed,
+  (allowed) => {
+    if (!allowed) dragActive.value = false;
+  },
+);
+
+watch(
   [
     () => chatStore.history?.turns.length ?? 0,
     () => chatStore.liveAssistantText,
@@ -103,24 +124,57 @@ function captureError(error: unknown): void {
     : "chat_temporarily_unavailable";
 }
 
+async function pickAttachments(): Promise<void> {
+  if (!attachmentInteractionAllowed.value) return;
+  actionErrorCode.value = null;
+  transientNotice.value = null;
+  try {
+    await chatStore.pickAttachments();
+  } catch {
+    return;
+  }
+}
+
+async function importDroppedAttachments(paths: readonly string[]): Promise<void> {
+  if (!attachmentInteractionAllowed.value || paths.length === 0) return;
+  actionErrorCode.value = null;
+  transientNotice.value = null;
+  try {
+    await chatStore.importAttachmentPaths(paths);
+  } catch {
+    return;
+  }
+}
+
+function composerContainsPhysicalPosition(position: { x: number; y: number }): boolean {
+  if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) return false;
+  const composer = document.querySelector<HTMLElement>(".chat-composer");
+  if (!composer) return false;
+  const bounds = composer.getBoundingClientRect();
+  // Wry reports macOS drag positions in the WebView's AppKit point coordinates.
+  return position.x >= bounds.left && position.x <= bounds.right &&
+    position.y >= bounds.top && position.y <= bounds.bottom;
+}
+
+async function removeAttachment(attachmentId: string): Promise<void> {
+  actionErrorCode.value = null;
+  try {
+    await chatStore.removeDraftAttachment(attachmentId);
+  } catch {
+    return;
+  }
+}
+
+function dismissAttachmentImport(operationId: string): void {
+  chatStore.dismissAttachmentImportAttempt(operationId);
+}
+
 async function pickProject(): Promise<void> {
   actionErrorCode.value = null;
   transientNotice.value = null;
   try {
     const project = await chatStore.pickProject();
     if (project) selectedProjectId.value = project.projectId;
-  } catch (error: unknown) {
-    captureError(error);
-  }
-}
-
-async function chooseProject(projectId: string | null): Promise<void> {
-  selectedProjectId.value = projectId;
-  actionErrorCode.value = null;
-  if (!projectId) return;
-  try {
-    const project = await chatStore.revalidateProject(projectId);
-    if (!project?.available) actionErrorCode.value = "chat_project_invalid";
   } catch (error: unknown) {
     captureError(error);
   }
@@ -184,6 +238,10 @@ async function handleStableErrorAction(): Promise<void> {
   if (code === "chat_resource_not_found") return void router.replace("/chat");
   if (code === "chat_project_invalid") return void pickProject();
   if (code === "chat_context_invalid" || code === "chat_unauthenticated") return void router.replace("/settings");
+  if (!chatStore.draftTargetReady) {
+    await chatStore.retryDraftRecovery();
+    return;
+  }
   if (code === "chat_protocol_error" || code === "chat_cursor_invalid" || code === "chat_conflict") {
     await chatStore.resyncSelected();
     return;
@@ -236,9 +294,60 @@ function messageTime(epoch: number): string {
   return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(epoch);
 }
 
+function messageBlocks(message: ChatMessage): readonly ChatMessageContentBlock[] {
+  if (message.contentBlocks && message.contentBlocks.length > 0) return message.contentBlocks;
+  return message.content.length > 0
+    ? Object.freeze([{ type: "text", text: message.content } as const])
+    : Object.freeze([]);
+}
+
+function historyAttachmentStatus(attachment: ChatAttachment): string {
+  if (attachment.status === "expired") return "已过期";
+  if (attachment.status === "error_terminal") return "处理失败";
+  return attachment.type === "image" ? "图片" : "文件";
+}
+
+function attachmentSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function installDragDropListener(): Promise<void> {
+  try {
+    const currentWindow = getCurrentWindow();
+    const unlisten = await currentWindow.onDragDropEvent((event) => {
+      if (!attachmentInteractionAllowed.value) {
+        dragActive.value = false;
+        return;
+      }
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        dragActive.value = composerContainsPhysicalPosition(event.payload.position);
+        return;
+      }
+      dragActive.value = false;
+      if (event.payload.type === "drop" && composerContainsPhysicalPosition(event.payload.position)) {
+        void importDroppedAttachments(event.payload.paths);
+      }
+    });
+    if (dragDropDisposed) unlisten();
+    else dragDropUnlisten = unlisten;
+  } catch {
+    dragActive.value = false;
+  }
+}
+
 onMounted(() => {
+  dragDropDisposed = false;
   updateScrollPosition();
+  void installDragDropListener();
   if (isSessionRoute.value) void nextTick(() => scrollToBottom());
+});
+
+onBeforeUnmount(() => {
+  dragDropDisposed = true;
+  dragDropUnlisten?.();
+  dragDropUnlisten = null;
 });
 </script>
 
@@ -268,11 +377,19 @@ onMounted(() => {
         :selected-project-id="selectedProjectId"
         :readiness="readiness"
         :can-send="chatStore.canSend"
+        :can-attach="attachmentInteractionAllowed"
         :sending="submitting"
         :streaming="false"
         :recovery-available="canRecoverReadiness"
-        @update:selected-project-id="chooseProject"
+        :attachments="chatStore.draftAttachments"
+        :attachment-import-attempt="chatStore.attachmentImportAttempt"
+        :attachment-importing="chatStore.attachmentImporting"
+        :attachment-error-code="chatStore.attachmentErrorCode"
+        :drag-active="dragActive"
         @pick-project="pickProject"
+        @pick-attachments="pickAttachments"
+        @remove-attachment="removeAttachment"
+        @dismiss-attachment-import="dismissAttachmentImport"
         @show-permission="permissionDialogOpen = true"
         @submit="submit"
         @recover="recoverReadiness"
@@ -344,7 +461,24 @@ onMounted(() => {
               aria-label="用户消息"
             >
               <div class="chat-message__label"><YjIcon name="user" size="xs" />你</div>
-              <div class="chat-message__body">{{ message.content }}</div>
+              <div class="chat-message__blocks">
+                <template v-for="(block, blockIndex) in messageBlocks(message)" :key="`${message.messageId}-${blockIndex}`">
+                  <div v-if="block.type === 'text'" class="chat-message__body">{{ block.text }}</div>
+                  <div
+                    v-else
+                    class="chat-message__attachment"
+                    :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
+                  >
+                    <span class="chat-message__attachment-icon" aria-hidden="true">
+                      <YjIcon :name="block.type === 'image' ? 'image' : 'file'" size="sm" />
+                    </span>
+                    <span class="chat-message__attachment-copy">
+                      <strong :title="block.name">{{ block.name }}</strong>
+                      <span>{{ historyAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
+                    </span>
+                  </div>
+                </template>
+              </div>
               <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
             </div>
 
@@ -430,10 +564,19 @@ onMounted(() => {
         :active-project-name="activeProject?.safeName"
         :readiness="readiness"
         :can-send="chatStore.canSend"
+        :can-attach="attachmentInteractionAllowed"
         :sending="submitting"
         :streaming="isStreaming"
         :recovery-available="canRecoverReadiness"
+          :attachments="chatStore.draftAttachments"
+          :attachment-import-attempt="chatStore.attachmentImportAttempt"
+          :attachment-importing="chatStore.attachmentImporting"
+        :attachment-error-code="chatStore.attachmentErrorCode"
+        :drag-active="dragActive"
         @pick-project="pickProject"
+        @pick-attachments="pickAttachments"
+        @remove-attachment="removeAttachment"
+        @dismiss-attachment-import="dismissAttachmentImport"
         @show-permission="permissionDialogOpen = true"
         @submit="submit"
         @interrupt="interrupt"
@@ -529,7 +672,7 @@ onMounted(() => {
 
 .chat-workspace__heading-copy { min-width: 0; }
 .chat-workspace__title { font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-workspace__meta { display: flex; gap: var(--yj-space-4); margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
+.chat-workspace__meta { display: flex; gap: var(--yj-space-4); margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-workspace__meta span { display: inline-flex; align-items: center; gap: var(--yj-space-1); }
 
 .chat-workspace__header-status {
@@ -540,9 +683,9 @@ onMounted(() => {
   background: var(--yj-color-bg-subtle);
   font-size: var(--yj-font-size-caption);
 }
-.chat-workspace__header-status--success { color: var(--yj-color-success); background: var(--yj-color-success-soft); }
-.chat-workspace__header-status--warning { color: var(--yj-color-warning); background: var(--yj-color-warning-soft); }
-.chat-workspace__header-status--error { color: var(--yj-color-error); background: var(--yj-color-error-soft); }
+.chat-workspace__header-status--success { color: var(--yj-color-text-primary); background: var(--yj-color-success-soft); }
+.chat-workspace__header-status--warning { color: var(--yj-color-text-primary); background: var(--yj-color-warning-soft); }
+.chat-workspace__header-status--error { color: var(--yj-color-text-primary); background: var(--yj-color-error-soft); }
 
 .chat-workspace__conversation-wrap { position: relative; min-height: 0; }
 .chat-workspace__conversation { width: 100%; height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: var(--yj-space-8); }
@@ -564,11 +707,30 @@ onMounted(() => {
 .chat-message { display: grid; max-width: 88%; gap: var(--yj-space-2); }
 .chat-message--user { align-self: flex-end; justify-items: end; }
 .chat-message--assistant { align-self: stretch; max-width: 100%; }
-.chat-message__label { display: inline-flex; align-items: center; gap: var(--yj-space-1); color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); font-weight: var(--yj-font-weight-semibold); }
+.chat-message__label { display: inline-flex; align-items: center; gap: var(--yj-space-1); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); font-weight: var(--yj-font-weight-semibold); }
+.chat-message__blocks { display: grid; max-width: 100%; gap: var(--yj-space-2); justify-items: end; }
 .chat-message__body { color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); line-height: 1.72; overflow-wrap: anywhere; white-space: pre-wrap; }
 .chat-message--user .chat-message__body { padding: var(--yj-space-3) var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-brand-border); border-radius: var(--yj-radius-lg) var(--yj-radius-lg) var(--yj-radius-xs) var(--yj-radius-lg); background: var(--yj-color-brand-soft); }
 .chat-message--assistant .chat-message__body { padding: 0 var(--yj-space-1); }
-.chat-message__time { color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
+.chat-message__attachment {
+  display: grid;
+  width: min(360px, 100%);
+  min-width: 0;
+  grid-template-columns: var(--yj-space-10) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--yj-space-2);
+  padding: var(--yj-space-2) var(--yj-space-3);
+  border: var(--yj-border-width) solid var(--yj-color-brand-border);
+  border-radius: var(--yj-radius-md);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-brand-soft);
+}
+.chat-message__attachment--expired { border-color: var(--yj-color-border-default); color: var(--yj-color-text-secondary); background: var(--yj-color-bg-subtle); }
+.chat-message__attachment-icon { display: inline-flex; width: var(--yj-space-10); height: var(--yj-space-10); align-items: center; justify-content: center; border-radius: var(--yj-radius-sm); background: var(--yj-color-bg-card); }
+.chat-message__attachment-copy { display: flex; min-width: 0; flex-direction: column; }
+.chat-message__attachment-copy strong { overflow: hidden; font-size: var(--yj-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
+.chat-message__attachment-copy span { overflow: hidden; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
+.chat-message__time { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-message__streaming { width: var(--yj-space-2); height: var(--yj-space-4); margin-left: var(--yj-space-1); border-radius: var(--yj-radius-xs); background: var(--yj-color-brand-active); animation: chat-caret 1s step-end infinite; }
 
 .chat-turn__terminal,

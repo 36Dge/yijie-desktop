@@ -2,10 +2,17 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CHAT_COMMAND_NAMES,
+  CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
+  CHAT_ATTACHMENT_ISSUES,
+  CHAT_NEW_DRAFT_TARGET,
+  CHAT_V2_COMMAND_NAMES,
   CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_ERROR_CODES,
   CHAT_EVENT_CHANNEL,
   ChatContractError,
+  chatSessionDraftTarget,
+  parseAttachmentListResponse,
+  parseAttachmentImportEvent,
   parseBoundContextResponse,
   parseCancelledResponse,
   parseChatIpcError,
@@ -14,8 +21,10 @@ import {
   parseControlPlaneEvent,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
+  parseHistoryPageResponseV2,
   parseLocalReadinessResponse,
   parseOperationResponse,
+  parseOperationResponseV2,
   parseOptionalCleanupResponse,
   parseOptionalProjectResponse,
   parseProjectListResponse,
@@ -34,6 +43,62 @@ function fixture(name: string): unknown {
 }
 
 describe("private chat IPC v1 contract", () => {
+  it("keeps the v2 attachment command allowlist closed", () => {
+    expect(CHAT_V2_COMMAND_NAMES).toEqual([
+      "chat_pick_attachments_v2",
+      "chat_import_attachments_v2",
+      "chat_list_draft_attachments_v2",
+      "chat_remove_attachment_v2",
+      "chat_create_session_v2",
+      "chat_submit_turn_v2",
+      "chat_load_history_v2",
+      "chat_resync_session_v2",
+    ]);
+  });
+
+  it("constructs only explicit non-nil attachment draft targets", () => {
+    const sessionId = "019c1a00-0000-7000-8000-000000000005";
+    expect(CHAT_NEW_DRAFT_TARGET).toEqual({ type: "new" });
+    expect(chatSessionDraftTarget(sessionId)).toEqual({ type: "session", sessionId });
+    expect(() => chatSessionDraftTarget("00000000-0000-0000-0000-000000000000"))
+      .toThrow(ChatContractError);
+  });
+
+  it("keeps the private v2 schema authoritative and aligned with the TypeScript adapter", () => {
+    const schema = JSON.parse(
+      readFileSync(new URL("../../src-tauri/schemas/chat-ipc-v2.schema.json", import.meta.url), "utf8"),
+    ) as Record<string, unknown>;
+    expect(schema["x-yijie-schema-version"]).toBe(2);
+    expect(schema["x-yijie-command-names"]).toEqual(CHAT_V2_COMMAND_NAMES);
+    expect(schema["x-yijie-attachment-issues"]).toEqual(CHAT_ATTACHMENT_ISSUES);
+    expect(schema["x-yijie-public-chat-time-projection"]).toBe(
+      "Unix epoch seconds are converted to RFC3339 date-time strings at the public ChatMessage boundary.",
+    );
+    expect(schema["x-yijie-attachment-import-event-channel"]).toBe(
+      CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
+    );
+
+    const contracts = schema["x-yijie-command-contracts"] as Record<string, Record<string, string>>;
+    const definitions = schema.$defs as Record<string, Record<string, unknown>>;
+    expect(Object.keys(contracts)).toEqual(CHAT_V2_COMMAND_NAMES);
+    for (const command of CHAT_V2_COMMAND_NAMES) {
+      expect(Object.keys(contracts[command] ?? {}).sort()).toEqual(["request", "response"]);
+      for (const surface of ["request", "response"] as const) {
+        const reference = contracts[command]?.[surface];
+        expect(reference).toMatch(/^#\/\$defs\//);
+        expect(definitions[reference.replace("#/$defs/", "")]).toBeDefined();
+      }
+    }
+    for (const payload of [
+      "pickAttachmentsPayload", "importAttachmentsPayload", "removeAttachmentPayload",
+      "createSessionPayload", "submitTurnPayload", "sessionReadPayload",
+      "textTurnBlock", "fileTurnBlock", "imageTurnBlock",
+    ]) {
+      expect(definitions[payload]?.additionalProperties).toBe(false);
+    }
+    expect(definitions.epochSeconds).toMatchObject({ type: "integer", minimum: 1 });
+  });
+
   it("keeps schema, TypeScript allowlists, channel, and golden fixtures equal", () => {
     const schema = JSON.parse(
       readFileSync(new URL("../../src-tauri/schemas/chat-ipc-v1.schema.json", import.meta.url), "utf8"),
@@ -153,6 +218,49 @@ describe("private chat IPC v1 contract", () => {
     expect(() => parseSessionControlPlaneResponse(inconsistent)).toThrow(ChatContractError);
   });
 
+  it("parses only v2 attachment issues with a matching stable error code", () => {
+    expect(parseChatIpcError({
+      schemaVersion: 2,
+      code: "chat_limit_exceeded",
+      retryable: false,
+      recovery: "reduce_input",
+      attachmentIssue: "too_large",
+      attachmentItemCount: 2,
+    })).toMatchObject({
+      code: "chat_limit_exceeded",
+      attachmentIssue: "too_large",
+      attachmentItemCount: 2,
+    });
+    expect(() => parseChatIpcError({
+      schemaVersion: 1,
+      code: "chat_limit_exceeded",
+      retryable: false,
+      recovery: "reduce_input",
+      attachmentIssue: "too_large",
+    })).toThrow(ChatContractError);
+    expect(() => parseChatIpcError({
+      schemaVersion: 1,
+      code: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+      attachmentItemCount: 2,
+    })).toThrow(ChatContractError);
+    expect(() => parseChatIpcError({
+      schemaVersion: 2,
+      code: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+      attachmentItemCount: 0,
+    })).toThrow(ChatContractError);
+    expect(() => parseChatIpcError({
+      schemaVersion: 2,
+      code: "chat_request_invalid",
+      retryable: false,
+      recovery: "fix_request",
+      attachmentIssue: "too_large",
+    })).toThrow(ChatContractError);
+  });
+
   it("uses decimal strings for u64 event sequence and rejects historical Host item IDs", () => {
     const event = fixture("reasoning-event.json") as Record<string, unknown>;
     event.projectionSequence = "18446744073709551616";
@@ -171,5 +279,106 @@ describe("private chat IPC v1 contract", () => {
       }],
     };
     expect(() => parseReasoningResponse(response)).toThrow(ChatContractError);
+  });
+
+  it("parses v2 attachment metadata and ordered multimodal history without accepting paths", () => {
+    const attachment = {
+      attachmentId: "019c1a00-0000-7000-8000-000000000021",
+      type: "image",
+      name: "synthetic-image.png",
+      mediaType: "image/png",
+      sizeBytes: 4096,
+      status: "ready",
+      expiresAt: 2_000_000_000,
+    };
+    expect(parseAttachmentListResponse({
+      schemaVersion: 2,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: [attachment],
+    })).toEqual([attachment]);
+    expect(parseOperationResponseV2({
+      schemaVersion: 2,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: { operationId: "019c1a00-0000-7000-8000-000000000024" },
+    })).toBe("019c1a00-0000-7000-8000-000000000024");
+
+    const historyAttachment = { ...attachment, status: "bound" };
+    const historyWire = {
+      schemaVersion: 2,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: {
+        turns: [{
+          turnId: "019c1a00-0000-7000-8000-000000000022",
+          status: "completed",
+          terminalAt: 3,
+          reasoningStatus: "complete",
+          reasoningReasonCode: null,
+          messages: [{
+            messageId: "019c1a00-0000-7000-8000-000000000023",
+            role: "user",
+            content: "检查图片",
+            contentBlocks: [{ type: "text", text: "检查图片" }, historyAttachment],
+            status: "complete",
+            ordinal: 1,
+            createdAt: 2,
+          }],
+          reasoning: [],
+        }],
+        nextCursor: null,
+      },
+    };
+    const history = parseHistoryPageResponseV2(historyWire);
+    expect(history.turns[0]?.messages[0]?.contentBlocks?.map((block) => block.type)).toEqual(["text", "image"]);
+
+    const missingContent = structuredClone(historyWire);
+    delete (missingContent.data.turns[0]?.messages[0] as Partial<{ content: string }>).content;
+    expect(() => parseHistoryPageResponseV2(missingContent)).toThrow(ChatContractError);
+
+    const readyHistory = structuredClone(historyWire);
+    const readyHistoryAttachment = readyHistory.data.turns[0]!.messages[0]!.contentBlocks[1] as {
+      status: string;
+    };
+    readyHistoryAttachment.status = "ready";
+    expect(() => parseHistoryPageResponseV2(readyHistory)).toThrow(ChatContractError);
+
+    const mismatchedProjection = structuredClone(historyWire);
+    mismatchedProjection.data.turns[0]!.messages[0]!.content = "不同文本";
+    expect(() => parseHistoryPageResponseV2(mismatchedProjection)).toThrow(ChatContractError);
+
+    expect(() => parseAttachmentListResponse({
+      schemaVersion: 2,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: [{ ...attachment, name: "/private/synthetic-image.png" }],
+    })).toThrow(ChatContractError);
+    expect(() => parseAttachmentListResponse({
+      schemaVersion: 2,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: [{ ...attachment, type: "file" }],
+    })).toThrow(ChatContractError);
+  });
+
+  it("parses only content-free aggregate attachment import events", () => {
+    const event = {
+      schemaVersion: 2,
+      contextId: "019c1a00-0000-7000-8000-000000000003",
+      operationId: "019c1a00-0000-7000-8000-000000000024",
+      sequence: "3",
+      stage: "parsing",
+      itemCount: 2,
+      issue: null,
+    };
+    expect(parseAttachmentImportEvent(event)).toEqual(event);
+    expect(() => parseAttachmentImportEvent({ ...event, name: "private.pdf" }))
+      .toThrow(ChatContractError);
+    expect(() => parseAttachmentImportEvent({ ...event, attachment: { path: "/private/file" } }))
+      .toThrow(ChatContractError);
+    expect(() => parseAttachmentImportEvent({ ...event, stage: "error_terminal" }))
+      .toThrow(ChatContractError);
+    expect(parseAttachmentImportEvent({
+      ...event,
+      sequence: "4",
+      stage: "error_terminal",
+      issue: "parse_failed",
+    })).toMatchObject({ stage: "error_terminal", issue: "parse_failed" });
   });
 });

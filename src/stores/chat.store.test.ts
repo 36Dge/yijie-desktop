@@ -1,14 +1,25 @@
 import { createPinia, setActivePinia } from "pinia";
+import { watch } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatClient } from "../api/chat-client";
 import type {
+  ChatAttachment,
+  ChatAttachmentImportEvent,
   ChatControlPlaneEvent,
   ChatProjectionEvent,
   ChatResyncProjection,
   ChatSession,
 } from "../domain/chat-ipc";
-import { ChatClientError } from "../domain/chat-ipc";
-import { createChatStoreDefinition } from "./chat.store";
+import {
+  CHAT_NEW_DRAFT_TARGET,
+  ChatClientError,
+  chatSessionDraftTarget,
+} from "../domain/chat-ipc";
+import {
+  CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS,
+  CHAT_DRAFT_ATTACHMENT_LIMIT,
+  createChatStoreDefinition,
+} from "./chat.store";
 
 const NOW = Date.parse("2026-08-03T12:00:00Z");
 const TENANT = "019c1a00-0000-7000-8000-000000000002";
@@ -17,19 +28,28 @@ const CONTEXT_B = "019c1a00-0000-7000-8000-000000000004";
 const SESSION_A = "019c1a00-0000-7000-8000-000000000005";
 const SESSION_B = "019c1a00-0000-7000-8000-000000000006";
 const TURN_A = "019c1a00-0000-7000-8000-000000000007";
+const SESSION_CREATED = "019c1a00-0000-7000-8000-000000000008";
 
 let storeSequence = 0;
 
 class Deferred<T> {
   readonly promise: Promise<T>;
   private resolvePromise!: (value: T) => void;
+  private rejectPromise!: (reason: unknown) => void;
 
   constructor() {
-    this.promise = new Promise<T>((resolve) => { this.resolvePromise = resolve; });
+    this.promise = new Promise<T>((resolve, reject) => {
+      this.resolvePromise = resolve;
+      this.rejectPromise = reject;
+    });
   }
 
   resolve(value: T): void {
     this.resolvePromise(value);
+  }
+
+  reject(reason: unknown): void {
+    this.rejectPromise(reason);
   }
 }
 
@@ -43,6 +63,18 @@ function session(sessionId: string, title = sessionId === SESSION_A ? "A" : "B")
     lastActivityAt: 1,
     latestTurnStatus: null,
     projectAvailable: true,
+  });
+}
+
+function attachment(status: ChatAttachment["status"] = "ready"): ChatAttachment {
+  return Object.freeze({
+    attachmentId: "019c1a00-0000-7000-8000-000000000020",
+    type: "file",
+    name: "synthetic.pdf",
+    mediaType: "application/pdf",
+    sizeBytes: 2048,
+    status,
+    expiresAt: Math.floor(NOW / 1000) + 604_800,
   });
 }
 
@@ -74,15 +106,34 @@ function event(
   } as ChatProjectionEvent;
 }
 
+function attachmentImportEvent(
+  stage: ChatAttachmentImportEvent["stage"],
+  sequence: string,
+  overrides: Partial<ChatAttachmentImportEvent> = {},
+): ChatAttachmentImportEvent {
+  return Object.freeze({
+    schemaVersion: 2,
+    contextId: CONTEXT,
+    operationId: "019c1a00-0000-7000-8000-00000000000c",
+    sequence,
+    stage,
+    itemCount: 2,
+    issue: stage === "error_terminal" ? "parse_failed" : null,
+    ...overrides,
+  });
+}
+
 function fakeClient(overrides: Partial<ChatClient> = {}): {
   client: ChatClient;
   emit: (event: ChatProjectionEvent) => void;
   emitControlPlane: (event: ChatControlPlaneEvent) => void;
+  emitAttachmentImport: (event: ChatAttachmentImportEvent) => void;
   invalidate: () => void;
 } {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
   let invalidHandler: () => void = () => undefined;
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
+  let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
   const client: ChatClient = {
     bindContext: async () => ({
       contextId: CONTEXT,
@@ -100,8 +151,15 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     removeProject: async (_context, _project, operation) => operation,
     createSession: async (_context, _project, _input, operation) => ({ sessionId: SESSION_A, turnId: TURN_A, operationId: operation }),
     submitTurn: async (_context, sessionId, _input, operation) => ({ sessionId, turnId: TURN_A, operationId: operation }),
+    pickAttachments: async () => [],
+    importAttachments: async () => [],
+    listDraftAttachments: async () => [],
+    removeAttachment: async (_context, _target, _attachment, operation) => operation,
+    createSessionV2: async (_context, _project, _blocks, operation) => ({ sessionId: SESSION_A, turnId: TURN_A, operationId: operation }),
+    submitTurnV2: async (_context, sessionId, _blocks, operation) => ({ sessionId, turnId: TURN_A, operationId: operation }),
     listSessions: async () => ({ sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }),
     loadHistory: async () => ({ turns: [], nextCursor: null }),
+    loadHistoryV2: (...arguments_) => client.loadHistory(...arguments_),
     loadReasoning: async () => [],
     renameSession: async (_context, _session, _title, operation) => operation,
     setSessionPinned: async (_context, _session, _pinned, operation) => operation,
@@ -149,6 +207,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       ? "019c1a00-0000-7000-8000-00000000000a"
       : "019c1a00-0000-7000-8000-00000000000b",
     resyncSession: async (_context, sessionId) => projection(sessionId),
+    resyncSessionV2: (...arguments_) => client.resyncSession(...arguments_),
     unsubscribeSession: async () => true,
     cancelRequest: async () => true,
     onEvent: async (handler, onInvalid) => {
@@ -160,18 +219,27 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       controlPlaneHandler = handler;
       return () => undefined;
     },
+    onAttachmentImportEvent: async (handler) => {
+      attachmentImportHandler = handler;
+      return () => undefined;
+    },
     ...overrides,
   };
   return {
     client,
     emit: (value) => eventHandler(value),
     emitControlPlane: (value) => controlPlaneHandler(value),
+    emitAttachmentImport: (value) => attachmentImportHandler(value),
     invalidate: () => invalidHandler(),
   };
 }
 
 function createStore(client: ChatClient) {
   return createChatStoreDefinition(client, `chat-test-${storeSequence++}`)();
+}
+
+async function finishAttachmentImportPresentation(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS * 5);
 }
 
 describe("chat view-model store", () => {
@@ -201,6 +269,29 @@ describe("chat view-model store", () => {
     }
   });
 
+  it("does not change phase when the new-task draft is already selected", async () => {
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async () => []);
+    const store = createStore(fakeClient({ listDraftAttachments }).client);
+    await store.bind(TENANT);
+    const observedPhases: string[] = [];
+    const stopWatching = watch(
+      () => store.phase,
+      (nextPhase) => observedPhases.push(nextPhase),
+      { flush: "sync" },
+    );
+
+    await store.clearSelectedSession();
+    await store.clearSelectedSession();
+    stopWatching();
+
+    expect(observedPhases).toEqual([]);
+    expect(store.phase).toBe("ready");
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftTargetReady).toBe(true);
+    expect(listDraftAttachments).toHaveBeenCalledOnce();
+  });
+
   it("retains only the closed bind failure stage and error code", async () => {
     const unavailable = () => new ChatClientError({
       schemaVersion: 1,
@@ -223,6 +314,162 @@ describe("chat view-model store", () => {
       expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
       await store.dispose();
     }
+  });
+
+  it("fails closed when the initial draft cannot be restored and re-enables actions only after retry", async () => {
+    let newDraftAttempts = 0;
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async (_context, target) => {
+      if (target.type !== "new") return [];
+      newDraftAttempts += 1;
+      if (newDraftAttempts === 1) {
+        throw new ChatClientError({
+          schemaVersion: 2,
+          code: "chat_temporarily_unavailable",
+          retryable: true,
+          recovery: "retry",
+        });
+      }
+      return [attachment()];
+    });
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operation) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId: operation,
+      }),
+    );
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>(
+      async (_context, _project, _blocks, operation) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId: operation,
+      }),
+    );
+    const importAttachments = vi.fn<ChatClient["importAttachments"]>(async () => []);
+    const store = createStore(fakeClient({
+      listDraftAttachments,
+      createSession,
+      createSessionV2,
+      importAttachments,
+    }).client);
+
+    await store.bind(TENANT);
+
+    expect(store.context?.contextId).toBe(CONTEXT);
+    expect(store.phase).toBe("unavailable");
+    expect(store.lastBindFailureStage).toBe("draft_attachments");
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftTargetReady).toBe(false);
+    expect(store.draftAttachments).toEqual([]);
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "blocked"))
+      .resolves.toBeNull();
+    await expect(store.importAttachmentPaths(["/private/blocked.pdf"])).resolves.toEqual([]);
+    expect(createSession).not.toHaveBeenCalled();
+    expect(createSessionV2).not.toHaveBeenCalled();
+    expect(importAttachments).not.toHaveBeenCalled();
+
+    await expect(store.retryDraftRecovery()).resolves.toBe(true);
+
+    expect(listDraftAttachments).toHaveBeenCalledTimes(2);
+    expect(listDraftAttachments).toHaveBeenLastCalledWith(CONTEXT, CHAT_NEW_DRAFT_TARGET);
+    expect(store.phase).toBe("ready");
+    expect(store.lastBindFailureStage).toBeNull();
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.draftTargetReady).toBe(true);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(store.canSend).toBe(true);
+    expect(store.canAttach).toBe(true);
+
+    await store.importAttachmentPaths(["/private/recovered.pdf"]);
+    expect(importAttachments).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a failed session draft target closed and reloads the full session on retry", async () => {
+    const sessionAttachment = Object.freeze({
+      ...attachment(),
+      attachmentId: "019c1a00-0000-7000-8000-000000000021",
+      name: "session-recovered.pdf",
+    }) satisfies ChatAttachment;
+    let sessionDraftAttempts = 0;
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async (_context, target) => {
+      if (target.type === "new") return [];
+      sessionDraftAttempts += 1;
+      if (sessionDraftAttempts === 1) {
+        throw new ChatClientError({
+          schemaVersion: 2,
+          code: "chat_temporarily_unavailable",
+          retryable: true,
+          recovery: "retry",
+        });
+      }
+      return [sessionAttachment];
+    });
+    const subscribeSession = vi.fn<ChatClient["subscribeSession"]>(
+      async () => "019c1a00-0000-7000-8000-00000000000a",
+    );
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(
+      async (_context, sessionId) => projection(sessionId, "Recovered A"),
+    );
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>(
+      async (_context, sessionId, _input, operation) => ({ sessionId, turnId: TURN_A, operationId: operation }),
+    );
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(
+      async (_context, sessionId, _blocks, operation) => ({ sessionId, turnId: TURN_A, operationId: operation }),
+    );
+    const importAttachments = vi.fn<ChatClient["importAttachments"]>(async () => []);
+    const store = createStore(fakeClient({
+      listDraftAttachments,
+      subscribeSession,
+      resyncSession,
+      submitTurn,
+      submitTurnV2,
+      importAttachments,
+    }).client);
+    await store.bind(TENANT);
+
+    await store.selectSession(SESSION_A);
+
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.draftTarget).toEqual(chatSessionDraftTarget(SESSION_A));
+    expect(store.draftTargetReady).toBe(false);
+    expect(store.draftAttachments).toEqual([]);
+    expect(store.history).toBeNull();
+    expect(store.phase).toBe("unavailable");
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(subscribeSession).not.toHaveBeenCalled();
+    expect(resyncSession).not.toHaveBeenCalled();
+
+    await store.submitTurn("blocked");
+    await store.importAttachmentPaths(["/private/blocked.pdf"]);
+    expect(submitTurn).not.toHaveBeenCalled();
+    expect(submitTurnV2).not.toHaveBeenCalled();
+    expect(importAttachments).not.toHaveBeenCalled();
+
+    await expect(store.retryDraftRecovery()).resolves.toBe(true);
+
+    const sessionDraftCalls = listDraftAttachments.mock.calls.filter(([, target]) =>
+      target.type === "session" && target.sessionId === SESSION_A,
+    );
+    expect(sessionDraftCalls).toHaveLength(2);
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.draftTargetReady).toBe(true);
+    expect(store.draftAttachments).toEqual([sessionAttachment]);
+    expect(store.history).toEqual({ turns: [], nextCursor: null });
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.title).toBe("Recovered A");
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.canSend).toBe(true);
+    expect(store.canAttach).toBe(true);
+    expect(subscribeSession).toHaveBeenCalledOnce();
+    expect(resyncSession).toHaveBeenCalledOnce();
+
+    await store.importAttachmentPaths(["/private/recovered.pdf"]);
+    expect(importAttachments).toHaveBeenCalledOnce();
   });
 
   it("reports whether an interrupt request crossed the authority boundary", async () => {
@@ -515,6 +762,515 @@ describe("chat view-model store", () => {
     await store.requestLocalRecovery();
     await store.submitTurn("now ready");
     expect(submitTurn).toHaveBeenCalledOnce();
+  });
+
+  it("disables attachment import for every unavailable composer state", async () => {
+    const delayedImport = new Deferred<readonly ChatAttachment[]>();
+    const { client } = fakeClient({ pickAttachments: async () => delayedImport.promise });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.canSend).toBe(true);
+    expect(store.canAttach).toBe(true);
+
+    store.phase = "streaming";
+    expect(store.canAttach).toBe(false);
+    store.phase = "ready";
+
+    const pendingImport = store.pickAttachments();
+    expect(store.attachmentImporting).toBe(true);
+    expect(store.canAttach).toBe(false);
+    delayedImport.resolve(Object.freeze([]));
+    await pendingImport;
+
+    store.draftAttachments = Object.freeze(Array.from(
+      { length: CHAT_DRAFT_ATTACHMENT_LIMIT },
+      (_, index): ChatAttachment => Object.freeze({
+        ...attachment(),
+        attachmentId: `019c1a00-0000-7000-8000-${String(20 + index).padStart(12, "0")}`,
+      }),
+    ));
+    expect(store.canAttach).toBe(false);
+    store.draftAttachments = Object.freeze([]);
+
+    const ready = store.localReadiness;
+    store.localReadiness = Object.freeze({
+      lifecycle: "blocked",
+      host: "unavailable",
+      runtime: "unavailable",
+      storage: "ready",
+      canSend: false,
+      issueCode: "chat_host_unavailable",
+      retryable: true,
+      recovery: "start_or_retry",
+    });
+    expect(store.canAttach).toBe(false);
+    store.localReadiness = ready;
+
+    const bound = store.context;
+    expect(bound).not.toBeNull();
+    store.context = Object.freeze({
+      ...bound!,
+      allowedActions: Object.freeze(["read_sessions", "submit_turn"] as const),
+    });
+    expect(store.canSend).toBe(true);
+    expect(store.canAttach).toBe(true);
+
+    store.context = Object.freeze({
+      ...bound!,
+      allowedActions: Object.freeze(["read_sessions", "create_session"] as const),
+    });
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+  });
+
+  it("accepts only ordered aggregate import events and requires terminal dismissal before recovery", async () => {
+    const delayedImport = new Deferred<readonly ChatAttachment[]>();
+    const pickAttachments = vi.fn(async () => delayedImport.promise);
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operation) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId: operation,
+      }),
+    );
+    const harness = fakeClient({ pickAttachments, createSession });
+    const store = createStore(harness.client);
+    await store.bind(TENANT);
+
+    const pending = store.pickAttachments();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pickAttachments).toHaveBeenCalledOnce();
+
+    harness.emitAttachmentImport(attachmentImportEvent("queued", "1", { contextId: CONTEXT_B }));
+    harness.emitAttachmentImport(attachmentImportEvent("queued", "1", { operationId: SESSION_CREATED }));
+    harness.emitAttachmentImport(attachmentImportEvent("importing", "2"));
+    expect(store.attachmentImportAttempt).toBeNull();
+
+    harness.emitAttachmentImport(attachmentImportEvent("queued", "1"));
+    expect(store.attachmentImportAttempt?.stage).toBe("queued");
+    harness.emitAttachmentImport(attachmentImportEvent("queued", "1"));
+    harness.emitAttachmentImport(attachmentImportEvent("importing", "2"));
+    harness.emitAttachmentImport(attachmentImportEvent("indexing", "3"));
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    expect(store.attachmentImportAttempt?.stage).toBe("importing");
+
+    harness.emitAttachmentImport(attachmentImportEvent("parsing", "3"));
+    harness.emitAttachmentImport(attachmentImportEvent("indexing", "4", { itemCount: 3 }));
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    expect(store.attachmentImportAttempt).toMatchObject({ stage: "parsing", itemCount: 2 });
+    harness.emitAttachmentImport(attachmentImportEvent("indexing", "4"));
+    harness.emitAttachmentImport(attachmentImportEvent("error_terminal", "5"));
+    harness.emitAttachmentImport(attachmentImportEvent("ready", "6"));
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS * 2);
+    expect(store.attachmentImportAttempt).toMatchObject({
+      stage: "error_terminal",
+      issue: "parse_failed",
+    });
+    store.dismissAttachmentImportAttempt("019c1a00-0000-7000-8000-00000000000c");
+    expect(store.attachmentImportAttempt?.stage).toBe("error_terminal");
+
+    delayedImport.reject(new ChatClientError({
+      schemaVersion: 2,
+      code: "chat_request_invalid",
+      retryable: false,
+      recovery: "fix_request",
+      attachmentIssue: "parse_failed",
+    }));
+    await expect(pending).rejects.toMatchObject({ shape: { attachmentIssue: "parse_failed" } });
+    expect(store.canAttach).toBe(false);
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "blocked")).resolves.toBeNull();
+    expect(createSession).not.toHaveBeenCalled();
+    await expect(store.pickAttachments()).resolves.toEqual([]);
+    expect(pickAttachments).toHaveBeenCalledOnce();
+
+    store.dismissAttachmentImportAttempt(SESSION_CREATED);
+    expect(store.attachmentImportAttempt?.stage).toBe("error_terminal");
+    store.dismissAttachmentImportAttempt("019c1a00-0000-7000-8000-00000000000c");
+    expect(store.attachmentImportAttempt).toBeNull();
+    expect(store.attachmentErrorCode).toBeNull();
+    expect(store.canAttach).toBe(true);
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "recovered"))
+      .resolves.toBe(SESSION_A);
+    expect(createSession).toHaveBeenCalledOnce();
+  });
+
+  it("synthesizes a terminal failure when the command rejects before its event arrives", async () => {
+    const pickAttachments = vi.fn<ChatClient["pickAttachments"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_request_invalid",
+        retryable: false,
+        recovery: "fix_request",
+        attachmentIssue: "parse_failed",
+        attachmentItemCount: 2,
+      });
+    });
+    const harness = fakeClient({ pickAttachments });
+    const store = createStore(harness.client);
+    await store.bind(TENANT);
+
+    await expect(store.pickAttachments()).rejects.toMatchObject({
+      shape: { attachmentIssue: "parse_failed", attachmentItemCount: 2 },
+    });
+
+    expect(store.attachmentImportAttempt).toMatchObject({ stage: "queued", itemCount: 2 });
+    expect(store.canAttach).toBe(false);
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    expect(store.attachmentImportAttempt?.stage).toBe("importing");
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    expect(store.attachmentImportAttempt?.stage).toBe("parsing");
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    expect(store.attachmentImportAttempt).toMatchObject({
+      stage: "error_terminal",
+      issue: "parse_failed",
+    });
+
+    harness.emitAttachmentImport(attachmentImportEvent("queued", "1"));
+    expect(store.attachmentImportAttempt?.stage).toBe("error_terminal");
+    store.dismissAttachmentImportAttempt("019c1a00-0000-7000-8000-00000000000c");
+    expect(store.attachmentImportAttempt).toBeNull();
+    expect(store.canAttach).toBe(true);
+  });
+
+  it("keeps every successful native import stage observable for a minimum interval", async () => {
+    const store = createStore(fakeClient({
+      pickAttachments: async () => [attachment()],
+    }).client);
+    await store.bind(TENANT);
+
+    await store.pickAttachments();
+
+    expect(store.attachmentImportAttempt?.stage).toBe("queued");
+    for (const stage of ["importing", "parsing", "indexing", "ready"] as const) {
+      await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+      expect(store.attachmentImportAttempt?.stage).toBe(stage);
+    }
+    await vi.advanceTimersByTimeAsync(CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS - 1);
+    expect(store.attachmentImportAttempt?.stage).toBe("ready");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.attachmentImportAttempt).toBeNull();
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(store.canAttach).toBe(true);
+  });
+
+  it("restores the scoped native draft in a new Pinia process without deleting it on dispose", async () => {
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(
+      async (_context, target) => target.type === "new" ? [attachment()] : [],
+    );
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>(
+      async (_context, _target, _attachment, operation) => operation,
+    );
+    const { client } = fakeClient({ listDraftAttachments, removeAttachment });
+
+    const firstProcess = createStore(client);
+    await firstProcess.bind(TENANT);
+    expect(firstProcess.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(firstProcess.draftAttachments).toEqual([attachment()]);
+    await firstProcess.clearSelectedSession();
+    expect(listDraftAttachments).toHaveBeenCalledTimes(1);
+
+    await firstProcess.dispose();
+    expect(removeAttachment).not.toHaveBeenCalled();
+
+    setActivePinia(createPinia());
+    const restartedProcess = createStore(client);
+    await restartedProcess.bind(TENANT);
+    expect(restartedProcess.draftAttachments).toEqual([attachment()]);
+    expect(listDraftAttachments).toHaveBeenNthCalledWith(2, CONTEXT, CHAT_NEW_DRAFT_TARGET);
+    expect(removeAttachment).not.toHaveBeenCalled();
+  });
+
+  it("loads only the selected target while preserving drafts owned by the previous route", async () => {
+    const sessionAttachment = Object.freeze({
+      ...attachment(),
+      attachmentId: "019c1a00-0000-7000-8000-000000000021",
+      name: "session-a.txt",
+      mediaType: "text/plain",
+    }) satisfies ChatAttachment;
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(
+      async (_context, target) => target.type === "new" ? [attachment()] : [sessionAttachment],
+    );
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>(
+      async (_context, _target, _attachment, operation) => operation,
+    );
+    const store = createStore(fakeClient({ listDraftAttachments, removeAttachment }).client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+
+    await store.selectSession(SESSION_A);
+
+    expect(store.draftTarget).toEqual(chatSessionDraftTarget(SESSION_A));
+    expect(store.draftAttachments).toEqual([sessionAttachment]);
+    expect(removeAttachment).not.toHaveBeenCalled();
+    expect(listDraftAttachments).toHaveBeenLastCalledWith(
+      CONTEXT,
+      chatSessionDraftTarget(SESSION_A),
+    );
+
+    await store.clearSelectedSession();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(removeAttachment).not.toHaveBeenCalled();
+  });
+
+  it("creates an attachment-only v2 turn and clears the draft only after success", async () => {
+    const pickAttachments = vi.fn(async () => [attachment()]);
+    const createSessionV2 = vi.fn(async (_context: string, _project: string, _blocks: unknown, operation: string) => ({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: operation,
+    }));
+    const { client } = fakeClient({
+      pickAttachments,
+      createSessionV2,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+    await store.pickAttachments();
+    expect(pickAttachments).toHaveBeenCalledWith(
+      CONTEXT,
+      CHAT_NEW_DRAFT_TARGET,
+      10,
+      expect.any(String),
+    );
+    expect(store.draftAttachmentsReady).toBe(true);
+    await finishAttachmentImportPresentation();
+
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "")).resolves.toBe(SESSION_A);
+    expect(createSessionV2).toHaveBeenCalledWith(
+      CONTEXT,
+      "019c1a00-0000-7000-8000-000000000009",
+      [{ type: "file", attachmentId: attachment().attachmentId }],
+      expect.any(String),
+    );
+    expect(store.draftAttachments).toEqual([]);
+  });
+
+  it("treats an accepted create as successful when the session-list refresh fails", async () => {
+    let listCall = 0;
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>(
+      async (_context, _project, _blocks, operation) => ({
+        sessionId: SESSION_CREATED,
+        turnId: TURN_A,
+        operationId: operation,
+      }),
+    );
+    const listSessions = vi.fn<ChatClient["listSessions"]>(async () => {
+      listCall += 1;
+      if (listCall === 1) return { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null };
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client } = fakeClient({
+      createSessionV2,
+      listSessions,
+      pickAttachments: async () => [attachment()],
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "new task"))
+      .resolves.toBe(SESSION_CREATED);
+
+    expect(createSessionV2).toHaveBeenCalledOnce();
+    expect(listSessions).toHaveBeenCalledTimes(2);
+    expect(store.draftAttachments).toEqual([]);
+    expect(store.selectedSessionId).toBe(SESSION_CREATED);
+    expect(store.sessions.some((item) => item.sessionId === SESSION_CREATED)).toBe(true);
+    expect(store.phase).toBe("ready");
+  });
+
+  it("retains attachment drafts after a failed v2 submit", async () => {
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_host_not_ready",
+        retryable: true,
+        recovery: "start_host",
+      });
+    });
+    const { client } = fakeClient({
+      pickAttachments: async () => [attachment()],
+      submitTurnV2,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+
+    await expect(store.submitTurn("")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
+    expect(submitTurnV2).toHaveBeenCalledOnce();
+    expect(store.draftAttachments).toEqual([attachment()]);
+  });
+
+  it("reuses a failed attachment submission operation only while its content is unchanged", async () => {
+    let operationSequence = 0x30;
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() =>
+        `019c1a00-0000-7000-8000-${(operationSequence++).toString(16).padStart(12, "0")}`,
+      ),
+    });
+    const secondAttachment = Object.freeze({
+      ...attachment(),
+      attachmentId: "019c1a00-0000-7000-8000-000000000021",
+      name: "synthetic-notes.txt",
+      mediaType: "text/plain",
+    }) satisfies ChatAttachment;
+    let pickCount = 0;
+    const pickAttachments = vi.fn(async () => [pickCount++ === 0 ? attachment() : secondAttachment]);
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_host_not_ready",
+        retryable: true,
+        recovery: "start_host",
+      });
+    });
+    const { client } = fakeClient({ pickAttachments, submitTurnV2 });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+
+    await expect(store.submitTurn("same input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
+    await expect(store.submitTurn("same input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
+    const firstOperation = submitTurnV2.mock.calls[0]?.[3];
+    expect(submitTurnV2.mock.calls[1]?.[3]).toBe(firstOperation);
+
+    await expect(store.submitTurn("changed input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
+    const changedInputOperation = submitTurnV2.mock.calls[2]?.[3];
+    expect(changedInputOperation).not.toBe(firstOperation);
+
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+    await expect(store.submitTurn("changed input")).rejects.toMatchObject({ shape: { code: "chat_host_not_ready" } });
+    expect(submitTurnV2.mock.calls[3]?.[3]).not.toBe(changedInputOperation);
+  });
+
+  it("leaves a late persisted import with its original target for later recovery", async () => {
+    const delayedImport = new Deferred<readonly ChatAttachment[]>();
+    let persistedNewDrafts: readonly ChatAttachment[] = [];
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>(
+      async (_context, _target, _attachment, operation) => operation,
+    );
+    const { client } = fakeClient({
+      pickAttachments: async () => {
+        persistedNewDrafts = await delayedImport.promise;
+        return persistedNewDrafts;
+      },
+      listDraftAttachments: async (_context, target) => target.type === "new"
+        ? persistedNewDrafts
+        : [],
+      removeAttachment,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+
+    const pendingImport = store.pickAttachments();
+    expect(store.attachmentImporting).toBe(true);
+    await Promise.resolve();
+    await store.selectSession(SESSION_A);
+    delayedImport.resolve(Object.freeze([attachment()]));
+
+    await expect(pendingImport).resolves.toEqual([]);
+    expect(removeAttachment).not.toHaveBeenCalled();
+    expect(store.draftAttachments).toEqual([]);
+    expect(store.attachmentImporting).toBe(false);
+
+    await store.clearSelectedSession();
+    expect(store.draftAttachments).toEqual([attachment()]);
+  });
+
+  it("preserves per-session drafts while switching composers", async () => {
+    let sessionADrafts: readonly ChatAttachment[] = [];
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>(
+      async (_context, _target, _attachment, operation) => operation,
+    );
+    const { client } = fakeClient({
+      pickAttachments: async () => {
+        sessionADrafts = [attachment()];
+        return sessionADrafts;
+      },
+      listDraftAttachments: async (_context, target) => target.type === "session" && target.sessionId === SESSION_A
+        ? sessionADrafts
+        : [],
+      removeAttachment,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    expect(store.draftAttachments).toEqual([attachment()]);
+
+    await store.selectSession(SESSION_B);
+
+    expect(store.draftAttachments).toEqual([]);
+    expect(removeAttachment).not.toHaveBeenCalled();
+
+    await store.selectSession(SESSION_A);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(removeAttachment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the attachment draft when native removal fails", async () => {
+    const removeAttachment = vi.fn(async () => {
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_storage_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client } = fakeClient({
+      pickAttachments: async () => [attachment()],
+      removeAttachment,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+    await store.pickAttachments();
+
+    await expect(store.removeDraftAttachment(attachment().attachmentId)).rejects.toMatchObject({
+      shape: { code: "chat_storage_unavailable" },
+    });
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(store.attachmentErrorCode).toBe("chat_storage_unavailable");
+  });
+
+  it("preserves a specific native attachment rejection reason for the composer", async () => {
+    const { client } = fakeClient({
+      pickAttachments: async () => {
+        throw new ChatClientError({
+          schemaVersion: 2,
+          code: "chat_request_invalid",
+          retryable: false,
+          recovery: "fix_request",
+          attachmentIssue: "archive_unsupported",
+        });
+      },
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.clearSelectedSession();
+
+    await expect(store.pickAttachments()).rejects.toMatchObject({
+      shape: { attachmentIssue: "archive_unsupported" },
+    });
+    expect(store.attachmentErrorCode).toBe("archive_unsupported");
   });
 
   it("appends session pages without duplicating the cursor boundary", async () => {

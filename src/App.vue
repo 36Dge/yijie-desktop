@@ -56,7 +56,13 @@ async function synchronizeChatRoute(): Promise<void> {
   const epoch = ++routeSelectionEpoch;
   if (!localChatUiEnabled || chatStore.context === null || !chatStore.isReady) return;
   if (route.path === "/chat") {
-    await chatStore.clearSelectedSession();
+    const newDraftAlreadySelected =
+      chatStore.selectedSessionId === null &&
+      chatStore.draftTarget?.type === "new" &&
+      chatStore.draftTargetReady;
+    if (!newDraftAlreadySelected) {
+      await chatStore.clearSelectedSession();
+    }
     return;
   }
   if (!route.path.startsWith("/chat/")) return;

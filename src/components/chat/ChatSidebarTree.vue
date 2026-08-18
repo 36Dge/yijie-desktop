@@ -408,7 +408,7 @@ async function confirmRemoveProject(): Promise<void> {
 
 .chat-tree__session-link--active { color: var(--yj-color-brand-text); background: var(--yj-color-brand-soft); }
 .chat-tree__session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-tree__session-status { flex: none; color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
+.chat-tree__session-status { flex: none; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 
 .chat-tree__state,
 .chat-tree__empty-session,

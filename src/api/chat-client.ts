@@ -1,34 +1,45 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
+  CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
   CHAT_EVENT_CHANNEL,
   CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_IPC_SCHEMA_VERSION,
+  CHAT_IPC_V2_SCHEMA_VERSION,
   ChatClientError,
   ChatContractError,
   parseBoundContextResponse,
+  parseAttachmentListResponse,
+  parseAttachmentImportEvent,
   parseCancelledResponse,
   parseChatIpcError,
   parseChatProjectionEvent,
   parseCleanupResponse,
   parseControlPlaneEvent,
   parseCreatedTurnResponse,
+  parseCreatedTurnResponseV2,
   parseHistoryPageResponse,
+  parseHistoryPageResponseV2,
   parseLocalReadinessResponse,
   parseOperationResponse,
+  parseOperationResponseV2,
   parseOptionalCleanupResponse,
   parseOptionalProjectResponse,
   parseProjectListResponse,
   parseProjectResponse,
   parseReasoningResponse,
   parseResyncResponse,
+  parseResyncResponseV2,
   parseSessionPageResponse,
   parseSessionControlPlaneResponse,
   parseSubscriptionResponse,
   type BoundChatContext,
+  type ChatAttachment,
+  type ChatAttachmentImportEvent,
   type ChatCleanupStatus,
   type ChatControlPlaneEvent,
   type ChatCreatedTurn,
+  type ChatDraftTarget,
   type ChatHistoryPage,
   type ChatLocalReadiness,
   type ChatProjectionEvent,
@@ -37,6 +48,7 @@ import {
   type ChatResyncProjection,
   type ChatSessionPage,
   type ChatSessionControlPlane,
+  type ChatTurnContentBlock,
 } from "../domain/chat-ipc";
 
 type InvokeFn = (command: string, arguments_?: Record<string, unknown>) => Promise<unknown>;
@@ -59,8 +71,25 @@ export interface ChatClient {
   removeProject(contextId: string, projectId: string, operationId: string): Promise<string>;
   createSession(contextId: string, projectId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
   submitTurn(contextId: string, sessionId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
+  pickAttachments(contextId: string, draftTarget: ChatDraftTarget, remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
+  importAttachments(contextId: string, draftTarget: ChatDraftTarget, paths: readonly string[], remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
+  listDraftAttachments(contextId: string, draftTarget: ChatDraftTarget, signal?: AbortSignal): Promise<readonly ChatAttachment[]>;
+  removeAttachment(contextId: string, draftTarget: ChatDraftTarget, attachmentId: string, operationId: string): Promise<string>;
+  createSessionV2(
+    contextId: string,
+    projectId: string,
+    contentBlocks: readonly ChatTurnContentBlock[],
+    operationId: string,
+  ): Promise<ChatCreatedTurn>;
+  submitTurnV2(
+    contextId: string,
+    sessionId: string,
+    contentBlocks: readonly ChatTurnContentBlock[],
+    operationId: string,
+  ): Promise<ChatCreatedTurn>;
   listSessions(contextId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatSessionPage>;
   loadHistory(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
+  loadHistoryV2(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadReasoning(contextId: string, turnId: string, signal?: AbortSignal): Promise<readonly ChatReasoningItem[]>;
   renameSession(contextId: string, sessionId: string, title: string, operationId: string): Promise<string>;
   setSessionPinned(contextId: string, sessionId: string, pinned: boolean, operationId: string): Promise<string>;
@@ -72,6 +101,7 @@ export interface ChatClient {
   requestLocalRecovery(contextId: string, operationId: string): Promise<ChatLocalReadiness>;
   subscribeSession(contextId: string, sessionId: string): Promise<string>;
   resyncSession(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
+  resyncSessionV2(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
   unsubscribeSession(contextId: string, subscriptionId: string): Promise<boolean>;
   cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
   onEvent(
@@ -80,6 +110,10 @@ export interface ChatClient {
   ): Promise<UnlistenFn>;
   onControlPlaneEvent(
     handler: (event: ChatControlPlaneEvent) => void,
+    onInvalid?: () => void,
+  ): Promise<UnlistenFn>;
+  onAttachmentImportEvent(
+    handler: (event: ChatAttachmentImportEvent) => void,
     onInvalid?: () => void,
   ): Promise<UnlistenFn>;
 }
@@ -101,6 +135,21 @@ function operationEnvelope(contextId: string, payload: Record<string, unknown>, 
     id,
     request: {
       schemaVersion: CHAT_IPC_SCHEMA_VERSION,
+      requestId: id,
+      contextId,
+      payload: compactPayload,
+    },
+  };
+}
+
+function operationEnvelopeV2(contextId: string, payload: Record<string, unknown>, id = requestId()) {
+  const compactPayload = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
+  return {
+    id,
+    request: {
+      schemaVersion: CHAT_IPC_V2_SCHEMA_VERSION,
       requestId: id,
       contextId,
       payload: compactPayload,
@@ -162,6 +211,36 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     }
   }
 
+  async function runReadV2<T>(
+    command: string,
+    contextId: string,
+    payload: Record<string, unknown>,
+    parse: (value: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const envelope = operationEnvelopeV2(contextId, payload);
+    if (signal?.aborted) {
+      throw new ChatClientError({ schemaVersion: 2, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+    }
+    let abortHandler: (() => void) | undefined;
+    if (signal) {
+      abortHandler = () => {
+        const cancellation = operationEnvelope(contextId, { targetRequestId: envelope.id });
+        void transport.invoke("chat_cancel_request_v1", { request: cancellation.request });
+      };
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+    try {
+      const value = await run(command, envelope.request, parse);
+      if (signal?.aborted) {
+        throw new ChatClientError({ schemaVersion: 2, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+      }
+      return value;
+    } finally {
+      if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+    }
+  }
+
   return {
     bindContext(tenantSelector) {
       const id = requestId();
@@ -196,10 +275,40 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       const envelope = operationEnvelope(contextId, { sessionId, input, operationId });
       return run("chat_submit_turn_v1", envelope.request, parseCreatedTurnResponse);
     },
+    pickAttachments(contextId, draftTarget, remainingCapacity, operationId) {
+      const envelope = operationEnvelopeV2(contextId, { draftTarget, operationId, remainingCapacity });
+      return run("chat_pick_attachments_v2", envelope.request, parseAttachmentListResponse);
+    },
+    importAttachments(contextId, draftTarget, paths, remainingCapacity, operationId) {
+      const envelope = operationEnvelopeV2(contextId, { paths: [...paths], draftTarget, operationId, remainingCapacity });
+      return run("chat_import_attachments_v2", envelope.request, parseAttachmentListResponse);
+    },
+    listDraftAttachments: (contextId, draftTarget, signal) =>
+      runReadV2(
+        "chat_list_draft_attachments_v2",
+        contextId,
+        { draftTarget },
+        parseAttachmentListResponse,
+        signal,
+      ),
+    removeAttachment(contextId, draftTarget, attachmentId, operationId) {
+      const envelope = operationEnvelopeV2(contextId, { attachmentId, draftTarget, operationId });
+      return run("chat_remove_attachment_v2", envelope.request, parseOperationResponseV2);
+    },
+    createSessionV2(contextId, projectId, contentBlocks, operationId) {
+      const envelope = operationEnvelopeV2(contextId, { projectId, contentBlocks, operationId });
+      return run("chat_create_session_v2", envelope.request, parseCreatedTurnResponseV2);
+    },
+    submitTurnV2(contextId, sessionId, contentBlocks, operationId) {
+      const envelope = operationEnvelopeV2(contextId, { sessionId, contentBlocks, operationId });
+      return run("chat_submit_turn_v2", envelope.request, parseCreatedTurnResponseV2);
+    },
     listSessions: (contextId, cursor, limit, signal) =>
       runRead("chat_list_sessions_v1", contextId, { cursor, limit }, parseSessionPageResponse, signal),
     loadHistory: (contextId, sessionId, cursor, limit, signal) =>
       runRead("chat_load_history_v1", contextId, { sessionId, cursor, limit }, parseHistoryPageResponse, signal),
+    loadHistoryV2: (contextId, sessionId, cursor, limit, signal) =>
+      runReadV2("chat_load_history_v2", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV2, signal),
     loadReasoning: (contextId, turnId, signal) =>
       runRead("chat_load_reasoning_v1", contextId, { turnId }, parseReasoningResponse, signal),
     renameSession(contextId, sessionId, title, operationId) {
@@ -240,6 +349,8 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     resyncSession: (contextId, sessionId, limit, signal) =>
       runRead("chat_resync_session_v1", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponse, signal),
+    resyncSessionV2: (contextId, sessionId, limit, signal) =>
+      runReadV2("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV2, signal),
     unsubscribeSession(contextId, subscriptionId) {
       const envelope = operationEnvelope(contextId, { subscriptionId });
       return run("chat_unsubscribe_session_v1", envelope.request, parseCancelledResponse);
@@ -262,6 +373,16 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       return transport.listen(CHAT_CONTROL_PLANE_EVENT_CHANNEL, (payload) => {
         try {
           handler(parseControlPlaneEvent(payload));
+        } catch (error: unknown) {
+          if (!(error instanceof ChatContractError)) throw error;
+          onInvalid?.();
+        }
+      });
+    },
+    async onAttachmentImportEvent(handler, onInvalid) {
+      return transport.listen(CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL, (payload) => {
+        try {
+          handler(parseAttachmentImportEvent(payload));
         } catch (error: unknown) {
           if (!(error instanceof ChatContractError)) throw error;
           onInvalid?.();

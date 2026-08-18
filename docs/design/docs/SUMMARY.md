@@ -41,6 +41,7 @@
 - [插件市场 Pattern](./design/05-patterns/10-plugin-marketplace.md)
 - [经营分析 Pattern](./design/05-patterns/11-store-analytics.md)
 - [FEAT-126 Chat / App Shell Pattern](./design/05-patterns/12-feat-126-chat-app-shell-candidate.md)
+- [FEAT-127 Chat 附件 Pattern](./design/05-patterns/13-feat-127-chat-attachments.md)
 - [文案语气规范](./design/06-content/01-copywriting.md)
 - [中文与本地化规范](./design/06-content/02-i18n-l10n.md)
 - [错误、空态与加载文案规范](./design/06-content/03-error-empty-loading.md)

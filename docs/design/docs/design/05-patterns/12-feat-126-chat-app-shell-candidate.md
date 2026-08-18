@@ -3,10 +3,10 @@
 ## 文档状态
 
 - 状态：Accepted
-- 候选版本：1.0.0
-- 最后更新：2026-08-02
+- 候选版本：1.1.0
+- 最后更新：2026-08-16
 - 适用 Feature：`FEAT-126`
-- Contract impact：`breaking`
+- Contract impact：`breaking`（FEAT-126 原始边界）；`semantic`（1.1 composer 键盘语义调整）
 - 适用仓库：`yijie-desktop`
 - 默认语言：中文
 
@@ -52,12 +52,15 @@ Design System、macOS 平台习惯、明确权限边界与可访问性。
 
 页面保持单列、低干扰。核心 composer 自上而下为：
 
-- Native 项目选择入口：首次 turn 必选；只显示安全名称，不把绝对路径交给 WebView。
-- “权限审批”只读入口：展示固定 `read-only / deny` 策略及原因，不允许提升权限。
-- 可访问 label 为“输入你的任务需求”的多行文本框。
-- 输入框内的发送按钮；空白、项目无效、权限/Runtime/DB 未就绪或正在提交时 disabled，并显示具体原因。
+- 独立的 Native 项目选择条：首次 turn 必选；显示文件夹图标与当前安全名称，不使用输入框下拉组件，
+  不把绝对路径交给 WebView。活跃 session 只展示绑定的项目，不允许在 composer 内切换。
+- 输入面板：可访问 label 为“输入你的任务需求”的多行文本框；“权限审批”只读入口固定在左下角，
+  发送/停止固定在右下角。权限入口展示固定 `read-only / deny` 策略及原因，不允许提升权限。
+- 空白、项目无效、权限/Runtime/DB 未就绪或正在提交时发送 disabled，并显示具体原因。正常 ready 状态
+  不额外显示“本地运行环境已就绪”提示条；阻断、错误与可恢复状态继续显示稳定原因和恢复动作。
+- 不展示常驻快捷键说明或输入字节计数；64 KiB 限制保持生效，只在超限时显示关联到输入框的校验错误。
 
-点击发送或 `⌘Enter` 只提交一次。普通 `Enter` 换行；IME composition 中不得提交。Desktop 必须先完成
+点击发送或普通 `Enter` 只提交一次，`Shift+Enter` 换行；IME composition 中不得提交。Desktop 必须先完成
 本地 session/user-message/outbox transaction，成功后再路由 `/chat/:sessionId`；transaction 失败保留输入并
 显示 typed error，不创建空 session。拖入或粘贴文件/图片必须拒绝，纯文本 paste 允许。
 
@@ -109,6 +112,8 @@ permanent delete 只有 Desktop/Host/Runtime required surfaces 与 SQLCipher che
 
 - 使用既有易界 semantic tokens、字体、圆角、边框、阴影和 light/dark theme；不复制参考截图的像素或
   引入 Codex 品牌资产。
+- 采用“顶部项目条 + 下方输入面板”的单列关系；借鉴 Codex 的入口层级和控件位置，但颜色、圆角、
+  边框、阴影与交互状态继续使用易界 token。
 - 视觉密度吸收 Codex 的单列阅读层级和 Linear 的克制信息密度；主操作只有发送/停止，次级入口使用
   icon + tooltip，不制造大面积工具栏。
 - hover/focus/active/disabled/error 状态在 light/dark 下均达到现有可访问性基线。焦点环不能被
@@ -117,7 +122,7 @@ permanent delete 只有 Desktop/Host/Runtime required surfaces 与 SQLCipher che
 
 ## 10. 键盘与辅助技术
 
-- Tab 顺序与视觉顺序一致：全局导航 → 项目/权限 → composer → send → conversation → active controls。
+- Tab 顺序与视觉顺序一致：全局导航 → 项目 → composer → 权限 → send → conversation → active controls。
 - 每个 icon-only action 有稳定中文 accessible name；menu 支持方向键、Enter/Space、Escape 并恢复触发器焦点。
 - reasoning disclosure 使用原生 button 语义、`aria-expanded` 和关联内容 ID；状态变化使用克制的
   `aria-live=polite` 摘要，不播报每个 delta。
@@ -128,6 +133,8 @@ permanent delete 只有 Desktop/Host/Runtime required surfaces 与 SQLCipher che
 
 - [ ] 只有一个全局 240/72 App Shell toggle；Chat 内无二级 sidebar toggle/right panel。
 - [ ] 新建任务只有项目、只读权限、文本和发送；没有附件/模型/强度/语音。
+- [ ] 项目入口位于输入面板上方且没有下拉组件；权限在输入面板左下角，发送/停止在右下角。
+- [ ] 普通 Enter 发送、Shift+Enter 换行，IME composition 不发送；界面不显示快捷键提示或字节计数。
 - [ ] commit 成功才进入 `/chat/:sessionId`，失败保留输入，重复提交只产生一个 session/turn。
 - [ ] 用户/模型工具栏不存在被删除的产品动作，原生文本选择与 `⌘C` 仍有效。
 - [ ] scroll-bottom 阈值、follow/reduced-motion、焦点和 accessible name 符合本文。
@@ -141,6 +148,9 @@ permanent delete 只有 Desktop/Host/Runtime required surfaces 与 SQLCipher che
 - 2026-08-02 / 1.0.0 Proposed：根据 FEAT-126 G1 已批准产品语义、ADR-0013/0014/0016 与
   DESIGN-126-003 建立 G2 Closure候选；没有修改业务代码。
 - Owner approval：段成威，Accepted 2026-08-02。批准范围为本文定义的FEAT-126冲突段落；不授权业务编码。
+- 2026-08-16 / 1.1.0 Accepted：按本次明确的新需求调整 composer 布局、项目与权限入口位置，移除成功态
+  readiness、快捷键提示和字节计数，并将键盘语义改为 Enter 发送、Shift+Enter 换行。公共 wire、权限策略、
+  64 KiB 限制和本地持久化边界不变。
 
 ## 关联文件
 

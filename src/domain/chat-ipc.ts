@@ -1,6 +1,8 @@
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
+export const CHAT_IPC_V2_SCHEMA_VERSION = 2 as const;
 export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
 export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
+export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-import:event:v2" as const;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
@@ -34,6 +36,19 @@ export const CHAT_COMMAND_NAMES = Object.freeze([
 ] as const);
 
 export type ChatCommandName = (typeof CHAT_COMMAND_NAMES)[number];
+
+export const CHAT_V2_COMMAND_NAMES = Object.freeze([
+  "chat_pick_attachments_v2",
+  "chat_import_attachments_v2",
+  "chat_list_draft_attachments_v2",
+  "chat_remove_attachment_v2",
+  "chat_create_session_v2",
+  "chat_submit_turn_v2",
+  "chat_load_history_v2",
+  "chat_resync_session_v2",
+] as const);
+
+export type ChatV2CommandName = (typeof CHAT_V2_COMMAND_NAMES)[number];
 
 export const CHAT_ERROR_CODES = Object.freeze([
   "chat_unauthenticated",
@@ -73,6 +88,17 @@ export const CHAT_RECOVERIES = Object.freeze([
 
 export type ChatRecovery = (typeof CHAT_RECOVERIES)[number];
 
+export const CHAT_ATTACHMENT_ISSUES = Object.freeze([
+  "too_many",
+  "too_large",
+  "archive_unsupported",
+  "unsupported",
+  "invalid_content",
+  "parse_failed",
+] as const);
+
+export type ChatAttachmentIssue = (typeof CHAT_ATTACHMENT_ISSUES)[number];
+
 export const CHAT_ALLOWED_ACTIONS = Object.freeze([
   "read_sessions",
   "create_session",
@@ -91,11 +117,13 @@ export const CHAT_ALLOWED_ACTIONS = Object.freeze([
 export type ChatAllowedAction = (typeof CHAT_ALLOWED_ACTIONS)[number];
 
 export interface ChatIpcErrorShape {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 1 | 2;
   readonly requestId?: string;
   readonly code: ChatErrorCode;
   readonly retryable: boolean;
   readonly recovery: ChatRecovery;
+  readonly attachmentIssue?: ChatAttachmentIssue;
+  readonly attachmentItemCount?: number;
   readonly retryAfterMs?: number;
 }
 
@@ -143,10 +171,105 @@ export interface ChatSessionPage {
   readonly nextCursor: string | null;
 }
 
+export const CHAT_ATTACHMENT_STATUSES = Object.freeze([
+  "queued",
+  "importing",
+  "parsing",
+  "indexing",
+  "ready",
+  "bound",
+  "error_terminal",
+  "expired",
+] as const);
+
+export type ChatAttachmentStatus = (typeof CHAT_ATTACHMENT_STATUSES)[number];
+
+export type ChatDraftTarget =
+  | Readonly<{ type: "new" }>
+  | Readonly<{ type: "session"; sessionId: string }>;
+
+export const CHAT_NEW_DRAFT_TARGET: ChatDraftTarget = Object.freeze({ type: "new" });
+
+export function chatSessionDraftTarget(sessionId: string): ChatDraftTarget {
+  return Object.freeze({ type: "session", sessionId: uuid(sessionId) });
+}
+
+const CHAT_IMAGE_MEDIA_TYPES = Object.freeze([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+] as const);
+
+const CHAT_FILE_MEDIA_TYPES = Object.freeze([
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/json",
+  "application/yaml",
+  "application/xml",
+  "text/html",
+  "application/rtf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+] as const);
+
+export interface ChatAttachment {
+  readonly attachmentId: string;
+  readonly type: "file" | "image";
+  readonly name: string;
+  readonly mediaType: string;
+  readonly sizeBytes: number;
+  readonly status: ChatAttachmentStatus;
+  readonly expiresAt: number;
+}
+
+export const CHAT_ATTACHMENT_IMPORT_STAGES = Object.freeze([
+  "queued",
+  "importing",
+  "parsing",
+  "indexing",
+  "ready",
+  "error_terminal",
+] as const);
+
+export type ChatAttachmentImportStage = (typeof CHAT_ATTACHMENT_IMPORT_STAGES)[number];
+
+export const CHAT_ATTACHMENT_IMPORT_EVENT_ISSUES = Object.freeze([
+  ...CHAT_ATTACHMENT_ISSUES,
+  "unavailable",
+] as const);
+
+export type ChatAttachmentImportEventIssue = (typeof CHAT_ATTACHMENT_IMPORT_EVENT_ISSUES)[number];
+
+export interface ChatAttachmentImportEvent {
+  readonly schemaVersion: 2;
+  readonly contextId: string;
+  readonly operationId: string;
+  readonly sequence: string;
+  readonly stage: ChatAttachmentImportStage;
+  readonly itemCount: number;
+  readonly issue: ChatAttachmentImportEventIssue | null;
+}
+
+export interface ChatTextContentBlock {
+  readonly type: "text";
+  readonly text: string;
+}
+
+export type ChatMessageContentBlock = ChatTextContentBlock | ChatAttachment;
+
+export type ChatTurnContentBlock =
+  | ChatTextContentBlock
+  | Readonly<{ type: "file" | "image"; attachmentId: string }>;
+
 export interface ChatMessage {
   readonly messageId: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly contentBlocks?: readonly ChatMessageContentBlock[];
   readonly status: string;
   readonly ordinal: number;
   readonly createdAt: number;
@@ -397,21 +520,50 @@ function responseData<T>(value: unknown, parser: Parser<T>): T {
   return parser(envelope.data);
 }
 
+function responseDataV2<T>(value: unknown, parser: Parser<T>): T {
+  const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
+  if (envelope.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) throw new ChatContractError();
+  uuid(envelope.requestId);
+  return parser(envelope.data);
+}
+
 export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   const error = exactObject(
     value,
     ["schemaVersion", "code", "retryable", "recovery"],
-    ["requestId", "retryAfterMs"],
+    ["requestId", "attachmentIssue", "attachmentItemCount", "retryAfterMs"],
   );
-  if (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION || typeof error.retryable !== "boolean") {
+  if (
+    (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION && error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) ||
+    typeof error.retryable !== "boolean"
+  ) {
+    throw new ChatContractError();
+  }
+  const code = oneOf(error.code, CHAT_ERROR_CODES);
+  const attachmentIssue = error.attachmentIssue === undefined
+    ? undefined
+    : oneOf(error.attachmentIssue, CHAT_ATTACHMENT_ISSUES);
+  if (attachmentIssue !== undefined) {
+    if (error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) throw new ChatContractError();
+    const isLimitIssue = attachmentIssue === "too_many" || attachmentIssue === "too_large";
+    if (code !== (isLimitIssue ? "chat_limit_exceeded" : "chat_request_invalid")) {
+      throw new ChatContractError();
+    }
+  }
+  const attachmentItemCount = error.attachmentItemCount === undefined
+    ? undefined
+    : integer(error.attachmentItemCount, 1, 10);
+  if (attachmentItemCount !== undefined && error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) {
     throw new ChatContractError();
   }
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: error.schemaVersion,
     ...(error.requestId === undefined ? {} : { requestId: uuid(error.requestId) }),
-    code: oneOf(error.code, CHAT_ERROR_CODES),
+    code,
     retryable: error.retryable,
     recovery: oneOf(error.recovery, CHAT_RECOVERIES),
+    ...(attachmentIssue === undefined ? {} : { attachmentIssue }),
+    ...(attachmentItemCount === undefined ? {} : { attachmentItemCount }),
     ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: integer(error.retryAfterMs, 0, 60_000) }),
   });
 }
@@ -474,6 +626,88 @@ function parseSession(value: unknown): ChatSession {
     lastActivityAt: integer(session.lastActivityAt),
     latestTurnStatus: nullable(session.latestTurnStatus, (entry) => stringValue(entry, 64)),
     projectAvailable: session.projectAvailable,
+  });
+}
+
+function attachmentName(value: unknown): string {
+  const name = stringValue(value, 255);
+  if (name.trim() !== name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
+    throw new ChatContractError();
+  }
+  return name;
+}
+
+function parseAttachment(value: unknown, history = false): ChatAttachment {
+  const attachment = exactObject(value, [
+    "attachmentId", "type", "name", "mediaType", "sizeBytes", "status", "expiresAt",
+  ]);
+  const name = attachmentName(attachment.name);
+  const type = oneOf(attachment.type, ["file", "image"] as const);
+  const mediaType = type === "image"
+    ? oneOf(attachment.mediaType, CHAT_IMAGE_MEDIA_TYPES)
+    : oneOf(attachment.mediaType, CHAT_FILE_MEDIA_TYPES);
+  const status = oneOf(attachment.status, CHAT_ATTACHMENT_STATUSES);
+  if (history && status !== "bound" && status !== "expired") throw new ChatContractError();
+  return Object.freeze({
+    attachmentId: uuid(attachment.attachmentId),
+    type,
+    name,
+    mediaType,
+    sizeBytes: integer(attachment.sizeBytes, 1, 10 * 1024 * 1024),
+    status,
+    expiresAt: integer(attachment.expiresAt, 1),
+  });
+}
+
+function parseContentBlock(value: unknown): ChatMessageContentBlock {
+  if (!isRecord(value)) throw new ChatContractError();
+  if (value.type === "text") {
+    const block = exactObject(value, ["type", "text"]);
+    return Object.freeze({ type: "text", text: plainText(block.text, 1024 * 1024) });
+  }
+  return parseAttachment(value, true);
+}
+
+export function parseAttachmentListResponse(value: unknown): readonly ChatAttachment[] {
+  return responseDataV2(value, (data) => {
+    if (!Array.isArray(data) || data.length > 10) throw new ChatContractError();
+    const attachments = data.map((entry) => parseAttachment(entry));
+    if (new Set(attachments.map((attachment) => attachment.attachmentId)).size !== attachments.length) {
+      throw new ChatContractError();
+    }
+    return Object.freeze(attachments);
+  });
+}
+
+export function parseAttachmentImportEvent(value: unknown): ChatAttachmentImportEvent {
+  const event = exactObject(value, [
+    "schemaVersion", "contextId", "operationId", "sequence", "stage", "itemCount", "issue",
+  ]);
+  if (
+    event.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION ||
+    typeof event.sequence !== "string" ||
+    !SEQUENCE_PATTERN.test(event.sequence)
+  ) {
+    throw new ChatContractError();
+  }
+  const sequence = BigInt(event.sequence);
+  if (sequence === 0n || sequence > MAX_SAFE_EVENT_SEQUENCE) throw new ChatContractError();
+  const stage = oneOf(event.stage, CHAT_ATTACHMENT_IMPORT_STAGES);
+  const itemCount = integer(event.itemCount, 1, 10);
+  const issue = nullable(event.issue, (entry) => oneOf(entry, CHAT_ATTACHMENT_IMPORT_EVENT_ISSUES));
+
+  if ((stage === "error_terminal") !== (issue !== null)) {
+    throw new ChatContractError();
+  }
+
+  return Object.freeze({
+    schemaVersion: 2,
+    contextId: uuid(event.contextId),
+    operationId: uuid(event.operationId),
+    sequence: event.sequence,
+    stage,
+    itemCount,
+    issue,
   });
 }
 
@@ -541,6 +775,58 @@ export function parseHistoryPageResponse(value: unknown): ChatHistoryPage {
   return responseData(value, parseHistoryPage);
 }
 
+function parseMessageV2(value: unknown): ChatMessage {
+  const message = exactObject(value, [
+    "messageId", "role", "content", "contentBlocks", "status", "ordinal", "createdAt",
+  ]);
+  if (!Array.isArray(message.contentBlocks) || message.contentBlocks.length === 0 || message.contentBlocks.length > 16) {
+    throw new ChatContractError();
+  }
+  const contentBlocks = Object.freeze(message.contentBlocks.map(parseContentBlock));
+  const content = plainText(message.content, 1024 * 1024, true);
+  const projectedText = contentBlocks
+    .filter((block): block is ChatTextContentBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  if (content !== projectedText) throw new ChatContractError();
+  return Object.freeze({
+    messageId: uuid(message.messageId),
+    role: oneOf(message.role, ["user", "assistant"] as const),
+    content,
+    contentBlocks,
+    status: stringValue(message.status, 64),
+    ordinal: integer(message.ordinal),
+    createdAt: integer(message.createdAt),
+  });
+}
+
+function parseHistoryPageV2(value: unknown): ChatHistoryPage {
+  const page = exactObject(value, ["turns", "nextCursor"]);
+  if (!Array.isArray(page.turns) || page.turns.length > 50) throw new ChatContractError();
+  const turns = page.turns.map((value): ChatHistoryTurn => {
+    const turn = exactObject(value, [
+      "turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode", "messages", "reasoning",
+    ]);
+    if (!Array.isArray(turn.messages) || !Array.isArray(turn.reasoning) || turn.reasoning.length > 8) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      turnId: uuid(turn.turnId),
+      status: stringValue(turn.status, 64),
+      terminalAt: nullable(turn.terminalAt, (entry) => integer(entry)),
+      reasoningStatus: stringValue(turn.reasoningStatus, 64),
+      reasoningReasonCode: nullable(turn.reasoningReasonCode, (entry) => stringValue(entry, 128)),
+      messages: Object.freeze(turn.messages.map(parseMessageV2)),
+      reasoning: Object.freeze(turn.reasoning.map(parseReasoningMetadata)),
+    });
+  });
+  return Object.freeze({ turns: Object.freeze(turns), nextCursor: nullable(page.nextCursor, cursor) });
+}
+
+export function parseHistoryPageResponseV2(value: unknown): ChatHistoryPage {
+  return responseDataV2(value, parseHistoryPageV2);
+}
+
 export function parseReasoningResponse(value: unknown): readonly ChatReasoningItem[] {
   return responseData(value, (data) => {
     if (!Array.isArray(data) || data.length > 8) throw new ChatContractError();
@@ -598,15 +884,25 @@ export function parseOperationResponse(value: unknown): string {
   return responseData(value, (data) => uuid(exactObject(data, ["operationId"]).operationId));
 }
 
-export function parseCreatedTurnResponse(value: unknown): ChatCreatedTurn {
-  return responseData(value, (data) => {
-    const created = exactObject(data, ["sessionId", "turnId", "operationId"]);
-    return Object.freeze({
-      sessionId: uuid(created.sessionId),
-      turnId: uuid(created.turnId),
-      operationId: uuid(created.operationId),
-    });
+export function parseOperationResponseV2(value: unknown): string {
+  return responseDataV2(value, (data) => uuid(exactObject(data, ["operationId"]).operationId));
+}
+
+function parseCreatedTurn(value: unknown): ChatCreatedTurn {
+  const created = exactObject(value, ["sessionId", "turnId", "operationId"]);
+  return Object.freeze({
+    sessionId: uuid(created.sessionId),
+    turnId: uuid(created.turnId),
+    operationId: uuid(created.operationId),
   });
+}
+
+export function parseCreatedTurnResponse(value: unknown): ChatCreatedTurn {
+  return responseData(value, parseCreatedTurn);
+}
+
+export function parseCreatedTurnResponseV2(value: unknown): ChatCreatedTurn {
+  return responseDataV2(value, parseCreatedTurn);
 }
 
 function parseSessionControlPlane(value: unknown): ChatSessionControlPlane {
@@ -713,6 +1009,17 @@ export function parseResyncResponse(value: unknown): ChatResyncProjection {
     return Object.freeze({
       session: parseSession(projection.session),
       history: parseHistoryPage(projection.history),
+      cleanup: nullable(projection.cleanup, parseCleanup),
+    });
+  });
+}
+
+export function parseResyncResponseV2(value: unknown): ChatResyncProjection {
+  return responseDataV2(value, (data) => {
+    const projection = exactObject(data, ["session", "history", "cleanup"]);
+    return Object.freeze({
+      session: parseSession(projection.session),
+      history: parseHistoryPageV2(projection.history),
       cleanup: nullable(projection.cleanup, parseCleanup),
     });
   });

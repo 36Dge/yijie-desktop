@@ -2,11 +2,16 @@ use super::application::{
     AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
     CoordinatorOutcome, DispatchOutcome, LiveTurnProjection, TurnProjectionSink,
 };
+use super::attachment::{
+    self, AttachmentImportError, AttachmentPreparationProgress, AttachmentPreparationStage,
+    PreparedAttachment,
+};
 use super::authorization::{
     AuthoritativeChatProjection, AuthorizationFailure, ChatAction, ChatAuthorizationManager,
 };
 use super::database::{
-    CleanupSurfaceState, DeletionStatus, HistoryPage, ProjectSummary, PublicTaskBindingState,
+    AttachmentSummary, CleanupSurfaceState, DeletionStatus, DraftContentBlock, DraftTarget,
+    HistoryPage, MessageContentBlockProjection, ProjectSummary, PublicTaskBindingState,
     PublicTaskControlPlaneStatus, ReasoningItem, ReasoningStatus, SessionPage, SessionPageCursor,
     SessionSummary, SessionTitleSource,
 };
@@ -14,8 +19,9 @@ use super::{ChatError, ChatRuntime};
 use crate::native_auth::{NativeAuthRuntime, NativeProjectionError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,8 +30,10 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 pub const CHAT_IPC_SCHEMA_VERSION: u8 = 1;
+pub const CHAT_IPC_V2_SCHEMA_VERSION: u8 = 2;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
+pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TITLE_BYTES: usize = 1024;
@@ -791,6 +799,10 @@ pub struct ChatIpcError {
     retryable: bool,
     recovery: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    attachment_issue: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment_item_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     retry_after_ms: Option<u64>,
 }
 
@@ -803,6 +815,8 @@ impl Debug for ChatIpcError {
             .field("code", &self.code)
             .field("retryable", &self.retryable)
             .field("recovery", &self.recovery)
+            .field("attachment_issue", &self.attachment_issue)
+            .field("attachment_item_count", &self.attachment_item_count)
             .finish()
     }
 }
@@ -820,6 +834,8 @@ impl ChatIpcError {
             code,
             retryable,
             recovery,
+            attachment_issue: None,
+            attachment_item_count: None,
             retry_after_ms: None,
         }
     }
@@ -862,6 +878,23 @@ impl ChatIpcError {
         error.retry_after_ms = Some(1000);
         error
     }
+
+    fn v2(mut self) -> Self {
+        self.schema_version = CHAT_IPC_V2_SCHEMA_VERSION;
+        self
+    }
+
+    fn with_attachment_issue(mut self, issue: &'static str) -> Self {
+        self.attachment_issue = Some(issue);
+        self
+    }
+
+    fn with_attachment_item_count(mut self, item_count: usize) -> Self {
+        if (1..=attachment::MAX_ATTACHMENTS_PER_MESSAGE).contains(&item_count) {
+            self.attachment_item_count = Some(item_count);
+        }
+        self
+    }
 }
 
 #[derive(Deserialize)]
@@ -899,6 +932,14 @@ impl<T> CommandResponse<T> {
     fn new(request_id: Uuid, data: T) -> Self {
         Self {
             schema_version: CHAT_IPC_SCHEMA_VERSION,
+            request_id: request_id.to_string(),
+            data,
+        }
+    }
+
+    fn new_v2(request_id: Uuid, data: T) -> Self {
+        Self {
+            schema_version: CHAT_IPC_V2_SCHEMA_VERSION,
             request_id: request_id.to_string(),
             data,
         }
@@ -956,6 +997,79 @@ struct CreateSessionPayload {
 struct SubmitTurnPayload {
     session_id: Uuid,
     input: String,
+    operation_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PickAttachmentsPayload {
+    draft_target: DraftTargetPayload,
+    operation_id: Uuid,
+    remaining_capacity: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportAttachmentsPayload {
+    paths: Vec<String>,
+    draft_target: DraftTargetPayload,
+    operation_id: Uuid,
+    remaining_capacity: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ListDraftAttachmentsPayload {
+    draft_target: DraftTargetPayload,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RemoveAttachmentPayload {
+    attachment_id: Uuid,
+    draft_target: DraftTargetPayload,
+    operation_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum DraftTargetPayload {
+    New {},
+    Session {
+        #[serde(rename = "sessionId")]
+        session_id: Uuid,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum TurnContentBlockPayload {
+    Text {
+        text: String,
+    },
+    File {
+        #[serde(rename = "attachmentId")]
+        attachment_id: Uuid,
+    },
+    Image {
+        #[serde(rename = "attachmentId")]
+        attachment_id: Uuid,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateSessionV2Payload {
+    project_id: Uuid,
+    content_blocks: Vec<TurnContentBlockPayload>,
+    operation_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmitTurnV2Payload {
+    session_id: Uuid,
+    content_blocks: Vec<TurnContentBlockPayload>,
     operation_id: Uuid,
 }
 
@@ -1114,6 +1228,50 @@ struct MessageDto {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum MessageContentBlockDto {
+    Text {
+        text: String,
+    },
+    File {
+        #[serde(rename = "attachmentId")]
+        attachment_id: String,
+        name: String,
+        #[serde(rename = "mediaType")]
+        media_type: String,
+        #[serde(rename = "sizeBytes")]
+        size_bytes: usize,
+        status: String,
+        #[serde(rename = "expiresAt")]
+        expires_at: i64,
+    },
+    Image {
+        #[serde(rename = "attachmentId")]
+        attachment_id: String,
+        name: String,
+        #[serde(rename = "mediaType")]
+        media_type: String,
+        #[serde(rename = "sizeBytes")]
+        size_bytes: usize,
+        status: String,
+        #[serde(rename = "expiresAt")]
+        expires_at: i64,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageDtoV2 {
+    message_id: String,
+    role: String,
+    content: String,
+    content_blocks: Vec<MessageContentBlockDto>,
+    status: String,
+    ordinal: u64,
+    created_at: i64,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReasoningMetadataDto {
     item_ordinal: usize,
@@ -1138,9 +1296,181 @@ struct HistoryTurnDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct HistoryTurnDtoV2 {
+    turn_id: String,
+    status: String,
+    terminal_at: Option<i64>,
+    reasoning_status: String,
+    reasoning_reason_code: Option<String>,
+    messages: Vec<MessageDtoV2>,
+    reasoning: Vec<ReasoningMetadataDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryPageDto {
     turns: Vec<HistoryTurnDto>,
     next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryPageDtoV2 {
+    turns: Vec<HistoryTurnDtoV2>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttachmentDto {
+    attachment_id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    name: String,
+    media_type: String,
+    size_bytes: usize,
+    status: String,
+    expires_at: i64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentImportEventDto {
+    schema_version: u8,
+    context_id: String,
+    operation_id: String,
+    sequence: String,
+    stage: &'static str,
+    item_count: usize,
+    issue: Option<&'static str>,
+}
+
+impl Debug for AttachmentImportEventDto {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AttachmentImportEventDto")
+            .field("schema_version", &self.schema_version)
+            .field("context_id", &self.context_id)
+            .field("operation_id", &self.operation_id)
+            .field("sequence", &self.sequence)
+            .field("stage", &self.stage)
+            .field("item_count", &self.item_count)
+            .field("issue", &self.issue)
+            .finish()
+    }
+}
+
+struct AttachmentImportEventEmitter {
+    app: AppHandle,
+    context_id: Uuid,
+    operation_id: Uuid,
+    item_count: usize,
+    next_sequence: u64,
+    last_stage: Option<AttachmentPreparationStage>,
+}
+
+fn valid_attachment_import_transition(
+    previous: Option<AttachmentPreparationStage>,
+    next: AttachmentPreparationStage,
+) -> bool {
+    matches!(
+        (previous, next),
+        (None, AttachmentPreparationStage::Queued)
+            | (
+                Some(AttachmentPreparationStage::Queued),
+                AttachmentPreparationStage::Importing
+            )
+            | (
+                Some(AttachmentPreparationStage::Importing),
+                AttachmentPreparationStage::Parsing | AttachmentPreparationStage::ErrorTerminal
+            )
+            | (
+                Some(AttachmentPreparationStage::Parsing),
+                AttachmentPreparationStage::Indexing | AttachmentPreparationStage::ErrorTerminal
+            )
+            | (
+                Some(AttachmentPreparationStage::Indexing),
+                AttachmentPreparationStage::Ready | AttachmentPreparationStage::ErrorTerminal
+            )
+    )
+}
+
+impl AttachmentImportEventEmitter {
+    fn new(app: AppHandle, context_id: Uuid, operation_id: Uuid, item_count: usize) -> Self {
+        Self {
+            app,
+            context_id,
+            operation_id,
+            item_count,
+            next_sequence: 1,
+            last_stage: None,
+        }
+    }
+
+    fn emit_progress(
+        &mut self,
+        progress: AttachmentPreparationProgress,
+    ) -> Result<(), AttachmentImportError> {
+        if progress.item_count != self.item_count {
+            return Err(AttachmentImportError::InvalidContent);
+        }
+        let event = self.progress_event(progress)?;
+        self.app
+            .emit(CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL, event)
+            .map_err(|_| AttachmentImportError::Unavailable)
+    }
+
+    fn emit_ready(&mut self) {
+        let event = self.next_event(AttachmentPreparationStage::Ready, None);
+        if let Ok(event) = event {
+            let _ = self.app.emit(CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL, event);
+        }
+    }
+
+    fn emit_storage_failure(&mut self) {
+        let event = self.next_event(
+            AttachmentPreparationStage::ErrorTerminal,
+            Some("unavailable"),
+        );
+        if let Ok(event) = event {
+            let _ = self.app.emit(CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL, event);
+        }
+    }
+
+    fn progress_event(
+        &mut self,
+        progress: AttachmentPreparationProgress,
+    ) -> Result<AttachmentImportEventDto, AttachmentImportError> {
+        self.next_event(progress.stage, progress.issue)
+    }
+
+    fn next_event(
+        &mut self,
+        stage: AttachmentPreparationStage,
+        issue: Option<&'static str>,
+    ) -> Result<AttachmentImportEventDto, AttachmentImportError> {
+        if !(1..=attachment::MAX_ATTACHMENTS_PER_MESSAGE).contains(&self.item_count)
+            || (stage == AttachmentPreparationStage::ErrorTerminal) != issue.is_some()
+            || !valid_attachment_import_transition(self.last_stage, stage)
+        {
+            return Err(AttachmentImportError::InvalidContent);
+        }
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(AttachmentImportError::Unavailable)?;
+        self.last_stage = Some(stage);
+        Ok(AttachmentImportEventDto {
+            schema_version: CHAT_IPC_V2_SCHEMA_VERSION,
+            context_id: self.context_id.to_string(),
+            operation_id: self.operation_id.to_string(),
+            sequence: sequence.to_string(),
+            stage: stage.as_str(),
+            item_count: self.item_count,
+            issue,
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -1322,6 +1652,138 @@ fn history_dto(page: HistoryPage, next_cursor: Option<String>) -> HistoryPageDto
     }
 }
 
+impl From<AttachmentSummary> for AttachmentDto {
+    fn from(attachment: AttachmentSummary) -> Self {
+        Self {
+            attachment_id: attachment.attachment_id.to_string(),
+            kind: attachment.kind,
+            name: attachment.safe_name,
+            media_type: attachment.media_type,
+            size_bytes: attachment.byte_size,
+            status: attachment.state,
+            expires_at: attachment.expires_at,
+        }
+    }
+}
+
+fn attachment_content_block(
+    attachment: AttachmentSummary,
+) -> Result<MessageContentBlockDto, ChatError> {
+    let AttachmentDto {
+        attachment_id,
+        kind,
+        name,
+        media_type,
+        size_bytes,
+        status,
+        expires_at,
+    } = attachment.into();
+    match kind.as_str() {
+        "file" => Ok(MessageContentBlockDto::File {
+            attachment_id,
+            name,
+            media_type,
+            size_bytes,
+            status,
+            expires_at,
+        }),
+        "image" => Ok(MessageContentBlockDto::Image {
+            attachment_id,
+            name,
+            media_type,
+            size_bytes,
+            status,
+            expires_at,
+        }),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn history_message_ids(page: &HistoryPage) -> Vec<Uuid> {
+    page.turns
+        .iter()
+        .flat_map(|turn| turn.messages.iter().map(|message| message.message_id))
+        .collect()
+}
+
+fn history_dto_v2(
+    page: HistoryPage,
+    next_cursor: Option<String>,
+    projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+) -> Result<HistoryPageDtoV2, ChatError> {
+    let mut projections = projections.into_iter().collect::<HashMap<_, _>>();
+    let mut turns = Vec::with_capacity(page.turns.len());
+    for turn in page.turns {
+        let mut messages = Vec::with_capacity(turn.messages.len());
+        for message in turn.messages {
+            let stored = projections
+                .remove(&message.message_id)
+                .ok_or(ChatError::DatabaseUnavailable)?;
+            let content_blocks = if stored.is_empty() {
+                vec![MessageContentBlockDto::Text {
+                    text: if message.content.is_empty() {
+                        " ".to_owned()
+                    } else {
+                        message.content.clone()
+                    },
+                }]
+            } else {
+                let mut blocks = Vec::with_capacity(stored.len());
+                for (expected_ordinal, block) in stored.into_iter().enumerate() {
+                    match block {
+                        MessageContentBlockProjection::Text { ordinal, text }
+                            if ordinal == expected_ordinal =>
+                        {
+                            blocks.push(MessageContentBlockDto::Text { text });
+                        }
+                        MessageContentBlockProjection::Attachment {
+                            ordinal,
+                            attachment,
+                        } if ordinal == expected_ordinal => {
+                            blocks.push(attachment_content_block(attachment)?);
+                        }
+                        _ => return Err(ChatError::DatabaseUnavailable),
+                    }
+                }
+                blocks
+            };
+            messages.push(MessageDtoV2 {
+                message_id: message.message_id.to_string(),
+                role: message.role,
+                content: message.content,
+                content_blocks,
+                status: message.status,
+                ordinal: message.ordinal,
+                created_at: message.created_at,
+            });
+        }
+        turns.push(HistoryTurnDtoV2 {
+            turn_id: turn.turn_id.to_string(),
+            status: turn.status,
+            terminal_at: turn.terminal_at,
+            reasoning_status: turn.reasoning_status,
+            reasoning_reason_code: turn.reasoning_reason_code,
+            messages,
+            reasoning: turn
+                .reasoning
+                .into_iter()
+                .map(|item| ReasoningMetadataDto {
+                    item_ordinal: item.item_ordinal,
+                    status: reasoning_status(item.status),
+                    reason_code: item.reason_code,
+                    total_bytes: item.total_bytes,
+                    part_count: item.part_count,
+                    finalized_at_ms: item.finalized_at_ms,
+                })
+                .collect(),
+        });
+    }
+    if !projections.is_empty() {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    Ok(HistoryPageDtoV2 { turns, next_cursor })
+}
+
 fn reasoning_dto(items: Vec<ReasoningItem>) -> Vec<ReasoningItemDto> {
     items
         .into_iter()
@@ -1389,6 +1851,194 @@ fn decode_request<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T>, 
         return Err(ChatIpcError::request_invalid(Some(request.request_id)));
     }
     Ok(request)
+}
+
+fn decode_request_v2<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T>, ChatIpcError> {
+    let request_id = extract_request_id(&raw);
+    if serde_json::to_vec(&raw)
+        .map(|encoded| encoded.len() > MAX_REQUEST_BYTES)
+        .unwrap_or(true)
+    {
+        return Err(ChatIpcError::limit_exceeded(request_id).v2());
+    }
+    let request: CommandRequest<T> =
+        serde_json::from_value(raw).map_err(|_| ChatIpcError::request_invalid(request_id).v2())?;
+    if request.schema_version != CHAT_IPC_V2_SCHEMA_VERSION
+        || request.request_id.is_nil()
+        || request.context_id.is_nil()
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    Ok(request)
+}
+
+fn draft_content_blocks(
+    blocks: Vec<TurnContentBlockPayload>,
+    request_id: Uuid,
+) -> Result<Vec<DraftContentBlock>, ChatIpcError> {
+    if blocks.is_empty() || blocks.len() > 16 {
+        return Err(ChatIpcError::limit_exceeded(Some(request_id)).v2());
+    }
+    let mut attachment_count = 0_usize;
+    let mut result = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        match block {
+            TurnContentBlockPayload::Text { text } => {
+                validate_input(&text, request_id).map_err(ChatIpcError::v2)?;
+                result.push(DraftContentBlock::Text(text));
+            }
+            TurnContentBlockPayload::File { attachment_id } => {
+                attachment_count += 1;
+                if attachment_id.is_nil() {
+                    return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+                }
+                result.push(DraftContentBlock::File(attachment_id));
+            }
+            TurnContentBlockPayload::Image { attachment_id } => {
+                attachment_count += 1;
+                if attachment_id.is_nil() {
+                    return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+                }
+                result.push(DraftContentBlock::Image(attachment_id));
+            }
+        }
+    }
+    if attachment_count > attachment::MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(ChatIpcError::limit_exceeded(Some(request_id)).v2());
+    }
+    Ok(result)
+}
+
+fn map_attachment_import_error(
+    error: AttachmentImportError,
+    request_id: Uuid,
+    item_count: usize,
+) -> ChatIpcError {
+    let mapped = match error {
+        AttachmentImportError::TooMany => ChatIpcError::limit_exceeded(Some(request_id))
+            .v2()
+            .with_attachment_issue("too_many"),
+        AttachmentImportError::TooLarge => ChatIpcError::limit_exceeded(Some(request_id))
+            .v2()
+            .with_attachment_issue("too_large"),
+        AttachmentImportError::ArchiveUnsupported => {
+            ChatIpcError::request_invalid(Some(request_id))
+                .v2()
+                .with_attachment_issue("archive_unsupported")
+        }
+        AttachmentImportError::Unsupported => ChatIpcError::request_invalid(Some(request_id))
+            .v2()
+            .with_attachment_issue("unsupported"),
+        AttachmentImportError::InvalidContent => ChatIpcError::request_invalid(Some(request_id))
+            .v2()
+            .with_attachment_issue("invalid_content"),
+        AttachmentImportError::ParseFailed => ChatIpcError::request_invalid(Some(request_id))
+            .v2()
+            .with_attachment_issue("parse_failed"),
+        AttachmentImportError::Unavailable => {
+            ChatIpcError::temporarily_unavailable(Some(request_id)).v2()
+        }
+    };
+    mapped.with_attachment_item_count(item_count)
+}
+
+fn validate_remaining_capacity(
+    remaining_capacity: usize,
+    request_id: Uuid,
+) -> Result<(), ChatIpcError> {
+    if !(1..=attachment::MAX_ATTACHMENTS_PER_MESSAGE).contains(&remaining_capacity) {
+        return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+    }
+    Ok(())
+}
+
+fn draft_target(
+    payload: DraftTargetPayload,
+    request_id: Uuid,
+) -> Result<DraftTarget, ChatIpcError> {
+    match payload {
+        DraftTargetPayload::New {} => Ok(DraftTarget::New),
+        DraftTargetPayload::Session { session_id } if !session_id.is_nil() => {
+            Ok(DraftTarget::Session(session_id))
+        }
+        DraftTargetPayload::Session { .. } => {
+            Err(ChatIpcError::request_invalid(Some(request_id)).v2())
+        }
+    }
+}
+
+fn draft_target_action(draft_target: &DraftTarget) -> ChatAction {
+    match draft_target {
+        DraftTarget::New => ChatAction::CreateSession,
+        DraftTarget::Session(_) => ChatAction::SubmitTurn,
+    }
+}
+
+fn validate_attachment_batch_size(
+    count: usize,
+    remaining_capacity: usize,
+    request_id: Uuid,
+) -> Result<(), ChatIpcError> {
+    validate_remaining_capacity(remaining_capacity, request_id)?;
+    if count == 0 {
+        return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+    }
+    if count > remaining_capacity || count > attachment::MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(ChatIpcError::limit_exceeded(Some(request_id))
+            .v2()
+            .with_attachment_issue("too_many")
+            .with_attachment_item_count(count));
+    }
+    Ok(())
+}
+
+fn validate_attachment_paths(
+    paths: &[String],
+    request_id: Uuid,
+) -> Result<Vec<PathBuf>, ChatIpcError> {
+    let mut unique = HashSet::with_capacity(paths.len());
+    let mut validated = Vec::with_capacity(paths.len());
+    for raw in paths {
+        if raw.is_empty() || raw.len() > 4096 || raw.contains('\0') {
+            return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+        }
+        let path = PathBuf::from(raw);
+        if !path.is_absolute() || !unique.insert(path.clone()) {
+            return Err(ChatIpcError::request_invalid(Some(request_id)).v2());
+        }
+        validated.push(path);
+    }
+    Ok(validated)
+}
+
+async fn prepare_attachments(
+    app: AppHandle,
+    context_id: Uuid,
+    operation_id: Uuid,
+    paths: Vec<PathBuf>,
+    now: i64,
+    remaining_capacity: usize,
+    request_id: Uuid,
+) -> Result<(Vec<PreparedAttachment>, AttachmentImportEventEmitter), ChatIpcError> {
+    let item_count = paths.len();
+    let (result, emitter) = tokio::task::spawn_blocking(move || {
+        let mut emitter =
+            AttachmentImportEventEmitter::new(app, context_id, operation_id, item_count);
+        let result =
+            attachment::prepare_paths_with_progress(paths, now, remaining_capacity, |progress| {
+                emitter.emit_progress(progress)
+            });
+        (result, emitter)
+    })
+    .await
+    .map_err(|_| {
+        ChatIpcError::temporarily_unavailable(Some(request_id))
+            .v2()
+            .with_attachment_item_count(item_count)
+    })?;
+    result
+        .map(|attachments| (attachments, emitter))
+        .map_err(|error| map_attachment_import_error(error, request_id, item_count))
 }
 
 fn decode_bind_request(raw: Value) -> Result<BindRequest, ChatIpcError> {
@@ -2141,6 +2791,278 @@ mod tests {
     }
 
     #[test]
+    fn attachment_import_event_is_aggregate_and_content_free() {
+        assert!(valid_attachment_import_transition(
+            None,
+            AttachmentPreparationStage::Queued
+        ));
+        assert!(valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Queued),
+            AttachmentPreparationStage::Importing
+        ));
+        assert!(valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Importing),
+            AttachmentPreparationStage::Parsing
+        ));
+        assert!(valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Parsing),
+            AttachmentPreparationStage::Indexing
+        ));
+        assert!(valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Indexing),
+            AttachmentPreparationStage::Ready
+        ));
+        for previous in [
+            AttachmentPreparationStage::Importing,
+            AttachmentPreparationStage::Parsing,
+            AttachmentPreparationStage::Indexing,
+        ] {
+            assert!(valid_attachment_import_transition(
+                Some(previous),
+                AttachmentPreparationStage::ErrorTerminal
+            ));
+        }
+        assert!(!valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Importing),
+            AttachmentPreparationStage::Indexing
+        ));
+        assert!(!valid_attachment_import_transition(
+            Some(AttachmentPreparationStage::Ready),
+            AttachmentPreparationStage::ErrorTerminal
+        ));
+
+        let event = AttachmentImportEventDto {
+            schema_version: CHAT_IPC_V2_SCHEMA_VERSION,
+            context_id: "019c1a00-0000-7000-8000-000000000003".to_owned(),
+            operation_id: "019c1a00-0000-7000-8000-000000000004".to_owned(),
+            sequence: "4".to_owned(),
+            stage: AttachmentPreparationStage::Indexing.as_str(),
+            item_count: 2,
+            issue: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({
+                "schemaVersion": 2,
+                "contextId": "019c1a00-0000-7000-8000-000000000003",
+                "operationId": "019c1a00-0000-7000-8000-000000000004",
+                "sequence": "4",
+                "stage": "indexing",
+                "itemCount": 2,
+                "issue": null,
+            })
+        );
+        let encoded = serde_json::to_string(&event).unwrap();
+        for forbidden in ["name", "path", "attachment", "digest", "dataUrl", "content"] {
+            assert!(!encoded.contains(forbidden), "event leaked {forbidden}");
+        }
+    }
+
+    #[test]
+    fn attachment_v2_payloads_freeze_capacity_and_remove_contracts() {
+        let request_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f10").unwrap();
+        let context_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f11").unwrap();
+        let operation_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f12").unwrap();
+        let attachment_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f13").unwrap();
+        let request = |payload: Value| {
+            json!({
+                "schemaVersion": 2,
+                "requestId": request_id,
+                "contextId": context_id,
+                "payload": payload,
+            })
+        };
+
+        let shared_fixture: Value = serde_json::from_str(include_str!(
+            "../../fixtures/chat-ipc-v2/create-session-attachment-only-request.json"
+        ))
+        .unwrap();
+        let shared_request: CommandRequest<CreateSessionV2Payload> =
+            decode_request_v2(shared_fixture).expect("shared TypeScript/Rust request fixture");
+        assert_eq!(
+            shared_request.payload.project_id.to_string(),
+            "019c1a00-0000-7000-8000-000000000013"
+        );
+        assert_eq!(shared_request.payload.content_blocks.len(), 1);
+        assert!(matches!(
+            &shared_request.payload.content_blocks[0],
+            TurnContentBlockPayload::File { attachment_id }
+                if attachment_id.to_string() == "019c1a00-0000-7000-8000-000000000010"
+        ));
+
+        let pick: CommandRequest<PickAttachmentsPayload> = decode_request_v2(request(json!({
+            "draftTarget": { "type": "new" },
+            "operationId": operation_id,
+            "remainingCapacity": 3,
+        })))
+        .expect("valid picker request");
+        assert_eq!(pick.payload.remaining_capacity, 3);
+        assert!(matches!(
+            pick.payload.draft_target,
+            DraftTargetPayload::New {}
+        ));
+        assert!(decode_request_v2::<PickAttachmentsPayload>(request(json!({
+            "operationId": operation_id,
+            "remainingCapacity": 3,
+        })))
+        .is_err());
+        assert!(decode_request_v2::<PickAttachmentsPayload>(request(json!({
+            "draftTarget": { "type": "new" },
+            "operationId": operation_id,
+            "remainingCapacity": 3,
+            "unexpected": true,
+        })))
+        .is_err());
+
+        for invalid in [0, attachment::MAX_ATTACHMENTS_PER_MESSAGE + 1] {
+            let error = validate_remaining_capacity(invalid, request_id).unwrap_err();
+            assert_eq!(error.schema_version, CHAT_IPC_V2_SCHEMA_VERSION);
+            assert_eq!(error.code, "chat_request_invalid");
+        }
+        let error = validate_attachment_batch_size(4, 3, request_id).unwrap_err();
+        assert_eq!(error.schema_version, CHAT_IPC_V2_SCHEMA_VERSION);
+        assert_eq!(error.code, "chat_limit_exceeded");
+        assert_eq!(error.attachment_issue, Some("too_many"));
+        assert_eq!(error.attachment_item_count, Some(4));
+
+        let too_large = map_attachment_import_error(AttachmentImportError::TooLarge, request_id, 2);
+        assert_eq!(too_large.code, "chat_limit_exceeded");
+        assert_eq!(too_large.attachment_issue, Some("too_large"));
+        assert_eq!(too_large.attachment_item_count, Some(2));
+        let archive =
+            map_attachment_import_error(AttachmentImportError::ArchiveUnsupported, request_id, 2);
+        assert_eq!(archive.code, "chat_request_invalid");
+        assert_eq!(archive.attachment_issue, Some("archive_unsupported"));
+        assert_eq!(
+            serde_json::to_value(&archive).unwrap()["attachmentIssue"],
+            "archive_unsupported"
+        );
+        assert_eq!(
+            serde_json::to_value(&archive).unwrap()["attachmentItemCount"],
+            2
+        );
+
+        let imported: CommandRequest<ImportAttachmentsPayload> =
+            decode_request_v2(request(json!({
+                "paths": ["/tmp/a.txt", "/tmp/b.txt"],
+                "draftTarget": { "type": "session", "sessionId": operation_id },
+                "operationId": operation_id,
+                "remainingCapacity": 2,
+            })))
+            .expect("valid import request");
+        assert_eq!(imported.payload.paths.len(), 2);
+        assert_eq!(imported.payload.remaining_capacity, 2);
+        assert!(matches!(
+            imported.payload.draft_target,
+            DraftTargetPayload::Session { session_id } if session_id == operation_id
+        ));
+        assert_eq!(
+            validate_attachment_paths(&imported.payload.paths, request_id).unwrap(),
+            vec![PathBuf::from("/tmp/a.txt"), PathBuf::from("/tmp/b.txt")]
+        );
+        for invalid in [
+            vec!["relative.txt".to_owned()],
+            vec!["/tmp/a.txt".to_owned(), "/tmp/a.txt".to_owned()],
+            vec!["/tmp/unsafe\0name.txt".to_owned()],
+        ] {
+            let error = validate_attachment_paths(&invalid, request_id).unwrap_err();
+            assert_eq!(error.schema_version, CHAT_IPC_V2_SCHEMA_VERSION);
+            assert_eq!(error.code, "chat_request_invalid");
+        }
+
+        let removed: CommandRequest<RemoveAttachmentPayload> = decode_request_v2(request(json!({
+            "attachmentId": attachment_id,
+            "draftTarget": { "type": "new" },
+            "operationId": operation_id,
+        })))
+        .expect("valid remove request");
+        assert_eq!(removed.payload.attachment_id, attachment_id);
+        assert_eq!(removed.payload.operation_id, operation_id);
+
+        let listed: CommandRequest<ListDraftAttachmentsPayload> =
+            decode_request_v2(request(json!({
+                "draftTarget": { "type": "session", "sessionId": operation_id },
+            })))
+            .expect("valid draft-list request");
+        assert!(matches!(
+            listed.payload.draft_target,
+            DraftTargetPayload::Session { session_id } if session_id == operation_id
+        ));
+        for invalid_target in [
+            json!({ "type": "new", "sessionId": operation_id }),
+            json!({ "type": "session" }),
+            json!({ "type": "unknown" }),
+        ] {
+            assert!(
+                decode_request_v2::<ListDraftAttachmentsPayload>(request(json!({
+                    "draftTarget": invalid_target,
+                })))
+                .is_err()
+            );
+        }
+        let nil_target: CommandRequest<ListDraftAttachmentsPayload> =
+            decode_request_v2(request(json!({
+                "draftTarget": {
+                    "type": "session",
+                    "sessionId": Uuid::nil(),
+                },
+            })))
+            .expect("serde accepts UUID shape before semantic validation");
+        assert!(draft_target(nil_target.payload.draft_target, request_id).is_err());
+        assert_eq!(
+            draft_target_action(&DraftTarget::New),
+            ChatAction::CreateSession
+        );
+        assert_eq!(
+            draft_target_action(&DraftTarget::Session(operation_id)),
+            ChatAction::SubmitTurn
+        );
+
+        let created: CommandRequest<CreateSessionV2Payload> = decode_request_v2(request(json!({
+            "projectId": operation_id,
+            "contentBlocks": [
+                { "type": "text", "text": "inspect attachments" },
+                { "type": "file", "attachmentId": attachment_id },
+                { "type": "image", "attachmentId": attachment_id },
+            ],
+            "operationId": operation_id,
+        })))
+        .expect("valid multimodal create request");
+        assert_eq!(created.payload.content_blocks.len(), 3);
+        assert!(matches!(
+            created.payload.content_blocks[1],
+            TurnContentBlockPayload::File { attachment_id: value } if value == attachment_id
+        ));
+        assert!(matches!(
+            created.payload.content_blocks[2],
+            TurnContentBlockPayload::Image { attachment_id: value } if value == attachment_id
+        ));
+        assert!(decode_request_v2::<CreateSessionV2Payload>(request(json!({
+            "projectId": operation_id,
+            "contentBlocks": [
+                { "type": "file", "attachment_id": attachment_id },
+            ],
+            "operationId": operation_id,
+        })))
+        .is_err());
+
+        assert_eq!(
+            serde_json::to_value(CommandResponse::new_v2(
+                request_id,
+                OperationDto {
+                    operation_id: operation_id.to_string(),
+                },
+            ))
+            .unwrap(),
+            json!({
+                "schemaVersion": 2,
+                "requestId": request_id,
+                "data": { "operationId": operation_id },
+            })
+        );
+    }
+
+    #[test]
     fn only_the_newest_bind_generation_can_publish_a_context() {
         let runtime = ChatIpcRuntime::new();
         let first = runtime.begin_binding();
@@ -2219,6 +3141,14 @@ async fn offline_applications(
 pub(crate) struct ResyncDto {
     session: SessionDto,
     history: HistoryPageDto,
+    cleanup: Option<CleanupStatusDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResyncDtoV2 {
+    session: SessionDto,
+    history: HistoryPageDtoV2,
     cleanup: Option<CleanupStatusDto>,
 }
 
@@ -2520,6 +3450,278 @@ pub async fn chat_submit_turn_v1(
 }
 
 #[tauri::command]
+pub async fn chat_pick_attachments_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    app: AppHandle,
+) -> Result<CommandResponse<Vec<AttachmentDto>>, ChatIpcError> {
+    let request: CommandRequest<PickAttachmentsPayload> = decode_request_v2(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    validate_remaining_capacity(request.payload.remaining_capacity, request.request_id)?;
+    let draft_target = draft_target(request.payload.draft_target, request.request_id)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&draft_target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    let Some(paths) = attachment::pick_paths()
+        .await
+        .map_err(|error| map_attachment_import_error(error, request.request_id, 0))?
+    else {
+        return Ok(CommandResponse::new_v2(request.request_id, Vec::new()));
+    };
+    validate_attachment_batch_size(
+        paths.len(),
+        request.payload.remaining_capacity,
+        request.request_id,
+    )?;
+    let now =
+        unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let (prepared, mut import_events) = prepare_attachments(
+        app,
+        request.context_id,
+        request.payload.operation_id,
+        paths,
+        now,
+        request.payload.remaining_capacity,
+        request.request_id,
+    )
+    .await?;
+    let attachments = match authorized
+        .store_attachments(
+            request.context_id,
+            prepared,
+            request.payload.remaining_capacity,
+            draft_target,
+        )
+        .await
+    {
+        Ok(attachments) => attachments,
+        Err(error) => {
+            import_events.emit_storage_failure();
+            return Err(map_chat_error(error, Some(request.request_id))
+                .v2()
+                .with_attachment_item_count(import_events.item_count));
+        }
+    };
+    let attachment_dtos = attachments
+        .into_iter()
+        .map(AttachmentDto::from)
+        .collect::<Vec<_>>();
+    import_events.emit_ready();
+    Ok(CommandResponse::new_v2(request.request_id, attachment_dtos))
+}
+
+#[tauri::command]
+pub async fn chat_import_attachments_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    app: AppHandle,
+) -> Result<CommandResponse<Vec<AttachmentDto>>, ChatIpcError> {
+    let request: CommandRequest<ImportAttachmentsPayload> = decode_request_v2(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    validate_attachment_batch_size(
+        request.payload.paths.len(),
+        request.payload.remaining_capacity,
+        request.request_id,
+    )?;
+    let paths = validate_attachment_paths(&request.payload.paths, request.request_id)?;
+    let draft_target = draft_target(request.payload.draft_target, request.request_id)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&draft_target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    let now =
+        unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let remaining_capacity = request.payload.remaining_capacity;
+    let (prepared, mut import_events) = prepare_attachments(
+        app,
+        request.context_id,
+        request.payload.operation_id,
+        paths,
+        now,
+        remaining_capacity,
+        request.request_id,
+    )
+    .await?;
+    let attachments = match authorized
+        .store_attachments(
+            request.context_id,
+            prepared,
+            remaining_capacity,
+            draft_target,
+        )
+        .await
+    {
+        Ok(attachments) => attachments,
+        Err(error) => {
+            import_events.emit_storage_failure();
+            return Err(map_chat_error(error, Some(request.request_id))
+                .v2()
+                .with_attachment_item_count(import_events.item_count));
+        }
+    };
+    let attachment_dtos = attachments
+        .into_iter()
+        .map(AttachmentDto::from)
+        .collect::<Vec<_>>();
+    import_events.emit_ready();
+    Ok(CommandResponse::new_v2(request.request_id, attachment_dtos))
+}
+
+#[tauri::command]
+pub async fn chat_list_draft_attachments_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<Vec<AttachmentDto>>, ChatIpcError> {
+    let request: CommandRequest<ListDraftAttachmentsPayload> = decode_request_v2(request)?;
+    let draft_target = draft_target(request.payload.draft_target, request.request_id)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&draft_target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    let attachments = authorized
+        .list_ready_attachments(request.context_id, draft_target)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    Ok(CommandResponse::new_v2(
+        request.request_id,
+        attachments.into_iter().map(Into::into).collect(),
+    ))
+}
+
+#[tauri::command]
+pub async fn chat_remove_attachment_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<OperationDto>, ChatIpcError> {
+    let request: CommandRequest<RemoveAttachmentPayload> = decode_request_v2(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    if request.payload.attachment_id.is_nil() {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    let draft_target = draft_target(request.payload.draft_target, request.request_id)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&draft_target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    authorized
+        .remove_ready_attachment(
+            request.context_id,
+            request.payload.attachment_id,
+            draft_target,
+        )
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    Ok(CommandResponse::new_v2(
+        request.request_id,
+        OperationDto {
+            operation_id: request.payload.operation_id.to_string(),
+        },
+    ))
+}
+
+#[tauri::command]
+pub async fn chat_create_session_v2(
+    request: Value,
+    app: AppHandle,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<CreatedSessionDto>, ChatIpcError> {
+    let request: CommandRequest<CreateSessionV2Payload> = decode_request_v2(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    let blocks = draft_content_blocks(request.payload.content_blocks, request.request_id)?;
+    let (application, authorized, manager) = applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    let pending = authorized
+        .create_local_session_multimodal(
+            request.context_id,
+            request.payload.project_id,
+            blocks,
+            request.payload.operation_id,
+        )
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    ipc_runtime
+        .ensure_coordinator(app, application, manager)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    Ok(CommandResponse::new_v2(
+        request.request_id,
+        CreatedSessionDto {
+            session_id: pending.session_id.to_string(),
+            turn_id: pending.turn_id.to_string(),
+            operation_id: pending.create_operation_id.to_string(),
+        },
+    ))
+}
+
+#[tauri::command]
+pub async fn chat_submit_turn_v2(
+    request: Value,
+    app: AppHandle,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<CreatedSessionDto>, ChatIpcError> {
+    let request: CommandRequest<SubmitTurnV2Payload> = decode_request_v2(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    let blocks = draft_content_blocks(request.payload.content_blocks, request.request_id)?;
+    let (application, authorized, manager) = applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    let turn_id = authorized
+        .enqueue_turn_multimodal(
+            request.context_id,
+            request.payload.session_id,
+            blocks,
+            request.payload.operation_id,
+        )
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    ipc_runtime
+        .ensure_coordinator(app, application, manager)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    Ok(CommandResponse::new_v2(
+        request.request_id,
+        CreatedSessionDto {
+            session_id: request.payload.session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            operation_id: request.payload.operation_id.to_string(),
+        },
+    ))
+}
+
+#[tauri::command]
 pub async fn chat_list_sessions_v1(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
@@ -2614,6 +3816,74 @@ pub async fn chat_load_history_v1(
     let data = history_dto(page, next_cursor);
     enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)?;
     Ok(CommandResponse::new(request.request_id, data))
+}
+
+#[tauri::command]
+pub async fn chat_load_history_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<HistoryPageDtoV2>, ChatIpcError> {
+    let request: CommandRequest<SessionReadPayload> = decode_request_v2(request)?;
+    let now =
+        unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let before = ipc_runtime
+        .resolve_history_cursor(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.cursor.as_deref(),
+            now,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v2)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    ipc_runtime
+        .begin_read(request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    let result = authorized
+        .load_history(
+            request.context_id,
+            request.payload.session_id,
+            before,
+            request.payload.limit,
+        )
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let page = result.map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    finished.map_err(ChatIpcError::v2)?;
+    let next_cursor = page
+        .next_before_ordinal
+        .map(|before| {
+            ipc_runtime.issue_cursor(
+                request.context_id,
+                CursorValue::History {
+                    session_id: request.payload.session_id,
+                    before,
+                },
+                now,
+            )
+        })
+        .transpose()
+        .map_err(ChatIpcError::v2)?;
+    let message_ids = history_message_ids(&page);
+    let projections = authorized
+        .load_message_content_blocks(request.context_id, message_ids)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let data = history_dto_v2(page, next_cursor, projections)
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    Ok(CommandResponse::new_v2(request.request_id, data))
 }
 
 #[tauri::command]
@@ -2890,6 +4160,78 @@ pub async fn chat_resync_session_v1(
     };
     enforce_response_limit(&data, MAX_RESYNC_BYTES, request.request_id)?;
     Ok(CommandResponse::new(request.request_id, data))
+}
+
+#[tauri::command]
+pub async fn chat_resync_session_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<ResyncDtoV2>, ChatIpcError> {
+    let request: CommandRequest<SessionReadPayload> = decode_request_v2(request)?;
+    if request.payload.cursor.is_some() {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    ipc_runtime
+        .begin_read(request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    let result = authorized
+        .resync_session(
+            request.context_id,
+            request.payload.session_id,
+            None,
+            request.payload.limit,
+        )
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let projection =
+        result.map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    finished.map_err(ChatIpcError::v2)?;
+    let next_cursor = projection
+        .history
+        .next_before_ordinal
+        .map(|before| {
+            ipc_runtime.issue_cursor(
+                request.context_id,
+                CursorValue::History {
+                    session_id: request.payload.session_id,
+                    before,
+                },
+                unix_seconds()
+                    .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?,
+            )
+        })
+        .transpose()
+        .map_err(ChatIpcError::v2)?;
+    let message_ids = history_message_ids(&projection.history);
+    let blocks = authorized
+        .load_message_content_blocks(request.context_id, message_ids)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let history = history_dto_v2(projection.history, next_cursor, blocks)
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let cleanup = authorized
+        .deletion_status_for_session(request.context_id, request.payload.session_id)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let data = ResyncDtoV2 {
+        session: projection.session.into(),
+        history,
+        cleanup: cleanup.map(cleanup_dto),
+    };
+    enforce_response_limit(&data, MAX_RESYNC_BYTES, request.request_id)
+        .map_err(ChatIpcError::v2)?;
+    Ok(CommandResponse::new_v2(request.request_id, data))
 }
 
 #[tauri::command]

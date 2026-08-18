@@ -14,12 +14,12 @@ Use only the fixed test harness and synthetic fixture. Do not enable the product
 - [ ] The region is announced as “易界AI” and has one level-one heading.
 - [ ] The sidebar has no expand/collapse control while Chat is active.
 - [ ] Project selection has an accessible label and announces the selected safe project name.
-- [ ] “权限审批，只读，禁止写入” is reachable and does not offer writable approval.
+- [ ] 输入面板左下角的“权限审批，只读访问，禁止写入” is reachable and does not offer writable approval.
 - [ ] The permission dialog announces its title, dialog role, read-only/deny policy, and “知道了” action.
 - [ ] Closing the permission dialog restores focus to the permission trigger.
 - [ ] The task textarea is announced by its visible intent rather than placeholder alone.
 - [ ] Empty, over-limit, unavailable, active-turn, storage, and authorization states disable send and announce stable localized copy.
-- [ ] Plain Enter inserts a newline; Command+Enter sends; IME composition does not send.
+- [ ] Plain Enter sends; Shift+Enter inserts a newline; IME composition does not send.
 
 ## Conversation flow
 

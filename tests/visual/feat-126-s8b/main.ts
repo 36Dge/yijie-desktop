@@ -22,7 +22,7 @@ const view = new URLSearchParams(window.location.search).get("view") ?? "active"
 document.documentElement.dataset.theme = dark ? "dark" : "light";
 
 const projects: readonly ChatProject[] = Object.freeze([
-  { projectId: PROJECT_ID, safeName: "CrossBSD", pinnedAt: 1, lastUsedAt: 9, available: true },
+  { projectId: PROJECT_ID, safeName: "project", pinnedAt: 1, lastUsedAt: 9, available: true },
   { projectId: "019c1a00-0000-7000-8000-000000000010", safeName: "Local Design Workspace", pinnedAt: null, lastUsedAt: 4, available: true },
 ]);
 

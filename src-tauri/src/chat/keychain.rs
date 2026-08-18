@@ -295,8 +295,10 @@ mod tests {
         )
         .unwrap();
         let first_version = first.schema_version().await.unwrap();
+        let first_thread = first.thread_lifetime_probe();
+        assert!(first_thread.upgrade().is_some());
         drop(first);
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(first_thread.upgrade().is_none());
 
         let restarted = crate::chat::worker::DatabaseWorker::start(
             chat_directory.clone(),
@@ -306,8 +308,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(restarted.schema_version().await.unwrap(), first_version);
+        let restarted_thread = restarted.thread_lifetime_probe();
+        assert!(restarted_thread.upgrade().is_some());
         drop(restarted);
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(restarted_thread.upgrade().is_none());
         std::fs::remove_dir_all(chat_directory).unwrap();
         crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile).unwrap();
         assert!(!root.exists());

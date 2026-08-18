@@ -12,6 +12,9 @@ const S7C_ORCHESTRATION_SQL: &str =
     include_str!("../../migrations/chat/0004_chat_s7c_orchestration.sql");
 const PUBLIC_TASK_CONTROL_PLANE_SQL: &str =
     include_str!("../../migrations/chat/0005_chat_public_task_control_plane.sql");
+const CHAT_ATTACHMENTS_SQL: &str = include_str!("../../migrations/chat/0006_chat_attachments.sql");
+const CHAT_ATTACHMENT_DRAFT_TARGETS_SQL: &str =
+    include_str!("../../migrations/chat/0007_chat_attachment_draft_targets.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -20,7 +23,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 5] = [
+const CATALOG: [CatalogEntry; 7] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -45,6 +48,16 @@ const CATALOG: [CatalogEntry; 5] = [
         version: 5,
         name: "0005_chat_public_task_control_plane",
         sql: PUBLIC_TASK_CONTROL_PLANE_SQL,
+    },
+    CatalogEntry {
+        version: 6,
+        name: "0006_chat_attachments",
+        sql: CHAT_ATTACHMENTS_SQL,
+    },
+    CatalogEntry {
+        version: 7,
+        name: "0007_chat_attachment_draft_targets",
+        sql: CHAT_ATTACHMENT_DRAFT_TARGETS_SQL,
     },
 ];
 
@@ -471,6 +484,159 @@ mod tests {
             assert!(!columns.iter().any(|column| column.contains(forbidden)));
         }
         assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn populated_v6_discards_unroutable_drafts_and_preserves_bound_attachment_history() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrations()
+            .to_version(&mut connection, 6)
+            .expect("create v6");
+
+        let project_id = Uuid::now_v7().to_string();
+        let session_id = Uuid::now_v7().to_string();
+        let turn_id = Uuid::now_v7().to_string();
+        let message_id = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        let ready_id = Uuid::now_v7().to_string();
+        let bound_id = Uuid::now_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'Synthetic', ?4, X'01', 1)",
+                params![project_id, owner, tenant, "a".repeat(64)],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'Existing', 'fallback', 'not_started', 1, 2)",
+                params![session_id, owner, tenant, project_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status, terminal_at)
+                 VALUES (?1, ?2, ?3, 'completed', 2)",
+                params![turn_id, session_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_messages(
+                   id, session_id, turn_id, role, content, status, ordinal, created_at
+                 ) VALUES (?1, ?2, ?3, 'user', '', 'committed', 0, 1)",
+                params![message_id, session_id, turn_id],
+            )
+            .unwrap();
+
+        for (attachment_id, state, linked_message) in [
+            (&ready_id, "ready", None),
+            (&bound_id, "bound", Some(message_id.as_str())),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO chat_attachments(
+                       id, owner_user_id, tenant_id, kind, safe_name, media_type,
+                       byte_size, sha256, state, imported_at, expires_at, content_blob, message_id
+                     ) VALUES (?1, ?2, ?3, 'file', 'synthetic.txt', 'text/plain',
+                       7, ?4, ?5, 10, 604810, X'636F6E74656E74', ?6)",
+                    params![
+                        attachment_id,
+                        owner,
+                        tenant,
+                        "b".repeat(64),
+                        state,
+                        linked_message
+                    ],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chat_attachment_chunks(
+                       attachment_id, chunk_ordinal, content, byte_count
+                     ) VALUES (?1, 0, 'context', 7)",
+                    [attachment_id],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO chat_message_content_blocks(
+                   message_id, block_ordinal, block_type, attachment_id
+                 ) VALUES (?1, 0, 'file', ?2)",
+                params![message_id, bound_id],
+            )
+            .unwrap();
+
+        migrate(&mut connection).expect("migrate populated v6");
+        migrate(&mut connection).expect("repeat current startup");
+
+        assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM chat_attachments WHERE id=?1",
+                    [ready_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM chat_attachment_chunks WHERE attachment_id=?1",
+                    [ready_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state, message_id, draft_target_kind, draft_session_id, draft_ordinal
+                     FROM chat_attachments WHERE id=?1",
+                    [bound_id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<i64>>(4)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            ("bound".to_owned(), message_id, None, None, None)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM chat_attachment_chunks WHERE attachment_id=?1",
+                    [bound_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM chat_message_content_blocks WHERE attachment_id=?1",
+                    [bound_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

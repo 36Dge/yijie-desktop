@@ -1,4 +1,5 @@
 mod application;
+mod attachment;
 mod authorization;
 mod database;
 mod error;
@@ -69,6 +70,14 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_remove_project_v1;
     let _ = ipc::chat_create_session_v1;
     let _ = ipc::chat_submit_turn_v1;
+    let _ = ipc::chat_pick_attachments_v2;
+    let _ = ipc::chat_list_draft_attachments_v2;
+    let _ = ipc::chat_import_attachments_v2;
+    let _ = ipc::chat_remove_attachment_v2;
+    let _ = ipc::chat_create_session_v2;
+    let _ = ipc::chat_submit_turn_v2;
+    let _ = ipc::chat_load_history_v2;
+    let _ = ipc::chat_resync_session_v2;
     let _ = ipc::chat_list_sessions_v1;
     let _ = ipc::chat_load_history_v1;
     let _ = ipc::chat_load_reasoning_v1;
@@ -84,7 +93,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_cancel_request_v1;
 }
 
-const CONTRACT_COMMIT: &str = "98e89d8cccfe15256f09e9329d4bc1980d6da578";
+const CONTRACT_COMMIT: &str = "ebdd30f076614ebc7f5149aebf70e851b81ff32b";
 
 #[derive(Clone)]
 struct LocalChatConfig {

@@ -1,7 +1,9 @@
+use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
-    ActiveTurnContext, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState, DeletionStatus,
-    HistoryPage, OutboxKind, PendingConversation, ProjectSummary, PublicTaskBindingState,
+    ActiveTurnContext, AttachmentSummary, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState,
+    DeletionStatus, DraftContentBlock, DraftTarget, HistoryPage, MessageContentBlockProjection,
+    OutboxKind, PendingConversation, ProjectSummary, PublicTaskBindingState,
     PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot,
     SessionPage, SessionPageCursor, SessionSummary, StoredEventCursor, TerminalTurnCommit,
     TurnProgress,
@@ -159,6 +161,20 @@ impl AuthorizedConversationApplication {
             .authorize(context_id, action, unix_seconds()?)
     }
 
+    fn authorize_draft_target(
+        &self,
+        context_id: Uuid,
+        draft_target: &DraftTarget,
+    ) -> Result<(), ChatError> {
+        self.authorize(
+            context_id,
+            match draft_target {
+                DraftTarget::New => ChatAction::CreateSession,
+                DraftTarget::Session(_) => ChatAction::SubmitTurn,
+            },
+        )
+    }
+
     pub async fn create_local_session(
         &self,
         context_id: Uuid,
@@ -177,6 +193,29 @@ impl AuthorizedConversationApplication {
             .await
     }
 
+    pub async fn create_local_session_multimodal(
+        &self,
+        context_id: Uuid,
+        project_id: Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: Uuid,
+    ) -> Result<PendingConversation, ChatError> {
+        self.authorize(context_id, ChatAction::UseProject)?;
+        self.authorize(context_id, ChatAction::CreateSession)?;
+        let authorization_revision = self
+            .authorization
+            .authorization_revision(context_id, ChatAction::CreateSession, unix_seconds()?)
+            .map_err(|_| ChatError::ScopeDenied)?;
+        self.application
+            .create_local_session_multimodal(
+                project_id,
+                blocks,
+                operation_id,
+                authorization_revision,
+            )
+            .await
+    }
+
     pub async fn enqueue_turn(
         &self,
         context_id: Uuid,
@@ -187,6 +226,64 @@ impl AuthorizedConversationApplication {
         self.authorize(context_id, ChatAction::SubmitTurn)?;
         self.application
             .enqueue_turn(session_id, input, operation_id)
+            .await
+    }
+
+    pub async fn enqueue_turn_multimodal(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: Uuid,
+    ) -> Result<Uuid, ChatError> {
+        self.authorize(context_id, ChatAction::SubmitTurn)?;
+        self.application
+            .enqueue_turn_multimodal(session_id, blocks, operation_id)
+            .await
+    }
+
+    pub async fn load_message_content_blocks(
+        &self,
+        context_id: Uuid,
+        message_ids: Vec<Uuid>,
+    ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_message_content_blocks(message_ids)
+            .await
+    }
+
+    pub async fn store_attachments(
+        &self,
+        context_id: Uuid,
+        attachments: Vec<PreparedAttachment>,
+        remaining_capacity: usize,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.authorize_draft_target(context_id, &draft_target)?;
+        self.application
+            .store_attachments(attachments, remaining_capacity, draft_target)
+            .await
+    }
+
+    pub async fn list_ready_attachments(
+        &self,
+        context_id: Uuid,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.authorize_draft_target(context_id, &draft_target)?;
+        self.application.list_ready_attachments(draft_target).await
+    }
+
+    pub async fn remove_ready_attachment(
+        &self,
+        context_id: Uuid,
+        attachment_id: Uuid,
+        draft_target: DraftTarget,
+    ) -> Result<(), ChatError> {
+        self.authorize_draft_target(context_id, &draft_target)?;
+        self.application
+            .remove_ready_attachment(attachment_id, draft_target)
             .await
     }
 
@@ -627,6 +724,23 @@ impl ConversationApplication {
             .await
     }
 
+    pub async fn create_local_session_multimodal(
+        &self,
+        project_id: Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
+        self.database
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                blocks,
+                operation_id,
+                authorization_revision,
+            )
+            .await
+    }
+
     pub async fn enqueue_turn(
         &self,
         session_id: Uuid,
@@ -635,6 +749,52 @@ impl ConversationApplication {
     ) -> Result<Uuid, ChatError> {
         self.database
             .enqueue_turn(session_id, input, operation_id)
+            .await
+    }
+
+    pub async fn enqueue_turn_multimodal(
+        &self,
+        session_id: Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: Uuid,
+    ) -> Result<Uuid, ChatError> {
+        self.database
+            .enqueue_turn_multimodal(session_id, blocks, operation_id)
+            .await
+    }
+
+    pub async fn load_message_content_blocks(
+        &self,
+        message_ids: Vec<Uuid>,
+    ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
+        self.database.load_message_content_blocks(message_ids).await
+    }
+
+    pub async fn store_attachments(
+        &self,
+        attachments: Vec<PreparedAttachment>,
+        remaining_capacity: usize,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.database
+            .store_attachments(attachments, remaining_capacity, draft_target)
+            .await
+    }
+
+    pub async fn list_ready_attachments(
+        &self,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.database.list_ready_attachments(draft_target).await
+    }
+
+    pub async fn remove_ready_attachment(
+        &self,
+        attachment_id: Uuid,
+        draft_target: DraftTarget,
+    ) -> Result<(), ChatError> {
+        self.database
+            .remove_ready_attachment(attachment_id, draft_target)
             .await
     }
 
@@ -960,45 +1120,130 @@ impl ConversationApplication {
         claimed: ClaimedOutbox,
         now: i64,
     ) -> Result<DispatchOutcome, ChatError> {
-        let dispatch = self
+        match self
             .database
-            .load_start_turn_dispatch(claimed.operation_id)
-            .await?;
-        let trace = HostTrace {
-            request_id: Some(dispatch.operation_id),
-            ..HostTrace::default()
-        };
-        let runtime_turn_id = match self
-            .host()?
-            .start_turn(dispatch.agent_session_id, &dispatch.input, &trace)
-            .await
+            .start_turn_payload_version(claimed.operation_id)
+            .await?
         {
-            Ok(turn_id) => turn_id,
-            Err(error) if error.code() == Some(HostErrorCode::TurnActive) => {
-                match self.host()?.get_session(dispatch.agent_session_id).await {
-                    Ok(session) if session.active_turn_id.is_some() => {
-                        session.active_turn_id.expect("checked above")
-                    }
-                    _ => {
+            1 => {
+                let dispatch = self
+                    .database
+                    .load_start_turn_dispatch(claimed.operation_id)
+                    .await?;
+                let trace = HostTrace {
+                    request_id: Some(dispatch.operation_id),
+                    ..HostTrace::default()
+                };
+                let result = self
+                    .host()?
+                    .start_turn(dispatch.agent_session_id, &dispatch.input, &trace)
+                    .await;
+                self.finish_turn_dispatch(
+                    now,
+                    1,
+                    dispatch.operation_id,
+                    dispatch.session_id,
+                    dispatch.agent_session_id,
+                    result,
+                )
+                .await
+            }
+            2 => {
+                let dispatch = match self
+                    .database
+                    .load_start_turn_dispatch_v2(claimed.operation_id)
+                    .await
+                {
+                    Ok(dispatch) => dispatch,
+                    Err(ChatError::NotFound) => {
                         self.database.fail_outbox(claimed.operation_id).await?;
                         return Ok(DispatchOutcome::FailedSafely {
                             operation_id: claimed.operation_id,
                         });
                     }
+                    Err(error) => return Err(error),
+                };
+                let trace = HostTrace {
+                    request_id: Some(dispatch.operation_id),
+                    ..HostTrace::default()
+                };
+                let result = self
+                    .host()?
+                    .start_turn_v2(
+                        dispatch.agent_session_id,
+                        dispatch.operation_id,
+                        &dispatch.content_blocks,
+                        &trace,
+                    )
+                    .await;
+                self.finish_turn_dispatch(
+                    now,
+                    2,
+                    dispatch.operation_id,
+                    dispatch.session_id,
+                    dispatch.agent_session_id,
+                    result,
+                )
+                .await
+            }
+            _ => {
+                self.database.fail_outbox(claimed.operation_id).await?;
+                Ok(DispatchOutcome::FailedSafely {
+                    operation_id: claimed.operation_id,
+                })
+            }
+        }
+    }
+
+    async fn finish_turn_dispatch(
+        &self,
+        now: i64,
+        payload_version: i64,
+        operation_id: Uuid,
+        session_id: Uuid,
+        agent_session_id: Uuid,
+        result: Result<Uuid, HostBridgeError>,
+    ) -> Result<DispatchOutcome, ChatError> {
+        let runtime_turn_id = match result {
+            Ok(turn_id) => turn_id,
+            Err(error)
+                if payload_version == 1 && error.code() == Some(HostErrorCode::TurnActive) =>
+            {
+                match self.host()?.get_session(agent_session_id).await {
+                    Ok(session) if session.active_turn_id.is_some() => {
+                        session.active_turn_id.expect("checked above")
+                    }
+                    _ => {
+                        self.database.fail_outbox(operation_id).await?;
+                        return Ok(DispatchOutcome::FailedSafely { operation_id });
+                    }
                 }
             }
+            Err(error)
+                if payload_version == 2
+                    && matches!(
+                        error.kind(),
+                        HostBridgeErrorKind::Transport
+                            | HostBridgeErrorKind::AcceptedResponseInvalid
+                    ) =>
+            {
+                self.database
+                    .reschedule_outbox(
+                        operation_id,
+                        now.checked_add(RETRY_DELAY_SECONDS)
+                            .ok_or(ChatError::InvalidInput)?,
+                    )
+                    .await?;
+                return Ok(DispatchOutcome::RetryScheduled { operation_id });
+            }
             Err(error) => {
-                return self
-                    .handle_dispatch_error(claimed.operation_id, now, error)
-                    .await;
+                return self.handle_dispatch_error(operation_id, now, error).await;
             }
         };
         self.database
-            .suspend_started_turn_retry(dispatch.operation_id, runtime_turn_id)
+            .suspend_started_turn_retry(operation_id, runtime_turn_id)
             .await?;
-        Ok(DispatchOutcome::TurnAccepted {
-            session_id: dispatch.session_id,
-        })
+        Ok(DispatchOutcome::TurnAccepted { session_id })
     }
 
     async fn dispatch_interrupt(
@@ -2354,6 +2599,103 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    async fn prepare_v2_turn_outbox(
+        label: &str,
+    ) -> (
+        std::path::PathBuf,
+        DatabaseWorker,
+        PendingConversation,
+        ClaimedOutbox,
+        Uuid,
+    ) {
+        let root = std::env::temp_dir().join(format!("yijie-{label}-{}", Uuid::now_v7()));
+        let project_path = root.join("project");
+        fs::create_dir_all(&project_path).unwrap();
+        let selection = native_project::create_selection(&project_path)
+            .unwrap()
+            .unwrap();
+        let database = DatabaseWorker::start(
+            root.join("chat"),
+            super::super::database::ChatScope::new(
+                Uuid::now_v7().to_string(),
+                Uuid::now_v7().to_string(),
+            )
+            .unwrap(),
+            Box::new(TestKeyStore),
+            Box::new(TestKeyStore),
+        )
+        .unwrap();
+        let project = database
+            .register_project(selection.canonical_path, selection.bookmark)
+            .await
+            .unwrap();
+        let attachment = crate::chat::attachment::prepare_bytes(
+            "idempotent.txt".to_owned(),
+            b"bounded idempotent context".to_vec(),
+            unix_seconds().unwrap(),
+        )
+        .unwrap();
+        let attachment_id = attachment.id;
+        database
+            .store_attachments(vec![attachment], 1, DraftTarget::New)
+            .await
+            .unwrap();
+        let pending = database
+            .create_session_and_enqueue_multimodal(
+                Uuid::parse_str(&project.id).unwrap(),
+                vec![
+                    DraftContentBlock::Text("inspect the attachment".to_owned()),
+                    DraftContentBlock::File(attachment_id),
+                ],
+                Uuid::now_v7(),
+                1,
+            )
+            .await
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let create = database
+            .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .unwrap();
+        let public_task_id = Uuid::now_v7();
+        database
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .await
+            .unwrap();
+        database
+            .reschedule_outbox(create.operation_id, now)
+            .await
+            .unwrap();
+        let create = database
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), OUTBOX_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .unwrap();
+        let agent_session_id = Uuid::now_v7();
+        database
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                public_task_id,
+                agent_session_id,
+                Uuid::now_v7(),
+            )
+            .await
+            .unwrap();
+        let turn = database
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), OUTBOX_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(turn.operation_id, pending.turn_operation_id);
+        assert_eq!(
+            database.start_turn_payload_version(turn.operation_id).await,
+            Ok(2)
+        );
+        (root, database, pending, turn, agent_session_id)
+    }
+
+    #[cfg(target_os = "macos")]
     fn http_response(status: &str, headers: &[(&str, &str)], body: &str) -> String {
         let mut response = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -2439,6 +2781,218 @@ mod tests {
             requests
         });
         (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn v2_transport_loss_retries_same_operation_and_accepts_idempotent_replay() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fb0";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, _agent_session_id) =
+            prepare_v2_turn_outbox("feat127-lost-response").await;
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let runtime_turn_id = Uuid::now_v7();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            String::new(),
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        database
+            .reschedule_outbox(claimed.operation_id, unix_seconds().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::RetryScheduled {
+                operation_id: pending.turn_operation_id
+            }
+        );
+        tokio::time::sleep(Duration::from_secs(RETRY_DELAY_SECONDS as u64)).await;
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::TurnAccepted {
+                session_id: pending.session_id
+            }
+        );
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        let first_body = requests[1].split("\r\n\r\n").nth(1).unwrap();
+        let second_body = requests[3].split("\r\n\r\n").nth(1).unwrap();
+        assert_eq!(first_body, second_body);
+        let payload: serde_json::Value = serde_json::from_str(first_body).unwrap();
+        assert_eq!(
+            payload["operation_id"],
+            pending.turn_operation_id.to_string()
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn v2_invalid_accepted_response_retries_same_operation_id() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fb0";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, _agent_session_id) =
+            prepare_v2_turn_outbox("feat127-invalid-accepted-response").await;
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let runtime_turn_id = Uuid::now_v7();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response("202 Accepted", r#"{"turn_id":"#),
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        database
+            .reschedule_outbox(claimed.operation_id, unix_seconds().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::RetryScheduled {
+                operation_id: pending.turn_operation_id
+            }
+        );
+        tokio::time::sleep(Duration::from_secs(RETRY_DELAY_SECONDS as u64)).await;
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::TurnAccepted {
+                session_id: pending.session_id
+            }
+        );
+
+        let requests = server.await.unwrap();
+        let first_body = requests[1].split("\r\n\r\n").nth(1).unwrap();
+        let second_body = requests[3].split("\r\n\r\n").nth(1).unwrap();
+        assert_eq!(first_body, second_body);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(first_body).unwrap()["operation_id"],
+            pending.turn_operation_id.to_string()
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn v2_turn_operation_conflict_is_not_retried() {
+        let (root, database, pending, _claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat127-turn-operation-conflict").await;
+        let application = ConversationApplication::new_offline(database.clone());
+        assert_eq!(
+            application
+                .finish_turn_dispatch(
+                    unix_seconds().unwrap(),
+                    2,
+                    pending.turn_operation_id,
+                    pending.session_id,
+                    agent_session_id,
+                    Err(HostBridgeError::rejected(
+                        HostErrorCode::TurnOperationConflict,
+                    )),
+                )
+                .await
+                .unwrap(),
+            DispatchOutcome::FailedSafely {
+                operation_id: pending.turn_operation_id
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Failed
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn v2_turn_active_never_binds_an_unrelated_runtime_turn() {
+        let (root, database, pending, _claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat127-turn-active").await;
+        let application = ConversationApplication::new_offline(database.clone());
+        assert_eq!(
+            application
+                .finish_turn_dispatch(
+                    unix_seconds().unwrap(),
+                    2,
+                    pending.turn_operation_id,
+                    pending.session_id,
+                    agent_session_id,
+                    Err(HostBridgeError::rejected(HostErrorCode::TurnActive)),
+                )
+                .await
+                .unwrap(),
+            DispatchOutcome::FailedSafely {
+                operation_id: pending.turn_operation_id
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Failed
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

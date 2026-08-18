@@ -200,8 +200,15 @@ pub fn run() {
         chat::ipc::chat_remove_project_v1,
         chat::ipc::chat_create_session_v1,
         chat::ipc::chat_submit_turn_v1,
+        chat::ipc::chat_pick_attachments_v2,
+        chat::ipc::chat_import_attachments_v2,
+        chat::ipc::chat_list_draft_attachments_v2,
+        chat::ipc::chat_remove_attachment_v2,
+        chat::ipc::chat_create_session_v2,
+        chat::ipc::chat_submit_turn_v2,
         chat::ipc::chat_list_sessions_v1,
         chat::ipc::chat_load_history_v1,
+        chat::ipc::chat_load_history_v2,
         chat::ipc::chat_load_reasoning_v1,
         chat::ipc::chat_rename_session_v1,
         chat::ipc::chat_set_session_pinned_v1,
@@ -213,6 +220,7 @@ pub fn run() {
         chat::ipc::chat_request_local_recovery_v1,
         chat::ipc::chat_subscribe_session_v1,
         chat::ipc::chat_resync_session_v1,
+        chat::ipc::chat_resync_session_v2,
         chat::ipc::chat_cancel_request_v1,
         chat::ipc::chat_unsubscribe_session_v1
     ]);

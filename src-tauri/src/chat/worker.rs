@@ -1,23 +1,45 @@
+use super::attachment::PreparedAttachment;
 #[cfg(feature = "feat126-s10-driver")]
 use super::database::Feat126ResumeCandidate;
 use super::database::{
-    ActiveTurnContext, ChatRepository, ChatScope, ClaimedDeletion, ClaimedOutbox,
-    CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, HistoryPage, InterruptTurnDispatch,
-    OutboxState, PendingConversation, ProjectSummary, PublicTaskBindingState,
-    PublicTaskControlPlaneStatus, ReasoningItem, RecoverySnapshot, SessionPage, SessionPageCursor,
-    SessionSummary, StartTurnDispatch, TerminalTurnCommit, TurnProgress,
+    ActiveTurnContext, AttachmentSummary, ChatRepository, ChatScope, ClaimedDeletion,
+    ClaimedOutbox, CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, DraftContentBlock,
+    DraftTarget, HistoryPage, InterruptTurnDispatch, MessageContentBlockProjection, OutboxState,
+    PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
+    ReasoningItem, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
+    StartTurnDispatch, StartTurnDispatchV2, TerminalTurnCommit, TurnProgress,
 };
 use super::error::ChatError;
 use super::keychain::{DatabaseKeyStore, ReceiptKeyStore};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use tokio::sync::oneshot;
 
 type DatabaseJob = Box<dyn FnOnce(&mut ChatRepository) + Send + 'static>;
 
 #[derive(Clone)]
 pub struct DatabaseWorker {
-    sender: mpsc::Sender<DatabaseJob>,
+    inner: Arc<DatabaseWorkerInner>,
+}
+
+struct DatabaseWorkerInner {
+    sender: Option<mpsc::Sender<DatabaseJob>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    #[cfg(test)]
+    thread_lifetime: std::sync::Weak<()>,
+}
+
+impl Drop for DatabaseWorkerInner {
+    fn drop(&mut self) {
+        self.sender.take();
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        if thread.thread().id() == std::thread::current().id() {
+            return;
+        }
+        let _ = thread.join();
+    }
 }
 
 impl DatabaseWorker {
@@ -34,16 +56,29 @@ impl DatabaseWorker {
         let receipt_key = receipt_key_store.load_or_create(deletion_identity_exists)?;
         let repository = ChatRepository::open(&chat_directory, &key, receipt_key, scope)?;
         let (sender, receiver) = mpsc::channel::<DatabaseJob>();
-        std::thread::Builder::new()
+        #[cfg(test)]
+        let thread_lifetime = Arc::new(());
+        #[cfg(test)]
+        let thread_lifetime_probe = Arc::downgrade(&thread_lifetime);
+        let thread = std::thread::Builder::new()
             .name("yijie-chat-database".to_owned())
             .spawn(move || {
+                #[cfg(test)]
+                let _thread_lifetime = thread_lifetime;
                 let mut repository = repository;
                 while let Ok(job) = receiver.recv() {
                     job(&mut repository);
                 }
             })
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(Self { sender })
+        Ok(Self {
+            inner: Arc::new(DatabaseWorkerInner {
+                sender: Some(sender),
+                thread: Some(thread),
+                #[cfg(test)]
+                thread_lifetime: thread_lifetime_probe,
+            }),
+        })
     }
 
     async fn call<T, F>(&self, operation: F) -> Result<T, ChatError>
@@ -52,7 +87,10 @@ impl DatabaseWorker {
         F: FnOnce(&mut ChatRepository) -> Result<T, ChatError> + Send + 'static,
     {
         let (result_sender, result_receiver) = oneshot::channel();
-        self.sender
+        self.inner
+            .sender
+            .as_ref()
+            .ok_or(ChatError::DatabaseUnavailable)?
             .send(Box::new(move |repository| {
                 let _ = result_sender.send(operation(repository));
             }))
@@ -60,6 +98,11 @@ impl DatabaseWorker {
         result_receiver
             .await
             .map_err(|_| ChatError::DatabaseUnavailable)?
+    }
+
+    #[cfg(test)]
+    pub(super) fn thread_lifetime_probe(&self) -> std::sync::Weak<()> {
+        self.inner.thread_lifetime.clone()
     }
 
     pub async fn schema_version(&self) -> Result<i64, ChatError> {
@@ -115,6 +158,57 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn store_attachment(
+        &self,
+        attachment: PreparedAttachment,
+        draft_target: DraftTarget,
+    ) -> Result<AttachmentSummary, ChatError> {
+        self.call(move |repository| repository.store_attachment(attachment, draft_target))
+            .await
+    }
+
+    pub async fn store_attachments(
+        &self,
+        attachments: Vec<PreparedAttachment>,
+        remaining_capacity: usize,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.call(move |repository| {
+            repository.store_attachments(attachments, remaining_capacity, draft_target)
+        })
+        .await
+    }
+
+    pub async fn list_ready_attachments(
+        &self,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        self.call(move |repository| repository.list_ready_attachments(draft_target))
+            .await
+    }
+
+    pub async fn remove_ready_attachment(
+        &self,
+        attachment_id: uuid::Uuid,
+        draft_target: DraftTarget,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| repository.remove_ready_attachment(attachment_id, draft_target))
+            .await
+    }
+
+    pub async fn expire_attachments(&self, now: i64) -> Result<usize, ChatError> {
+        self.call(move |repository| repository.expire_attachments(now))
+            .await
+    }
+
+    pub async fn load_message_content_blocks(
+        &self,
+        message_ids: Vec<uuid::Uuid>,
+    ) -> Result<Vec<(uuid::Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
+        self.call(move |repository| repository.load_message_content_blocks(message_ids))
+            .await
+    }
+
     pub async fn create_session_and_enqueue(
         &self,
         project_id: uuid::Uuid,
@@ -143,6 +237,24 @@ impl DatabaseWorker {
         .await
     }
 
+    pub async fn create_session_and_enqueue_multimodal(
+        &self,
+        project_id: uuid::Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: uuid::Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
+        self.call(move |repository| {
+            repository.create_session_and_enqueue_multimodal(
+                project_id,
+                &blocks,
+                operation_id,
+                authorization_revision,
+            )
+        })
+        .await
+    }
+
     pub async fn enqueue_turn(
         &self,
         session_id: uuid::Uuid,
@@ -151,6 +263,18 @@ impl DatabaseWorker {
     ) -> Result<uuid::Uuid, ChatError> {
         self.call(move |repository| repository.enqueue_turn(session_id, &input, operation_id))
             .await
+    }
+
+    pub async fn enqueue_turn_multimodal(
+        &self,
+        session_id: uuid::Uuid,
+        blocks: Vec<DraftContentBlock>,
+        operation_id: uuid::Uuid,
+    ) -> Result<uuid::Uuid, ChatError> {
+        self.call(move |repository| {
+            repository.enqueue_turn_multimodal(session_id, &blocks, operation_id)
+        })
+        .await
     }
 
     pub async fn claim_next_conversation_outbox(
@@ -244,6 +368,22 @@ impl DatabaseWorker {
         operation_id: uuid::Uuid,
     ) -> Result<StartTurnDispatch, ChatError> {
         self.call(move |repository| repository.load_start_turn_dispatch(operation_id))
+            .await
+    }
+
+    pub async fn start_turn_payload_version(
+        &self,
+        operation_id: uuid::Uuid,
+    ) -> Result<i64, ChatError> {
+        self.call(move |repository| repository.start_turn_payload_version(operation_id))
+            .await
+    }
+
+    pub async fn load_start_turn_dispatch_v2(
+        &self,
+        operation_id: uuid::Uuid,
+    ) -> Result<StartTurnDispatchV2, ChatError> {
+        self.call(move |repository| repository.load_start_turn_dispatch_v2(operation_id))
             .await
     }
 

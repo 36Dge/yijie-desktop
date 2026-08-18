@@ -1,6 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createChatClient, type ChatClientTransport } from "./chat-client";
-import { ChatClientError } from "../domain/chat-ipc";
+import {
+  CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
+  CHAT_NEW_DRAFT_TARGET,
+  ChatClientError,
+} from "../domain/chat-ipc";
 
 const REQUEST_ID = "019c1a00-0000-7000-8000-000000000001";
 const CONTEXT_ID = "019c1a00-0000-7000-8000-000000000003";
@@ -86,6 +91,37 @@ describe("chat client", () => {
     expect(invalid).toHaveBeenCalledOnce();
   });
 
+  it("listens for aggregate attachment progress and rejects leaked file metadata", async () => {
+    let listener!: (payload: unknown) => void;
+    const handler = vi.fn();
+    const invalid = vi.fn();
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_channel: string, callback: (payload: unknown) => void) => {
+      listener = callback;
+      return unlisten;
+    });
+    const client = createChatClient({ invoke: async () => undefined, listen });
+
+    await expect(client.onAttachmentImportEvent(handler, invalid)).resolves.toBe(unlisten);
+    expect(listen).toHaveBeenCalledWith(CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL, expect.any(Function));
+
+    const event = {
+      schemaVersion: 2,
+      contextId: CONTEXT_ID,
+      operationId: REQUEST_ID,
+      sequence: "1",
+      stage: "queued",
+      itemCount: 2,
+      issue: null,
+    };
+    listener(event);
+    listener({ ...event, sequence: "2", path: "/private/source.pdf" });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(event);
+    expect(invalid).toHaveBeenCalledOnce();
+  });
+
   it("uses the closed readiness and recovery commands instead of legacy Host commands", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
     const nativeInvoke = vi.fn(async (command: string) => {
@@ -166,5 +202,131 @@ describe("chat client", () => {
       publicTaskId: "019c1a00-0000-7000-8000-000000000099",
     });
     expect(invalid).toHaveBeenCalledOnce();
+  });
+
+  it("uses additive v2 envelopes for attachment metadata and ordered multimodal turns", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const attachmentId = "019c1a00-0000-7000-8000-000000000010";
+    const sessionId = "019c1a00-0000-7000-8000-000000000011";
+    const nativeInvoke = vi.fn(async (command: string, arguments_?: Record<string, unknown>) => {
+      void arguments_;
+      if (
+        command === "chat_pick_attachments_v2" ||
+        command === "chat_import_attachments_v2" ||
+        command === "chat_list_draft_attachments_v2"
+      ) return {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        data: [{
+          attachmentId,
+          type: "file",
+          name: "synthetic.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 2048,
+          status: "ready",
+          expiresAt: 2_000_000_000,
+        }],
+      };
+      if (command === "chat_remove_attachment_v2") return {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        data: { operationId: REQUEST_ID },
+      };
+      return {
+          schemaVersion: 2,
+          requestId: REQUEST_ID,
+          data: { sessionId, turnId: "019c1a00-0000-7000-8000-000000000012", operationId: REQUEST_ID },
+        };
+    });
+    const client = createChatClient(transport(nativeInvoke));
+
+    await expect(client.pickAttachments(CONTEXT_ID, CHAT_NEW_DRAFT_TARGET, 7, REQUEST_ID)).resolves.toHaveLength(1);
+    await expect(client.importAttachments(CONTEXT_ID, CHAT_NEW_DRAFT_TARGET, ["/transient/drop.pdf"], 6, REQUEST_ID)).resolves.toHaveLength(1);
+    await expect(client.listDraftAttachments(CONTEXT_ID, CHAT_NEW_DRAFT_TARGET)).resolves.toHaveLength(1);
+    await expect(client.removeAttachment(CONTEXT_ID, CHAT_NEW_DRAFT_TARGET, attachmentId, REQUEST_ID)).resolves.toBe(REQUEST_ID);
+    await client.createSessionV2(CONTEXT_ID, "019c1a00-0000-7000-8000-000000000013", [
+      { type: "text", text: "检查文档" },
+      { type: "file", attachmentId },
+    ], REQUEST_ID);
+
+    expect(nativeInvoke.mock.calls[0]).toEqual(["chat_pick_attachments_v2", {
+      request: {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { draftTarget: { type: "new" }, operationId: REQUEST_ID, remainingCapacity: 7 },
+      },
+    }]);
+    expect(nativeInvoke.mock.calls[1]).toEqual(["chat_import_attachments_v2", {
+      request: {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: {
+          paths: ["/transient/drop.pdf"],
+          draftTarget: { type: "new" },
+          operationId: REQUEST_ID,
+          remainingCapacity: 6,
+        },
+      },
+    }]);
+    expect(nativeInvoke.mock.calls[2]).toEqual(["chat_list_draft_attachments_v2", {
+      request: {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { draftTarget: { type: "new" } },
+      },
+    }]);
+    expect(nativeInvoke.mock.calls[3]).toEqual(["chat_remove_attachment_v2", {
+      request: {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { attachmentId, draftTarget: { type: "new" }, operationId: REQUEST_ID },
+      },
+    }]);
+    expect(nativeInvoke.mock.calls[4]?.[1]).toEqual({
+      request: {
+        schemaVersion: 2,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: {
+          projectId: "019c1a00-0000-7000-8000-000000000013",
+          contentBlocks: [
+            { type: "text", text: "检查文档" },
+            { type: "file", attachmentId },
+          ],
+          operationId: REQUEST_ID,
+        },
+      },
+    });
+  });
+
+  it("produces the same attachment-only request fixture consumed by Rust serde", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const fixture = JSON.parse(readFileSync(
+      new URL("../../src-tauri/fixtures/chat-ipc-v2/create-session-attachment-only-request.json", import.meta.url),
+      "utf8",
+    )) as Record<string, unknown>;
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 2,
+      requestId: REQUEST_ID,
+      data: {
+        sessionId: "019c1a00-0000-7000-8000-000000000011",
+        turnId: "019c1a00-0000-7000-8000-000000000012",
+        operationId: REQUEST_ID,
+      },
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    await client.createSessionV2(
+      CONTEXT_ID,
+      "019c1a00-0000-7000-8000-000000000013",
+      [{ type: "file", attachmentId: "019c1a00-0000-7000-8000-000000000010" }],
+      REQUEST_ID,
+    );
+
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_create_session_v2", { request: fixture });
   });
 });

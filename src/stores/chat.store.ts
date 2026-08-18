@@ -5,8 +5,11 @@ import { chatClient, type ChatClient } from "../api/chat-client";
 import type {
   BoundChatContext,
   ChatAllowedAction,
+  ChatAttachment,
+  ChatAttachmentImportEvent,
   ChatCleanupStatus,
   ChatControlPlaneEvent,
+  ChatDraftTarget,
   ChatHistoryPage,
   ChatLocalReadiness,
   ChatProjectionEvent,
@@ -15,13 +18,58 @@ import type {
   ChatResyncProjection,
   ChatSession,
   ChatSessionControlPlane,
+  ChatTurnContentBlock,
 } from "../domain/chat-ipc";
-import { ChatClientError } from "../domain/chat-ipc";
+import {
+  CHAT_NEW_DRAFT_TARGET,
+  ChatClientError,
+  chatSessionDraftTarget,
+} from "../domain/chat-ipc";
 
 const STORE_ID = "chat-conversation";
 const MAX_LIVE_ASSISTANT_BYTES = 1024 * 1024;
 const MAX_LIVE_REASONING_BYTES = 256 * 1024;
 const MAX_SEEN_EVENT_IDS = 256;
+export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
+export const CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS = 220;
+const ATTACHMENT_IMPORT_TRANSITIONS = {
+  queued: ["importing"],
+  importing: ["parsing", "error_terminal"],
+  parsing: ["indexing", "error_terminal"],
+  indexing: ["ready", "error_terminal"],
+  ready: [],
+  error_terminal: [],
+} as const satisfies Readonly<Record<
+  ChatAttachmentImportEvent["stage"],
+  readonly ChatAttachmentImportEvent["stage"][]
+>>;
+const ATTACHMENT_IMPORT_SUCCESS_STAGES = Object.freeze([
+  "queued",
+  "importing",
+  "parsing",
+  "indexing",
+  "ready",
+] as const);
+
+type ActiveAttachmentImport = {
+  readonly contextId: string;
+  readonly operationId: string;
+  readonly draftEpoch: number;
+  readonly expectedItemCount: number | null;
+  lastSequence: bigint;
+  acceptedEvent: ChatAttachmentImportEvent | null;
+  readonly displayQueue: ChatAttachmentImportEvent[];
+  displayTimer: ReturnType<typeof setTimeout> | null;
+  commandSettled: boolean;
+};
+
+function validAttachmentImportTransition(
+  previous: ChatAttachmentImportEvent["stage"],
+  next: ChatAttachmentImportEvent["stage"],
+): boolean {
+  const allowed = ATTACHMENT_IMPORT_TRANSITIONS[previous] as readonly ChatAttachmentImportEvent["stage"][];
+  return allowed.includes(next);
+}
 
 export type ChatViewPhase =
   | "idle"
@@ -40,7 +88,8 @@ export type ChatBindFailureStage =
   | "context"
   | "projects"
   | "sessions"
-  | "readiness";
+  | "readiness"
+  | "draft_attachments";
 
 export interface LiveReasoningPart {
   readonly itemOrdinal: number;
@@ -93,14 +142,46 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     const cleanupStatus = shallowRef<ChatCleanupStatus | null>(null);
     const controlPlane = shallowRef<ChatSessionControlPlane | null>(null);
     const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
+    const draftTarget = shallowRef<ChatDraftTarget | null>(null);
+    const draftTargetReady = ref(false);
+    const draftAttachments = shallowRef<readonly ChatAttachment[]>(Object.freeze([]));
+    const attachmentImportAttempt = shallowRef<ChatAttachmentImportEvent | null>(null);
+    const attachmentImporting = ref(false);
+    const attachmentErrorCode = ref<string | null>(null);
     const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
     const lastBindFailureStage = ref<ChatBindFailureStage | null>(null);
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
+    const hasSendPermission = computed(() => context.value?.allowedActions.includes(
+      selectedSessionId.value === null ? "create_session" : "submit_turn",
+    ) === true);
     const canSend = computed(() =>
-      isReady.value &&
+      phase.value === "ready" &&
+      draftTargetReady.value &&
+      hasSendPermission.value &&
       localReadiness.value?.canSend === true &&
       (selectedSessionId.value === null || controlPlane.value?.state === "bound"),
+    );
+    const canAttach = computed(() =>
+      canSend.value &&
+      draftTarget.value !== null &&
+      (
+        (draftTarget.value.type === "new" && hasAction("create_session")) ||
+        (
+          draftTarget.value.type === "session" &&
+          draftTarget.value.sessionId === selectedSessionId.value &&
+          hasAction("submit_turn")
+        )
+      ) &&
+      !attachmentImporting.value &&
+      attachmentImportAttempt.value === null &&
+      draftAttachments.value.length < CHAT_DRAFT_ATTACHMENT_LIMIT,
+    );
+    const draftAttachmentsReady = computed(() =>
+      draftTargetReady.value &&
+      !attachmentImporting.value &&
+      draftAttachments.value.length > 0 &&
+      draftAttachments.value.every((attachment) => attachment.status === "ready"),
     );
 
     let selectionEpoch = 0;
@@ -112,10 +193,15 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     let eventListenerPromise: Promise<void> | null = null;
     let controlPlaneUnlisten: UnlistenFn | null = null;
     let controlPlaneListenerPromise: Promise<void> | null = null;
+    let attachmentImportUnlisten: UnlistenFn | null = null;
+    let attachmentImportListenerPromise: Promise<void> | null = null;
     let controlPlaneSequence: bigint | null = null;
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let resyncPromise: Promise<void> | null = null;
+    let draftEpoch = 0;
+    let activeAttachmentImport: ActiveAttachmentImport | null = null;
+    let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
     let bufferingEvents = false;
     let bufferedEvents: ChatProjectionEvent[] = [];
     const seenEventIds = new Set<string>();
@@ -123,6 +209,26 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
 
     function hasAction(action: ChatAllowedAction): boolean {
       return context.value?.allowedActions.includes(action) ?? false;
+    }
+
+    function submissionOperation(key: string): string {
+      if (pendingSubmission?.key === key) return pendingSubmission.operationId;
+      const next = operationId();
+      pendingSubmission = Object.freeze({ key, operationId: next });
+      return next;
+    }
+
+    function submissionKey(
+      kind: "create" | "submit",
+      targetId: string,
+      input: string,
+      blocks: readonly ChatTurnContentBlock[],
+    ): string {
+      return JSON.stringify({ kind, targetId, input: input.trim(), blocks });
+    }
+
+    function clearSubmissionAttempt(): void {
+      pendingSubmission = null;
     }
 
     function rememberEvent(eventId: string): void {
@@ -163,11 +269,108 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       resyncPromise = null;
     }
 
+    function dropDraftReferences(): void {
+      draftEpoch += 1;
+      draftAttachments.value = Object.freeze([]);
+      attachmentImportAttempt.value = null;
+      const displayTimer = activeAttachmentImport?.displayTimer;
+      if (displayTimer !== null && displayTimer !== undefined) {
+        clearTimeout(displayTimer);
+      }
+      activeAttachmentImport = null;
+      attachmentImporting.value = false;
+      attachmentErrorCode.value = null;
+      clearSubmissionAttempt();
+    }
+
+    async function removePersistedDrafts(
+      contextId: string,
+      target: ChatDraftTarget,
+      attachments: readonly ChatAttachment[],
+    ): Promise<void> {
+      await Promise.allSettled(attachments.map((attachment) =>
+        client.removeAttachment(contextId, target, attachment.attachmentId, operationId()),
+      ));
+    }
+
+    function discardDraftAttachments(): void {
+      const contextId = context.value?.contextId;
+      const target = draftTarget.value;
+      const attachments = draftAttachments.value;
+      dropDraftReferences();
+      if (contextId && target && attachments.length > 0) {
+        void removePersistedDrafts(contextId, target, attachments);
+      }
+    }
+
+    function sameDraftTarget(left: ChatDraftTarget | null, right: ChatDraftTarget): boolean {
+      return left?.type === right.type && (
+        right.type === "new" || (left.type === "session" && left.sessionId === right.sessionId)
+      );
+    }
+
+    async function switchDraftTarget(nextTarget: ChatDraftTarget): Promise<void> {
+      const bound = context.value;
+      if (!bound || (sameDraftTarget(draftTarget.value, nextTarget) && draftTargetReady.value)) return;
+
+      dropDraftReferences();
+      draftTarget.value = nextTarget;
+      draftTargetReady.value = false;
+      const epoch = draftEpoch;
+      attachmentImporting.value = true;
+
+      try {
+        const attachments = await client.listDraftAttachments(bound.contextId, nextTarget);
+        if (
+          context.value?.contextId !== bound.contextId ||
+          draftEpoch !== epoch ||
+          !sameDraftTarget(draftTarget.value, nextTarget)
+        ) return;
+        const attachmentIds = new Set(attachments.map((attachment) => attachment.attachmentId));
+        if (
+          attachments.length > CHAT_DRAFT_ATTACHMENT_LIMIT ||
+          attachmentIds.size !== attachments.length ||
+          attachments.some((attachment) => attachment.status !== "ready")
+        ) {
+          throw new ChatClientError({
+            schemaVersion: 2,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+        draftAttachments.value = Object.freeze([...attachments]);
+        draftTargetReady.value = true;
+      } catch (error: unknown) {
+        if (
+          context.value?.contextId === bound.contextId &&
+          draftEpoch === epoch &&
+          sameDraftTarget(draftTarget.value, nextTarget)
+        ) {
+          attachmentErrorCode.value = error instanceof ChatClientError
+            ? error.shape.attachmentIssue ?? error.shape.code
+            : "chat_temporarily_unavailable";
+          throw error;
+        }
+      } finally {
+        if (
+          context.value?.contextId === bound.contextId &&
+          draftEpoch === epoch &&
+          sameDraftTarget(draftTarget.value, nextTarget)
+        ) {
+          attachmentImporting.value = false;
+        }
+      }
+    }
+
     function clearAuthority(nextPhase: ChatViewPhase): void {
       authorityEpoch += 1;
       const oldContext = context.value?.contextId;
       const oldSubscription = subscriptionId;
       clearSelection();
+      dropDraftReferences();
+      draftTarget.value = null;
+      draftTargetReady.value = false;
       clearExpiryTimer();
       context.value = null;
       projects.value = Object.freeze([]);
@@ -246,6 +449,169 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         });
       controlPlaneListenerPromise = pending;
       return pending;
+    }
+
+    async function ensureAttachmentImportListener(): Promise<void> {
+      if (attachmentImportUnlisten !== null) return;
+      if (attachmentImportListenerPromise !== null) return attachmentImportListenerPromise;
+      const generation = listenerEpoch;
+      const pending = client.onAttachmentImportEvent(handleAttachmentImportEvent)
+        .then((unlisten) => {
+          if (generation !== listenerEpoch) {
+            unlisten();
+          } else if (attachmentImportUnlisten === null) {
+            attachmentImportUnlisten = unlisten;
+          } else {
+            unlisten();
+          }
+        })
+        .finally(() => {
+          if (attachmentImportListenerPromise === pending) attachmentImportListenerPromise = null;
+        });
+      attachmentImportListenerPromise = pending;
+      return pending;
+    }
+
+    function finishSettledAttachmentDisplay(active: ActiveAttachmentImport): void {
+      if (
+        activeAttachmentImport !== active ||
+        !active.commandSettled ||
+        active.displayTimer !== null ||
+        active.displayQueue.length > 0
+      ) return;
+      const displayed = attachmentImportAttempt.value;
+      if (displayed?.operationId !== active.operationId) return;
+      if (displayed.stage === "ready") attachmentImportAttempt.value = null;
+      if (displayed.stage === "ready" || displayed.stage === "error_terminal") {
+        activeAttachmentImport = null;
+      }
+    }
+
+    function displayNextAttachmentImportEvent(active: ActiveAttachmentImport): void {
+      if (activeAttachmentImport !== active || active.displayTimer !== null) return;
+      const next = active.displayQueue.shift();
+      if (!next) {
+        finishSettledAttachmentDisplay(active);
+        return;
+      }
+      attachmentImportAttempt.value = next;
+      if (next.stage === "error_terminal") {
+        attachmentErrorCode.value = next.issue;
+        finishSettledAttachmentDisplay(active);
+        return;
+      }
+      active.displayTimer = setTimeout(() => {
+        active.displayTimer = null;
+        if (activeAttachmentImport !== active) return;
+        if (active.displayQueue.length > 0) {
+          displayNextAttachmentImportEvent(active);
+        } else {
+          finishSettledAttachmentDisplay(active);
+        }
+      }, CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS);
+    }
+
+    function acceptAttachmentImportEvent(
+      active: ActiveAttachmentImport,
+      event: ChatAttachmentImportEvent,
+    ): void {
+      active.lastSequence = BigInt(event.sequence);
+      active.acceptedEvent = event;
+      active.displayQueue.push(event);
+      displayNextAttachmentImportEvent(active);
+    }
+
+    function syntheticAttachmentImportEvent(
+      active: ActiveAttachmentImport,
+      stage: ChatAttachmentImportEvent["stage"],
+      itemCount: number,
+      issue: ChatAttachmentImportEvent["issue"] = null,
+    ): ChatAttachmentImportEvent {
+      return Object.freeze({
+        schemaVersion: 2,
+        contextId: active.contextId,
+        operationId: active.operationId,
+        sequence: (active.lastSequence + 1n).toString(),
+        stage,
+        itemCount,
+        issue,
+      });
+    }
+
+    function completeAttachmentImportSuccess(
+      active: ActiveAttachmentImport,
+      itemCount: number,
+    ): boolean {
+      const current = active.acceptedEvent?.stage ?? null;
+      if (current === "error_terminal") return false;
+      const currentIndex = current === null
+        ? -1
+        : ATTACHMENT_IMPORT_SUCCESS_STAGES.indexOf(current as "queued" | "importing" | "parsing" | "indexing" | "ready");
+      if (current !== null && currentIndex === -1) return false;
+      for (const stage of ATTACHMENT_IMPORT_SUCCESS_STAGES.slice(currentIndex + 1)) {
+        acceptAttachmentImportEvent(active, syntheticAttachmentImportEvent(active, stage, itemCount));
+      }
+      return true;
+    }
+
+    function completeAttachmentImportFailure(
+      active: ActiveAttachmentImport,
+      itemCount: number,
+      issue: Exclude<ChatAttachmentImportEvent["issue"], null>,
+    ): void {
+      const current = active.acceptedEvent?.stage ?? null;
+      if (current === "error_terminal") return;
+      if (current === "ready") {
+        acceptAttachmentImportEvent(
+          active,
+          syntheticAttachmentImportEvent(active, "error_terminal", itemCount, issue),
+        );
+        return;
+      }
+      const failureStage = issue === "parse_failed"
+        ? "parsing"
+        : issue === "unavailable"
+          ? "indexing"
+          : "importing";
+      const failureStageIndex = ATTACHMENT_IMPORT_SUCCESS_STAGES.indexOf(failureStage);
+      const currentIndex = current === null
+        ? -1
+        : ATTACHMENT_IMPORT_SUCCESS_STAGES.indexOf(current as "queued" | "importing" | "parsing" | "indexing");
+      for (const stage of ATTACHMENT_IMPORT_SUCCESS_STAGES.slice(
+        currentIndex + 1,
+        failureStageIndex + 1,
+      )) {
+        acceptAttachmentImportEvent(active, syntheticAttachmentImportEvent(active, stage, itemCount));
+      }
+      acceptAttachmentImportEvent(
+        active,
+        syntheticAttachmentImportEvent(active, "error_terminal", itemCount, issue),
+      );
+    }
+
+    function handleAttachmentImportEvent(event: ChatAttachmentImportEvent): void {
+      const active = activeAttachmentImport;
+      if (
+        active === null ||
+        context.value?.contextId !== active.contextId ||
+        event.contextId !== active.contextId ||
+        event.operationId !== active.operationId ||
+        draftEpoch !== active.draftEpoch
+      ) {
+        return;
+      }
+      const sequence = BigInt(event.sequence);
+      if (sequence !== active.lastSequence + 1n) return;
+      if (active.expectedItemCount !== null && event.itemCount !== active.expectedItemCount) return;
+      const previous = active.acceptedEvent;
+      if (
+        previous === null
+          ? event.stage !== "queued"
+          : previous.operationId !== event.operationId ||
+            previous.itemCount !== event.itemCount ||
+            !validAttachmentImportTransition(previous.stage, event.stage)
+      ) return;
+      acceptAttachmentImportEvent(active, event);
     }
 
     function applyControlPlaneStatus(status: ChatSessionControlPlane): void {
@@ -420,6 +786,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         await Promise.all([
           atBindStage("event_listener", ensureEventListener()),
           atBindStage("event_listener", ensureControlPlaneListener()),
+          atBindStage("event_listener", ensureAttachmentImportListener()),
         ]);
         if (bindEpoch !== authorityEpoch) return;
         const bound = await atBindStage("context", client.bindContext(tenantSelector));
@@ -437,10 +804,16 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         sessions.value = nextSessions.sessions;
         sessionsCursor.value = nextSessions.nextCursor;
         localReadiness.value = nextReadiness;
+        await atBindStage("draft_attachments", switchDraftTarget(CHAT_NEW_DRAFT_TARGET));
+        if (bindEpoch !== authorityEpoch || context.value?.contextId !== bound.contextId) return;
         phase.value = "ready";
       } catch (error: unknown) {
         if (bindEpoch !== authorityEpoch) return;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
+        if (lastBindFailureStage.value === "draft_attachments" && context.value !== null) {
+          phase.value = phaseForError(error);
+          return;
+        }
         clearAuthority(phaseForError(error));
       }
     }
@@ -451,6 +824,8 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         phase.value = "permission-denied";
         return;
       }
+      lastErrorCode.value = null;
+      const targetSync = switchDraftTarget(chatSessionDraftTarget(sessionId));
       const oldSubscription = subscriptionId;
       const oldSession = selectedSessionId.value;
       clearSelection();
@@ -462,13 +837,15 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const { epoch, controller } = startRead();
       bufferingEvents = true;
       try {
+        await targetSync;
+        if (!isCurrent(epoch, controller, sessionId)) return;
         const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
         if (!isCurrent(epoch, controller, sessionId)) {
           void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
           return;
         }
         subscriptionId = nextSubscription;
-        const projection = await client.resyncSession(bound.contextId, sessionId, 20, controller.signal);
+        const projection = await client.resyncSessionV2(bound.contextId, sessionId, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
         applyResync(projection);
         await refreshControlPlane();
@@ -490,12 +867,64 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
 
     async function clearSelectedSession(): Promise<void> {
       const bound = context.value;
+      if (
+        bound &&
+        selectedSessionId.value === null &&
+        sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET) &&
+        draftTargetReady.value
+      ) {
+        return;
+      }
+      const targetSync = bound
+        ? switchDraftTarget(CHAT_NEW_DRAFT_TARGET)
+        : Promise.resolve();
       const oldSubscription = subscriptionId;
       clearSelection();
       if (bound && oldSubscription) {
-        await client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
+        void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
       }
-      if (context.value !== null) phase.value = "ready";
+      if (!bound) return;
+      lastErrorCode.value = null;
+      phase.value = "loading";
+      try {
+        await targetSync;
+        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return;
+        phase.value = "ready";
+      } catch (error: unknown) {
+        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return;
+        lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
+        phase.value = phaseForError(error);
+      }
+    }
+
+    async function retryDraftRecovery(): Promise<boolean> {
+      const bound = context.value;
+      if (!bound) return false;
+      const sessionId = selectedSessionId.value;
+      const expectedTarget = sessionId === null
+        ? CHAT_NEW_DRAFT_TARGET
+        : chatSessionDraftTarget(sessionId);
+      if (sameDraftTarget(draftTarget.value, expectedTarget) && draftTargetReady.value) return true;
+
+      if (sessionId !== null) {
+        await selectSession(sessionId);
+        return phase.value === "ready" && draftTargetReady.value;
+      }
+
+      lastErrorCode.value = null;
+      phase.value = "loading";
+      try {
+        await switchDraftTarget(CHAT_NEW_DRAFT_TARGET);
+        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return false;
+        lastBindFailureStage.value = null;
+        phase.value = "ready";
+        return true;
+      } catch (error: unknown) {
+        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== null) return false;
+        lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
+        phase.value = phaseForError(error);
+        return false;
+      }
     }
 
     function applyResync(projection: ChatResyncProjection): void {
@@ -504,9 +933,14 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
       history.value = projection.history;
       cleanupStatus.value = projection.cleanup;
-      sessions.value = Object.freeze(sessions.value.map((session) =>
-        session.sessionId === projection.session.sessionId ? projection.session : session,
-      ));
+      const projectedSessionIndex = sessions.value.findIndex((session) =>
+        session.sessionId === projection.session.sessionId,
+      );
+      sessions.value = projectedSessionIndex === -1
+        ? Object.freeze([projection.session, ...sessions.value])
+        : Object.freeze(sessions.value.map((session, index) =>
+            index === projectedSessionIndex ? projection.session : session,
+          ));
       liveAssistantText.value = "";
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = projection.session.latestTurnStatus;
@@ -533,7 +967,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
           expectedSequence = 0n;
           seenEventIds.clear();
           seenEventOrder.length = 0;
-          return client.resyncSession(bound.contextId, sessionId, 20, controller.signal)
+          return client.resyncSessionV2(bound.contextId, sessionId, 20, controller.signal)
             .then((projection) => ({ projection, nextSubscription }));
         })
         .then(({ projection, nextSubscription }) => {
@@ -569,7 +1003,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       if (!bound || !sessionId || !cursor) return;
       const { epoch, controller } = startRead();
       try {
-        const page = await client.loadHistory(bound.contextId, sessionId, cursor, 20, controller.signal);
+        const page = await client.loadHistoryV2(bound.contextId, sessionId, cursor, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId)) return;
         const known = new Set(history.value?.turns.map((turn) => turn.turnId));
         history.value = Object.freeze({
@@ -593,9 +1027,9 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !Number.isSafeInteger(limit) || limit <= 0 || limit > 50) return null;
       try {
-        const page = await client.loadHistory(bound.contextId, sessionId, undefined, limit);
+        const page = await client.loadHistoryV2(bound.contextId, sessionId, undefined, limit);
         if (!page.nextCursor) return { page, cursorMonotonic: true, pagesDisjoint: true };
-        const next = await client.loadHistory(bound.contextId, sessionId, page.nextCursor, limit);
+        const next = await client.loadHistoryV2(bound.contextId, sessionId, page.nextCursor, limit);
         const firstIds = new Set(page.turns.map((turn) => turn.turnId));
         const pagesDisjoint = next.turns.every((turn) => !firstIds.has(turn.turnId));
         return {
@@ -626,11 +1060,236 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
     }
 
+    async function runAttachmentImport(
+      operation: (
+        bound: BoundChatContext,
+        target: ChatDraftTarget,
+        importOperationId: string,
+      ) => Promise<readonly ChatAttachment[]>,
+      expectedItemCount: number | null = null,
+    ): Promise<readonly ChatAttachment[]> {
+      const bound = context.value;
+      const target = draftTarget.value;
+      if (!bound || !target || !canAttach.value) {
+        if (draftAttachments.value.length >= CHAT_DRAFT_ATTACHMENT_LIMIT) {
+          attachmentErrorCode.value = "chat_limit_exceeded";
+        }
+        return Object.freeze([]);
+      }
+      const epoch = draftEpoch;
+      const importOperationId = operationId();
+      const remainingCapacity = CHAT_DRAFT_ATTACHMENT_LIMIT - draftAttachments.value.length;
+      const existingIds = new Set(draftAttachments.value.map((attachment) => attachment.attachmentId));
+      attachmentImportAttempt.value = null;
+      attachmentImporting.value = true;
+      attachmentErrorCode.value = null;
+      try {
+        await ensureAttachmentImportListener();
+        if (context.value?.contextId !== bound.contextId || draftEpoch !== epoch) {
+          return Object.freeze([]);
+        }
+        activeAttachmentImport = {
+          contextId: bound.contextId,
+          operationId: importOperationId,
+          draftEpoch: epoch,
+          expectedItemCount,
+          lastSequence: 0n,
+          acceptedEvent: null,
+          displayQueue: [],
+          displayTimer: null,
+          commandSettled: false,
+        };
+        const attachments = await operation(bound, target, importOperationId);
+        if (context.value?.contextId !== bound.contextId || draftEpoch !== epoch) {
+          return Object.freeze([]);
+        }
+        if (
+          attachments.length > remainingCapacity ||
+          attachments.some((attachment) => existingIds.has(attachment.attachmentId))
+        ) {
+          await removePersistedDrafts(
+            bound.contextId,
+            target,
+            attachments.filter((attachment) => !existingIds.has(attachment.attachmentId)),
+          );
+          throw new ChatClientError({
+            schemaVersion: 2,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+        const active = activeAttachmentImport;
+        if (attachments.length === 0) {
+          if (active?.operationId === importOperationId) {
+            active.commandSettled = true;
+            if (active.acceptedEvent === null) activeAttachmentImport = null;
+          }
+          return Object.freeze([]);
+        }
+        if (
+          !active ||
+          active.operationId !== importOperationId ||
+          (active.acceptedEvent !== null && active.acceptedEvent.itemCount !== attachments.length) ||
+          !completeAttachmentImportSuccess(active, attachments.length)
+        ) {
+          await removePersistedDrafts(bound.contextId, target, attachments);
+          throw new ChatClientError({
+            schemaVersion: 2,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+        active.commandSettled = true;
+        finishSettledAttachmentDisplay(active);
+        draftAttachments.value = Object.freeze([...draftAttachments.value, ...attachments]);
+        clearSubmissionAttempt();
+        return attachments;
+      } catch (error: unknown) {
+        if (context.value?.contextId === bound.contextId && draftEpoch === epoch) {
+          attachmentErrorCode.value = error instanceof ChatClientError
+            ? error.shape.attachmentIssue ?? error.shape.code
+            : "chat_temporarily_unavailable";
+          const active = activeAttachmentImport;
+          if (active?.operationId === importOperationId) {
+            const itemCount = active.acceptedEvent?.itemCount ?? (
+              error instanceof ChatClientError
+                ? error.shape.attachmentItemCount ?? expectedItemCount
+                : expectedItemCount
+            );
+            if (itemCount !== null && itemCount >= 1 && itemCount <= CHAT_DRAFT_ATTACHMENT_LIMIT) {
+              completeAttachmentImportFailure(
+                active,
+                itemCount,
+                error instanceof ChatClientError && error.shape.attachmentIssue
+                  ? error.shape.attachmentIssue
+                  : "unavailable",
+              );
+            }
+            active.commandSettled = true;
+            if (active.acceptedEvent === null) activeAttachmentImport = null;
+            else finishSettledAttachmentDisplay(active);
+          }
+        }
+        throw error;
+      } finally {
+        if (context.value?.contextId === bound.contextId && draftEpoch === epoch) {
+          attachmentImporting.value = false;
+        }
+      }
+    }
+
+    function pickAttachments(): Promise<readonly ChatAttachment[]> {
+      const remainingCapacity = CHAT_DRAFT_ATTACHMENT_LIMIT - draftAttachments.value.length;
+      return runAttachmentImport((bound, target, importOperationId) => client.pickAttachments(
+        bound.contextId,
+        target,
+        remainingCapacity,
+        importOperationId,
+      ));
+    }
+
+    function importAttachmentPaths(paths: readonly string[]): Promise<readonly ChatAttachment[]> {
+      if (paths.length === 0) return Promise.resolve(Object.freeze([]));
+      if (paths.length > CHAT_DRAFT_ATTACHMENT_LIMIT - draftAttachments.value.length) {
+        attachmentErrorCode.value = "too_many";
+        return Promise.resolve(Object.freeze([]));
+      }
+      const remainingCapacity = CHAT_DRAFT_ATTACHMENT_LIMIT - draftAttachments.value.length;
+      return runAttachmentImport((bound, target, importOperationId) => client.importAttachments(
+        bound.contextId,
+        target,
+        paths,
+        remainingCapacity,
+        importOperationId,
+      ), paths.length);
+    }
+
+    async function removeDraftAttachment(attachmentId: string): Promise<void> {
+      const bound = context.value;
+      const target = draftTarget.value;
+      if (
+        !bound || !target || !hasSendPermission.value ||
+        !draftAttachments.value.some((attachment) => attachment.attachmentId === attachmentId)
+      ) return;
+      const epoch = draftEpoch;
+      attachmentErrorCode.value = null;
+      try {
+        await client.removeAttachment(bound.contextId, target, attachmentId, operationId());
+        if (context.value?.contextId !== bound.contextId || draftEpoch !== epoch) return;
+        draftAttachments.value = Object.freeze(
+          draftAttachments.value.filter((attachment) => attachment.attachmentId !== attachmentId),
+        );
+        clearSubmissionAttempt();
+      } catch (error: unknown) {
+        if (context.value?.contextId === bound.contextId && draftEpoch === epoch) {
+          attachmentErrorCode.value = error instanceof ChatClientError
+            ? error.shape.attachmentIssue ?? error.shape.code
+            : "chat_temporarily_unavailable";
+        }
+        throw error;
+      }
+    }
+
+    function dismissAttachmentImportAttempt(operationId: string): void {
+      if (
+        attachmentImportAttempt.value?.operationId !== operationId ||
+        attachmentImportAttempt.value.stage !== "error_terminal" ||
+        (
+          activeAttachmentImport?.operationId === operationId &&
+          !activeAttachmentImport.commandSettled
+        )
+      ) return;
+      attachmentImportAttempt.value = null;
+      attachmentErrorCode.value = null;
+    }
+
+    function turnContentBlocks(input: string): readonly ChatTurnContentBlock[] | null {
+      const text = input.trim();
+      if (attachmentImportAttempt.value !== null) return null;
+      if (draftAttachments.value.some((attachment) => attachment.status !== "ready")) return null;
+      const imageBytes = draftAttachments.value
+        .filter((attachment) => attachment.type === "image")
+        .reduce((total, attachment) => total + attachment.sizeBytes, 0);
+      if (imageBytes > 10 * 1024 * 1024) return null;
+      const blocks: ChatTurnContentBlock[] = [];
+      if (text.length > 0) blocks.push(Object.freeze({ type: "text", text }));
+      blocks.push(...draftAttachments.value.map((attachment) => Object.freeze({
+        type: attachment.type,
+        attachmentId: attachment.attachmentId,
+      })));
+      return blocks.length > 0 ? Object.freeze(blocks) : null;
+    }
+
     async function createSession(projectId: string, input: string): Promise<string | null> {
       const bound = context.value;
       if (!bound || !canSend.value || !hasAction("create_session") || !hasAction("use_project")) return null;
-      const created = await client.createSession(bound.contextId, projectId, input, operationId());
-      await reloadSessions();
+      const blocks = turnContentBlocks(input);
+      if (blocks === null) return null;
+      const attemptKey = submissionKey("create", projectId, input, blocks);
+      const attemptOperationId = submissionOperation(attemptKey);
+      const created = draftAttachments.value.length > 0
+        ? await client.createSessionV2(bound.contextId, projectId, blocks, attemptOperationId)
+        : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
+      if (created.operationId !== attemptOperationId) {
+        throw new ChatClientError({
+          schemaVersion: 2,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      dropDraftReferences();
+      try {
+        await reloadSessions();
+      } catch (error: unknown) {
+        if (context.value?.contextId === bound.contextId) {
+          lastErrorCode.value = error instanceof ChatClientError
+            ? error.shape.code
+            : "chat_protocol_error";
+        }
+      }
       await selectSession(created.sessionId);
       return created.sessionId;
     }
@@ -639,7 +1298,25 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !canSend.value || !hasAction("submit_turn")) return;
-      await client.submitTurn(bound.contextId, sessionId, input, operationId());
+      const blocks = turnContentBlocks(input);
+      if (blocks === null) return;
+      const attemptKey = submissionKey("submit", sessionId, input, blocks);
+      const attemptOperationId = submissionOperation(attemptKey);
+      let created;
+      if (draftAttachments.value.length > 0) {
+        created = await client.submitTurnV2(bound.contextId, sessionId, blocks, attemptOperationId);
+      } else {
+        created = await client.submitTurn(bound.contextId, sessionId, input, attemptOperationId);
+      }
+      if (created.operationId !== attemptOperationId) {
+        throw new ChatClientError({
+          schemaVersion: 2,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      dropDraftReferences();
       await resyncSelected();
     }
 
@@ -817,6 +1494,8 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       eventUnlisten = null;
       controlPlaneUnlisten?.();
       controlPlaneUnlisten = null;
+      attachmentImportUnlisten?.();
+      attachmentImportUnlisten = null;
     }
 
     return {
@@ -833,19 +1512,33 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       cleanupStatus,
       controlPlane,
       localReadiness,
+      draftTarget,
+      draftTargetReady,
+      draftAttachments,
+      attachmentImportAttempt,
+      attachmentImporting,
+      attachmentErrorCode,
       deleteDisposition,
       lastErrorCode,
       lastBindFailureStage,
       isReady,
       canSend,
+      canAttach,
+      draftAttachmentsReady,
       hasAction,
       bind,
       selectSession,
       clearSelectedSession,
+      retryDraftRecovery,
       resyncSelected,
       loadOlderHistory,
       loadHistoryPage,
       loadReasoning,
+      pickAttachments,
+      importAttachmentPaths,
+      removeDraftAttachment,
+      dismissAttachmentImportAttempt,
+      discardDraftAttachments,
       createSession,
       submitTurn,
       reloadSessions,

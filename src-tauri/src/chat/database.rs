@@ -1,9 +1,12 @@
+use super::attachment::{PreparedAttachment, MAX_ATTACHMENTS_PER_MESSAGE, MAX_FILE_CONTEXT_BYTES};
 use super::error::{map_sqlite_error, ChatError};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use base64::Engine;
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -201,6 +204,132 @@ pub struct StartTurnDispatch {
     pub turn_id: Uuid,
     pub agent_session_id: Uuid,
     pub input: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DraftContentBlock {
+    Text(String),
+    File(Uuid),
+    Image(Uuid),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DraftTarget {
+    New,
+    Session(Uuid),
+}
+
+impl DraftTarget {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Session(_) => "session",
+        }
+    }
+
+    fn session_id(&self) -> Option<Uuid> {
+        match self {
+            Self::New => None,
+            Self::Session(session_id) => Some(*session_id),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HostTurnInputBlock {
+    Text {
+        text: String,
+    },
+    File {
+        attachment_id: Uuid,
+        #[serde(rename = "name")]
+        safe_name: String,
+        media_type: String,
+        size_bytes: usize,
+        sha256: String,
+        context_chunks: Vec<String>,
+    },
+    Image {
+        attachment_id: Uuid,
+        media_type: String,
+        size_bytes: usize,
+        sha256: String,
+        data_url: String,
+    },
+}
+
+impl std::fmt::Debug for HostTurnInputBlock {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text { text } => formatter
+                .debug_struct("Text")
+                .field("utf8_bytes", &text.len())
+                .finish(),
+            Self::File {
+                attachment_id,
+                media_type,
+                size_bytes,
+                context_chunks,
+                ..
+            } => formatter
+                .debug_struct("File")
+                .field("attachment_id", attachment_id)
+                .field("media_type", media_type)
+                .field("size_bytes", size_bytes)
+                .field("context_chunk_count", &context_chunks.len())
+                .field(
+                    "context_utf8_bytes",
+                    &context_chunks.iter().map(String::len).sum::<usize>(),
+                )
+                .finish(),
+            Self::Image {
+                attachment_id,
+                media_type,
+                size_bytes,
+                data_url,
+                ..
+            } => formatter
+                .debug_struct("Image")
+                .field("attachment_id", attachment_id)
+                .field("media_type", media_type)
+                .field("size_bytes", size_bytes)
+                .field("data_url_bytes", &data_url.len())
+                .finish(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartTurnDispatchV2 {
+    pub operation_id: Uuid,
+    pub session_id: Uuid,
+    pub turn_id: Uuid,
+    pub agent_session_id: Uuid,
+    pub content_blocks: Vec<HostTurnInputBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AttachmentSummary {
+    pub attachment_id: Uuid,
+    pub kind: String,
+    pub safe_name: String,
+    pub media_type: String,
+    pub byte_size: usize,
+    pub state: String,
+    pub expires_at: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MessageContentBlockProjection {
+    Text {
+        ordinal: usize,
+        text: String,
+    },
+    Attachment {
+        ordinal: usize,
+        attachment: AttachmentSummary,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -477,6 +606,34 @@ struct StartTurnPayloadV1 {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CreateSessionPayloadV2 {
+    session_id: Uuid,
+    task_id: Uuid,
+    turn_id: Uuid,
+    turn_operation_id: Uuid,
+    message_id: Uuid,
+    block_digest: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartTurnPayloadV2 {
+    turn_id: Uuid,
+    message_id: Uuid,
+    block_digest: String,
+}
+
+struct CreatePayloadIdentity {
+    session_id: Uuid,
+    task_id: Uuid,
+    turn_id: Uuid,
+    turn_operation_id: Uuid,
+    message_id: Uuid,
+    block_digest: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InterruptTurnPayloadV1 {
     turn_id: Uuid,
     runtime_turn_id: Uuid,
@@ -500,6 +657,7 @@ pub struct ChatRepository {
     database_path: PathBuf,
     scope: ChatScope,
     receipt_key: ReceiptKey,
+    attachment_checkpoint_pending: bool,
 }
 
 #[cfg(feature = "feat126-s10-driver")]
@@ -642,12 +800,17 @@ impl ChatRepository {
         migrations::validate_embedded_migrations()?;
         migrations::migrate(&mut connection)?;
         protect_database_files(&database_path)?;
-        Ok(Self {
+        let mut repository = Self {
             connection,
             database_path,
             scope,
             receipt_key,
-        })
+            // A prior process may have committed attachment cleanup and exited before
+            // truncating WAL. Every open proves that no stale attachment frames remain.
+            attachment_checkpoint_pending: true,
+        };
+        repository.expire_attachments_all_scopes(unix_seconds()?)?;
+        Ok(repository)
     }
 
     pub fn schema_version(&self) -> Result<i64, ChatError> {
@@ -1136,6 +1299,395 @@ impl ChatRepository {
         Ok(())
     }
 
+    pub fn store_attachment(
+        &mut self,
+        attachment: PreparedAttachment,
+        draft_target: DraftTarget,
+    ) -> Result<AttachmentSummary, ChatError> {
+        self.store_attachments(vec![attachment], 1, draft_target)?
+            .pop()
+            .ok_or(ChatError::DatabaseUnavailable)
+    }
+
+    pub fn store_attachments(
+        &mut self,
+        attachments: Vec<PreparedAttachment>,
+        remaining_capacity: usize,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        if !(1..=MAX_ATTACHMENTS_PER_MESSAGE).contains(&remaining_capacity)
+            || attachments.is_empty()
+            || attachments.len() > remaining_capacity
+            || attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        let imported_at = attachments[0].imported_at;
+        if attachments
+            .iter()
+            .any(|attachment| attachment.imported_at != imported_at)
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        self.expire_attachments(imported_at)?;
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        validate_draft_target(
+            &transaction,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &draft_target,
+        )?;
+        let existing = count_ready_attachments_for_target(
+            &transaction,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &draft_target,
+            imported_at,
+        )?;
+        if existing
+            .checked_add(attachments.len())
+            .is_none_or(|count| count > MAX_ATTACHMENTS_PER_MESSAGE)
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        let mut draft_ordinal = next_draft_attachment_ordinal(
+            &transaction,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &draft_target,
+        )?;
+        let mut summaries = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            summaries.push(insert_attachment(
+                &transaction,
+                &self.scope.owner_user_id,
+                &self.scope.tenant_id,
+                attachment,
+                &draft_target,
+                draft_ordinal,
+            )?);
+            draft_ordinal = draft_ordinal
+                .checked_add(1)
+                .ok_or(ChatError::DatabaseUnavailable)?;
+        }
+        transaction.commit().map_err(map_sqlite_error)?;
+        Ok(summaries)
+    }
+
+    pub fn list_ready_attachments(
+        &mut self,
+        draft_target: DraftTarget,
+    ) -> Result<Vec<AttachmentSummary>, ChatError> {
+        let now = unix_seconds()?;
+        self.expire_attachments(now)?;
+        validate_draft_target(
+            &self.connection,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &draft_target,
+        )?;
+        let target_kind = draft_target.kind();
+        let target_session_id = draft_target.session_id().map(|value| value.to_string());
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT id, kind, safe_name, media_type, byte_size, state, expires_at
+                 FROM chat_attachments
+                 WHERE owner_user_id=?1 AND tenant_id=?2
+                   AND state='ready' AND message_id IS NULL AND expires_at>?3
+                   AND draft_target_kind=?4
+                   AND ((?4='new' AND draft_session_id IS NULL)
+                     OR (?4='session' AND draft_session_id=?5))
+                 ORDER BY draft_ordinal ASC LIMIT 10",
+            )
+            .map_err(map_sqlite_error)?;
+        let attachments = statement
+            .query_map(
+                params![
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    now,
+                    target_kind,
+                    target_session_id,
+                ],
+                |row| {
+                    let attachment_id = row.get::<_, String>(0)?;
+                    let byte_size = row.get::<_, i64>(4)?;
+                    Ok((
+                        attachment_id,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        byte_size,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )
+            .map_err(map_sqlite_error)?
+            .map(|row| {
+                let (attachment_id, kind, safe_name, media_type, byte_size, state, expires_at) =
+                    row.map_err(map_sqlite_error)?;
+                Ok(AttachmentSummary {
+                    attachment_id: parse_uuid_value(&attachment_id)?,
+                    kind,
+                    safe_name,
+                    media_type,
+                    byte_size: usize::try_from(byte_size)
+                        .map_err(|_| ChatError::DatabaseUnavailable)?,
+                    state,
+                    expires_at,
+                })
+            })
+            .collect();
+        attachments
+    }
+
+    pub fn remove_ready_attachment(
+        &mut self,
+        attachment_id: Uuid,
+        draft_target: DraftTarget,
+    ) -> Result<(), ChatError> {
+        validate_non_nil(attachment_id)?;
+        validate_draft_target(
+            &self.connection,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &draft_target,
+        )?;
+        let target_kind = draft_target.kind();
+        let target_session_id = draft_target.session_id().map(|value| value.to_string());
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        let changed = transaction
+            .execute(
+                "DELETE FROM chat_attachments
+                 WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+                   AND state='ready' AND message_id IS NULL
+                   AND draft_target_kind=?4
+                   AND ((?4='new' AND draft_session_id IS NULL)
+                     OR (?4='session' AND draft_session_id=?5))",
+                params![
+                    attachment_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    target_kind,
+                    target_session_id,
+                ],
+            )
+            .map_err(map_sqlite_error)?;
+        if changed == 1 {
+            transaction.commit().map_err(map_sqlite_error)?;
+            self.attachment_checkpoint_pending = true;
+            self.checkpoint_attachment_cleanup()?;
+            return Ok(());
+        }
+        let exists_in_scope = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_attachments
+                   WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+                 )",
+                params![
+                    attachment_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(map_sqlite_error)?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        if exists_in_scope {
+            Err(ChatError::ConversationConflict)
+        } else {
+            self.checkpoint_attachment_cleanup()?;
+            Ok(())
+        }
+    }
+
+    pub fn expire_attachments(&mut self, now: i64) -> Result<usize, ChatError> {
+        if now < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        let deleted_chunks = transaction
+            .execute(
+                "DELETE FROM chat_attachment_chunks
+                 WHERE attachment_id IN (
+                   SELECT id FROM chat_attachments
+                   WHERE owner_user_id=?1 AND tenant_id=?2 AND expires_at<=?3
+                     AND state IN ('ready', 'bound')
+                 )",
+                params![self.scope.owner_user_id, self.scope.tenant_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+        let expired = transaction
+            .execute(
+                "UPDATE chat_attachments
+                 SET state='expired', content_blob=NULL
+                 WHERE owner_user_id=?1 AND tenant_id=?2 AND expires_at<=?3
+                   AND state='bound' AND message_id IS NOT NULL",
+                params![self.scope.owner_user_id, self.scope.tenant_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+        let deleted_ready = transaction
+            .execute(
+                "DELETE FROM chat_attachments
+                 WHERE owner_user_id=?1 AND tenant_id=?2 AND expires_at<=?3
+                   AND state='ready' AND message_id IS NULL",
+                params![self.scope.owner_user_id, self.scope.tenant_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        if deleted_chunks > 0 || expired > 0 || deleted_ready > 0 {
+            self.attachment_checkpoint_pending = true;
+        }
+        self.checkpoint_attachment_cleanup()?;
+        expired
+            .checked_add(deleted_ready)
+            .ok_or(ChatError::DatabaseUnavailable)
+    }
+
+    fn expire_attachments_all_scopes(&mut self, now: i64) -> Result<usize, ChatError> {
+        if now < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        let deleted_chunks = transaction
+            .execute(
+                "DELETE FROM chat_attachment_chunks
+                 WHERE attachment_id IN (
+                   SELECT id FROM chat_attachments
+                   WHERE expires_at<=?1 AND state IN ('ready', 'bound')
+                 )",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        let expired_bound = transaction
+            .execute(
+                "UPDATE chat_attachments
+                 SET state='expired', content_blob=NULL
+                 WHERE expires_at<=?1 AND state='bound' AND message_id IS NOT NULL",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        let deleted_ready = transaction
+            .execute(
+                "DELETE FROM chat_attachments
+                 WHERE expires_at<=?1 AND state='ready' AND message_id IS NULL",
+                [now],
+            )
+            .map_err(map_sqlite_error)?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        if deleted_chunks > 0 || expired_bound > 0 || deleted_ready > 0 {
+            self.attachment_checkpoint_pending = true;
+        }
+        self.checkpoint_attachment_cleanup()?;
+        expired_bound
+            .checked_add(deleted_ready)
+            .ok_or(ChatError::DatabaseUnavailable)
+    }
+
+    pub fn load_message_content_blocks(
+        &mut self,
+        message_ids: Vec<Uuid>,
+    ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
+        if message_ids.len() > 100 || message_ids.iter().any(Uuid::is_nil) {
+            return Err(ChatError::InvalidInput);
+        }
+        self.expire_attachments(unix_seconds()?)?;
+        let mut result = Vec::with_capacity(message_ids.len());
+        for message_id in message_ids {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT b.block_ordinal, b.block_type, b.text_content,
+                            a.id, a.kind, a.safe_name, a.media_type, a.byte_size,
+                            a.state, a.expires_at
+                     FROM chat_message_content_blocks b
+                     JOIN chat_messages m ON m.id=b.message_id
+                     JOIN chat_sessions s ON s.id=m.session_id
+                     LEFT JOIN chat_attachments a ON a.id=b.attachment_id
+                     WHERE b.message_id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
+                     ORDER BY b.block_ordinal ASC",
+                )
+                .map_err(map_sqlite_error)?;
+            type BlockRow = (
+                i64,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<i64>,
+                Option<String>,
+                Option<i64>,
+            );
+            let rows = statement
+                .query_map(
+                    params![
+                        message_id.to_string(),
+                        self.scope.owner_user_id,
+                        self.scope.tenant_id,
+                    ],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                        ))
+                    },
+                )
+                .map_err(map_sqlite_error)?
+                .collect::<rusqlite::Result<Vec<BlockRow>>>()
+                .map_err(map_sqlite_error)?;
+            let mut blocks = Vec::with_capacity(rows.len());
+            for row in rows {
+                let ordinal = usize::try_from(row.0).map_err(|_| ChatError::DatabaseUnavailable)?;
+                match row.1.as_str() {
+                    "text" => blocks.push(MessageContentBlockProjection::Text {
+                        ordinal,
+                        text: row.2.ok_or(ChatError::DatabaseUnavailable)?,
+                    }),
+                    "file" | "image" => {
+                        let attachment_id = parse_uuid_value(
+                            row.3.as_deref().ok_or(ChatError::DatabaseUnavailable)?,
+                        )?;
+                        let kind = row.4.ok_or(ChatError::DatabaseUnavailable)?;
+                        if kind != row.1 {
+                            return Err(ChatError::DatabaseUnavailable);
+                        }
+                        blocks.push(MessageContentBlockProjection::Attachment {
+                            ordinal,
+                            attachment: AttachmentSummary {
+                                attachment_id,
+                                kind,
+                                safe_name: row.5.ok_or(ChatError::DatabaseUnavailable)?,
+                                media_type: row.6.ok_or(ChatError::DatabaseUnavailable)?,
+                                byte_size: usize::try_from(
+                                    row.7.ok_or(ChatError::DatabaseUnavailable)?,
+                                )
+                                .map_err(|_| ChatError::DatabaseUnavailable)?,
+                                state: row.8.ok_or(ChatError::DatabaseUnavailable)?,
+                                expires_at: row.9.ok_or(ChatError::DatabaseUnavailable)?,
+                            },
+                        });
+                    }
+                    _ => return Err(ChatError::DatabaseUnavailable),
+                }
+            }
+            result.push((message_id, blocks));
+        }
+        Ok(result)
+    }
+
     pub fn create_session_and_enqueue(
         &mut self,
         project_id: Uuid,
@@ -1325,6 +1877,211 @@ impl ChatRepository {
         })
     }
 
+    pub fn create_session_and_enqueue_multimodal(
+        &mut self,
+        project_id: Uuid,
+        blocks: &[DraftContentBlock],
+        create_operation_id: Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
+        validate_non_nil(project_id)?;
+        validate_non_nil(create_operation_id)?;
+        validate_draft_blocks(blocks)?;
+        if authorization_revision == 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let now = unix_seconds()?;
+        self.expire_attachments(now)?;
+        let text_projection = draft_text_projection(blocks);
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        if let Some((stored_session_id, version, payload, stored_revision)) = transaction
+            .query_row(
+                "SELECT o.session_id, o.payload_version, o.encrypted_payload, b.authorization_revision
+                 FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id
+                 WHERE o.operation_id=?1 AND o.kind='create_session'
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    create_operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?
+        {
+            if version != 2 {
+                return Err(ChatError::ConversationConflict);
+            }
+            let payload: CreateSessionPayloadV2 = decode_payload(&payload)?;
+            let stored_project: Option<String> = transaction
+                .query_row(
+                    "SELECT project_id FROM chat_sessions WHERE id=?1",
+                    [&stored_session_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(map_sqlite_error)?;
+            if payload.session_id.to_string() != stored_session_id
+                || payload.task_id != payload.session_id
+                || stored_project.as_deref() != Some(project_id.to_string().as_str())
+                || stored_revision
+                    != i64::try_from(authorization_revision)
+                        .map_err(|_| ChatError::InvalidInput)?
+                || !draft_matches_stored_blocks(&transaction, payload.message_id, blocks)?
+                || stored_content_block_digest(&transaction, payload.message_id)?
+                    != payload.block_digest
+            {
+                return Err(ChatError::ConversationConflict);
+            }
+            return Ok(PendingConversation {
+                session_id: payload.session_id,
+                task_id: payload.task_id,
+                turn_id: payload.turn_id,
+                create_operation_id,
+                turn_operation_id: payload.turn_operation_id,
+            });
+        }
+        let project_exists: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_projects
+                   WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3 AND removed_at IS NULL
+                 )",
+                params![
+                    project_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        if !project_exists {
+            return Err(ChatError::NotFound);
+        }
+        let title_source = if text_projection.trim().is_empty() {
+            first_attachment_name(
+                &transaction,
+                &self.scope.owner_user_id,
+                &self.scope.tenant_id,
+                &DraftTarget::New,
+                blocks,
+                now,
+            )?
+            .unwrap_or_else(|| "新任务".to_owned())
+        } else {
+            text_projection.clone()
+        };
+        let session_id = Uuid::now_v7();
+        let task_id = session_id;
+        let client_reference_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let turn_operation_id = Uuid::now_v7();
+        let message_id = Uuid::now_v7();
+        transaction
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'fallback', 'not_started', ?6, ?6)",
+                params![
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    project_id.to_string(),
+                    fallback_title(&title_source),
+                    now,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_public_task_bindings(
+                   session_id, client_reference_id, create_operation_id, host_operation_id,
+                   state, authorization_revision, attempt_count, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?3, 'pending', ?4, 0, ?5, ?5)",
+                params![
+                    session_id.to_string(),
+                    client_reference_id.to_string(),
+                    create_operation_id.to_string(),
+                    i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?,
+                    now,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'queued')",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    turn_operation_id.to_string(),
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_messages(id, session_id, turn_id, role, content, status, ordinal, created_at)
+                 VALUES (?1, ?2, ?3, 'user', ?4, 'committed', 0, ?5)",
+                params![
+                    message_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    text_projection,
+                    now,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        let block_digest = bind_draft_blocks(
+            &transaction,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &DraftTarget::New,
+            message_id,
+            blocks,
+            now,
+        )?;
+        let payload = encode_payload(&CreateSessionPayloadV2 {
+            session_id,
+            task_id,
+            turn_id,
+            turn_operation_id,
+            message_id,
+            block_digest,
+        })?;
+        transaction
+            .execute(
+                "INSERT INTO chat_outbox(
+                   operation_id, session_id, kind, state, attempt_count, next_attempt_at,
+                   payload_version, encrypted_payload
+                 ) VALUES (?1, ?2, 'create_session', 'pending', 0, ?3, 2, ?4)",
+                params![
+                    create_operation_id.to_string(),
+                    session_id.to_string(),
+                    now,
+                    payload,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        Ok(PendingConversation {
+            session_id,
+            task_id,
+            turn_id,
+            create_operation_id,
+            turn_operation_id,
+        })
+    }
+
     pub fn enqueue_turn(
         &mut self,
         session_id: Uuid,
@@ -1440,6 +2197,144 @@ impl ChatRepository {
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(turn_id)
+    }
+
+    pub fn enqueue_turn_multimodal(
+        &mut self,
+        session_id: Uuid,
+        blocks: &[DraftContentBlock],
+        operation_id: Uuid,
+    ) -> Result<Uuid, ChatError> {
+        validate_non_nil(session_id)?;
+        validate_non_nil(operation_id)?;
+        validate_draft_blocks(blocks)?;
+        let now = unix_seconds()?;
+        self.expire_attachments(now)?;
+        let text_projection = draft_text_projection(blocks);
+        let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        if let Some((turn_id, version, payload)) = transaction
+            .query_row(
+                "SELECT t.id, o.payload_version, o.encrypted_payload
+                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 JOIN chat_outbox o ON o.operation_id=t.operation_id
+                 WHERE t.operation_id=?1 AND t.session_id=?2
+                   AND s.owner_user_id=?3 AND s.tenant_id=?4",
+                params![
+                    operation_id.to_string(),
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?
+        {
+            if version != 2 {
+                return Err(ChatError::ConversationConflict);
+            }
+            let payload: StartTurnPayloadV2 = decode_payload(&payload)?;
+            if payload.turn_id.to_string() != turn_id
+                || !draft_matches_stored_blocks(&transaction, payload.message_id, blocks)?
+                || stored_content_block_digest(&transaction, payload.message_id)?
+                    != payload.block_digest
+            {
+                return Err(ChatError::ConversationConflict);
+            }
+            return parse_uuid_value(&turn_id);
+        }
+        let session_ready: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id
+                   WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
+                     AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL
+                     AND p.removed_at IS NULL
+                     AND NOT EXISTS(
+                       SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id
+                     )
+                 )",
+                params![
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        if !session_ready {
+            return Err(ChatError::ConversationConflict);
+        }
+        let turn_id = Uuid::now_v7();
+        let message_id = Uuid::now_v7();
+        let ordinal: i64 = transaction
+            .query_row(
+                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM chat_messages WHERE session_id=?1",
+                [session_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'queued')",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    operation_id.to_string(),
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_messages(id, session_id, turn_id, role, content, status, ordinal, created_at)
+                 VALUES (?1, ?2, ?3, 'user', ?4, 'committed', ?5, ?6)",
+                params![
+                    message_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    text_projection,
+                    ordinal,
+                    now,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        let block_digest = bind_draft_blocks(
+            &transaction,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &DraftTarget::Session(session_id),
+            message_id,
+            blocks,
+            now,
+        )?;
+        let payload = encode_payload(&StartTurnPayloadV2 {
+            turn_id,
+            message_id,
+            block_digest,
+        })?;
+        transaction
+            .execute(
+                "INSERT INTO chat_outbox(
+                   operation_id, session_id, kind, state, attempt_count, next_attempt_at,
+                   payload_version, encrypted_payload
+                 ) VALUES (?1, ?2, 'start_turn', 'pending', 0, ?3, 2, ?4)",
+                params![
+                    operation_id.to_string(),
+                    session_id.to_string(),
+                    now,
+                    payload
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        transaction.commit().map_err(map_sqlite_error)?;
         Ok(turn_id)
     }
 
@@ -1606,10 +2501,7 @@ impl ChatRepository {
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .ok_or(ChatError::ConversationConflict)?;
-        if version != OUTBOX_PAYLOAD_VERSION {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        let payload: CreateSessionPayloadV1 = decode_payload(&payload)?;
+        let payload = decode_create_payload(version, &payload)?;
         let parsed_session = parse_uuid_value(&session_id)?;
         if payload.session_id != parsed_session
             || payload.task_id != parsed_session
@@ -1933,10 +2825,7 @@ impl ChatRepository {
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .ok_or(ChatError::NotFound)?;
-        if version != OUTBOX_PAYLOAD_VERSION {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        let create: CreateSessionPayloadV1 = decode_payload(&payload)?;
+        let create = decode_create_payload(version, &payload)?;
         if create.session_id.to_string() != session_id
             || parse_uuid_value(&bound_public_task_id)? != task_id
         {
@@ -1978,10 +2867,7 @@ impl ChatRepository {
                 [create_operation_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let turn_payload = encode_payload(&StartTurnPayloadV1 {
-            turn_id: create.turn_id,
-            message_id: create.message_id,
-        })?;
+        let turn_payload = encode_start_turn_payload(&create)?;
         transaction
             .execute(
                 "INSERT INTO chat_outbox(
@@ -1993,7 +2879,7 @@ impl ChatRepository {
                     create.turn_operation_id.to_string(),
                     session_id,
                     now,
-                    OUTBOX_PAYLOAD_VERSION,
+                    version,
                     turn_payload
                 ],
             )
@@ -2011,11 +2897,8 @@ impl ChatRepository {
             != Some((
                 session_id,
                 OutboxKind::StartTurn.as_str().to_owned(),
-                OUTBOX_PAYLOAD_VERSION,
-                encode_payload(&StartTurnPayloadV1 {
-                    turn_id: create.turn_id,
-                    message_id: create.message_id,
-                })?,
+                version,
+                encode_start_turn_payload(&create)?,
             ))
         {
             return Err(ChatError::ConversationConflict);
@@ -2078,6 +2961,229 @@ impl ChatRepository {
             turn_id: parsed_turn,
             agent_session_id: parse_uuid_value(&agent_session_id)?,
             input,
+        })
+    }
+
+    pub fn start_turn_payload_version(&self, operation_id: Uuid) -> Result<i64, ChatError> {
+        validate_non_nil(operation_id)?;
+        self.connection
+            .query_row(
+                "SELECT o.payload_version
+                 FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 WHERE o.operation_id=?1 AND o.kind='start_turn' AND o.state='inflight'
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(map_sqlite_error)?
+            .ok_or(ChatError::ConversationConflict)
+    }
+
+    pub fn load_start_turn_dispatch_v2(
+        &mut self,
+        operation_id: Uuid,
+    ) -> Result<StartTurnDispatchV2, ChatError> {
+        validate_non_nil(operation_id)?;
+        let now = unix_seconds()?;
+        self.expire_attachments(now)?;
+        let row: Option<(String, String, String, i64, Vec<u8>, String)> = self
+            .connection
+            .query_row(
+                "SELECT o.session_id, s.agent_session_id, t.id, o.payload_version,
+                        o.encrypted_payload, m.id
+                 FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_turns t ON t.operation_id=o.operation_id AND t.session_id=s.id
+                 JOIN chat_messages m ON m.turn_id=t.id AND m.role='user'
+                 WHERE o.operation_id=?1 AND o.kind='start_turn' AND o.state='inflight'
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        let (session_id, agent_session_id, turn_id, version, payload, message_id) =
+            row.ok_or(ChatError::ConversationConflict)?;
+        if version != 2 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let payload: StartTurnPayloadV2 = decode_payload(&payload)?;
+        let parsed_turn = parse_uuid_value(&turn_id)?;
+        let parsed_message = parse_uuid_value(&message_id)?;
+        if payload.turn_id != parsed_turn
+            || payload.message_id != parsed_message
+            || payload.block_digest.len() != 64
+            || stored_content_block_digest(&self.connection, parsed_message)?
+                != payload.block_digest
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let query_text: String = self
+            .connection
+            .query_row(
+                "SELECT content FROM chat_messages WHERE id=?1",
+                [message_id.clone()],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        let query_terms = lexical_terms(&query_text);
+        type StoredBlockRow = (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<Vec<u8>>,
+            Option<i64>,
+        );
+        let rows = {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT b.block_ordinal, b.block_type, b.text_content, a.id,
+                            a.safe_name, a.media_type, a.byte_size, a.sha256,
+                            a.content_blob, a.expires_at
+                     FROM chat_message_content_blocks b
+                     LEFT JOIN chat_attachments a ON a.id=b.attachment_id
+                     WHERE b.message_id=?1 ORDER BY b.block_ordinal ASC",
+                )
+                .map_err(map_sqlite_error)?;
+            let rows = statement
+                .query_map([message_id.clone()], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                    ))
+                })
+                .map_err(map_sqlite_error)?
+                .collect::<rusqlite::Result<Vec<StoredBlockRow>>>()
+                .map_err(map_sqlite_error)?;
+            rows
+        };
+        if rows.is_empty() || rows.len() > 16 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let mut remaining_file_blocks = rows.iter().filter(|row| row.1 == "file").count();
+        let mut content_blocks = Vec::with_capacity(rows.len());
+        let mut image_bytes = 0_usize;
+        let mut file_context_bytes = 0_usize;
+        for (expected_ordinal, row) in rows.into_iter().enumerate() {
+            if usize::try_from(row.0).map_err(|_| ChatError::DatabaseUnavailable)?
+                != expected_ordinal
+            {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            match row.1.as_str() {
+                "text" => {
+                    let text = row.2.ok_or(ChatError::DatabaseUnavailable)?;
+                    validate_message(&text)?;
+                    content_blocks.push(HostTurnInputBlock::Text { text });
+                }
+                "file" => {
+                    if remaining_file_blocks == 0 {
+                        return Err(ChatError::DatabaseUnavailable);
+                    }
+                    let attachment_id =
+                        parse_uuid_value(row.3.as_deref().ok_or(ChatError::DatabaseUnavailable)?)?;
+                    if row.9.ok_or(ChatError::DatabaseUnavailable)? <= now {
+                        return Err(ChatError::NotFound);
+                    }
+                    let remaining_context_bytes =
+                        MAX_FILE_CONTEXT_BYTES.saturating_sub(file_context_bytes);
+                    let file_context_budget = remaining_context_bytes / remaining_file_blocks;
+                    remaining_file_blocks -= 1;
+                    let context_chunks = select_attachment_context(
+                        &self.connection,
+                        attachment_id,
+                        &query_terms,
+                        file_context_budget,
+                    )?;
+                    if context_chunks.is_empty() {
+                        return Err(ChatError::NotFound);
+                    }
+                    let context_bytes = context_chunks.iter().map(String::len).sum::<usize>();
+                    file_context_bytes = file_context_bytes
+                        .checked_add(context_bytes)
+                        .ok_or(ChatError::InvalidInput)?;
+                    content_blocks.push(HostTurnInputBlock::File {
+                        attachment_id,
+                        safe_name: row.4.ok_or(ChatError::DatabaseUnavailable)?,
+                        media_type: row.5.ok_or(ChatError::DatabaseUnavailable)?,
+                        size_bytes: usize::try_from(row.6.ok_or(ChatError::DatabaseUnavailable)?)
+                            .map_err(|_| ChatError::DatabaseUnavailable)?,
+                        sha256: row.7.ok_or(ChatError::DatabaseUnavailable)?,
+                        context_chunks,
+                    });
+                }
+                "image" => {
+                    let attachment_id =
+                        parse_uuid_value(row.3.as_deref().ok_or(ChatError::DatabaseUnavailable)?)?;
+                    if row.9.ok_or(ChatError::DatabaseUnavailable)? <= now {
+                        return Err(ChatError::NotFound);
+                    }
+                    let media_type = row.5.ok_or(ChatError::DatabaseUnavailable)?;
+                    let declared_size =
+                        usize::try_from(row.6.ok_or(ChatError::DatabaseUnavailable)?)
+                            .map_err(|_| ChatError::DatabaseUnavailable)?;
+                    let expected_digest = row.7.ok_or(ChatError::DatabaseUnavailable)?;
+                    let bytes = row.8.ok_or(ChatError::NotFound)?;
+                    if bytes.len() != declared_size
+                        || format!("{:x}", Sha256::digest(&bytes)) != expected_digest
+                    {
+                        return Err(ChatError::DatabaseUnavailable);
+                    }
+                    image_bytes = image_bytes
+                        .checked_add(bytes.len())
+                        .ok_or(ChatError::InvalidInput)?;
+                    if image_bytes > super::attachment::MAX_ATTACHMENT_BYTES {
+                        return Err(ChatError::InvalidInput);
+                    }
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+                    content_blocks.push(HostTurnInputBlock::Image {
+                        attachment_id,
+                        media_type: media_type.clone(),
+                        size_bytes: declared_size,
+                        sha256: expected_digest,
+                        data_url: format!("data:{media_type};base64,{encoded}"),
+                    });
+                }
+                _ => return Err(ChatError::DatabaseUnavailable),
+            }
+        }
+        Ok(StartTurnDispatchV2 {
+            operation_id,
+            session_id: parse_uuid_value(&session_id)?,
+            turn_id: parsed_turn,
+            agent_session_id: parse_uuid_value(&agent_session_id)?,
+            content_blocks,
         })
     }
 
@@ -4015,6 +5121,34 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let message_ids = {
+            let mut statement = transaction
+                .prepare("SELECT id FROM chat_messages WHERE session_id=?1 ORDER BY id")
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            let rows = statement
+                .query_map([session_id], |row| row.get::<_, String>(0))
+                .map_err(|_| ChatError::DatabaseUnavailable)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            rows
+        };
+        let attachment_ids = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT DISTINCT a.id
+                     FROM chat_attachments a
+                     LEFT JOIN chat_messages m ON m.id=a.message_id
+                     WHERE m.session_id=?1 OR a.draft_session_id=?1
+                     ORDER BY a.id",
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            let rows = statement
+                .query_map([session_id], |row| row.get::<_, String>(0))
+                .map_err(|_| ChatError::DatabaseUnavailable)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            rows
+        };
         let turn_ids = {
             let mut statement = transaction
                 .prepare("SELECT id FROM chat_turns WHERE session_id=?1")
@@ -4056,6 +5190,34 @@ impl ChatRepository {
                 let query = format!("SELECT count(*) FROM {table} WHERE turn_id=?1");
                 let count: i64 = transaction
                     .query_row(&query, [turn_id.as_str()], |row| row.get(0))
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if count != 0 {
+                    return Err(ChatError::CleanupIncomplete);
+                }
+            }
+        }
+        for message_id in message_ids {
+            for (table, column) in [
+                ("chat_messages", "id"),
+                ("chat_message_content_blocks", "message_id"),
+            ] {
+                let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
+                let count: i64 = transaction
+                    .query_row(&query, [message_id.as_str()], |row| row.get(0))
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if count != 0 {
+                    return Err(ChatError::CleanupIncomplete);
+                }
+            }
+        }
+        for attachment_id in attachment_ids {
+            for (table, column) in [
+                ("chat_attachments", "id"),
+                ("chat_attachment_chunks", "attachment_id"),
+            ] {
+                let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
+                let count: i64 = transaction
+                    .query_row(&query, [attachment_id.as_str()], |row| row.get(0))
                     .map_err(|_| ChatError::DatabaseUnavailable)?;
                 if count != 0 {
                     return Err(ChatError::CleanupIncomplete);
@@ -4107,6 +5269,15 @@ impl ChatRepository {
             return Err(ChatError::CleanupIncomplete);
         }
         protect_database_files(&self.database_path)
+    }
+
+    fn checkpoint_attachment_cleanup(&mut self) -> Result<(), ChatError> {
+        if !self.attachment_checkpoint_pending {
+            return Ok(());
+        }
+        self.checkpoint_after_delete()?;
+        self.attachment_checkpoint_pending = false;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -4253,6 +5424,610 @@ fn encode_payload<T: Serialize>(payload: &T) -> Result<Vec<u8>, ChatError> {
 
 fn decode_payload<T: for<'de> Deserialize<'de>>(payload: &[u8]) -> Result<T, ChatError> {
     serde_json::from_slice(payload).map_err(|_| ChatError::DatabaseUnavailable)
+}
+
+fn decode_create_payload(version: i64, payload: &[u8]) -> Result<CreatePayloadIdentity, ChatError> {
+    match version {
+        OUTBOX_PAYLOAD_VERSION => {
+            let payload: CreateSessionPayloadV1 = decode_payload(payload)?;
+            Ok(CreatePayloadIdentity {
+                session_id: payload.session_id,
+                task_id: payload.task_id,
+                turn_id: payload.turn_id,
+                turn_operation_id: payload.turn_operation_id,
+                message_id: payload.message_id,
+                block_digest: None,
+            })
+        }
+        2 => {
+            let payload: CreateSessionPayloadV2 = decode_payload(payload)?;
+            if payload.block_digest.len() != 64 {
+                return Err(ChatError::DatabaseUnavailable);
+            }
+            Ok(CreatePayloadIdentity {
+                session_id: payload.session_id,
+                task_id: payload.task_id,
+                turn_id: payload.turn_id,
+                turn_operation_id: payload.turn_operation_id,
+                message_id: payload.message_id,
+                block_digest: Some(payload.block_digest),
+            })
+        }
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn encode_start_turn_payload(payload: &CreatePayloadIdentity) -> Result<Vec<u8>, ChatError> {
+    match payload.block_digest.as_ref() {
+        Some(block_digest) => encode_payload(&StartTurnPayloadV2 {
+            turn_id: payload.turn_id,
+            message_id: payload.message_id,
+            block_digest: block_digest.clone(),
+        }),
+        None => encode_payload(&StartTurnPayloadV1 {
+            turn_id: payload.turn_id,
+            message_id: payload.message_id,
+        }),
+    }
+}
+
+fn insert_attachment(
+    transaction: &Transaction<'_>,
+    owner_user_id: &str,
+    tenant_id: &str,
+    attachment: PreparedAttachment,
+    draft_target: &DraftTarget,
+    draft_ordinal: i64,
+) -> Result<AttachmentSummary, ChatError> {
+    let PreparedAttachment {
+        id,
+        kind,
+        safe_name,
+        media_type,
+        byte_size,
+        sha256,
+        imported_at,
+        expires_at,
+        content,
+        chunks,
+    } = attachment;
+    if id.is_nil()
+        || byte_size == 0
+        || byte_size > super::attachment::MAX_ATTACHMENT_BYTES
+        || content.len() != byte_size
+        || sha256 != format!("{:x}", Sha256::digest(&content))
+        || expires_at != imported_at + super::attachment::ATTACHMENT_TTL_SECONDS
+        || chunks.len() > 128
+        || (kind.as_str() == "file" && chunks.is_empty())
+        || (kind.as_str() == "image" && !chunks.is_empty())
+        || draft_ordinal < 0
+        || chunks
+            .iter()
+            .any(|chunk| chunk.trim().is_empty() || chunk.len() > 16 * 1024)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    let target_kind = draft_target.kind();
+    let target_session_id = draft_target.session_id().map(|value| value.to_string());
+    transaction
+        .execute(
+            "INSERT INTO chat_attachments(
+               id, owner_user_id, tenant_id, kind, safe_name, media_type, byte_size,
+               sha256, state, imported_at, expires_at, content_blob,
+               draft_target_kind, draft_session_id, draft_ordinal
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'ready', ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                id.to_string(),
+                owner_user_id,
+                tenant_id,
+                kind.as_str(),
+                safe_name,
+                media_type,
+                i64::try_from(byte_size).map_err(|_| ChatError::InvalidInput)?,
+                sha256,
+                imported_at,
+                expires_at,
+                content,
+                target_kind,
+                target_session_id,
+                draft_ordinal,
+            ],
+        )
+        .map_err(map_constraint_or_database)?;
+    for (ordinal, chunk) in chunks.iter().enumerate() {
+        transaction
+            .execute(
+                "INSERT INTO chat_attachment_chunks(
+                   attachment_id, chunk_ordinal, content, byte_count
+                 ) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    id.to_string(),
+                    i64::try_from(ordinal).map_err(|_| ChatError::InvalidInput)?,
+                    chunk,
+                    i64::try_from(chunk.len()).map_err(|_| ChatError::InvalidInput)?,
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+    }
+    Ok(AttachmentSummary {
+        attachment_id: id,
+        kind: kind.as_str().to_owned(),
+        safe_name,
+        media_type,
+        byte_size,
+        state: "ready".to_owned(),
+        expires_at,
+    })
+}
+
+fn validate_draft_target(
+    connection: &Connection,
+    owner_user_id: &str,
+    tenant_id: &str,
+    draft_target: &DraftTarget,
+) -> Result<(), ChatError> {
+    let DraftTarget::Session(session_id) = draft_target else {
+        return Ok(());
+    };
+    validate_non_nil(*session_id)?;
+    let exists = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM chat_sessions s
+               WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
+                 AND NOT EXISTS(
+                   SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id
+                 )
+             )",
+            params![session_id.to_string(), owner_user_id, tenant_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(map_sqlite_error)?;
+    if exists {
+        Ok(())
+    } else {
+        Err(ChatError::NotFound)
+    }
+}
+
+fn count_ready_attachments_for_target(
+    connection: &Connection,
+    owner_user_id: &str,
+    tenant_id: &str,
+    draft_target: &DraftTarget,
+    now: i64,
+) -> Result<usize, ChatError> {
+    let target_kind = draft_target.kind();
+    let target_session_id = draft_target.session_id().map(|value| value.to_string());
+    let count = connection
+        .query_row(
+            "SELECT count(*) FROM chat_attachments
+             WHERE owner_user_id=?1 AND tenant_id=?2
+               AND state='ready' AND message_id IS NULL AND expires_at>?3
+               AND draft_target_kind=?4
+               AND ((?4='new' AND draft_session_id IS NULL)
+                 OR (?4='session' AND draft_session_id=?5))",
+            params![
+                owner_user_id,
+                tenant_id,
+                now,
+                target_kind,
+                target_session_id,
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(map_sqlite_error)?;
+    usize::try_from(count).map_err(|_| ChatError::DatabaseUnavailable)
+}
+
+fn next_draft_attachment_ordinal(
+    connection: &Connection,
+    owner_user_id: &str,
+    tenant_id: &str,
+    draft_target: &DraftTarget,
+) -> Result<i64, ChatError> {
+    let target_kind = draft_target.kind();
+    let target_session_id = draft_target.session_id().map(|value| value.to_string());
+    let maximum = connection
+        .query_row(
+            "SELECT MAX(draft_ordinal) FROM chat_attachments
+             WHERE owner_user_id=?1 AND tenant_id=?2
+               AND state='ready' AND message_id IS NULL
+               AND draft_target_kind=?3
+               AND ((?3='new' AND draft_session_id IS NULL)
+                 OR (?3='session' AND draft_session_id=?4))",
+            params![owner_user_id, tenant_id, target_kind, target_session_id,],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(map_sqlite_error)?;
+    maximum
+        .unwrap_or(-1)
+        .checked_add(1)
+        .ok_or(ChatError::DatabaseUnavailable)
+}
+
+fn validate_draft_blocks(blocks: &[DraftContentBlock]) -> Result<(), ChatError> {
+    if blocks.is_empty() || blocks.len() > 16 {
+        return Err(ChatError::InvalidInput);
+    }
+    let mut attachment_ids = HashSet::new();
+    let mut attachment_count = 0_usize;
+    let mut total_text_bytes = 0_usize;
+    for block in blocks {
+        match block {
+            DraftContentBlock::Text(text) => {
+                validate_message(text)?;
+                total_text_bytes = total_text_bytes
+                    .checked_add(text.len())
+                    .ok_or(ChatError::InvalidInput)?;
+            }
+            DraftContentBlock::File(id) | DraftContentBlock::Image(id) => {
+                validate_non_nil(*id)?;
+                attachment_count += 1;
+                if !attachment_ids.insert(*id) {
+                    return Err(ChatError::InvalidInput);
+                }
+            }
+        }
+    }
+    if attachment_count > MAX_ATTACHMENTS_PER_MESSAGE || total_text_bytes > MAX_MESSAGE_BYTES {
+        return Err(ChatError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn draft_text_projection(blocks: &[DraftContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            DraftContentBlock::Text(text) => Some(text.as_str()),
+            DraftContentBlock::File(_) | DraftContentBlock::Image(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn first_attachment_name(
+    transaction: &Transaction<'_>,
+    owner_user_id: &str,
+    tenant_id: &str,
+    draft_target: &DraftTarget,
+    blocks: &[DraftContentBlock],
+    now: i64,
+) -> Result<Option<String>, ChatError> {
+    let Some(id) = blocks.iter().find_map(|block| match block {
+        DraftContentBlock::File(id) | DraftContentBlock::Image(id) => Some(*id),
+        DraftContentBlock::Text(_) => None,
+    }) else {
+        return Ok(None);
+    };
+    let target_kind = draft_target.kind();
+    let target_session_id = draft_target.session_id().map(|value| value.to_string());
+    transaction
+        .query_row(
+            "SELECT safe_name FROM chat_attachments
+             WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+               AND state='ready' AND message_id IS NULL AND expires_at>?4
+               AND draft_target_kind=?5
+               AND ((?5='new' AND draft_session_id IS NULL)
+                 OR (?5='session' AND draft_session_id=?6))",
+            params![
+                id.to_string(),
+                owner_user_id,
+                tenant_id,
+                now,
+                target_kind,
+                target_session_id,
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite_error)
+}
+
+fn bind_draft_blocks(
+    transaction: &Transaction<'_>,
+    owner_user_id: &str,
+    tenant_id: &str,
+    draft_target: &DraftTarget,
+    message_id: Uuid,
+    blocks: &[DraftContentBlock],
+    now: i64,
+) -> Result<String, ChatError> {
+    validate_draft_blocks(blocks)?;
+    validate_draft_target(transaction, owner_user_id, tenant_id, draft_target)?;
+    let target_kind = draft_target.kind();
+    let target_session_id = draft_target.session_id().map(|value| value.to_string());
+    let mut image_bytes = 0_usize;
+    for (ordinal, block) in blocks.iter().enumerate() {
+        match block {
+            DraftContentBlock::Text(text) => {
+                transaction
+                    .execute(
+                        "INSERT INTO chat_message_content_blocks(
+                           message_id, block_ordinal, block_type, text_content
+                         ) VALUES (?1, ?2, 'text', ?3)",
+                        params![
+                            message_id.to_string(),
+                            i64::try_from(ordinal).map_err(|_| ChatError::InvalidInput)?,
+                            text,
+                        ],
+                    )
+                    .map_err(map_constraint_or_database)?;
+            }
+            DraftContentBlock::File(id) | DraftContentBlock::Image(id) => {
+                let expected_kind = match block {
+                    DraftContentBlock::File(_) => "file",
+                    DraftContentBlock::Image(_) => "image",
+                    DraftContentBlock::Text(_) => unreachable!(),
+                };
+                let row: Option<(String, i64)> = transaction
+                    .query_row(
+                        "SELECT kind, byte_size FROM chat_attachments
+                         WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+                           AND state='ready' AND message_id IS NULL AND expires_at>?4
+                           AND draft_target_kind=?5
+                           AND ((?5='new' AND draft_session_id IS NULL)
+                             OR (?5='session' AND draft_session_id=?6))",
+                        params![
+                            id.to_string(),
+                            owner_user_id,
+                            tenant_id,
+                            now,
+                            target_kind,
+                            target_session_id,
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(map_sqlite_error)?;
+                let (kind, byte_size) = row.ok_or(ChatError::NotFound)?;
+                if kind != expected_kind {
+                    return Err(ChatError::InvalidInput);
+                }
+                if expected_kind == "image" {
+                    image_bytes = image_bytes
+                        .checked_add(
+                            usize::try_from(byte_size)
+                                .map_err(|_| ChatError::DatabaseUnavailable)?,
+                        )
+                        .ok_or(ChatError::InvalidInput)?;
+                    if image_bytes > super::attachment::MAX_ATTACHMENT_BYTES {
+                        return Err(ChatError::InvalidInput);
+                    }
+                } else {
+                    let has_context: bool = transaction
+                        .query_row(
+                            "SELECT EXISTS(
+                               SELECT 1 FROM chat_attachment_chunks WHERE attachment_id=?1
+                             )",
+                            [id.to_string()],
+                            |row| row.get(0),
+                        )
+                        .map_err(map_sqlite_error)?;
+                    if !has_context {
+                        return Err(ChatError::InvalidInput);
+                    }
+                }
+                let changed = transaction
+                    .execute(
+                        "UPDATE chat_attachments
+                         SET state='bound', message_id=?1,
+                           draft_target_kind=NULL, draft_session_id=NULL, draft_ordinal=NULL
+                         WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4
+                           AND state='ready' AND message_id IS NULL AND expires_at>?5
+                           AND draft_target_kind=?6
+                           AND ((?6='new' AND draft_session_id IS NULL)
+                             OR (?6='session' AND draft_session_id=?7))",
+                        params![
+                            message_id.to_string(),
+                            id.to_string(),
+                            owner_user_id,
+                            tenant_id,
+                            now,
+                            target_kind,
+                            target_session_id,
+                        ],
+                    )
+                    .map_err(map_constraint_or_database)?;
+                if changed != 1 {
+                    return Err(ChatError::ConversationConflict);
+                }
+                transaction
+                    .execute(
+                        "INSERT INTO chat_message_content_blocks(
+                           message_id, block_ordinal, block_type, attachment_id
+                         ) VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            message_id.to_string(),
+                            i64::try_from(ordinal).map_err(|_| ChatError::InvalidInput)?,
+                            expected_kind,
+                            id.to_string(),
+                        ],
+                    )
+                    .map_err(map_constraint_or_database)?;
+            }
+        }
+    }
+    stored_content_block_digest(transaction, message_id)
+}
+
+fn stored_content_block_digest(
+    connection: &Connection,
+    message_id: Uuid,
+) -> Result<String, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT b.block_ordinal, b.block_type, COALESCE(b.text_content, ''),
+                    COALESCE(b.attachment_id, ''), COALESCE(a.sha256, '')
+             FROM chat_message_content_blocks b
+             LEFT JOIN chat_attachments a ON a.id=b.attachment_id
+             WHERE b.message_id=?1 ORDER BY b.block_ordinal ASC",
+        )
+        .map_err(map_sqlite_error)?;
+    let rows = statement
+        .query_map([message_id.to_string()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(map_sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sqlite_error)?;
+    if rows.is_empty() {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    let mut digest = Sha256::new();
+    for (ordinal, kind, text, attachment_id, attachment_digest) in rows {
+        digest.update(ordinal.to_be_bytes());
+        digest.update([0]);
+        digest.update(kind.as_bytes());
+        digest.update([0]);
+        digest.update(text.as_bytes());
+        digest.update([0]);
+        digest.update(attachment_id.as_bytes());
+        digest.update([0]);
+        digest.update(attachment_digest.as_bytes());
+        digest.update([0xff]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn draft_matches_stored_blocks(
+    connection: &Connection,
+    message_id: Uuid,
+    blocks: &[DraftContentBlock],
+) -> Result<bool, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT block_type, text_content, attachment_id
+             FROM chat_message_content_blocks
+             WHERE message_id=?1 ORDER BY block_ordinal ASC",
+        )
+        .map_err(map_sqlite_error)?;
+    let stored = statement
+        .query_map([message_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(map_sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sqlite_error)?;
+    if stored.len() != blocks.len() {
+        return Ok(false);
+    }
+    for (stored, requested) in stored.iter().zip(blocks) {
+        let matches = match requested {
+            DraftContentBlock::Text(text) => {
+                stored.0 == "text"
+                    && stored.1.as_deref() == Some(text.as_str())
+                    && stored.2.is_none()
+            }
+            DraftContentBlock::File(id) => {
+                stored.0 == "file"
+                    && stored.1.is_none()
+                    && stored.2.as_deref() == Some(id.to_string().as_str())
+            }
+            DraftContentBlock::Image(id) => {
+                stored.0 == "image"
+                    && stored.1.is_none()
+                    && stored.2.as_deref() == Some(id.to_string().as_str())
+            }
+        };
+        if !matches {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn lexical_terms(value: &str) -> HashSet<String> {
+    value
+        .split(|character: char| !character.is_alphanumeric())
+        .map(str::trim)
+        .filter(|term| term.chars().count() >= 2)
+        .map(|term| term.to_lowercase())
+        .take(256)
+        .collect()
+}
+
+fn select_attachment_context(
+    connection: &Connection,
+    attachment_id: Uuid,
+    query_terms: &HashSet<String>,
+    byte_budget: usize,
+) -> Result<Vec<String>, ChatError> {
+    if byte_budget == 0 {
+        return Err(ChatError::InvalidInput);
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT c.chunk_ordinal, c.content
+             FROM chat_attachment_chunks c JOIN chat_attachments a ON a.id=c.attachment_id
+             WHERE c.attachment_id=?1 AND a.state='bound'
+             ORDER BY c.chunk_ordinal ASC",
+        )
+        .map_err(map_sqlite_error)?;
+    let mut chunks = statement
+        .query_map([attachment_id.to_string()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(map_sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sqlite_error)?
+        .into_iter()
+        .map(|(ordinal, content)| {
+            let content_terms = lexical_terms(&content);
+            let score = if query_terms.is_empty() {
+                0
+            } else {
+                query_terms.intersection(&content_terms).count()
+            };
+            (ordinal, score, content)
+        })
+        .collect::<Vec<_>>();
+    chunks.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let mut selected = Vec::new();
+    let mut used = 0_usize;
+    for (ordinal, _, content) in chunks {
+        if selected.len() >= 32 {
+            break;
+        }
+        let separator = usize::from(!selected.is_empty());
+        if used + separator >= byte_budget {
+            break;
+        }
+        let available = byte_budget - used - separator;
+        let piece = truncate_utf8_for_budget(&content, available);
+        if piece.is_empty() {
+            continue;
+        }
+        used += separator + piece.len();
+        selected.push((ordinal, piece.to_owned()));
+        if used >= byte_budget {
+            break;
+        }
+    }
+    selected.sort_by_key(|entry| entry.0);
+    Ok(selected.into_iter().map(|entry| entry.1).collect())
+}
+
+fn truncate_utf8_for_budget(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &value[..boundary]
 }
 
 fn parse_uuid_value(value: &str) -> Result<Uuid, ChatError> {
@@ -5962,6 +7737,1106 @@ mod tests {
             &DatabaseKey::from_bytes([29; 32])
         )
         .unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ready_attachment_removal_is_scoped_idempotent_and_cascades_chunks() {
+        let root = std::env::temp_dir().join(format!("yijie-feat127-remove-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let primary_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 43, primary_scope.clone());
+        let imported_at = unix_seconds().unwrap();
+        let ready = crate::chat::attachment::prepare_bytes(
+            "remove-me.txt".to_owned(),
+            b"indexed attachment context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let ready_id = ready.id;
+        repository
+            .store_attachments(vec![ready], 1, DraftTarget::New)
+            .unwrap();
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachment_chunks", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+
+        let mut foreign = open_repository_for_scope(&root, 43, scope());
+        foreign
+            .remove_ready_attachment(ready_id, DraftTarget::New)
+            .unwrap();
+        drop(foreign);
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1,
+            "foreign scopes must neither learn about nor delete the attachment"
+        );
+
+        repository
+            .remove_ready_attachment(ready_id, DraftTarget::New)
+            .unwrap();
+        let wal = root.join("chat").join(format!("{DATABASE_FILE_NAME}-wal"));
+        assert!(!wal.exists() || fs::metadata(&wal).unwrap().len() == 0);
+        repository
+            .remove_ready_attachment(ready_id, DraftTarget::New)
+            .unwrap();
+        for table in ["chat_attachments", "chat_attachment_chunks"] {
+            let count = repository
+                .connection
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} must be empty after removal");
+        }
+
+        let first = crate::chat::attachment::prepare_bytes(
+            "first.txt".to_owned(),
+            b"first".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let second = crate::chat::attachment::prepare_bytes(
+            "second.txt".to_owned(),
+            b"second".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        assert_eq!(
+            repository.store_attachments(vec![first, second], 1, DraftTarget::New),
+            Err(ChatError::InvalidInput)
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachments", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0,
+            "over-capacity batches must not write rows"
+        );
+
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let bound = crate::chat::attachment::prepare_bytes(
+            "bound.txt".to_owned(),
+            b"bound attachment context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let bound_id = bound.id;
+        let expires_at = bound.expires_at;
+        repository
+            .store_attachments(vec![bound], 1, DraftTarget::New)
+            .unwrap();
+        let expiring_ready = crate::chat::attachment::prepare_bytes(
+            "ready-expiry.txt".to_owned(),
+            b"ready expiry private context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let expiring_ready_id = expiring_ready.id;
+        repository
+            .store_attachments(vec![expiring_ready], 1, DraftTarget::New)
+            .unwrap();
+        let attachment_only = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::File(bound_id)],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT title FROM chat_sessions WHERE id=?1",
+                    [attachment_only.session_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "bound.txt"
+        );
+        assert_eq!(
+            repository.remove_ready_attachment(bound_id, DraftTarget::New),
+            Err(ChatError::ConversationConflict)
+        );
+        assert_eq!(repository.expire_attachments(expires_at - 1).unwrap(), 0);
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT state, content_blob IS NOT NULL FROM chat_attachments WHERE id=?1",
+                    [bound_id.to_string()],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+                )
+                .unwrap(),
+            ("bound".to_owned(), true)
+        );
+        assert_eq!(repository.expire_attachments(expires_at).unwrap(), 2);
+        assert_eq!(repository.expire_attachments(expires_at + 1).unwrap(), 0);
+        assert!(!repository
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_attachments WHERE id=?1)",
+                [expiring_ready_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert!(!wal.exists() || fs::metadata(&wal).unwrap().len() == 0);
+        assert_eq!(
+            repository.remove_ready_attachment(bound_id, DraftTarget::New),
+            Err(ChatError::ConversationConflict)
+        );
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn draft_attachment_targets_survive_reopen_and_bind_only_to_their_composer() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat127-draft-targets-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let primary_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 49, primary_scope.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let seed = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        bind_and_accept_first_turn(&mut repository, &seed, now);
+        commit_synthetic_terminal(
+            &mut repository,
+            seed.session_id,
+            Uuid::now_v7(),
+            1,
+            "seed complete",
+        );
+
+        let imported_at = unix_seconds().unwrap();
+        let new_draft = crate::chat::attachment::prepare_bytes(
+            "new-draft.txt".to_owned(),
+            b"new composer context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let new_draft_id = new_draft.id;
+        repository
+            .store_attachment(new_draft, DraftTarget::New)
+            .unwrap();
+        let session_draft = crate::chat::attachment::prepare_bytes(
+            "session-draft.txt".to_owned(),
+            b"session composer context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let session_draft_id = session_draft.id;
+        repository
+            .store_attachment(session_draft, DraftTarget::Session(seed.session_id))
+            .unwrap();
+        drop(repository);
+
+        let mut reopened = open_repository_for_scope(&root, 49, primary_scope.clone());
+        assert_eq!(
+            reopened
+                .list_ready_attachments(DraftTarget::New)
+                .unwrap()
+                .into_iter()
+                .map(|attachment| attachment.attachment_id)
+                .collect::<Vec<_>>(),
+            vec![new_draft_id]
+        );
+        assert_eq!(
+            reopened
+                .list_ready_attachments(DraftTarget::Session(seed.session_id))
+                .unwrap()
+                .into_iter()
+                .map(|attachment| attachment.attachment_id)
+                .collect::<Vec<_>>(),
+            vec![session_draft_id]
+        );
+        assert_eq!(
+            reopened.remove_ready_attachment(new_draft_id, DraftTarget::Session(seed.session_id),),
+            Err(ChatError::ConversationConflict)
+        );
+        assert_eq!(
+            reopened.remove_ready_attachment(session_draft_id, DraftTarget::New),
+            Err(ChatError::ConversationConflict)
+        );
+
+        let mut foreign = open_repository_for_scope(&root, 49, scope());
+        assert!(foreign
+            .list_ready_attachments(DraftTarget::New)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            foreign.list_ready_attachments(DraftTarget::Session(seed.session_id)),
+            Err(ChatError::NotFound)
+        );
+        drop(foreign);
+
+        assert_eq!(
+            reopened.create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::File(session_draft_id)],
+                Uuid::now_v7(),
+                1,
+            ),
+            Err(ChatError::NotFound)
+        );
+        assert_eq!(
+            reopened.enqueue_turn_multimodal(
+                seed.session_id,
+                &[DraftContentBlock::File(new_draft_id)],
+                Uuid::now_v7(),
+            ),
+            Err(ChatError::NotFound)
+        );
+
+        let attachment_only = reopened
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::File(new_draft_id)],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        reopened
+            .enqueue_turn_multimodal(
+                seed.session_id,
+                &[DraftContentBlock::File(session_draft_id)],
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        for attachment_id in [new_draft_id, session_draft_id] {
+            let state = reopened
+                .connection
+                .query_row(
+                    "SELECT state, message_id IS NOT NULL,
+                       draft_target_kind IS NULL, draft_session_id IS NULL
+                     FROM chat_attachments WHERE id=?1",
+                    [attachment_id.to_string()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, bool>(3)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(state, ("bound".to_owned(), true, true, true));
+        }
+        assert!(reopened
+            .list_ready_attachments(DraftTarget::New)
+            .unwrap()
+            .is_empty());
+        assert!(reopened
+            .list_ready_attachments(DraftTarget::Session(seed.session_id))
+            .unwrap()
+            .is_empty());
+
+        drop(reopened);
+        let mut reopened = open_repository_for_scope(&root, 49, primary_scope);
+        let attachment_only_summary = reopened
+            .session_summary(attachment_only.session_id)
+            .unwrap();
+        assert_eq!(attachment_only_summary.title, "new-draft.txt");
+        assert_eq!(
+            attachment_only_summary.title_source,
+            SessionTitleSource::Fallback
+        );
+
+        for (session_id, attachment_id, safe_name) in [
+            (attachment_only.session_id, new_draft_id, "new-draft.txt"),
+            (seed.session_id, session_draft_id, "session-draft.txt"),
+        ] {
+            let message_id = reopened
+                .connection
+                .query_row(
+                    "SELECT message_id FROM chat_attachments WHERE id=?1",
+                    [attachment_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap();
+            let message_id = Uuid::parse_str(&message_id).unwrap();
+            let history = reopened.load_history(session_id, None, Some(20)).unwrap();
+            assert!(history
+                .turns
+                .iter()
+                .flat_map(|turn| turn.messages.iter())
+                .any(|message| message.message_id == message_id));
+            let blocks = reopened
+                .load_message_content_blocks(vec![message_id])
+                .unwrap();
+            assert!(matches!(
+                blocks.as_slice(),
+                [(projected_message_id, projected_blocks)]
+                    if *projected_message_id == message_id
+                        && matches!(projected_blocks.as_slice(), [
+                            MessageContentBlockProjection::Attachment { ordinal: 0, attachment }
+                        ] if attachment.attachment_id == attachment_id
+                            && attachment.safe_name == safe_name
+                            && attachment.state == "bound")
+            ));
+        }
+
+        reopened
+            .delete_session_local(&seed.session_id.to_string())
+            .unwrap();
+        reopened
+            .delete_session_local(&attachment_only.session_id.to_string())
+            .unwrap();
+        for table in [
+            "chat_attachments",
+            "chat_attachment_chunks",
+            "chat_message_content_blocks",
+        ] {
+            let count = reopened
+                .connection
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} must cascade on permanent deletion");
+        }
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn draft_attachment_ordinals_preserve_same_second_import_order_across_reopen() {
+        let root = std::env::temp_dir().join(format!(
+            "yijie-feat127-draft-order-reopen-{}",
+            Uuid::now_v7()
+        ));
+        fs::create_dir(&root).unwrap();
+        let primary_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 50, primary_scope.clone());
+        let imported_at = unix_seconds().unwrap();
+        let expected = [
+            (
+                Uuid::parse_str("ffffffff-ffff-4fff-bfff-fffffffffff1").unwrap(),
+                "first.txt",
+            ),
+            (
+                Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+                "second.txt",
+            ),
+            (
+                Uuid::parse_str("88888888-8888-4888-8888-888888888883").unwrap(),
+                "third.txt",
+            ),
+        ];
+        let attachments = expected
+            .iter()
+            .map(|(id, safe_name)| {
+                let mut attachment = crate::chat::attachment::prepare_bytes(
+                    (*safe_name).to_owned(),
+                    format!("context for {safe_name}").into_bytes(),
+                    imported_at,
+                )
+                .unwrap();
+                attachment.id = *id;
+                attachment
+            })
+            .collect::<Vec<_>>();
+        repository
+            .store_attachments(attachments, expected.len(), DraftTarget::New)
+            .unwrap();
+
+        let stored = {
+            let mut statement = repository
+                .connection
+                .prepare(
+                    "SELECT id, imported_at, draft_ordinal FROM chat_attachments
+                     WHERE draft_target_kind='new' ORDER BY draft_ordinal",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        assert_eq!(
+            stored,
+            expected
+                .iter()
+                .enumerate()
+                .map(|(ordinal, (id, _))| {
+                    (id.to_string(), imported_at, i64::try_from(ordinal).unwrap())
+                })
+                .collect::<Vec<_>>()
+        );
+        drop(repository);
+
+        let mut reopened = open_repository_for_scope(&root, 50, primary_scope);
+        let restored = reopened.list_ready_attachments(DraftTarget::New).unwrap();
+        assert_eq!(
+            restored
+                .iter()
+                .map(|attachment| attachment.attachment_id)
+                .collect::<Vec<_>>(),
+            expected.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            restored
+                .iter()
+                .map(|attachment| attachment.safe_name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(_, safe_name)| *safe_name)
+                .collect::<Vec<_>>()
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn draft_attachment_ordinals_are_target_scoped_and_append_after_removal() {
+        let root = std::env::temp_dir().join(format!(
+            "yijie-feat127-draft-order-targets-{}",
+            Uuid::now_v7()
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 51);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let session_id = repository
+            .create_session_and_enqueue(project_id, "seed", Uuid::now_v7())
+            .unwrap()
+            .session_id;
+        let imported_at = unix_seconds().unwrap();
+        let prepare = |safe_name: &str| {
+            crate::chat::attachment::prepare_bytes(
+                safe_name.to_owned(),
+                format!("context for {safe_name}").into_bytes(),
+                imported_at,
+            )
+            .unwrap()
+        };
+        let new_first = prepare("new-first.txt");
+        let new_first_id = new_first.id;
+        let new_second = prepare("new-second.txt");
+        let new_second_id = new_second.id;
+        repository
+            .store_attachments(vec![new_first, new_second], 2, DraftTarget::New)
+            .unwrap();
+        let session_first = prepare("session-first.txt");
+        let session_first_id = session_first.id;
+        let session_second = prepare("session-second.txt");
+        let session_second_id = session_second.id;
+        repository
+            .store_attachments(
+                vec![session_first, session_second],
+                2,
+                DraftTarget::Session(session_id),
+            )
+            .unwrap();
+
+        for (attachment_id, expected_ordinal) in [
+            (new_first_id, 0_i64),
+            (new_second_id, 1),
+            (session_first_id, 0),
+            (session_second_id, 1),
+        ] {
+            assert_eq!(
+                repository
+                    .connection
+                    .query_row(
+                        "SELECT draft_ordinal FROM chat_attachments WHERE id=?1",
+                        [attachment_id.to_string()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap(),
+                expected_ordinal
+            );
+        }
+
+        repository
+            .remove_ready_attachment(new_first_id, DraftTarget::New)
+            .unwrap();
+        let new_third = prepare("new-third.txt");
+        let new_third_id = new_third.id;
+        repository
+            .store_attachment(new_third, DraftTarget::New)
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .list_ready_attachments(DraftTarget::New)
+                .unwrap()
+                .into_iter()
+                .map(|attachment| attachment.attachment_id)
+                .collect::<Vec<_>>(),
+            vec![new_second_id, new_third_id]
+        );
+        assert_eq!(
+            repository
+                .list_ready_attachments(DraftTarget::Session(session_id))
+                .unwrap()
+                .into_iter()
+                .map(|attachment| attachment.attachment_id)
+                .collect::<Vec<_>>(),
+            vec![session_first_id, session_second_id]
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT draft_ordinal FROM chat_attachments WHERE id=?1",
+                    [new_third_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn two_large_files_share_the_remaining_context_budget_fairly() {
+        let root = std::env::temp_dir().join(format!("yijie-feat127-context-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 45);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let imported_at = unix_seconds().unwrap();
+        let alpha = crate::chat::attachment::prepare_bytes(
+            "alpha.txt".to_owned(),
+            "alpha context ".repeat(50_000).into_bytes(),
+            imported_at,
+        )
+        .unwrap();
+        let beta = crate::chat::attachment::prepare_bytes(
+            "beta.txt".to_owned(),
+            "beta context ".repeat(50_000).into_bytes(),
+            imported_at,
+        )
+        .unwrap();
+        let alpha_id = alpha.id;
+        let beta_id = beta.id;
+        repository
+            .store_attachments(vec![alpha, beta], 2, DraftTarget::New)
+            .unwrap();
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[
+                    DraftContentBlock::Text("compare alpha and beta context".to_owned()),
+                    DraftContentBlock::File(alpha_id),
+                    DraftContentBlock::File(beta_id),
+                ],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(create.operation_id, pending.create_operation_id);
+        let public_task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .unwrap();
+        repository
+            .reschedule_outbox(create.operation_id, now)
+            .unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        repository
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                public_task_id,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        let turn = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        let dispatch = repository
+            .load_start_turn_dispatch_v2(turn.operation_id)
+            .unwrap();
+        let context_bytes = dispatch
+            .content_blocks
+            .iter()
+            .filter_map(|block| match block {
+                HostTurnInputBlock::File { context_chunks, .. } => {
+                    Some(context_chunks.iter().map(String::len).sum::<usize>())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(context_bytes.len(), 2);
+        assert!(context_bytes
+            .iter()
+            .all(|bytes| *bytes > 100 * 1024 && *bytes <= MAX_FILE_CONTEXT_BYTES / 2));
+        assert!(context_bytes.iter().sum::<usize>() <= MAX_FILE_CONTEXT_BYTES);
+        assert!(context_bytes[0].abs_diff(context_bytes[1]) <= 8 * 1024);
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn repository_startup_expires_attachments_across_all_scopes_and_truncates_wal() {
+        let root = std::env::temp_dir().join(format!("yijie-feat127-ttl-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let primary_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 46, primary_scope.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let imported_at = unix_seconds().unwrap();
+        let bound = crate::chat::attachment::prepare_bytes(
+            "bound-expiry.txt".to_owned(),
+            b"bound expiry private context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let bound_id = bound.id;
+        repository
+            .store_attachments(vec![bound], 1, DraftTarget::New)
+            .unwrap();
+        repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::File(bound_id)],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+
+        let mut foreign = open_repository_for_scope(&root, 46, scope());
+        let ready = crate::chat::attachment::prepare_bytes(
+            "foreign-ready-expiry.txt".to_owned(),
+            b"foreign ready private context".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let ready_id = ready.id;
+        foreign
+            .store_attachments(vec![ready], 1, DraftTarget::New)
+            .unwrap();
+        drop(foreign);
+
+        let expires_at = unix_seconds().unwrap() - 1;
+        let expired_imported_at = expires_at - crate::chat::attachment::ATTACHMENT_TTL_SECONDS;
+        assert_eq!(
+            repository
+                .connection
+                .execute(
+                    "UPDATE chat_attachments SET imported_at=?1, expires_at=?2
+                     WHERE id IN (?3, ?4)",
+                    params![
+                        expired_imported_at,
+                        expires_at,
+                        bound_id.to_string(),
+                        ready_id.to_string(),
+                    ],
+                )
+                .unwrap(),
+            2
+        );
+        drop(repository);
+
+        let reopened = open_repository_for_scope(&root, 46, primary_scope);
+        assert_eq!(
+            reopened
+                .connection
+                .query_row(
+                    "SELECT state, content_blob IS NULL FROM chat_attachments WHERE id=?1",
+                    [bound_id.to_string()],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+                )
+                .unwrap(),
+            ("expired".to_owned(), true)
+        );
+        assert!(!reopened
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_attachments WHERE id=?1)",
+                [ready_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert_eq!(
+            reopened
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachment_chunks", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            reopened
+                .connection
+                .query_row("PRAGMA secure_delete", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let wal = root.join("chat").join(format!("{DATABASE_FILE_NAME}-wal"));
+        assert!(!wal.exists() || fs::metadata(&wal).unwrap().len() == 0);
+
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn attachment_checkpoint_retries_after_busy_even_when_no_rows_change() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat127-checkpoint-retry-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 47);
+        let now = unix_seconds().unwrap();
+        let attachment = crate::chat::attachment::prepare_bytes(
+            "checkpoint-retry.txt".to_owned(),
+            b"private attachment bytes held by a WAL reader".to_vec(),
+            now,
+        )
+        .unwrap();
+        let attachment_id = attachment.id;
+        repository
+            .store_attachment(attachment, DraftTarget::New)
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_attachments
+                 SET imported_at=?1, expires_at=?2 WHERE id=?3",
+                params![
+                    now - crate::chat::attachment::ATTACHMENT_TTL_SECONDS - 1,
+                    now - 1,
+                    attachment_id.to_string(),
+                ],
+            )
+            .unwrap();
+
+        let blocker = Connection::open_with_flags(
+            &repository.database_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        apply_raw_key(&blocker, &DatabaseKey::from_bytes([47; 32])).unwrap();
+        blocker.execute_batch("BEGIN").unwrap();
+        let retained: Vec<u8> = blocker
+            .query_row(
+                "SELECT content_blob FROM chat_attachments WHERE id=?1",
+                [attachment_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!retained.is_empty());
+        repository
+            .connection
+            .execute_batch("PRAGMA busy_timeout=0;")
+            .unwrap();
+
+        assert_eq!(
+            repository.expire_attachments(now),
+            Err(ChatError::CleanupIncomplete)
+        );
+        assert!(repository.attachment_checkpoint_pending);
+        blocker.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(repository.expire_attachments(now).unwrap(), 0);
+        assert!(!repository.attachment_checkpoint_pending);
+        let wal = PathBuf::from(format!(
+            "{}-wal",
+            repository.database_path.to_string_lossy()
+        ));
+        assert!(!wal.exists() || wal.metadata().unwrap().len() == 0);
+
+        drop(blocker);
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_pending_checkpoint_truncates_wal_after_cleanup_already_committed() {
+        let root = std::env::temp_dir().join(format!(
+            "yijie-feat127-checkpoint-reopen-{}",
+            Uuid::now_v7()
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 48);
+        let now = unix_seconds().unwrap();
+        let attachment = crate::chat::attachment::prepare_bytes(
+            "checkpoint-reopen.txt".to_owned(),
+            b"private bytes committed to WAL before a simulated process exit".to_vec(),
+            now,
+        )
+        .unwrap();
+        let attachment_id = attachment.id;
+        repository
+            .store_attachment(attachment, DraftTarget::New)
+            .unwrap();
+
+        let transaction = repository.connection.transaction().unwrap();
+        transaction
+            .execute(
+                "DELETE FROM chat_attachment_chunks WHERE attachment_id=?1",
+                [attachment_id.to_string()],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "DELETE FROM chat_attachments WHERE id=?1",
+                [attachment_id.to_string()],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        let wal = PathBuf::from(format!(
+            "{}-wal",
+            repository.database_path.to_string_lossy()
+        ));
+        assert!(wal.exists() && wal.metadata().unwrap().len() > 0);
+        assert!(!repository
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_attachments WHERE id=?1)",
+                [attachment_id.to_string()],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap());
+
+        // ChatRepository::open initializes this flag before running the all-scope expiry pass.
+        repository.attachment_checkpoint_pending = true;
+        assert_eq!(repository.expire_attachments_all_scopes(now).unwrap(), 0);
+        assert!(!wal.exists() || wal.metadata().unwrap().len() == 0);
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn multimodal_blocks_bind_atomically_dispatch_v2_and_expire_content() {
+        let root = std::env::temp_dir().join(format!("yijie-feat127-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let primary_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 44, primary_scope.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let imported_at = unix_seconds().unwrap();
+        let file = crate::chat::attachment::prepare_bytes(
+            "quarterly-total.csv".to_owned(),
+            b"quarter,total\nQ1,42".to_vec(),
+            imported_at,
+        )
+        .unwrap();
+        let image_bytes = crate::chat::attachment::test_image_bytes("png");
+        let image_size = image_bytes.len();
+        let image = crate::chat::attachment::prepare_bytes(
+            "chart.png".to_owned(),
+            image_bytes,
+            imported_at,
+        )
+        .unwrap();
+        let file_id = file.id;
+        let image_id = image.id;
+        let summaries = repository
+            .store_attachments(
+                vec![file, image],
+                MAX_ATTACHMENTS_PER_MESSAGE,
+                DraftTarget::New,
+            )
+            .unwrap();
+        assert_eq!(summaries.len(), 2);
+        let expires_at = summaries[0].expires_at;
+        let blocks = vec![
+            DraftContentBlock::Text("Compare quarterly total with the chart".to_owned()),
+            DraftContentBlock::File(file_id),
+            DraftContentBlock::Image(image_id),
+        ];
+        let operation_id = Uuid::now_v7();
+        let pending = repository
+            .create_session_and_enqueue_multimodal(project_id, &blocks, operation_id, 7)
+            .unwrap();
+        assert_eq!(
+            repository
+                .create_session_and_enqueue_multimodal(project_id, &blocks, operation_id, 7)
+                .unwrap(),
+            pending
+        );
+        let changed_blocks = vec![
+            DraftContentBlock::Text("different".to_owned()),
+            DraftContentBlock::File(file_id),
+            DraftContentBlock::Image(image_id),
+        ];
+        assert_eq!(
+            repository.create_session_and_enqueue_multimodal(
+                project_id,
+                &changed_blocks,
+                operation_id,
+                7,
+            ),
+            Err(ChatError::ConversationConflict)
+        );
+
+        drop(repository);
+        let mut repository = open_repository_for_scope(&root, 44, primary_scope);
+        let persisted_history = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        let persisted_message_id = persisted_history.turns[0].messages[0].message_id;
+        let persisted_blocks = repository
+            .load_message_content_blocks(vec![persisted_message_id])
+            .unwrap();
+        assert!(matches!(
+            persisted_blocks.as_slice(),
+            [(message_id, blocks)]
+                if *message_id == persisted_message_id
+                    && matches!(blocks.as_slice(), [
+                        MessageContentBlockProjection::Text { ordinal: 0, .. },
+                        MessageContentBlockProjection::Attachment { ordinal: 1, attachment: persisted_file },
+                        MessageContentBlockProjection::Attachment { ordinal: 2, attachment: persisted_image },
+                    ] if persisted_file.attachment_id == file_id
+                        && persisted_file.safe_name == "quarterly-total.csv"
+                        && persisted_file.state == "bound"
+                        && persisted_image.attachment_id == image_id
+                        && persisted_image.safe_name == "chart.png"
+                        && persisted_image.state == "bound")
+        ));
+
+        let now = unix_seconds().unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        let public_task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .unwrap();
+        repository
+            .reschedule_outbox(create.operation_id, now)
+            .unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        repository
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                public_task_id,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        let turn = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            repository.start_turn_payload_version(turn.operation_id),
+            Ok(2)
+        );
+        let dispatch = repository
+            .load_start_turn_dispatch_v2(turn.operation_id)
+            .unwrap();
+        assert_eq!(dispatch.content_blocks.len(), 3);
+        assert!(matches!(
+            &dispatch.content_blocks[0],
+            HostTurnInputBlock::Text { text }
+                if text == "Compare quarterly total with the chart"
+        ));
+        assert!(matches!(
+            &dispatch.content_blocks[1],
+            HostTurnInputBlock::File {
+                attachment_id,
+                safe_name,
+                media_type,
+                size_bytes: 19,
+                context_chunks,
+                ..
+            } if *attachment_id == file_id
+                && safe_name == "quarterly-total.csv"
+                && media_type == "text/csv"
+                && context_chunks == &["quarter,total Q1,42"]
+        ));
+        assert!(matches!(
+            &dispatch.content_blocks[2],
+            HostTurnInputBlock::Image {
+                attachment_id,
+                media_type,
+                size_bytes,
+                data_url,
+                ..
+            } if *attachment_id == image_id
+                && media_type == "image/png"
+                && *size_bytes == image_size
+                && data_url.starts_with("data:image/png;base64,")
+        ));
+
+        assert_eq!(repository.expire_attachments(expires_at).unwrap(), 2);
+        let wal = root.join("chat").join(format!("{DATABASE_FILE_NAME}-wal"));
+        assert!(!wal.exists() || fs::metadata(&wal).unwrap().len() == 0);
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT count(*) FROM chat_attachments
+                     WHERE state='expired' AND content_blob IS NULL",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_attachment_chunks", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        let history = repository
+            .load_history(pending.session_id, None, Some(1))
+            .unwrap();
+        let message_id = history.turns[0].messages[0].message_id;
+        let projected = repository
+            .load_message_content_blocks(vec![message_id])
+            .unwrap();
+        assert!(matches!(
+            &projected[0].1[1],
+            MessageContentBlockProjection::Attachment { attachment, .. }
+                if attachment.state == "expired"
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 

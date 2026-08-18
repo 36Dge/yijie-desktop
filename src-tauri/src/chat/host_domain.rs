@@ -21,6 +21,7 @@ pub enum HostBridgeErrorKind {
     InstanceMismatch,
     NotReady,
     Transport,
+    AcceptedResponseInvalid,
     Protocol,
     Rejected,
 }
@@ -32,6 +33,7 @@ pub enum HostErrorCode {
     SessionNotFound,
     TaskSessionExists,
     TurnActive,
+    TurnOperationConflict,
     TurnNotActive,
     SessionNotUsable,
     EventStreamChanged,
@@ -863,6 +865,7 @@ pub(super) fn parse_host_error_code(value: &str) -> HostErrorCode {
         "session_not_found" => HostErrorCode::SessionNotFound,
         "task_session_exists" => HostErrorCode::TaskSessionExists,
         "turn_active" => HostErrorCode::TurnActive,
+        "turn_operation_conflict" => HostErrorCode::TurnOperationConflict,
         "turn_not_active" => HostErrorCode::TurnNotActive,
         "session_not_usable" => HostErrorCode::SessionNotUsable,
         "event_stream_changed" => HostErrorCode::EventStreamChanged,
