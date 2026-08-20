@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.4.0-candidate",
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "full_commit": "ea48fe190e18afba728712d1e2cc79cda57f581b",
+  "sources": {
+    "openapi": {
+      "path": "openapi/agent-host/agent-host.yaml",
+      "sha256": "cf72ba8dd6910e8454ad60feeffa5e82583303b441dad78e49910fbdb9f5420f"
+    },
+    "event_schema": {
+      "path": "jsonschema/agent/session-event-v3.schema.json",
+      "sha256": "87b1284056529bde8314e6cfa6ad1fb27ffefef50ea86033875fda795330939f"
+    },
+    "report_schema": {
+      "path": "jsonschema/report/report-document-v1.schema.json",
+      "sha256": "94715e5b821cca686405d06004b805e9eac6d39dc61e19c9fc38925102f79556"
+    },
+    "protobuf": {
+      "path": "protobuf/yijie/events/v3/agent_session.proto",
+      "sha256": "5021a0342b84cdea0e1dd773728e4c8f013ce7d03377ade18f06f6716a81b70d"
+    }
+  },
+  "fixture_trees": [
+    {
+      "path": "tests/fixtures/agent/session-event-v3",
+      "git_tree_oid": "21de31ceb65900bcf38bc7fe171de8238dfa30dc"
+    },
+    {
+      "path": "tests/fixtures/agent/resources-v3",
+      "git_tree_oid": "f447129c08b9b39231e33698afc3f2fd875d6b14"
+    },
+    {
+      "path": "tests/fixtures/agent/host-v3",
+      "git_tree_oid": "8afbe7e88cc89401d9990e08b4b332096b53934e"
+    },
+    {
+      "path": "tests/fixtures/report/report-document-v1",
+      "git_tree_oid": "3fafff6d702504f7a8a1cd44b4c717f024c88ae8"
+    }
+  ],
+  "parser": {
+    "package": "@redocly/openapi-core",
+    "version": "1.34.18",
+    "api": "parseYaml",
+    "provided_by": "openapi-typescript@7.13.0"
+  },
+  "validator": {
+    "package": "ajv",
+    "version": "8.17.1"
+  },
+  "consumer": {
+    "owner": "段成威",
+    "mode": "pre-implementation-contract-pin",
+    "adapter_status": "not_started",
+    "approved_rust_generator": "N/A",
+    "generator_rationale": "No Rust JSON Schema/OpenAPI generator is approved for this Desktop native boundary. G2 approves a future explicit adapter only after this exact pin and same-source conformance; no adapter or business behavior exists at G2A preflight."
+  },
+  "exception": {
+    "id": "EXC-128-001",
+    "scope": "Time-bounded plan for a future hand-written Rust v3 Artifact adapter validated against the exact pinned OpenAPI, JSON Schemas, and fixtures.",
+    "owner": "段成威",
+    "approved_on": "2026-08-20",
+    "expires_on": "2026-11-20",
+    "status": "approved-plan",
+    "removal_trigger": "Remove or re-review before G5, at expiry, when an approved Rust generator exists, or whenever a pinned source/digest changes."
+  }
+}

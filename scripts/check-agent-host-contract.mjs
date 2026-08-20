@@ -13,10 +13,10 @@ const lockPath = path.join(repositoryRoot, "contracts/agent-host-v2-turn.lock.js
 const generatorRoot = path.join(repositoryRoot, "tools/public-api-generator");
 const checkOnly = process.argv.includes("--check");
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const PINNED_COMMIT = "747cf740f2d91e76e5c1a130e8e009f1efa821b8";
+const PINNED_COMMIT = "ea48fe190e18afba728712d1e2cc79cda57f581b";
 const PINNED_SOURCE_PATH = "openapi/agent-host/agent-host.yaml";
 const PINNED_SOURCE_SHA256 =
-  "3d2f2273160aa05112f63d67f170229780d4526d679cd449a267890a933ea177";
+  "cf72ba8dd6910e8454ad60feeffa5e82583303b441dad78e49910fbdb9f5420f";
 const PINNED_FIXTURE_SOURCE_PATH = "tests/fixtures/agent/host-v2/turn-request.json";
 const PINNED_FIXTURE_SHA256 =
   "ec464ce56f749852e65be8d1472d8f5d8cccc82c89d2dd16fab33fbdbe62decc";
@@ -85,7 +85,7 @@ export function validateLock(lock) {
   if (
     !lock ||
     lock.schema_version !== 1 ||
-    lock.contract_version !== "0.3.0-candidate" ||
+    lock.contract_version !== "0.4.0-candidate" ||
     lock.repository !== PINNED_REPOSITORY ||
     lock.full_commit !== PINNED_COMMIT ||
     lock.source?.path !== PINNED_SOURCE_PATH ||
@@ -108,7 +108,7 @@ export function validateLock(lock) {
       "c6e90e0e8eff736101fd2cf9eea39cf70064f9c59ab0bcd90b2e2fc9286e221d" ||
     lock.consumer?.readiness_path !== "src-tauri/src/chat/mod.rs" ||
     lock.consumer?.readiness_sha256 !==
-      "9a0702519eb8ad39cab72aa6adf5b1e2bdc72103b84c92cc0b38e0f05b0a444a" ||
+      "9041d9bbf62d6f03661ba0eeb110e02156eae6ea544829fd67d39874e3134085" ||
     lock.consumer?.public_lock_path !== "contracts/public-api.lock.json" ||
     lock.consumer?.serialization_test !==
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection" ||

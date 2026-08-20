@@ -3,9 +3,9 @@ import { safeRelativePath, sha256, validateLock } from "./generate-public-api.mj
 
 const validLock = {
   schema_version: 1,
-  contract_version: "0.3.0-candidate",
+  contract_version: "0.4.0-candidate",
   repository: "https://github.com/36Dge/yijie-contracts.git",
-  full_commit: "747cf740f2d91e76e5c1a130e8e009f1efa821b8",
+  full_commit: "ea48fe190e18afba728712d1e2cc79cda57f581b",
   source_path: "openapi/public/public.yaml",
   source_sha256: "b".repeat(64),
   generator: {

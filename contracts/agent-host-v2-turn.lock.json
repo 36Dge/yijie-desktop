@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "contract_version": "0.3.0-candidate",
+  "contract_version": "0.4.0-candidate",
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "full_commit": "747cf740f2d91e76e5c1a130e8e009f1efa821b8",
+  "full_commit": "ea48fe190e18afba728712d1e2cc79cda57f581b",
   "source": {
     "path": "openapi/agent-host/agent-host.yaml",
-    "sha256": "3d2f2273160aa05112f63d67f170229780d4526d679cd449a267890a933ea177"
+    "sha256": "cf72ba8dd6910e8454ad60feeffa5e82583303b441dad78e49910fbdb9f5420f"
   },
   "operation": {
     "method": "post",
@@ -30,7 +30,7 @@
     "adapter_path": "src-tauri/src/chat/host_bridge.rs",
     "adapter_sha256": "c6e90e0e8eff736101fd2cf9eea39cf70064f9c59ab0bcd90b2e2fc9286e221d",
     "readiness_path": "src-tauri/src/chat/mod.rs",
-    "readiness_sha256": "9a0702519eb8ad39cab72aa6adf5b1e2bdc72103b84c92cc0b38e0f05b0a444a",
+    "readiness_sha256": "9041d9bbf62d6f03661ba0eeb110e02156eae6ea544829fd67d39874e3134085",
     "public_lock_path": "contracts/public-api.lock.json",
     "serialization_test": "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection",
     "approved_rust_generator": "N/A",
