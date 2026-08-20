@@ -108,7 +108,7 @@ export function validateLock(lock) {
       "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2" ||
     lock.consumer?.readiness_path !== "src-tauri/src/chat/mod.rs" ||
     lock.consumer?.readiness_sha256 !==
-      "6ea940c2129a2b08039eb121ae95f9790667b207b2a79c25d7560ab23b1f4474" ||
+      "ff775fa2731caf0f48a2785b93c5730e98d1a36fd323ac77e0611bc17eb3b7f3" ||
     lock.consumer?.public_lock_path !== "contracts/public-api.lock.json" ||
     lock.consumer?.serialization_test !==
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection" ||

@@ -1,6 +1,7 @@
 use super::artifact::{
     ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
-    DownloadedArtifact, ReadyImageContent, ReadyImageReadError, StoredArtifactCommit,
+    DownloadedArtifact, ReadyImageContent, ReadyImageReadError, ReadyVideoContent,
+    ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError, StoredArtifactCommit,
     TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
@@ -315,6 +316,27 @@ impl DatabaseWorker {
             repository.read_ready_image(session_id, turn_id, artifact_id, now)
         })
         .await
+    }
+
+    pub(crate) async fn read_ready_video(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        artifact_id: uuid::Uuid,
+        now: i64,
+    ) -> Result<Result<ReadyVideoContent, ReadyVideoReadError>, ChatError> {
+        self.call(move |repository| {
+            repository.read_ready_video(session_id, turn_id, artifact_id, now)
+        })
+        .await
+    }
+
+    pub(crate) async fn read_ready_video_range(
+        &self,
+        request: ReadyVideoRangeRequest,
+    ) -> Result<Result<ReadyVideoRangeContent, ReadyVideoReadError>, ChatError> {
+        self.call(move |repository| repository.read_ready_video_range(request))
+            .await
     }
 
     pub async fn purge_expired_artifacts(&self, now: i64) -> Result<usize, ChatError> {

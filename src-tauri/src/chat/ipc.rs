@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -3347,7 +3347,6 @@ pub async fn chat_bind_context_v1(
     auth_runtime: State<'_, NativeAuthRuntime>,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
-    artifact_native_runtime: State<'_, super::artifact_native::ArtifactNativeRuntime>,
 ) -> Result<CommandResponse<BoundContextDto>, ChatIpcError> {
     let request = decode_bind_request(request)?;
     let bind_generation = ipc_runtime.begin_binding();
@@ -3378,7 +3377,10 @@ pub async fn chat_bind_context_v1(
     let context = manager
         .bind(projection, now)
         .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    artifact_native_runtime.invalidate_all();
+    app.state::<super::artifact_native::ArtifactNativeRuntime>()
+        .invalidate_all();
+    app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
+        .invalidate_all();
     let offline = chat_runtime
         .local_offline_conversation_application()
         .await

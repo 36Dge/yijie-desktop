@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, Duration};
@@ -133,6 +133,63 @@ pub(crate) struct ReadyImageContent {
     pub size_bytes: usize,
     pub sha256: [u8; 32],
     pub bytes: Vec<u8>,
+}
+
+pub(crate) type ReadyVideoIdentity = ReadyImageIdentity;
+pub(crate) type ReadyVideoReadError = ReadyImageReadError;
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ReadyVideoContent {
+    pub identity: ReadyVideoIdentity,
+    pub display_name: Option<String>,
+    pub media_type: &'static str,
+    pub size_bytes: usize,
+    pub sha256: [u8; 32],
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ReadyVideoRangeContent {
+    pub identity: ReadyVideoIdentity,
+    pub size_bytes: usize,
+    pub sha256: [u8; 32],
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReadyVideoRangeRequest {
+    pub session_id: Uuid,
+    pub turn_id: Uuid,
+    pub artifact_id: Uuid,
+    pub now: i64,
+    pub expected_size: usize,
+    pub expected_sha256: [u8; 32],
+    pub start: usize,
+    pub length: usize,
+}
+
+impl Debug for ReadyVideoRangeContent {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReadyVideoRangeContent")
+            .field("identity", &self.identity)
+            .field("size_bytes", &self.size_bytes)
+            .field("content", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Debug for ReadyVideoContent {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReadyVideoContent")
+            .field("identity", &self.identity)
+            .field("display_name", &self.display_name)
+            .field("media_type", &self.media_type)
+            .field("size_bytes", &self.size_bytes)
+            .field("content", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl Debug for ReadyImageContent {
@@ -1421,6 +1478,284 @@ impl ChatRepository {
             media_type,
             size_bytes,
             sha256: expected_sha256,
+            bytes,
+        }))
+    }
+
+    pub(crate) fn read_ready_video(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        artifact_id: Uuid,
+        now: i64,
+    ) -> Result<Result<ReadyVideoContent, ReadyVideoReadError>, ChatError> {
+        if session_id.is_nil() || turn_id.is_nil() || artifact_id.is_nil() || now < 0 {
+            return Ok(Err(ReadyVideoReadError::NotFound));
+        }
+        type ReadyRow = (
+            i64,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let row: Option<ReadyRow> = self
+            .connection
+            .query_row(
+                "SELECT a.rowid, a.owner_user_id, a.tenant_id, a.state, a.kind,
+                        a.display_name, a.media_type, a.byte_size, a.sha256, a.expires_at,
+                        length(a.content_blob)
+                 FROM chat_output_artifacts a
+                 JOIN chat_sessions s ON s.id=a.session_id
+                 JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id
+                 WHERE a.artifact_id=?1 AND a.session_id=?2 AND a.turn_id=?3
+                   AND a.owner_user_id=?4 AND a.tenant_id=?5
+                   AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
+                params![
+                    artifact_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        let Some((
+            row_id,
+            owner_user_id,
+            tenant_id,
+            state,
+            kind,
+            display_name,
+            media_type,
+            size_bytes,
+            sha256,
+            expires_at,
+            blob_length,
+        )) = row
+        else {
+            return Ok(Err(ReadyVideoReadError::NotFound));
+        };
+        if state == "expired" || expires_at.is_some_and(|value| value <= now) {
+            return Ok(Err(ReadyVideoReadError::Expired));
+        }
+        if state != "ready" {
+            return Ok(Err(ReadyVideoReadError::NotReady));
+        }
+        if kind != "video" || media_type.as_deref() != Some("video/mp4") {
+            return Ok(Err(ReadyVideoReadError::Unsupported));
+        }
+        let Some(size_bytes) = size_bytes.and_then(|value| usize::try_from(value).ok()) else {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        };
+        if !(1..=MAX_ARTIFACT_BYTES).contains(&size_bytes)
+            || blob_length.and_then(|value| usize::try_from(value).ok()) != Some(size_bytes)
+            || display_name
+                .as_deref()
+                .is_some_and(|value| !valid_safe_name(value))
+        {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        }
+        let Some(expected_sha256) = sha256.as_deref().and_then(decode_sha256) else {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        };
+        let owner_user_id = parse_uuid(&owner_user_id)?;
+        let tenant_id = parse_uuid(&tenant_id)?;
+        let mut bytes = vec![0_u8; size_bytes];
+        {
+            let mut blob = self
+                .connection
+                .blob_open(
+                    "main",
+                    "chat_output_artifacts",
+                    "content_blob",
+                    row_id,
+                    true,
+                )
+                .map_err(map_sqlite_error)?;
+            blob.read_exact(&mut bytes)
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        let actual_sha256: [u8; 32] = Sha256::digest(&bytes).into();
+        if !bool::from(subtle::ConstantTimeEq::ct_eq(
+            actual_sha256.as_slice(),
+            expected_sha256.as_slice(),
+        )) || super::artifact_video_native::validate_mp4(&bytes).is_err()
+        {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        }
+        Ok(Ok(ReadyVideoContent {
+            identity: ReadyVideoIdentity {
+                owner_user_id,
+                tenant_id,
+                session_id,
+                turn_id,
+                artifact_id,
+            },
+            display_name,
+            media_type: "video/mp4",
+            size_bytes,
+            sha256: expected_sha256,
+            bytes,
+        }))
+    }
+
+    pub(crate) fn read_ready_video_range(
+        &self,
+        request: ReadyVideoRangeRequest,
+    ) -> Result<Result<ReadyVideoRangeContent, ReadyVideoReadError>, ChatError> {
+        if request.session_id.is_nil()
+            || request.turn_id.is_nil()
+            || request.artifact_id.is_nil()
+            || request.now < 0
+            || request.expected_size == 0
+            || request.expected_size > MAX_ARTIFACT_BYTES
+            || request.start > request.expected_size
+            || request
+                .start
+                .checked_add(request.length)
+                .is_none_or(|end| end > request.expected_size)
+        {
+            return Ok(Err(ReadyVideoReadError::NotFound));
+        }
+        type ReadyRow = (
+            i64,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let row: Option<ReadyRow> = self
+            .connection
+            .query_row(
+                "SELECT a.rowid, a.owner_user_id, a.tenant_id, a.state, a.kind,
+                        a.media_type, a.byte_size, a.sha256, a.expires_at,
+                        length(a.content_blob)
+                 FROM chat_output_artifacts a
+                 JOIN chat_sessions s ON s.id=a.session_id
+                 JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id
+                 WHERE a.artifact_id=?1 AND a.session_id=?2 AND a.turn_id=?3
+                   AND a.owner_user_id=?4 AND a.tenant_id=?5
+                   AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
+                params![
+                    request.artifact_id.to_string(),
+                    request.session_id.to_string(),
+                    request.turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        let Some((
+            row_id,
+            owner_user_id,
+            tenant_id,
+            state,
+            kind,
+            media_type,
+            size_bytes,
+            sha256,
+            expires_at,
+            blob_length,
+        )) = row
+        else {
+            return Ok(Err(ReadyVideoReadError::NotFound));
+        };
+        if state == "expired" || expires_at.is_some_and(|value| value <= request.now) {
+            return Ok(Err(ReadyVideoReadError::Expired));
+        }
+        if state != "ready" {
+            return Ok(Err(ReadyVideoReadError::NotReady));
+        }
+        if kind != "video" || media_type.as_deref() != Some("video/mp4") {
+            return Ok(Err(ReadyVideoReadError::Unsupported));
+        }
+        let Some(size_bytes) = size_bytes.and_then(|value| usize::try_from(value).ok()) else {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        };
+        let Some(manifest_sha256) = sha256.as_deref().and_then(decode_sha256) else {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        };
+        if size_bytes != request.expected_size
+            || manifest_sha256 != request.expected_sha256
+            || blob_length.and_then(|value| usize::try_from(value).ok())
+                != Some(request.expected_size)
+        {
+            return Ok(Err(ReadyVideoReadError::Integrity));
+        }
+        let owner_user_id = parse_uuid(&owner_user_id)?;
+        let tenant_id = parse_uuid(&tenant_id)?;
+        let mut bytes = vec![0_u8; request.length];
+        if request.length > 0 {
+            let mut blob = self
+                .connection
+                .blob_open(
+                    "main",
+                    "chat_output_artifacts",
+                    "content_blob",
+                    row_id,
+                    true,
+                )
+                .map_err(map_sqlite_error)?;
+            blob.seek(SeekFrom::Start(
+                u64::try_from(request.start).map_err(|_| ChatError::InvalidInput)?,
+            ))
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+            blob.read_exact(&mut bytes)
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        Ok(Ok(ReadyVideoRangeContent {
+            identity: ReadyVideoIdentity {
+                owner_user_id,
+                tenant_id,
+                session_id: request.session_id,
+                turn_id: request.turn_id,
+                artifact_id: request.artifact_id,
+            },
+            size_bytes,
+            sha256: manifest_sha256,
             bytes,
         }))
     }
@@ -2774,6 +3109,243 @@ mod tests {
                 .read_ready_image(session_id, turn_id, artifact_id, 1_001)
                 .unwrap(),
             Err(ReadyImageReadError::Integrity)
+        );
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ready_video_reader_is_scope_state_type_size_digest_and_mp4_bound() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat128-native-video-{}", Uuid::now_v7()));
+        let owner = Uuid::now_v7();
+        let tenant = Uuid::now_v7();
+        let scope = ChatScope::new(owner.to_string(), tenant.to_string()).unwrap();
+        let project_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let artifact_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let content = crate::chat::artifact_video_native::test_mp4_bytes();
+        let digest = format!("{:x}", Sha256::digest(&content));
+        let database_key = DatabaseKey::from_bytes([0x51; 32]);
+        let receipt_key = ReceiptKey::from_bytes([0x52; 32]);
+        let mut repository =
+            ChatRepository::open(&root, &database_key, receipt_key, scope).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'fixture', ?4, ?5, 1)",
+                params![
+                    project_id.to_string(),
+                    owner.to_string(),
+                    tenant.to_string(),
+                    "c".repeat(64),
+                    vec![1_u8]
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'fixture', 'fallback', 'not_started', 1, 1)",
+                params![
+                    session_id.to_string(),
+                    owner.to_string(),
+                    tenant.to_string(),
+                    project_id.to_string()
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'completed')",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    Uuid::now_v7().to_string()
+                ],
+            )
+            .unwrap();
+        let manifest = ArtifactManifest {
+            artifact_id,
+            agent_session_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::Video,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: Some("synthetic.mp4".to_owned()),
+            media_type: "video/mp4".to_owned(),
+            size_bytes: content.len(),
+            sha256: digest.clone(),
+            content_href: format!(
+                "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content"
+            ),
+            poster_href: None,
+        };
+        let identity = ArtifactIdentity {
+            artifact_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::Video,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: Some("synthetic.mp4".to_owned()),
+        };
+        repository.record_artifact_started(&identity).unwrap();
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, turn_id, artifact_id, 999)
+                .unwrap(),
+            Err(ReadyVideoReadError::NotReady)
+        );
+        repository.begin_artifact_transfer(&manifest).unwrap();
+        repository
+            .commit_artifact(
+                &manifest,
+                &DownloadedArtifact {
+                    content: DownloadedResource {
+                        media_type: "video/mp4".to_owned(),
+                        size_bytes: content.len(),
+                        sha256: digest.clone(),
+                        bytes: content.clone(),
+                    },
+                    poster: None,
+                },
+                1_000,
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        let ready = repository
+            .read_ready_video(session_id, turn_id, artifact_id, 1_001)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ready.bytes, content);
+        assert_eq!(ready.media_type, "video/mp4");
+        let expected_sha256: [u8; 32] = Sha256::digest(&content).into();
+        let range = repository
+            .read_ready_video_range(ReadyVideoRangeRequest {
+                session_id,
+                turn_id,
+                artifact_id,
+                now: 1_001,
+                expected_size: content.len(),
+                expected_sha256,
+                start: 10,
+                length: 20,
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(range.bytes, content[10..30]);
+        assert_eq!(
+            repository
+                .read_ready_video_range(ReadyVideoRangeRequest {
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    now: 1_001,
+                    expected_size: content.len(),
+                    expected_sha256: [0; 32],
+                    start: 0,
+                    length: 1,
+                })
+                .unwrap(),
+            Err(ReadyVideoReadError::Integrity)
+        );
+        assert_eq!(
+            repository
+                .read_ready_video(Uuid::now_v7(), turn_id, artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::NotFound)
+        );
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, Uuid::now_v7(), artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::NotFound)
+        );
+        assert_eq!(
+            repository
+                .read_ready_video(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    1_000 + ARTIFACT_RETENTION_SECONDS,
+                )
+                .unwrap(),
+            Err(ReadyVideoReadError::Expired)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET kind='file' WHERE artifact_id=?1",
+                [artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, turn_id, artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::Unsupported)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET kind='video', media_type='video/webm' WHERE artifact_id=?1",
+                [artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, turn_id, artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::Unsupported)
+        );
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=ON", [])
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET media_type='video/mp4', byte_size=byte_size+1 WHERE artifact_id=?1",
+                [artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, turn_id, artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::Integrity)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET byte_size=?1, sha256=?2 WHERE artifact_id=?3",
+                params![
+                    content.len() as i64,
+                    "0".repeat(64),
+                    artifact_id.to_string()
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=OFF", [])
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_video(session_id, turn_id, artifact_id, 1_001)
+                .unwrap(),
+            Err(ReadyVideoReadError::Integrity)
         );
         drop(repository);
         fs::remove_dir_all(root).unwrap();

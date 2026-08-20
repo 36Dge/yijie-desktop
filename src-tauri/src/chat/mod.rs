@@ -1,6 +1,7 @@
 mod application;
 mod artifact;
 pub(crate) mod artifact_native;
+pub(crate) mod artifact_video_native;
 mod attachment;
 mod authorization;
 mod database;
@@ -31,6 +32,7 @@ pub use artifact::{
     StoredArtifactCommit, TransferDisposition, ARTIFACT_RETENTION_SECONDS,
 };
 pub use artifact_native::ArtifactNativeRuntime;
+pub use artifact_video_native::ArtifactVideoNativeRuntime;
 pub use authorization::{
     AuthoritativeChatProjection, ChatAction, ChatAuthorizationContext, ChatAuthorizationManager,
 };

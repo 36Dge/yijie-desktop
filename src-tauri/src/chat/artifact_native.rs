@@ -1,5 +1,5 @@
 use super::artifact::{
-    ReadyImageContent, ReadyImageIdentity, ReadyImageReadError, MAX_IMAGE_BYTES,
+    ReadyImageContent, ReadyImageIdentity, ReadyImageReadError, MAX_ARTIFACT_BYTES, MAX_IMAGE_BYTES,
 };
 use super::authorization::{AuthorizationFailure, ChatAction};
 use super::{ChatError, ChatRuntime, ConversationApplication};
@@ -72,7 +72,7 @@ impl ArtifactNativeCode {
         Self::Unavailable,
     ];
 
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::InvalidRequest => "artifact_native_invalid_request",
             Self::Unauthenticated => "artifact_native_unauthenticated",
@@ -104,7 +104,7 @@ pub struct ArtifactNativeError {
 }
 
 impl ArtifactNativeError {
-    fn new(request_id: Option<Uuid>, code: ArtifactNativeCode) -> Self {
+    pub(crate) fn new(request_id: Option<Uuid>, code: ArtifactNativeCode) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             request_id: request_id.map(|value| value.to_string()),
@@ -140,7 +140,7 @@ pub struct ArtifactNativeResponse<T> {
 }
 
 impl<T> ArtifactNativeResponse<T> {
-    fn new(request_id: Uuid, data: T) -> Self {
+    pub(crate) fn new(request_id: Uuid, data: T) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             request_id: request_id.to_string(),
@@ -911,6 +911,22 @@ fn atomic_save(
     content: &ReadyImageContent,
     process_epoch: Uuid,
 ) -> Result<(), ArtifactNativeCode> {
+    atomic_save_content(
+        target,
+        &content.bytes,
+        content.size_bytes,
+        content.sha256,
+        process_epoch,
+    )
+}
+
+pub(crate) fn atomic_save_content(
+    target: &Path,
+    bytes: &[u8],
+    size_bytes: usize,
+    sha256: [u8; 32],
+    process_epoch: Uuid,
+) -> Result<(), ArtifactNativeCode> {
     let parent = target.parent().ok_or(ArtifactNativeCode::InvalidRequest)?;
     let parent_metadata = fs::metadata(parent).map_err(|error| map_io_error(&error))?;
     if !parent_metadata.is_dir() {
@@ -932,7 +948,7 @@ fn atomic_save(
     };
     let mut digest = Sha256::new();
     let mut written = 0_usize;
-    for chunk in content.bytes.chunks(SAVE_CHUNK_BYTES) {
+    for chunk in bytes.chunks(SAVE_CHUNK_BYTES) {
         temp_file
             .write_all(chunk)
             .map_err(|error| map_io_error(&error))?;
@@ -942,10 +958,10 @@ fn atomic_save(
             .ok_or(ArtifactNativeCode::IntegrityFailed)?;
     }
     let actual_sha256: [u8; 32] = digest.finalize().into();
-    if written != content.size_bytes
+    if written != size_bytes
         || !bool::from(subtle::ConstantTimeEq::ct_eq(
             actual_sha256.as_slice(),
-            content.sha256.as_slice(),
+            sha256.as_slice(),
         ))
     {
         return Err(ArtifactNativeCode::IntegrityFailed);
@@ -1035,7 +1051,7 @@ fn verified_stale_temp_file(path: &Path, process_epoch: Uuid) -> bool {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return false;
     };
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_IMAGE_BYTES as u64 {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_ARTIFACT_BYTES as u64 {
         return false;
     }
     #[cfg(unix)]
@@ -1056,8 +1072,11 @@ fn verified_stale_temp_file(path: &Path, process_epoch: Uuid) -> bool {
     let Some(media_type) = infer::get(&bytes).map(|kind| kind.mime_type()) else {
         return false;
     };
-    matches!(media_type, "image/png" | "image/jpeg" | "image/webp")
-        && super::attachment::validate_image_content(media_type, &bytes).is_ok()
+    if matches!(media_type, "image/png" | "image/jpeg" | "image/webp") {
+        super::attachment::validate_image_content(media_type, &bytes).is_ok()
+    } else {
+        media_type == "video/mp4" && super::artifact_video_native::validate_mp4(&bytes).is_ok()
+    }
 }
 
 fn validate_protocol_request(

@@ -6,7 +6,7 @@ mod native_auth;
 
 pub use feat126_secure_storage::feat126_secure_storage_test_control;
 
-use chat::{ArtifactNativeRuntime, ChatIpcRuntime, ChatRuntime};
+use chat::{ArtifactNativeRuntime, ArtifactVideoNativeRuntime, ChatIpcRuntime, ChatRuntime};
 use native_auth::NativeAuthRuntime;
 #[cfg(not(feature = "feat126-s10-driver"))]
 use native_auth::{AuthStatus, CommandError, OperationResponse};
@@ -58,6 +58,7 @@ async fn native_auth_logout(
     chat_runtime: State<'_, ChatRuntime>,
     chat_ipc_runtime: State<'_, ChatIpcRuntime>,
     artifact_native_runtime: State<'_, ArtifactNativeRuntime>,
+    artifact_video_native_runtime: State<'_, ArtifactVideoNativeRuntime>,
 ) -> Result<AuthStatus, CommandError> {
     let status = runtime.logout().await?;
     if let Ok(manager) = chat_runtime.authorization_manager() {
@@ -66,6 +67,7 @@ async fn native_auth_logout(
     chat_ipc_runtime.invalidate_pending_bindings();
     chat_ipc_runtime.invalidate_all();
     artifact_native_runtime.invalidate_all();
+    artifact_video_native_runtime.invalidate_all();
     Ok(status)
 }
 
@@ -121,11 +123,15 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
-        .manage(ArtifactNativeRuntime::new());
+        .manage(ArtifactNativeRuntime::new())
+        .manage(ArtifactVideoNativeRuntime::new());
     let builder = builder.on_window_event(|window, event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
             window
                 .state::<ArtifactNativeRuntime>()
+                .invalidate_webview(window.label());
+            window
+                .state::<ArtifactVideoNativeRuntime>()
                 .invalidate_webview(window.label());
         }
     });
@@ -133,6 +139,11 @@ pub fn run() {
     let builder = builder.register_asynchronous_uri_scheme_protocol(
         "yijie-artifact-preview",
         chat::artifact_native::handle_preview_protocol,
+    );
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    let builder = builder.register_asynchronous_uri_scheme_protocol(
+        "yijie-artifact-video",
+        chat::artifact_video_native::handle_video_protocol,
     );
     #[cfg(feature = "feat126-s10-driver")]
     let startup_failure_driver = driver.clone();
@@ -228,6 +239,9 @@ pub fn run() {
         chat::artifact_native::chat_open_artifact_image_preview_v1,
         chat::artifact_native::chat_release_artifact_image_preview_v1,
         chat::artifact_native::chat_save_artifact_image_v1,
+        chat::artifact_video_native::chat_open_artifact_video_preview_v1,
+        chat::artifact_video_native::chat_release_artifact_video_preview_v1,
+        chat::artifact_video_native::chat_save_artifact_video_v1,
         chat::ipc::chat_load_reasoning_v1,
         chat::ipc::chat_rename_session_v1,
         chat::ipc::chat_set_session_pinned_v1,
