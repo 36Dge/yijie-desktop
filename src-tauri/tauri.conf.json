@@ -25,7 +25,7 @@
         "default-src": "'self' customprotocol: asset:",
         "connect-src": "ipc: http://ipc.localhost http://localhost:8080 http://127.0.0.1:8080 http://localhost:18080 http://127.0.0.1:18080 ws://localhost:1421 ws://127.0.0.1:1421",
         "font-src": "'self' data:",
-        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "img-src": "'self' asset: http://asset.localhost blob: data: yijie-artifact-preview:",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'"
       },

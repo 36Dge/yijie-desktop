@@ -1,6 +1,7 @@
 use super::artifact::{
     ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
-    DownloadedArtifact, StoredArtifactCommit, TransferDisposition,
+    DownloadedArtifact, ReadyImageContent, ReadyImageReadError, StoredArtifactCommit,
+    TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
 #[cfg(feature = "feat126-s10-driver")]
@@ -301,6 +302,19 @@ impl DatabaseWorker {
     ) -> Result<Vec<ArtifactProjection>, ChatError> {
         self.call(move |repository| repository.load_artifacts_for_turns(&turn_ids))
             .await
+    }
+
+    pub(crate) async fn read_ready_image(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        artifact_id: uuid::Uuid,
+        now: i64,
+    ) -> Result<Result<ReadyImageContent, ReadyImageReadError>, ChatError> {
+        self.call(move |repository| {
+            repository.read_ready_image(session_id, turn_id, artifact_id, now)
+        })
+        .await
     }
 
     pub async fn purge_expired_artifacts(&self, now: i64) -> Result<usize, ChatError> {

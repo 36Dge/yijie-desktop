@@ -1,5 +1,6 @@
 mod application;
 mod artifact;
+pub(crate) mod artifact_native;
 mod attachment;
 mod authorization;
 mod database;
@@ -29,6 +30,7 @@ pub use artifact::{
     ArtifactTransferOutcome, ArtifactTransferService, DownloadedArtifact, DownloadedResource,
     StoredArtifactCommit, TransferDisposition, ARTIFACT_RETENTION_SECONDS,
 };
+pub use artifact_native::ArtifactNativeRuntime;
 pub use authorization::{
     AuthoritativeChatProjection, ChatAction, ChatAuthorizationContext, ChatAuthorizationManager,
 };
@@ -101,6 +103,9 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_subscribe_session_v1;
     let _ = ipc::chat_unsubscribe_session_v1;
     let _ = ipc::chat_cancel_request_v1;
+    let _ = artifact_native::chat_open_artifact_image_preview_v1;
+    let _ = artifact_native::chat_release_artifact_image_preview_v1;
+    let _ = artifact_native::chat_save_artifact_image_v1;
 }
 
 const CONTRACT_COMMIT: &str = "ea48fe190e18afba728712d1e2cc79cda57f581b";

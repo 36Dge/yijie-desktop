@@ -1,4 +1,4 @@
-use super::artifact::ArtifactProjection;
+use super::artifact::{ArtifactProjection, ReadyImageContent, ReadyImageReadError};
 use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
@@ -785,6 +785,18 @@ impl ConversationApplication {
         turn_ids: Vec<Uuid>,
     ) -> Result<Vec<ArtifactProjection>, ChatError> {
         self.database.load_artifacts_for_turns(turn_ids).await
+    }
+
+    pub(crate) async fn read_ready_image(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        artifact_id: Uuid,
+        now: i64,
+    ) -> Result<Result<ReadyImageContent, ReadyImageReadError>, ChatError> {
+        self.database
+            .read_ready_image(session_id, turn_id, artifact_id, now)
+            .await
     }
 
     pub async fn store_attachments(

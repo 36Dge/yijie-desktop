@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-artifact-native-v1.schema.json",
+  "title": "Yijie Desktop Private Artifact Native Boundary v1",
+  "description": "Identity-only image preview/save intent and content-free results. Content authority remains native SQLCipher storage.",
+  "x-yijie-schema-version": 1,
+  "x-yijie-preview-scheme": "yijie-artifact-preview",
+  "x-yijie-command-names": [
+    "chat_open_artifact_image_preview_v1",
+    "chat_release_artifact_image_preview_v1",
+    "chat_save_artifact_image_v1"
+  ],
+  "x-yijie-error-codes": [
+    "artifact_native_invalid_request",
+    "artifact_native_unauthenticated",
+    "artifact_native_forbidden",
+    "artifact_native_not_found",
+    "artifact_native_not_ready",
+    "artifact_native_expired",
+    "artifact_native_unsupported",
+    "artifact_native_integrity_failed",
+    "artifact_native_limit_exceeded",
+    "artifact_native_conflict",
+    "artifact_native_extension_mismatch",
+    "artifact_native_dialog_unavailable",
+    "artifact_native_permission_denied",
+    "artifact_native_storage_full",
+    "artifact_native_io_failed",
+    "artifact_native_unavailable"
+  ],
+  "x-yijie-command-contracts": {
+    "chat_open_artifact_image_preview_v1": {
+      "request": "#/$defs/openRequest",
+      "response": "#/$defs/openResponse"
+    },
+    "chat_release_artifact_image_preview_v1": {
+      "request": "#/$defs/releaseRequest",
+      "response": "#/$defs/releaseResponse"
+    },
+    "chat_save_artifact_image_v1": {
+      "request": "#/$defs/saveRequest",
+      "response": "#/$defs/saveResponse"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "identityPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "artifactId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "artifactId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "identityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/identityPayload" }
+      }
+    },
+    "openRequest": { "$ref": "#/$defs/identityRequest" },
+    "releaseRequest": { "$ref": "#/$defs/identityRequest" },
+    "saveRequest": { "$ref": "#/$defs/identityRequest" },
+    "previewUrl": {
+      "type": "string",
+      "pattern": "^yijie-artifact-preview://localhost/v1/[A-Za-z0-9_-]{43}$"
+    },
+    "openResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "previewUrl"],
+      "properties": {
+        "status": { "const": "opened" },
+        "previewUrl": { "$ref": "#/$defs/previewUrl" }
+      }
+    },
+    "releaseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "released" } }
+    },
+    "errorCode": {
+      "enum": [
+        "artifact_native_invalid_request",
+        "artifact_native_unauthenticated",
+        "artifact_native_forbidden",
+        "artifact_native_not_found",
+        "artifact_native_not_ready",
+        "artifact_native_expired",
+        "artifact_native_unsupported",
+        "artifact_native_integrity_failed",
+        "artifact_native_limit_exceeded",
+        "artifact_native_conflict",
+        "artifact_native_extension_mismatch",
+        "artifact_native_dialog_unavailable",
+        "artifact_native_permission_denied",
+        "artifact_native_storage_full",
+        "artifact_native_io_failed",
+        "artifact_native_unavailable"
+      ]
+    },
+    "nullableErrorCode": {
+      "oneOf": [{ "$ref": "#/$defs/errorCode" }, { "type": "null" }]
+    },
+    "saveResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "code"],
+          "properties": { "status": { "enum": ["saved", "cancelled"] }, "code": { "type": "null" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "code"],
+          "properties": { "status": { "const": "failed" }, "code": { "$ref": "#/$defs/errorCode" } }
+        }
+      ]
+    },
+    "openResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/openResult" }
+      }
+    },
+    "releaseResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/releaseResult" }
+      }
+    },
+    "saveResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/saveResult" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "code", "retryable"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "code": { "$ref": "#/$defs/errorCode" },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  }
+}
