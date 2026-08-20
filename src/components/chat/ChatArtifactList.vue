@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import type { ChatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactShell from "./ChatArtifactShell.vue";
 
@@ -7,6 +8,7 @@ defineProps<{
   artifacts: readonly ArtifactProjection[];
   contextId: string;
   nativeClient?: ChatArtifactNativeClient;
+  videoNativeClient?: ChatArtifactVideoNativeClient;
 }>();
 </script>
 
@@ -18,6 +20,7 @@ defineProps<{
           :artifact="artifact"
           :context-id="contextId"
           :native-client="nativeClient"
+          :video-native-client="videoNativeClient"
         />
       </li>
     </ol>
