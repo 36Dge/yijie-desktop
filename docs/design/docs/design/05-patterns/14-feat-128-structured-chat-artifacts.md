@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.1.0
+- 版本：1.2.0
 - 最后更新：2026-08-20
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
@@ -14,9 +14,11 @@
 本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Contracts S1/S2 与
 downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 native foundation 已实现 SQLCipher v8
 authority、严格 v3 adapter、owner-bound transfer/ACK、7 天 TTL/cleanup receipt 与 metadata-only
-`chat_load_history_v3`；S5 已实现 provider-neutral domain/store 与通用 metadata shell。S6-READINESS 现已冻结
-图片 preview/save 的原生安全边界，但没有新增 command、custom protocol、capability、CSP、renderer 或保存实现。
-模型调用、真实 provider、云资源、发布或生产配置仍不在授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
+`chat_load_history_v3`；S5 已实现 provider-neutral domain/store 与通用 metadata shell。S6A 已实现 image-only
+native preview/save boundary，S6B 已实现 ready-image renderer/lightbox/save UX，两者均为 G3 外的独立 PASS。
+S7-READINESS 进一步冻结 video fixture、Range protocol、native save 与 renderer 切片，但没有修改 fixture、Host、
+Desktop 业务代码、private schema、command、CSP 或依赖。模型调用、真实 provider、云资源、发布或生产配置仍不在
+授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
 
 ## 目标
 
@@ -123,6 +125,12 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
   不得伪造“已有字幕”。
 - 视频无法内嵌预览时必须显示“当前格式无法预览”，并在文件仍可安全读取时保留下载入口。
 - 播放错误、解码失败和内容过期必须是卡片内稳定状态，不得使用无限 loading 或浏览器原始错误文案。
+- FEAT-128 当前只批准 `video/mp4`；不得把未进入 frozen contract 的 WebM 写成已支持。S7B 使用原生
+  `<video controls preload="metadata" playsinline>`，明确禁止 `autoplay`、player library、external origin、
+  browser download、remote playback 和 Picture-in-Picture。保存必须走 native command。
+- S7B 不新增 poster command，也不把 S6A image-only command 扩展到 video poster。当前切片保留稳定 16:9
+  placeholder，资源可解码后由原生 video 显示首帧；未来若要消费 SQLCipher `poster_blob`，必须先单独冻结
+  identity-only command、opaque handle、limits 与释放语义。
 
 ### 6. 文件 Artifact
 
@@ -237,6 +245,84 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 `artifact_native_io_failed`、`artifact_native_unavailable`。跨 owner/tenant/session 的存在性错误统一映射为
 `artifact_native_not_found`；错误响应不得包含 path、name、digest、SQL、正文或 raw OS error。
 
+### 9.4 S7-READINESS：canonical video fixture 与 S7F
+
+- `yijie-contracts@ea48fe190e18afba728712d1e2cc79cda57f581b` 已有唯一 canonical resource：
+  `tests/fixtures/agent/resources-v3/synthetic-video-16x16.mp4.base64`。解码后固定为 1,642 bytes，SHA-256
+  `96ea070cac612d17927939c22f3c0c593fb26b171f62c4e9cee43fb596177dd5`；top-level `ftyp` 后立即是
+  `moov`，再到 `free/mdat`，因此 metadata 位于媒体数据之前。
+- 该 resource 是本地生成的三帧相同画面，不包含外部素材、品牌或真实业务数据。固定媒体属性为
+  H.264/AVC High profile level 1.0、`yuv420p`、16×16、25 fps、0.12 秒、3 帧；`stss` 标记首帧为
+  keyframe，sample table 与前置 `moov` 使单 Range 读取可以完成本地播放/seek smoke。S7F 不重新编码、
+  不依赖运行机 ffmpeg，也不声称该 0.12 秒 fixture 代表真实视频质量。
+- 当前 Host S3 `syntheticMP4()` 只产生 `ftyp/free/mdat`，没有 `moov`、track、codec、duration、dimensions、
+  sample table 或 keyframe；它只能证明 transport/integrity，明确不可播放、不可 seek。S7F 的唯一目标是让
+  Host strict-local producer 消费/校验上述已冻结 Contracts fixture，禁止再维护第二份独立 authority。
+- S7F 可以在 Host 保存由 immutable Contracts fixture 派生且由 checker 逐字节比对的 consumer snapshot，或
+  生成与 canonical raw digest 完全相同的 bytes；Contracts 路径、tree OID
+  `f447129c08b9b39231e33698afc3f2fd875d6b14`、full commit、schema/operation/version 与 Desktop pin 均不得改变。
+  本切片是对当前 synthetic producer 的 `semantic` conformance 修复，不是公共 contract 变更；Host commit、
+  fixture conformance checker 与测试证据会改变。
+
+### 9.5 S7-READINESS：video opaque Range protocol
+
+- 唯一批准方案是独立 Desktop-private
+  `yijie-artifact-video://localhost/v1/<opaque-handle>`。拒绝 `blob:`/`data:`，因为它们要求 Vue 接收正文并扩大
+  CSP；拒绝复用 `yijie-artifact-preview`，因为 image handle 是 30 秒 one-shot GET 且明确不支持 HEAD/Range。
+- 新 private authority 使用独立 `chat-artifact-video-native-v1.schema.json`，exact commands 只有
+  `chat_open_artifact_video_preview_v1`、`chat_release_artifact_video_preview_v1`、
+  `chat_save_artifact_video_v1`。envelope 沿用 `requestId/contextId`，payload 只允许
+  `sessionId/turnId/artifactId`；Vue 不接收 bytes、base64、digest、Host href、path、filename、bearer 或
+  destination。
+- open 必须绑定 `main` WebView label、process epoch、当前 context、owner、tenant、session、turn、artifact，
+  且只允许 SQLCipher 中 `ready`、未过期、`kind=video`、`media_type=video/mp4`、1..64 MiB 的 immutable BLOB。
+  native 在签发时完整复核 BLOB length/SHA-256 与 bounded MP4 box/sample-table 结构；protocol 首次请求前再次
+  完整复核，此后每个请求仍重复 owner/state/expiry/kind/MIME/size/digest metadata/BLOB length 与 binding 校验，
+  只从同一 SQLCipher row 读取请求范围。SQLCipher/MAC 或 identity/revision 漂移立即撤销 handle。
+- handle 使用 native CSPRNG 256-bit base64url（43 chars）；每 WebView 最多 2 个 active video handles、每
+  Artifact 1 个，每 handle 最多 64 个成功 HEAD/GET，请求并发最多 2，总 in-flight response bytes 最多
+  64 MiB。Tauri 2.11.x custom protocol responder 会缓冲 response body，因此 64 MiB 是不可越过的内存上限；
+  若实现需要 streaming responder、新依赖或更大媒体，立即停止并重开 Technical/Security review。
+- handle absolute TTL 为 30 分钟、idle TTL 为 5 分钟；每次成功 HEAD/GET 只刷新 idle deadline，不延长 absolute
+  deadline。release、pause+clear source、component unmount、artifact/session/context/WebView switch、context
+  invalidation、app/WebView close、restart、TTL、request budget 或 protocol failure 都清除 registry entry；
+  restart 后旧 handle 无效。与 image one-shot 不同，同一 video handle 在存活期内可服务多次 Range。
+- protocol 只接受精确 host/path、无 query/fragment/body 的 `GET|HEAD`。无 Range 返回 `200`；一个合法
+  closed/open/suffix byte range 返回 `206`；malformed、multi-range、HEAD/GET unsatisfiable 返回 body-empty
+  `416` 和 `Content-Range: bytes */<size>`。成功只返回 allowlisted `Content-Type: video/mp4`、准确
+  `Content-Length`、`Accept-Ranges: bytes`、必要时 `Content-Range`、`Cache-Control: no-store`、
+  `Pragma: no-cache`、`X-Content-Type-Options: nosniff`；HEAD body 为空。禁止 redirect、CORS/Origin reflection、
+  cookie、ETag/digest、filename/disposition、query token 和 error body；其它失败统一 body-empty `404`，UI 通过
+  identity-only open/retry command 获得稳定 typed error。
+- CSP 只新增精确 `media-src 'self' yijie-artifact-video:`。不得把 `blob:`、`data:`、external origin、
+  `asset:`、generic file/filesystem/shell scope 加入 `media-src/connect-src`，不得修改 `object-src/frame-src`。
+  `connect-src` 不含 video scheme，因此 Vue fetch/XHR 不可读取该 URL。
+
+### 9.6 S7-READINESS：video native save
+
+- save 只能由 ready video 上明确 click/keyboard intent 触发，使用独立 video command；不得通过 `<video>`、
+  browser download 或 renderer 自行写文件。native 在 dialog 前和 write 前执行与 preview 相同的 scope、state、
+  MIME、64 MiB、digest 与 MP4 structure 校验。
+- 允许复用 S6A 已有 `rfd` panel、single-flight、safe-name、same-directory `0600` create-new/no-follow temp、
+  chunked digest、fsync、atomic replace 与 RAII cleanup 内核，但 image command/schema/limits/behavior 不得改变。
+  video canonical extension 只有 `.mp4`；无 extension 时 native 追加，不匹配时 fail closed。
+- Vue 只接收 content-free `saved|cancelled|failed` 和既有 stable error allowlist，不接收目标路径或 filename。
+  cancel/normal failure 保留 SQLCipher authority；crash residue 与 S6A 采用同一保守语义，不扫描未由用户重新选择的
+  任意目录。
+
+### 9.7 S7 切片与 Owner readiness
+
+| Slice | 前置与允许范围 | 测试先行与停止条件 | 回滚 |
+|---|---|---|---|
+| S7F Host fixture conformance | 基于 Host `4017785adb08e1114781d3d844e9a10a683fa933`；只允许 synthetic fixture producer、pinned fixture snapshot/checker/lock metadata 与 Host tests/docs；Contracts/Desktop 不变 | RED 先证明 Host video digest/size 与 canonical 不同且无 `moov`；GREEN 证明 exact digest/boxes/track/keyframe、GET/HEAD/single Range/200/206/416、default-off/strict-local；若必须改 Contracts full commit/tree/schema、引入 codec/ffmpeg/runtime dependency 或真实 provider，停止 | 回退 Host S7F commit，恢复 transport-only fixture 并保持 video renderer 关闭 |
+| S7A native boundary | 仅在 S7F immutable PASS 后；允许独立 private schema/client、SQLCipher bounded video reader/range、3 exact commands、one scheme、exact `media-src`、对应 tests，以及必要的 Desktop internal implementation digest/checker 刷新 | Rust/TS RED→GREEN 覆盖 scope/state/MIME/size/digest/MP4、double validation、HEAD/GET/range/limits/TTL/replay/release/save/leak/CSP；若需 dependency/plugin/capability/migration/public pin 或不能在 64 MiB buffered bound 内实现，停止 | 移除 3 commands/schema/client/registry/scheme/media-src；S6A/S6B 与 SQLCipher schema/data不变 |
+| S7B video renderer | 仅在 S7A immutable PASS 后；TS/Vue `src/components/chat` 与必要的既有 typed client integration/tests | ready-video-only、native controls/no-autoplay、metadata loading/error/expired、seek、save outcomes、duplicate/stale、pause-clear-release、keyboard/focus/reduced-motion/axe/sensitive-data negative；任何 native/config/dependency/page/contract 需求都停止 | 关闭 video renderer，回落 S5 metadata shell；S7A authority 可保持关闭 |
+
+Owner capture（用户明确要求 Codex 代录，不声称独立人工评审）：Product/Design
+`READY FOR S7F ONLY; S7A/S7B WAIT`；Technical `APPROVED FOR S7F CANONICAL CONFORMANCE`；
+Security/Data `APPROVED FOR S7F WITH NO PIN/TREE/DEPENDENCY/PROVIDER DRIFT`。S7A/S7B 的设计边界已接受，但编码
+授权分别以 S7F/S7A immutable PASS 为前置；readiness 不是实现 PASS，不扩 G3，不声明 G4。
+
 ### 10. 主题、窗口与可访问性
 
 - 所有颜色、间距、圆角、阴影、动效和尺寸必须来自易界 semantic tokens；图标必须通过 `YjIcon` registry。
@@ -260,9 +346,10 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## AI / Codex 必须遵守
 
-- 本文已 Accepted，G2A、Host S3、Desktop S4/S5 与 G3(S3/S4/S5 only) 已通过。下一编码切片只能进入
-  S6A native image preview/save boundary；S6A 通过后才可进入 S6B image renderer。不得把 S6-READINESS
-  描述为 command/protocol/CSP/save/renderer 已实现，也不得扩展 G3 或声明 G4。
+- 本文已 Accepted，G2A、Host S3、Desktop S4/S5 与 G3(S3/S4/S5 only) 已通过；S6A/S6B 是 G3 外独立
+  PASS。下一编码切片只能进入 S7F Host canonical fixture conformance；S7F immutable PASS 后才可请求 S7A，
+  S7A immutable PASS 后才可请求 S7B。不得把 S7-READINESS 描述为 fixture/command/protocol/CSP/save/renderer
+  已实现，也不得扩展 G3 或声明 G4。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -279,8 +366,8 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - `src/components/chat/`：可复用的 Artifact 列表、图片、视频、文件、报告和预览组件；
 - `src/stores/`：按 session/turn/item identity 合并单调事件，不持有原始路径或大文件正文；
 - `src/pages/chat/`：只组合 assistant message、live turn 和预览入口，不解析 wire 或执行下载副作用；
-- `src-tauri/`：S6A 按 9.1-9.3 的精确安全批准负责 owner 校验、SQLCipher 内容读取、一次性预览句柄、native
-  保存和生命周期释放；S6B 不得再修改 native/Tauri/CSP；
+- `src-tauri/`：S6A 按 9.1-9.3 实现 image-only owner 校验、SQLCipher 内容读取、一次性预览句柄、native
+  保存和生命周期释放；未来 S7A 只能按 9.5-9.6 新增隔离的 video boundary，不得改变 S6A 行为；
 - Agent Host 与 Contracts：由对应仓库定义并评审权威事件、历史恢复、读取、过期、错误和兼容语义。
 
 实现必须先固定不可变 Contracts 引用和 provider-first conformance，再由 Desktop 消费；不得在 Vue 中手写一份与
@@ -293,7 +380,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - [x] S4 native authority 持久化单调进度、校验/加密 content 与 poster、commit 后 ACK、TTL receipt，并且
   private IPC v3 只返回安全 metadata；默认 flag 为关闭。
 - [x] S5 provider-neutral reducer/store 与通用 accessible metadata shell 已实现并通过 G3 slice evidence。
-- [x] S6-READINESS 已冻结 custom protocol、opaque handle、native save、最小 command/CSP delta 与稳定错误；没有实现。
+- [x] S6-READINESS 已先冻结 custom protocol、opaque handle、native save、最小 command/CSP delta 与稳定错误。
+- [x] S6A/S6B 已分别实现 image native boundary 与 component renderer，保持 G3 不变。
+- [x] S7-READINESS 已冻结 canonical playable/seekable fixture 路线、video Range/save boundary 与 S7F/S7A/S7B；没有实现。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -317,6 +406,11 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - 2026-08-20 / 1.1.0 S6-READINESS Accepted：以 SQLCipher authority + one-shot opaque handle custom protocol
   取代不可同时满足 no-bytes-to-Vue 的 object URL 候选；冻结 S6A/S6B、3-command allowlist、单一 `img-src`
   scheme delta、native atomic save 与稳定 error codes。本记录不构成 S6 实现、G3 扩展或 G4。
+- 2026-08-20 / S6A/S6B：S6A `8b99849d418a3ef226f4133128f1ac22a438f9d5` 与 S6B
+  `4a8dce6a6526e37052941f6dbb921ba2486e109f` 分别独立 PASS；G3 仍只包含 S3/S4/S5。
+- 2026-08-20 / 1.2.0 S7-READINESS Accepted：确认 Contracts canonical MP4 可播放/可 Range seek，而 Host S3
+  transport-only MP4 不可播放；冻结 S7F producer conformance、独立 multi-request Range video opaque protocol、
+  native `.mp4` save、精确 `media-src` 与 S7A/S7B stop conditions。本记录不构成 S7 实现、G3 扩展或 G4。
 - S6 readiness Owner capture：Product/Design `READY FOR S6A; S6B WAITS FOR S6A PASS`；Technical
   `APPROVED FOR S6A CODING WITH EXACT THREE COMMANDS + ONE IMAGE SCHEME`；Security/Data
   `APPROVED FOR S6A CODING WITH NO NEW DEPENDENCY/PLUGIN/CAPABILITY AND EXACT CSP DELTA`。依据是用户本轮
