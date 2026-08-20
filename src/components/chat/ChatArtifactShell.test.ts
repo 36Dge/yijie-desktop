@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 
 import axe from "axe-core";
-import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vitest";
+import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ChatArtifact } from "../../domain/chat-ipc";
 import { createArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "./ChatArtifactList.vue";
@@ -10,6 +11,13 @@ import ChatArtifactShell from "./ChatArtifactShell.vue";
 
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000301";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000302";
+const CONTEXT_ID = "019c1a00-0000-7000-8000-000000000300";
+const PREVIEW_URL = `yijie-artifact-preview://localhost/v1/${"D".repeat(43)}`;
+const NATIVE_CLIENT: ChatArtifactNativeClient = {
+  openImagePreview: vi.fn(async () => ({ status: "opened" as const, previewUrl: PREVIEW_URL })),
+  releaseImagePreview: vi.fn(async () => ({ status: "released" as const })),
+  saveImage: vi.fn(async () => ({ status: "saved" as const, code: null })),
+};
 
 function artifact(
   ordinal: number,
@@ -47,7 +55,9 @@ describe("ChatArtifactShell", () => {
       artifact(6, { status: "cancelled", errorCode: "turn_interrupted", retryable: false }),
       artifact(7, { status: "expired", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
     ];
-    const wrapper = mount(ChatArtifactList, { props: { artifacts: items } });
+    const wrapper = mount(ChatArtifactList, {
+      props: { artifacts: items, contextId: CONTEXT_ID, nativeClient: NATIVE_CLIENT },
+    });
 
     expect(wrapper.text()).toContain("demo.png");
     expect(wrapper.text()).toContain("图片");
@@ -63,7 +73,11 @@ describe("ChatArtifactShell", () => {
 
   it("exposes busy, live, focus, and trusted progress semantics without inventing a percent", () => {
     const unknown = mount(ChatArtifactShell, {
-      props: { artifact: artifact(0, { status: "generating", progressStage: "generating" }) },
+      props: {
+        artifact: artifact(0, { status: "generating", progressStage: "generating" }),
+        contextId: CONTEXT_ID,
+        nativeClient: NATIVE_CLIENT,
+      },
     });
     expect(unknown.get("article").attributes("aria-busy")).toBe("true");
     expect(unknown.get("article").attributes("tabindex")).toBe("0");
@@ -78,6 +92,8 @@ describe("ChatArtifactShell", () => {
           progressStage: "processing",
           progressPercent: 57,
         }),
+        contextId: CONTEXT_ID,
+        nativeClient: NATIVE_CLIENT,
       },
     });
     const progress = trusted.get("[role='progressbar']");
@@ -88,10 +104,12 @@ describe("ChatArtifactShell", () => {
     expect(trusted.get("[aria-live='polite']").text()).not.toContain("57%");
   });
 
-  it("has no preview, action, link, path, payload, or executable-content surface", async () => {
+  it("escapes the safe name and keeps the image action surface metadata-only", async () => {
     const wrapper = mount(ChatArtifactList, {
       attachTo: document.body,
       props: {
+        contextId: CONTEXT_ID,
+        nativeClient: NATIVE_CLIENT,
         artifacts: [artifact(0, {
           status: "ready",
           displayName: "<img onerror=alert(1)>.png",
@@ -102,8 +120,11 @@ describe("ChatArtifactShell", () => {
         })],
       },
     });
+    await flushPromises();
 
-    expect(wrapper.find("img, video, audio, iframe, a, button").exists()).toBe(false);
+    expect(wrapper.find("img").exists()).toBe(true);
+    expect(wrapper.find("video, audio, iframe, a").exists()).toBe(false);
+    expect(wrapper.findAll("button").length).toBeGreaterThanOrEqual(2);
     expect(wrapper.text()).toContain("<img onerror=alert(1)>.png");
     expect(wrapper.html()).not.toMatch(/(?:base64|digest|hostHref|absolutePath|token|v-html)/i);
     expect((await axe.run(wrapper.element)).violations).toEqual([]);

@@ -9,6 +9,7 @@ import {
   CircleStop,
   Clock3,
   Ellipsis,
+  Download,
   FileText,
   Folder,
   FolderOpen,
@@ -33,6 +34,8 @@ import {
   TriangleAlert,
   UserRound,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "@lucide/vue";
 
 export const iconRegistry = {
@@ -43,6 +46,7 @@ export const iconRegistry = {
   chevronRight: ChevronRight,
   collapseSidebar: PanelLeftClose,
   dismiss: X,
+  download: Download,
   edit: Pencil,
   file: FileText,
   folder: Folder,
@@ -69,6 +73,8 @@ export const iconRegistry = {
   user: UserRound,
   warning: TriangleAlert,
   workspace: LayoutDashboard,
+  zoomIn: ZoomIn,
+  zoomOut: ZoomOut,
 } as const satisfies Record<string, Component>;
 
 export type YjIconName = keyof typeof iconRegistry;

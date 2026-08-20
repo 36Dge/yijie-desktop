@@ -11,6 +11,7 @@ describe("iconRegistry", () => {
       "chevronRight",
       "collapseSidebar",
       "dismiss",
+      "download",
       "edit",
       "expandSidebar",
       "file",
@@ -37,6 +38,8 @@ describe("iconRegistry", () => {
       "user",
       "warning",
       "workspace",
+      "zoomIn",
+      "zoomOut",
     ]);
   });
 

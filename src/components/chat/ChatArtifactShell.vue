@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { NProgress, NTag } from "naive-ui";
+import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
+import ChatArtifactImage from "./ChatArtifactImage.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
 const props = defineProps<{
   artifact: ArtifactProjection;
+  contextId: string;
+  nativeClient?: ChatArtifactNativeClient;
 }>();
 
 const kindPresentation = computed(() => ({
@@ -65,6 +69,13 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>
     </header>
+
+    <ChatArtifactImage
+      v-if="artifact.kind === 'image' && artifact.status === 'ready'"
+      :artifact="artifact"
+      :context-id="contextId"
+      :client="nativeClient"
+    />
 
     <div class="artifact-shell__status-row">
       <div class="artifact-shell__status" role="status" aria-live="polite" aria-atomic="true">
