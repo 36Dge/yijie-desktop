@@ -1,0 +1,112 @@
+// @vitest-environment happy-dom
+
+import axe from "axe-core";
+import { mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+import type { ChatArtifact } from "../../domain/chat-ipc";
+import { createArtifactProjection } from "../../domain/chat-artifact";
+import ChatArtifactList from "./ChatArtifactList.vue";
+import ChatArtifactShell from "./ChatArtifactShell.vue";
+
+const SESSION_ID = "019c1a00-0000-7000-8000-000000000301";
+const TURN_ID = "019c1a00-0000-7000-8000-000000000302";
+
+function artifact(
+  ordinal: number,
+  overrides: Partial<ChatArtifact> = {},
+) {
+  return createArtifactProjection(SESSION_ID, TURN_ID, Object.freeze({
+    artifactId: `019c1a00-0000-7000-8000-0000000003${String(ordinal + 3).padStart(2, "0")}`,
+    kind: "image",
+    provenance: "synthetic",
+    status: "announced",
+    ordinal,
+    progressStage: null,
+    progressPercent: null,
+    displayName: null,
+    mediaType: null,
+    sizeBytes: null,
+    localCommittedAt: null,
+    expiresAt: null,
+    hasPoster: false,
+    errorCode: null,
+    retryable: null,
+    ...overrides,
+  }));
+}
+
+describe("ChatArtifactShell", () => {
+  it("renders safe metadata, all generic states, four kinds, and synthetic provenance", () => {
+    const items = [
+      artifact(0, { kind: "image", status: "announced", displayName: "demo.png" }),
+      artifact(1, { kind: "video", status: "generating", progressStage: "generating" }),
+      artifact(2, { kind: "file", status: "processing", progressStage: "processing", progressPercent: 42 }),
+      artifact(3, { kind: "report", status: "transferring", mediaType: "application/vnd.yijie.report+json;version=1", sizeBytes: 32 }),
+      artifact(4, { status: "ready", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
+      artifact(5, { status: "failed", errorCode: "artifact_failed", retryable: false }),
+      artifact(6, { status: "cancelled", errorCode: "turn_interrupted", retryable: false }),
+      artifact(7, { status: "expired", mediaType: "image/png", sizeBytes: 32, localCommittedAt: 1_000, expiresAt: 605_801_000 }),
+    ];
+    const wrapper = mount(ChatArtifactList, { props: { artifacts: items } });
+
+    expect(wrapper.text()).toContain("demo.png");
+    expect(wrapper.text()).toContain("图片");
+    expect(wrapper.text()).toContain("视频");
+    expect(wrapper.text()).toContain("文件");
+    expect(wrapper.text()).toContain("报告");
+    expect(wrapper.text()).toContain("本地合成演示");
+    for (const label of ["已登记", "正在生成", "正在处理", "正在安全传输", "已就绪", "失败", "已取消", "已过期"]) {
+      expect(wrapper.text()).toContain(label);
+    }
+    expect(wrapper.findAll("article")).toHaveLength(8);
+  });
+
+  it("exposes busy, live, focus, and trusted progress semantics without inventing a percent", () => {
+    const unknown = mount(ChatArtifactShell, {
+      props: { artifact: artifact(0, { status: "generating", progressStage: "generating" }) },
+    });
+    expect(unknown.get("article").attributes("aria-busy")).toBe("true");
+    expect(unknown.get("article").attributes("tabindex")).toBe("0");
+    expect(unknown.get("[aria-live='polite']").text()).toContain("正在生成");
+    expect(unknown.find("[role='progressbar']").exists()).toBe(false);
+    expect(unknown.text()).not.toContain("0%");
+
+    const trusted = mount(ChatArtifactShell, {
+      props: {
+        artifact: artifact(1, {
+          status: "processing",
+          progressStage: "processing",
+          progressPercent: 57,
+        }),
+      },
+    });
+    const progress = trusted.get("[role='progressbar']");
+    expect(progress.attributes("aria-valuemin")).toBe("0");
+    expect(progress.attributes("aria-valuemax")).toBe("100");
+    expect(progress.attributes("aria-valuenow")).toBe("57");
+    expect(trusted.text()).toContain("57%");
+    expect(trusted.get("[aria-live='polite']").text()).not.toContain("57%");
+  });
+
+  it("has no preview, action, link, path, payload, or executable-content surface", async () => {
+    const wrapper = mount(ChatArtifactList, {
+      attachTo: document.body,
+      props: {
+        artifacts: [artifact(0, {
+          status: "ready",
+          displayName: "<img onerror=alert(1)>.png",
+          mediaType: "image/png",
+          sizeBytes: 32,
+          localCommittedAt: 1_000,
+          expiresAt: 605_801_000,
+        })],
+      },
+    });
+
+    expect(wrapper.find("img, video, audio, iframe, a, button").exists()).toBe(false);
+    expect(wrapper.text()).toContain("<img onerror=alert(1)>.png");
+    expect(wrapper.html()).not.toMatch(/(?:base64|digest|hostHref|absolutePath|token|v-html)/i);
+    expect((await axe.run(wrapper.element)).violations).toEqual([]);
+    wrapper.unmount();
+  });
+});
