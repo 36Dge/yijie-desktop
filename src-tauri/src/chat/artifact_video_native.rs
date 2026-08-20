@@ -26,7 +26,6 @@ const VIDEO_HOST: &str = "localhost";
 const ABSOLUTE_TTL_SECONDS: i64 = 30 * 60;
 const IDLE_TTL_SECONDS: i64 = 5 * 60;
 const MAX_HANDLES_PER_WEBVIEW: usize = 2;
-const MAX_REQUESTS_PER_HANDLE: u8 = 64;
 const MAX_CONCURRENT_REQUESTS: usize = 2;
 const MAX_INFLIGHT_BYTES: usize = 64 * 1024 * 1024;
 const NATIVE_IO_TIMEOUT_SECONDS: u64 = 10;
@@ -81,7 +80,6 @@ struct VideoPreviewBinding {
     expectation: VideoExpectation,
     absolute_expires_at: i64,
     idle_expires_at: i64,
-    successful_requests: u8,
     active_requests: u8,
     fully_validated_in_protocol: bool,
 }
@@ -175,7 +173,6 @@ impl VideoPreviewRegistry {
                     },
                     absolute_expires_at,
                     idle_expires_at,
-                    successful_requests: 0,
                     active_requests: 0,
                     fully_validated_in_protocol: false,
                 },
@@ -195,11 +192,7 @@ impl VideoPreviewRegistry {
         let Some(entry) = self.entries.get_mut(handle) else {
             return Err(ArtifactNativeCode::NotFound);
         };
-        if entry.process_epoch != self.process_epoch
-            || entry.webview_label != webview_label
-            || usize::from(entry.successful_requests) + usize::from(entry.active_requests)
-                >= usize::from(MAX_REQUESTS_PER_HANDLE)
-        {
+        if entry.process_epoch != self.process_epoch || entry.webview_label != webview_label {
             return Err(ArtifactNativeCode::NotFound);
         }
         entry.active_requests = entry
@@ -216,20 +209,14 @@ impl VideoPreviewRegistry {
     }
 
     fn complete_success(&mut self, request: &VideoRequestBinding, now: i64) {
-        let mut exhausted = false;
         if let Some(entry) = self.entries.get_mut(&request.handle) {
             entry.active_requests = entry.active_requests.saturating_sub(1);
-            entry.successful_requests = entry.successful_requests.saturating_add(1);
             entry.fully_validated_in_protocol = true;
             entry.idle_expires_at = now
                 .checked_add(IDLE_TTL_SECONDS)
                 .map_or(entry.absolute_expires_at, |idle| {
                     idle.min(entry.absolute_expires_at)
                 });
-            exhausted = entry.successful_requests >= MAX_REQUESTS_PER_HANDLE;
-        }
-        if exhausted {
-            self.entries.remove(&request.handle);
         }
     }
 
@@ -316,6 +303,60 @@ pub struct ArtifactVideoNativeRuntime {
     registry: Mutex<VideoPreviewRegistry>,
     reads: Mutex<VideoReadLimits>,
     active_saves: Mutex<HashSet<ReadyVideoIdentity>>,
+    #[cfg(feature = "feat128-s7b-runtime")]
+    diagnostics: Mutex<VideoProtocolDiagnostics>,
+}
+
+#[cfg(feature = "feat128-s7b-runtime")]
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VideoProtocolDiagnostics {
+    pub(crate) requests_total: u64,
+    pub(crate) get_requests: u64,
+    pub(crate) head_requests: u64,
+    pub(crate) other_method_requests: u64,
+    pub(crate) range_headers: u64,
+    pub(crate) origin_headers: u64,
+    pub(crate) cookie_headers: u64,
+    pub(crate) content_length_headers: u64,
+    pub(crate) transfer_encoding_headers: u64,
+    pub(crate) validation_success: u64,
+    pub(crate) validation_webview_or_body_rejected: u64,
+    pub(crate) validation_method_rejected: u64,
+    pub(crate) validation_duplicate_range_rejected: u64,
+    pub(crate) validation_origin_rejected: u64,
+    pub(crate) validation_cookie_rejected: u64,
+    pub(crate) validation_content_length_rejected: u64,
+    pub(crate) validation_transfer_encoding_rejected: u64,
+    pub(crate) validation_uri_rejected: u64,
+    pub(crate) begin_request_failed: u64,
+    pub(crate) range_parse_failed: u64,
+    pub(crate) parsed_range_requests: u64,
+    pub(crate) whole_resource_ranges: u64,
+    pub(crate) prefix_ranges: u64,
+    pub(crate) suffix_ranges: u64,
+    pub(crate) middle_ranges: u64,
+    pub(crate) distinct_ranges: u64,
+    pub(crate) repeated_ranges: u64,
+    #[serde(skip)]
+    seen_ranges: HashSet<(usize, usize)>,
+    pub(crate) reservation_failed: u64,
+    pub(crate) full_authorization_failed: u64,
+    pub(crate) full_identity_failed: u64,
+    pub(crate) full_media_type_failed: u64,
+    pub(crate) full_size_failed: u64,
+    pub(crate) full_digest_failed: u64,
+    pub(crate) mp4_validation_failed: u64,
+    pub(crate) full_validation_success: u64,
+    pub(crate) range_authorization_failed: u64,
+    pub(crate) range_validation_failed: u64,
+    pub(crate) range_validation_success: u64,
+    pub(crate) body_length_failed: u64,
+    pub(crate) responses_ok: u64,
+    pub(crate) responses_partial: u64,
+    pub(crate) responses_head: u64,
+    pub(crate) responses_not_found: u64,
+    pub(crate) responses_range_not_satisfiable: u64,
 }
 
 impl ArtifactVideoNativeRuntime {
@@ -326,7 +367,129 @@ impl ArtifactVideoNativeRuntime {
             registry: Mutex::new(VideoPreviewRegistry::new(process_epoch)),
             reads: Mutex::new(VideoReadLimits::default()),
             active_saves: Mutex::new(HashSet::new()),
+            #[cfg(feature = "feat128-s7b-runtime")]
+            diagnostics: Mutex::new(VideoProtocolDiagnostics::default()),
         }
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    fn diagnose(&self, update: impl FnOnce(&mut VideoProtocolDiagnostics)) {
+        if let Ok(mut diagnostics) = self.diagnostics.lock() {
+            update(&mut diagnostics);
+        }
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    fn diagnose_request(&self, method: &str, headers: &[(String, String)]) {
+        self.diagnose(|diagnostics| {
+            diagnostics.requests_total = diagnostics.requests_total.saturating_add(1);
+            match method {
+                "GET" => diagnostics.get_requests = diagnostics.get_requests.saturating_add(1),
+                "HEAD" => diagnostics.head_requests = diagnostics.head_requests.saturating_add(1),
+                _ => {
+                    diagnostics.other_method_requests =
+                        diagnostics.other_method_requests.saturating_add(1)
+                }
+            }
+            for (name, _) in headers {
+                match name.to_ascii_lowercase().as_str() {
+                    "range" => {
+                        diagnostics.range_headers = diagnostics.range_headers.saturating_add(1)
+                    }
+                    "origin" => {
+                        diagnostics.origin_headers = diagnostics.origin_headers.saturating_add(1)
+                    }
+                    "cookie" => {
+                        diagnostics.cookie_headers = diagnostics.cookie_headers.saturating_add(1)
+                    }
+                    "content-length" => {
+                        diagnostics.content_length_headers =
+                            diagnostics.content_length_headers.saturating_add(1)
+                    }
+                    "transfer-encoding" => {
+                        diagnostics.transfer_encoding_headers =
+                            diagnostics.transfer_encoding_headers.saturating_add(1)
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    fn diagnose_validation_error(&self, error: ProtocolValidationError) {
+        self.diagnose(|diagnostics| match error {
+            ProtocolValidationError::WebviewOrBody => {
+                diagnostics.validation_webview_or_body_rejected = diagnostics
+                    .validation_webview_or_body_rejected
+                    .saturating_add(1)
+            }
+            ProtocolValidationError::Method => {
+                diagnostics.validation_method_rejected =
+                    diagnostics.validation_method_rejected.saturating_add(1)
+            }
+            ProtocolValidationError::DuplicateRange => {
+                diagnostics.validation_duplicate_range_rejected = diagnostics
+                    .validation_duplicate_range_rejected
+                    .saturating_add(1)
+            }
+            ProtocolValidationError::Origin => {
+                diagnostics.validation_origin_rejected =
+                    diagnostics.validation_origin_rejected.saturating_add(1)
+            }
+            ProtocolValidationError::Cookie => {
+                diagnostics.validation_cookie_rejected =
+                    diagnostics.validation_cookie_rejected.saturating_add(1)
+            }
+            ProtocolValidationError::ContentLength => {
+                diagnostics.validation_content_length_rejected = diagnostics
+                    .validation_content_length_rejected
+                    .saturating_add(1)
+            }
+            ProtocolValidationError::TransferEncoding => {
+                diagnostics.validation_transfer_encoding_rejected = diagnostics
+                    .validation_transfer_encoding_rejected
+                    .saturating_add(1)
+            }
+            ProtocolValidationError::Uri => {
+                diagnostics.validation_uri_rejected =
+                    diagnostics.validation_uri_rejected.saturating_add(1)
+            }
+        });
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    fn diagnose_requested_range(&self, requested: RequestedRange, total: usize) {
+        self.diagnose(|diagnostics| {
+            diagnostics.parsed_range_requests = diagnostics.parsed_range_requests.saturating_add(1);
+            let (start, end) = match requested {
+                RequestedRange::Full => (0, total.saturating_sub(1)),
+                RequestedRange::Slice { start, end } => (start, end),
+            };
+            if start == 0 && end.saturating_add(1) == total {
+                diagnostics.whole_resource_ranges =
+                    diagnostics.whole_resource_ranges.saturating_add(1);
+            } else if start == 0 {
+                diagnostics.prefix_ranges = diagnostics.prefix_ranges.saturating_add(1);
+            } else if end.saturating_add(1) == total {
+                diagnostics.suffix_ranges = diagnostics.suffix_ranges.saturating_add(1);
+            } else {
+                diagnostics.middle_ranges = diagnostics.middle_ranges.saturating_add(1);
+            }
+            if diagnostics.seen_ranges.insert((start, end)) {
+                diagnostics.distinct_ranges = diagnostics.distinct_ranges.saturating_add(1);
+            } else {
+                diagnostics.repeated_ranges = diagnostics.repeated_ranges.saturating_add(1);
+            }
+        });
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    pub(crate) fn diagnostics_snapshot(&self) -> VideoProtocolDiagnostics {
+        self.diagnostics
+            .lock()
+            .map(|diagnostics| diagnostics.clone())
+            .unwrap_or_default()
     }
 
     pub fn invalidate_all(&self) {
@@ -905,32 +1068,46 @@ struct ProtocolRequest {
     range: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProtocolValidationError {
+    WebviewOrBody,
+    Method,
+    DuplicateRange,
+    Origin,
+    Cookie,
+    ContentLength,
+    TransferEncoding,
+    Uri,
+}
+
 fn validate_protocol_request(
     webview_label: &str,
     method: &str,
     uri: &str,
     headers: &[(String, String)],
     body: &[u8],
-) -> Result<ProtocolRequest, ()> {
+) -> Result<ProtocolRequest, ProtocolValidationError> {
     if webview_label != MAIN_WEBVIEW || !body.is_empty() {
-        return Err(());
+        return Err(ProtocolValidationError::WebviewOrBody);
     }
     let head = match method {
         value if value == Method::GET.as_str() => false,
         value if value == Method::HEAD.as_str() => true,
-        _ => return Err(()),
+        _ => return Err(ProtocolValidationError::Method),
     };
     let mut range = None;
     for (name, value) in headers {
         match name.to_ascii_lowercase().as_str() {
             "range" if range.is_none() => range = Some(value.clone()),
-            "range" | "origin" | "cookie" | "content-length" | "transfer-encoding" => {
-                return Err(())
-            }
+            "range" => return Err(ProtocolValidationError::DuplicateRange),
+            "origin" => return Err(ProtocolValidationError::Origin),
+            "cookie" => return Err(ProtocolValidationError::Cookie),
+            "content-length" => return Err(ProtocolValidationError::ContentLength),
+            "transfer-encoding" => return Err(ProtocolValidationError::TransferEncoding),
             _ => {}
         }
     }
-    let parsed = url::Url::parse(uri).map_err(|_| ())?;
+    let parsed = url::Url::parse(uri).map_err(|_| ProtocolValidationError::Uri)?;
     if parsed.scheme() != VIDEO_SCHEME
         || parsed.host_str() != Some(VIDEO_HOST)
         || parsed.port().is_some()
@@ -939,15 +1116,18 @@ fn validate_protocol_request(
         || parsed.query().is_some()
         || parsed.fragment().is_some()
     {
-        return Err(());
+        return Err(ProtocolValidationError::Uri);
     }
-    let handle = parsed.path().strip_prefix("/v1/").ok_or(())?;
+    let handle = parsed
+        .path()
+        .strip_prefix("/v1/")
+        .ok_or(ProtocolValidationError::Uri)?;
     if handle.len() != 43
         || handle
             .bytes()
             .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'-' | b'_'))
     {
-        return Err(());
+        return Err(ProtocolValidationError::Uri);
     }
     Ok(ProtocolRequest {
         handle: handle.to_owned(),
@@ -1037,6 +1217,9 @@ pub fn handle_video_protocol(
             )
         })
         .collect::<Vec<_>>();
+    #[cfg(feature = "feat128-s7b-runtime")]
+    app.state::<ArtifactVideoNativeRuntime>()
+        .diagnose_request(request.method().as_str(), &headers);
     let protocol = match validate_protocol_request(
         &webview_label,
         request.method().as_str(),
@@ -1044,11 +1227,28 @@ pub fn handle_video_protocol(
         &headers,
         request.body(),
     ) {
-        Ok(protocol) => protocol,
-        Err(()) => {
+        Ok(protocol) => {
+            #[cfg(feature = "feat128-s7b-runtime")]
+            app.state::<ArtifactVideoNativeRuntime>()
+                .diagnose(|diagnostics| {
+                    diagnostics.validation_success =
+                        diagnostics.validation_success.saturating_add(1)
+                });
+            protocol
+        }
+        Err(_validation_error) => {
+            #[cfg(feature = "feat128-s7b-runtime")]
+            app.state::<ArtifactVideoNativeRuntime>()
+                .diagnose_validation_error(_validation_error);
             if let Some(handle) = handle_for_failure_cleanup(&uri) {
                 app.state::<ArtifactVideoNativeRuntime>().revoke(&handle);
             }
+            #[cfg(feature = "feat128-s7b-runtime")]
+            app.state::<ArtifactVideoNativeRuntime>()
+                .diagnose(|diagnostics| {
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1)
+                });
             responder.respond(protocol_not_found());
             return;
         }
@@ -1058,6 +1258,11 @@ pub fn handle_video_protocol(
         let now = match unix_seconds() {
             Ok(now) => now,
             Err(_) => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1)
+                });
                 responder.respond(protocol_not_found());
                 return;
             }
@@ -1065,14 +1270,33 @@ pub fn handle_video_protocol(
         let binding = match runtime.begin_request(&protocol.handle, &webview_label, now) {
             Ok(binding) => binding,
             Err(_) => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    diagnostics.begin_request_failed =
+                        diagnostics.begin_request_failed.saturating_add(1);
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1);
+                });
                 responder.respond(protocol_not_found());
                 return;
             }
         };
         let requested =
             match parse_single_range(protocol.range.as_deref(), binding.expectation.size) {
-                Ok(range) => range,
+                Ok(range) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose_requested_range(range, binding.expectation.size);
+                    range
+                }
                 Err(()) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.range_parse_failed =
+                            diagnostics.range_parse_failed.saturating_add(1);
+                        diagnostics.responses_range_not_satisfiable = diagnostics
+                            .responses_range_not_satisfiable
+                            .saturating_add(1);
+                    });
                     runtime.revoke(&protocol.handle);
                     responder.respond(protocol_range_not_satisfiable(binding.expectation.size));
                     return;
@@ -1091,6 +1315,13 @@ pub fn handle_video_protocol(
         let reservation = match runtime.reserve(reservation_bytes) {
             Ok(reservation) => reservation,
             Err(_) => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    diagnostics.reservation_failed =
+                        diagnostics.reservation_failed.saturating_add(1);
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1);
+                });
                 runtime.revoke(&protocol.handle);
                 responder.respond(protocol_not_found());
                 return;
@@ -1110,13 +1341,60 @@ pub fn handle_video_protocol(
             )
             .await
             {
-                Ok(mut content)
-                    if content.identity == binding.identity
-                        && content.media_type == "video/mp4"
-                        && content.size_bytes == binding.expectation.size
-                        && content.sha256 == binding.expectation.sha256
-                        && validate_mp4(&content.bytes).is_ok() =>
-                {
+                Err(_) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_authorization_failed =
+                            diagnostics.full_authorization_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(content) if content.identity != binding.identity => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_identity_failed =
+                            diagnostics.full_identity_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(content) if content.media_type != "video/mp4" => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_media_type_failed =
+                            diagnostics.full_media_type_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(content) if content.size_bytes != binding.expectation.size => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_size_failed =
+                            diagnostics.full_size_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(content) if content.sha256 != binding.expectation.sha256 => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_digest_failed =
+                            diagnostics.full_digest_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(content) if validate_mp4(&content.bytes).is_err() => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.mp4_validation_failed =
+                            diagnostics.mp4_validation_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Ok(mut content) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.full_validation_success =
+                            diagnostics.full_validation_success.saturating_add(1)
+                    });
                     if protocol.head {
                         content.bytes.clear();
                     } else {
@@ -1125,7 +1403,6 @@ pub fn handle_video_protocol(
                     }
                     Ok(content.bytes)
                 }
-                _ => Err(()),
             }
         } else {
             match authorized_video_range(
@@ -1144,18 +1421,69 @@ pub fn handle_video_protocol(
                         && content.size_bytes == binding.expectation.size
                         && content.sha256 == binding.expectation.sha256 =>
                 {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.range_validation_success =
+                            diagnostics.range_validation_success.saturating_add(1)
+                    });
                     Ok(content.bytes)
                 }
-                _ => Err(()),
+                Ok(_) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.range_validation_failed =
+                            diagnostics.range_validation_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
+                Err(_) => {
+                    #[cfg(feature = "feat128-s7b-runtime")]
+                    runtime.diagnose(|diagnostics| {
+                        diagnostics.range_authorization_failed =
+                            diagnostics.range_authorization_failed.saturating_add(1)
+                    });
+                    Err(())
+                }
             }
         };
         let response = match body {
             Ok(body) if body.len() == body_length => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    if protocol.head {
+                        diagnostics.responses_head = diagnostics.responses_head.saturating_add(1);
+                    }
+                    match requested {
+                        RequestedRange::Full => {
+                            diagnostics.responses_ok = diagnostics.responses_ok.saturating_add(1)
+                        }
+                        RequestedRange::Slice { .. } => {
+                            diagnostics.responses_partial =
+                                diagnostics.responses_partial.saturating_add(1)
+                        }
+                    }
+                });
                 runtime.complete_success(&binding, now);
                 schedule_idle_expiry(&app);
                 protocol_success(body, binding.expectation.size, requested, protocol.head)
             }
-            _ => {
+            Ok(_) => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    diagnostics.body_length_failed =
+                        diagnostics.body_length_failed.saturating_add(1);
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1);
+                });
+                runtime.revoke(&protocol.handle);
+                protocol_not_found()
+            }
+            Err(()) => {
+                #[cfg(feature = "feat128-s7b-runtime")]
+                runtime.diagnose(|diagnostics| {
+                    diagnostics.responses_not_found =
+                        diagnostics.responses_not_found.saturating_add(1)
+                });
                 runtime.revoke(&protocol.handle);
                 protocol_not_found()
             }
@@ -1636,26 +1964,25 @@ mod tests {
     }
 
     #[test]
-    fn registry_revokes_after_sixty_four_successful_requests_and_on_release() {
-        let mut registry = VideoPreviewRegistry::new(Uuid::now_v7());
+    fn registry_supports_playback_range_volume_until_lifecycle_revocation() {
+        let epoch = Uuid::now_v7();
+        let mut registry = VideoPreviewRegistry::new(epoch);
         let context_id = Uuid::now_v7();
         let video = content(Uuid::now_v7(), 10);
         let handle = registry
             .issue(MAIN_WEBVIEW, context_id, &video, 10)
             .unwrap();
-        for now in 11..75 {
+        for now in 11..139 {
             let request = registry.begin_request(&handle, MAIN_WEBVIEW, now).unwrap();
             registry.complete_success(&request, now);
         }
-        assert_eq!(registry.active_count(), 0);
+        assert_eq!(registry.active_count(), 1);
         assert_eq!(
-            registry.begin_request(&handle, MAIN_WEBVIEW, 75),
+            registry.begin_request(&handle, "secondary", 139),
             Err(ArtifactNativeCode::NotFound)
         );
+        assert_eq!(registry.active_count(), 1);
 
-        let handle = registry
-            .issue(MAIN_WEBVIEW, context_id, &video, 100)
-            .unwrap();
         registry.release(
             MAIN_WEBVIEW,
             context_id,
@@ -1664,13 +1991,55 @@ mod tests {
                 turn_id: video.identity.turn_id,
                 artifact_id: video.identity.artifact_id,
             },
-            101,
+            140,
         );
         assert_eq!(registry.active_count(), 0);
         assert_eq!(
-            registry.begin_request(&handle, MAIN_WEBVIEW, 101),
+            registry.begin_request(&handle, MAIN_WEBVIEW, 140),
             Err(ArtifactNativeCode::NotFound)
         );
+
+        let idle_handle = registry
+            .issue(MAIN_WEBVIEW, context_id, &video, 1_000)
+            .unwrap();
+        assert_eq!(registry.active_count(), 1);
+        registry.remove_expired(1_300);
+        assert_eq!(registry.active_count(), 0);
+        assert_eq!(
+            registry.begin_request(&idle_handle, MAIN_WEBVIEW, 1_300),
+            Err(ArtifactNativeCode::NotFound)
+        );
+
+        let absolute_handle = registry
+            .issue(MAIN_WEBVIEW, context_id, &video, 2_000)
+            .unwrap();
+        for now in [2_299, 2_598, 2_897, 3_196, 3_495, 3_794] {
+            let request = registry
+                .begin_request(&absolute_handle, MAIN_WEBVIEW, now)
+                .unwrap();
+            registry.complete_success(&request, now);
+        }
+        registry.remove_expired(3_800);
+        assert_eq!(registry.active_count(), 0);
+
+        registry
+            .issue(MAIN_WEBVIEW, context_id, &video, 4_000)
+            .unwrap();
+        registry.invalidate_context(context_id);
+        assert_eq!(registry.active_count(), 0);
+
+        registry
+            .issue(MAIN_WEBVIEW, context_id, &video, 5_000)
+            .unwrap();
+        registry.invalidate_webview(MAIN_WEBVIEW);
+        assert_eq!(registry.active_count(), 0);
+
+        registry
+            .issue(MAIN_WEBVIEW, context_id, &video, 6_000)
+            .unwrap();
+        let restarted = VideoPreviewRegistry::new(Uuid::now_v7());
+        assert_ne!(restarted.process_epoch, epoch);
+        assert_eq!(restarted.active_count(), 0);
     }
 
     #[test]
@@ -1749,6 +2118,35 @@ mod tests {
     #[test]
     fn accepts_a_bounded_avc_sample_table() {
         assert!(validate_mp4(&test_mp4_bytes()).is_ok());
+    }
+
+    #[cfg(feature = "feat128-s7b-runtime")]
+    #[test]
+    fn runtime_diagnostics_are_content_free_monotonic_stage_counts() {
+        let runtime = ArtifactVideoNativeRuntime::new();
+        runtime.diagnose_request(
+            "GET",
+            &[
+                ("Range".to_owned(), "bytes=0-1".to_owned()),
+                ("Origin".to_owned(), "redacted".to_owned()),
+            ],
+        );
+        runtime.diagnose_validation_error(ProtocolValidationError::Origin);
+        runtime.diagnose_requested_range(RequestedRange::Slice { start: 0, end: 1 }, 100);
+        runtime.diagnose_requested_range(RequestedRange::Slice { start: 0, end: 1 }, 100);
+        let snapshot = runtime.diagnostics_snapshot();
+        assert_eq!(snapshot.requests_total, 1);
+        assert_eq!(snapshot.get_requests, 1);
+        assert_eq!(snapshot.range_headers, 1);
+        assert_eq!(snapshot.origin_headers, 1);
+        assert_eq!(snapshot.validation_origin_rejected, 1);
+        assert_eq!(snapshot.prefix_ranges, 2);
+        assert_eq!(snapshot.distinct_ranges, 1);
+        assert_eq!(snapshot.repeated_ranges, 1);
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        assert!(!encoded.contains("bytes=0-1"));
+        assert!(!encoded.contains("redacted"));
+        assert!(!encoded.contains("\"seenRanges\""));
     }
 
     #[test]

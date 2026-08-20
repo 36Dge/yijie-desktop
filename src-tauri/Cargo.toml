@@ -17,6 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = []
 feat126-s10-driver = []
+feat128-s7b-runtime = []
 
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }

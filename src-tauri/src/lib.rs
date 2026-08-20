@@ -2,6 +2,8 @@ pub mod chat;
 #[cfg(feature = "feat126-s10-driver")]
 mod feat126_s10_driver;
 mod feat126_secure_storage;
+#[cfg(feature = "feat128-s7b-runtime")]
+mod feat128_s7b_runtime;
 mod native_auth;
 
 pub use feat126_secure_storage::feat126_secure_storage_test_control;
@@ -120,11 +122,17 @@ pub fn run() {
     let chat_native_auth = native_auth.clone();
     let chat_secure_storage = secure_storage.profile();
     let chat_secure_storage_invalid = secure_storage.is_invalid();
+    #[cfg(feature = "feat128-s7b-runtime")]
+    let feat128_s7b_runtime =
+        feat128_s7b_runtime::Feat128S7bRuntimeHarness::from_environment(secure_storage.profile())
+            .unwrap_or_else(|failure| panic!("{failure}"));
     let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
         .manage(ArtifactNativeRuntime::new())
         .manage(ArtifactVideoNativeRuntime::new());
+    #[cfg(feature = "feat128-s7b-runtime")]
+    let builder = builder.manage(feat128_s7b_runtime);
     let builder = builder.on_window_event(|window, event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
             window
@@ -203,6 +211,8 @@ pub fn run() {
                 chat_secure_storage_invalid,
                 chat_native_auth.clone(),
             ));
+            #[cfg(feature = "feat128-s7b-runtime")]
+            feat128_s7b_runtime::Feat128S7bRuntimeHarness::start_watchdog(app.handle().clone());
             Ok(())
         }
     });
@@ -255,7 +265,11 @@ pub fn run() {
         chat::ipc::chat_resync_session_v1,
         chat::ipc::chat_resync_session_v2,
         chat::ipc::chat_cancel_request_v1,
-        chat::ipc::chat_unsubscribe_session_v1
+        chat::ipc::chat_unsubscribe_session_v1,
+        #[cfg(feature = "feat128-s7b-runtime")]
+        feat128_s7b_runtime::feat128_s7b_runtime_seed,
+        #[cfg(feature = "feat128-s7b-runtime")]
+        feat128_s7b_runtime::feat128_s7b_runtime_result
     ]);
     #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.invoke_handler(tauri::generate_handler![

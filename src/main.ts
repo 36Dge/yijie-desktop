@@ -2,8 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 const root = document.querySelector("#app");
 const featureDriverEnabled = import.meta.env.VITE_FEAT126_S10_DRIVER === "true";
+const feat128S7bRuntimeEnabled = import.meta.env.VITE_FEAT128_S7B_RUNTIME === "true";
 
-if (featureDriverEnabled) {
+if (featureDriverEnabled && feat128S7bRuntimeEnabled) {
+  throw new Error("test_driver_conflict");
+} else if (feat128S7bRuntimeEnabled) {
+  if (root === null) throw new Error("application_root_missing");
+  void import("./feat128/s7b-runtime-harness").then(({ mountFeat128S7bRuntimeHarness }) =>
+    mountFeat128S7bRuntimeHarness(root),
+  );
+} else if (featureDriverEnabled) {
   if (root === null) {
     void invoke("feat126_s10_driver_fail_closed", {
       failureClass: "driver_frontend_startup_invalid",
