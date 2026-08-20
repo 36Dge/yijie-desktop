@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0
+- 版本：1.1.0
 - 最后更新：2026-08-20
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
@@ -12,11 +12,11 @@
 - 默认语言：中文
 
 本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Contracts S1/S2 与
-downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 native foundation 已实现：SQLCipher v8
-expand-only authority、严格 v3 event/report adapter、owner-bound content/poster transfer、commit 后幂等 ACK、
-7 天 TTL/cleanup receipt，以及唯一新增的 metadata-only 只读 Tauri command `chat_load_history_v3`。S4 没有
-新增 capability、CSP、外部 origin、renderer UI 或保存能力；模型调用、真实 provider、云资源、发布或生产配置
-仍不在授权范围。
+downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 native foundation 已实现 SQLCipher v8
+authority、严格 v3 adapter、owner-bound transfer/ACK、7 天 TTL/cleanup receipt 与 metadata-only
+`chat_load_history_v3`；S5 已实现 provider-neutral domain/store 与通用 metadata shell。S6-READINESS 现已冻结
+图片 preview/save 的原生安全边界，但没有新增 command、custom protocol、capability、CSP、renderer 或保存实现。
+模型调用、真实 provider、云资源、发布或生产配置仍不在授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
 
 ## 目标
 
@@ -110,6 +110,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - 灯箱可以提供放大、缩小、重置、上一张、下一张和下载，但只显示当前能力真实支持的操作。图标按钮必须有
   tooltip 和 accessible name，缩放不得使关闭操作离开可达区域。
 - 图片加载失败必须进入可恢复的预览错误状态；不得显示浏览器破图图标或把资源地址展示给用户。
+- 图片 bytes 只允许由 S6A 批准的 native custom URI protocol 直接交给 WebView 资源加载器；Vue/Pinia 不得接收
+  `ArrayBuffer`、`Uint8Array`、base64、digest、Host href、绝对路径或 bearer。组件只持有本次渲染所需的
+  non-authoritative opaque preview handle，且不得持久化、记录或进入测试快照。
 
 ### 5. 视频 Artifact
 
@@ -170,7 +173,69 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
   请求或绕过审批。
 - Artifact 历史恢复、过期和删除必须遵循后续批准的本地持久化与 cleanup authority；UI 不得以卡片消失冒充
   内容已物理删除。
-- 本候选不批准 CSP 放宽、外部 origin、云服务器、对象存储、数据库或其他付费资源。
+- 除 9.1 冻结的单一 `img-src yijie-artifact-preview:` 增量外，本候选不批准 CSP 放宽、外部 origin、
+  云服务器、对象存储、数据库或其他付费资源。
+
+### 9.1 S6-READINESS：图片 preview 原生边界
+
+- 唯一批准的预览方案是 `yijie-artifact-preview://localhost/v1/<opaque-handle>`。`opaque-handle` 使用 native
+  CSPRNG 生成 256-bit base64url 值，不含 session、artifact、path、digest 或 bearer；它不是单独的授权凭据。
+- WebView 发起 open 时，private IPC envelope 沿用 `requestId/contextId`，payload 只允许
+  `sessionId/turnId/artifactId`。native 必须绑定 `main` WebView label、进程 epoch、当前授权 context、owner、tenant、
+  session、turn 与 Artifact；任一不一致都 fail closed，opaque ID 单独没有访问权。
+- 只允许 SQLCipher 中 `state=ready`、`kind=image`、尚未到期的 `image/png|image/jpeg|image/webp`。每次签发和
+  protocol GET 都重新检查 owner/state/kind/MIME、1..20 MiB、BLOB length、SHA-256 与 image magic/decode limits。
+- handle 自签发起绝对 TTL 30 秒、只允许一次 GET；每个 WebView 最多 4 个未消费 handle、每个 Artifact 最多 1 个，
+  最多 2 个并发读取且总 in-flight response bytes 不超过 40 MiB。达到上限返回稳定 typed error，不驱逐既有读取。
+- protocol 只接受精确 host `localhost`、`/v1/<43-char-base64url>`、无 query、无 request body 的 GET；不支持
+  HEAD、Range、redirect、fetch/XHR 或 CORS。成功响应只含 allowlisted `Content-Type`、`Content-Length`、
+  `Cache-Control: no-store`、`Pragma: no-cache`、`X-Content-Type-Options: nosniff`；全部失败返回 empty 404。
+- handle 在 GET 开始时原子消费；显式 close、组件卸载、替换、session 切换、context invalidation、WebView/app
+  关闭、进程重启或 TTL 到期均清除未消费 registry entry。S6B 必须在卸载/切换时清空 `<img src>` 并调用 release；
+  进程重启后旧 handle 必然无效。
+- CSP 只允许在既有 `img-src` 后追加 `yijie-artifact-preview:`。不得修改 `connect-src`、增加外部 origin、
+  `asset` scope、`media-src`、`object-src`、`frame-src` 或 `unsafe-*`。Artifact 路径不得使用既有 `asset:`、
+  `http://asset.localhost`、`blob:` 或 `data:` 作为绕过。
+
+### 9.2 S6-READINESS：图片 native save 边界
+
+- save 只能由 ready image 上一次明确的 click/keyboard 用户动作触发；private IPC payload 同样只允许
+  `sessionId/turnId/artifactId`，不得接收 filename、destination、path、MIME、digest、href 或 bytes。
+- native 在打开 dialog 前及真正写入前重复 preview 的 owner/state/kind/MIME/size/digest/content 校验。保存只复制
+  SQLCipher authority 的同一不可变 bytes，不转码、不重新编码、不从 Host 重新下载。
+- 使用仓库已经存在的 macOS native `rfd` save panel；dialog 内生成默认 safe name，canonical extension 固定为
+  PNG `.png`、JPEG `.jpg`、WebP `.webp`。无扩展名时 native 追加 canonical extension；不同扩展名 fail closed，
+  不创建临时文件。已有目标的覆盖确认完全由 native panel 管理。
+- dialog 返回后，在用户选择目录内创建随机、`0600`、`create_new`/no-follow 的同目录 temporary file；分块读取
+  SQLCipher BLOB、同步复算 length/SHA-256，写入并 `fsync`，再执行同目录 atomic replace。目标 leaf 若为 symlink
+  或非 regular file 则拒绝；不允许 workspace 自动写入、浏览器 download 或后台保存。
+- Vue 只接收 content-free `{ outcome: saved|cancelled|failed, code }`；不接收或记录目标绝对路径。审计只允许
+  `kind=image`、outcome、stable code 与大小/时延 bucket，不记录 artifact ID、名称、path、digest 或正文。
+- cancel 在创建 temp 前返回；所有正常失败使用 RAII 清理 temp，并保留 SQLCipher authority 以便用户重试。进程或
+  断电崩溃可能在用户明确选择的目录留下 `0600` hidden temp；不为清理它持久化目标路径或扫描任意 filesystem。
+  下次用户再次选择同一目录时只可 best-effort 清理本应用可验证的陈旧 temp；不得把该限制描述为零残留保证。
+
+### 9.3 S6A 最小 Tauri allowlist
+
+- S6A 仅允许新增 app commands：`chat_open_artifact_image_preview_v1`、
+  `chat_release_artifact_image_preview_v1`、`chat_save_artifact_image_v1`；必须逐项加入现有
+  `generate_handler!`，不得新增通用 read/write/path/dialog command。
+- S6A 允许注册唯一 custom scheme `yijie-artifact-preview`，handler 必须再次校验 `main` WebView label 和 registry
+  binding；不得注册 generic asset/file protocol。
+- 当前仓库没有 app-command ACL manifest。若只为这三个 command 新建 manifest，Tauri 会把全部既有 app command
+  置于 ACL 检查下而造成系统性行为变化；因此 S6A 不新增 capability/permission 文件，不引入
+  `tauri-plugin-dialog`、`tauri-plugin-fs` 或 shell。精确命令注册、现有 local-only `main` capability、context/RBAC
+  与 native 参数校验共同组成本切片最小边界。未来全量 app-command ACL 迁移必须另立安全切片。
+- private authority 使用独立 `src-tauri/schemas/chat-artifact-native-v1.schema.json`；不得扩充公共 Contracts、Host
+  wire 或 immutable pin，也不得把 preview/save operation 塞进 metadata-only history schema。
+
+稳定 native error code 集合冻结为：`artifact_native_invalid_request`、`artifact_native_unauthenticated`、
+`artifact_native_forbidden`、`artifact_native_not_found`、`artifact_native_not_ready`、
+`artifact_native_expired`、`artifact_native_unsupported`、`artifact_native_integrity_failed`、
+`artifact_native_limit_exceeded`、`artifact_native_conflict`、`artifact_native_extension_mismatch`、
+`artifact_native_dialog_unavailable`、`artifact_native_permission_denied`、`artifact_native_storage_full`、
+`artifact_native_io_failed`、`artifact_native_unavailable`。跨 owner/tenant/session 的存在性错误统一映射为
+`artifact_native_not_found`；错误响应不得包含 path、name、digest、SQL、正文或 raw OS error。
 
 ### 10. 主题、窗口与可访问性
 
@@ -195,8 +260,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## AI / Codex 必须遵守
 
-- 本文已 Accepted，G2A、Host S3 与 Desktop S4 已通过。下一切片只能进入 S5 provider-neutral
-  domain/store；不得把 S4 native foundation 描述为 renderer、端到端验收或真实 provider 已完成。
+- 本文已 Accepted，G2A、Host S3、Desktop S4/S5 与 G3(S3/S4/S5 only) 已通过。下一编码切片只能进入
+  S6A native image preview/save boundary；S6A 通过后才可进入 S6B image renderer。不得把 S6-READINESS
+  描述为 command/protocol/CSP/save/renderer 已实现，也不得扩展 G3 或声明 G4。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -213,7 +279,8 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - `src/components/chat/`：可复用的 Artifact 列表、图片、视频、文件、报告和预览组件；
 - `src/stores/`：按 session/turn/item identity 合并单调事件，不持有原始路径或大文件正文；
 - `src/pages/chat/`：只组合 assistant message、live turn 和预览入口，不解析 wire 或执行下载副作用；
-- `src-tauri/`：经单独安全批准后负责 owner 校验、内容读取、临时预览句柄、保存和生命周期释放；
+- `src-tauri/`：S6A 按 9.1-9.3 的精确安全批准负责 owner 校验、SQLCipher 内容读取、一次性预览句柄、native
+  保存和生命周期释放；S6B 不得再修改 native/Tauri/CSP；
 - Agent Host 与 Contracts：由对应仓库定义并评审权威事件、历史恢复、读取、过期、错误和兼容语义。
 
 实现必须先固定不可变 Contracts 引用和 provider-first conformance，再由 Desktop 消费；不得在 Vue 中手写一份与
@@ -222,9 +289,11 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## 验收清单
 
-- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；G2A、Host S3 与 Desktop S4 已通过。
+- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；G2A、Host S3 与 Desktop S4/S5 已通过。
 - [x] S4 native authority 持久化单调进度、校验/加密 content 与 poster、commit 后 ACK、TTL receipt，并且
   private IPC v3 只返回安全 metadata；默认 flag 为关闭。
+- [x] S5 provider-neutral reducer/store 与通用 accessible metadata shell 已实现并通过 G3 slice evidence。
+- [x] S6-READINESS 已冻结 custom protocol、opaque handle、native save、最小 command/CSP delta 与稳定错误；没有实现。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -243,6 +312,15 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - 2026-08-20 / 1.0.0 Accepted：G2 closure 冻结 turn-level cancel、synthetic/real 分层、report unknown optional/required、bounded preview/save 与 retention 展示语义。
 - 2026-08-20 / S4 native foundation：实现 SQLCipher schema v8、严格 v3 adapter、原生 transfer/ACK/TTL/delete
   和 metadata-only private history v3；未实现 S5-S9 renderer/CSP/save/provider 能力。
+- 2026-08-20 / S5 provider-neutral shell：实现 domain/store/generic metadata shell；未实现 type renderer、preview、
+  save、custom protocol 或 CSP。
+- 2026-08-20 / 1.1.0 S6-READINESS Accepted：以 SQLCipher authority + one-shot opaque handle custom protocol
+  取代不可同时满足 no-bytes-to-Vue 的 object URL 候选；冻结 S6A/S6B、3-command allowlist、单一 `img-src`
+  scheme delta、native atomic save 与稳定 error codes。本记录不构成 S6 实现、G3 扩展或 G4。
+- S6 readiness Owner capture：Product/Design `READY FOR S6A; S6B WAITS FOR S6A PASS`；Technical
+  `APPROVED FOR S6A CODING WITH EXACT THREE COMMANDS + ONE IMAGE SCHEME`；Security/Data
+  `APPROVED FOR S6A CODING WITH NO NEW DEPENDENCY/PLUGIN/CAPABILITY AND EXACT CSP DELTA`。依据是用户本轮
+  明确要求记录 Owner 结论；Codex 负责审计与代录，不声称独立人工批准。S6A/S6B 状态仍为 NOT RUN。
 - Owner approval：段成威，`APPROVED`（用户明确 G2 指令由 Codex 代录；不声称独立人工评审）。
 - Desktop implementation approval：`GRANTED AFTER G2A FOR PLANNED S4+ ONLY`。精确 pin commit 为
   `96094419d963745529ed0fa246919089e659f20d`；它只包含 provenance/conformance，不包含业务实现。
