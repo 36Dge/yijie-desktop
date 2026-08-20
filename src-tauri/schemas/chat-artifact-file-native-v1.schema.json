@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-artifact-file-native-v1.schema.json",
+  "title": "Yijie Desktop Private Artifact File Native Boundary v1",
+  "description": "Identity-only bounded file preview/save intent. Only a validated bounded safe projection may cross private IPC.",
+  "x-yijie-schema-version": 1,
+  "x-yijie-command-names": [
+    "chat_read_artifact_file_preview_v1",
+    "chat_save_artifact_file_v1"
+  ],
+  "x-yijie-error-codes": [
+    "artifact_native_invalid_request",
+    "artifact_native_unauthenticated",
+    "artifact_native_forbidden",
+    "artifact_native_not_found",
+    "artifact_native_not_ready",
+    "artifact_native_expired",
+    "artifact_native_unsupported",
+    "artifact_native_integrity_failed",
+    "artifact_native_limit_exceeded",
+    "artifact_native_conflict",
+    "artifact_native_extension_mismatch",
+    "artifact_native_dialog_unavailable",
+    "artifact_native_permission_denied",
+    "artifact_native_storage_full",
+    "artifact_native_io_failed",
+    "artifact_native_unavailable"
+  ],
+  "x-yijie-preview-limits": {
+    "sourceBytes": 1048576,
+    "projectionBytes": 262144,
+    "responseBytes": 524288,
+    "textLines": 2000,
+    "textLineBytes": 8192,
+    "csvRows": 200,
+    "csvColumns": 50,
+    "csvCellBytes": 4096,
+    "jsonDepth": 32,
+    "jsonNodes": 20000,
+    "operationsPerWebview": 2,
+    "sourceBytesInFlightPerWebview": 2097152,
+    "timeoutSeconds": 10
+  },
+  "x-yijie-save-limits": {
+    "sourceBytes": 67108864,
+    "mediaTypes": [
+      "text/plain",
+      "text/csv",
+      "application/json",
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ],
+    "extensions": ["txt", "csv", "json", "pdf", "xlsx"]
+  },
+  "x-yijie-command-contracts": {
+    "chat_read_artifact_file_preview_v1": {
+      "request": "#/$defs/previewRequest",
+      "response": "#/$defs/previewResponse"
+    },
+    "chat_save_artifact_file_v1": {
+      "request": "#/$defs/saveRequest",
+      "response": "#/$defs/saveResponse"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "identityPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "artifactId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "artifactId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "identityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/identityPayload" }
+      }
+    },
+    "previewRequest": { "$ref": "#/$defs/identityRequest" },
+    "saveRequest": { "$ref": "#/$defs/identityRequest" },
+    "textPreviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "mediaType", "text", "truncated"],
+      "properties": {
+        "status": { "const": "previewed" },
+        "mediaType": { "enum": ["text/plain", "application/json"] },
+        "text": { "type": "string" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "csvPreviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "mediaType", "rows", "truncated"],
+      "properties": {
+        "status": { "const": "previewed" },
+        "mediaType": { "const": "text/csv" },
+        "rows": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": { "type": "string" }
+          }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "previewResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/textPreviewResult" },
+        { "$ref": "#/$defs/csvPreviewResult" }
+      ]
+    },
+    "errorCode": {
+      "enum": [
+        "artifact_native_invalid_request", "artifact_native_unauthenticated", "artifact_native_forbidden",
+        "artifact_native_not_found", "artifact_native_not_ready", "artifact_native_expired",
+        "artifact_native_unsupported", "artifact_native_integrity_failed", "artifact_native_limit_exceeded",
+        "artifact_native_conflict", "artifact_native_extension_mismatch", "artifact_native_dialog_unavailable",
+        "artifact_native_permission_denied", "artifact_native_storage_full", "artifact_native_io_failed",
+        "artifact_native_unavailable"
+      ]
+    },
+    "saveResult": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["status", "code"],
+          "properties": { "status": { "enum": ["saved", "cancelled"] }, "code": { "type": "null" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["status", "code"],
+          "properties": { "status": { "const": "failed" }, "code": { "$ref": "#/$defs/errorCode" } }
+        }
+      ]
+    },
+    "previewResponse": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/previewResult" }
+      }
+    },
+    "saveResponse": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/saveResult" }
+      }
+    },
+    "error": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "requestId", "code", "retryable"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "requestId": { "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "code": { "$ref": "#/$defs/errorCode" },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  }
+}

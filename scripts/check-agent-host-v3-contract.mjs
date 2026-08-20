@@ -38,13 +38,13 @@ const FIXTURE_TREE_PINS = new Map([
   ["tests/fixtures/report/report-document-v1", "3fafff6d702504f7a8a1cd44b4c717f024c88ae8"],
 ]);
 const IMPLEMENTATION_PINS = new Map([
-  ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "cf2122d1cc858919fb91b0bfa62aecd3cff85cb31e0bc8a30c929fa8bb1908f0"]],
+  ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "1f03dd893958fdb6666aad9f98764e2ab6abc54256e0bf065c76628d90ccb58f"]],
   ["src-tauri/src/chat/host_bridge.rs", ["host_resource_transport", "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2"]],
   ["src-tauri/src/chat/database.rs", ["database_lifecycle", "f68222c9251e44bc72ef0c044e4d4d31bc47bc6903fc95155b0438c22e3f59b6"]],
-  ["src-tauri/src/chat/worker.rs", ["database_worker", "ebd6daebee879e36996bc718b896f300377c7ea734bb2f9517127ecbb46bcc21"]],
-  ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "bf74d7ac9d53b83b4700829158a5ecee549fa38979ae1963319222c43f823cb9"]],
-  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "3965e9ff100bd564f04488f048afdcd1d9edc9713339c2d930f72bff3b03c382"]],
-  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "ff775fa2731caf0f48a2785b93c5730e98d1a36fd323ac77e0611bc17eb3b7f3"]],
+  ["src-tauri/src/chat/worker.rs", ["database_worker", "d7dd8b804d644a74b9f256607ea385d93ddbeb2ba82f39162a3a6cd1b4164d22"]],
+  ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "d3c0da508abb8f20118bf089f74211e33f922af223006e7111b69cf81282786a"]],
+  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "d8eb06f03560383f5fc6bd3f5e4057c1b148b0dae81072c049d842123ebfb415"]],
+  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "c0168e149d71ffee5663008510c8f9aee5e0bf7156f1fe6a93858bb3061bee33"]],
   ["src-tauri/migrations/chat/0008_chat_output_artifacts.sql", ["sqlcipher_schema_v8", "bec50a16583b216380f5f19728342772ff211ca2ebb88c0ff83b2e44d3fa9a15"]],
   ["src-tauri/schemas/chat-ipc-v3.schema.json", ["private_ipc_v3_schema", "ac61e2f1377e8a5ea44fd8611b05bdbb39e5188f42c142342d7de8401375f3f2"]],
   ["src/domain/chat-ipc.ts", ["typescript_private_ipc_adapter", "2fbec6e363ab75733efdfde538392423248a4c23d4460e7669f9e666fa51ac64"]],

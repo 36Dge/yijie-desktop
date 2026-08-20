@@ -57,7 +57,7 @@
       {
         "role": "wire_and_storage_adapter",
         "path": "src-tauri/src/chat/artifact.rs",
-        "sha256": "cf2122d1cc858919fb91b0bfa62aecd3cff85cb31e0bc8a30c929fa8bb1908f0"
+        "sha256": "1f03dd893958fdb6666aad9f98764e2ab6abc54256e0bf065c76628d90ccb58f"
       },
       {
         "role": "host_resource_transport",
@@ -72,22 +72,22 @@
       {
         "role": "database_worker",
         "path": "src-tauri/src/chat/worker.rs",
-        "sha256": "ebd6daebee879e36996bc718b896f300377c7ea734bb2f9517127ecbb46bcc21"
+        "sha256": "d7dd8b804d644a74b9f256607ea385d93ddbeb2ba82f39162a3a6cd1b4164d22"
       },
       {
         "role": "private_ipc_adapter",
         "path": "src-tauri/src/chat/ipc.rs",
-        "sha256": "bf74d7ac9d53b83b4700829158a5ecee549fa38979ae1963319222c43f823cb9"
+        "sha256": "d3c0da508abb8f20118bf089f74211e33f922af223006e7111b69cf81282786a"
       },
       {
         "role": "interrupt_lifecycle",
         "path": "src-tauri/src/chat/application.rs",
-        "sha256": "3965e9ff100bd564f04488f048afdcd1d9edc9713339c2d930f72bff3b03c382"
+        "sha256": "d8eb06f03560383f5fc6bd3f5e4057c1b148b0dae81072c049d842123ebfb415"
       },
       {
         "role": "runtime_gate",
         "path": "src-tauri/src/chat/mod.rs",
-        "sha256": "ff775fa2731caf0f48a2785b93c5730e98d1a36fd323ac77e0611bc17eb3b7f3"
+        "sha256": "c0168e149d71ffee5663008510c8f9aee5e0bf7156f1fe6a93858bb3061bee33"
       },
       {
         "role": "sqlcipher_schema_v8",

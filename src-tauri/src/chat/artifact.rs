@@ -137,6 +137,17 @@ pub(crate) struct ReadyImageContent {
 
 pub(crate) type ReadyVideoIdentity = ReadyImageIdentity;
 pub(crate) type ReadyVideoReadError = ReadyImageReadError;
+pub(crate) type ReadyFileIdentity = ReadyImageIdentity;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadyFileReadError {
+    NotFound,
+    NotReady,
+    Expired,
+    Unsupported,
+    Integrity,
+    LimitExceeded,
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ReadyVideoContent {
@@ -145,6 +156,17 @@ pub(crate) struct ReadyVideoContent {
     pub media_type: &'static str,
     pub size_bytes: usize,
     pub sha256: [u8; 32],
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ReadyFileContent {
+    pub identity: ReadyFileIdentity,
+    pub display_name: Option<String>,
+    pub media_type: &'static str,
+    pub size_bytes: usize,
+    pub sha256: [u8; 32],
+    pub revision: i64,
     pub bytes: Vec<u8>,
 }
 
@@ -183,6 +205,19 @@ impl Debug for ReadyVideoContent {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ReadyVideoContent")
+            .field("identity", &self.identity)
+            .field("display_name", &self.display_name)
+            .field("media_type", &self.media_type)
+            .field("size_bytes", &self.size_bytes)
+            .field("content", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Debug for ReadyFileContent {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReadyFileContent")
             .field("identity", &self.identity)
             .field("display_name", &self.display_name)
             .field("media_type", &self.media_type)
@@ -1622,6 +1657,173 @@ impl ChatRepository {
         }))
     }
 
+    pub(crate) fn read_ready_file(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        artifact_id: Uuid,
+        now: i64,
+        max_bytes: usize,
+    ) -> Result<Result<ReadyFileContent, ReadyFileReadError>, ChatError> {
+        if session_id.is_nil()
+            || turn_id.is_nil()
+            || artifact_id.is_nil()
+            || now < 0
+            || !(1..=MAX_ARTIFACT_BYTES).contains(&max_bytes)
+        {
+            return Ok(Err(ReadyFileReadError::NotFound));
+        }
+        type ReadyRow = (
+            i64,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let row: Option<ReadyRow> = self
+            .connection
+            .query_row(
+                "SELECT a.rowid, a.owner_user_id, a.tenant_id, a.state, a.kind,
+                        a.display_name, a.media_type, a.byte_size, a.sha256, a.expires_at,
+                        a.local_committed_at, length(a.content_blob)
+                 FROM chat_output_artifacts a
+                 JOIN chat_sessions s ON s.id=a.session_id
+                 JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id
+                 WHERE a.artifact_id=?1 AND a.session_id=?2 AND a.turn_id=?3
+                   AND a.owner_user_id=?4 AND a.tenant_id=?5
+                   AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
+                params![
+                    artifact_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        let Some((
+            row_id,
+            owner_user_id,
+            tenant_id,
+            state,
+            kind,
+            display_name,
+            media_type,
+            size_bytes,
+            sha256,
+            expires_at,
+            revision,
+            blob_length,
+        )) = row
+        else {
+            return Ok(Err(ReadyFileReadError::NotFound));
+        };
+        if state == "expired" || expires_at.is_some_and(|value| value <= now) {
+            return Ok(Err(ReadyFileReadError::Expired));
+        }
+        if state != "ready" {
+            return Ok(Err(ReadyFileReadError::NotReady));
+        }
+        if kind != "file" {
+            return Ok(Err(ReadyFileReadError::Unsupported));
+        }
+        let media_type = match media_type.as_deref() {
+            Some("text/plain") => "text/plain",
+            Some("text/csv") => "text/csv",
+            Some("application/json") => "application/json",
+            Some("application/pdf") => "application/pdf",
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+            _ => return Ok(Err(ReadyFileReadError::Unsupported)),
+        };
+        let Some(size_bytes) = size_bytes.and_then(|value| usize::try_from(value).ok()) else {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        };
+        let Some(revision) = revision.filter(|value| *value >= 0) else {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        };
+        if !(1..=MAX_ARTIFACT_BYTES).contains(&size_bytes) {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        }
+        if size_bytes > max_bytes {
+            return Ok(Err(ReadyFileReadError::LimitExceeded));
+        }
+        if blob_length.and_then(|value| usize::try_from(value).ok()) != Some(size_bytes)
+            || display_name
+                .as_deref()
+                .is_some_and(|value| !valid_safe_name(value))
+        {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        }
+        let Some(expected_sha256) = sha256.as_deref().and_then(decode_sha256) else {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        };
+        let owner_user_id = parse_uuid(&owner_user_id)?;
+        let tenant_id = parse_uuid(&tenant_id)?;
+        let mut bytes = vec![0_u8; size_bytes];
+        {
+            let mut blob = self
+                .connection
+                .blob_open(
+                    "main",
+                    "chat_output_artifacts",
+                    "content_blob",
+                    row_id,
+                    true,
+                )
+                .map_err(map_sqlite_error)?;
+            blob.read_exact(&mut bytes)
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        let actual_sha256: [u8; 32] = Sha256::digest(&bytes).into();
+        if !bool::from(subtle::ConstantTimeEq::ct_eq(
+            actual_sha256.as_slice(),
+            expected_sha256.as_slice(),
+        )) {
+            return Ok(Err(ReadyFileReadError::Integrity));
+        }
+        Ok(Ok(ReadyFileContent {
+            identity: ReadyFileIdentity {
+                owner_user_id,
+                tenant_id,
+                session_id,
+                turn_id,
+                artifact_id,
+            },
+            display_name,
+            media_type,
+            size_bytes,
+            sha256: expected_sha256,
+            revision,
+            bytes,
+        }))
+    }
+
     pub(crate) fn read_ready_video_range(
         &self,
         request: ReadyVideoRangeRequest,
@@ -2762,6 +2964,171 @@ mod tests {
             )
             .unwrap();
         assert_eq!(commit.expires_at, committed_at + ARTIFACT_RETENTION_SECONDS);
+        let ready_file = repository
+            .read_ready_file(
+                session_id,
+                turn_id,
+                artifact_id,
+                committed_at + 1,
+                MAX_ARTIFACT_BYTES,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(ready_file.media_type, "text/csv");
+        assert_eq!(ready_file.bytes, content);
+        assert_eq!(ready_file.revision, committed_at);
+        assert_eq!(
+            repository
+                .read_ready_file(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    committed_at + 1,
+                    content.len() - 1,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::LimitExceeded)
+        );
+        assert_eq!(
+            repository
+                .read_ready_file(
+                    Uuid::now_v7(),
+                    turn_id,
+                    artifact_id,
+                    committed_at + 1,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::NotFound)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET owner_user_id=?1 WHERE artifact_id=?2",
+                params![Uuid::now_v7().to_string(), artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_file(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    committed_at + 1,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::NotFound)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET owner_user_id=?1 WHERE artifact_id=?2",
+                params![owner.to_string(), artifact_id.to_string()],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=ON", [])
+            .unwrap();
+        for (column, invalid, expected) in [
+            ("state", "processing", ReadyFileReadError::NotReady),
+            ("kind", "report", ReadyFileReadError::Unsupported),
+            (
+                "media_type",
+                "text/markdown",
+                ReadyFileReadError::Unsupported,
+            ),
+        ] {
+            repository
+                .connection
+                .execute(
+                    &format!("UPDATE chat_output_artifacts SET {column}=?1 WHERE artifact_id=?2"),
+                    params![invalid, artifact_id.to_string()],
+                )
+                .unwrap();
+            assert_eq!(
+                repository
+                    .read_ready_file(
+                        session_id,
+                        turn_id,
+                        artifact_id,
+                        committed_at + 1,
+                        MAX_ARTIFACT_BYTES,
+                    )
+                    .unwrap(),
+                Err(expected)
+            );
+            let restored = match column {
+                "state" => "ready",
+                "kind" => "file",
+                "media_type" => "text/csv",
+                _ => unreachable!(),
+            };
+            repository
+                .connection
+                .execute(
+                    &format!("UPDATE chat_output_artifacts SET {column}=?1 WHERE artifact_id=?2"),
+                    params![restored, artifact_id.to_string()],
+                )
+                .unwrap();
+        }
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET byte_size=byte_size+1 WHERE artifact_id=?1",
+                [artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_file(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    committed_at + 1,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::Integrity)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET byte_size=?1, sha256=?2 WHERE artifact_id=?3",
+                params![
+                    content.len() as i64,
+                    "0".repeat(64),
+                    artifact_id.to_string()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_file(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    committed_at + 1,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::Integrity)
+        );
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET sha256=?1 WHERE artifact_id=?2",
+                params![
+                    format!("{:x}", Sha256::digest(&content)),
+                    artifact_id.to_string()
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=OFF", [])
+            .unwrap();
         assert_eq!(
             repository.begin_artifact_transfer(&manifest).unwrap(),
             TransferDisposition::AlreadyCommitted
@@ -2822,6 +3189,18 @@ mod tests {
         );
         let expired = reopened.load_artifacts_for_turns(&[turn_id]).unwrap();
         assert_eq!(expired[0].state, "expired");
+        assert_eq!(
+            reopened
+                .read_ready_file(
+                    session_id,
+                    turn_id,
+                    artifact_id,
+                    commit.expires_at,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyFileReadError::Expired)
+        );
         assert!(reopened
             .connection
             .query_row(

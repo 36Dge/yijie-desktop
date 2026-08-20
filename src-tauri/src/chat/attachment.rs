@@ -594,6 +594,10 @@ fn extract_pdf(content: &[u8]) -> Result<String, AttachmentImportError> {
     extract_pdf_document(&document, MAX_EXTRACTED_TEXT_BYTES)
 }
 
+pub(crate) fn validate_pdf_artifact_content(content: &[u8]) -> Result<(), AttachmentImportError> {
+    preflight_pdf(content).map(drop)
+}
+
 fn extract_pdf_document(
     document: &pdf_extract::Document,
     limit: usize,
@@ -1145,6 +1149,53 @@ fn extract_ooxml(
 ) -> Result<(&'static str, String), AttachmentImportError> {
     let mut archive =
         ZipArchive::new(Cursor::new(content)).map_err(|_| AttachmentImportError::InvalidContent)?;
+    let OoxmlPreflight {
+        names,
+        media_type,
+        prefixes,
+        mut actual_total_size,
+    } = preflight_ooxml(extension, &mut archive)?;
+    let mut selected = names
+        .into_iter()
+        .filter(|name| {
+            name.ends_with(".xml") && prefixes.iter().any(|prefix| name.starts_with(prefix))
+        })
+        .collect::<Vec<_>>();
+    selected.sort();
+    let mut output = String::new();
+    for name in selected {
+        let xml = read_ooxml_entry(&mut archive, &name, &mut actual_total_size)?;
+        let text = extract_xml_text(&xml)?;
+        if !text.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&text);
+        }
+        if output.len() >= MAX_EXTRACTED_TEXT_BYTES {
+            break;
+        }
+    }
+    Ok((media_type, bounded_normalized_text(&output)?))
+}
+
+pub(crate) fn validate_xlsx_artifact_content(content: &[u8]) -> Result<(), AttachmentImportError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(content)).map_err(|_| AttachmentImportError::InvalidContent)?;
+    preflight_ooxml("xlsx", &mut archive).map(|_| ())
+}
+
+struct OoxmlPreflight {
+    names: HashSet<String>,
+    media_type: &'static str,
+    prefixes: &'static [&'static str],
+    actual_total_size: u64,
+}
+
+fn preflight_ooxml(
+    extension: &str,
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+) -> Result<OoxmlPreflight, AttachmentImportError> {
     if archive.is_empty() || archive.len() > MAX_OOXML_ENTRIES {
         return Err(AttachmentImportError::InvalidContent);
     }
@@ -1215,31 +1266,14 @@ fn extract_ooxml(
         return Err(AttachmentImportError::InvalidContent);
     }
     let mut actual_total_size = 0_u64;
-    let content_types =
-        read_ooxml_entry(&mut archive, "[Content_Types].xml", &mut actual_total_size)?;
+    let content_types = read_ooxml_entry(archive, "[Content_Types].xml", &mut actual_total_size)?;
     validate_ooxml_main_content_type(&content_types, marker, main_content_type)?;
-    let mut selected = names
-        .into_iter()
-        .filter(|name| {
-            name.ends_with(".xml") && prefixes.iter().any(|prefix| name.starts_with(prefix))
-        })
-        .collect::<Vec<_>>();
-    selected.sort();
-    let mut output = String::new();
-    for name in selected {
-        let xml = read_ooxml_entry(&mut archive, &name, &mut actual_total_size)?;
-        let text = extract_xml_text(&xml)?;
-        if !text.is_empty() {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&text);
-        }
-        if output.len() >= MAX_EXTRACTED_TEXT_BYTES {
-            break;
-        }
-    }
-    Ok((media_type, bounded_normalized_text(&output)?))
+    Ok(OoxmlPreflight {
+        names,
+        media_type,
+        prefixes,
+        actual_total_size,
+    })
 }
 
 fn read_ooxml_entry(
@@ -2010,6 +2044,7 @@ mod tests {
             false,
         );
         assert!(preflight_pdf(&valid).is_ok());
+        assert!(validate_pdf_artifact_content(&valid).is_ok());
         let document = prepare_bytes("brief.pdf".to_owned(), valid, 20).expect("bounded PDF");
         assert_eq!(document.chunks, vec!["hello bounded pdf"]);
 
@@ -2173,5 +2208,9 @@ mod tests {
             prepare_bytes("forged.docx".to_owned(), forged, 30),
             Err(AttachmentImportError::InvalidContent)
         );
+
+        let xlsx = test_ooxml("xlsx", "validated without extraction");
+        assert!(validate_xlsx_artifact_content(&xlsx).is_ok());
+        assert!(validate_xlsx_artifact_content(&test_ooxml("docx", "wrong package")).is_err());
     }
 }

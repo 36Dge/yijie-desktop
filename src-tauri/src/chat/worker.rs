@@ -1,8 +1,8 @@
 use super::artifact::{
     ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
-    DownloadedArtifact, ReadyImageContent, ReadyImageReadError, ReadyVideoContent,
-    ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError, StoredArtifactCommit,
-    TransferDisposition,
+    DownloadedArtifact, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
+    ReadyImageReadError, ReadyVideoContent, ReadyVideoRangeContent, ReadyVideoRangeRequest,
+    ReadyVideoReadError, StoredArtifactCommit, TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
 #[cfg(feature = "feat126-s10-driver")]
@@ -327,6 +327,20 @@ impl DatabaseWorker {
     ) -> Result<Result<ReadyVideoContent, ReadyVideoReadError>, ChatError> {
         self.call(move |repository| {
             repository.read_ready_video(session_id, turn_id, artifact_id, now)
+        })
+        .await
+    }
+
+    pub(crate) async fn read_ready_file(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        artifact_id: uuid::Uuid,
+        now: i64,
+        max_bytes: usize,
+    ) -> Result<Result<ReadyFileContent, ReadyFileReadError>, ChatError> {
+        self.call(move |repository| {
+            repository.read_ready_file(session_id, turn_id, artifact_id, now, max_bytes)
         })
         .await
     }

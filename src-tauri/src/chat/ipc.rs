@@ -3381,6 +3381,8 @@ pub async fn chat_bind_context_v1(
         .invalidate_all();
     app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
         .invalidate_all();
+    app.state::<super::artifact_file_native::ArtifactFileNativeRuntime>()
+        .invalidate_all();
     let offline = chat_runtime
         .local_offline_conversation_application()
         .await

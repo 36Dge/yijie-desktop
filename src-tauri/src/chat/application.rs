@@ -1,6 +1,7 @@
 use super::artifact::{
-    ArtifactProjection, ReadyImageContent, ReadyImageReadError, ReadyVideoContent,
-    ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError,
+    ArtifactProjection, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
+    ReadyImageReadError, ReadyVideoContent, ReadyVideoRangeContent, ReadyVideoRangeRequest,
+    ReadyVideoReadError,
 };
 use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
@@ -811,6 +812,19 @@ impl ConversationApplication {
     ) -> Result<Result<ReadyVideoContent, ReadyVideoReadError>, ChatError> {
         self.database
             .read_ready_video(session_id, turn_id, artifact_id, now)
+            .await
+    }
+
+    pub(crate) async fn read_ready_file(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        artifact_id: Uuid,
+        now: i64,
+        max_bytes: usize,
+    ) -> Result<Result<ReadyFileContent, ReadyFileReadError>, ChatError> {
+        self.database
+            .read_ready_file(session_id, turn_id, artifact_id, now, max_bytes)
             .await
     }
 
