@@ -11,9 +11,10 @@
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
 
-本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Accepted 只冻结产品/交互设计，
-不构成 Desktop 业务实现授权；G2 当前只允许 `yijie-contracts` S1/S2。Desktop IPC、Tauri
-command/capability/CSP、Host 路由、本地数据库、模型调用、依赖、云资源或生产配置必须等待 G2A 与对应切片授权。
+本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Contracts S1/S2 与
+downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 业务实现现已获条件授权，但尚未开始；
+IPC、Tauri command/capability/CSP、本地数据库等必须按 S4/S7 原子切片实施。模型调用、真实 provider、
+云资源、发布或生产配置仍不在授权范围。
 
 ## 目标
 
@@ -192,7 +193,7 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## AI / Codex 必须遵守
 
-- 本文虽已 Accepted，Desktop/Host 仍须等待 G2A 与明确切片授权；当前仅 Contracts S1/S2 可执行。
+- 本文已 Accepted 且 G2A 已通过；Host S3 可先启动，Desktop S4 必须在 S3 conformance 后启动。当前两端业务实现仍为 `not_started`。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -218,7 +219,7 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## 验收清单
 
-- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；Desktop 本地实现授权仍须等待 G2A。
+- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；G2A 已通过，Desktop S4 获授权但尚未开始。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -236,7 +237,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
   图片、视频、文件、报告、渐进式状态、预览/下载、安全边界和无云资源的本地限制。
 - 2026-08-20 / 1.0.0 Accepted：G2 closure 冻结 turn-level cancel、synthetic/real 分层、report unknown optional/required、bounded preview/save 与 retention 展示语义。
 - Owner approval：段成威，`APPROVED`（用户明确 G2 指令由 Codex 代录；不声称独立人工评审）。
-- Desktop implementation approval：`NOT GRANTED`。G2 只授权 Contracts S1/S2；本文不授权修改 Desktop 业务代码、数据库、Tauri 权限、Host 或调用 MiniMax。
+- Desktop implementation approval：`GRANTED AFTER G2A FOR PLANNED S4+ ONLY`。精确 pin commit 为
+  `96094419d963745529ed0fa246919089e659f20d`；它只包含 provenance/conformance，不包含业务实现。
+  本文不授权真实 MiniMax/provider、tag、push、release 或生产激活。
 
 ## 关联文件
 
