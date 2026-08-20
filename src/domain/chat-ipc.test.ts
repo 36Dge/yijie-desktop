@@ -6,6 +6,7 @@ import {
   CHAT_ATTACHMENT_ISSUES,
   CHAT_NEW_DRAFT_TARGET,
   CHAT_V2_COMMAND_NAMES,
+  CHAT_V3_COMMAND_NAMES,
   CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_ERROR_CODES,
   CHAT_EVENT_CHANNEL,
@@ -22,6 +23,7 @@ import {
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
   parseHistoryPageResponseV2,
+  parseHistoryPageResponseV3,
   parseLocalReadinessResponse,
   parseOperationResponse,
   parseOperationResponseV2,
@@ -54,6 +56,75 @@ describe("private chat IPC v1 contract", () => {
       "chat_load_history_v2",
       "chat_resync_session_v2",
     ]);
+  });
+
+  it("keeps private v3 history metadata-only and rejects inconsistent artifact state", () => {
+    expect(CHAT_V3_COMMAND_NAMES).toEqual(["chat_load_history_v3"]);
+    const schema = JSON.parse(
+      readFileSync(new URL("../../src-tauri/schemas/chat-ipc-v3.schema.json", import.meta.url), "utf8"),
+    ) as Record<string, unknown>;
+    expect(schema["x-yijie-schema-version"]).toBe(3);
+    expect(schema["x-yijie-command-names"]).toEqual(CHAT_V3_COMMAND_NAMES);
+
+    const response = {
+      schemaVersion: 3,
+      requestId: "019c1a00-0000-7000-8000-000000000020",
+      data: {
+        turns: [{
+          turnId: "019c1a00-0000-7000-8000-000000000022",
+          status: "completed",
+          terminalAt: 1_785_000_003,
+          reasoningStatus: "complete",
+          reasoningReasonCode: null,
+          messages: [{
+            messageId: "019c1a00-0000-7000-8000-000000000023",
+            role: "assistant",
+            content: "完成",
+            contentBlocks: [{ type: "text", text: "完成" }],
+            status: "committed",
+            ordinal: 1,
+            createdAt: 1_785_000_002,
+          }],
+          reasoning: [],
+          artifacts: [{
+            artifactId: "019c1a00-0000-7000-8000-000000000024",
+            kind: "image",
+            provenance: "synthetic",
+            status: "ready",
+            ordinal: 0,
+            progressStage: null,
+            progressPercent: null,
+            displayName: "synthetic.png",
+            mediaType: "image/png",
+            sizeBytes: 68,
+            localCommittedAt: 1_785_000_004,
+            expiresAt: 1_785_604_804,
+            hasPoster: false,
+            errorCode: null,
+            retryable: null,
+          }],
+        }],
+        nextCursor: null,
+      },
+    };
+    const history = parseHistoryPageResponseV3(response);
+    expect(history.turns[0]?.artifacts?.[0]).toMatchObject({ kind: "image", status: "ready" });
+    expect(JSON.stringify(history)).not.toMatch(/"(?:sha256|contentHref|token|path|bytes)"/i);
+
+    const badExpiry = structuredClone(response);
+    badExpiry.data.turns[0]!.artifacts[0]!.expiresAt += 1;
+    expect(() => parseHistoryPageResponseV3(badExpiry)).toThrow(ChatContractError);
+
+    const terminalWithProgress = structuredClone(response) as unknown as {
+      data: { turns: Array<{ artifacts: Array<{ progressStage: unknown }> }> };
+    };
+    terminalWithProgress.data.turns[0]!.artifacts[0]!.progressStage = "generating";
+    expect(() => parseHistoryPageResponseV3(terminalWithProgress)).toThrow(ChatContractError);
+    const leakedHref = structuredClone(response) as typeof response & {
+      data: { turns: Array<{ artifacts: Array<Record<string, unknown>> }> };
+    };
+    leakedHref.data.turns[0]!.artifacts[0]!.contentHref = "/v3/private";
+    expect(() => parseHistoryPageResponseV3(leakedHref)).toThrow(ChatContractError);
   });
 
   it("constructs only explicit non-nil attachment draft targets", () => {

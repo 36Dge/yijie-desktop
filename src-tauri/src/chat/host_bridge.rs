@@ -1,3 +1,7 @@
+use super::artifact::{
+    ArtifactCommit, ArtifactKind, ArtifactManifest, DownloadedArtifact, DownloadedResource,
+    MAX_ARTIFACT_BYTES, MAX_IMAGE_BYTES,
+};
 use super::attachment::validate_image_content;
 use super::database::HostTurnInputBlock;
 use super::host_domain::{
@@ -7,7 +11,10 @@ use super::host_domain::{
 };
 use super::sidecar::HostConnection;
 use base64::Engine;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
+use reqwest::header::{
+    HeaderMap, HeaderValue, ACCEPT_RANGES, AUTHORIZATION, CACHE_CONTROL, CONTENT_DISPOSITION,
+    CONTENT_LENGTH, CONTENT_TYPE, ETAG,
+};
 use reqwest::{Client, Method, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -144,6 +151,31 @@ struct CleanupRequest<'a> {
     operation_id: Uuid,
     #[serde(flatten)]
     trace: &'a HostTrace,
+}
+
+#[derive(Serialize)]
+struct ArtifactAcknowledgementRequest<'a> {
+    ack_id: Uuid,
+    size_bytes: usize,
+    sha256: &'a str,
+    local_committed_at: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactAcknowledgementResponse {
+    artifact_id: Uuid,
+    ack_id: Uuid,
+    status: String,
+    cleanup_status: String,
+    acknowledged_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactAcknowledgement {
+    pub artifact_id: Uuid,
+    pub ack_id: Uuid,
+    pub acknowledged_at: String,
 }
 
 #[derive(Deserialize)]
@@ -521,6 +553,150 @@ impl HostBridge {
             response,
             decoder: SseDecoder::new(stream_id, last_sequence),
             finished: false,
+        })
+    }
+
+    pub async fn download_artifact(
+        &self,
+        manifest: &ArtifactManifest,
+    ) -> Result<DownloadedArtifact, HostBridgeError> {
+        manifest.validate().map_err(|_| protocol_error())?;
+        let content = self
+            .download_artifact_resource(
+                &manifest.content_href,
+                Some((&manifest.media_type, manifest.size_bytes, &manifest.sha256)),
+                MAX_ARTIFACT_BYTES.min(match manifest.kind {
+                    ArtifactKind::Image => MAX_IMAGE_BYTES,
+                    ArtifactKind::Video | ArtifactKind::File | ArtifactKind::Report => {
+                        MAX_ARTIFACT_BYTES
+                    }
+                }),
+            )
+            .await?;
+        let poster = match manifest.poster_href.as_deref() {
+            Some(href) => Some(
+                self.download_artifact_resource(href, None, MAX_IMAGE_BYTES)
+                    .await?,
+            ),
+            None => None,
+        };
+        Ok(DownloadedArtifact { content, poster })
+    }
+
+    pub async fn acknowledge_artifact(
+        &self,
+        manifest: &ArtifactManifest,
+        commit: &ArtifactCommit,
+        local_committed_at: &str,
+    ) -> Result<ArtifactAcknowledgement, HostBridgeError> {
+        manifest.validate().map_err(|_| protocol_error())?;
+        if commit.artifact_id != manifest.artifact_id
+            || commit.ack_id.is_nil()
+            || !valid_rfc3339_utc(local_committed_at)
+        {
+            return Err(protocol_error());
+        }
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!(
+                    "/v3/agent-sessions/{}/artifacts/{}/ack",
+                    manifest.agent_session_id, manifest.artifact_id
+                ),
+                &ArtifactAcknowledgementRequest {
+                    ack_id: commit.ack_id,
+                    size_bytes: manifest.size_bytes,
+                    sha256: &manifest.sha256,
+                    local_committed_at,
+                },
+            )
+            .await?;
+        let body = expect_json_status(response, StatusCode::OK).await?;
+        let wire: ArtifactAcknowledgementResponse =
+            serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+        if wire.artifact_id != manifest.artifact_id
+            || wire.ack_id != commit.ack_id
+            || wire.status != "acknowledged"
+            || !matches!(wire.cleanup_status.as_str(), "pending" | "completed")
+            || !valid_rfc3339_utc(&wire.acknowledged_at)
+        {
+            return Err(protocol_error());
+        }
+        Ok(ArtifactAcknowledgement {
+            artifact_id: wire.artifact_id,
+            ack_id: wire.ack_id,
+            acknowledged_at: wire.acknowledged_at,
+        })
+    }
+
+    async fn download_artifact_resource(
+        &self,
+        href: &str,
+        expected: Option<(&str, usize, &str)>,
+        maximum: usize,
+    ) -> Result<DownloadedResource, HostBridgeError> {
+        if !href.starts_with("/v3/agent-sessions/") || href.contains('?') {
+            return Err(protocol_error());
+        }
+        let response = self
+            .authorized_request(Method::GET, href)
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        validate_no_store(response.headers())?;
+        let media_type = header_text(response.headers(), CONTENT_TYPE)?.to_owned();
+        let size_bytes = header_text(response.headers(), CONTENT_LENGTH)?
+            .parse::<usize>()
+            .ok()
+            .filter(|value| (1..=maximum).contains(value))
+            .ok_or_else(protocol_error)?;
+        let etag = header_text(response.headers(), ETAG)?;
+        let sha256 = etag
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .filter(|value| valid_sha256(value))
+            .ok_or_else(protocol_error)?
+            .to_owned();
+        let disposition = header_text(response.headers(), CONTENT_DISPOSITION)?;
+        if disposition.is_empty()
+            || disposition.len() > 512
+            || disposition.contains('/')
+            || disposition.contains('\\')
+            || header_text(response.headers(), ACCEPT_RANGES)? != "bytes"
+            || header_text_name(response.headers(), "X-Content-Type-Options")? != "nosniff"
+        {
+            return Err(protocol_error());
+        }
+        if let Some((expected_media_type, expected_size, expected_sha256)) = expected {
+            if media_type != expected_media_type
+                || size_bytes != expected_size
+                || sha256 != expected_sha256
+            {
+                return Err(protocol_error());
+            }
+        } else if !matches!(
+            media_type.as_str(),
+            "image/png" | "image/jpeg" | "image/webp"
+        ) {
+            return Err(protocol_error());
+        }
+        let bytes = read_limited(response, maximum).await?;
+        if bytes.len() != size_bytes || format!("{:x}", Sha256::digest(&bytes)) != sha256 {
+            return Err(protocol_error());
+        }
+        if expected.is_none() && validate_image_content(&media_type, &bytes).is_err() {
+            return Err(protocol_error());
+        }
+        Ok(DownloadedResource {
+            media_type,
+            size_bytes,
+            sha256,
+            bytes,
         })
     }
 
@@ -942,6 +1118,17 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn valid_rfc3339_utc(value: &str) -> bool {
+    value.len() >= 20
+        && value.len() <= 35
+        && value.ends_with('Z')
+        && value.as_bytes().get(4) == Some(&b'-')
+        && value.as_bytes().get(7) == Some(&b'-')
+        && value.as_bytes().get(10) == Some(&b'T')
+        && value.as_bytes().get(13) == Some(&b':')
+        && value.as_bytes().get(16) == Some(&b':')
+}
+
 fn validate_error_message(value: &str) -> Result<(), HostBridgeError> {
     if value.is_empty()
         || value.len() > MAX_ERROR_MESSAGE_BYTES
@@ -1157,6 +1344,90 @@ mod tests {
             instance_nonce: nonce.to_owned(),
         })
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn artifact_download_and_post_commit_ack_use_exact_owner_only_v3_resources() {
+        let token = TestToken::new(0o600);
+        let agent_session_id = Uuid::now_v7();
+        let artifact_id = Uuid::now_v7();
+        let content = "name,value\nalpha,1\n";
+        let digest = format!("{:x}", Sha256::digest(content.as_bytes()));
+        let manifest = ArtifactManifest {
+            artifact_id,
+            agent_session_id,
+            local_session_id: Uuid::now_v7(),
+            local_turn_id: Uuid::now_v7(),
+            kind: ArtifactKind::File,
+            provenance: super::super::artifact::ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: Some("synthetic.csv".to_owned()),
+            media_type: "text/csv".to_owned(),
+            size_bytes: content.len(),
+            sha256: digest.clone(),
+            content_href: format!(
+                "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content"
+            ),
+            poster_href: None,
+        };
+        let commit = ArtifactCommit {
+            artifact_id,
+            ack_id: Uuid::now_v7(),
+            local_committed_at: 1_785_000_004,
+            expires_at: 1_785_604_804,
+        };
+        let ack_body = serde_json::json!({
+            "artifact_id": artifact_id,
+            "ack_id": commit.ack_id,
+            "status": "acknowledged",
+            "cleanup_status": "completed",
+            "acknowledged_at": "2026-08-20T04:00:05Z"
+        })
+        .to_string();
+        let artifact_response = response(
+            "200 OK",
+            &[
+                ("Content-Type", "text/csv"),
+                ("Cache-Control", "no-store"),
+                ("ETag", &format!("\"{digest}\"")),
+                ("Accept-Ranges", "bytes"),
+                ("Content-Disposition", "attachment; filename=synthetic.csv"),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+            content,
+        );
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            artifact_response,
+            ready_response(NONCE),
+            json_response("200 OK", &ack_body),
+        ])
+        .await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        let downloaded = bridge.download_artifact(&manifest).await.unwrap();
+        assert_eq!(downloaded.content.bytes, content.as_bytes());
+        assert!(downloaded.poster.is_none());
+        let acknowledgement = bridge
+            .acknowledge_artifact(&manifest, &commit, "2026-07-25T00:00:04Z")
+            .await
+            .unwrap();
+        assert_eq!(acknowledgement.ack_id, commit.ack_id);
+
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "GET /v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content HTTP/1.1"
+        )));
+        assert!(requests[3].starts_with(&format!(
+            "POST /v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/ack HTTP/1.1"
+        )));
+        let ack_request: serde_json::Value =
+            serde_json::from_str(requests[3].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(ack_request["ack_id"], commit.ack_id.to_string());
+        assert_eq!(ack_request["size_bytes"], content.len());
+        assert_eq!(ack_request["sha256"], digest);
+        assert_eq!(ack_request["local_committed_at"], "2026-07-25T00:00:04Z");
+        assert!(!requests[3].contains("content_href"));
+        assert!(!requests[3].contains("path"));
     }
 
     fn session_body() -> String {

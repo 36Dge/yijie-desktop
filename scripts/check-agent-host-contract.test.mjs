@@ -51,9 +51,9 @@ const validLock = {
   consumer: {
     mode: "hand-written-rust-adapter",
     adapter_path: "src-tauri/src/chat/host_bridge.rs",
-    adapter_sha256: "c6e90e0e8eff736101fd2cf9eea39cf70064f9c59ab0bcd90b2e2fc9286e221d",
+    adapter_sha256: "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2",
     readiness_path: "src-tauri/src/chat/mod.rs",
-    readiness_sha256: "9041d9bbf62d6f03661ba0eeb110e02156eae6ea544829fd67d39874e3134085",
+    readiness_sha256: "5c178ba97cff2d06f696681b332ed0ddb41a5f551141065574613660f515ea5b",
     public_lock_path: "contracts/public-api.lock.json",
     serialization_test:
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection",

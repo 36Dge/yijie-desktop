@@ -2,6 +2,7 @@ use super::application::{
     AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
     CoordinatorOutcome, DispatchOutcome, LiveTurnProjection, TurnProjectionSink,
 };
+use super::artifact::ArtifactProjection;
 use super::attachment::{
     self, AttachmentImportError, AttachmentPreparationProgress, AttachmentPreparationStage,
     PreparedAttachment,
@@ -31,6 +32,7 @@ use uuid::Uuid;
 
 pub const CHAT_IPC_SCHEMA_VERSION: u8 = 1;
 pub const CHAT_IPC_V2_SCHEMA_VERSION: u8 = 2;
+pub const CHAT_IPC_V3_SCHEMA_VERSION: u8 = 3;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
@@ -884,6 +886,11 @@ impl ChatIpcError {
         self
     }
 
+    fn v3(mut self) -> Self {
+        self.schema_version = CHAT_IPC_V3_SCHEMA_VERSION;
+        self
+    }
+
     fn with_attachment_issue(mut self, issue: &'static str) -> Self {
         self.attachment_issue = Some(issue);
         self
@@ -940,6 +947,14 @@ impl<T> CommandResponse<T> {
     fn new_v2(request_id: Uuid, data: T) -> Self {
         Self {
             schema_version: CHAT_IPC_V2_SCHEMA_VERSION,
+            request_id: request_id.to_string(),
+            data,
+        }
+    }
+
+    fn new_v3(request_id: Uuid, data: T) -> Self {
+        Self {
+            schema_version: CHAT_IPC_V3_SCHEMA_VERSION,
             request_id: request_id.to_string(),
             data,
         }
@@ -1308,6 +1323,39 @@ struct HistoryTurnDtoV2 {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ArtifactDtoV3 {
+    artifact_id: String,
+    kind: &'static str,
+    provenance: &'static str,
+    status: String,
+    ordinal: usize,
+    progress_stage: Option<&'static str>,
+    progress_percent: Option<f64>,
+    display_name: Option<String>,
+    media_type: Option<String>,
+    size_bytes: Option<usize>,
+    local_committed_at: Option<i64>,
+    expires_at: Option<i64>,
+    has_poster: bool,
+    error_code: Option<String>,
+    retryable: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryTurnDtoV3 {
+    turn_id: String,
+    status: String,
+    terminal_at: Option<i64>,
+    reasoning_status: String,
+    reasoning_reason_code: Option<String>,
+    messages: Vec<MessageDtoV2>,
+    reasoning: Vec<ReasoningMetadataDto>,
+    artifacts: Vec<ArtifactDtoV3>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryPageDto {
     turns: Vec<HistoryTurnDto>,
     next_cursor: Option<String>,
@@ -1317,6 +1365,13 @@ pub(crate) struct HistoryPageDto {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryPageDtoV2 {
     turns: Vec<HistoryTurnDtoV2>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HistoryPageDtoV3 {
+    turns: Vec<HistoryTurnDtoV3>,
     next_cursor: Option<String>,
 }
 
@@ -1784,6 +1839,76 @@ fn history_dto_v2(
     Ok(HistoryPageDtoV2 { turns, next_cursor })
 }
 
+fn history_dto_v3(
+    page: HistoryPage,
+    next_cursor: Option<String>,
+    projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+    artifacts: Vec<ArtifactProjection>,
+) -> Result<HistoryPageDtoV3, ChatError> {
+    let turn_ids = page
+        .turns
+        .iter()
+        .map(|turn| turn.turn_id)
+        .collect::<HashSet<_>>();
+    let mut by_turn = HashMap::<Uuid, Vec<ArtifactDtoV3>>::new();
+    for artifact in artifacts {
+        if !turn_ids.contains(&artifact.turn_id) {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        by_turn
+            .entry(artifact.turn_id)
+            .or_default()
+            .push(ArtifactDtoV3 {
+                artifact_id: artifact.artifact_id.to_string(),
+                kind: artifact.kind.as_str(),
+                provenance: artifact.provenance.as_str(),
+                status: artifact.state,
+                ordinal: artifact.ordinal,
+                progress_stage: artifact.progress_stage.map(|stage| stage.as_str()),
+                progress_percent: artifact.progress_percent,
+                display_name: artifact.display_name,
+                media_type: artifact.media_type,
+                size_bytes: artifact.size_bytes,
+                local_committed_at: artifact.local_committed_at,
+                expires_at: artifact.expires_at,
+                has_poster: artifact.has_poster,
+                error_code: artifact.error_code,
+                retryable: artifact.retryable,
+            });
+    }
+    let v2 = history_dto_v2(page, next_cursor, projections)?;
+    let mut turns = Vec::with_capacity(v2.turns.len());
+    for turn in v2.turns {
+        let turn_id = Uuid::parse_str(&turn.turn_id).map_err(|_| ChatError::DatabaseUnavailable)?;
+        let artifacts = by_turn.remove(&turn_id).unwrap_or_default();
+        if artifacts.len() > 12
+            || artifacts.iter().any(|artifact| artifact.ordinal >= 12)
+            || artifacts
+                .windows(2)
+                .any(|pair| pair[0].ordinal >= pair[1].ordinal)
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        turns.push(HistoryTurnDtoV3 {
+            turn_id: turn.turn_id,
+            status: turn.status,
+            terminal_at: turn.terminal_at,
+            reasoning_status: turn.reasoning_status,
+            reasoning_reason_code: turn.reasoning_reason_code,
+            messages: turn.messages,
+            reasoning: turn.reasoning,
+            artifacts,
+        });
+    }
+    if !by_turn.is_empty() {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    Ok(HistoryPageDtoV3 {
+        turns,
+        next_cursor: v2.next_cursor,
+    })
+}
+
 fn reasoning_dto(items: Vec<ReasoningItem>) -> Vec<ReasoningItemDto> {
     items
         .into_iter()
@@ -1868,6 +1993,25 @@ fn decode_request_v2<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T
         || request.context_id.is_nil()
     {
         return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    Ok(request)
+}
+
+fn decode_request_v3<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T>, ChatIpcError> {
+    let request_id = extract_request_id(&raw);
+    if serde_json::to_vec(&raw)
+        .map(|encoded| encoded.len() > MAX_REQUEST_BYTES)
+        .unwrap_or(true)
+    {
+        return Err(ChatIpcError::limit_exceeded(request_id).v3());
+    }
+    let request: CommandRequest<T> =
+        serde_json::from_value(raw).map_err(|_| ChatIpcError::request_invalid(request_id).v3())?;
+    if request.schema_version != CHAT_IPC_V3_SCHEMA_VERSION
+        || request.request_id.is_nil()
+        || request.context_id.is_nil()
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v3());
     }
     Ok(request)
 }
@@ -2410,6 +2554,50 @@ mod tests {
         ] {
             assert!(!permissions.iter().any(|permission| permission == forbidden));
         }
+    }
+
+    #[test]
+    fn private_v3_schema_is_metadata_only_and_version_negotiated() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../../schemas/chat-ipc-v3.schema.json"))
+                .expect("v3 schema json");
+        assert_eq!(schema["x-yijie-schema-version"], 3);
+        assert_eq!(
+            schema["x-yijie-command-names"],
+            json!(["chat_load_history_v3"])
+        );
+        let properties = schema["$defs"]["artifact"]["properties"]
+            .as_object()
+            .expect("artifact properties");
+        for forbidden in [
+            "sha256",
+            "contentHref",
+            "posterHref",
+            "bytes",
+            "path",
+            "token",
+        ] {
+            assert!(!properties.contains_key(forbidden));
+        }
+        let request_id = Uuid::now_v7();
+        let request: CommandRequest<SessionReadPayload> = decode_request_v3(json!({
+            "schemaVersion": 3,
+            "requestId": request_id,
+            "contextId": Uuid::now_v7(),
+            "payload": {"sessionId": Uuid::now_v7()}
+        }))
+        .expect("closed v3 request");
+        assert_eq!(request.schema_version, CHAT_IPC_V3_SCHEMA_VERSION);
+        let error = decode_request_v3::<SessionReadPayload>(json!({
+            "schemaVersion": 2,
+            "requestId": request_id,
+            "contextId": Uuid::now_v7(),
+            "payload": {"sessionId": Uuid::now_v7()}
+        }));
+        let Err(error) = error else {
+            panic!("v2 request cannot call v3 command");
+        };
+        assert_eq!(error.schema_version, CHAT_IPC_V3_SCHEMA_VERSION);
     }
 
     #[test]
@@ -3884,6 +4072,79 @@ pub async fn chat_load_history_v2(
     enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)
         .map_err(ChatIpcError::v2)?;
     Ok(CommandResponse::new_v2(request.request_id, data))
+}
+
+#[tauri::command]
+pub async fn chat_load_history_v3(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<HistoryPageDtoV3>, ChatIpcError> {
+    let request: CommandRequest<SessionReadPayload> = decode_request_v3(request)?;
+    let now =
+        unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
+    let before = ipc_runtime
+        .resolve_history_cursor(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.cursor.as_deref(),
+            now,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v3)?;
+    let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v3)?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v3)?;
+    ipc_runtime
+        .begin_read(request.request_id)
+        .map_err(ChatIpcError::v3)?;
+    let result = authorized
+        .load_history(
+            request.context_id,
+            request.payload.session_id,
+            before,
+            request.payload.limit,
+        )
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let page = result.map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
+    finished.map_err(ChatIpcError::v3)?;
+    let next_cursor = page
+        .next_before_ordinal
+        .map(|before| {
+            ipc_runtime.issue_cursor(
+                request.context_id,
+                CursorValue::History {
+                    session_id: request.payload.session_id,
+                    before,
+                },
+                now,
+            )
+        })
+        .transpose()
+        .map_err(ChatIpcError::v3)?;
+    let message_ids = history_message_ids(&page);
+    let turn_ids = page.turns.iter().map(|turn| turn.turn_id).collect();
+    let projections = authorized
+        .load_message_content_blocks(request.context_id, message_ids)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
+    let artifacts = authorized
+        .load_artifacts_for_turns(request.context_id, turn_ids)
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
+    let data = history_dto_v3(page, next_cursor, projections, artifacts)
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v3())?;
+    enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)
+        .map_err(ChatIpcError::v3)?;
+    Ok(CommandResponse::new_v3(request.request_id, data))
 }
 
 #[tauri::command]

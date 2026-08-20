@@ -15,6 +15,8 @@ const PUBLIC_TASK_CONTROL_PLANE_SQL: &str =
 const CHAT_ATTACHMENTS_SQL: &str = include_str!("../../migrations/chat/0006_chat_attachments.sql");
 const CHAT_ATTACHMENT_DRAFT_TARGETS_SQL: &str =
     include_str!("../../migrations/chat/0007_chat_attachment_draft_targets.sql");
+const CHAT_OUTPUT_ARTIFACTS_SQL: &str =
+    include_str!("../../migrations/chat/0008_chat_output_artifacts.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -23,7 +25,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 7] = [
+const CATALOG: [CatalogEntry; 8] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -58,6 +60,11 @@ const CATALOG: [CatalogEntry; 7] = [
         version: 7,
         name: "0007_chat_attachment_draft_targets",
         sql: CHAT_ATTACHMENT_DRAFT_TARGETS_SQL,
+    },
+    CatalogEntry {
+        version: 8,
+        name: "0008_chat_output_artifacts",
+        sql: CHAT_OUTPUT_ARTIFACTS_SQL,
     },
 ];
 
@@ -337,6 +344,73 @@ mod tests {
                 params![Uuid::now_v7().to_string(), session_id, turn_id],
             )
             .is_err());
+    }
+
+    #[test]
+    fn populated_v7_expands_to_empty_artifact_authority_without_backfill() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrations()
+            .to_version(&mut connection, 7)
+            .expect("create v7");
+        let project_id = Uuid::now_v7().to_string();
+        let session_id = Uuid::now_v7().to_string();
+        let turn_id = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'Synthetic', ?4, X'01', 1)",
+                params![project_id, owner, tenant, "a".repeat(64)],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'Existing', 'fallback', 'not_started', 1, 1)",
+                params![session_id, owner, tenant, project_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status, terminal_at)
+                 VALUES (?1, ?2, ?3, 'completed', 1)",
+                params![turn_id, session_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_messages(
+                   id, session_id, turn_id, role, content, status, ordinal, created_at
+                 ) VALUES (?1, ?2, ?3, 'assistant', 'retained-v7', 'committed', 0, 1)",
+                params![Uuid::now_v7().to_string(), session_id, turn_id],
+            )
+            .unwrap();
+
+        migrate(&mut connection).expect("expand populated v7 to v8");
+        assert_eq!(user_version(&connection).unwrap(), 8);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT content FROM chat_messages WHERE turn_id=?1",
+                    [turn_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "retained-v7"
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM chat_output_artifacts", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

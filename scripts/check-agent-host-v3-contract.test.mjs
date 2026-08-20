@@ -30,7 +30,14 @@ describe("Agent Host v3 Artifact contract pin", () => {
     })).toThrow();
     expect(() => validateLock({
       ...lock,
-      consumer: { ...lock.consumer, adapter_status: "implemented" },
+      consumer: { ...lock.consumer, adapter_status: "not_started" },
+    })).toThrow();
+    expect(() => validateLock({
+      ...lock,
+      consumer: {
+        ...lock.consumer,
+        implementation_files: lock.consumer.implementation_files.slice(1),
+      },
     })).toThrow();
   });
 

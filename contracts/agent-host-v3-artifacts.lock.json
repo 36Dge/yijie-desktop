@@ -51,18 +51,77 @@
   },
   "consumer": {
     "owner": "段成威",
-    "mode": "pre-implementation-contract-pin",
-    "adapter_status": "not_started",
+    "mode": "hand-written-rust-adapter",
+    "adapter_status": "implemented",
+    "implementation_files": [
+      {
+        "role": "wire_and_storage_adapter",
+        "path": "src-tauri/src/chat/artifact.rs",
+        "sha256": "a22b474220455d670e91b3b1fa46b13e23912f0fce645c38dda2165bfb61c7dc"
+      },
+      {
+        "role": "host_resource_transport",
+        "path": "src-tauri/src/chat/host_bridge.rs",
+        "sha256": "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2"
+      },
+      {
+        "role": "database_lifecycle",
+        "path": "src-tauri/src/chat/database.rs",
+        "sha256": "f68222c9251e44bc72ef0c044e4d4d31bc47bc6903fc95155b0438c22e3f59b6"
+      },
+      {
+        "role": "database_worker",
+        "path": "src-tauri/src/chat/worker.rs",
+        "sha256": "3f8006a145d347f7768aa07dc2fc350d866dc90331c40e479ba805e665fd566e"
+      },
+      {
+        "role": "private_ipc_adapter",
+        "path": "src-tauri/src/chat/ipc.rs",
+        "sha256": "b3db186c1dfc353cc93497166586583bd9302b2ae2587b8a2865c29964e2b291"
+      },
+      {
+        "role": "interrupt_lifecycle",
+        "path": "src-tauri/src/chat/application.rs",
+        "sha256": "8c7399b495a0052c5f3bace1b4d8e84430b171010802e82ca130a2229db837db"
+      },
+      {
+        "role": "runtime_gate",
+        "path": "src-tauri/src/chat/mod.rs",
+        "sha256": "5c178ba97cff2d06f696681b332ed0ddb41a5f551141065574613660f515ea5b"
+      },
+      {
+        "role": "sqlcipher_schema_v8",
+        "path": "src-tauri/migrations/chat/0008_chat_output_artifacts.sql",
+        "sha256": "bec50a16583b216380f5f19728342772ff211ca2ebb88c0ff83b2e44d3fa9a15"
+      },
+      {
+        "role": "private_ipc_v3_schema",
+        "path": "src-tauri/schemas/chat-ipc-v3.schema.json",
+        "sha256": "ac61e2f1377e8a5ea44fd8611b05bdbb39e5188f42c142342d7de8401375f3f2"
+      },
+      {
+        "role": "typescript_private_ipc_adapter",
+        "path": "src/domain/chat-ipc.ts",
+        "sha256": "2fbec6e363ab75733efdfde538392423248a4c23d4460e7669f9e666fa51ac64"
+      }
+    ],
+    "conformance_tests": [
+      "chat::artifact::tests::v3_wire_adapter_is_closed_scope_bound_and_never_accepts_provider_drift",
+      "chat::artifact::tests::report_adapter_accepts_unknown_optional_and_rejects_required_or_markup",
+      "chat::artifact::tests::sqlcipher_commit_ack_reopen_expiry_receipt_and_delete_are_atomic",
+      "chat::host_bridge::tests::artifact_download_and_post_commit_ack_use_exact_owner_only_v3_resources",
+      "chat::ipc::tests::private_v3_schema_is_metadata_only_and_version_negotiated"
+    ],
     "approved_rust_generator": "N/A",
-    "generator_rationale": "No Rust JSON Schema/OpenAPI generator is approved for this Desktop native boundary. G2 approves a future explicit adapter only after this exact pin and same-source conformance; no adapter or business behavior exists at G2A preflight."
+    "generator_rationale": "No Rust JSON Schema/OpenAPI generator is approved for this Desktop native boundary. The time-bounded exception permits only these digest-pinned closed adapters with same-source fixture and semantic conformance."
   },
   "exception": {
     "id": "EXC-128-001",
-    "scope": "Time-bounded plan for a future hand-written Rust v3 Artifact adapter validated against the exact pinned OpenAPI, JSON Schemas, and fixtures.",
+    "scope": "Time-bounded hand-written Rust v3 Artifact event, resource, report, SQLCipher and private IPC adapters validated against the exact pinned OpenAPI, JSON Schemas and fixtures.",
     "owner": "段成威",
     "approved_on": "2026-08-20",
     "expires_on": "2026-11-20",
-    "status": "approved-plan",
+    "status": "active",
     "removal_trigger": "Remove or re-review before G5, at expiry, when an approved Rust generator exists, or whenever a pinned source/digest changes."
   }
 }

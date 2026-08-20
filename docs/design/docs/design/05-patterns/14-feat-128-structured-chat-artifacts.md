@@ -12,9 +12,11 @@
 - 默认语言：中文
 
 本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Contracts S1/S2 与
-downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 业务实现现已获条件授权，但尚未开始；
-IPC、Tauri command/capability/CSP、本地数据库等必须按 S4/S7 原子切片实施。模型调用、真实 provider、
-云资源、发布或生产配置仍不在授权范围。
+downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 native foundation 已实现：SQLCipher v8
+expand-only authority、严格 v3 event/report adapter、owner-bound content/poster transfer、commit 后幂等 ACK、
+7 天 TTL/cleanup receipt，以及唯一新增的 metadata-only 只读 Tauri command `chat_load_history_v3`。S4 没有
+新增 capability、CSP、外部 origin、renderer UI 或保存能力；模型调用、真实 provider、云资源、发布或生产配置
+仍不在授权范围。
 
 ## 目标
 
@@ -183,9 +185,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ### 11. MiniMax 与当前实现限制
 
-- MiniMax 宣称支持多模态不等于当前固定 Runtime、Agent Host 和 Desktop 已经支持结构化 Artifact 输出。
-- 当前仓库的已接受证据只覆盖文本对话、raw reasoning 以及 FEAT-127 用户输入附件链路；尚无 Accepted 证据
-  证明 MiniMax 图片生成、视频生成、生成文件/报告、Artifact 进度事件、owner-only 内容读取或历史恢复可用。
+- MiniMax 宣称支持多模态不等于当前固定 Runtime、Agent Host 和 Desktop 已经支持真实 provider Artifact 输出。
+- 当前仓库只实现默认关闭的 native S4 foundation，并用严格 local synthetic fixture 验证四类 metadata、事件、
+  内容读取、SQLCipher 持久化、ACK、过期与历史投影；尚无 renderer 展示或真实 MiniMax 生成能力证据。
 - 视频生成尤其没有当前 provider 能力、时长、格式、计费和失败语义证据。UI 禁止仅根据模型宣传材料提前显示
   可用能力。
 - 未来实现必须先用无付费、无真实卖家数据的 deterministic fixture 完成状态机与 UI 验证。任何真实 MiniMax
@@ -193,7 +195,8 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## AI / Codex 必须遵守
 
-- 本文已 Accepted 且 G2A 已通过；Host S3 可先启动，Desktop S4 必须在 S3 conformance 后启动。当前两端业务实现仍为 `not_started`。
+- 本文已 Accepted，G2A、Host S3 与 Desktop S4 已通过。下一切片只能进入 S5 provider-neutral
+  domain/store；不得把 S4 native foundation 描述为 renderer、端到端验收或真实 provider 已完成。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -219,7 +222,9 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 ## 验收清单
 
-- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；G2A 已通过，Desktop S4 获授权但尚未开始。
+- [x] 本文状态已由 G2/Owner 明确批准为 Accepted；G2A、Host S3 与 Desktop S4 已通过。
+- [x] S4 native authority 持久化单调进度、校验/加密 content 与 poster、commit 后 ACK、TTL receipt，并且
+  private IPC v3 只返回安全 metadata；默认 flag 为关闭。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -236,6 +241,8 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 - 2026-08-20 / 0.1.0 Proposed Candidate：根据 FEAT-128 需求形成 ChatGPT 类结构化 Artifact UI 候选，覆盖
   图片、视频、文件、报告、渐进式状态、预览/下载、安全边界和无云资源的本地限制。
 - 2026-08-20 / 1.0.0 Accepted：G2 closure 冻结 turn-level cancel、synthetic/real 分层、report unknown optional/required、bounded preview/save 与 retention 展示语义。
+- 2026-08-20 / S4 native foundation：实现 SQLCipher schema v8、严格 v3 adapter、原生 transfer/ACK/TTL/delete
+  和 metadata-only private history v3；未实现 S5-S9 renderer/CSP/save/provider 能力。
 - Owner approval：段成威，`APPROVED`（用户明确 G2 指令由 Codex 代录；不声称独立人工评审）。
 - Desktop implementation approval：`GRANTED AFTER G2A FOR PLANNED S4+ ONLY`。精确 pin commit 为
   `96094419d963745529ed0fa246919089e659f20d`；它只包含 provenance/conformance，不包含业务实现。

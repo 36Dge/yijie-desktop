@@ -1,4 +1,5 @@
 mod application;
+mod artifact;
 mod attachment;
 mod authorization;
 mod database;
@@ -22,6 +23,12 @@ pub use application::{
     ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome, LiveReasoningProjection,
     LiveTurnProjection, ReducerOutcome, ReducerOutcomeKind, TurnEventReducer, TurnProjectionSink,
 };
+pub use artifact::{
+    decode_artifact_event_v3, ArtifactCommit, ArtifactEventV3, ArtifactIdentity, ArtifactKind,
+    ArtifactManifest, ArtifactProgressStage, ArtifactProjection, ArtifactProvenance,
+    ArtifactTransferOutcome, ArtifactTransferService, DownloadedArtifact, DownloadedResource,
+    StoredArtifactCommit, TransferDisposition, ARTIFACT_RETENTION_SECONDS,
+};
 pub use authorization::{
     AuthoritativeChatProjection, ChatAction, ChatAuthorizationContext, ChatAuthorizationManager,
 };
@@ -42,7 +49,9 @@ pub use host_domain::{
     HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSession,
     HostSessionFailure, HostSessionState, HostTurnStatus,
 };
-pub use ipc::{ChatIpcRuntime, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION};
+pub use ipc::{
+    ChatIpcRuntime, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION, CHAT_IPC_V3_SCHEMA_VERSION,
+};
 pub use keychain::{
     DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore, DATABASE_KEYCHAIN_ACCOUNT,
     DATABASE_KEYCHAIN_SERVICE, RECEIPT_KEYCHAIN_ACCOUNT, RECEIPT_KEYCHAIN_SERVICE,
@@ -77,6 +86,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_create_session_v2;
     let _ = ipc::chat_submit_turn_v2;
     let _ = ipc::chat_load_history_v2;
+    let _ = ipc::chat_load_history_v3;
     let _ = ipc::chat_resync_session_v2;
     let _ = ipc::chat_list_sessions_v1;
     let _ = ipc::chat_load_history_v1;
@@ -94,6 +104,11 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
 }
 
 const CONTRACT_COMMIT: &str = "ea48fe190e18afba728712d1e2cc79cda57f581b";
+const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
+
+fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
+    value == Some("true")
+}
 
 #[derive(Clone)]
 struct LocalChatConfig {
@@ -655,6 +670,19 @@ impl ChatRuntime {
             self.authorization_manager()?,
         ))
     }
+
+    pub async fn local_artifact_transfer_service(
+        &self,
+    ) -> Result<ArtifactTransferService, ChatError> {
+        let configured = std::env::var(ARTIFACTS_V3_FLAG).ok();
+        if !artifacts_v3_transfer_enabled(configured.as_deref()) {
+            return Err(ChatError::Disabled);
+        }
+        Ok(ArtifactTransferService::new(
+            self.local_host_bridge().await?,
+            self.database().await?,
+        ))
+    }
 }
 
 #[cfg(feature = "feat126-s10-driver")]
@@ -839,5 +867,13 @@ mod tests {
         for forbidden in ["bearer", "sqlcipher", "projectPath", "binary", "token"] {
             assert!(!encoded.contains(forbidden));
         }
+    }
+
+    #[test]
+    fn artifact_transfer_flag_is_exact_true_and_defaults_off() {
+        for disabled in [None, Some(""), Some("false"), Some("TRUE"), Some("1")] {
+            assert!(!artifacts_v3_transfer_enabled(disabled));
+        }
+        assert!(artifacts_v3_transfer_enabled(Some("true")));
     }
 }

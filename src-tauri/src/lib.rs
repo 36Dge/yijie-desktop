@@ -209,6 +209,7 @@ pub fn run() {
         chat::ipc::chat_list_sessions_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_history_v2,
+        chat::ipc::chat_load_history_v3,
         chat::ipc::chat_load_reasoning_v1,
         chat::ipc::chat_rename_session_v1,
         chat::ipc::chat_set_session_pinned_v1,

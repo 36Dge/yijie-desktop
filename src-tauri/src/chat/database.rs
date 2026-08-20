@@ -47,8 +47,8 @@ const R8_IDEMPOTENCY_RETRY_DELAY: Duration = Duration::from_micros(100);
 
 #[derive(Clone)]
 pub struct ChatScope {
-    owner_user_id: String,
-    tenant_id: String,
+    pub(super) owner_user_id: String,
+    pub(super) tenant_id: String,
 }
 
 impl ChatScope {
@@ -653,9 +653,9 @@ struct TitlePayloadV1 {
 }
 
 pub struct ChatRepository {
-    connection: Connection,
-    database_path: PathBuf,
-    scope: ChatScope,
+    pub(super) connection: Connection,
+    pub(super) database_path: PathBuf,
+    pub(super) scope: ChatScope,
     receipt_key: ReceiptKey,
     attachment_checkpoint_pending: bool,
 }
@@ -810,6 +810,7 @@ impl ChatRepository {
             attachment_checkpoint_pending: true,
         };
         repository.expire_attachments_all_scopes(unix_seconds()?)?;
+        repository.purge_expired_artifacts(unix_seconds()?)?;
         Ok(repository)
     }
 
@@ -5160,6 +5161,17 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             collected
         };
+        let artifact_ids = {
+            let mut statement = transaction
+                .prepare("SELECT artifact_id FROM chat_output_artifacts WHERE session_id=?1")
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            let result = statement
+                .query_map([session_id], |row| row.get::<_, String>(0))
+                .map_err(|_| ChatError::DatabaseUnavailable)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            result
+        };
         let changed = transaction
             .execute(
                 "DELETE FROM chat_sessions WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3",
@@ -5176,6 +5188,7 @@ impl ChatRepository {
             ("chat_event_cursors", "session_id"),
             ("chat_outbox", "session_id"),
             ("chat_public_task_bindings", "session_id"),
+            ("chat_output_artifacts", "session_id"),
         ] {
             let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
             let count: i64 = transaction
@@ -5183,6 +5196,20 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             if count != 0 {
                 return Err(ChatError::CleanupIncomplete);
+            }
+        }
+        for artifact_id in artifact_ids {
+            for (table, column) in [
+                ("chat_output_artifacts", "artifact_id"),
+                ("chat_artifact_cleanup_receipts", "artifact_id"),
+            ] {
+                let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
+                let count: i64 = transaction
+                    .query_row(&query, [artifact_id.as_str()], |row| row.get(0))
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if count != 0 {
+                    return Err(ChatError::CleanupIncomplete);
+                }
             }
         }
         for turn_id in turn_ids {
@@ -5241,7 +5268,7 @@ impl ChatRepository {
         self.checkpoint_after_delete()
     }
 
-    fn checkpoint_after_delete(&self) -> Result<(), ChatError> {
+    pub(super) fn checkpoint_after_delete(&self) -> Result<(), ChatError> {
         let secure_delete: i64 = self
             .connection
             .query_row("PRAGMA secure_delete", [], |row| row.get(0))

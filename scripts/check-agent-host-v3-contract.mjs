@@ -37,6 +37,25 @@ const FIXTURE_TREE_PINS = new Map([
   ["tests/fixtures/agent/host-v3", "8afbe7e88cc89401d9990e08b4b332096b53934e"],
   ["tests/fixtures/report/report-document-v1", "3fafff6d702504f7a8a1cd44b4c717f024c88ae8"],
 ]);
+const IMPLEMENTATION_PINS = new Map([
+  ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "a22b474220455d670e91b3b1fa46b13e23912f0fce645c38dda2165bfb61c7dc"]],
+  ["src-tauri/src/chat/host_bridge.rs", ["host_resource_transport", "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2"]],
+  ["src-tauri/src/chat/database.rs", ["database_lifecycle", "f68222c9251e44bc72ef0c044e4d4d31bc47bc6903fc95155b0438c22e3f59b6"]],
+  ["src-tauri/src/chat/worker.rs", ["database_worker", "3f8006a145d347f7768aa07dc2fc350d866dc90331c40e479ba805e665fd566e"]],
+  ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "b3db186c1dfc353cc93497166586583bd9302b2ae2587b8a2865c29964e2b291"]],
+  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "8c7399b495a0052c5f3bace1b4d8e84430b171010802e82ca130a2229db837db"]],
+  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "5c178ba97cff2d06f696681b332ed0ddb41a5f551141065574613660f515ea5b"]],
+  ["src-tauri/migrations/chat/0008_chat_output_artifacts.sql", ["sqlcipher_schema_v8", "bec50a16583b216380f5f19728342772ff211ca2ebb88c0ff83b2e44d3fa9a15"]],
+  ["src-tauri/schemas/chat-ipc-v3.schema.json", ["private_ipc_v3_schema", "ac61e2f1377e8a5ea44fd8611b05bdbb39e5188f42c142342d7de8401375f3f2"]],
+  ["src/domain/chat-ipc.ts", ["typescript_private_ipc_adapter", "2fbec6e363ab75733efdfde538392423248a4c23d4460e7669f9e666fa51ac64"]],
+]);
+const CONFORMANCE_TESTS = Object.freeze([
+  "chat::artifact::tests::v3_wire_adapter_is_closed_scope_bound_and_never_accepts_provider_drift",
+  "chat::artifact::tests::report_adapter_accepts_unknown_optional_and_rejects_required_or_markup",
+  "chat::artifact::tests::sqlcipher_commit_ack_reopen_expiry_receipt_and_delete_are_atomic",
+  "chat::host_bridge::tests::artifact_download_and_post_commit_ack_use_exact_owner_only_v3_resources",
+  "chat::ipc::tests::private_v3_schema_is_metadata_only_and_version_negotiated",
+]);
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -61,6 +80,22 @@ function sameEntries(actual, expected) {
   );
 }
 
+function sameImplementationFiles(actual) {
+  return (
+    Array.isArray(actual) &&
+    actual.length === IMPLEMENTATION_PINS.size &&
+    actual.every((entry) => {
+      const expected = IMPLEMENTATION_PINS.get(entry?.path);
+      return expected?.[0] === entry?.role && expected?.[1] === entry?.sha256;
+    })
+  );
+}
+
+function sameStrings(actual, expected) {
+  return Array.isArray(actual) && actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index]);
+}
+
 export function validateLock(lock) {
   if (
     !lock ||
@@ -79,8 +114,10 @@ export function validateLock(lock) {
     lock.validator?.package !== "ajv" ||
     lock.validator?.version !== "8.17.1" ||
     lock.consumer?.owner !== "段成威" ||
-    lock.consumer?.mode !== "pre-implementation-contract-pin" ||
-    lock.consumer?.adapter_status !== "not_started" ||
+    lock.consumer?.mode !== "hand-written-rust-adapter" ||
+    lock.consumer?.adapter_status !== "implemented" ||
+    !sameImplementationFiles(lock.consumer?.implementation_files) ||
+    !sameStrings(lock.consumer?.conformance_tests, CONFORMANCE_TESTS) ||
     lock.consumer?.approved_rust_generator !== "N/A" ||
     typeof lock.consumer?.generator_rationale !== "string" ||
     lock.consumer.generator_rationale.length === 0 ||
@@ -88,7 +125,7 @@ export function validateLock(lock) {
     lock.exception?.owner !== "段成威" ||
     lock.exception?.approved_on !== "2026-08-20" ||
     lock.exception?.expires_on !== "2026-11-20" ||
-    lock.exception?.status !== "approved-plan" ||
+    lock.exception?.status !== "active" ||
     typeof lock.exception?.removal_trigger !== "string" ||
     lock.exception.removal_trigger.length === 0
   ) {
@@ -96,6 +133,7 @@ export function validateLock(lock) {
   }
   for (const { path: entryPath } of Object.values(lock.sources)) safeRelativePath(entryPath);
   for (const { path: entryPath } of lock.fixture_trees) safeRelativePath(entryPath);
+  for (const { path: entryPath } of lock.consumer.implementation_files) safeRelativePath(entryPath);
   return lock;
 }
 
@@ -192,6 +230,15 @@ async function validateFixtureTrees(lock, contractsRoot) {
   }
 }
 
+async function verifyImplementationPins(lock) {
+  for (const implementation of lock.consumer.implementation_files) {
+    const bytes = await readFile(path.join(repositoryRoot, safeRelativePath(implementation.path)));
+    if (sha256(bytes) !== implementation.sha256) {
+      throw new Error(`${implementation.path} digest differs from its implementation pin`);
+    }
+  }
+}
+
 export async function checkAgentHostV3Contract() {
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
   const contractsRoot = path.resolve(
@@ -206,6 +253,7 @@ export async function checkAgentHostV3Contract() {
     verifySource(contractsRoot, lock.sources.protobuf),
     loadPinnedOpenApiParser(lock),
     validateFixtureTrees(lock, contractsRoot),
+    verifyImplementationPins(lock),
   ]);
   validateOpenApi(parseYaml(openApiBytes.toString("utf8")));
   const validateEvent = compileSchema(JSON.parse(eventBytes));
@@ -223,8 +271,8 @@ export async function checkAgentHostV3Contract() {
     if (!protoBytes.includes(Buffer.from(symbol))) throw new Error(`v3 Protobuf is missing ${symbol}`);
   }
   process.stdout.write(
-    `Agent Host v3 Artifact contract pre-implementation pin verified at ${lock.full_commit}; ` +
-      `Desktop adapter remains ${lock.consumer.adapter_status}.\n`,
+    `Agent Host v3 Artifact contract and ${lock.consumer.implementation_files.length} Desktop ` +
+      `implementation pins verified at ${lock.full_commit}; adapter is ${lock.consumer.adapter_status}.\n`,
   );
 }
 

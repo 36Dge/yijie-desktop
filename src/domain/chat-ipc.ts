@@ -1,5 +1,6 @@
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
 export const CHAT_IPC_V2_SCHEMA_VERSION = 2 as const;
+export const CHAT_IPC_V3_SCHEMA_VERSION = 3 as const;
 export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
 export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
 export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-import:event:v2" as const;
@@ -49,6 +50,10 @@ export const CHAT_V2_COMMAND_NAMES = Object.freeze([
 ] as const);
 
 export type ChatV2CommandName = (typeof CHAT_V2_COMMAND_NAMES)[number];
+
+export const CHAT_V3_COMMAND_NAMES = Object.freeze(["chat_load_history_v3"] as const);
+
+export type ChatV3CommandName = (typeof CHAT_V3_COMMAND_NAMES)[number];
 
 export const CHAT_ERROR_CODES = Object.freeze([
   "chat_unauthenticated",
@@ -117,7 +122,7 @@ export const CHAT_ALLOWED_ACTIONS = Object.freeze([
 export type ChatAllowedAction = (typeof CHAT_ALLOWED_ACTIONS)[number];
 
 export interface ChatIpcErrorShape {
-  readonly schemaVersion: 1 | 2;
+  readonly schemaVersion: 1 | 2 | 3;
   readonly requestId?: string;
   readonly code: ChatErrorCode;
   readonly retryable: boolean;
@@ -294,6 +299,32 @@ export interface ChatHistoryTurn {
   readonly reasoningReasonCode: string | null;
   readonly messages: readonly ChatMessage[];
   readonly reasoning: readonly ChatReasoningMetadata[];
+  readonly artifacts?: readonly ChatArtifact[];
+}
+
+export const CHAT_ARTIFACT_KINDS = Object.freeze(["image", "video", "file", "report"] as const);
+export const CHAT_ARTIFACT_PROVENANCES = Object.freeze(["synthetic", "provider", "tool"] as const);
+export const CHAT_ARTIFACT_STATUSES = Object.freeze([
+  "announced", "generating", "processing", "transferring",
+  "ready", "failed", "cancelled", "expired",
+] as const);
+
+export interface ChatArtifact {
+  readonly artifactId: string;
+  readonly kind: (typeof CHAT_ARTIFACT_KINDS)[number];
+  readonly provenance: (typeof CHAT_ARTIFACT_PROVENANCES)[number];
+  readonly status: (typeof CHAT_ARTIFACT_STATUSES)[number];
+  readonly ordinal: number;
+  readonly progressStage: "generating" | "processing" | "finalizing" | null;
+  readonly progressPercent: number | null;
+  readonly displayName: string | null;
+  readonly mediaType: string | null;
+  readonly sizeBytes: number | null;
+  readonly localCommittedAt: number | null;
+  readonly expiresAt: number | null;
+  readonly hasPoster: boolean;
+  readonly errorCode: string | null;
+  readonly retryable: boolean | null;
 }
 
 export interface ChatHistoryPage {
@@ -527,6 +558,13 @@ function responseDataV2<T>(value: unknown, parser: Parser<T>): T {
   return parser(envelope.data);
 }
 
+function responseDataV3<T>(value: unknown, parser: Parser<T>): T {
+  const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
+  if (envelope.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION) throw new ChatContractError();
+  uuid(envelope.requestId);
+  return parser(envelope.data);
+}
+
 export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   const error = exactObject(
     value,
@@ -534,7 +572,9 @@ export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
     ["requestId", "attachmentIssue", "attachmentItemCount", "retryAfterMs"],
   );
   if (
-    (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION && error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) ||
+    (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION &&
+      error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION &&
+      error.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION) ||
     typeof error.retryable !== "boolean"
   ) {
     throw new ChatContractError();
@@ -825,6 +865,129 @@ function parseHistoryPageV2(value: unknown): ChatHistoryPage {
 
 export function parseHistoryPageResponseV2(value: unknown): ChatHistoryPage {
   return responseDataV2(value, parseHistoryPageV2);
+}
+
+const CHAT_ARTIFACT_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+const CHAT_ARTIFACT_FILE_MEDIA_TYPES = [
+  "text/plain",
+  "text/csv",
+  "application/json",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+] as const;
+
+function parseArtifact(value: unknown): ChatArtifact {
+  const artifact = exactObject(value, [
+    "artifactId", "kind", "provenance", "status", "ordinal", "progressStage", "progressPercent",
+    "displayName", "mediaType",
+    "sizeBytes", "localCommittedAt", "expiresAt", "hasPoster", "errorCode", "retryable",
+  ]);
+  if (typeof artifact.hasPoster !== "boolean") throw new ChatContractError();
+  const kind = oneOf(artifact.kind, CHAT_ARTIFACT_KINDS);
+  const status = oneOf(artifact.status, CHAT_ARTIFACT_STATUSES);
+  const displayName = nullable(artifact.displayName, attachmentName);
+  const progressStage = nullable(artifact.progressStage, (entry) => oneOf(
+    entry,
+    ["generating", "processing", "finalizing"] as const,
+  ));
+  const progressPercent = nullable(artifact.progressPercent, (entry) => {
+    if (typeof entry !== "number" || !Number.isFinite(entry) || entry < 0 || entry > 100) {
+      throw new ChatContractError();
+    }
+    return entry;
+  });
+  const mediaType = nullable(artifact.mediaType, (entry) => {
+    switch (kind) {
+      case "image": return oneOf(entry, CHAT_ARTIFACT_IMAGE_MEDIA_TYPES);
+      case "video": return oneOf(entry, ["video/mp4"] as const);
+      case "file": return oneOf(entry, CHAT_ARTIFACT_FILE_MEDIA_TYPES);
+      case "report": return oneOf(entry, ["application/vnd.yijie.report+json;version=1"] as const);
+    }
+  });
+  const sizeBytes = nullable(artifact.sizeBytes, (entry) => integer(
+    entry,
+    1,
+    kind === "image" ? 20 * 1024 * 1024 : 64 * 1024 * 1024,
+  ));
+  const localCommittedAt = nullable(artifact.localCommittedAt, (entry) => integer(entry));
+  const expiresAt = nullable(artifact.expiresAt, (entry) => integer(entry));
+  const errorCode = nullable(artifact.errorCode, (entry) => stringValue(entry, 128));
+  const retryable = nullable(artifact.retryable, (entry) => {
+    if (typeof entry !== "boolean") throw new ChatContractError();
+    return entry;
+  });
+  if ((kind !== "video" && artifact.hasPoster) || (artifact.hasPoster && status !== "ready" && status !== "expired")) {
+    throw new ChatContractError();
+  }
+  const hasManifest = mediaType !== null && sizeBytes !== null;
+  const isDurable = status === "ready" || status === "expired";
+  const isFailed = status === "failed" || status === "cancelled";
+  const consistent =
+    (isDurable && hasManifest && progressStage === null && progressPercent === null && localCommittedAt !== null &&
+      expiresAt === localCommittedAt + 7 * 24 * 60 * 60 && errorCode === null && retryable === null) ||
+    (status === "transferring" && hasManifest && localCommittedAt === null && expiresAt === null &&
+      errorCode === null && retryable === null && !artifact.hasPoster) ||
+    (isFailed && progressStage === null && progressPercent === null && localCommittedAt === null && expiresAt === null && errorCode !== null && retryable !== null &&
+      !artifact.hasPoster) ||
+    ((status === "announced" || status === "generating" || status === "processing") && !hasManifest &&
+      localCommittedAt === null && expiresAt === null && errorCode === null && retryable === null &&
+      !artifact.hasPoster &&
+      (status !== "announced" || (progressStage === null && progressPercent === null)) &&
+      (progressStage === null ||
+        (status === "generating" && progressStage === "generating") ||
+        (status === "processing" && (progressStage === "processing" || progressStage === "finalizing"))));
+  if (!consistent || ((mediaType === null) !== (sizeBytes === null))) throw new ChatContractError();
+  return Object.freeze({
+    artifactId: uuid(artifact.artifactId),
+    kind,
+    provenance: oneOf(artifact.provenance, CHAT_ARTIFACT_PROVENANCES),
+    status,
+    ordinal: integer(artifact.ordinal, 0, 11),
+    progressStage,
+    progressPercent,
+    displayName,
+    mediaType,
+    sizeBytes,
+    localCommittedAt,
+    expiresAt,
+    hasPoster: artifact.hasPoster,
+    errorCode,
+    retryable,
+  });
+}
+
+function parseHistoryPageV3(value: unknown): ChatHistoryPage {
+  const page = exactObject(value, ["turns", "nextCursor"]);
+  if (!Array.isArray(page.turns) || page.turns.length > 50) throw new ChatContractError();
+  const turns = page.turns.map((value): ChatHistoryTurn => {
+    const turn = exactObject(value, [
+      "turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode",
+      "messages", "reasoning", "artifacts",
+    ]);
+    if (!Array.isArray(turn.messages) || !Array.isArray(turn.reasoning) || !Array.isArray(turn.artifacts) ||
+        turn.reasoning.length > 8 || turn.artifacts.length > 12) {
+      throw new ChatContractError();
+    }
+    const artifacts = turn.artifacts.map(parseArtifact);
+    if (artifacts.some((artifact, index) => index > 0 && artifacts[index - 1]!.ordinal >= artifact.ordinal)) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      turnId: uuid(turn.turnId),
+      status: stringValue(turn.status, 64),
+      terminalAt: nullable(turn.terminalAt, (entry) => integer(entry)),
+      reasoningStatus: stringValue(turn.reasoningStatus, 64),
+      reasoningReasonCode: nullable(turn.reasoningReasonCode, (entry) => stringValue(entry, 128)),
+      messages: Object.freeze(turn.messages.map(parseMessageV2)),
+      reasoning: Object.freeze(turn.reasoning.map(parseReasoningMetadata)),
+      artifacts: Object.freeze(artifacts),
+    });
+  });
+  return Object.freeze({ turns: Object.freeze(turns), nextCursor: nullable(page.nextCursor, cursor) });
+}
+
+export function parseHistoryPageResponseV3(value: unknown): ChatHistoryPage {
+  return responseDataV3(value, parseHistoryPageV3);
 }
 
 export function parseReasoningResponse(value: unknown): readonly ChatReasoningItem[] {

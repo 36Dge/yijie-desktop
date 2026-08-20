@@ -1,3 +1,4 @@
+use super::artifact::ArtifactProjection;
 use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
@@ -251,6 +252,15 @@ impl AuthorizedConversationApplication {
         self.application
             .load_message_content_blocks(message_ids)
             .await
+    }
+
+    pub async fn load_artifacts_for_turns(
+        &self,
+        context_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Vec<ArtifactProjection>, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application.load_artifacts_for_turns(turn_ids).await
     }
 
     pub async fn store_attachments(
@@ -768,6 +778,13 @@ impl ConversationApplication {
         message_ids: Vec<Uuid>,
     ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
         self.database.load_message_content_blocks(message_ids).await
+    }
+
+    pub async fn load_artifacts_for_turns(
+        &self,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Vec<ArtifactProjection>, ChatError> {
+        self.database.load_artifacts_for_turns(turn_ids).await
     }
 
     pub async fn store_attachments(

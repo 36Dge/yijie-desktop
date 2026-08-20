@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-ipc-v3.schema.json",
+  "title": "Yijie Desktop Private Structured Artifact History IPC v3",
+  "description": "Desktop-owned private history projection. It returns bounded Artifact metadata only; no content, digest, Host href, bearer, provider payload, or filesystem path crosses into the WebView.",
+  "x-yijie-schema-version": 3,
+  "x-yijie-public-chat-time-projection": "Unix epoch seconds are converted to RFC3339 date-time strings at the public ChatMessage boundary.",
+  "x-yijie-command-names": ["chat_load_history_v3"],
+  "x-yijie-command-contracts": {
+    "chat_load_history_v3": {
+      "request": "#/$defs/sessionReadRequest",
+      "response": "#/$defs/historyPageResponse"
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "opaqueCursor": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "epochSeconds": { "type": "integer", "minimum": 1 },
+    "nullableEpochSeconds": {
+      "oneOf": [{ "$ref": "#/$defs/epochSeconds" }, { "type": "null" }]
+    },
+    "boundedStatus": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "boundedReasonCode": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 128 },
+        { "type": "null" }
+      ]
+    },
+    "safeName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$"
+    },
+    "sessionReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/uuid" },
+        "cursor": { "$ref": "#/$defs/opaqueCursor" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "sessionReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "contextId", "payload"],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "contextId": { "$ref": "#/$defs/uuid" },
+        "payload": { "$ref": "#/$defs/sessionReadPayload" }
+      }
+    },
+    "imageMediaType": { "enum": ["image/png", "image/jpeg", "image/webp"] },
+    "fileMediaType": {
+      "enum": [
+        "text/plain",
+        "text/csv",
+        "application/json",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ]
+    },
+    "artifactMediaType": {
+      "oneOf": [
+        { "$ref": "#/$defs/imageMediaType" },
+        { "$ref": "#/$defs/fileMediaType" },
+        { "const": "video/mp4" },
+        { "const": "application/vnd.yijie.report+json;version=1" }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactId", "kind", "provenance", "status", "ordinal", "progressStage", "progressPercent", "displayName",
+        "mediaType", "sizeBytes", "localCommittedAt", "expiresAt", "hasPoster",
+        "errorCode", "retryable"
+      ],
+      "properties": {
+        "artifactId": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["image", "video", "file", "report"] },
+        "provenance": { "enum": ["synthetic", "provider", "tool"] },
+        "status": {
+          "enum": [
+            "announced", "generating", "processing", "transferring",
+            "ready", "failed", "cancelled", "expired"
+          ]
+        },
+        "ordinal": { "type": "integer", "minimum": 0, "maximum": 11 },
+        "progressStage": {
+          "oneOf": [
+            { "enum": ["generating", "processing", "finalizing"] },
+            { "type": "null" }
+          ]
+        },
+        "progressPercent": {
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 100 },
+            { "type": "null" }
+          ]
+        },
+        "displayName": {
+          "oneOf": [{ "$ref": "#/$defs/safeName" }, { "type": "null" }]
+        },
+        "mediaType": {
+          "oneOf": [{ "$ref": "#/$defs/artifactMediaType" }, { "type": "null" }]
+        },
+        "sizeBytes": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1, "maximum": 67108864 },
+            { "type": "null" }
+          ]
+        },
+        "localCommittedAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "expiresAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "hasPoster": { "type": "boolean" },
+        "errorCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "retryable": {
+          "oneOf": [{ "type": "boolean" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "image" } }, "required": ["kind"] },
+          "then": { "properties": { "mediaType": { "oneOf": [{ "$ref": "#/$defs/imageMediaType" }, { "type": "null" }] }, "sizeBytes": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 20971520 }, { "type": "null" }] }, "hasPoster": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "video" } }, "required": ["kind"] },
+          "then": { "properties": { "mediaType": { "oneOf": [{ "const": "video/mp4" }, { "type": "null" }] } } },
+          "else": { "properties": { "hasPoster": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "file" } }, "required": ["kind"] },
+          "then": { "properties": { "mediaType": { "oneOf": [{ "$ref": "#/$defs/fileMediaType" }, { "type": "null" }] } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "report" } }, "required": ["kind"] },
+          "then": { "properties": { "mediaType": { "oneOf": [{ "const": "application/vnd.yijie.report+json;version=1" }, { "type": "null" }] } } }
+        }
+      ]
+    },
+    "textMessageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1048576, "x-yijie-forbid-nul": true }
+      }
+    },
+    "attachmentMessageBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "attachmentId", "name", "mediaType", "sizeBytes", "status", "expiresAt"],
+      "properties": {
+        "type": { "enum": ["file", "image"] },
+        "attachmentId": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/safeName" },
+        "mediaType": { "type": "string", "minLength": 3, "maxLength": 127 },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+        "status": { "enum": ["bound", "expired"] },
+        "expiresAt": { "$ref": "#/$defs/epochSeconds" }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "role", "content", "contentBlocks", "status", "ordinal", "createdAt"],
+      "properties": {
+        "messageId": { "$ref": "#/$defs/uuid" },
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "type": "string", "maxLength": 1048576, "x-yijie-forbid-nul": true },
+        "contentBlocks": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "oneOf": [{ "$ref": "#/$defs/textMessageBlock" }, { "$ref": "#/$defs/attachmentMessageBlock" }] } },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/epochSeconds" }
+      }
+    },
+    "reasoningMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemOrdinal", "status", "reasonCode", "totalBytes", "partCount", "finalizedAtMs"],
+      "properties": {
+        "itemOrdinal": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "status": { "enum": ["complete", "incomplete", "unavailable"] },
+        "reasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "totalBytes": { "type": "integer", "minimum": 0, "maximum": 131072 },
+        "partCount": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "finalizedAtMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "historyTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode", "messages", "reasoning", "artifacts"],
+      "properties": {
+        "turnId": { "$ref": "#/$defs/uuid" },
+        "status": { "$ref": "#/$defs/boundedStatus" },
+        "terminalAt": { "$ref": "#/$defs/nullableEpochSeconds" },
+        "reasoningStatus": { "$ref": "#/$defs/boundedStatus" },
+        "reasoningReasonCode": { "$ref": "#/$defs/boundedReasonCode" },
+        "messages": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/message" } },
+        "reasoning": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/reasoningMetadata" } },
+        "artifacts": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/artifact" } }
+      }
+    },
+    "historyPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turns", "nextCursor"],
+      "properties": {
+        "turns": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/historyTurn" } },
+        "nextCursor": { "oneOf": [{ "$ref": "#/$defs/opaqueCursor" }, { "type": "null" }] }
+      }
+    },
+    "historyPageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "data"],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "data": { "$ref": "#/$defs/historyPage" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "code", "retryable", "recovery"],
+      "properties": {
+        "schemaVersion": { "const": 3 },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "code": { "enum": ["chat_unauthenticated", "chat_context_invalid", "chat_capability_denied", "chat_resource_not_found", "chat_project_invalid", "chat_cursor_invalid", "chat_request_invalid", "chat_request_cancelled", "chat_conflict", "chat_turn_active", "chat_host_not_ready", "chat_storage_unavailable", "chat_protocol_error", "chat_limit_exceeded", "chat_cleanup_incomplete", "chat_temporarily_unavailable"] },
+        "retryable": { "type": "boolean" },
+        "recovery": { "enum": ["none", "sign_in", "rebind_context", "request_permission", "fix_request", "reload", "resync", "retry", "start_host", "wait_cleanup", "reduce_input", "reselect_project"] },
+        "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 60000 }
+      }
+    }
+  }
+}

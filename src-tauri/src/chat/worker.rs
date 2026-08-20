@@ -1,3 +1,7 @@
+use super::artifact::{
+    ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
+    DownloadedArtifact, StoredArtifactCommit, TransferDisposition,
+};
 use super::attachment::PreparedAttachment;
 #[cfg(feature = "feat126-s10-driver")]
 use super::database::Feat126ResumeCandidate;
@@ -206,6 +210,101 @@ impl DatabaseWorker {
         message_ids: Vec<uuid::Uuid>,
     ) -> Result<Vec<(uuid::Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
         self.call(move |repository| repository.load_message_content_blocks(message_ids))
+            .await
+    }
+
+    pub async fn begin_artifact_transfer(
+        &self,
+        manifest: ArtifactManifest,
+    ) -> Result<TransferDisposition, ChatError> {
+        self.call(move |repository| repository.begin_artifact_transfer(&manifest))
+            .await
+    }
+
+    pub async fn record_artifact_started(
+        &self,
+        identity: ArtifactIdentity,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| repository.record_artifact_started(&identity))
+            .await
+    }
+
+    pub async fn record_artifact_progress(
+        &self,
+        identity: ArtifactIdentity,
+        stage: Option<ArtifactProgressStage>,
+        progress_percent: Option<f64>,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.record_artifact_progress(&identity, stage, progress_percent)
+        })
+        .await
+    }
+
+    pub async fn record_artifact_failed(
+        &self,
+        identity: ArtifactIdentity,
+        error_code: String,
+        retryable: bool,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.record_artifact_failed(&identity, &error_code, retryable)
+        })
+        .await
+    }
+
+    pub async fn cancel_inflight_artifacts(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+    ) -> Result<usize, ChatError> {
+        self.call(move |repository| repository.cancel_inflight_artifacts(session_id, turn_id))
+            .await
+    }
+
+    pub async fn commit_artifact(
+        &self,
+        manifest: ArtifactManifest,
+        downloaded: DownloadedArtifact,
+        local_committed_at: i64,
+        ack_id: uuid::Uuid,
+    ) -> Result<ArtifactCommit, ChatError> {
+        self.call(move |repository| {
+            repository.commit_artifact(&manifest, &downloaded, local_committed_at, ack_id)
+        })
+        .await
+    }
+
+    pub async fn artifact_commit(
+        &self,
+        manifest: ArtifactManifest,
+    ) -> Result<StoredArtifactCommit, ChatError> {
+        self.call(move |repository| repository.artifact_commit(&manifest))
+            .await
+    }
+
+    pub async fn mark_artifact_acknowledged(
+        &self,
+        artifact_id: uuid::Uuid,
+        ack_id: uuid::Uuid,
+        acknowledged_at: i64,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.mark_artifact_acknowledged(artifact_id, ack_id, acknowledged_at)
+        })
+        .await
+    }
+
+    pub async fn load_artifacts_for_turns(
+        &self,
+        turn_ids: Vec<uuid::Uuid>,
+    ) -> Result<Vec<ArtifactProjection>, ChatError> {
+        self.call(move |repository| repository.load_artifacts_for_turns(&turn_ids))
+            .await
+    }
+
+    pub async fn purge_expired_artifacts(&self, now: i64) -> Result<usize, ChatError> {
+        self.call(move |repository| repository.purge_expired_artifacts(now))
             .await
     }
 
