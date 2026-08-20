@@ -42,6 +42,7 @@
 - [经营分析 Pattern](./design/05-patterns/11-store-analytics.md)
 - [FEAT-126 Chat / App Shell Pattern](./design/05-patterns/12-feat-126-chat-app-shell-candidate.md)
 - [FEAT-127 Chat 附件 Pattern](./design/05-patterns/13-feat-127-chat-attachments.md)
+- [FEAT-128 对话流结构化 Artifact Pattern](./design/05-patterns/14-feat-128-structured-chat-artifacts.md)
 - [文案语气规范](./design/06-content/01-copywriting.md)
 - [中文与本地化规范](./design/06-content/02-i18n-l10n.md)
 - [错误、空态与加载文案规范](./design/06-content/03-error-empty-loading.md)
