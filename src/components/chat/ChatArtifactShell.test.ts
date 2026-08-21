@@ -5,6 +5,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import type { ChatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import type { ChatArtifact } from "../../domain/chat-ipc";
 import { createArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "./ChatArtifactList.vue";
@@ -27,6 +28,17 @@ const FILE_NATIVE_CLIENT: ChatArtifactFileNativeClient = {
     truncated: false,
   })),
   saveFile: vi.fn(async () => ({ status: "saved" as const, code: null })),
+};
+const REPORT_NATIVE_CLIENT: ChatArtifactReportNativeClient = {
+  readReportPreview: vi.fn(async () => ({
+    schemaVersion: 1 as const,
+    title: "安全结构化报告",
+    generatedAt: "2026-08-21T08:00:00Z",
+    sourceTime: null,
+    truncated: false,
+    sections: [],
+  })),
+  saveReport: vi.fn(async () => ({ status: "saved" as const, code: null })),
 };
 
 function artifact(
@@ -171,5 +183,37 @@ describe("ChatArtifactShell", () => {
     await wrapper.setProps({ artifact: artifact(8, { kind: "file", status: "expired" }) });
     await flushPromises();
     expect(wrapper.find("[data-testid='artifact-file']").exists()).toBe(false);
+  });
+
+  it("adds report actions only for a ready report and forwards the trusted context to S9A", async () => {
+    const wrapper = mount(ChatArtifactShell, {
+      props: {
+        artifact: artifact(9, {
+          kind: "report",
+          status: "ready",
+          displayName: "安全报告.json",
+          mediaType: "application/vnd.yijie.report+json;version=1",
+          sizeBytes: 128,
+          localCommittedAt: 1_000,
+          expiresAt: 605_801_000,
+        }),
+        contextId: CONTEXT_ID,
+        reportNativeClient: REPORT_NATIVE_CLIENT,
+      },
+    });
+
+    expect(REPORT_NATIVE_CLIENT.readReportPreview).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='artifact-report-open']").trigger("click");
+    await flushPromises();
+    expect(REPORT_NATIVE_CLIENT.readReportPreview).toHaveBeenCalledWith(CONTEXT_ID, {
+      sessionId: SESSION_ID,
+      turnId: TURN_ID,
+      artifactId: "019c1a00-0000-7000-8000-000000000312",
+    });
+    expect(wrapper.text()).toContain("安全结构化报告");
+
+    await wrapper.setProps({ artifact: artifact(9, { kind: "report", status: "failed" }) });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='artifact-report']").exists()).toBe(false);
   });
 });

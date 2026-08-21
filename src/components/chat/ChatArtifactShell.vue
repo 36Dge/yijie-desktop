@@ -3,10 +3,12 @@ import { computed } from "vue";
 import { NProgress, NTag } from "naive-ui";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import type { ChatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import type { ChatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactImage from "./ChatArtifactImage.vue";
 import ChatArtifactFile from "./ChatArtifactFile.vue";
+import ChatArtifactReport from "./ChatArtifactReport.vue";
 import ChatArtifactVideo from "./ChatArtifactVideo.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -16,6 +18,7 @@ const props = defineProps<{
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
   fileNativeClient?: ChatArtifactFileNativeClient;
+  reportNativeClient?: ChatArtifactReportNativeClient;
 }>();
 
 const kindPresentation = computed(() => ({
@@ -95,6 +98,13 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       :artifact="artifact"
       :context-id="contextId"
       :client="fileNativeClient"
+    />
+
+    <ChatArtifactReport
+      v-if="artifact.kind === 'report' && artifact.status === 'ready'"
+      :artifact="artifact"
+      :context-id="contextId"
+      :client="reportNativeClient"
     />
 
     <div class="artifact-shell__status-row">
