@@ -87,7 +87,7 @@
       {
         "role": "runtime_gate",
         "path": "src-tauri/src/chat/mod.rs",
-        "sha256": "134d878b2955e9ca3f0ad0afebdf2d8a550737288e35bed0c125556465d03e20"
+        "sha256": "807817989e7c28afb4e001f1d3e416be235f2dc3511a8763781ad3ebdeb56d0a"
       },
       {
         "role": "sqlcipher_schema_v8",
