@@ -35,6 +35,15 @@
   --yj-color-icon-default: #526046;
   --yj-color-icon-muted: #7a8670;
 
+  --yj-color-chart-series-1: #6b8e23;
+  --yj-color-chart-series-2: #356bea;
+  --yj-color-chart-series-3: #0e7490;
+  --yj-color-chart-series-4: #7c3aed;
+  --yj-color-chart-series-5: #b45309;
+  --yj-color-chart-series-6: #c2410c;
+  --yj-color-chart-series-7: #dc2626;
+  --yj-color-chart-series-8: #475569;
+
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --yj-font-size-caption: 12px;
   --yj-font-size-body: 14px;
@@ -131,4 +140,13 @@
 
   --yj-color-icon-default: #c6d0bc;
   --yj-color-icon-muted: #98a58e;
+
+  --yj-color-chart-series-1: #a6cc62;
+  --yj-color-chart-series-2: #78a2ff;
+  --yj-color-chart-series-3: #46c7d8;
+  --yj-color-chart-series-4: #a78bfa;
+  --yj-color-chart-series-5: #fbbf24;
+  --yj-color-chart-series-6: #fb923c;
+  --yj-color-chart-series-7: #f87171;
+  --yj-color-chart-series-8: #94a3b8;
 }
