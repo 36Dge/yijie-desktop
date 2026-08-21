@@ -78,8 +78,9 @@ use tauri::State;
 use tokio::sync::Mutex;
 use worker::DatabaseWorker;
 
-// The feature handler deliberately omits these production commands. Referencing the function
-// items keeps their normal compile coverage without making them invokable from the WebView.
+// The feature handler deliberately omits these production commands and private URI protocols.
+// Referencing the function items keeps their normal compile coverage without making them
+// invokable from the WebView.
 #[cfg(feature = "feat126-s10-driver")]
 pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_pick_project_v1;
@@ -112,6 +113,11 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_native::chat_open_artifact_image_preview_v1;
     let _ = artifact_native::chat_release_artifact_image_preview_v1;
     let _ = artifact_native::chat_save_artifact_image_v1;
+    let _ = artifact_native::handle_preview_protocol;
+    let _ = artifact_video_native::chat_open_artifact_video_preview_v1;
+    let _ = artifact_video_native::chat_release_artifact_video_preview_v1;
+    let _ = artifact_video_native::chat_save_artifact_video_v1;
+    let _ = artifact_video_native::handle_video_protocol;
     let _ = artifact_file_native::chat_read_artifact_file_preview_v1;
     let _ = artifact_file_native::chat_save_artifact_file_v1;
     let _ = artifact_report_native::chat_read_artifact_report_preview_v1;
