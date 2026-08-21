@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const BASELINE_COMMIT = "630c3c8d55a2617499f51bd5bed263b819aaf084";
+const READINESS_BASELINE_COMMIT = "630c3c8d55a2617499f51bd5bed263b819aaf084";
+const IMMUTABLE_S9B_D_COMMIT = "0a36ca7c54460d22ea6b3228832a57f05f0bde68";
 const EXPECTED = Object.freeze({
   echarts: Object.freeze({
     version: "6.1.0",
@@ -25,7 +26,7 @@ const EXPECTED = Object.freeze({
   }),
 });
 const ADDED_KEYS = Object.freeze(["echarts@6.1.0", "tslib@2.3.0", "zrender@6.1.0"]);
-const ALLOWED_FILES = new Set([
+const HISTORICAL_ALLOWED_FILES = new Set([
   "package.json",
   "pnpm-lock.yaml",
   "THIRD_PARTY_NOTICES.md",
@@ -41,6 +42,21 @@ const ALLOWED_FILES = new Set([
   "scripts/check-feat128-s9b-d-bundle.mjs",
   "scripts/check-feat128-s9b-d-bundle.test.mjs",
 ]);
+const PROTECTED_FILES = new Set([
+  "package.json",
+  "pnpm-lock.yaml",
+  "THIRD_PARTY_NOTICES.md",
+  "src/styles/variables.css",
+  "src/design/theme/echarts-theme.ts",
+  "src/design/theme/echarts-theme.test.ts",
+  "src/domain/chat-artifact-report-chart.ts",
+  "src/domain/chat-artifact-report-chart.test.ts",
+  "src/components/yijie/YjChartCard.vue",
+  "src/components/yijie/YjChartCard.test.ts",
+  "scripts/check-feat128-s9b-d-bundle.mjs",
+  "scripts/check-feat128-s9b-d-bundle.test.mjs",
+]);
+const VISUAL_HARNESS_PREFIX = "tests/visual/feat-128-s9b-d/";
 
 export function validateDependencyFacts(facts) {
   for (const [name, expected] of Object.entries(EXPECTED)) {
@@ -115,20 +131,37 @@ function validateImports(source) {
   }
 }
 
+export function validateHistoricalScopeFiles(files) {
+  for (const file of files) {
+    if (file.startsWith(VISUAL_HARNESS_PREFIX)) continue;
+    if (!HISTORICAL_ALLOWED_FILES.has(file)) {
+      throw new Error(`historical S9B-D commit changed a forbidden file: ${file}`);
+    }
+  }
+}
+
+export function validateProtectedBoundaryFiles(files) {
+  for (const file of files) {
+    if (file.startsWith(VISUAL_HARNESS_PREFIX) || PROTECTED_FILES.has(file)) {
+      throw new Error(`immutable S9B-D protected file changed: ${file}`);
+    }
+  }
+}
+
 async function validateScope(root) {
-  const [{ stdout: diffOutput }, { stdout: statusOutput }] = await Promise.all([
-    exec("git", ["diff", "--name-only", BASELINE_COMMIT, "--"], { cwd: root }),
+  const [{ stdout: historicalDiffOutput }, { stdout: currentDiffOutput }, { stdout: statusOutput }] = await Promise.all([
+    exec("git", ["diff", "--name-only", "--no-renames", READINESS_BASELINE_COMMIT, IMMUTABLE_S9B_D_COMMIT, "--"], { cwd: root }),
+    exec("git", ["diff", "--name-only", "--no-renames", IMMUTABLE_S9B_D_COMMIT, "--"], { cwd: root }),
     exec("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root }),
   ]);
-  const changed = new Set(diffOutput.trim().split("\n").filter(Boolean));
+  validateHistoricalScopeFiles(historicalDiffOutput.trim().split("\n").filter(Boolean));
+
+  const changed = new Set(currentDiffOutput.trim().split("\n").filter(Boolean));
   for (const line of statusOutput.split("\n").filter(Boolean)) {
     const file = line.slice(3).replace(/^"|"$/g, "");
     changed.add(file);
   }
-  for (const file of changed) {
-    if (file.startsWith("tests/visual/feat-128-s9b-d/")) continue;
-    if (!ALLOWED_FILES.has(file)) throw new Error(`S9B-D changed a forbidden file: ${file}`);
-  }
+  validateProtectedBoundaryFiles(changed);
 }
 
 export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
@@ -137,7 +170,7 @@ export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
     readFile(path.join(root, "pnpm-lock.yaml"), "utf8"),
     readFile(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8"),
     readFile(path.join(root, "src/components/yijie/YjChartCard.vue"), "utf8"),
-    exec("git", ["show", `${BASELINE_COMMIT}:pnpm-lock.yaml`], { cwd: root }).then(({ stdout }) => stdout),
+    exec("git", ["show", `${READINESS_BASELINE_COMMIT}:pnpm-lock.yaml`], { cwd: root }).then(({ stdout }) => stdout),
   ]);
   const packageJson = JSON.parse(packageSource);
   if (packageJson.dependencies?.echarts !== "6.1.0" || packageJson.devDependencies?.echarts) {

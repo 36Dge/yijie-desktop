@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   checkFeat128S9bDDependencies,
   validateDependencyFacts,
+  validateHistoricalScopeFiles,
+  validateProtectedBoundaryFiles,
 } from "./check-feat128-s9b-d-dependencies.mjs";
 
 describe("FEAT-128 S9B-D dependency boundary", () => {
@@ -32,5 +34,31 @@ describe("FEAT-128 S9B-D dependency boundary", () => {
 
   it("checks the actual package, lock, notice and static import boundary", async () => {
     await expect(checkFeat128S9bDDependencies()).resolves.toBeUndefined();
+  });
+
+  it("does not claim ownership of a legal downstream S9B-R path", () => {
+    expect(() => validateProtectedBoundaryFiles([
+      "src/components/chat/ChatArtifactReport.vue",
+    ])).not.toThrow();
+  });
+
+  it("fails closed when an immutable S9B-D production boundary changes", () => {
+    expect(() => validateProtectedBoundaryFiles([
+      "src/components/yijie/YjChartCard.vue",
+    ])).toThrow("immutable S9B-D protected file changed");
+    expect(() => validateProtectedBoundaryFiles([
+      "tests/visual/feat-128-s9b-d/visual-harness.ts",
+    ])).toThrow("immutable S9B-D protected file changed");
+  });
+
+  it("fixes the historical readiness-to-S9B-D scope audit", () => {
+    expect(() => validateHistoricalScopeFiles([
+      "package.json",
+      "scripts/check-feat128-s9b-d-dependencies.mjs",
+      "tests/visual/feat-128-s9b-d/index.html",
+    ])).not.toThrow();
+    expect(() => validateHistoricalScopeFiles([
+      "src/components/chat/ChatArtifactReport.vue",
+    ])).toThrow("historical S9B-D commit changed a forbidden file");
   });
 });
