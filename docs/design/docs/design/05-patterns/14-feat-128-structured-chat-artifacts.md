@@ -3,8 +3,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.5.0
-- 最后更新：2026-08-21
+- 版本：1.6.0
+- 最后更新：2026-08-22
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
 - 适用仓库：`yijie-desktop`
@@ -20,9 +20,11 @@ S7F、S7A、S7A-REPAIR 与 S7B 随后分别完成 strict-local playable fixture�
 累计请求上限修复与 ready-video renderer/runtime playback/seek smoke，并作为 G3 外独立 PASS 留痕。S8A/S8B
 随后分别完成 bounded file preview/save boundary 与 ready-file renderer/search/save UX。S9A 已在
 `232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` 完成 Desktop-private bounded report projection/canonical JSON save，
-仍是 G3 外独立 PASS。本文 1.5.0 完成 S9B-READINESS，将未实现的 S9B 拆为 S9B-D
-dependency/theme/closed-adapter foundation 与 S9B-R ready-report renderer；当前只批准 S9B-D 编码，
-S9B-R 等待 S9B-D immutable PASS 与单独授权。模型调用、真实 provider、
+仍是 G3 外独立 PASS。S9B-D `0a36ca7c54460d22ea6b3228832a57f05f0bde68`、checker repair
+`aec0f8a05ba7534132cbb4f46be64e333d7e9024` 与 S9B-R
+`6bcc2a6bfb4db76398ecf5483c688475477f08ed` 随后也分别完成并保持 G3 外独立 PASS；production Chat/Tauri
+纵向仍未执行。本文 1.6.0 完成 S9-SPEC-RECONCILIATION 与 S10-READINESS，只批准
+S10A-LOCAL-PROFILE 编码，其余 S10 切片等待前序 immutable PASS 与单独授权。模型调用、真实 provider、
 云资源、发布或生产配置仍不在授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
 
 ## 目标
@@ -576,7 +578,115 @@ S9B-R WAITS`；Technical `APPROVED FOR S9B-D WITH EXACT ECHARTS@6.1.0, DIRECT ST
 CANVAS RENDERER, CLOSED ADAPTER, SEMANTIC THEME/CARD AND EXACT BUNDLE GATE`；Security/Data
 `APPROVED FOR S9B-D WITH EXACT LICENSE/LOCK, NO REPORT READ, NO ARBITRARY OPTION/HTML/EVENT/NETWORK,
 BOUNDED INSTANCES AND DISPOSE-ON-LIFECYCLE; S9B-R WAITS FOR IMMUTABLE D PASS`。S9B-READINESS 只是 docs-only
-PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
+PASS；其历史 Owner capture 保留。S9B-D、checker repair 与 S9B-R 现已分别 PASS，production page/Tauri
+vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
+
+### 9.14 S10-READINESS：当前缺口与 single-V3 决策
+
+- 当前生产 `HostBridge` 只打开 v2 SSE；`ConversationApplication`/`TurnEventReducer` 只消费 schema v2，虽然
+  `ArtifactTransferService` 与 v3 decoder 已存在，但没有生产调用点。`ChatClient`/`ChatStore` 仍加载 history v2，
+  `ArtifactStore` 未接 production authority，`ChatPage` 未挂载 `ChatArtifactList`。S7B runtime 是 seeded shell，
+  S9 visual 是 Vite fake projection，二者都不是 production vertical。
+- Host v3 hub 是普通 turn/reasoning 事件与四类 Artifact 事件的同一有序超集。Artifact producer flag 开启时，
+  Desktop active turn 必须只消费 `/v3/agent-sessions/{id}/events?event_schema_version=3`；禁止并跑不具原子同步
+  证明的 v2/v3 双流，也禁止把 v2 pagination cursor 交给 `chat_load_history_v3`。
+- v3 decoder 必须一次解析 common envelope/stream cursor，再把普通事件交给既有 turn reducer、Artifact 事件交给
+  strict artifact decoder。所有事件继续按同一 `stream_id/sequence/event_id` 连续域 fail closed；gap、stream change、
+  identity mismatch、unknown required shape 或 terminal regression 触发 bounded resync，不得跳过或降低单调检查。
+- ordinary progress 可按既有阈值合并，但在 Artifact 事件前必须把此前 ordinary projection 一起提交。started、progress、
+  failed 必须在一个 SQLCipher transaction 内完成 turn progress flush、Artifact 状态变更和该 v3 cursor advance。
+  completed 先将前序 cursor flush，再保持 completed cursor 未推进地进入 `transferring`、下载和完整校验；最终 ready
+  BLOB、ACK intent 与 completed cursor 在同一 transaction commit，随后才发送 ACK 和 private invalidation。崩溃发生在
+  ready commit 前时重放 completed 并重新 fetch；发生在 commit 后时 cursor 去重，pending ACK 由既有幂等路径重试。
+  不允许在网络 I/O 期间持有 SQLite transaction，也不需要 migration。
+- flag off 禁止新 v3 producer/transfer，active turn 继续单一 v2；已经持久化的 Artifact metadata/history 与经当前
+  `ReadSessions` authority 授权的 image/video/file/report preview/save 保持只读。不得新增 Vue-only Artifact flag。
+
+### 9.15 S10A-LOCAL-PROFILE：严格本地零 provider 剖面
+
+- 当前 FEAT-128 synthetic 不能独立驱动真实 Host：`StartSession`/`StartTurn` 先要求 Runtime 成功，而 Host 又拒绝
+  synthetic 与 MiniMax 或 FEAT-126 fake Responses 同时启用。因此 1.6.0 选择新增 exact、默认关闭的
+  `YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED=true`，只在它与既有
+  `YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED=true` 同时成立时允许 synthetic + fake Responses 组合；其它组合仍在监听
+  端口、创建 spool 或启动 child 之前失败。
+- exact conjunction 还必须满足：`YIJIE_ENV=local`、`YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED=true`、
+  `YIJIE_FEAT128_SYNTHETIC_ENABLED=true`、manifest exact `feat128-artifact-v1`、MiniMax/provider/key/key-file 均未设置、
+  fake endpoint exact `http://127.0.0.1:18082/v1`，以及既有 canonical UUIDv4 run id、parent PID、owner-only run root/
+  log dir/process manifest 校验。只允许 loopback；任何 key、MiniMax、非 loopback、浮动 manifest、缺失 authority 或
+  大小写/非 exact-true 值都 fail startup，且错误与证据不得包含 env value、token 或路径。
+- Desktop parent 的 `YIJIE_CHAT_ARTIFACTS_V3_ENABLED=true` 只在本进程控制新 v3 coordinator，并映射为 child
+  `YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED=true`；parent flag 本身不转发。synthetic 两个 child env 只能由
+  compile-time `feat128-s10-runtime` + exact S10 test profile 注入，禁止继承任意 shell 值。四个 flags 默认都关闭。
+- S10A 只允许 Host `internal/app/app.go`/tests、必要 `cmd/desktop-host` config wiring、一个
+  `internal/integration/feat128_s10_local_profile_test.go` 与 exact runner；Desktop 只允许 `src-tauri/Cargo.toml`、
+  `src-tauri/src/chat/sidecar.rs`/tests 和 test-only runner。不得修改 session fixture bytes、public wire、Contracts pin、
+  Host S7F、Desktop transfer/page/store/schema/config/capability/CSP/dependency。
+- runner 必须从待测 Host commit build fresh `desktop-host`，记录 source SHA 与 binary SHA-256；创建 `mktemp -d` 后
+  校验 realpath、owner、0700，内部独立 host-home/codex-home/log/spool/process manifest。fixed loopback ports 18082
+  (fake Responses) 与 18080 (Host) 必须先证明未占用；ready deadline 20s，session/turn deadline 各 30s，全程 180s
+  watchdog，SIGTERM grace 10s 后才 SIGKILL。测试必须真实完成 start session/turn、读取 v3 四类 started/progress/
+  completed、GET/ACK，并证明 MiniMax/key/provider env absent、所有 socket peer 为 loopback。退出后先停 Desktop/Host/fake，
+  再证明无 child、无监听、无 WAL/spool/temp residue，最后删除 run root；只保留 content-free JSON evidence。
+
+### 9.16 Desktop-private invalidation、history 与 authority
+
+- S10B-NATIVE-LIVE 新增独立 private channel `yijie:chat:artifact:changed:v1` 与 closed schema
+  `chat-artifact-live-v1.schema.json`。事件 exact root 为 `schemaVersion=1`、`subscriptionId/contextId/sessionId/turnId/eventId`
+  canonical UUID、`notificationSequence` canonical decimal string、kind `artifact_changed|resync_required|context_invalidated`；
+  payload 分别只能是 `{}`、`{reason:'backpressure'|'sequence_gap'|'protocol_error'}`、
+  `{reason:'authority_changed'}`。事件不含 artifactId、state、name、MIME、size、正文、digest、href、path、token 或 raw error。
+- notification 只在对应 SQLCipher transaction durable commit 后向 current main-WebView、current context/session
+  subscription 发出；每 subscription 序列从 1 单调递增，queue cap 64。gap/invalid/overflow 必须丢弃 pending changed、
+  合并为一个 `resync_required`；事件不做跨进程 replay，restart 后以 history v3 为唯一恢复 authority。emit 失败不回滚
+  durable state，下一次 subscribe/resync 恢复。
+- S10C-PAGE 必须 subscribe 两个 private channels first 并 buffer，随后在同一 epoch 执行 control resync + 首个
+  `chat_load_history_v3` page、用同一个 S5 reducer ingest history，再 coalesce buffered Artifact invalidation 并至少再做
+  一次 history-v3 resync，最后 replay ordinary buffered events。older-page 只使用独立 v3 cursor state；不得与 v2 cursor
+  比较、复用或拼接。
+- `ArtifactStore` 增加 authority tuple `authorizationRevision/contextId/tenantId/sessionId`、`resetAuthority()`、per-read epoch
+  和 stale guards；logout、permission expiry/rebind、tenant/context/session switch、delete 与 unmount 先 invalidate epoch 再
+  清全部 projection。`ChatPage` 只使用 `chatStore.context.contextId` 和 history/native 返回的 trusted turnId；不得从 route、
+  DOM 或显示顺序推断。即使 assistant text 为空，也在对应 turn 下挂 Artifact list，并显式注入现有四类 singleton typed clients。
+
+### 9.17 S10 DAG、停止条件与回滚
+
+| Slice | 前置与允许范围 | 测试/停止条件 | 回滚 |
+|---|---|---|---|
+| S10A-LOCAL-PROFILE | 1.6.0 Accepted；仅 9.15 Host/Desktop config、sidecar、feature 与 test runner | EXPECTED RED 证明当前 synthetic+fake 被拒、child env 缺失；GREEN 证明 exact conjunction、zero key/provider/non-loopback、fresh binary digest、watchdog/cleanup；任何 public wire/pin/fixture、dependency/config capability/CSP、非 loopback 或 secret 需求立即停止 | 删除 exact master/profile mapping 与 runner；恢复 synthetic+fake 互斥，v2/default-off production 不变 |
+| S10B-NATIVE-LIVE | S10A immutable PASS + 单独授权；HostBridge/v3 decoder、application/artifact/database/worker/ipc/mod/lib、private schema/client parser/tests及必要 Desktop implementation/readiness SHA-only checker | 单一 v3、common sequence、started/progress/failed atomic cursor、completed crash points/ACK replay、stream restart/gap/duplicate/identity、queue 64/content-free notification；禁止 migration/public contract/Host fixture/monotonic weakening | 关闭 parent Artifact flag，恢复 v2 coordinator；保留 SQLCipher rows与只读 preview/save；移除 private channel，不删 authority data |
+| S10C-PAGE | S10B immutable PASS + 单独授权；ChatClient/ChatStore/ArtifactStore/ChatPage/List integration/tests | subscribe-buffer-control+v3-history-replay、独立 v3 pagination、authority reset/stale、empty-text turn、四 client、keyboard/axe/leak；禁止 native/config/dependency与 route/DOM identity inference | unmount list并移除 v3 UI subscription/history wiring；回落现有 v2 Chat UI，native authority保留关闭 |
+| S10D-VERTICAL | A-C immutable PASS；仅 compile-time `feat128-s10-runtime`、test-only real-Tauri production-Chat harness/evidence | fresh Host binary；四类 lifecycle/ACK/history/pagination/reload/restart/mixed failure/TTL/delete；light/dark/1180x760/720/200%/keyboard/focus/axe/reduced-motion；seeded shell/Vite fake均不算 | 移除/关闭 test feature与 harness；production code不因证据切片扩权 |
+| S10E-SEC-PERF | D PASS + 单独授权；test-only adversarial/boundary/perf controls/evidence | 12 items、100 progress/s、20MiB image、64MiB video/save、file/report caps、auth/digest/MIME/size/content mismatch、WAL/residue；任一泄漏/越权/阈值 hard-stop 即失败 | 禁用 affected kind/preview，仅保留 metadata+native save；不得放宽 limit |
+
+所有后续切片都禁止新 dependency/plugin/capability/CSP/migration/external origin、公共 Contracts/Host wire/canonical fixture
+或 real provider。consumer checker 只可更新 Desktop implementation/readiness SHA 与对应 test 常量；Contracts
+`full_commit/source/tree/schema/operation/version` 和 Host public pin 必须逐字段不变。
+
+### 9.18 S10D/E 纵向、安全与性能证据
+
+- vertical harness 必须挂载真实 production `ChatPage`，运行 fresh exact Host binary，不替换 production commands、SQLCipher
+  或 Artifact clients。每次 run 独立 0700 root；禁止外部写 DB/spool 造状态。native save 继续通过真实 dialog，只记
+  manual `saved|cancelled|failed` content-free 结果；无法安全自动化时明确 `MANUAL/NOT RUN`，不得注入 target path。
+- 基础 matrix：四类 announced→progress→ready；duplicate/out-of-order/gap/terminal regression；一项失败不清其它 ready；
+  live/history/pagination/reload/session/context/tenant switch；Host/Desktop restart、download validation、ACK replay、TTL/delete；
+  未授权 context/WebView/session 和 digest/MIME/size/content mismatch。安全 canary 对 DOM/Pinia/log/diagnostics/evidence 的
+  bytes/base64/digest/Host href/absolute path/token/raw error/未授权正文命中必须为 0。
+- 性能 run 固定 release-like build、同一机器；记录 macOS/build、CPU、RAM、Desktop/WebContent/Host PID 与 binary/source
+  digest。每 scenario 3 次 warmup + 30 measured samples，报告 p50/p95。started-to-visible p95 `<300ms`，`>=1000ms`
+  hard-stop；100 progress events/s 持续 10s 时每 component render `<=10Hz`，持续 `>20Hz` hard-stop；12 mixed Artifacts
+  不得出现 `>200ms` long task，目标无 `>50ms`，CLS `<=0.1`。
+- RSS 分别采 Desktop main、WebContent、Host，在 open 前、peak、close 后 30s 记录；20MiB image/64MiB video preview
+  peak delta 目标 `<=2.5x` content，`>3x` 或 crash/OOM hard-stop，close 后三进程合计残留增量必须 `<=64MiB`。
+  chart instance、image/video handle、ResizeObserver、temporary save/residue 最终计数必须为 0。超 target 但未达 hard-stop
+  只能降级 metadata/table/save-only并保留 finding，不能声明 G4。
+
+### 9.19 S10 Owner readiness
+
+Owner capture（用户明确要求 Codex 代录，不声称独立人工评审）：Product
+`READY FOR S10A-LOCAL-PROFILE ONLY; PRODUCTION VERTICAL AND MARKDOWN REMAIN PENDING`；Technical
+`APPROVED FOR EXACT KEYLESS LOOPBACK PROFILE AND SIDECAR FLAG MAPPING; SINGLE-V3/ATOMIC-CURSOR S10B WAITS FOR A PASS`；
+Security/Data `APPROVED FOR S10A ONLY WITH NO KEY/PROVIDER/NON-LOOPBACK, OWNER-ONLY TEMP ROOT, WATCHDOG AND
+CONTENT-FREE EVIDENCE; S10B-S10E WAIT`。本 readiness 为 docs-only PASS；S10A-S10E 均 `NOT RUN`，不扩 G3、不声明 G4。
 
 ### 10. 主题、窗口与可访问性
 
@@ -596,7 +706,7 @@ PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
   fixture、Desktop S7 video boundary/renderer 与 S8 file boundary/renderer。真实 Tauri WebView
   metadata/playback/seek smoke 只对 video 形成；image/file runtime visual 仍待后续 vertical evidence。S9A report
   private commands/projection/canonical JSON save 已以 `232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` 独立 PASS；
-  S9B-D/S9B-R 仍只有 1.5.0 readiness，尚无 dependency/theme/adapter/renderer。上述 local evidence 均不是
+  S9B-D、checker repair 与 S9B-R 已分别实现并独立 PASS；production Chat/Tauri vertical 仍属于 S10。上述 local evidence 均不是
   MiniMax/provider capability 证据。
 - 视频生成尤其没有当前 provider 能力、时长、格式、计费和失败语义证据。UI 禁止仅根据模型宣传材料提前显示
   可用能力。
@@ -606,8 +716,9 @@ PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 ## AI / Codex 必须遵守
 
 - 本文已 Accepted，G2A、Host S3、Desktop S4/S5 与 G3(S3/S4/S5 only) 已通过；S6A/S6B/S7F/S7A/
-  S7A-REPAIR/S7B/S8A/S8B/S9A 是 G3 外独立 PASS。下一编码切片只能在单独授权后进入
-  9.12-9.13 的 S9B-D；S9B-D immutable PASS 与单独授权前不得进入 S9B-R。不得扩展 G3 或声明 G4。
+  S7A-REPAIR/S7B/S8A/S8B/S9A/S9B-D/S9B-D-CHECKER-REPAIR/S9B-R 是 G3 外独立 PASS。下一编码切片只能在
+  单独授权后进入 9.15/9.17 的 S10A-LOCAL-PROFILE；其 immutable PASS 与单独授权前不得进入 S10B。不得扩展 G3
+  或声明 G4。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -632,6 +743,8 @@ PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
   semantic chart theme、closed adapter 与 one-instance chart card，不得读取报告或接入 Chat shell；
 - `src/components/chat/`：S9B-R 只能在 S9B-D immutable PASS 后消费 S9A typed client 与 S9B-D closed card，
   不得修改 native、dependency/theme/adapter、page 或 store；
+- S10 必须严格按 9.14-9.19 的 A→B→C→D→E DAG；native single-v3/cursor foundation 先于 production page，
+  test-only keyless profile/harness 均默认关闭且不得成为 provider capability 声明；
 - Agent Host 与 Contracts：由对应仓库定义并评审权威事件、历史恢复、读取、过期、错误和兼容语义。
 
 实现必须先固定不可变 Contracts 引用和 provider-first conformance，再由 Desktop 消费；不得在 Vue 中手写一份与
@@ -650,7 +763,9 @@ PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 - [x] S8A/S8B 已分别实现 bounded file native boundary 与 reusable ready-file renderer；Markdown 仍延期。
 - [x] S9A 已实现 contract-conformant bounded report projection 与 canonical JSON native save，并以 G3 外独立 PASS 留痕。
 - [x] S9B-READINESS 已冻结 exact ECharts dependency/integrity/license/imports/bundle、semantic theme/card、closed adapter、
-  data lifecycle、a11y/visual matrix 与 S9B-D/S9B-R 回滚；S9B-D/S9B-R 均 `NOT RUN`。
+  data lifecycle、a11y/visual matrix 与 S9B-D/S9B-R 回滚；S9B-D、checker repair 与 S9B-R 后续均独立 PASS。
+- [x] S10-READINESS 已冻结 strict-local keyless profile、single-v3/atomic cursor、content-free invalidation、page authority、
+  real-Tauri vertical 与 security/performance DAG；S10 implementation slices 均 `NOT RUN`。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -698,6 +813,12 @@ PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
   core，拒绝 `vue-echarts`；冻结 exact integrity/license/transitives/imports/bundle、accessible semantic theme/card、
   closed adapter/table fallback、单位/来源/时间范围 honest-unavailable、local-only lifecycle 与 S9B-D/S9B-R。
   只批准 S9B-D；本记录不是 implementation PASS，S9B-R 等待 D immutable PASS 与单独授权。
+- 2026-08-21 / S9B-D/CHECKER-REPAIR/S9B-R：`0a36ca7c54460d22ea6b3228832a57f05f0bde68`、
+  `aec0f8a05ba7534132cbb4f46be64e333d7e9024`、`6bcc2a6bfb4db76398ecf5483c688475477f08ed`
+  分别独立 PASS；保留 readiness/RED 历史，production Chat/Tauri vertical 仍 NOT RUN。
+- 2026-08-22 / 1.6.0 S9-SPEC-RECONCILIATION + S10-READINESS Accepted：纠正 S9 当前状态；确认现有
+  FEAT-128 synthetic 无法独立驱动真实 Runtime，选择 exact FEAT126 loopback fake Responses 组合 profile；冻结
+  S10A-LOCAL-PROFILE→S10B-NATIVE-LIVE→S10C-PAGE→S10D-VERTICAL→S10E-SEC-PERF，仅批准 S10A 编码。
 - S6 readiness Owner capture：Product/Design `READY FOR S6A; S6B WAITS FOR S6A PASS`；Technical
   `APPROVED FOR S6A CODING WITH EXACT THREE COMMANDS + ONE IMAGE SCHEME`；Security/Data
   `APPROVED FOR S6A CODING WITH NO NEW DEPENDENCY/PLUGIN/CAPABILITY AND EXACT CSP DELTA`。依据是用户本轮
