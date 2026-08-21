@@ -9,8 +9,8 @@ mod native_auth;
 pub use feat126_secure_storage::feat126_secure_storage_test_control;
 
 use chat::{
-    ArtifactFileNativeRuntime, ArtifactNativeRuntime, ArtifactVideoNativeRuntime, ChatIpcRuntime,
-    ChatRuntime,
+    ArtifactFileNativeRuntime, ArtifactNativeRuntime, ArtifactReportNativeRuntime,
+    ArtifactVideoNativeRuntime, ChatIpcRuntime, ChatRuntime,
 };
 use native_auth::NativeAuthRuntime;
 #[cfg(not(feature = "feat126-s10-driver"))]
@@ -64,6 +64,7 @@ async fn native_auth_logout(
     chat_ipc_runtime: State<'_, ChatIpcRuntime>,
     artifact_file_native_runtime: State<'_, ArtifactFileNativeRuntime>,
     artifact_native_runtime: State<'_, ArtifactNativeRuntime>,
+    artifact_report_native_runtime: State<'_, ArtifactReportNativeRuntime>,
     artifact_video_native_runtime: State<'_, ArtifactVideoNativeRuntime>,
 ) -> Result<AuthStatus, CommandError> {
     let status = runtime.logout().await?;
@@ -74,6 +75,7 @@ async fn native_auth_logout(
     chat_ipc_runtime.invalidate_all();
     artifact_file_native_runtime.invalidate_all();
     artifact_native_runtime.invalidate_all();
+    artifact_report_native_runtime.invalidate_all();
     artifact_video_native_runtime.invalidate_all();
     Ok(status)
 }
@@ -136,6 +138,7 @@ pub fn run() {
         .manage(ChatIpcRuntime::new())
         .manage(ArtifactFileNativeRuntime::new())
         .manage(ArtifactNativeRuntime::new())
+        .manage(ArtifactReportNativeRuntime::new())
         .manage(ArtifactVideoNativeRuntime::new());
     #[cfg(feature = "feat128-s7b-runtime")]
     let builder = builder.manage(feat128_s7b_runtime);
@@ -146,6 +149,9 @@ pub fn run() {
                 .invalidate_webview(window.label());
             window
                 .state::<ArtifactNativeRuntime>()
+                .invalidate_webview(window.label());
+            window
+                .state::<ArtifactReportNativeRuntime>()
                 .invalidate_webview(window.label());
             window
                 .state::<ArtifactVideoNativeRuntime>()
@@ -263,6 +269,8 @@ pub fn run() {
         chat::artifact_video_native::chat_save_artifact_video_v1,
         chat::artifact_file_native::chat_read_artifact_file_preview_v1,
         chat::artifact_file_native::chat_save_artifact_file_v1,
+        chat::artifact_report_native::chat_read_artifact_report_preview_v1,
+        chat::artifact_report_native::chat_save_artifact_report_v1,
         chat::ipc::chat_load_reasoning_v1,
         chat::ipc::chat_rename_session_v1,
         chat::ipc::chat_set_session_pinned_v1,

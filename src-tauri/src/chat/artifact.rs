@@ -8,7 +8,6 @@ use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
@@ -138,6 +137,7 @@ pub(crate) struct ReadyImageContent {
 pub(crate) type ReadyVideoIdentity = ReadyImageIdentity;
 pub(crate) type ReadyVideoReadError = ReadyImageReadError;
 pub(crate) type ReadyFileIdentity = ReadyImageIdentity;
+pub(crate) type ReadyReportIdentity = ReadyImageIdentity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReadyFileReadError {
@@ -169,6 +169,19 @@ pub(crate) struct ReadyFileContent {
     pub revision: i64,
     pub bytes: Vec<u8>,
 }
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ReadyReportContent {
+    pub identity: ReadyReportIdentity,
+    pub display_name: Option<String>,
+    pub media_type: &'static str,
+    pub size_bytes: usize,
+    pub sha256: [u8; 32],
+    pub revision: i64,
+    pub bytes: Vec<u8>,
+}
+
+pub(crate) type ReadyReportReadError = ReadyFileReadError;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ReadyVideoRangeContent {
@@ -218,6 +231,19 @@ impl Debug for ReadyFileContent {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ReadyFileContent")
+            .field("identity", &self.identity)
+            .field("display_name", &self.display_name)
+            .field("media_type", &self.media_type)
+            .field("size_bytes", &self.size_bytes)
+            .field("content", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Debug for ReadyReportContent {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReadyReportContent")
             .field("identity", &self.identity)
             .field("display_name", &self.display_name)
             .field("media_type", &self.media_type)
@@ -1824,6 +1850,170 @@ impl ChatRepository {
         }))
     }
 
+    pub(crate) fn read_ready_report(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        artifact_id: Uuid,
+        now: i64,
+        max_bytes: usize,
+    ) -> Result<Result<ReadyReportContent, ReadyReportReadError>, ChatError> {
+        if session_id.is_nil()
+            || turn_id.is_nil()
+            || artifact_id.is_nil()
+            || now < 0
+            || !(1..=MAX_ARTIFACT_BYTES).contains(&max_bytes)
+        {
+            return Ok(Err(ReadyReportReadError::NotFound));
+        }
+        type ReadyRow = (
+            i64,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let row: Option<ReadyRow> = self
+            .connection
+            .query_row(
+                "SELECT a.rowid, a.owner_user_id, a.tenant_id, a.state, a.kind,
+                        a.display_name, a.media_type, a.byte_size, a.sha256, a.expires_at,
+                        a.local_committed_at, length(a.content_blob)
+                 FROM chat_output_artifacts a
+                 JOIN chat_sessions s ON s.id=a.session_id
+                 JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id
+                 WHERE a.artifact_id=?1 AND a.session_id=?2 AND a.turn_id=?3
+                   AND a.owner_user_id=?4 AND a.tenant_id=?5
+                   AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
+                params![
+                    artifact_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        let Some((
+            row_id,
+            owner_user_id,
+            tenant_id,
+            state,
+            kind,
+            display_name,
+            media_type,
+            size_bytes,
+            sha256,
+            expires_at,
+            revision,
+            blob_length,
+        )) = row
+        else {
+            return Ok(Err(ReadyReportReadError::NotFound));
+        };
+        if state == "expired" || expires_at.is_some_and(|value| value <= now) {
+            return Ok(Err(ReadyReportReadError::Expired));
+        }
+        if state != "ready" {
+            return Ok(Err(ReadyReportReadError::NotReady));
+        }
+        if kind != "report" {
+            return Ok(Err(ReadyReportReadError::Unsupported));
+        }
+        let media_type = match media_type.as_deref() {
+            Some("application/vnd.yijie.report+json;version=1") => {
+                "application/vnd.yijie.report+json;version=1"
+            }
+            _ => return Ok(Err(ReadyReportReadError::Unsupported)),
+        };
+        let Some(size_bytes) = size_bytes.and_then(|value| usize::try_from(value).ok()) else {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        };
+        let Some(revision) = revision.filter(|value| *value >= 0) else {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        };
+        if !(1..=MAX_ARTIFACT_BYTES).contains(&size_bytes) {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        }
+        if size_bytes > max_bytes {
+            return Ok(Err(ReadyReportReadError::LimitExceeded));
+        }
+        if blob_length.and_then(|value| usize::try_from(value).ok()) != Some(size_bytes)
+            || display_name
+                .as_deref()
+                .is_some_and(|value| !valid_safe_name(value))
+        {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        }
+        let Some(expected_sha256) = sha256.as_deref().and_then(decode_sha256) else {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        };
+        let owner_user_id = parse_uuid(&owner_user_id)?;
+        let tenant_id = parse_uuid(&tenant_id)?;
+        let mut bytes = vec![0_u8; size_bytes];
+        {
+            let mut blob = self
+                .connection
+                .blob_open(
+                    "main",
+                    "chat_output_artifacts",
+                    "content_blob",
+                    row_id,
+                    true,
+                )
+                .map_err(map_sqlite_error)?;
+            blob.read_exact(&mut bytes)
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        let actual_sha256: [u8; 32] = Sha256::digest(&bytes).into();
+        if !bool::from(subtle::ConstantTimeEq::ct_eq(
+            actual_sha256.as_slice(),
+            expected_sha256.as_slice(),
+        )) || validate_report_document(&bytes).is_err()
+        {
+            return Ok(Err(ReadyReportReadError::Integrity));
+        }
+        Ok(Ok(ReadyReportContent {
+            identity: ReadyReportIdentity {
+                owner_user_id,
+                tenant_id,
+                session_id,
+                turn_id,
+                artifact_id,
+            },
+            display_name,
+            media_type,
+            size_bytes,
+            sha256: expected_sha256,
+            revision,
+            bytes,
+        }))
+    }
+
     pub(crate) fn read_ready_video_range(
         &self,
         request: ReadyVideoRangeRequest,
@@ -2204,7 +2394,7 @@ fn validate_kind_content(
     valid.then_some(()).ok_or(ChatError::InvalidInput)
 }
 
-fn validate_report_document(bytes: &[u8]) -> Result<(), ChatError> {
+pub(super) fn validate_report_document(bytes: &[u8]) -> Result<(), ChatError> {
     let document: Value = serde_json::from_slice(bytes).map_err(|_| ChatError::InvalidInput)?;
     let root = document.as_object().ok_or(ChatError::InvalidInput)?;
     exact_keys(
@@ -2226,22 +2416,18 @@ fn validate_report_document(bytes: &[u8]) -> Result<(), ChatError> {
         .and_then(Value::as_array)
         .filter(|sections| sections.len() <= 64)
         .ok_or(ChatError::InvalidInput)?;
-    let mut ids = HashSet::new();
     for section in sections {
         let envelope = section.as_object().ok_or(ChatError::InvalidInput)?;
         exact_keys(envelope, &["id", "type", "required", "payload"], &[])?;
-        let id = envelope
+        envelope
             .get("id")
             .and_then(Value::as_str)
             .filter(|value| valid_report_identifier(value, true))
             .ok_or(ChatError::InvalidInput)?;
-        if !ids.insert(id) {
-            return Err(ChatError::InvalidInput);
-        }
         let section_type = envelope
             .get("type")
             .and_then(Value::as_str)
-            .filter(|value| !value.is_empty() && value.len() <= 64)
+            .filter(|value| (1..=64).contains(&value.chars().count()))
             .ok_or(ChatError::InvalidInput)?;
         let required = envelope
             .get("required")
@@ -2296,7 +2482,7 @@ fn validate_known_report_section(kind: &str, payload: &Value) -> Result<(), Chat
                     || item
                         .get("value")
                         .and_then(Value::as_str)
-                        .is_some_and(|value| value.len() > 128 || contains_markup(value))
+                        .is_some_and(|value| value.chars().count() > 128 || contains_markup(value))
                     || item
                         .get("unit")
                         .is_some_and(|value| !safe_text(Some(value), 0, 32))
@@ -2338,16 +2524,15 @@ fn validate_table_section(object: &Map<String, Value>) -> Result<(), ChatError> 
         .and_then(Value::as_array)
         .filter(|values| (1..=32).contains(&values.len()))
         .ok_or(ChatError::InvalidInput)?;
-    let mut keys = HashSet::new();
     for column in columns {
         let column = column.as_object().ok_or(ChatError::InvalidInput)?;
         exact_keys(column, &["key", "label"], &[])?;
-        let key = column
+        column
             .get("key")
             .and_then(Value::as_str)
             .filter(|value| valid_report_identifier(value, false))
             .ok_or(ChatError::InvalidInput)?;
-        if !keys.insert(key) || !safe_text(column.get("label"), 1, 80) {
+        if !safe_text(column.get("label"), 1, 80) {
             return Err(ChatError::InvalidInput);
         }
     }
@@ -2369,7 +2554,7 @@ fn validate_table_section(object: &Map<String, Value>) -> Result<(), ChatError> 
                 )
                 || value
                     .as_str()
-                    .is_some_and(|text| text.len() > 4096 || contains_markup(text))
+                    .is_some_and(|text| text.chars().count() > 4096 || contains_markup(text))
             {
                 return Err(ChatError::InvalidInput);
             }
@@ -2409,7 +2594,7 @@ fn validate_chart_section(object: &Map<String, Value>) -> Result<(), ChatError> 
         let values = item
             .get("values")
             .and_then(Value::as_array)
-            .filter(|values| (1..=128).contains(&values.len()) && values.len() == labels.len())
+            .filter(|values| (1..=128).contains(&values.len()))
             .ok_or(ChatError::InvalidInput)?;
         if !safe_text(item.get("name"), 1, 80) || values.iter().any(|value| !value.is_number()) {
             return Err(ChatError::InvalidInput);
@@ -2436,12 +2621,14 @@ fn exact_keys(
 fn safe_text(value: Option<&Value>, minimum: usize, maximum: usize) -> bool {
     value
         .and_then(Value::as_str)
-        .map(|value| (minimum..=maximum).contains(&value.len()) && !contains_markup(value))
+        .map(|value| {
+            (minimum..=maximum).contains(&value.chars().count()) && !contains_markup(value)
+        })
         .unwrap_or(false)
 }
 
 fn contains_markup(value: &str) -> bool {
-    value.contains('<') || value.contains('>') || value.contains('\0')
+    value.contains('<') || value.contains('>')
 }
 
 fn safe_timestamp(value: Option<&Value>) -> bool {
@@ -2452,11 +2639,10 @@ fn safe_timestamp(value: Option<&Value>) -> bool {
 }
 
 fn valid_rfc3339_utc(value: &str) -> bool {
-    if !(20..=35).contains(&value.len())
-        || !value.ends_with('Z')
+    if value.len() < 20
         || value.as_bytes().get(4) != Some(&b'-')
         || value.as_bytes().get(7) != Some(&b'-')
-        || value.as_bytes().get(10) != Some(&b'T')
+        || !matches!(value.as_bytes().get(10), Some(b'T' | b't'))
         || value.as_bytes().get(13) != Some(&b':')
         || value.as_bytes().get(16) != Some(&b':')
     {
@@ -2500,13 +2686,28 @@ fn valid_rfc3339_utc(value: &str) -> bool {
     if year == 0 || day == 0 || day > maximum_day || hour > 23 || minute > 59 || second > 59 {
         return false;
     }
-    if value.len() == 20 {
+    let zone_start = if matches!(value.as_bytes().last(), Some(b'Z' | b'z')) {
+        value.len() - 1
+    } else {
+        let start = value.len().saturating_sub(6);
+        if !matches!(value.as_bytes().get(start), Some(b'+' | b'-'))
+            || value.as_bytes().get(start + 3) != Some(&b':')
+            || !digits(start + 1..start + 3)
+            || !digits(start + 4..start + 6)
+            || number(start + 1..start + 3).is_none_or(|offset_hour| offset_hour > 23)
+            || number(start + 4..start + 6).is_none_or(|offset_minute| offset_minute > 59)
+        {
+            return false;
+        }
+        start
+    };
+    if zone_start == 19 {
         return true;
     }
     value.as_bytes().get(19) == Some(&b'.')
         && value
             .as_bytes()
-            .get(20..value.len() - 1)
+            .get(20..zone_start)
             .is_some_and(|fraction| !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit))
 }
 
@@ -2717,6 +2918,262 @@ mod tests {
             Err(ChatError::InvalidInput)
         );
         assert!(valid_rfc3339_utc("2024-02-29T23:59:59.123Z"));
+        assert!(valid_rfc3339_utc(
+            "2024-02-29T23:59:59.12345678901234567890-07:30"
+        ));
+    }
+
+    #[test]
+    fn report_adapter_accepts_all_schema_valid_cardinality_and_datetime_forms() {
+        let title = "报".repeat(200);
+        let document = serde_json::json!({
+            "schema_version": 1,
+            "title": title,
+            "generated_at": "2026-08-20T10:00:00+08:00",
+            "sections": [
+                {
+                    "id": "duplicate",
+                    "type": "summary",
+                    "required": true,
+                    "payload": { "text": "first" }
+                },
+                {
+                    "id": "duplicate",
+                    "type": "table",
+                    "required": false,
+                    "payload": {
+                        "columns": [
+                            { "key": "value", "label": "First" },
+                            { "key": "value", "label": "Second" }
+                        ],
+                        "rows": [{ "value": 1 }]
+                    }
+                },
+                {
+                    "id": "chart",
+                    "type": "chart",
+                    "required": false,
+                    "payload": {
+                        "chart_type": "line",
+                        "labels": ["Q1", "Q2"],
+                        "series": [{ "name": "Total", "values": [42] }]
+                    }
+                }
+            ]
+        });
+        validate_report_document(&serde_json::to_vec(&document).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn ready_report_reader_is_scope_state_type_size_digest_revision_and_schema_bound() {
+        let root = std::env::temp_dir().join(format!("yijie-report-reader-{}", Uuid::now_v7()));
+        let owner = Uuid::now_v7();
+        let tenant = Uuid::now_v7();
+        let scope = ChatScope::new(owner.to_string(), tenant.to_string()).unwrap();
+        let project_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let artifact_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let database_key = DatabaseKey::from_bytes([0x41; 32]);
+        let receipt_key = ReceiptKey::from_bytes([0x42; 32]);
+        let mut repository =
+            ChatRepository::open(&root, &database_key, receipt_key, scope).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'fixture', ?4, ?5, 1)",
+                params![
+                    project_id.to_string(),
+                    owner.to_string(),
+                    tenant.to_string(),
+                    "b".repeat(64),
+                    vec![1_u8]
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'fixture', 'fallback', 'not_started', 1, 1)",
+                params![
+                    session_id.to_string(),
+                    owner.to_string(),
+                    tenant.to_string(),
+                    project_id.to_string()
+                ],
+            )
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'completed')",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    Uuid::now_v7().to_string()
+                ],
+            )
+            .unwrap();
+        let content = br#"{"schema_version":1,"title":"Safe","generated_at":"2026-08-20T10:00:00+08:00","sections":[]}"#.to_vec();
+        let digest = format!("{:x}", Sha256::digest(&content));
+        let identity = ArtifactIdentity {
+            artifact_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::Report,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: Some("report.json".to_owned()),
+        };
+        let manifest = ArtifactManifest {
+            artifact_id,
+            agent_session_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::Report,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: identity.display_name.clone(),
+            media_type: "application/vnd.yijie.report+json;version=1".to_owned(),
+            size_bytes: content.len(),
+            sha256: digest.clone(),
+            content_href: format!(
+                "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content"
+            ),
+            poster_href: None,
+        };
+        repository.record_artifact_started(&identity).unwrap();
+        assert_eq!(
+            repository.begin_artifact_transfer(&manifest).unwrap(),
+            TransferDisposition::Fetch
+        );
+        repository
+            .commit_artifact(
+                &manifest,
+                &DownloadedArtifact {
+                    content: DownloadedResource {
+                        media_type: manifest.media_type.clone(),
+                        size_bytes: content.len(),
+                        sha256: digest,
+                        bytes: content.clone(),
+                    },
+                    poster: None,
+                },
+                100,
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        let ready = repository
+            .read_ready_report(session_id, turn_id, artifact_id, 101, MAX_ARTIFACT_BYTES)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ready.bytes, content);
+        assert_eq!(ready.revision, 100);
+        assert_eq!(
+            repository
+                .read_ready_report(session_id, turn_id, artifact_id, 101, content.len() - 1)
+                .unwrap(),
+            Err(ReadyReportReadError::LimitExceeded)
+        );
+        assert_eq!(
+            repository
+                .read_ready_report(
+                    Uuid::now_v7(),
+                    turn_id,
+                    artifact_id,
+                    101,
+                    MAX_ARTIFACT_BYTES,
+                )
+                .unwrap(),
+            Err(ReadyReportReadError::NotFound)
+        );
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=ON", [])
+            .unwrap();
+        for (column, invalid, restored, expected) in [
+            (
+                "state",
+                "processing",
+                "ready",
+                ReadyReportReadError::NotReady,
+            ),
+            ("kind", "file", "report", ReadyReportReadError::Unsupported),
+            (
+                "media_type",
+                "application/json",
+                "application/vnd.yijie.report+json;version=1",
+                ReadyReportReadError::Unsupported,
+            ),
+        ] {
+            repository
+                .connection
+                .execute(
+                    &format!("UPDATE chat_output_artifacts SET {column}=?1 WHERE artifact_id=?2"),
+                    params![invalid, artifact_id.to_string()],
+                )
+                .unwrap();
+            assert_eq!(
+                repository
+                    .read_ready_report(session_id, turn_id, artifact_id, 101, MAX_ARTIFACT_BYTES,)
+                    .unwrap(),
+                Err(expected)
+            );
+            repository
+                .connection
+                .execute(
+                    &format!("UPDATE chat_output_artifacts SET {column}=?1 WHERE artifact_id=?2"),
+                    params![restored, artifact_id.to_string()],
+                )
+                .unwrap();
+        }
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts SET sha256=?1 WHERE artifact_id=?2",
+                params!["0".repeat(64), artifact_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_report(session_id, turn_id, artifact_id, 101, MAX_ARTIFACT_BYTES,)
+                .unwrap(),
+            Err(ReadyReportReadError::Integrity)
+        );
+        let invalid = br#"{"schema_version":1,"title":"<unsafe>","generated_at":"2026-08-20T02:00:00Z","sections":[]}"#.to_vec();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_output_artifacts
+                 SET content_blob=?1, byte_size=?2, sha256=?3
+                 WHERE artifact_id=?4",
+                params![
+                    invalid,
+                    invalid.len() as i64,
+                    format!("{:x}", Sha256::digest(&invalid)),
+                    artifact_id.to_string()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            repository
+                .read_ready_report(session_id, turn_id, artifact_id, 101, MAX_ARTIFACT_BYTES,)
+                .unwrap(),
+            Err(ReadyReportReadError::Integrity)
+        );
+        repository
+            .connection
+            .execute("PRAGMA ignore_check_constraints=OFF", [])
+            .unwrap();
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

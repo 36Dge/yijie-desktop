@@ -38,13 +38,13 @@ const FIXTURE_TREE_PINS = new Map([
   ["tests/fixtures/report/report-document-v1", "3fafff6d702504f7a8a1cd44b4c717f024c88ae8"],
 ]);
 const IMPLEMENTATION_PINS = new Map([
-  ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "1f03dd893958fdb6666aad9f98764e2ab6abc54256e0bf065c76628d90ccb58f"]],
+  ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "a8c3128bbc647fb99db516f60627952d0d5cb4d2923fa12ff4756f5ebd6de285"]],
   ["src-tauri/src/chat/host_bridge.rs", ["host_resource_transport", "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2"]],
   ["src-tauri/src/chat/database.rs", ["database_lifecycle", "f68222c9251e44bc72ef0c044e4d4d31bc47bc6903fc95155b0438c22e3f59b6"]],
-  ["src-tauri/src/chat/worker.rs", ["database_worker", "d7dd8b804d644a74b9f256607ea385d93ddbeb2ba82f39162a3a6cd1b4164d22"]],
+  ["src-tauri/src/chat/worker.rs", ["database_worker", "7cf74c094e735ff26fd17c4252dc693224cd237ba9ada5809bd12aa66b4128c0"]],
   ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "d3c0da508abb8f20118bf089f74211e33f922af223006e7111b69cf81282786a"]],
-  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "d8eb06f03560383f5fc6bd3f5e4057c1b148b0dae81072c049d842123ebfb415"]],
-  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "c0168e149d71ffee5663008510c8f9aee5e0bf7156f1fe6a93858bb3061bee33"]],
+  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "d3290063de27db9c9da967d5eb26506a5ddd551ead67cc68611513d95838803d"]],
+  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "134d878b2955e9ca3f0ad0afebdf2d8a550737288e35bed0c125556465d03e20"]],
   ["src-tauri/migrations/chat/0008_chat_output_artifacts.sql", ["sqlcipher_schema_v8", "bec50a16583b216380f5f19728342772ff211ca2ebb88c0ff83b2e44d3fa9a15"]],
   ["src-tauri/schemas/chat-ipc-v3.schema.json", ["private_ipc_v3_schema", "ac61e2f1377e8a5ea44fd8611b05bdbb39e5188f42c142342d7de8401375f3f2"]],
   ["src/domain/chat-ipc.ts", ["typescript_private_ipc_adapter", "2fbec6e363ab75733efdfde538392423248a4c23d4460e7669f9e666fa51ac64"]],

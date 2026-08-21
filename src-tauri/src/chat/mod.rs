@@ -2,6 +2,7 @@ mod application;
 mod artifact;
 pub(crate) mod artifact_file_native;
 pub(crate) mod artifact_native;
+pub(crate) mod artifact_report_native;
 pub(crate) mod artifact_video_native;
 mod attachment;
 mod authorization;
@@ -34,6 +35,7 @@ pub use artifact::{
 };
 pub use artifact_file_native::ArtifactFileNativeRuntime;
 pub use artifact_native::ArtifactNativeRuntime;
+pub use artifact_report_native::ArtifactReportNativeRuntime;
 pub use artifact_video_native::ArtifactVideoNativeRuntime;
 pub use authorization::{
     AuthoritativeChatProjection, ChatAction, ChatAuthorizationContext, ChatAuthorizationManager,
@@ -112,6 +114,8 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_native::chat_save_artifact_image_v1;
     let _ = artifact_file_native::chat_read_artifact_file_preview_v1;
     let _ = artifact_file_native::chat_save_artifact_file_v1;
+    let _ = artifact_report_native::chat_read_artifact_report_preview_v1;
+    let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
 const CONTRACT_COMMIT: &str = "ea48fe190e18afba728712d1e2cc79cda57f581b";
