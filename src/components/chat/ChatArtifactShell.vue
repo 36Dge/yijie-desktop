@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { NProgress, NTag } from "naive-ui";
+import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ChatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactImage from "./ChatArtifactImage.vue";
+import ChatArtifactFile from "./ChatArtifactFile.vue";
 import ChatArtifactVideo from "./ChatArtifactVideo.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -13,6 +15,7 @@ const props = defineProps<{
   contextId: string;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
+  fileNativeClient?: ChatArtifactFileNativeClient;
 }>();
 
 const kindPresentation = computed(() => ({
@@ -85,6 +88,13 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       :artifact="artifact"
       :context-id="contextId"
       :client="videoNativeClient"
+    />
+
+    <ChatArtifactFile
+      v-if="artifact.kind === 'file' && artifact.status === 'ready'"
+      :artifact="artifact"
+      :context-id="contextId"
+      :client="fileNativeClient"
     />
 
     <div class="artifact-shell__status-row">

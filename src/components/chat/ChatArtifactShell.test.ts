@@ -3,6 +3,7 @@
 import axe from "axe-core";
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
+import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ChatArtifact } from "../../domain/chat-ipc";
 import { createArtifactProjection } from "../../domain/chat-artifact";
@@ -17,6 +18,15 @@ const NATIVE_CLIENT: ChatArtifactNativeClient = {
   openImagePreview: vi.fn(async () => ({ status: "opened" as const, previewUrl: PREVIEW_URL })),
   releaseImagePreview: vi.fn(async () => ({ status: "released" as const })),
   saveImage: vi.fn(async () => ({ status: "saved" as const, code: null })),
+};
+const FILE_NATIVE_CLIENT: ChatArtifactFileNativeClient = {
+  readFilePreview: vi.fn(async () => ({
+    status: "previewed" as const,
+    mediaType: "text/plain" as const,
+    text: "显式打开后的安全内容",
+    truncated: false,
+  })),
+  saveFile: vi.fn(async () => ({ status: "saved" as const, code: null })),
 };
 
 function artifact(
@@ -129,5 +139,37 @@ describe("ChatArtifactShell", () => {
     expect(wrapper.html()).not.toMatch(/(?:base64|digest|hostHref|absolutePath|token|v-html)/i);
     expect((await axe.run(wrapper.element)).violations).toEqual([]);
     wrapper.unmount();
+  });
+
+  it("adds file actions only for a ready file and forwards the trusted context to S8A", async () => {
+    const wrapper = mount(ChatArtifactShell, {
+      props: {
+        artifact: artifact(8, {
+          kind: "file",
+          status: "ready",
+          displayName: "安全文件.txt",
+          mediaType: "text/plain",
+          sizeBytes: 32,
+          localCommittedAt: 1_000,
+          expiresAt: 605_801_000,
+        }),
+        contextId: CONTEXT_ID,
+        fileNativeClient: FILE_NATIVE_CLIENT,
+      },
+    });
+
+    expect(FILE_NATIVE_CLIENT.readFilePreview).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='artifact-file-open']").trigger("click");
+    await flushPromises();
+    expect(FILE_NATIVE_CLIENT.readFilePreview).toHaveBeenCalledWith(CONTEXT_ID, {
+      sessionId: SESSION_ID,
+      turnId: TURN_ID,
+      artifactId: "019c1a00-0000-7000-8000-000000000311",
+    });
+    expect(wrapper.text()).toContain("显式打开后的安全内容");
+
+    await wrapper.setProps({ artifact: artifact(8, { kind: "file", status: "expired" }) });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='artifact-file']").exists()).toBe(false);
   });
 });

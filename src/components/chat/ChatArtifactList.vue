@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import type { ChatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
@@ -9,6 +10,7 @@ defineProps<{
   contextId: string;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
+  fileNativeClient?: ChatArtifactFileNativeClient;
 }>();
 </script>
 
@@ -21,6 +23,7 @@ defineProps<{
           :context-id="contextId"
           :native-client="nativeClient"
           :video-native-client="videoNativeClient"
+          :file-native-client="fileNativeClient"
         />
       </li>
     </ol>
