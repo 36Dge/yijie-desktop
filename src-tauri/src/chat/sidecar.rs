@@ -15,6 +15,9 @@ use tokio::task::JoinHandle;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const FEAT126_FAKE_RESPONSES_BASE_URL: &str = "http://127.0.0.1:18082/v1";
 const FEAT126_DRIVER_NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
+const FEAT128_S10_PROFILE_ENV: &str = "YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED";
+const CHAT_ARTIFACTS_V3_ENV: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
+const FEAT128_SYNTHETIC_MANIFEST: &str = "feat128-artifact-v1";
 const MAX_CHILD_LOG_BYTES: u64 = 256 << 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +37,8 @@ pub struct SidecarConfig {
     codex_manifest: Option<PathBuf>,
     codex_home: Option<PathBuf>,
     test_profile: Option<FEAT126TestProfile>,
+    artifact_v3_enabled: bool,
+    feat128_s10_profile: bool,
 }
 
 impl SidecarConfig {
@@ -44,6 +49,9 @@ impl SidecarConfig {
                 || std::env::var_os("YIJIE_FEAT126_FAKE_RESPONSES_BASE_URL").is_some()
                 || std::env::var_os("YIJIE_FEAT126_S10_RUN_ROOT").is_some()
                 || std::env::var_os(FEAT126_DRIVER_NONCE_ENV).is_some()
+                || std::env::var_os(FEAT128_S10_PROFILE_ENV).is_some()
+                || std::env::var_os(CHAT_ARTIFACTS_V3_ENV).is_some()
+                || feat128_child_profile_is_present()
             {
                 return Err(ChatError::InvalidConfiguration);
             }
@@ -79,6 +87,18 @@ impl SidecarConfig {
             return Err(ChatError::InvalidConfiguration);
         }
         let test_profile = load_feat126_test_profile()?;
+        let artifact_v3_enabled = read_exact_boolean_environment(CHAT_ARTIFACTS_V3_ENV)?;
+        let feat128_s10_profile = read_exact_boolean_environment(FEAT128_S10_PROFILE_ENV)?;
+        if feat128_child_profile_is_present() {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        validate_feat128_s10_profile_values(
+            feat128_s10_profile,
+            artifact_v3_enabled,
+            test_profile.is_some(),
+            cfg!(feature = "feat128-s10-runtime"),
+            feat128_provider_environment_is_present(),
+        )?;
         let secure_storage =
             std::env::var("YIJIE_FEAT126_S10_SECURE_STORAGE_ENABLED").unwrap_or_default();
         let ephemeral_storage =
@@ -105,6 +125,8 @@ impl SidecarConfig {
             codex_manifest,
             codex_home,
             test_profile,
+            artifact_v3_enabled,
+            feat128_s10_profile,
         }))
     }
 
@@ -170,6 +192,19 @@ impl SidecarConfig {
                 ),
             ]);
         }
+        if self.artifact_v3_enabled {
+            values.push(("YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED", "true".to_owned()));
+        }
+        if self.feat128_s10_profile {
+            values.extend([
+                (FEAT128_S10_PROFILE_ENV, "true".to_owned()),
+                ("YIJIE_FEAT128_SYNTHETIC_ENABLED", "true".to_owned()),
+                (
+                    "YIJIE_FEAT128_SYNTHETIC_MANIFEST",
+                    FEAT128_SYNTHETIC_MANIFEST.to_owned(),
+                ),
+            ]);
+        }
         if let Some(value) = &self.codex_binary {
             values.push(("YIJIE_CODEX_BINARY", value.to_string_lossy().into_owned()));
         }
@@ -181,6 +216,60 @@ impl SidecarConfig {
         }
         values
     }
+}
+
+fn read_exact_boolean_environment(name: &str) -> Result<bool, ChatError> {
+    match std::env::var(name) {
+        Ok(value) => parse_exact_boolean_value(&value),
+        Err(std::env::VarError::NotUnicode(_)) => Err(ChatError::InvalidConfiguration),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+    }
+}
+
+fn parse_exact_boolean_value(value: &str) -> Result<bool, ChatError> {
+    match value {
+        "true" => Ok(true),
+        "" | "false" => Ok(false),
+        _ => Err(ChatError::InvalidConfiguration),
+    }
+}
+
+fn feat128_child_profile_is_present() -> bool {
+    [
+        "YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED",
+        "YIJIE_FEAT128_SYNTHETIC_ENABLED",
+        "YIJIE_FEAT128_SYNTHETIC_MANIFEST",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some())
+}
+
+fn feat128_provider_environment_is_present() -> bool {
+    [
+        "YIJIE_MODEL_PROVIDER",
+        "YIJIE_MINIMAX_API_KEY",
+        "YIJIE_MINIMAX_API_KEY_FILE",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some())
+}
+
+fn validate_feat128_s10_profile_values(
+    profile_enabled: bool,
+    artifact_v3_enabled: bool,
+    feat126_profile_enabled: bool,
+    feature_compiled: bool,
+    provider_environment_present: bool,
+) -> Result<(), ChatError> {
+    if profile_enabled
+        && (!artifact_v3_enabled
+            || !feat126_profile_enabled
+            || !feature_compiled
+            || provider_environment_present)
+    {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -1323,6 +1412,8 @@ mod tests {
             codex_manifest: None,
             codex_home: None,
             test_profile: None,
+            artifact_v3_enabled: false,
+            feat128_s10_profile: false,
         };
         let environment = config.environment("019fbd88-cbc3-7bf1-934d-7b05cd693f80", None, None);
         let names = environment
@@ -1431,6 +1522,8 @@ mod tests {
             codex_manifest: Some(root.join("runtime-manifest.json")),
             codex_home: Some(root.join("codex-home")),
             test_profile: Some(profile),
+            artifact_v3_enabled: false,
+            feat128_s10_profile: false,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -1486,6 +1579,86 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(feature = "feat128-s10-runtime")]
+    #[test]
+    fn feat128_s10_profile_maps_the_exact_child_capabilities() {
+        const RUN_ID: &str = "12800000-0000-4000-8000-000000000010";
+        const NONCE: &str = "12800000-0000-4000-8000-000000000011";
+        let root = private_test_directory("feat128-s10-red");
+        let config = SidecarConfig {
+            binary: PathBuf::from("/synthetic/host"),
+            host_home: root.join("host-home"),
+            port: 18080,
+            codex_binary: None,
+            codex_manifest: None,
+            codex_home: None,
+            test_profile: Some(FEAT126TestProfile {
+                run_id: RUN_ID.to_owned(),
+                fake_responses_base_url: FEAT126_FAKE_RESPONSES_BASE_URL.to_owned(),
+                run_root: root.clone(),
+                instance_nonce: NONCE.to_owned(),
+            }),
+            artifact_v3_enabled: true,
+            feat128_s10_profile: true,
+        };
+        let host_root = create_private_directory(&root.join("host")).unwrap();
+        let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
+        let process_manifest = log_directory.join("process.json");
+        let environment = config.environment(NONCE, Some(&log_directory), Some(&process_manifest));
+        for (name, value) in [
+            ("YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED", "true"),
+            ("YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED", "true"),
+            ("YIJIE_FEAT128_SYNTHETIC_ENABLED", "true"),
+            ("YIJIE_FEAT128_SYNTHETIC_MANIFEST", "feat128-artifact-v1"),
+        ] {
+            assert!(
+                environment.iter().any(|(actual_name, actual_value)| {
+                    *actual_name == name && actual_value == value
+                }),
+                "child environment omitted {name}"
+            );
+        }
+        assert!(!environment
+            .iter()
+            .any(|(name, _)| *name == "YIJIE_CHAT_ARTIFACTS_V3_ENABLED"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat128_s10_profile_is_exact_closed_and_default_off() {
+        assert_eq!(parse_exact_boolean_value(""), Ok(false));
+        assert_eq!(parse_exact_boolean_value("false"), Ok(false));
+        assert_eq!(parse_exact_boolean_value("true"), Ok(true));
+        for value in ["TRUE", "False", "1", " true", "true "] {
+            assert_eq!(
+                parse_exact_boolean_value(value),
+                Err(ChatError::InvalidConfiguration)
+            );
+        }
+
+        assert_eq!(
+            validate_feat128_s10_profile_values(false, false, false, false, false),
+            Ok(())
+        );
+        assert_eq!(
+            validate_feat128_s10_profile_values(true, true, true, true, false),
+            Ok(())
+        );
+        for values in [
+            (true, false, true, true, false),
+            (true, true, false, true, false),
+            (true, true, true, false, false),
+            (true, true, true, true, true),
+        ] {
+            assert_eq!(
+                validate_feat128_s10_profile_values(
+                    values.0, values.1, values.2, values.3, values.4
+                ),
+                Err(ChatError::InvalidConfiguration)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn child_log_capture_is_owner_only_and_bounded() {
         let root = private_test_directory("bounded-log");
@@ -1537,6 +1710,8 @@ mod tests {
                     run_root: root.clone(),
                     instance_nonce: nonce.to_owned(),
                 }),
+                artifact_v3_enabled: false,
+                feat128_s10_profile: false,
             };
             let supervisor = SidecarSupervisor {
                 config: Some(config),
@@ -1618,6 +1793,8 @@ mod tests {
                 run_root: root.clone(),
                 instance_nonce: NONCE.to_owned(),
             }),
+            artifact_v3_enabled: false,
+            feat128_s10_profile: false,
         };
         let supervisor = SidecarSupervisor {
             config: Some(config),
@@ -1672,6 +1849,204 @@ mod tests {
             }
         }
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    #[tokio::test]
+    async fn feat128_s10_local_profile_integration() {
+        if std::env::var("YIJIE_RUN_FEAT128_S10_DESKTOP_INTEGRATION").as_deref() != Ok("1") {
+            return;
+        }
+        let project = PathBuf::from(
+            std::env::var("YIJIE_FEAT128_S10_PROJECT_DIR").expect("test project authority"),
+        );
+        let supervisor = SidecarSupervisor::from_environment().expect("exact sidecar profile");
+        assert_eq!(
+            supervisor.start().await.expect("start exact Host child"),
+            SidecarState::RuntimeReady
+        );
+        let connection = supervisor
+            .connection()
+            .await
+            .expect("ready Host connection");
+        let bridge = crate::chat::host_bridge::HostBridge::from_connection(connection.clone())
+            .expect("exact Host bridge");
+        let trace = crate::chat::host_bridge::HostTrace {
+            trace_id: Some(feat128_test_uuid(1)),
+            request_id: Some(feat128_test_uuid(2)),
+            tenant_id: Some(feat128_test_uuid(3)),
+            user_id: Some(feat128_test_uuid(4)),
+        };
+        let session = bridge
+            .start_session(feat128_test_uuid(5), &project, &trace)
+            .await
+            .expect("start strict-local session");
+        let turn_id = bridge
+            .start_turn(
+                session.agent_session_id,
+                "emit strict-local structured artifacts",
+                &trace,
+            )
+            .await
+            .expect("start strict-local turn");
+        let token = fs::read_to_string(&connection.token_path).expect("owner-only Host token");
+        let token = token.trim();
+        assert!(!token.is_empty());
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("loopback event client");
+        let mut response = client
+            .get(format!(
+                "http://127.0.0.1:{}/v3/agent-sessions/{}/events?event_schema_version=3",
+                connection.port, session.agent_session_id
+            ))
+            .bearer_auth(token)
+            .send()
+            .await
+            .expect("subscribe v3 events");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("X-Yijie-Event-Schema-Version")
+                .and_then(|value| value.to_str().ok()),
+            Some("3")
+        );
+        let mut buffer = Vec::new();
+        let mut started = 0usize;
+        let mut progress = 0usize;
+        let mut completed = Vec::new();
+        let mut turn_terminal = false;
+        let turn_id_text = turn_id.to_string();
+        while completed.len() < 4 || !turn_terminal {
+            let chunk = tokio::time::timeout(Duration::from_secs(30), response.chunk())
+                .await
+                .expect("v3 event timeout")
+                .expect("v3 event stream")
+                .expect("v3 event stream ended early");
+            buffer.extend_from_slice(&chunk);
+            while let Some(frame_end) = buffer.windows(2).position(|pair| pair == b"\n\n") {
+                let frame = buffer.drain(..frame_end + 2).collect::<Vec<_>>();
+                let Some(data) = frame
+                    .split(|byte| *byte == b'\n')
+                    .find_map(|line| line.strip_prefix(b"data: "))
+                else {
+                    continue;
+                };
+                let event: serde_json::Value =
+                    serde_json::from_slice(data).expect("closed v3 event JSON");
+                if event.get("turn_id").and_then(serde_json::Value::as_str)
+                    != Some(turn_id_text.as_str())
+                {
+                    continue;
+                }
+                match event
+                    .get("event_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                {
+                    "item.artifact.started" => started += 1,
+                    "item.artifact.progress" => progress += 1,
+                    "item.artifact.completed" => {
+                        completed.push(feat128_manifest_from_event(
+                            &event,
+                            session.agent_session_id,
+                            turn_id,
+                        ));
+                    }
+                    "turn.completed" => turn_terminal = true,
+                    _ => {}
+                }
+            }
+        }
+        drop(response);
+        assert_eq!((started, progress, completed.len()), (4, 4, 4));
+        let mut kinds = Vec::new();
+        for manifest in &completed {
+            let _downloaded = bridge
+                .download_artifact(manifest)
+                .await
+                .expect("download exact Artifact resource");
+            let commit = crate::chat::artifact::ArtifactCommit {
+                artifact_id: manifest.artifact_id,
+                ack_id: feat128_test_uuid(10 + kinds.len()),
+                local_committed_at: 1,
+                expires_at: 2,
+            };
+            bridge
+                .acknowledge_artifact(manifest, &commit, "2026-08-22T00:00:00Z")
+                .await
+                .expect("acknowledge exact Artifact resource");
+            kinds.push(manifest.kind.as_str());
+        }
+        kinds.sort_unstable();
+        assert_eq!(kinds, ["file", "image", "report", "video"]);
+        assert_eq!(
+            supervisor.stop().await.expect("stop exact Host child"),
+            SidecarState::Stopped
+        );
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    fn feat128_manifest_from_event(
+        event: &serde_json::Value,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+    ) -> crate::chat::artifact::ArtifactManifest {
+        let payload = event.get("payload").expect("Artifact payload");
+        let text = |name: &str| {
+            payload
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .expect("Artifact payload text")
+        };
+        let kind = match text("kind") {
+            "image" => crate::chat::artifact::ArtifactKind::Image,
+            "video" => crate::chat::artifact::ArtifactKind::Video,
+            "file" => crate::chat::artifact::ArtifactKind::File,
+            "report" => crate::chat::artifact::ArtifactKind::Report,
+            _ => panic!("unsupported Artifact kind"),
+        };
+        let manifest = crate::chat::artifact::ArtifactManifest {
+            artifact_id: uuid::Uuid::parse_str(text("artifact_id")).expect("Artifact ID"),
+            agent_session_id: session_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind,
+            provenance: crate::chat::artifact::ArtifactProvenance::Synthetic,
+            ordinal: payload
+                .get("ordinal")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .expect("Artifact ordinal"),
+            display_name: payload
+                .get("display_name")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned),
+            media_type: text("media_type").to_owned(),
+            size_bytes: payload
+                .get("size_bytes")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .expect("Artifact size"),
+            sha256: text("sha256").to_owned(),
+            content_href: text("content_href").to_owned(),
+            poster_href: payload
+                .get("poster_href")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned),
+        };
+        manifest.validate().expect("valid completed manifest");
+        manifest
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    fn feat128_test_uuid(suffix: usize) -> uuid::Uuid {
+        uuid::Uuid::parse_str(&format!("12800000-0000-4000-8000-{suffix:012}"))
+            .expect("canonical synthetic UUIDv4")
     }
 
     #[test]
@@ -1773,6 +2148,8 @@ mod tests {
             codex_manifest: None,
             codex_home: None,
             test_profile: None,
+            artifact_v3_enabled: false,
+            feat128_s10_profile: false,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
