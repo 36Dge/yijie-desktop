@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.4.0
+- 版本：1.5.0
 - 最后更新：2026-08-21
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
@@ -18,9 +18,11 @@ authority、严格 v3 adapter、owner-bound transfer/ACK、7 天 TTL/cleanup rec
 native preview/save boundary，S6B 已实现 ready-image renderer/lightbox/save UX，两者均为 G3 外的独立 PASS。
 S7F、S7A、S7A-REPAIR 与 S7B 随后分别完成 strict-local playable fixture、Desktop-private Range/save boundary、
 累计请求上限修复与 ready-video renderer/runtime playback/seek smoke，并作为 G3 外独立 PASS 留痕。S8A/S8B
-随后分别完成 bounded file preview/save boundary 与 ready-file renderer/search/save UX。本文 1.4.0 冻结 S9A
-Desktop-private bounded report projection/canonical JSON save 与 S9B report renderer；当前只批准 S9A 编码，S9B
-等待 S9A immutable PASS，并因活跃应用尚无 ECharts dependency/theme 而保持 blocked。模型调用、真实 provider、
+随后分别完成 bounded file preview/save boundary 与 ready-file renderer/search/save UX。S9A 已在
+`232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` 完成 Desktop-private bounded report projection/canonical JSON save，
+仍是 G3 外独立 PASS。本文 1.5.0 完成 S9B-READINESS，将未实现的 S9B 拆为 S9B-D
+dependency/theme/closed-adapter foundation 与 S9B-R ready-report renderer；当前只批准 S9B-D 编码，
+S9B-R 等待 S9B-D immutable PASS 与单独授权。模型调用、真实 provider、
 云资源、发布或生产配置仍不在授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
 
 ## 目标
@@ -155,20 +157,22 @@ Artifact 状态必须投影为以下可观察 UI 阶段：
 
 - 报告不应退化为普通文件名行。紧凑结果面必须展示报告标题、专业摘要、格式、数据范围或生成时间等已确认
   信息，并在存在结构化数据时展示关键指标和章节入口。
-- 数据分析图表必须使用 ECharts 易界主题，同时提供文字结论、时间范围、单位和数据来源；图表不能作为唯一
-  信息载体。
+- 数据分析图表必须使用 ECharts 易界主题，并始终提供可见、可访问的数据表。当前 immutable
+  ReportDocumentV1/chart projection 只有 `title/chartType/labels/series`，根对象只另有
+  `generatedAt/sourceTime`，没有 chart unit、data source 或 time range。UI 可将非空 `sourceTime` 标为
+  “数据时间”，但必须对单位、数据来源和时间范围显示“报告未提供”，不得从标题、系列名或值
+  推断。图表辅助描述只能陈述图类、类目数、系列数与“完整数据见下方表格”，不得生成业务结论。
 - 本候选的报告 `progress` 只展示权威阶段/百分比和稳定占位，不展示章节或摘要快照。未来 partial report
   必须先获得版本化 resource、digest、权限和替换语义，且明确“生成中”，不得把未完成内容标记为最终结论。
 - “预览报告”打开应用内只读预览；“下载报告”保存同一已完成版本的 canonical Report JSON
   (`application/vnd.yijie.report+json;version=1`)。PDF/Markdown 仅作为未来派生导出，不属于本候选。预览和下载
   必须指向同一已完成版本，不能在 ready 后静默替换内容。
 - 报告预览为空、部分生成、解析失败或内容不兼容时，必须保留 metadata、错误原因和下一步。
-- 当前 `chat_load_history_v3` 仍只返回 report metadata；不存在可复用的 report 正文 projection。S9 必须拆为
-  S9A native projection/save 与 S9B TS/Vue renderer，S9B 不得直接读取 SQLCipher、Host resource 或 raw JSON。
-- 当前 S4 Rust adapter 相对 immutable ReportDocumentV1 还存在已确认的 consumer conformance 漂移：Unicode
-  `maxLength` 被按 UTF-8 bytes 计数、date-time 只接受 `Z`，且额外要求 section ID/column key 唯一和 chart
-  labels/values 等长。S9A 必须先以契约有效 fixture 修复这些额外拒绝，再复用同一 full-schema validator；不得
-  通过收紧 Contracts、修改 fixture 或把额外限制写成“既有契约事实”绕过。
+- `chat_load_history_v3` 仍只返回 report metadata；S9A 已提供可复用的 typed bounded projection 与
+  canonical JSON save client。S9B-R 只能消费该 client，不得直接读取 SQLCipher、Host resource 或 raw JSON。
+- S9A 已修复原 S4 Rust adapter 对 immutable ReportDocumentV1 的 consumer conformance 漂移：Unicode
+  `maxLength` 按 scalar 计数、接受合法 RFC 3339 offset，不再发明 section ID/column key 唯一或
+  chart labels/values 等长约束；closed schema、unknown-required、integrity 与 revision 失败仍 fail closed。
 
 ### 8. 过期、不可预览与未知状态
 
@@ -476,37 +480,103 @@ G3 仍为 S3/S4/S5，G4 pending。
 
 ### 9.12 S9B：provider-neutral report renderer 与 chart adapter
 
-- S9B 必须等待 S9A immutable PASS、单独授权以及 ECharts dependency/theme blocker 解除。只对
-  `kind=report && status=ready` 在用户明确打开后调用 typed S9A client；其它 kind/status 保持 S5 generic shell。
-  bounded projection 只在组件 local state/打开态 DOM，close/error/stale response、status/artifact/session/context switch
-  与 unmount 时清空；不得进入 Pinia/history/router/storage/log/diagnostics/telemetry/snapshot。
-- summary/paragraph/callout/metrics 只使用 Vue text nodes。table 使用 semantic `<table>`、`<caption>`、`<th scope>`
-  与 positional cells；最多显示 S9A 已投影的 200×32，并在 `truncated=true` 时明确“仅展示报告的一部分”。unknown
-  optional 只显示“当前版本不支持此报告区块”，不显示 source type/payload。禁止 `v-html`、Markdown/HTML renderer、
-  linkification、活动 URL、脚本、公式、宏、网络、Agent/tool action。
-- chart adapter 只能从 closed chart projection 构造固定 option：bar/line 使用 category x-axis；pie 仅在 exactly one
-  aligned series 时可视化；其它合法但不对齐的 chart 只显示 accessible data table 与“标签和数据长度不一致”提示。
-  固定 `animation=false`、semantic palette、plain/rich-text tooltip、`aria.enabled=true` 与 decal；禁止接收/合并任意
-  ECharts option、formatter function/string template、HTML tooltip、URL、event action、toolbox、dataZoom、dataset、
-  graphic、custom series、dynamic import 或代码执行。图表下必须始终有完整的 bounded text table，图表不是唯一信息载体。
-- 当前 active `package.json`/lockfile 没有 `echarts` 或 `vue-echarts`，`src/design/theme/echarts-theme.ts` 与
-  `YjChartCard` 也不存在；因此 S9B=`BLOCKED`。解除条件是用户单独批准精确 pinned ECharts dependency/lockfile 和
-  最小 tree-shaken imports，并先实现/验证易界 semantic-token theme 与 reusable chart boundary；readiness 本轮不得安装。
-- S9B 覆盖 loading/unsupported/failed/expired/truncated/retry、duplicate/stale、keyboard/focus return、aria-live/busy、
-  axe、200% zoom、light/dark 与 reduced-motion；production page/vertical/manual visual/performance 继续属于 S10。
+- 依赖方案冻结为直接使用 exact `echarts@6.1.0`（Apache-2.0，registry integrity
+  `sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==`）。
+  lockfile 只允许新增根 `echarts@6.1.0`、`zrender@6.1.0`（BSD-3-Clause，integrity
+  `sha512-oEGMDB6pOP2S6OwRR4PdVv610zrjnA3Bh+JnSG12fYJlBKjtNAoEb5fSUoCOOINlH96I2fU38/A2UpRKs67xYQ==`）与
+  `tslib@2.3.0`（0BSD，integrity
+  `sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg==`）的
+  importer/package/snapshot 增量，并在根 `THIRD_PARTY_NOTICES.md` 保留 package/version/license/source/integrity 与
+  ECharts 6.1.0 `NOTICE`。审计日 2026-08-21 未安装任何包。
+- 不选 `vue-echarts@8.1.0`：它仍 peer-depend ECharts 6，却增加 generic option/update/event/lifecycle 表面和供应链，
+  对 closed adapter 无必要能力。table-only 是每个 chart 的权威 fallback 和回滚路径，但不替代 AC-006 的
+  有限图表渐进增强。
+- exact value imports 只能是 `init/use` from `echarts/core`，`BarChart/LineChart/PieChart` from
+  `echarts/charts`，`GridComponent/TooltipComponent/AriaComponent` from `echarts/components` 和
+  `CanvasRenderer` from `echarts/renderers`。禁止 root/full `echarts`、`vue-echarts`、SVG renderer、Legend/Title/
+  Dataset/Transform/DataZoom/Toolbox/Graphic/Custom/UniversalTransition、extension/theme pack、CDN、外部 origin、
+  import map、dynamic/runtime module 与远程资源。图例使用 card 内的可访问 HTML `<ul>`，不注册
+  ECharts LegendComponent。直接 bundled Canvas 方案不需要 Tauri/CSP/capability 增量。
+- S9B-D 必须以 2026-08-21 S9A baseline 同环境 build（全部 `dist/assets/*.js`）的
+  `655,731` minified raw bytes / `206,580` gzip-9 bytes 为基线。tree-shaken chart runtime 与后续 S9B-R 的
+  最终总增量分别不得超过 `716,800` raw / `225,280` gzip bytes，最终全部 JS 不得超过
+  `1,372,531` raw / `431,860` gzip bytes。必须统计所有 JS，不得通过拆 chunk 或动态/CDN 加载
+  规避。超限、integrity/license/transitive 漂移或出现 install script/额外 package 即停止并回滚 S9B-D。
+- S9B-D 新增的 semantic chart token 名称只能是 `--yj-color-chart-series-1` 至
+  `--yj-color-chart-series-8`，按序精确映射 light
+  `#6B8E23,#356BEA,#0E7490,#7C3AED,#B45309,#C2410C,#DC2626,#475569` 和 dark
+  `#A6CC62,#78A2FF,#46C7D8,#A78BFA,#FBBF24,#FB923C,#F87171,#94A3B8`；文字/背景/边框/焦点/
+  字体使用既有 text-primary/text-secondary/bg-card/bg-elevated/border-default/brand-border/font tokens。文字
+  对比至少 4.5:1，焦点与信息性图形至少 3:1；颜色仍必须配合 decal、line symbol/style、HTML
+  legend 与可见 table。theme factory 只接受 resolved required-token reader，缺 token 则 table fallback。
+- `YjChartCard` 只接受 closed frozen adapter model，不接受 `EChartsOption`、option fragment、provider config、
+  generic slot 或 event callback。固定 transparent background、standard height `280px`、narrow/200% zoom height `180px`、
+  grid `{left:16,right:16,top:24,bottom:32,containLabel:true}`、`animation=false`、
+  `tooltip.renderMode="richText"/confine=true/appendToBody=false/enterable=false/transitionDuration=0`、
+  `aria.enabled=true` 与 decal。禁止 formatter（function 或 template）、HTML tooltip、URL、`.on`、
+  `dispatchAction`、toolbox、dataZoom、dataset、graphic 与 custom series。通用图表规范中的 dataZoom 建议对
+  FEAT-128 无效。
+- closed adapter 输入只能是 S9A `type=chart` projection，输出只能是 frozen
+  `renderable|fallback` model 和完整 text-table model，不暴露 ECharts option。bar/line 只在 `aligned=true`、
+  `1..64` labels、`1..8` series、每 series 等长 finite values 且总 points `<=512` 时增强；pie 只在
+  exactly one aligned series、`1..32` labels、所有值 `>=0` 且至少一个 `>0` 时增强。empty、mismatch、
+  unsupported、defensive non-finite 或 oversize 都只对当前 section 回落 table。mismatch table 行数取 labels/
+  values 最大长度，缺 label 显示“第 N 项（缺少标签）”，缺值显示“—”，不丢弃其他投影值。
+- S9B-D 提供无全局状态的纯 budget helper；S9B-R 在每次 explicit open 的组件 local state 中按 section
+  `ordinal` 升序提交已通过 adapter 的 chart candidates，只增强最前 `4` 个。单 chart 已受 `<=512` points
+  限制，因此合计必为 `<=2,048`；其余只表格。close/error/stale/switch/unmount 清掉该次 open 的 budget，
+  禁止按 mount/async completion 顺序或跨 report/global counter 分配。
+  card 每次只持有一个 Canvas instance 和一个 ResizeObserver；model/theme/error/unmount 时按
+  `clear -> dispose -> disconnect` 释放，init/setOption/resize 失败只降级当前 chart，其它 section 和可见 table
+  不受影响。theme change 通过既有 `document.documentElement.dataset.theme` 驱动 dispose/re-init。
+- S9B-R 只对 `kind=report && status=ready` 在用户明确打开后调用 typed S9A client；其它
+  kind/status 保持 S5 shell。summary/paragraph/callout/metrics 只用 text nodes；table 用 `<table>`/
+  `<caption>`/`<th scope>` 与 positional cells；unknown optional 只显示固定 unsupported marker。禁止
+  `v-html`、linkification、活动 URL、公式/宏/代码、网络与 Agent/tool action。canonical JSON save 只调用
+  S9A client，禁止 derived PDF/Markdown/image export。
+- projection/model/option 只能在组件 local state 与打开态 DOM；close/error/stale response、status/artifact/session/
+  context switch 与 unmount 时先使 request epoch 失效，再清 projection/model/feedback，然后 unmount chart 以
+  dispose。禁止进入 Pinia/history/router/storage/log/diagnostics/telemetry 或 snapshot。含 title/labels/series/
+  values 的 model/option 不得做 snapshot；测试必须改用 exact-key allowlist、JSON-serializable 与递归
+  no-function/no-URL/no-formatter 结构断言。
+- chart Canvas 使用固定 accessible name 和只陈述结构的 description，不进 Tab 序；键盘/读屏用户通过
+  紧邻的 HTML legend 与始终可见 table 读取全部 bounded 数据。loading/error/empty/fallback/truncated
+  有稳定文字、`aria-live`/`aria-busy`；panel 打开聚焦 labelled region，关闭返焦触发器。
+  `animation=false` 在所有主题成立，reduced-motion 下同时去除 CSS transition。
+- S9B-D 必须以 test-only chart harness 验证 light/dark、1180×760、720px 窄宽与 200% zoom（有效
+  590 CSS px），并检查无 page horizontal scroll/重叠、table local scroll、focus、tooltip confinement、theme
+  dispose/re-init 与 reduced-motion。S9B-R 仍需 component/axe/security 与同一视觉矩阵；production page/vertical
+  继续属于 S10，不得用 harness 冒充。
 
 ### 9.13 S9 切片、测试与回滚
 
+S9B-D checker 路径固定为 `scripts/check-feat128-s9b-d-dependencies.mjs` 与
+`scripts/check-feat128-s9b-d-bundle.mjs`，测试分别使用同名 `.test.mjs`；visual harness 固定在
+`tests/visual/feat-128-s9b-d/`。实现验证必须依次执行：
+
+1. `pnpm exec vitest run scripts/check-feat128-s9b-d-dependencies.test.mjs scripts/check-feat128-s9b-d-bundle.test.mjs src/design/theme/echarts-theme.test.ts src/domain/chat-artifact-report-chart.test.ts src/components/yijie/YjChartCard.test.ts`
+2. `node scripts/check-feat128-s9b-d-dependencies.mjs`
+3. `pnpm lint`
+4. `pnpm test`
+5. `make build`
+6. `pnpm docs:build`
+7. `node scripts/check-feat128-s9b-d-bundle.mjs --dist dist/assets`
+8. `pnpm exec vite --config tests/visual/feat-128-s9b-d/vite.config.ts --host 127.0.0.1 --port 41783`，随后在真实浏览器逐格执行 9.12 的 light/dark、1180×760、720px、200% zoom、fallback/error/reduced-motion 矩阵并记录实际结果；不得把 happy-dom/axe 冒充真实布局证据。
+9. `git diff --check`
+
 | Slice | 前置与允许范围 | 测试先行与停止条件 | 回滚 |
 |---|---|---|---|
-| S9A native boundary | immutable report v1 + S4 SQLCipher；new report private schema/native module、必要 artifact/application/worker/ipc/mod/lib wiring、TS domain/client/tests；必要 consumer checker 仅刷新 Desktop implementation/readiness SHA | EXPECTED RED 先证明当前 Unicode/offset/duplicate/mismatched-chart contract-valid fixtures 被错误拒绝以及 report commands 不存在；GREEN 覆盖 full schema/unknown/injection、exact caps/projection union、identity/context/concurrency/stale、save double-read/extension/dialog/symlink/atomic/fsync/report-only residue/leak；任何 Contracts/Host/public pin、dependency/config/CSP/capability/migration/protocol/S6-S8 行为变化立即停止 | 移除 report commands/schema/client/runtime；恢复 SHA-only checker；SQLCipher 数据与 S6-S8 保持，consumer repair 若需回滚则关闭 report preview/save 而不得恢复错误契约解释 |
-| S9B renderer | S9A immutable PASS + separate authorization + pinned ECharts/theme blocker closed；components/chat、provider-neutral TS mapper、design chart theme/card、tests | renderer/chart/component/axe RED→GREEN；closed option snapshot、no-option-injection、all sections/unknown/truncation/stale/clear/save/a11y/leak；任何 native/page/store/config/public contract、外部 origin或派生 export需求立即停止 | disable report renderer/chart，回落 S5 metadata + S9A canonical save；不删除 SQLCipher authority |
+| S9A native boundary | `232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` separate PASS；immutable report v1 consumer repair + private projection/canonical JSON save | Rust/TS EXPECTED RED→GREEN、cargo 227 passed/3 ignored、Desktop lint/347 tests/build/docs/diff 已 PASS；保留原 RED 证据 | 若未来需要关闭，移除 report commands/schema/client/runtime 而不恢复错误 consumer 契约解释 |
+| S9B-D dependency/theme/adapter foundation | S9A PASS + 1.5.0 readiness + separate S9B-D authorization；`package.json`/`pnpm-lock.yaml`/`THIRD_PARTY_NOTICES.md`、`src/styles/variables.css`、`src/design/theme/echarts-theme.ts`、`src/domain/chat-artifact-report-chart.ts`、`src/components/yijie/YjChartCard.vue`、两条 exact checker + tests 与 `tests/visual/feat-128-s9b-d/`；禁止 `components/chat`、S9A client 调用与报告正文读取 | 先做 dependency/import/theme/adapter/card/bundle EXPECTED RED；按本节 9 条 exact 验证 GREEN，覆盖 lock/integrity/license/imports、light/dark/missing-token、bar/line/pie/fallback/bounds、ordinal budget/table-completeness、exact-key/no-function/no-URL、init/update/resize/theme/error/unmount disposal、axe/reduced-motion/network/storage/log 与真实浏览器矩阵。任何额外 dependency、budget 超限、native/config/page/store/public contract 或 arbitrary option 需求立即停止 | 移除 exact dependency/三个 lock nodes/notice、chart tokens/theme/adapter/card/checker；S5 shell 与 S9A authority 不变 |
+| S9B-R ready-report renderer | S9B-D immutable PASS + separate S9B-R authorization；只允许 `src/components/chat/ChatArtifactReport*.vue`、Shell/List 的 typed report-client 透传、对应 tests 与 test-only visual harness；不再改 dependency/theme/adapter/native/config/page/store | 先做 renderer EXPECTED RED；GREEN 覆盖 explicit open/all known sections/unknown/truncation、chart fallback 隔离、duplicate/stale/clear/dispose顺序、save 三结果、keyboard/focus/aria/axe、open-DOM/close-zero-hit、no raw/unknown/path/digest/href/token/requestId/error/log/snapshot，并复验总 bundle 上限 | 移除 report renderer 与 Shell/List 透传，回落 S5 metadata + S9A canonical save；S9B-D 可保留但不接入 |
 
 Owner capture（用户明确要求 Codex 代录，不声称独立人工评审）：Product
-`READY FOR S9A ONLY; CANONICAL JSON SAVE ONLY; S9B WAITS`；Technical
-`APPROVED FOR S9A WITH CONTRACT-CONFORMANT VALIDATOR REPAIR + EXACT PRIVATE SCHEMA/TWO COMMANDS; S9B BLOCKED ON ECHARTS`；
-Security/Data `APPROVED FOR S9A WITH BOUNDED PROJECTION, UNKNOWN-PAYLOAD OMISSION, LOCAL-ONLY LIFECYCLE AND NATIVE
-ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3/S4/S5，G4 pending。
+`READY FOR S9B-D ONLY; ACCESSIBLE TABLE IS AUTHORITATIVE; UNIT/SOURCE/TIME RANGE MUST BE HONESTLY UNAVAILABLE;
+S9B-R WAITS`；Technical `APPROVED FOR S9B-D WITH EXACT ECHARTS@6.1.0, DIRECT STATIC TREE-SHAKEN CORE,
+CANVAS RENDERER, CLOSED ADAPTER, SEMANTIC THEME/CARD AND EXACT BUNDLE GATE`；Security/Data
+`APPROVED FOR S9B-D WITH EXACT LICENSE/LOCK, NO REPORT READ, NO ARBITRARY OPTION/HTML/EVENT/NETWORK,
+BOUNDED INSTANCES AND DISPOSE-ON-LIFECYCLE; S9B-R WAITS FOR IMMUTABLE D PASS`。S9B-READINESS 只是 docs-only
+PASS，S9B-D/S9B-R 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 
 ### 10. 主题、窗口与可访问性
 
@@ -524,8 +594,9 @@ ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3
 - MiniMax 宣称支持多模态不等于当前固定 Runtime、Agent Host 和 Desktop 已经支持真实 provider Artifact 输出。
 - 当前跨仓库实现已包含默认关闭的 S4 foundation、S5 shell、Desktop S6 image boundary/renderer、Host S7F video
   fixture、Desktop S7 video boundary/renderer 与 S8 file boundary/renderer。真实 Tauri WebView
-  metadata/playback/seek smoke 只对 video 形成；image/file runtime visual 仍待后续 vertical evidence。S9 report
-  仅完成 1.4.0 readiness，尚无 command/projection/renderer；上述 local evidence 均不是
+  metadata/playback/seek smoke 只对 video 形成；image/file runtime visual 仍待后续 vertical evidence。S9A report
+  private commands/projection/canonical JSON save 已以 `232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` 独立 PASS；
+  S9B-D/S9B-R 仍只有 1.5.0 readiness，尚无 dependency/theme/adapter/renderer。上述 local evidence 均不是
   MiniMax/provider capability 证据。
 - 视频生成尤其没有当前 provider 能力、时长、格式、计费和失败语义证据。UI 禁止仅根据模型宣传材料提前显示
   可用能力。
@@ -535,8 +606,8 @@ ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3
 ## AI / Codex 必须遵守
 
 - 本文已 Accepted，G2A、Host S3、Desktop S4/S5 与 G3(S3/S4/S5 only) 已通过；S6A/S6B/S7F/S7A/
-  S7A-REPAIR/S7B/S8A/S8B 是 G3 外独立 PASS。下一编码切片只能在单独授权后进入 9.11 的 S9A；S9A immutable
-  PASS 且 ECharts dependency/theme blocker 解除前不得进入 S9B。不得扩展 G3 或声明 G4。
+  S7A-REPAIR/S7B/S8A/S8B/S9A 是 G3 外独立 PASS。下一编码切片只能在单独授权后进入
+  9.12-9.13 的 S9B-D；S9B-D immutable PASS 与单独授权前不得进入 S9B-R。不得扩展 G3 或声明 G4。
 - 不得把用户输入附件复用为生成 Artifact，也不得从 Markdown 链接、文件名或模型自然语言猜测结构化结果。
 - 必须从权威结构化事件消费 Artifact；未知 kind、status 或版本必须 fail closed 并显示兼容状态。
 - 必须先显示 `announced/progress`，不得为了实现简单而等待 ready 后才插入卡片。
@@ -557,6 +628,10 @@ ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3
 - `src-tauri/`：S6A 按 9.1-9.3 实现 image-only boundary，S7A/S7A-REPAIR 按 9.5-9.6 实现并修正隔离的 video
   boundary；S8A 按 9.8 实现隔离的 file boundary；S9A 只能按 9.11 修复 report consumer conformance 并新增隔离的
   report boundary，不得改变 S6-S8 行为；
+- `src/design/theme/`、`src/domain/`、`src/components/yijie/`：S9B-D 只能按 9.12-9.13 实现 exact dependency、
+  semantic chart theme、closed adapter 与 one-instance chart card，不得读取报告或接入 Chat shell；
+- `src/components/chat/`：S9B-R 只能在 S9B-D immutable PASS 后消费 S9A typed client 与 S9B-D closed card，
+  不得修改 native、dependency/theme/adapter、page 或 store；
 - Agent Host 与 Contracts：由对应仓库定义并评审权威事件、历史恢复、读取、过期、错误和兼容语义。
 
 实现必须先固定不可变 Contracts 引用和 provider-first conformance，再由 Desktop 消费；不得在 Vue 中手写一份与
@@ -573,7 +648,9 @@ ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3
 - [x] S6A/S6B 已分别实现 image native boundary 与 component renderer，保持 G3 不变。
 - [x] S7F/S7A/S7A-REPAIR/S7B 已分别独立 PASS；累计 64 次 request 撤销已由 lifecycle-based boundary 取代。
 - [x] S8A/S8B 已分别实现 bounded file native boundary 与 reusable ready-file renderer；Markdown 仍延期。
-- [x] S9-READINESS 已冻结 report contract facts、S9A projection/canonical save、S9B chart adapter、ECharts blocker 与回滚；尚未实现 S9 代码。
+- [x] S9A 已实现 contract-conformant bounded report projection 与 canonical JSON native save，并以 G3 外独立 PASS 留痕。
+- [x] S9B-READINESS 已冻结 exact ECharts dependency/integrity/license/imports/bundle、semantic theme/card、closed adapter、
+  data lifecycle、a11y/visual matrix 与 S9B-D/S9B-R 回滚；S9B-D/S9B-R 均 `NOT RUN`。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -615,6 +692,12 @@ ATOMIC SAVE`。Readiness 不是实现 PASS；S9A/S9B 均未开始，G3 保持 S3
 - 2026-08-21 / 1.4.0 S9-READINESS Accepted：确认 report history 仍 metadata-only、无 bounded projection；冻结
   S9A consumer-conformance repair、identity-only projection/canonical JSON save、exact caps/unknown omission/lifecycle，
   以及 S9B fixed ECharts mapping。active app 尚无 ECharts dependency/theme，故只批准 S9A，S9B blocked/waits。
+- 2026-08-21 / S9A：`232ea6ce132faa8ac99bdf6abcc5e02ddd704ffe` 独立 PASS；修复 Desktop
+  consumer conformance，新增 exact private projection/canonical JSON save，未实现 report renderer/chart 或改变 G3。
+- 2026-08-21 / 1.5.0 S9B-READINESS Accepted：选择 direct exact `echarts@6.1.0` + Canvas static tree-shaken
+  core，拒绝 `vue-echarts`；冻结 exact integrity/license/transitives/imports/bundle、accessible semantic theme/card、
+  closed adapter/table fallback、单位/来源/时间范围 honest-unavailable、local-only lifecycle 与 S9B-D/S9B-R。
+  只批准 S9B-D；本记录不是 implementation PASS，S9B-R 等待 D immutable PASS 与单独授权。
 - S6 readiness Owner capture：Product/Design `READY FOR S6A; S6B WAITS FOR S6A PASS`；Technical
   `APPROVED FOR S6A CODING WITH EXACT THREE COMMANDS + ONE IMAGE SCHEME`；Security/Data
   `APPROVED FOR S6A CODING WITH NO NEW DEPENDENCY/PLUGIN/CAPABILITY AND EXACT CSP DELTA`。依据是用户本轮
