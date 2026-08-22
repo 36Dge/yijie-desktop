@@ -15,6 +15,37 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it("loads Artifact history through only the closed v3 command and envelope", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 3,
+      requestId: REQUEST_ID,
+      data: { turns: [], nextCursor: null },
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    await client.loadHistoryV3(
+      CONTEXT_ID,
+      "019c1a00-0000-7000-8000-000000000004",
+      "abcdefghijklmnop",
+      20,
+    );
+
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_load_history_v3", {
+      request: {
+        schemaVersion: 3,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: {
+          sessionId: "019c1a00-0000-7000-8000-000000000004",
+          cursor: "abcdefghijklmnop",
+          limit: 20,
+        },
+      },
+    });
+    expect(nativeInvoke).not.toHaveBeenCalledWith("chat_load_history_v2", expect.anything());
+  });
+
   it("sends only the closed versioned request envelope", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
     const nativeInvoke = vi.fn(async (command: string) => {

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import axe from "axe-core";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
@@ -15,6 +16,12 @@ import {
   type ChatSession,
 } from "../../domain/chat-ipc";
 import { useChatStore } from "../../stores/chat.store";
+import { useArtifactStore } from "../../stores/artifact.store";
+import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
+import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
+import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
+import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import ChatPage from "./ChatPage.vue";
 
 type MockDragDropPayload =
@@ -141,7 +148,7 @@ async function mountPage(path: string, active = false) {
   await router.isReady();
   const wrapper = mount(ChatPage, { attachTo: document.body, global: { plugins: [pinia, router] } });
   await flushPromises();
-  return { wrapper, store, router };
+  return { wrapper, store, router, pinia };
 }
 
 afterEach(() => {
@@ -153,6 +160,63 @@ afterEach(() => {
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("renders an empty-text assistant turn with trusted Artifact identity and all typed clients", async () => {
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const artifacts = useArtifactStore(pinia);
+    const artifactHistory: ChatHistoryPage = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        ...HISTORY.turns[0],
+        messages: Object.freeze([
+          HISTORY.turns[0].messages[0],
+          Object.freeze({ ...HISTORY.turns[0].messages[1], content: "" }),
+        ]),
+        artifacts: Object.freeze([Object.freeze({
+          artifactId: "019c1a00-0000-7000-8000-000000000021",
+          kind: "file" as const,
+          provenance: "synthetic" as const,
+          status: "announced" as const,
+          ordinal: 0,
+          progressStage: null,
+          progressPercent: null,
+          displayName: "safe-metadata.txt",
+          mediaType: null,
+          sizeBytes: null,
+          localCommittedAt: null,
+          expiresAt: null,
+          hasPoster: false,
+          errorCode: null,
+          retryable: null,
+        })]),
+      })]),
+      nextCursor: null,
+    });
+    artifacts.replaceAuthority({
+      authorizationRevision: 7,
+      contextId: store.context!.contextId,
+      tenantId: "019c1a00-0000-7000-8000-000000000022",
+      sessionId: SESSION_ID,
+    });
+    artifacts.ingestHistoryV3(artifacts.captureAuthority(), artifactHistory);
+    store.history = artifactHistory;
+    await flushPromises();
+
+    const list = wrapper.getComponent(ChatArtifactList);
+    expect(list.props("contextId")).toBe(store.context!.contextId);
+    expect(list.props("nativeClient")).toBe(chatArtifactNativeClient);
+    expect(list.props("videoNativeClient")).toBe(chatArtifactVideoNativeClient);
+    expect(list.props("fileNativeClient")).toBe(chatArtifactFileNativeClient);
+    expect(list.props("reportNativeClient")).toBe(chatArtifactReportNativeClient);
+    expect(wrapper.text()).toContain("safe-metadata.txt");
+    expect(wrapper.find(".artifact-list").exists()).toBe(true);
+    expect(JSON.stringify(store.$state)).not.toMatch(/bytes|base64|digest|hostHref|absolutePath|token|requestId/);
+    const results = await axe.run(wrapper.element, {
+      rules: { "color-contrast": { enabled: false } },
+    });
+    expect(results.violations.filter((violation) =>
+      violation.impact === "serious" || violation.impact === "critical",
+    )).toEqual([]);
+  });
+
   it("creates exactly one session from the real composer and routes only after success", async () => {
     const { wrapper, store, router } = await mountPage("/chat");
     const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);

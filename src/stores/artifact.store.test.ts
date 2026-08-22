@@ -10,6 +10,10 @@ const TURN_A = "019c1a00-0000-7000-8000-000000000203";
 const TURN_B = "019c1a00-0000-7000-8000-000000000204";
 const ARTIFACT_A = "019c1a00-0000-7000-8000-000000000205";
 const ARTIFACT_B = "019c1a00-0000-7000-8000-000000000206";
+const TENANT_A = "019c1a00-0000-7000-8000-000000000207";
+const TENANT_B = "019c1a00-0000-7000-8000-000000000208";
+const CONTEXT_A = "019c1a00-0000-7000-8000-000000000209";
+const CONTEXT_B = "019c1a00-0000-7000-8000-00000000020a";
 let storeSequence = 0;
 
 function artifact(
@@ -58,25 +62,42 @@ function createStore() {
   return createArtifactStoreDefinition(`artifact-test-${storeSequence++}`)();
 }
 
+function authority(overrides: Partial<{
+  authorizationRevision: number;
+  contextId: string;
+  tenantId: string;
+  sessionId: string;
+}> = {}) {
+  return Object.freeze({
+    authorizationRevision: 7,
+    contextId: CONTEXT_A,
+    tenantId: TENANT_A,
+    sessionId: SESSION_A,
+    ...overrides,
+  });
+}
+
 describe("Artifact store", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
   it("uses one reducer for history and live projections while preserving order and identity", () => {
     const store = createStore();
+    store.replaceAuthority(authority());
+    const epoch = store.captureAuthority();
     const page = history(turn(TURN_A, [
       artifact(ARTIFACT_B, 1),
       artifact(ARTIFACT_A, 0),
     ]));
 
-    store.ingestHistoryV3(SESSION_A, page);
+    store.ingestHistoryV3(epoch, page);
     const first = store.artifactsForTurn(SESSION_A, TURN_A);
     expect(first.map((item) => item.artifactId)).toEqual([ARTIFACT_A, ARTIFACT_B]);
 
-    store.ingestHistoryV3(SESSION_A, page);
+    store.ingestHistoryV3(epoch, page);
     expect(store.artifactsForTurn(SESSION_A, TURN_A)).toBe(first);
     expect(store.artifactsForTurn(SESSION_A, TURN_A)[0]).toBe(first[0]);
 
-    store.applyProjection(SESSION_A, TURN_A, artifact(ARTIFACT_A, 0, {
+    store.applyProjection(epoch, TURN_A, artifact(ARTIFACT_A, 0, {
       status: "processing",
       progressStage: "processing",
       progressPercent: 48,
@@ -89,6 +110,8 @@ describe("Artifact store", () => {
 
   it("keeps ready Artifacts when another item fails or expires", () => {
     const store = createStore();
+    store.replaceAuthority(authority());
+    const epoch = store.captureAuthority();
     const ready = artifact(ARTIFACT_A, 0, {
       status: "ready",
       mediaType: "text/plain",
@@ -101,12 +124,12 @@ describe("Artifact store", () => {
       errorCode: "artifact_generation_failed",
       retryable: false,
     });
-    store.ingestHistoryV3(SESSION_A, history(turn(TURN_A, [ready, failed])));
+    store.ingestHistoryV3(epoch, history(turn(TURN_A, [ready, failed])));
 
     const items = store.artifactsForTurn(SESSION_A, TURN_A);
     expect(items.map((item) => item.status)).toEqual(["ready", "failed"]);
 
-    store.applyProjection(SESSION_A, TURN_A, artifact(ARTIFACT_A, 0, {
+    store.applyProjection(epoch, TURN_A, artifact(ARTIFACT_A, 0, {
       status: "expired",
       mediaType: "text/plain",
       sizeBytes: 32,
@@ -119,24 +142,26 @@ describe("Artifact store", () => {
 
   it("survives session switches, reloads, and repeated history without duplicates", () => {
     const store = createStore();
-    store.ingestHistoryV3(SESSION_A, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
-    store.ingestHistoryV3(SESSION_B, history(turn(TURN_B, [artifact(ARTIFACT_A, 0)])));
-
-    store.selectSession(SESSION_A);
+    store.replaceAuthority(authority());
+    const firstEpoch = store.captureAuthority();
+    store.ingestHistoryV3(firstEpoch, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
     expect(store.activeArtifacts).toHaveLength(1);
-    store.selectSession(SESSION_B);
+    store.replaceAuthority(authority({ sessionId: SESSION_B }));
+    const secondEpoch = store.captureAuthority();
+    store.ingestHistoryV3(secondEpoch, history(turn(TURN_B, [artifact(ARTIFACT_A, 0)])));
     expect(store.activeArtifacts).toHaveLength(1);
-    store.selectSession(SESSION_A);
-    store.ingestHistoryV3(SESSION_A, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
+    store.ingestHistoryV3(secondEpoch, history(turn(TURN_B, [artifact(ARTIFACT_A, 0)])));
     expect(store.activeArtifacts).toHaveLength(1);
   });
 
   it("rejects a conflicting replay atomically and stores only safe metadata", () => {
     const store = createStore();
-    store.ingestHistoryV3(SESSION_A, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
+    store.replaceAuthority(authority());
+    const epoch = store.captureAuthority();
+    store.ingestHistoryV3(epoch, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
     const before = store.artifactsForTurn(SESSION_A, TURN_A);
 
-    expect(() => store.ingestHistoryV3(SESSION_A, history(turn(TURN_A, [
+    expect(() => store.ingestHistoryV3(epoch, history(turn(TURN_A, [
       artifact(ARTIFACT_A, 0),
       artifact(ARTIFACT_B, 0),
     ])))).toThrowError(ArtifactProjectionError);
@@ -146,5 +171,30 @@ describe("Artifact store", () => {
     expect(keys).not.toEqual(expect.arrayContaining([
       "bytes", "base64", "digest", "href", "hostHref", "absolutePath", "token", "body",
     ]));
+  });
+
+  it("clears immediately for every authority field and rejects stale history", () => {
+    const store = createStore();
+    store.replaceAuthority(authority());
+    const stale = store.captureAuthority();
+    store.ingestHistoryV3(stale, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)])));
+
+    for (const next of [
+      authority({ authorizationRevision: 8 }),
+      authority({ contextId: CONTEXT_B }),
+      authority({ tenantId: TENANT_B }),
+      authority({ sessionId: SESSION_B }),
+    ]) {
+      store.replaceAuthority(next);
+      expect(store.activeArtifacts).toEqual([]);
+      expect(store.ingestHistoryV3(stale, history(turn(TURN_A, [artifact(ARTIFACT_A, 0)]))))
+        .toBe(false);
+      expect(store.activeArtifacts).toEqual([]);
+      store.replaceAuthority(authority());
+    }
+
+    store.clearAuthority();
+    expect(store.authority).toBeNull();
+    expect(store.activeArtifacts).toEqual([]);
   });
 });

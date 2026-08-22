@@ -2,6 +2,11 @@ import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { chatClient, type ChatClient } from "../api/chat-client";
+import {
+  chatArtifactLiveClient,
+  type ChatArtifactLiveClient,
+} from "../api/chat-artifact-live-client";
+import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
   BoundChatContext,
   ChatAllowedAction,
@@ -25,6 +30,12 @@ import {
   ChatClientError,
   chatSessionDraftTarget,
 } from "../domain/chat-ipc";
+import {
+  useArtifactStore,
+  type ArtifactAuthority,
+  type ArtifactAuthorityToken,
+} from "./artifact.store";
+import { usePermissionStore } from "./permission.store";
 
 const STORE_ID = "chat-conversation";
 const MAX_LIVE_ASSISTANT_BYTES = 1024 * 1024;
@@ -103,6 +114,24 @@ export type DeleteDisposition = Readonly<{
   path: "/chat" | `/chat/${string}`;
 }>;
 
+export interface ChatArtifactStoreBoundary {
+  replaceAuthority(authority: ArtifactAuthority): void;
+  clearAuthority(): void;
+  captureAuthority(): ArtifactAuthorityToken | null;
+  ingestHistoryV3(token: ArtifactAuthorityToken | null, history: ChatHistoryPage): boolean;
+}
+
+export interface ChatArtifactAuthoritySource {
+  readonly authorizationRevision: number;
+  readonly tenantId: string;
+}
+
+export interface ChatArtifactIntegration {
+  readonly liveClient: ChatArtifactLiveClient;
+  readonly store: ChatArtifactStoreBoundary;
+  readonly authority: () => ChatArtifactAuthoritySource | null;
+}
+
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
 }
@@ -127,8 +156,13 @@ function phaseForError(error: unknown): ChatViewPhase {
   }
 }
 
-export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID) {
+export function createChatStoreDefinition(
+  client: ChatClient,
+  storeId = STORE_ID,
+  artifactIntegrationFactory?: () => ChatArtifactIntegration,
+) {
   return defineStore(storeId, () => {
+    const artifactIntegration = artifactIntegrationFactory?.() ?? null;
     const phase = ref<ChatViewPhase>("idle");
     const context = shallowRef<BoundChatContext | null>(null);
     const projects = shallowRef<readonly ChatProject[]>(Object.freeze([]));
@@ -191,6 +225,9 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     let expectedSequence = 0n;
     let eventUnlisten: UnlistenFn | null = null;
     let eventListenerPromise: Promise<void> | null = null;
+    let sessionListenerEpoch = 0;
+    let artifactEventUnlisten: UnlistenFn | null = null;
+    let artifactEventListenerPromise: Promise<void> | null = null;
     let controlPlaneUnlisten: UnlistenFn | null = null;
     let controlPlaneListenerPromise: Promise<void> | null = null;
     let attachmentImportUnlisten: UnlistenFn | null = null;
@@ -199,13 +236,20 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let resyncPromise: Promise<void> | null = null;
+    let resyncTrailingRequested = false;
     let draftEpoch = 0;
     let activeAttachmentImport: ActiveAttachmentImport | null = null;
     let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
     let bufferingEvents = false;
     let bufferedEvents: ChatProjectionEvent[] = [];
+    let bufferingArtifactEvents = false;
+    let bufferedArtifactEvents: ChatArtifactLiveEvent[] = [];
+    let artifactExpectedSequence = 0n;
+    let artifactAuthorityToken: ArtifactAuthorityToken | null = null;
     const seenEventIds = new Set<string>();
     const seenEventOrder: string[] = [];
+    const seenArtifactEventIds = new Set<string>();
+    const seenArtifactEventOrder: string[] = [];
 
     function hasAction(action: ChatAllowedAction): boolean {
       return context.value?.allowedActions.includes(action) ?? false;
@@ -240,6 +284,22 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
     }
 
+    function rememberArtifactEvent(eventId: string): void {
+      seenArtifactEventIds.add(eventId);
+      seenArtifactEventOrder.push(eventId);
+      while (seenArtifactEventOrder.length > MAX_SEEN_EVENT_IDS) {
+        const oldest = seenArtifactEventOrder.shift();
+        if (oldest) seenArtifactEventIds.delete(oldest);
+      }
+    }
+
+    function resetArtifactStream(): void {
+      artifactExpectedSequence = 0n;
+      seenArtifactEventIds.clear();
+      seenArtifactEventOrder.length = 0;
+      bufferedArtifactEvents = [];
+    }
+
     function clearExpiryTimer(): void {
       if (contextExpiryTimer !== null) {
         clearTimeout(contextExpiryTimer);
@@ -266,7 +326,12 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       seenEventOrder.length = 0;
       bufferedEvents = [];
       bufferingEvents = false;
+      bufferingArtifactEvents = false;
+      resetArtifactStream();
+      artifactAuthorityToken = null;
+      artifactIntegration?.store.clearAuthority();
       resyncPromise = null;
+      resyncTrailingRequested = false;
     }
 
     function dropDraftReferences(): void {
@@ -412,10 +477,10 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     async function ensureEventListener(): Promise<void> {
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
-      const generation = listenerEpoch;
+      const generation = sessionListenerEpoch;
       const pending = client.onEvent(handleEvent, requestResync)
         .then((unlisten) => {
-          if (generation !== listenerEpoch) {
+          if (generation !== sessionListenerEpoch) {
             unlisten();
           } else if (eventUnlisten === null) {
             eventUnlisten = unlisten;
@@ -428,6 +493,46 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         });
       eventListenerPromise = pending;
       return pending;
+    }
+
+    async function ensureArtifactEventListener(): Promise<void> {
+      if (artifactIntegration === null || artifactEventUnlisten !== null) return;
+      if (artifactEventListenerPromise !== null) return artifactEventListenerPromise;
+      const generation = sessionListenerEpoch;
+      const pending = artifactIntegration.liveClient.listen(handleArtifactEvent, requestResync)
+        .then((unlisten) => {
+          if (generation !== sessionListenerEpoch) {
+            unlisten();
+          } else if (artifactEventUnlisten === null) {
+            artifactEventUnlisten = unlisten;
+          } else {
+            unlisten();
+          }
+        })
+        .finally(() => {
+          if (artifactEventListenerPromise === pending) artifactEventListenerPromise = null;
+        });
+      artifactEventListenerPromise = pending;
+      return pending;
+    }
+
+    function releaseSessionListeners(): void {
+      sessionListenerEpoch += 1;
+      eventUnlisten?.();
+      eventUnlisten = null;
+      artifactEventUnlisten?.();
+      artifactEventUnlisten = null;
+    }
+
+    async function ensureSessionEventListeners(): Promise<void> {
+      await Promise.all([ensureEventListener(), ensureArtifactEventListener()]);
+      if (eventUnlisten !== null && (artifactIntegration === null || artifactEventUnlisten !== null)) {
+        return;
+      }
+      await Promise.all([ensureEventListener(), ensureArtifactEventListener()]);
+      if (eventUnlisten === null || (artifactIntegration !== null && artifactEventUnlisten === null)) {
+        throw new Error("chat-session-listener-unavailable");
+      }
     }
 
     async function ensureControlPlaneListener(): Promise<void> {
@@ -683,6 +788,11 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       ) {
         return;
       }
+      if (event.kind === "context_invalidated") {
+        lastErrorCode.value = "chat_context_invalid";
+        clearAuthority("resync-required");
+        return;
+      }
       const sequence = BigInt(event.projectionSequence);
       if (sequence <= expectedSequence) {
         if (seenEventIds.has(event.eventId)) return;
@@ -732,19 +842,66 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         case "resync_required":
           requestResync();
           break;
-        case "context_invalidated":
-          clearAuthority("resync-required");
-          break;
       }
     }
 
     function handleEvent(event: ChatProjectionEvent): void {
       if (bufferingEvents) {
+        if (event.kind === "context_invalidated") {
+          applyEvent(event);
+          return;
+        }
         bufferedEvents.push(event);
-        if (bufferedEvents.length > 64) requestResync();
+        if (bufferedEvents.length > 64) resyncTrailingRequested = true;
         return;
       }
       applyEvent(event);
+    }
+
+    function artifactEventNeedsRefresh(event: ChatArtifactLiveEvent): boolean {
+      if (
+        context.value === null ||
+        event.contextId !== context.value.contextId ||
+        event.subscriptionId !== subscriptionId ||
+        event.sessionId !== selectedSessionId.value
+      ) {
+        return false;
+      }
+      if (event.kind === "context_invalidated") {
+        lastErrorCode.value = "chat_context_invalid";
+        clearAuthority("resync-required");
+        return false;
+      }
+      const sequence = BigInt(event.notificationSequence);
+      if (sequence <= artifactExpectedSequence) {
+        return !seenArtifactEventIds.has(event.eventId);
+      }
+      if (sequence !== artifactExpectedSequence + 1n) return true;
+      artifactExpectedSequence = sequence;
+      rememberArtifactEvent(event.eventId);
+      return true;
+    }
+
+    function handleArtifactEvent(event: ChatArtifactLiveEvent): void {
+      if (
+        context.value === null ||
+        event.contextId !== context.value.contextId ||
+        event.subscriptionId !== subscriptionId ||
+        event.sessionId !== selectedSessionId.value
+      ) {
+        return;
+      }
+      if (event.kind === "context_invalidated") {
+        lastErrorCode.value = "chat_context_invalid";
+        clearAuthority("resync-required");
+        return;
+      }
+      if (bufferingArtifactEvents) {
+        bufferedArtifactEvents.push(event);
+        if (bufferedArtifactEvents.length > 64) resyncTrailingRequested = true;
+        return;
+      }
+      if (artifactEventNeedsRefresh(event)) requestResync();
     }
 
     function requestResync(): void {
@@ -785,6 +942,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       try {
         await Promise.all([
           atBindStage("event_listener", ensureEventListener()),
+          atBindStage("event_listener", ensureArtifactEventListener()),
           atBindStage("event_listener", ensureControlPlaneListener()),
           atBindStage("event_listener", ensureAttachmentImportListener()),
         ]);
@@ -809,6 +967,7 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         phase.value = "ready";
       } catch (error: unknown) {
         if (bindEpoch !== authorityEpoch) return;
+        if (lastBindFailureStage.value === "event_listener") releaseSessionListeners();
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         if (lastBindFailureStage.value === "draft_attachments" && context.value !== null) {
           phase.value = phaseForError(error);
@@ -816,6 +975,41 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
         }
         clearAuthority(phaseForError(error));
       }
+    }
+
+    function establishArtifactAuthority(sessionId: string): ArtifactAuthorityToken | null {
+      if (artifactIntegration === null) return null;
+      const source = artifactIntegration.authority();
+      const bound = context.value;
+      if (
+        source === null ||
+        bound === null ||
+        !Number.isSafeInteger(source.authorizationRevision) ||
+        source.authorizationRevision < 0
+      ) {
+        throw new ChatClientError({
+          schemaVersion: 3,
+          code: "chat_context_invalid",
+          retryable: false,
+          recovery: "rebind_context",
+        });
+      }
+      artifactIntegration.store.replaceAuthority(Object.freeze({
+        authorizationRevision: source.authorizationRevision,
+        contextId: bound.contextId,
+        tenantId: source.tenantId,
+        sessionId,
+      }));
+      const token = artifactIntegration.store.captureAuthority();
+      if (token === null) {
+        throw new ChatClientError({
+          schemaVersion: 3,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      return token;
     }
 
     async function selectSession(sessionId: string): Promise<void> {
@@ -836,29 +1030,81 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
       const { epoch, controller } = startRead();
       bufferingEvents = true;
+      bufferingArtifactEvents = artifactIntegration !== null;
       try {
-        await targetSync;
+        await Promise.all([
+          targetSync,
+          ensureSessionEventListeners(),
+        ]);
         if (!isCurrent(epoch, controller, sessionId)) return;
+        artifactAuthorityToken = establishArtifactAuthority(sessionId);
         const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
         if (!isCurrent(epoch, controller, sessionId)) {
           void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
           return;
         }
         subscriptionId = nextSubscription;
+        resetArtifactStream();
+        bufferingArtifactEvents = artifactIntegration !== null;
         const projection = await client.resyncSessionV2(bound.contextId, sessionId, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
-        applyResync(projection);
+        let authoritativeHistory = projection.history;
+        let trailingArtifactRefresh = false;
+        if (artifactIntegration !== null) {
+          const firstHistory = await client.loadHistoryV3(
+            bound.contextId,
+            sessionId,
+            undefined,
+            20,
+            controller.signal,
+          );
+          if (
+            !isCurrent(epoch, controller, sessionId) ||
+            subscriptionId !== nextSubscription ||
+            !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, firstHistory)
+          ) return;
+          const initiallyBuffered = bufferedArtifactEvents;
+          bufferedArtifactEvents = [];
+          for (const event of initiallyBuffered) artifactEventNeedsRefresh(event);
+          const secondHistory = await client.loadHistoryV3(
+            bound.contextId,
+            sessionId,
+            undefined,
+            20,
+            controller.signal,
+          );
+          if (
+            !isCurrent(epoch, controller, sessionId) ||
+            subscriptionId !== nextSubscription ||
+            !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, secondHistory)
+          ) return;
+          authoritativeHistory = secondHistory;
+          const lateNotifications = bufferedArtifactEvents;
+          bufferedArtifactEvents = [];
+          for (const event of lateNotifications) {
+            if (artifactEventNeedsRefresh(event)) trailingArtifactRefresh = true;
+          }
+        }
+        applyResync(projection, authoritativeHistory);
         await refreshControlPlane();
         bufferingEvents = false;
+        bufferingArtifactEvents = false;
         const pending = bufferedEvents;
         bufferedEvents = [];
-        for (const event of pending) applyEvent(event);
         activeRead = null;
         if (phase.value === "resyncing") phase.value = "ready";
+        for (const event of pending) applyEvent(event);
+        if (trailingArtifactRefresh || resyncTrailingRequested) {
+          resyncTrailingRequested = false;
+          requestResync();
+        }
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
+        releaseSessionListeners();
         bufferingEvents = false;
+        bufferingArtifactEvents = false;
         bufferedEvents = [];
+        bufferedArtifactEvents = [];
         activeRead = null;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         phase.value = phaseForError(error);
@@ -927,11 +1173,14 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       }
     }
 
-    function applyResync(projection: ChatResyncProjection): void {
+    function applyResync(
+      projection: ChatResyncProjection,
+      authoritativeHistory: ChatHistoryPage = projection.history,
+    ): void {
       if (projection.session.sessionId !== selectedSessionId.value) {
         throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync" });
       }
-      history.value = projection.history;
+      history.value = authoritativeHistory;
       cleanupStatus.value = projection.cleanup;
       const projectedSessionIndex = sessions.value.findIndex((session) =>
         session.sessionId === projection.session.sessionId,
@@ -947,18 +1196,24 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
     }
 
     async function resyncSelected(): Promise<void> {
-      if (resyncPromise !== null) return resyncPromise;
+      if (resyncPromise !== null) {
+        resyncTrailingRequested = true;
+        return resyncPromise;
+      }
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !subscriptionId) return;
       const { epoch, controller } = startRead();
       phase.value = "resyncing";
       bufferingEvents = true;
+      bufferingArtifactEvents = artifactIntegration !== null;
       const previousSubscription = subscriptionId;
-      const promise = client.unsubscribeSession(bound.contextId, previousSubscription)
-        .catch(() => false)
-        .then(() => client.subscribeSession(bound.contextId, sessionId))
-        .then((nextSubscription) => {
+      const run = async (): Promise<void> => {
+        try {
+          await ensureSessionEventListeners();
+          artifactAuthorityToken = establishArtifactAuthority(sessionId);
+          await client.unsubscribeSession(bound.contextId, previousSubscription).catch(() => false);
+          const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
           if (!isCurrent(epoch, controller, sessionId)) {
             void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
             throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
@@ -967,31 +1222,71 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
           expectedSequence = 0n;
           seenEventIds.clear();
           seenEventOrder.length = 0;
-          return client.resyncSessionV2(bound.contextId, sessionId, 20, controller.signal)
-            .then((projection) => ({ projection, nextSubscription }));
-        })
-        .then(({ projection, nextSubscription }) => {
+          resetArtifactStream();
+          bufferingArtifactEvents = artifactIntegration !== null;
+          const projection = await client.resyncSessionV2(
+            bound.contextId,
+            sessionId,
+            20,
+            controller.signal,
+          );
           if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
-          applyResync(projection);
+          let authoritativeHistory = projection.history;
+          if (artifactIntegration !== null) {
+            const page = await client.loadHistoryV3(
+              bound.contextId,
+              sessionId,
+              undefined,
+              20,
+              controller.signal,
+            );
+            if (
+              !isCurrent(epoch, controller, sessionId) ||
+              subscriptionId !== nextSubscription ||
+              !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, page)
+            ) return;
+            authoritativeHistory = page;
+          }
+          applyResync(projection, authoritativeHistory);
           void refreshControlPlane();
+          const pendingArtifactEvents = bufferedArtifactEvents;
+          bufferedArtifactEvents = [];
+          let needsTrailingArtifactRefresh = false;
+          for (const event of pendingArtifactEvents) {
+            if (artifactEventNeedsRefresh(event)) needsTrailingArtifactRefresh = true;
+          }
           const pending = bufferedEvents;
           bufferedEvents = [];
           bufferingEvents = false;
-          for (const event of pending) applyEvent(event);
+          bufferingArtifactEvents = false;
           activeRead = null;
           if (phase.value === "resyncing") phase.value = "ready";
-        })
-        .catch((error: unknown) => {
+          for (const event of pending) applyEvent(event);
+          if (needsTrailingArtifactRefresh) resyncTrailingRequested = true;
+        } catch (error: unknown) {
           if (!isCurrent(epoch, controller, sessionId)) return;
           activeRead = null;
           bufferingEvents = false;
+          bufferingArtifactEvents = false;
           bufferedEvents = [];
+          bufferedArtifactEvents = [];
           lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
           phase.value = phaseForError(error);
-        })
-        .finally(() => {
-          if (resyncPromise === promise) resyncPromise = null;
-        });
+        }
+      };
+      const promise = run().finally(() => {
+        if (resyncPromise !== promise) return;
+        resyncPromise = null;
+        if (
+          resyncTrailingRequested &&
+          context.value?.contextId === bound.contextId &&
+          selectedSessionId.value === sessionId &&
+          subscriptionId !== null
+        ) {
+          resyncTrailingRequested = false;
+          void resyncSelected();
+        }
+      });
       resyncPromise = promise;
       return promise;
     }
@@ -1003,8 +1298,12 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       if (!bound || !sessionId || !cursor) return;
       const { epoch, controller } = startRead();
       try {
-        const page = await client.loadHistoryV2(bound.contextId, sessionId, cursor, 20, controller.signal);
+        const token = artifactAuthorityToken;
+        const page = artifactIntegration === null
+          ? await client.loadHistoryV2(bound.contextId, sessionId, cursor, 20, controller.signal)
+          : await client.loadHistoryV3(bound.contextId, sessionId, cursor, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId)) return;
+        if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
         const known = new Set(history.value?.turns.map((turn) => turn.turnId));
         history.value = Object.freeze({
           turns: Object.freeze([...(history.value?.turns ?? []), ...page.turns.filter((turn) => !known.has(turn.turnId))]),
@@ -1027,9 +1326,12 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !Number.isSafeInteger(limit) || limit <= 0 || limit > 50) return null;
       try {
-        const page = await client.loadHistoryV2(bound.contextId, sessionId, undefined, limit);
+        const loadPage = artifactIntegration === null
+          ? client.loadHistoryV2.bind(client)
+          : client.loadHistoryV3.bind(client);
+        const page = await loadPage(bound.contextId, sessionId, undefined, limit);
         if (!page.nextCursor) return { page, cursorMonotonic: true, pagesDisjoint: true };
-        const next = await client.loadHistoryV2(bound.contextId, sessionId, page.nextCursor, limit);
+        const next = await loadPage(bound.contextId, sessionId, page.nextCursor, limit);
         const firstIds = new Set(page.turns.map((turn) => turn.turnId));
         const pagesDisjoint = next.turns.every((turn) => !firstIds.has(turn.turnId));
         return {
@@ -1487,11 +1789,15 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       clearAuthority("signed-out");
     }
 
+    async function deactivatePageSession(): Promise<void> {
+      await clearSelectedSession();
+      releaseSessionListeners();
+    }
+
     async function dispose(): Promise<void> {
       clearAuthority("idle");
       listenerEpoch += 1;
-      eventUnlisten?.();
-      eventUnlisten = null;
+      releaseSessionListeners();
       controlPlaneUnlisten?.();
       controlPlaneUnlisten = null;
       attachmentImportUnlisten?.();
@@ -1556,9 +1862,27 @@ export function createChatStoreDefinition(client: ChatClient, storeId = STORE_ID
       setProjectPinned,
       removeProject,
       clearForLogout,
+      deactivatePageSession,
       dispose,
     };
   });
 }
 
-export const useChatStore = createChatStoreDefinition(chatClient);
+export const useChatStore = createChatStoreDefinition(chatClient, STORE_ID, () => {
+  const permissionStore = usePermissionStore();
+  return {
+    liveClient: chatArtifactLiveClient,
+    store: useArtifactStore(),
+    authority: () => {
+      if (
+        !permissionStore.isReady ||
+        permissionStore.selectedTenantId === null ||
+        permissionStore.authorizationRevision === null
+      ) return null;
+      return Object.freeze({
+        authorizationRevision: permissionStore.authorizationRevision,
+        tenantId: permissionStore.selectedTenantId,
+      });
+    },
+  };
+});

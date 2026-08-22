@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
 import { useRoute, useRouter } from "vue-router";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
@@ -24,10 +25,16 @@ import {
   turnStatusLabel,
 } from "../../domain/chat-ui";
 import { useChatStore } from "../../stores/chat.store";
+import { useArtifactStore } from "../../stores/artifact.store";
+import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
+import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
+import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+const artifactStore = useArtifactStore();
 const prompt = ref("");
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
@@ -348,6 +355,7 @@ onBeforeUnmount(() => {
   dragDropDisposed = true;
   dragDropUnlisten?.();
   dragDropUnlisten = null;
+  void chatStore.deactivatePageSession();
 });
 </script>
 
@@ -420,6 +428,7 @@ onBeforeUnmount(() => {
         class="chat-workspace__conversation"
         tabindex="-1"
         aria-label="任务对话记录"
+        :aria-busy="isHistoryLoading || chatStore.phase === 'resyncing'"
         @scroll="updateScrollPosition"
       >
         <div class="chat-workspace__column">
@@ -504,6 +513,16 @@ onBeforeUnmount(() => {
               <div class="chat-message__body">{{ message.content }}</div>
               <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
             </div>
+
+            <ChatArtifactList
+              v-if="chatStore.context && chatStore.selectedSessionId === artifactStore.authority?.sessionId"
+              :artifacts="artifactStore.artifactsForTurn(chatStore.selectedSessionId, turn.turnId)"
+              :context-id="chatStore.context.contextId"
+              :native-client="chatArtifactNativeClient"
+              :video-native-client="chatArtifactVideoNativeClient"
+              :file-native-client="chatArtifactFileNativeClient"
+              :report-native-client="chatArtifactReportNativeClient"
+            />
 
             <p v-if="turn.status === 'interrupted'" class="chat-turn__terminal">本轮生成已停止</p>
             <p v-else-if="turn.status === 'failed'" class="chat-turn__terminal chat-turn__terminal--error">本轮生成失败，请重新提交</p>

@@ -6,6 +6,7 @@ import {
   CHAT_CONTROL_PLANE_EVENT_CHANNEL,
   CHAT_IPC_SCHEMA_VERSION,
   CHAT_IPC_V2_SCHEMA_VERSION,
+  CHAT_IPC_V3_SCHEMA_VERSION,
   ChatClientError,
   ChatContractError,
   parseBoundContextResponse,
@@ -20,6 +21,7 @@ import {
   parseCreatedTurnResponseV2,
   parseHistoryPageResponse,
   parseHistoryPageResponseV2,
+  parseHistoryPageResponseV3,
   parseLocalReadinessResponse,
   parseOperationResponse,
   parseOperationResponseV2,
@@ -90,6 +92,7 @@ export interface ChatClient {
   listSessions(contextId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatSessionPage>;
   loadHistory(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadHistoryV2(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
+  loadHistoryV3(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadReasoning(contextId: string, turnId: string, signal?: AbortSignal): Promise<readonly ChatReasoningItem[]>;
   renameSession(contextId: string, sessionId: string, title: string, operationId: string): Promise<string>;
   setSessionPinned(contextId: string, sessionId: string, pinned: boolean, operationId: string): Promise<string>;
@@ -150,6 +153,21 @@ function operationEnvelopeV2(contextId: string, payload: Record<string, unknown>
     id,
     request: {
       schemaVersion: CHAT_IPC_V2_SCHEMA_VERSION,
+      requestId: id,
+      contextId,
+      payload: compactPayload,
+    },
+  };
+}
+
+function operationEnvelopeV3(contextId: string, payload: Record<string, unknown>, id = requestId()) {
+  const compactPayload = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
+  return {
+    id,
+    request: {
+      schemaVersion: CHAT_IPC_V3_SCHEMA_VERSION,
       requestId: id,
       contextId,
       payload: compactPayload,
@@ -241,6 +259,36 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     }
   }
 
+  async function runReadV3<T>(
+    command: string,
+    contextId: string,
+    payload: Record<string, unknown>,
+    parse: (value: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const envelope = operationEnvelopeV3(contextId, payload);
+    if (signal?.aborted) {
+      throw new ChatClientError({ schemaVersion: 3, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+    }
+    let abortHandler: (() => void) | undefined;
+    if (signal) {
+      abortHandler = () => {
+        const cancellation = operationEnvelope(contextId, { targetRequestId: envelope.id });
+        void transport.invoke("chat_cancel_request_v1", { request: cancellation.request });
+      };
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+    try {
+      const value = await run(command, envelope.request, parse);
+      if (signal?.aborted) {
+        throw new ChatClientError({ schemaVersion: 3, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+      }
+      return value;
+    } finally {
+      if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+    }
+  }
+
   return {
     bindContext(tenantSelector) {
       const id = requestId();
@@ -309,6 +357,8 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       runRead("chat_load_history_v1", contextId, { sessionId, cursor, limit }, parseHistoryPageResponse, signal),
     loadHistoryV2: (contextId, sessionId, cursor, limit, signal) =>
       runReadV2("chat_load_history_v2", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV2, signal),
+    loadHistoryV3: (contextId, sessionId, cursor, limit, signal) =>
+      runReadV3("chat_load_history_v3", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV3, signal),
     loadReasoning: (contextId, turnId, signal) =>
       runRead("chat_load_reasoning_v1", contextId, { turnId }, parseReasoningResponse, signal),
     renameSession(contextId, sessionId, title, operationId) {

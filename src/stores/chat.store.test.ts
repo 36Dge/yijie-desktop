@@ -2,10 +2,12 @@ import { createPinia, setActivePinia } from "pinia";
 import { watch } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatClient } from "../api/chat-client";
+import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
   ChatAttachment,
   ChatAttachmentImportEvent,
   ChatControlPlaneEvent,
+  ChatHistoryPage,
   ChatProjectionEvent,
   ChatResyncProjection,
   ChatSession,
@@ -20,6 +22,7 @@ import {
   CHAT_DRAFT_ATTACHMENT_LIMIT,
   createChatStoreDefinition,
 } from "./chat.store";
+import { createArtifactStoreDefinition } from "./artifact.store";
 
 const NOW = Date.parse("2026-08-03T12:00:00Z");
 const TENANT = "019c1a00-0000-7000-8000-000000000002";
@@ -29,6 +32,7 @@ const SESSION_A = "019c1a00-0000-7000-8000-000000000005";
 const SESSION_B = "019c1a00-0000-7000-8000-000000000006";
 const TURN_A = "019c1a00-0000-7000-8000-000000000007";
 const SESSION_CREATED = "019c1a00-0000-7000-8000-000000000008";
+const ARTIFACT_A = "019c1a00-0000-7000-8000-000000000019";
 
 let storeSequence = 0;
 
@@ -83,6 +87,38 @@ function projection(sessionId: string, title?: string): ChatResyncProjection {
     session: session(sessionId, title),
     history: Object.freeze({ turns: Object.freeze([]), nextCursor: null }),
     cleanup: null,
+  });
+}
+
+function artifactHistory(nextCursor: string | null = null): ChatHistoryPage {
+  return Object.freeze({
+    turns: Object.freeze([Object.freeze({
+      turnId: TURN_A,
+      status: "completed" as const,
+      terminalAt: 1,
+      reasoningStatus: "complete" as const,
+      reasoningReasonCode: null,
+      messages: Object.freeze([]),
+      reasoning: Object.freeze([]),
+      artifacts: Object.freeze([Object.freeze({
+        artifactId: ARTIFACT_A,
+        kind: "file" as const,
+        provenance: "synthetic" as const,
+        status: "ready" as const,
+        ordinal: 0,
+        progressStage: null,
+        progressPercent: null,
+        displayName: "safe.txt",
+        mediaType: "text/plain",
+        sizeBytes: 4,
+        localCommittedAt: 1,
+        expiresAt: 605_801,
+        hasPoster: false,
+        errorCode: null,
+        retryable: null,
+      })]),
+    })]),
+    nextCursor,
   });
 }
 
@@ -160,6 +196,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     listSessions: async () => ({ sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }),
     loadHistory: async () => ({ turns: [], nextCursor: null }),
     loadHistoryV2: (...arguments_) => client.loadHistory(...arguments_),
+    loadHistoryV3: (...arguments_) => client.loadHistory(...arguments_),
     loadReasoning: async () => [],
     renameSession: async (_context, _session, _title, operation) => operation,
     setSessionPinned: async (_context, _session, _pinned, operation) => operation,
@@ -267,6 +304,200 @@ describe("chat view-model store", () => {
     for (const forbidden of ["owneruserid", "bearer", "sqlcipher", "/private/", "runtimeid", "hostid"]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("subscribes both channels before v3 history, coalesces initial invalidation, and isolates the v3 cursor", async () => {
+    const order: string[] = [];
+    let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
+    const ordinaryUnlisten = vi.fn();
+    const artifactUnlisten = vi.fn();
+    const historyCursor = "abcdefghijklmnop";
+    let historyCalls = 0;
+    const loadHistoryV2 = vi.fn<ChatClient["loadHistoryV2"]>(async () => {
+      throw new Error("v2 history must stay isolated");
+    });
+    const loadHistoryV3 = vi.fn<ChatClient["loadHistoryV3"]>(async () => {
+      historyCalls += 1;
+      order.push("history-v3");
+      if (historyCalls === 1) {
+        artifactHandler({
+          schemaVersion: 1,
+          subscriptionId: "019c1a00-0000-7000-8000-00000000000a",
+          contextId: CONTEXT,
+          sessionId: SESSION_A,
+          turnId: TURN_A,
+          eventId: "019c1a00-0000-7000-8000-000000000031",
+          notificationSequence: "1",
+          kind: "artifact_changed",
+          payload: {},
+        });
+      }
+      return artifactHistory(historyCursor);
+    });
+    const { client } = fakeClient({
+      onEvent: async () => {
+        order.push("ordinary-listen");
+        return ordinaryUnlisten;
+      },
+      subscribeSession: async () => {
+        order.push("session-subscribe");
+        return "019c1a00-0000-7000-8000-00000000000a";
+      },
+      resyncSessionV2: async (_context, sessionId) => {
+        order.push("control-resync");
+        return projection(sessionId);
+      },
+      loadHistoryV2,
+      loadHistoryV3,
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-s10c-${storeSequence++}`)();
+    const store = createChatStoreDefinition(client, `chat-s10c-${storeSequence++}`, () => ({
+      liveClient: {
+        listen: async (handler) => {
+          order.push("artifact-listen");
+          artifactHandler = handler;
+          return artifactUnlisten;
+        },
+      },
+      store: artifacts,
+      authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+    }))();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(order.indexOf("ordinary-listen")).toBeLessThan(order.indexOf("session-subscribe"));
+    expect(order.indexOf("artifact-listen")).toBeLessThan(order.indexOf("session-subscribe"));
+    expect(order.indexOf("control-resync")).toBeLessThan(order.indexOf("history-v3"));
+    expect(loadHistoryV3).toHaveBeenCalledTimes(2);
+    expect(loadHistoryV2).not.toHaveBeenCalled();
+    expect(artifacts.artifactsForTurn(SESSION_A, TURN_A)).toHaveLength(1);
+    expect(store.history?.turns[0]?.turnId).toBe(TURN_A);
+
+    await store.loadOlderHistory();
+    expect(loadHistoryV3).toHaveBeenLastCalledWith(
+      CONTEXT,
+      SESSION_A,
+      historyCursor,
+      20,
+      expect.any(AbortSignal),
+    );
+    expect(loadHistoryV2).not.toHaveBeenCalled();
+
+    await store.deactivatePageSession();
+    expect(ordinaryUnlisten).toHaveBeenCalledOnce();
+    expect(artifactUnlisten).toHaveBeenCalledOnce();
+    expect(artifacts.authority).toBeNull();
+  });
+
+  it("bounds Artifact refresh to one in-flight plus one trailing and resets sequence per subscription", async () => {
+    let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
+    const delayedRefresh = new Deferred<ReturnType<typeof artifactHistory>>();
+    const subscriptionIds = [
+      "019c1a00-0000-7000-8000-00000000000a",
+      "019c1a00-0000-7000-8000-00000000000b",
+      "019c1a00-0000-7000-8000-00000000000c",
+    ];
+    let subscribeCalls = 0;
+    let historyCalls = 0;
+    const loadHistoryV3 = vi.fn<ChatClient["loadHistoryV3"]>(async () => {
+      historyCalls += 1;
+      if (historyCalls === 3) return delayedRefresh.promise;
+      return artifactHistory();
+    });
+    const resyncSessionV2 = vi.fn<ChatClient["resyncSessionV2"]>(
+      async (_context, sessionId) => projection(sessionId),
+    );
+    const { client } = fakeClient({
+      subscribeSession: async () => subscriptionIds[subscribeCalls++] ?? subscriptionIds[2],
+      resyncSessionV2,
+      loadHistoryV3,
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-s10c-${storeSequence++}`)();
+    const store = createChatStoreDefinition(client, `chat-s10c-${storeSequence++}`, () => ({
+      liveClient: {
+        listen: async (handler) => {
+          artifactHandler = handler;
+          return () => undefined;
+        },
+      },
+      store: artifacts,
+      authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+    }))();
+    const changed = (
+      subscriptionId: string,
+      sequence: string,
+      eventId: string,
+    ): ChatArtifactLiveEvent => ({
+      schemaVersion: 1,
+      subscriptionId,
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      eventId,
+      notificationSequence: sequence,
+      kind: "artifact_changed",
+      payload: {},
+    });
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(resyncSessionV2).toHaveBeenCalledTimes(1);
+
+    const first = changed(subscriptionIds[0], "1", "019c1a00-0000-7000-8000-000000000041");
+    artifactHandler(first);
+    artifactHandler(first);
+    for (let index = 0; index < 12 && historyCalls < 3; index += 1) await Promise.resolve();
+    expect(historyCalls).toBe(3);
+
+    artifactHandler(changed(subscriptionIds[1], "1", "019c1a00-0000-7000-8000-000000000042"));
+    artifactHandler({
+      ...changed(subscriptionIds[1], "4", "019c1a00-0000-7000-8000-000000000043"),
+      kind: "resync_required",
+      payload: { reason: "sequence_gap" },
+    });
+    delayedRefresh.resolve(artifactHistory());
+    for (let index = 0; index < 30; index += 1) await Promise.resolve();
+
+    expect(resyncSessionV2).toHaveBeenCalledTimes(3);
+    expect(loadHistoryV3).toHaveBeenCalledTimes(4);
+
+    artifactHandler(changed(subscriptionIds[1], "5", "019c1a00-0000-7000-8000-000000000045"));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(resyncSessionV2).toHaveBeenCalledTimes(3);
+
+    artifactHandler({
+      schemaVersion: 1,
+      subscriptionId: subscriptionIds[2],
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      eventId: "019c1a00-0000-7000-8000-000000000044",
+      notificationSequence: "1",
+      kind: "context_invalidated",
+      payload: { reason: "authority_changed" },
+    });
+    expect(store.context).toBeNull();
+    expect(store.selectedSessionId).toBeNull();
+    expect(artifacts.authority).toBeNull();
+  });
+
+  it("cleans an established ordinary listener when the Artifact listener fails", async () => {
+    const ordinaryUnlisten = vi.fn();
+    const store = createChatStoreDefinition(
+      fakeClient({ onEvent: async () => ordinaryUnlisten }).client,
+      `chat-s10c-${storeSequence++}`,
+      () => ({
+        liveClient: { listen: async () => { throw new Error("closed listener failure"); } },
+        store: createArtifactStoreDefinition(`artifact-s10c-${storeSequence++}`)(),
+        authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+      }),
+    )();
+
+    await store.bind(TENANT);
+
+    expect(store.phase).toBe("unavailable");
+    expect(ordinaryUnlisten).toHaveBeenCalledOnce();
   });
 
   it("does not change phase when the new-task draft is already selected", async () => {
