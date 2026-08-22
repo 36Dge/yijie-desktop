@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.6.0
+- 版本：1.7.0
 - 最后更新：2026-08-22
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
@@ -23,8 +23,9 @@ S7F、S7A、S7A-REPAIR 与 S7B 随后分别完成 strict-local playable fixture�
 仍是 G3 外独立 PASS。S9B-D `0a36ca7c54460d22ea6b3228832a57f05f0bde68`、checker repair
 `aec0f8a05ba7534132cbb4f46be64e333d7e9024` 与 S9B-R
 `6bcc2a6bfb4db76398ecf5483c688475477f08ed` 随后也分别完成并保持 G3 外独立 PASS；production Chat/Tauri
-纵向仍未执行。本文 1.6.0 完成 S9-SPEC-RECONCILIATION 与 S10-READINESS，只批准
-S10A-LOCAL-PROFILE 编码，其余 S10 切片等待前序 immutable PASS 与单独授权。模型调用、真实 provider、
+纵向仍未执行。S10A-LOCAL-PROFILE、S10B-NATIVE-LIVE 与 S10C-PAGE 已在后续独立授权下分别完成并保持
+G3 外 separate PASS。本文 1.7.0 完成 S10-SPEC-RECONCILIATION 与 S10D-READINESS，只批准默认关闭的
+S10D-H harness/walking-skeleton 编码；S10D-V 与 S10E 继续等待前序 immutable PASS 与单独授权。模型调用、真实 provider、
 云资源、发布或生产配置仍不在授权范围；G3 仍只覆盖 S3/S4/S5，G4 pending。
 
 ## 目标
@@ -581,12 +582,15 @@ BOUNDED INSTANCES AND DISPOSE-ON-LIFECYCLE; S9B-R WAITS FOR IMMUTABLE D PASS`。
 PASS；其历史 Owner capture 保留。S9B-D、checker repair 与 S9B-R 现已分别 PASS，production page/Tauri
 vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 
-### 9.14 S10-READINESS：当前缺口与 single-V3 决策
+### 9.14 S10 当前事实与 single-V3 决策
 
-- 当前生产 `HostBridge` 只打开 v2 SSE；`ConversationApplication`/`TurnEventReducer` 只消费 schema v2，虽然
-  `ArtifactTransferService` 与 v3 decoder 已存在，但没有生产调用点。`ChatClient`/`ChatStore` 仍加载 history v2，
-  `ArtifactStore` 未接 production authority，`ChatPage` 未挂载 `ChatArtifactList`。S7B runtime 是 seeded shell，
-  S9 visual 是 Vite fake projection，二者都不是 production vertical。
+- 历史 S10-READINESS 捕获时 production 只开 v2、Page/Store 尚未接入；该事实不得回写成从未发生。当前 S10A 已
+  提供 exact keyless strict-local Host/fake profile，S10B 已实现 single-v3 coordinator、SQLCipher/cursor 原子提交、ACK
+  recovery 与 private invalidation，S10C 已实现 history v3、`ArtifactStore` authority/bounded resync 及 production
+  `ChatPage`/`ChatArtifactList`/四类 typed-client wiring。三者均为 G3 外 separate PASS。
+- 当前仍没有 fresh exact Host/fake/Desktop binaries + 真实 Tauri WebView + production ChatPage 的端到端证据。S7B
+  runtime 会替换 production bootstrap 并只挂 seeded video shell；S9 visual 使用 Vite fake projection；S10A runner
+  只驱动 sidecar/Host integration test，不启动 production Page。三者均不得冒充 S10D vertical。
 - Host v3 hub 是普通 turn/reasoning 事件与四类 Artifact 事件的同一有序超集。Artifact producer flag 开启时，
   Desktop active turn 必须只消费 `/v3/agent-sessions/{id}/events?event_schema_version=3`；禁止并跑不具原子同步
   证明的 v2/v3 双流，也禁止把 v2 pagination cursor 交给 `chat_load_history_v3`。
@@ -630,7 +634,7 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 
 ### 9.16 Desktop-private invalidation、history 与 authority
 
-- S10B-NATIVE-LIVE 新增独立 private channel `yijie:chat:artifact:changed:v1` 与 closed schema
+- S10B-NATIVE-LIVE 已新增独立 private channel `yijie:chat:artifact:changed:v1` 与 closed schema
   `chat-artifact-live-v1.schema.json`。事件 exact root 为 `schemaVersion=1`、`subscriptionId/contextId/sessionId/turnId/eventId`
   canonical UUID、`notificationSequence` canonical decimal string、kind `artifact_changed|resync_required|context_invalidated`；
   payload 分别只能是 `{}`、`{reason:'backpressure'|'sequence_gap'|'protocol_error'}`、
@@ -639,7 +643,7 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
   subscription 发出；每 subscription 序列从 1 单调递增，queue cap 64。gap/invalid/overflow 必须丢弃 pending changed、
   合并为一个 `resync_required`；事件不做跨进程 replay，restart 后以 history v3 为唯一恢复 authority。emit 失败不回滚
   durable state，下一次 subscribe/resync 恢复。
-- S10C-PAGE 必须 subscribe 两个 private channels first 并 buffer，随后在同一 epoch 执行 control resync + 首个
+- S10C-PAGE 已按 subscribe 两个 private channels first 并 buffer 的顺序，在同一 epoch 执行 control resync + 首个
   `chat_load_history_v3` page、用同一个 S5 reducer ingest history，再 coalesce buffered Artifact invalidation 并至少再做
   一次 history-v3 resync，最后 replay ordinary buffered events。older-page 只使用独立 v3 cursor state；不得与 v2 cursor
   比较、复用或拼接。
@@ -655,8 +659,9 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 | S10A-LOCAL-PROFILE | 1.6.0 Accepted；仅 9.15 Host/Desktop config、sidecar、feature 与 test runner | EXPECTED RED 证明当前 synthetic+fake 被拒、child env 缺失；GREEN 证明 exact conjunction、zero key/provider/non-loopback、fresh binary digest、watchdog/cleanup；任何 public wire/pin/fixture、dependency/config capability/CSP、非 loopback 或 secret 需求立即停止 | 删除 exact master/profile mapping 与 runner；恢复 synthetic+fake 互斥，v2/default-off production 不变 |
 | S10B-NATIVE-LIVE | S10A immutable PASS + 单独授权；HostBridge/v3 decoder、application/artifact/database/worker/ipc/mod/lib、private schema/client parser/tests及必要 Desktop implementation/readiness SHA-only checker | 单一 v3、common sequence、started/progress/failed atomic cursor、completed crash points/ACK replay、stream restart/gap/duplicate/identity、queue 64/content-free notification；禁止 migration/public contract/Host fixture/monotonic weakening | 关闭 parent Artifact flag，恢复 v2 coordinator；保留 SQLCipher rows与只读 preview/save；移除 private channel，不删 authority data |
 | S10C-PAGE | S10B immutable PASS + 单独授权；ChatClient/ChatStore/ArtifactStore/ChatPage/List integration/tests | subscribe-buffer-control+v3-history-replay、独立 v3 pagination、authority reset/stale、empty-text turn、四 client、keyboard/axe/leak；禁止 native/config/dependency与 route/DOM identity inference | unmount list并移除 v3 UI subscription/history wiring；回落现有 v2 Chat UI，native authority保留关闭 |
-| S10D-VERTICAL | A-C immutable PASS；仅 compile-time `feat128-s10-runtime`、test-only real-Tauri production-Chat harness/evidence | fresh Host binary；四类 lifecycle/ACK/history/pagination/reload/restart/mixed failure/TTL/delete；light/dark/1180x760/720/200%/keyboard/focus/axe/reduced-motion；seeded shell/Vite fake均不算 | 移除/关闭 test feature与 harness；production code不因证据切片扩权 |
-| S10E-SEC-PERF | D PASS + 单独授权；test-only adversarial/boundary/perf controls/evidence | 12 items、100 progress/s、20MiB image、64MiB video/save、file/report caps、auth/digest/MIME/size/content mismatch、WAL/residue；任一泄漏/越权/阈值 hard-stop 即失败 | 禁用 affected kind/preview，仅保留 metadata+native save；不得放宽 limit |
+| S10D-H HARNESS | A-C immutable PASS + 1.7.0 + 单独授权；复用 compile-time `feat128-s10-runtime`，只允许 9.18 的 test-only bootstrap/controller/runner/checker | fresh exact Host/fake/Desktop；真实 Tauri production bootstrap/ChatPage；一个真实 UI 提交产生四类 ready shell；content-free verdict、axe/focus/单张 transient screenshot、全进程清理。不得替换 production commands/Page/store，不得写 DB/spool | 删除 S10D-H module/controller/runner/checker 与 `src/main.ts`/`lib.rs` 的 feature-only hook；S10A-C production path不变 |
+| S10D-V VERTICAL | H immutable PASS + 单独授权；只扩展 test-only scenarios/evidence | 四类 preview/playback/file/report、ACK/history/pagination/reload/restart/mixed failure/TTL/delete；light/dark/1180x760/720/200%/keyboard/focus/axe/reduced-motion；seeded shell/Vite fake均不算 | 关闭/移除 V scenarios；保留 H walking skeleton与 A-C authority |
+| S10E-SEC-PERF | D-V PASS + 单独授权；test-only adversarial/boundary/perf controls/evidence | 12 items、100 progress/s、20MiB image、64MiB video/save、file/report caps、auth/digest/MIME/size/content mismatch、WAL/residue；任一泄漏/越权/阈值 hard-stop 即失败 | 禁用 affected kind/preview，仅保留 metadata+native save；不得放宽 limit |
 
 所有后续切片都禁止新 dependency/plugin/capability/CSP/migration/external origin、公共 Contracts/Host wire/canonical fixture
 或 real provider。consumer checker 只可更新 Desktop implementation/readiness SHA 与对应 test 常量；Contracts
@@ -671,6 +676,44 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
   live/history/pagination/reload/session/context/tenant switch；Host/Desktop restart、download validation、ACK replay、TTL/delete；
   未授权 context/WebView/session 和 digest/MIME/size/content mismatch。安全 canary 对 DOM/Pinia/log/diagnostics/evidence 的
   bytes/base64/digest/Host href/absolute path/token/raw error/未授权正文命中必须为 0。
+- S10D 重切为 H/V，因为现有 S7B 只证明 self-mounted WebView media、S10A 只证明 sidecar，而 production auth 又不接受
+  ephemeral test profile；真实 Page bootstrap、macOS WKWebView 控制、screenshot 和多进程 teardown 属于非平凡生命周期。
+  本结论不是实现 blocker，而是只批准 H 先建立并证明该控制面；H 未 PASS 前不得运行 V。
+- H 复用现有 Cargo feature `feat128-s10-runtime`，不得新增 feature/dependency/plugin/capability/CSP/config。允许文件仅为
+  `src-tauri/src/lib.rs`、新 `src-tauri/src/feat128_s10d_runtime.rs`、完成 exact test-auth/bootstrap 所必需且只受同 feature
+  编译的 `src-tauri/src/native_auth/{mod.rs,runtime.rs}` 最小引用、`src/main.ts`、新
+  `src/feat128/s10d-runtime-controller.ts` 及 test、`scripts/run-feat128-s10d-runtime-smoke.sh` 与同名 scope checker/test。
+  禁止改 Page/Store/component/domain/api/schema/protocol/commands/config/package/lock。若 consumer digest、public/private wire、
+  migration 或生产 auth 语义必须变化，立即停止并另行授权。
+- `src/main.ts` 必须先按现有 production branch 创建 `App`/Pinia/router 并完成 `router.isReady()`，再在 exact
+  `VITE_FEAT128_S10D_RUNTIME=true` 时动态加载 test controller；controller 不得 mount 第二个 App、mock client、set Pinia、
+  写 SQLCipher/spool 或绕过 router。native bootstrap 只可在 exact S10A conjunction 下建立 synthetic auth/project
+  prerequisite；session/turn、四类 Artifact、history/ACK/UI 必须走 production commands、S10B coordinator 与 S10C Page。
+- H runner 必须先证明 ports 18080/18082 free，建立 canonical 0700 `mktemp` root，fresh `go build -trimpath` Host/fake，
+  `pnpm build` 后以隔离 `CARGO_TARGET_DIR` 执行 exact
+  `cargo build --locked --release --features feat128-s10-runtime,tauri/custom-protocol`，记录三仓 source SHA、Host/fake/Desktop
+  binary SHA-256。先启动 fake，再启动 Desktop，由 production sidecar 启动 Host；禁止 Vite/devUrl/1420/1421 authority。
+  deadlines 固定为 Host/fake ready 20s、Tauri/Page ready 45s、walking skeleton 180s、runtime global 300s、SIGTERM grace
+  10s 后 SIGKILL；任一超时只输出 stable content-free failure class。
+- H controller 只按 accessible role/name 真实 click/type/keyboard：进入 production ChatPage、选择已由 native test bootstrap
+  注册的 run-root project、提交一个 deterministic prompt，并等待 image/video/file/report 各一项经历 announced、progress、ready。
+  H 不打开 renderer、不做 save、不声称完整 vertical；它只证明 production walking skeleton 与四类 stable shell。
+- H verdict 是 exact closed JSON：`schemaVersion/status/failureCode`、三个 source commit、Host/fake/Desktop binary SHA-256、
+  `profile{zeroProvider,zeroNonLoopback}`、`productionPath{realTauri,productionBootstrap,productionChatPage,productionCommands,
+  singleV3,sqlcipher,historyV3,artifactStore,typedClients}`、`lifecycle{announced,progress,ready,kinds}`、
+  `ui{axeSeriousCritical,focusOrder,screenshotSha256}`、`cleanup{desktop,webContent,host,fake,listeners,wal,spool,temp,runRoot}`。
+  禁止 ID、path、URL、header、requestId、正文、name、MIME、digest（artifact）、token 或 raw error；binary/screenshot SHA 仅作为
+  test provenance。feature-only Rust hook 使用现有 Tauri raw macOS window/`objc2` 取得 current `NSWindow.windowNumber`，
+  runner 再以 `/usr/sbin/screencapture -l` 采集到 0600 run-root，
+  只允许 deterministic synthetic ready-state，记录 SHA 后删除；权限/窗口定位失败则 H fail closed，不得改用 Vite/browser。
+- H teardown 顺序固定为 controller terminal→pause/release renderer resources→close Tauri window→TERM Desktop→等待 WebContent→
+  stop Host→stop fake→检查 18080/18082、child PIDs、SQLCipher WAL/SHM、Host spool/temp/save residue→删除 run root。controller、
+  DOM、Pinia、stdout/stderr、diagnostics、verdict 的禁止 canary 必须 zero-hit；原始 screenshot/log 只存在 run root 且最终删除。
+- S10D-V matrix 固定覆盖四类 announced→progress→ready、duplicate/out-of-order/gap/terminal regression、single failed 不清其它
+  ready、live→history-v3→pagination→reload、session/context/tenant/stale clear、Host restart、Desktop reload/restart、ACK replay、
+  expired/TTL/session-delete cleanup；image inline/lightbox、video metadata/playback/seek、file plain/JSON/CSV 与 PDF/XLSX save-only、
+  report table/chart fallback；light/dark、1180×760、720×760、200% zoom、keyboard/focus/axe/reduced-motion。native save 必须真实
+  click + native dialog；无法安全自动化时逐项 `MANUAL/NOT RUN`，不得注入目标路径。
 - 性能 run 固定 release-like build、同一机器；记录 macOS/build、CPU、RAM、Desktop/WebContent/Host PID 与 binary/source
   digest。每 scenario 3 次 warmup + 30 measured samples，报告 p50/p95。started-to-visible p95 `<300ms`，`>=1000ms`
   hard-stop；100 progress events/s 持续 10s 时每 component render `<=10Hz`，持续 `>20Hz` hard-stop；12 mixed Artifacts
@@ -682,11 +725,13 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 
 ### 9.19 S10 Owner readiness
 
-Owner capture（用户明确要求 Codex 代录，不声称独立人工评审）：Product
-`READY FOR S10A-LOCAL-PROFILE ONLY; PRODUCTION VERTICAL AND MARKDOWN REMAIN PENDING`；Technical
-`APPROVED FOR EXACT KEYLESS LOOPBACK PROFILE AND SIDECAR FLAG MAPPING; SINGLE-V3/ATOMIC-CURSOR S10B WAITS FOR A PASS`；
-Security/Data `APPROVED FOR S10A ONLY WITH NO KEY/PROVIDER/NON-LOOPBACK, OWNER-ONLY TEMP ROOT, WATCHDOG AND
-CONTENT-FREE EVIDENCE; S10B-S10E WAIT`。本 readiness 为 docs-only PASS；S10A-S10E 均 `NOT RUN`，不扩 G3、不声明 G4。
+历史 Owner capture（用户明确要求 Codex 代录，不声称独立人工评审）只批准 S10A；当时 S10A-S10E 均 `NOT RUN`，
+该事实保留。当前 S10A/S10B/S10C 已分别 separate PASS。1.7.0 新 capture：Product
+`READY FOR S10D-H ONLY; H PROVES ONE PRODUCTION WALKING SKELETON, FULL FOUR-TYPE USER PATHS WAIT FOR V`；Technical
+`APPROVED FOR EXACT FRESH-BINARY REAL-TAURI HARNESS WITH PRODUCTION BOOTSTRAP/COMMANDS AND CLOSED PROCESS LIFECYCLE;
+S10D-V WAITS FOR H IMMUTABLE PASS`；Security/Data `APPROVED FOR S10D-H ONLY WITH EXACT KEYLESS LOOPBACK PROFILE,
+TEST-ONLY AUTHORITY BOOTSTRAP, ZERO CANARY, CONTENT-FREE VERDICT, TRANSIENT SCREENSHOT AND COMPLETE CLEANUP`。
+本 readiness 只是 docs-only PASS；S10D-H/V 与 S10E 均 `NOT RUN`，不扩 G3、不声明 G4。
 
 ### 10. 主题、窗口与可访问性
 
@@ -744,7 +789,8 @@ CONTENT-FREE EVIDENCE; S10B-S10E WAIT`。本 readiness 为 docs-only PASS；S10A
 - `src/components/chat/`：S9B-R 只能在 S9B-D immutable PASS 后消费 S9A typed client 与 S9B-D closed card，
   不得修改 native、dependency/theme/adapter、page 或 store；
 - S10 必须严格按 9.14-9.19 的 A→B→C→D→E DAG；native single-v3/cursor foundation 先于 production page，
-  test-only keyless profile/harness 均默认关闭且不得成为 provider capability 声明；
+  test-only keyless profile/harness 均默认关闭且不得成为 provider capability 声明；当前下一编码切片仅为 9.17/9.18
+  的 S10D-H，S10D-V/S10E 等待 H immutable PASS 与单独授权；
 - Agent Host 与 Contracts：由对应仓库定义并评审权威事件、历史恢复、读取、过期、错误和兼容语义。
 
 实现必须先固定不可变 Contracts 引用和 provider-first conformance，再由 Desktop 消费；不得在 Vue 中手写一份与
@@ -764,8 +810,8 @@ CONTENT-FREE EVIDENCE; S10B-S10E WAIT`。本 readiness 为 docs-only PASS；S10A
 - [x] S9A 已实现 contract-conformant bounded report projection 与 canonical JSON native save，并以 G3 外独立 PASS 留痕。
 - [x] S9B-READINESS 已冻结 exact ECharts dependency/integrity/license/imports/bundle、semantic theme/card、closed adapter、
   data lifecycle、a11y/visual matrix 与 S9B-D/S9B-R 回滚；S9B-D、checker repair 与 S9B-R 后续均独立 PASS。
-- [x] S10-READINESS 已冻结 strict-local keyless profile、single-v3/atomic cursor、content-free invalidation、page authority、
-  real-Tauri vertical 与 security/performance DAG；S10 implementation slices 均 `NOT RUN`。
+- [x] S10A/S10B/S10C 已分别形成 G3 外 separate PASS；1.7.0 S10D-READINESS 已冻结 real-Tauri H/V harness、
+  production path、content-free evidence、process cleanup 与完整 vertical matrix；S10D-H/V、S10E 均 `NOT RUN`。
 - [ ] Artifact 在 `announced` 时立即出现，并在同一稳定位置进入 `progress/ready/failed`。
 - [ ] 有可信进度才显示百分比；未知进度、完成、失败和迟到事件语义正确。
 - [ ] 图片卡和灯箱、视频 controls、文件预览/下载、报告摘要/预览/下载符合本文。
@@ -819,6 +865,11 @@ CONTENT-FREE EVIDENCE; S10B-S10E WAIT`。本 readiness 为 docs-only PASS；S10A
 - 2026-08-22 / 1.6.0 S9-SPEC-RECONCILIATION + S10-READINESS Accepted：纠正 S9 当前状态；确认现有
   FEAT-128 synthetic 无法独立驱动真实 Runtime，选择 exact FEAT126 loopback fake Responses 组合 profile；冻结
   S10A-LOCAL-PROFILE→S10B-NATIVE-LIVE→S10C-PAGE→S10D-VERTICAL→S10E-SEC-PERF，仅批准 S10A 编码。
+- 2026-08-22 / S10A/S10B/S10C：Host/Desktop exact keyless profile、Desktop single-v3/atomic/private invalidation 与
+  history-v3/ArtifactStore/production ChatPage wiring 已分别独立 PASS；G3 仍只包含 S3/S4/S5，production vertical 未运行。
+- 2026-08-22 / 1.7.0 S10-SPEC-RECONCILIATION + S10D-READINESS Accepted：确认 S7B/S9/S10A evidence 均不能替代
+  production vertical；将非平凡的 macOS Tauri bootstrap/control/screenshot/process lifecycle 独立为 S10D-H，并将完整
+  四类/restart/history/visual/a11y matrix 留给 S10D-V；只批准 H 编码，D-H/D-V/E 均未实现或运行。
 - S6 readiness Owner capture：Product/Design `READY FOR S6A; S6B WAITS FOR S6A PASS`；Technical
   `APPROVED FOR S6A CODING WITH EXACT THREE COMMANDS + ONE IMAGE SCHEME`；Security/Data
   `APPROVED FOR S6A CODING WITH NO NEW DEPENDENCY/PLUGIN/CAPABILITY AND EXACT CSP DELTA`。依据是用户本轮
