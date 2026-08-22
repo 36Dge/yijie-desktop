@@ -1,6 +1,7 @@
 use super::application::{
-    AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
-    CoordinatorOutcome, DispatchOutcome, LiveTurnProjection, TurnProjectionSink,
+    ArtifactResyncReason, AuthorizedConversationApplication, ConversationApplication,
+    ConversationCoordinator, CoordinatorOutcome, DispatchOutcome, LiveTurnProjection,
+    TurnProjectionSink,
 };
 use super::artifact::ArtifactProjection;
 use super::attachment::{
@@ -20,7 +21,7 @@ use super::{ChatError, ChatRuntime};
 use crate::native_auth::{NativeAuthRuntime, NativeProjectionError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,6 +37,7 @@ pub const CHAT_IPC_V3_SCHEMA_VERSION: u8 = 3;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
+pub const CHAT_ARTIFACT_LIVE_EVENT_CHANNEL: &str = "yijie:chat:artifact:changed:v1";
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const MAX_TITLE_BYTES: usize = 1024;
@@ -50,6 +52,7 @@ const MAX_EVENT_BATCH: usize = 64;
 const MAX_EVENT_BATCH_BYTES: usize = 256 * 1024;
 const MAX_ASSISTANT_APPEND_BYTES: usize = 64 * 1024;
 const MAX_REASONING_APPEND_BYTES: usize = 16 * 1024;
+const MAX_ARTIFACT_NOTIFICATION_QUEUE: usize = 64;
 
 #[derive(Clone)]
 pub struct ChatIpcRuntime {
@@ -320,6 +323,111 @@ struct SubscriptionRecord {
     reasoning: HashMap<(usize, usize), String>,
     terminal: bool,
     blocked: bool,
+    artifact_turn_id: Option<Uuid>,
+    artifact_notifications: ArtifactNotificationQueue,
+}
+
+#[derive(Clone, Copy)]
+enum ArtifactNotification {
+    Changed {
+        event_id: Uuid,
+    },
+    ResyncRequired {
+        event_id: Uuid,
+        reason: &'static str,
+    },
+    ContextInvalidated {
+        event_id: Uuid,
+    },
+}
+
+#[derive(Default)]
+struct ArtifactNotificationQueue {
+    sequence: u64,
+    pending: VecDeque<ArtifactNotification>,
+}
+
+impl ArtifactNotificationQueue {
+    fn enqueue_changed(&mut self, event_id: Uuid) {
+        if self.pending.len() >= MAX_ARTIFACT_NOTIFICATION_QUEUE {
+            self.enqueue_resync("backpressure");
+            return;
+        }
+        self.pending
+            .push_back(ArtifactNotification::Changed { event_id });
+    }
+
+    fn enqueue_resync(&mut self, reason: &'static str) {
+        self.pending.clear();
+        self.pending
+            .push_back(ArtifactNotification::ResyncRequired {
+                event_id: Uuid::now_v7(),
+                reason,
+            });
+    }
+
+    fn enqueue_context_invalidated(&mut self) {
+        self.pending.clear();
+        self.pending
+            .push_back(ArtifactNotification::ContextInvalidated {
+                event_id: Uuid::now_v7(),
+            });
+    }
+
+    fn drain(
+        &mut self,
+        subscription_id: Uuid,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Vec<ArtifactLiveEventDto>, ChatError> {
+        let mut events = Vec::with_capacity(self.pending.len());
+        while let Some(notification) = self.pending.pop_front() {
+            self.sequence = self
+                .sequence
+                .checked_add(1)
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let (event_id, kind, payload) = match notification {
+                ArtifactNotification::Changed { event_id } => {
+                    (event_id, "artifact_changed", json!({}))
+                }
+                ArtifactNotification::ResyncRequired { event_id, reason } => {
+                    (event_id, "resync_required", json!({"reason": reason}))
+                }
+                ArtifactNotification::ContextInvalidated { event_id } => (
+                    event_id,
+                    "context_invalidated",
+                    json!({"reason":"authority_changed"}),
+                ),
+            };
+            events.push(ArtifactLiveEventDto {
+                schema_version: 1,
+                subscription_id,
+                context_id,
+                session_id,
+                turn_id,
+                event_id,
+                notification_sequence: self.sequence.to_string(),
+                kind,
+                payload,
+            });
+        }
+        Ok(events)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactLiveEventDto {
+    schema_version: u8,
+    subscription_id: Uuid,
+    context_id: Uuid,
+    session_id: Uuid,
+    turn_id: Uuid,
+    event_id: Uuid,
+    notification_sequence: String,
+    kind: &'static str,
+    payload: Value,
 }
 
 impl Debug for ChatEventBridge {
@@ -375,6 +483,8 @@ impl ChatEventBridge {
                 reasoning: HashMap::new(),
                 terminal: false,
                 blocked: false,
+                artifact_turn_id: None,
+                artifact_notifications: ArtifactNotificationQueue::default(),
             },
         );
         Ok(subscription_id)
@@ -396,25 +506,34 @@ impl ChatEventBridge {
     }
 
     fn invalidate_all(&self) {
-        let (app, events) = match self.inner.lock() {
+        let (app, events, artifact_events) = match self.inner.lock() {
             Ok(mut state) => {
                 let app = state.app.clone();
-                let events = state
-                    .subscriptions
-                    .drain()
-                    .map(|(subscription_id, mut record)| {
-                        record.projection_sequence += 1;
-                        event_envelope(
+                let mut events = Vec::new();
+                let mut artifact_events = Vec::new();
+                for (subscription_id, mut record) in state.subscriptions.drain() {
+                    record.projection_sequence += 1;
+                    events.push(event_envelope(
+                        subscription_id,
+                        &record,
+                        None,
+                        "context_invalidated",
+                        json!({"reason":"authority_changed"}),
+                    ));
+                    if let Some(turn_id) = record.artifact_turn_id {
+                        record.artifact_notifications.enqueue_context_invalidated();
+                        if let Ok(mut drained) = record.artifact_notifications.drain(
                             subscription_id,
-                            &record,
-                            None,
-                            "context_invalidated",
-                            json!({"reason":"authority_changed"}),
-                        )
-                    })
-                    .collect::<Vec<_>>();
+                            record.context_id,
+                            record.session_id,
+                            turn_id,
+                        ) {
+                            artifact_events.append(&mut drained);
+                        }
+                    }
+                }
                 state.cleanup_sessions.clear();
-                (app, events)
+                (app, events, artifact_events)
             }
             Err(_) => return,
         };
@@ -422,6 +541,7 @@ impl ChatEventBridge {
             for event in events {
                 let _ = app.emit(CHAT_EVENT_CHANNEL, event);
             }
+            let _ = emit_artifact_events(&app, &artifact_events);
         }
     }
 
@@ -503,6 +623,88 @@ impl ChatEventBridge {
         app.emit(CHAT_CONTROL_PLANE_EVENT_CHANNEL, event)
             .map_err(|_| ChatError::OrchestrationUnavailable)
     }
+
+    fn publish_artifact_notification(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        notification: ArtifactNotification,
+    ) -> Result<(), ChatError> {
+        let now = unix_seconds()?;
+        let (app, events) = {
+            let mut state = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let app = state
+                .app
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorization = state
+                .authorization
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let subscription_ids = state
+                .subscriptions
+                .iter()
+                .filter_map(|(id, record)| (record.session_id == session_id).then_some(*id))
+                .collect::<Vec<_>>();
+            let mut events = Vec::new();
+            for subscription_id in subscription_ids {
+                let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
+                    continue;
+                };
+                record.artifact_turn_id = Some(turn_id);
+                if authorization
+                    .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
+                    .is_err()
+                {
+                    record.artifact_notifications.enqueue_context_invalidated();
+                } else {
+                    match notification {
+                        ArtifactNotification::Changed { event_id } => {
+                            record.artifact_notifications.enqueue_changed(event_id)
+                        }
+                        ArtifactNotification::ResyncRequired { reason, .. } => {
+                            record.artifact_notifications.enqueue_resync(reason)
+                        }
+                        ArtifactNotification::ContextInvalidated { .. } => {
+                            record.artifact_notifications.enqueue_context_invalidated()
+                        }
+                    }
+                }
+                events.append(&mut record.artifact_notifications.drain(
+                    subscription_id,
+                    record.context_id,
+                    record.session_id,
+                    turn_id,
+                )?);
+            }
+            (app, events)
+        };
+        if emit_artifact_events(&app, &events) {
+            return Ok(());
+        }
+        if let Ok(mut state) = self.inner.lock() {
+            for event in events {
+                if let Some(record) = state.subscriptions.get_mut(&event.subscription_id) {
+                    record
+                        .artifact_notifications
+                        .enqueue_resync("protocol_error");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn emit_artifact_events(app: &AppHandle, events: &[ArtifactLiveEventDto]) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return events.is_empty();
+    };
+    events
+        .iter()
+        .all(|event| window.emit(CHAT_ARTIFACT_LIVE_EVENT_CHANNEL, event).is_ok())
 }
 
 impl TurnProjectionSink for ChatEventBridge {
@@ -533,6 +735,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
                     continue;
                 };
+                record.artifact_turn_id = Some(projection.turn_id);
                 if authorization
                     .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
                     .is_err()
@@ -655,6 +858,41 @@ impl TurnProjectionSink for ChatEventBridge {
             app.emit(CHAT_EVENT_CHANNEL, event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
+        Ok(())
+    }
+
+    fn publish_artifact_changed(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<(), ChatError> {
+        let _ = self.publish_artifact_notification(
+            session_id,
+            turn_id,
+            ArtifactNotification::Changed { event_id },
+        );
+        Ok(())
+    }
+
+    fn publish_artifact_resync_required(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        reason: ArtifactResyncReason,
+    ) -> Result<(), ChatError> {
+        let reason = match reason {
+            ArtifactResyncReason::SequenceGap => "sequence_gap",
+            ArtifactResyncReason::ProtocolError => "protocol_error",
+        };
+        let _ = self.publish_artifact_notification(
+            session_id,
+            turn_id,
+            ArtifactNotification::ResyncRequired {
+                event_id: Uuid::now_v7(),
+                reason,
+            },
+        );
         Ok(())
     }
 }
@@ -2369,6 +2607,57 @@ mod tests {
     use super::*;
     use crate::chat::{LiveReasoningProjection, ReasoningPart};
 
+    #[test]
+    fn artifact_live_schema_and_queue_are_closed_bounded_monotonic_and_content_free() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../schemas/chat-artifact-live-v1.schema.json"
+        ))
+        .expect("artifact live schema");
+        assert_eq!(schema["x-yijie-schema-version"], 1);
+        assert_eq!(
+            schema["x-yijie-event-channel"],
+            CHAT_ARTIFACT_LIVE_EVENT_CHANNEL
+        );
+        assert_eq!(schema["$defs"]["common"]["additionalProperties"], false);
+
+        let subscription_id = Uuid::now_v7();
+        let context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let mut queue = ArtifactNotificationQueue::default();
+        for _ in 0..=MAX_ARTIFACT_NOTIFICATION_QUEUE {
+            queue.enqueue_changed(Uuid::now_v7());
+        }
+        let events = queue
+            .drain(subscription_id, context_id, session_id, turn_id)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].notification_sequence, "1");
+        assert_eq!(events[0].kind, "resync_required");
+        assert_eq!(events[0].payload, json!({"reason":"backpressure"}));
+        queue.enqueue_changed(Uuid::now_v7());
+        let next = queue
+            .drain(subscription_id, context_id, session_id, turn_id)
+            .unwrap();
+        assert_eq!(next[0].notification_sequence, "2");
+        let encoded = serde_json::to_string(&next).unwrap().to_ascii_lowercase();
+        for forbidden in [
+            "artifactid",
+            "media",
+            "size",
+            "bytes",
+            "base64",
+            "digest",
+            "href",
+            "path",
+            "token",
+            "requestid",
+            "error",
+        ] {
+            assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+        }
+    }
+
     const COMMAND_NAMES: [&str; 23] = [
         "chat_bind_context_v1",
         "chat_list_projects_v1",
@@ -2879,6 +3168,8 @@ mod tests {
             reasoning: HashMap::new(),
             terminal: false,
             blocked: false,
+            artifact_turn_id: None,
+            artifact_notifications: ArtifactNotificationQueue::default(),
         };
         let subscription_id = Uuid::parse_str("019c1a00-0000-7000-8000-000000000004").unwrap();
         let turn_id = Uuid::parse_str(turn_id).unwrap();
@@ -2932,6 +3223,8 @@ mod tests {
             reasoning: HashMap::new(),
             terminal: false,
             blocked: false,
+            artifact_turn_id: None,
+            artifact_notifications: ArtifactNotificationQueue::default(),
         };
         let projection = LiveTurnProjection {
             session_id,

@@ -6154,7 +6154,7 @@ fn validate_message(value: &str) -> Result<(), ChatError> {
     Ok(())
 }
 
-fn validate_message_output(value: &str) -> Result<(), ChatError> {
+pub(super) fn validate_message_output(value: &str) -> Result<(), ChatError> {
     if value.len() > MAX_MESSAGE_BYTES || value.contains('\0') {
         return Err(ChatError::InvalidInput);
     }
@@ -6222,7 +6222,7 @@ fn contains_forbidden_title_character(value: &str) -> bool {
     })
 }
 
-fn validate_cursor(cursor: &StoredEventCursor) -> Result<(), ChatError> {
+pub(super) fn validate_cursor(cursor: &StoredEventCursor) -> Result<(), ChatError> {
     validate_non_nil(cursor.stream_id)?;
     validate_non_nil(cursor.event_id)?;
     if cursor.sequence == 0 || cursor.sequence > i64::MAX as u64 {
@@ -6231,8 +6231,8 @@ fn validate_cursor(cursor: &StoredEventCursor) -> Result<(), ChatError> {
     Ok(())
 }
 
-fn advance_cursor(
-    transaction: &rusqlite::Transaction<'_>,
+pub(super) fn advance_cursor(
+    transaction: &rusqlite::Connection,
     session_id: &str,
     cursor: &StoredEventCursor,
 ) -> Result<(), ChatError> {

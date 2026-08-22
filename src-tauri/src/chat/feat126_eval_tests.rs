@@ -1,5 +1,5 @@
 use super::database::{ChatRepository, ChatScope, ReasoningStatus, SessionTitleSource};
-use super::host_domain::SseDecoder;
+use super::host_domain::{HostStreamEvent, SseDecoder};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::{ChatError, ReducerOutcome, TurnEventReducer};
 use serde::Deserialize;
@@ -109,13 +109,16 @@ fn host_authority_fixture_survives_reducer_sqlcipher_restart_and_delete() {
 
     let expected_stream =
         Uuid::parse_str("019fbe00-0000-7000-8000-000000000001").expect("fixture stream");
-    let mut decoder = SseDecoder::new(expected_stream, 0);
+    let mut decoder = SseDecoder::new(expected_stream, 0, 2);
     for chunk in EVENT_FIXTURE.chunks(37) {
         decoder.push(chunk).expect("decode bounded SSE chunk");
     }
     decoder.finish().expect("complete SSE stream");
     let mut events = Vec::new();
     while let Some(event) = decoder.next() {
+        let HostStreamEvent::Ordinary(event) = event else {
+            panic!("v2 fixture cannot contain Artifact events");
+        };
         events.push(event);
     }
     assert_eq!(events.len(), 5);

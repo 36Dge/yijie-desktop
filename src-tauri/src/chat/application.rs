@@ -1,5 +1,6 @@
 use super::artifact::{
-    ArtifactProjection, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
+    decode_artifact_event_envelope_v3, ArtifactEventV3, ArtifactProjection,
+    ArtifactTransferService, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
     ReadyImageReadError, ReadyReportContent, ReadyReportReadError, ReadyVideoContent,
     ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError,
 };
@@ -16,9 +17,10 @@ use super::database::{
 use super::error::ChatError;
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
-    HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupReason,
-    HostCleanupSurfaceStatus, HostErrorCode, HostEvent, HostEventCursor, HostEventKind,
-    HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSessionState, HostTurnStatus,
+    HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
+    HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEvent, HostEventCursor,
+    HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSessionState,
+    HostStreamEvent, HostTurnStatus,
 };
 use super::native_project;
 use super::public_tasks::{
@@ -132,6 +134,7 @@ pub struct ConversationApplication {
     database: DatabaseWorker,
     host: Option<Arc<HostBridge>>,
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
+    artifact_transfers: Option<ArtifactTransferService>,
 }
 
 #[derive(Clone)]
@@ -457,6 +460,7 @@ impl Debug for ConversationApplication {
             .field("database", &"[SQLCIPHER_WORKER]")
             .field("host_configured", &self.host.is_some())
             .field("public_tasks_configured", &self.public_tasks.is_some())
+            .field("artifacts_v3_enabled", &self.artifact_transfers.is_some())
             .finish()
     }
 }
@@ -648,6 +652,30 @@ pub trait TurnProjectionSink: Send + Sync {
     fn publish_coordinator(&self, _outcome: &CoordinatorOutcome) -> Result<(), ChatError> {
         Ok(())
     }
+
+    fn publish_artifact_changed(
+        &self,
+        _session_id: Uuid,
+        _turn_id: Uuid,
+        _event_id: Uuid,
+    ) -> Result<(), ChatError> {
+        Ok(())
+    }
+
+    fn publish_artifact_resync_required(
+        &self,
+        _session_id: Uuid,
+        _turn_id: Uuid,
+        _reason: ArtifactResyncReason,
+    ) -> Result<(), ChatError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactResyncReason {
+    SequenceGap,
+    ProtocolError,
 }
 
 struct NoopProjectionSink;
@@ -700,6 +728,20 @@ impl ConversationApplication {
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
+            artifact_transfers: None,
+        }
+    }
+
+    pub fn new_with_artifacts_v3(
+        database: DatabaseWorker,
+        host: Arc<HostBridge>,
+        public_tasks: Arc<dyn PublicTaskControlPlane>,
+    ) -> Self {
+        Self {
+            artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
+            database,
+            host: Some(host),
+            public_tasks: Some(public_tasks),
         }
     }
 
@@ -708,6 +750,7 @@ impl ConversationApplication {
             database,
             host: None,
             public_tasks: None,
+            artifact_transfers: None,
         }
     }
 
@@ -1403,6 +1446,11 @@ impl ConversationApplication {
         &self,
         sink: &dyn TurnProjectionSink,
     ) -> Result<CoordinatorOutcome, ChatError> {
+        if let Some(artifact_transfers) = &self.artifact_transfers {
+            artifact_transfers
+                .recover_pending_acknowledgements()
+                .await?;
+        }
         let dispatch = self.dispatch_next().await?;
         if dispatch != DispatchOutcome::Idle {
             return Ok(CoordinatorOutcome::Dispatched(dispatch));
@@ -1570,6 +1618,11 @@ impl ConversationApplication {
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
     ) -> Result<(), ChatError> {
+        if let Some(artifact_transfers) = &self.artifact_transfers {
+            return self
+                .stream_active_turn_v3(session_id, sink, artifact_transfers)
+                .await;
+        }
         let mut context = self.database.active_turn_context(session_id).await?;
         let cursor = context
             .cursor
@@ -1648,6 +1701,190 @@ impl ConversationApplication {
                     self.database.commit_terminal_turn(terminal).await?;
                     sink.publish(reducer.projection(true)?)?;
                     return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn stream_active_turn_v3(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+        artifact_transfers: &ArtifactTransferService,
+    ) -> Result<(), ChatError> {
+        artifact_transfers
+            .recover_pending_acknowledgements()
+            .await?;
+        let mut context = self.database.active_turn_context(session_id).await?;
+        let cursor = context
+            .cursor
+            .as_ref()
+            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
+            .transpose()
+            .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        let host = self.host()?;
+        let mut stream = match host
+            .open_event_stream_v3(context.agent_session_id, cursor)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(error)
+                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
+            {
+                let stream = host
+                    .open_event_stream_v3(context.agent_session_id, None)
+                    .await
+                    .map_err(map_host_error)?;
+                let expected = context
+                    .cursor
+                    .take()
+                    .ok_or(ChatError::ConversationConflict)?;
+                self.database
+                    .clear_event_cursor_after_stream_change(session_id, expected)
+                    .await?;
+                sink.publish_artifact_resync_required(
+                    session_id,
+                    context.turn_id,
+                    ArtifactResyncReason::SequenceGap,
+                )?;
+                stream
+            }
+            Err(error) => return Err(map_host_error(error)),
+        };
+        let mut reducer = TurnEventReducer::new(context)?;
+        let mut progress_dirty = false;
+        let mut unflushed_events = 0_usize;
+        let mut last_flush = Instant::now();
+        loop {
+            let event = match stream.next_stream_event().await {
+                Ok(Some(event)) => event,
+                Ok(None) => {
+                    if progress_dirty {
+                        self.database
+                            .persist_turn_progress(reducer.progress()?)
+                            .await?;
+                        sink.publish(reducer.projection(false)?)?;
+                    }
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+                Err(error) => {
+                    if progress_dirty {
+                        self.database
+                            .persist_turn_progress(reducer.progress()?)
+                            .await?;
+                        sink.publish(reducer.projection(false)?)?;
+                    }
+                    sink.publish_artifact_resync_required(
+                        session_id,
+                        reducer.local_turn_id,
+                        ArtifactResyncReason::ProtocolError,
+                    )?;
+                    return Err(map_host_error(error));
+                }
+            };
+            match event {
+                HostStreamEvent::Ordinary(event) => {
+                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
+                    let reduced = reducer.apply(event, unix_millis()?).inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id,
+                            resync_reason,
+                        );
+                    })?;
+                    match reduced {
+                        ReducerOutcome::Duplicate => {}
+                        ReducerOutcome::Progress => {
+                            progress_dirty = true;
+                            unflushed_events += 1;
+                            if unflushed_events >= PROGRESS_FLUSH_EVENT_COUNT
+                                || last_flush.elapsed() >= PROGRESS_FLUSH_INTERVAL
+                            {
+                                self.database
+                                    .persist_turn_progress(reducer.progress()?)
+                                    .await?;
+                                sink.publish(reducer.projection(false)?)?;
+                                progress_dirty = false;
+                                unflushed_events = 0;
+                                last_flush = Instant::now();
+                            }
+                        }
+                        ReducerOutcome::Terminal(terminal) => {
+                            self.database.commit_terminal_turn(terminal).await?;
+                            sink.publish(reducer.projection(true)?)?;
+                            return Ok(());
+                        }
+                    }
+                }
+                HostStreamEvent::Artifact(envelope) => {
+                    let artifact = decode_artifact_event_envelope_v3(
+                        &envelope,
+                        reducer.agent_session_id,
+                        reducer.runtime_turn_id,
+                        reducer.session_id,
+                        reducer.local_turn_id,
+                    )
+                    .inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id,
+                            ArtifactResyncReason::ProtocolError,
+                        );
+                    })?;
+                    if matches!(artifact, ArtifactEventV3::Completed(_)) && progress_dirty {
+                        self.database
+                            .persist_turn_progress(reducer.progress()?)
+                            .await?;
+                        sink.publish(reducer.projection(false)?)?;
+                        progress_dirty = false;
+                        unflushed_events = 0;
+                        last_flush = Instant::now();
+                    }
+                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
+                    let observed = reducer.observe_artifact(&envelope).inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id,
+                            resync_reason,
+                        );
+                    })?;
+                    match observed {
+                        ReducerOutcome::Duplicate => continue,
+                        ReducerOutcome::Terminal(_) => return Err(ChatError::ConversationConflict),
+                        ReducerOutcome::Progress => {}
+                    }
+                    let cursor_progress = reducer.progress()?;
+                    match artifact {
+                        ArtifactEventV3::Completed(manifest) => {
+                            if let Err(error) = artifact_transfers
+                                .transfer_completed_with_cursor(manifest, cursor_progress)
+                                .await
+                            {
+                                sink.publish_artifact_changed(
+                                    session_id,
+                                    reducer.local_turn_id,
+                                    envelope.event_id,
+                                )?;
+                                return Err(error);
+                            }
+                        }
+                        artifact => {
+                            self.database
+                                .commit_artifact_event_progress(cursor_progress, artifact)
+                                .await?;
+                        }
+                    }
+                    if progress_dirty {
+                        sink.publish(reducer.projection(false)?)?;
+                    }
+                    progress_dirty = false;
+                    unflushed_events = 0;
+                    last_flush = Instant::now();
+                    sink.publish_artifact_changed(
+                        session_id,
+                        reducer.local_turn_id,
+                        envelope.event_id,
+                    )?;
                 }
             }
         }
@@ -1848,6 +2085,61 @@ impl TurnEventReducer {
         self.last_sequence = event.cursor.sequence;
         self.last_event_id = Some(event.event_id);
         Ok(ReducerOutcome::Progress)
+    }
+
+    pub fn observe_artifact(
+        &mut self,
+        event: &HostArtifactEventV3,
+    ) -> Result<ReducerOutcome, ChatError> {
+        if self.terminal {
+            return Err(ChatError::ConversationConflict);
+        }
+        if event.task_id != self.task_id
+            || event.agent_session_id != self.agent_session_id
+            || event.codex_thread_id != self.codex_thread_id
+            || event.turn_id != self.runtime_turn_id
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        if event.cursor.sequence == self.last_sequence
+            && self.last_event_id == Some(event.event_id)
+            && self.expected_stream == Some(event.cursor.stream_id)
+        {
+            return Ok(ReducerOutcome::Duplicate);
+        }
+        let expected_sequence = self
+            .last_sequence
+            .checked_add(1)
+            .ok_or(ChatError::OrchestrationUnavailable)?;
+        if event.cursor.sequence != expected_sequence
+            || self
+                .expected_stream
+                .is_some_and(|stream| stream != event.cursor.stream_id)
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        self.expected_stream = Some(event.cursor.stream_id);
+        self.last_sequence = event.cursor.sequence;
+        self.last_event_id = Some(event.event_id);
+        Ok(ReducerOutcome::Progress)
+    }
+
+    fn resync_reason(&self, cursor: HostEventCursor, event_id: Uuid) -> ArtifactResyncReason {
+        if cursor.sequence == self.last_sequence
+            && self.last_event_id == Some(event_id)
+            && self.expected_stream == Some(cursor.stream_id)
+        {
+            return ArtifactResyncReason::ProtocolError;
+        }
+        if cursor.sequence != self.last_sequence.checked_add(1).unwrap_or_default()
+            || self
+                .expected_stream
+                .is_some_and(|stream| stream != cursor.stream_id)
+        {
+            ArtifactResyncReason::SequenceGap
+        } else {
+            ArtifactResyncReason::ProtocolError
+        }
     }
 
     pub fn progress(&self) -> Result<TurnProgress, ChatError> {
@@ -2238,6 +2530,8 @@ mod tests {
         synthetic_authorization_code_tokens, NativeAuthConfig, NativeAuthRuntime, OidcClient,
     };
     #[cfg(target_os = "macos")]
+    use sha2::Digest;
+    #[cfg(target_os = "macos")]
     use std::fs;
     #[cfg(target_os = "macos")]
     use std::os::unix::fs::PermissionsExt;
@@ -2412,6 +2706,54 @@ mod tests {
                 ),
                 3,
             ),
+            Err(ChatError::OrchestrationUnavailable)
+        ));
+    }
+
+    #[test]
+    fn artifact_observation_shares_the_ordinary_cursor_domain_and_is_idempotent() {
+        let (context, identity) = context();
+        let local_turn_id = context.turn_id;
+        let mut reducer = TurnEventReducer::new(context).unwrap();
+        reducer
+            .apply(
+                event(
+                    &identity,
+                    1,
+                    Some("answer"),
+                    HostEventKind::AgentMessageDelta {
+                        delta: "a".to_owned(),
+                    },
+                ),
+                1,
+            )
+            .unwrap();
+        let artifact = HostArtifactEventV3 {
+            cursor: HostEventCursor::new(identity.stream_id, 2).unwrap(),
+            event_type: "item.artifact.started".to_owned(),
+            event_id: Uuid::now_v7(),
+            task_id: identity.task_id,
+            agent_session_id: identity.agent_session_id,
+            codex_thread_id: identity.thread_id,
+            turn_id: identity.turn_id,
+            occurred_at: "2026-08-20T00:00:00Z".to_owned(),
+            payload: serde_json::json!({}),
+        };
+        assert_eq!(
+            reducer.observe_artifact(&artifact).unwrap().kind(),
+            ReducerOutcomeKind::Progress
+        );
+        assert_eq!(reducer.progress().unwrap().cursor.sequence, 2);
+        assert_eq!(reducer.progress().unwrap().local_turn_id, local_turn_id);
+        assert_eq!(
+            reducer.observe_artifact(&artifact).unwrap().kind(),
+            ReducerOutcomeKind::Duplicate
+        );
+        let mut gap = artifact;
+        gap.cursor.sequence = 4;
+        gap.event_id = Uuid::now_v7();
+        assert!(matches!(
+            reducer.observe_artifact(&gap),
             Err(ChatError::OrchestrationUnavailable)
         ));
     }
@@ -3488,6 +3830,311 @@ mod tests {
         assert!(requests[5].contains("event_schema_version=2"));
 
         drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn v3_coordinator_uses_one_mixed_stream_and_commits_artifact_before_terminal_cursor() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
+        const TOKEN: &str = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+        let root = std::env::temp_dir().join(format!("yijie-s10b-v3-app-{}", Uuid::now_v7()));
+        let project_path = root.join("project");
+        let token_directory = root.join("host");
+        fs::create_dir_all(&project_path).unwrap();
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let selection = native_project::create_selection(&project_path)
+            .unwrap()
+            .unwrap();
+        let database = DatabaseWorker::start(
+            root.join("chat"),
+            super::super::database::ChatScope::new(
+                Uuid::now_v7().to_string(),
+                Uuid::now_v7().to_string(),
+            )
+            .unwrap(),
+            Box::new(TestKeyStore),
+            Box::new(TestKeyStore),
+        )
+        .unwrap();
+        let project = database
+            .register_project(selection.canonical_path, selection.bookmark)
+            .await
+            .unwrap();
+        let pending = database
+            .create_session_and_enqueue(
+                Uuid::parse_str(&project.id).unwrap(),
+                "v3 input".to_owned(),
+                Uuid::now_v7(),
+            )
+            .await
+            .unwrap();
+        let identity = EventIdentity {
+            stream_id: Uuid::now_v7(),
+            task_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            thread_id: Uuid::now_v7(),
+            turn_id: Uuid::now_v7(),
+        };
+        let artifact_id = Uuid::now_v7();
+        let content = b"name,value\nlocal,4\n";
+        let digest = format!("{:x}", sha2::Sha256::digest(content));
+        let session_body = serde_json::json!({
+            "session": {
+                "task_id": identity.task_id,
+                "agent_session_id": identity.agent_session_id,
+                "codex_thread_id": identity.thread_id,
+                "active_turn_id": "",
+                "state": "idle",
+                "cwd": project_path,
+                "model": "MiniMax-M3",
+                "model_provider": "minimax",
+                "failure_code": "",
+                "created_at": "2026-08-20T00:00:00Z",
+                "updated_at": "2026-08-20T00:00:01Z"
+            }
+        })
+        .to_string();
+        let frame = |sequence: u64,
+                     item_id: Option<&str>,
+                     event_type: &str,
+                     terminal: bool,
+                     payload: serde_json::Value| {
+            let event_id = Uuid::now_v7();
+            let mut body = serde_json::json!({
+                "schema_version": 3,
+                "event_id": event_id,
+                "stream_id": identity.stream_id,
+                "sequence": sequence,
+                "occurred_at": "2026-08-20T00:00:02Z",
+                "task_id": identity.task_id,
+                "agent_session_id": identity.agent_session_id,
+                "codex_thread_id": identity.thread_id,
+                "turn_id": identity.turn_id,
+                "event_type": event_type,
+                "terminal": terminal,
+                "payload": payload
+            });
+            if let Some(item_id) = item_id {
+                body["item_id"] = serde_json::json!(item_id);
+            }
+            format!(
+                "id: {}:{sequence}\nevent: {event_type}\ndata: {body}\n\n",
+                identity.stream_id
+            )
+        };
+        let artifact_payload = |status: &str| {
+            serde_json::json!({
+                "artifact_id": artifact_id,
+                "kind": "file",
+                "provenance": "synthetic",
+                "status": status,
+                "ordinal": 0
+            })
+        };
+        let mut sse_body = String::new();
+        sse_body.push_str(&frame(
+            1,
+            Some("answer"),
+            "item.agent_message.delta",
+            false,
+            serde_json::json!({"delta":"v3 answer"}),
+        ));
+        let mut started = artifact_payload("in_progress");
+        started["display_name"] = serde_json::json!("synthetic.csv");
+        sse_body.push_str(&frame(
+            2,
+            Some("artifact"),
+            "item.artifact.started",
+            false,
+            started,
+        ));
+        let mut progress = artifact_payload("in_progress");
+        progress["stage"] = serde_json::json!("generating");
+        progress["progress_percent"] = serde_json::json!(50.0);
+        sse_body.push_str(&frame(
+            3,
+            Some("artifact"),
+            "item.artifact.progress",
+            false,
+            progress,
+        ));
+        let mut completed = artifact_payload("ready");
+        completed["display_name"] = serde_json::json!("synthetic.csv");
+        completed["media_type"] = serde_json::json!("text/csv");
+        completed["size_bytes"] = serde_json::json!(content.len());
+        completed["sha256"] = serde_json::json!(digest);
+        completed["content_href"] = serde_json::json!(format!(
+            "/v3/agent-sessions/{}/artifacts/{artifact_id}/content",
+            identity.agent_session_id
+        ));
+        sse_body.push_str(&frame(
+            4,
+            Some("artifact"),
+            "item.artifact.completed",
+            false,
+            completed,
+        ));
+        sse_body.push_str(&frame(
+            5,
+            None,
+            "turn.completed",
+            true,
+            serde_json::json!({"status":"completed"}),
+        ));
+        let stream_header = identity.stream_id.to_string();
+        let stream_response = http_response(
+            "200 OK",
+            &[
+                ("Content-Type", "text/event-stream"),
+                ("Cache-Control", "no-store"),
+                ("X-Accel-Buffering", "no"),
+                ("X-Yijie-Event-Schema-Version", "3"),
+                ("X-Yijie-Event-Stream-ID", &stream_header),
+            ],
+            &sse_body,
+        );
+        let etag = format!("\"{digest}\"");
+        let content_response = http_response(
+            "200 OK",
+            &[
+                ("Content-Type", "text/csv"),
+                ("Cache-Control", "no-store"),
+                ("ETag", &etag),
+                ("Content-Disposition", "attachment; filename=synthetic.csv"),
+                ("Accept-Ranges", "bytes"),
+                ("X-Content-Type-Options", "nosniff"),
+            ],
+            std::str::from_utf8(content).unwrap(),
+        );
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response("201 Created", &session_body),
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": identity.turn_id}).to_string(),
+            ),
+            ready_response(NONCE),
+            stream_response,
+            ready_response(NONCE),
+            content_response,
+            ready_response(NONCE),
+            json_response(
+                "500 Internal Server Error",
+                r#"{"error":{"code":"internal_error","message":"synthetic"}}"#,
+            ),
+        ])
+        .await;
+        let bridge = Arc::new(
+            HostBridge::from_connection(HostConnection {
+                port,
+                token_path: token_path.clone(),
+                instance_nonce: NONCE.to_owned(),
+            })
+            .unwrap(),
+        );
+        let public_tasks = Arc::new(FixedPublicTaskControlPlane::new([
+            PublicTaskCreateOutcome::Bound {
+                public_task_id: identity.task_id,
+            },
+        ]));
+        let application =
+            ConversationApplication::new_with_artifacts_v3(database.clone(), bridge, public_tasks);
+        assert!(matches!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::ControlPlaneChanged(_)
+        ));
+        assert!(matches!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::SessionBound { .. }
+        ));
+        assert!(matches!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::TurnAccepted { .. }
+        ));
+        application
+            .stream_active_turn(pending.session_id)
+            .await
+            .unwrap();
+        let artifacts = database
+            .load_artifacts_for_turns(vec![pending.turn_id])
+            .await
+            .unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].state, "ready");
+        let pending_ack = database
+            .pending_artifact_acknowledgements()
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("ready commit must retain ACK intent after Host failure");
+        let history = application
+            .load_history(pending.session_id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].messages[1].content, "v3 answer");
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 10);
+        assert!(requests[5].contains(&format!(
+            "/v3/agent-sessions/{}/events?event_schema_version=3",
+            identity.agent_session_id
+        )));
+        assert!(!requests
+            .iter()
+            .any(|request| request.contains("/v2/agent-sessions")));
+        assert!(requests[7].contains(&format!(
+            "/v3/agent-sessions/{}/artifacts/{artifact_id}/content",
+            identity.agent_session_id
+        )));
+        assert!(requests[9].contains(&format!(
+            "/v3/agent-sessions/{}/artifacts/{artifact_id}/ack",
+            identity.agent_session_id
+        )));
+        drop(application);
+        let recovery_body = serde_json::json!({
+            "artifact_id": artifact_id,
+            "ack_id": pending_ack.commit.ack_id,
+            "status": "acknowledged",
+            "cleanup_status": "completed",
+            "acknowledged_at": "2026-08-20T00:00:06Z"
+        })
+        .to_string();
+        let (recovery_port, recovery_server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response("200 OK", &recovery_body),
+        ])
+        .await;
+        let recovery_host = Arc::new(
+            HostBridge::from_connection(HostConnection {
+                port: recovery_port,
+                token_path,
+                instance_nonce: NONCE.to_owned(),
+            })
+            .unwrap(),
+        );
+        let recovery = ArtifactTransferService::new(recovery_host, database.clone());
+        assert_eq!(
+            recovery.recover_pending_acknowledgements().await.unwrap(),
+            1
+        );
+        assert!(database
+            .pending_artifact_acknowledgements()
+            .await
+            .unwrap()
+            .is_empty());
+        let recovery_requests = recovery_server.await.unwrap();
+        assert_eq!(recovery_requests.len(), 2);
+        assert!(recovery_requests[1].contains(&format!(
+            "/v3/agent-sessions/{}/artifacts/{artifact_id}/ack",
+            identity.agent_session_id
+        )));
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

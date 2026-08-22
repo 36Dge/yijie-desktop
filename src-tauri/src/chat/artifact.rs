@@ -1,8 +1,12 @@
 use super::attachment::validate_image_content;
-use super::database::ChatRepository;
+use super::database::{
+    advance_cursor, validate_cursor, validate_message_output, ChatRepository, TurnProgress,
+};
 use super::error::{map_sqlite_error, ChatError};
 use super::host_bridge::HostBridge;
-use super::host_domain::{HostBridgeError, HostBridgeErrorKind, HostErrorCode};
+use super::host_domain::{
+    HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostErrorCode,
+};
 use super::worker::DatabaseWorker;
 use rusqlite::{params, OptionalExtension};
 use serde::Deserialize;
@@ -451,6 +455,12 @@ pub struct StoredArtifactCommit {
     pub expired: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct PendingArtifactAcknowledgement {
+    pub manifest: ArtifactManifest,
+    pub commit: ArtifactCommit,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferDisposition {
     Fetch,
@@ -592,6 +602,93 @@ impl ArtifactTransferService {
         }
     }
 
+    pub async fn transfer_completed_with_cursor(
+        &self,
+        manifest: ArtifactManifest,
+        progress: TurnProgress,
+    ) -> Result<ArtifactTransferOutcome, ChatError> {
+        match self
+            .database
+            .begin_artifact_transfer(manifest.clone())
+            .await?
+        {
+            TransferDisposition::AlreadyCommitted => {
+                let stored = self
+                    .database
+                    .commit_existing_artifact_cursor(progress, manifest.clone())
+                    .await?;
+                let host_acknowledged = if stored.host_acknowledged || stored.expired {
+                    stored.host_acknowledged
+                } else {
+                    self.acknowledge_committed(&manifest, &stored.commit)
+                        .await
+                        .unwrap_or(false)
+                };
+                return Ok(ArtifactTransferOutcome {
+                    commit: stored.commit,
+                    host_acknowledged,
+                });
+            }
+            TransferDisposition::Fetch => {}
+        }
+        let downloaded = match self.download_with_retry(&manifest).await {
+            Ok(downloaded) => downloaded,
+            Err(error) => {
+                let error_code = if matches!(
+                    error,
+                    ChatError::InvalidConfiguration | ChatError::ConversationConflict
+                ) {
+                    "integrity_failed"
+                } else {
+                    "resource_unavailable"
+                };
+                self.database
+                    .commit_artifact_failure_with_cursor(
+                        progress,
+                        artifact_identity_from_manifest(&manifest),
+                        error_code.to_owned(),
+                        error_code == "resource_unavailable",
+                    )
+                    .await?;
+                return Err(error);
+            }
+        };
+        let local_committed_at = unix_seconds()?;
+        let commit = self
+            .database
+            .commit_artifact_with_cursor(
+                manifest.clone(),
+                downloaded,
+                local_committed_at,
+                Uuid::now_v7(),
+                progress,
+            )
+            .await?;
+        let host_acknowledged = self
+            .acknowledge_committed(&manifest, &commit)
+            .await
+            .unwrap_or(false);
+        Ok(ArtifactTransferOutcome {
+            commit,
+            host_acknowledged,
+        })
+    }
+
+    pub async fn recover_pending_acknowledgements(&self) -> Result<usize, ChatError> {
+        let pending = self.database.pending_artifact_acknowledgements().await?;
+        let mut acknowledged = 0_usize;
+        for item in pending {
+            if self
+                .acknowledge_committed(&item.manifest, &item.commit)
+                .await
+                .unwrap_or(false)
+            {
+                acknowledged += 1;
+            }
+        }
+        Ok(acknowledged)
+    }
+
     pub async fn acknowledge_committed(
         &self,
         manifest: &ArtifactManifest,
@@ -633,6 +730,18 @@ impl ArtifactTransferService {
             }
         }
         Err(ChatError::OrchestrationUnavailable)
+    }
+}
+
+fn artifact_identity_from_manifest(manifest: &ArtifactManifest) -> ArtifactIdentity {
+    ArtifactIdentity {
+        artifact_id: manifest.artifact_id,
+        local_session_id: manifest.local_session_id,
+        local_turn_id: manifest.local_turn_id,
+        kind: manifest.kind,
+        provenance: manifest.provenance,
+        ordinal: manifest.ordinal,
+        display_name: manifest.display_name.clone(),
     }
 }
 
@@ -737,10 +846,58 @@ pub fn decode_artifact_event_v3(
     {
         return Err(ChatError::InvalidInput);
     }
+    decode_artifact_event_envelope_v3(
+        &HostArtifactEventV3 {
+            cursor: super::host_domain::HostEventCursor {
+                stream_id: wire.stream_id,
+                sequence: wire.sequence,
+            },
+            event_type: wire.event_type,
+            event_id: wire.event_id,
+            task_id: wire.task_id,
+            agent_session_id: wire.agent_session_id,
+            codex_thread_id: wire.codex_thread_id,
+            turn_id: wire.turn_id,
+            occurred_at: wire.occurred_at,
+            payload: wire.payload,
+        },
+        expected_agent_session_id,
+        expected_runtime_turn_id,
+        local_session_id,
+        local_turn_id,
+    )
+}
+
+pub fn decode_artifact_event_envelope_v3(
+    wire: &HostArtifactEventV3,
+    expected_agent_session_id: Uuid,
+    expected_runtime_turn_id: Uuid,
+    local_session_id: Uuid,
+    local_turn_id: Uuid,
+) -> Result<ArtifactEventV3, ChatError> {
+    if wire.event_id.is_nil()
+        || wire.cursor.stream_id.is_nil()
+        || wire.cursor.sequence == 0
+        || wire.task_id.is_nil()
+        || wire.agent_session_id != expected_agent_session_id
+        || wire.codex_thread_id.is_nil()
+        || wire.turn_id != expected_runtime_turn_id
+        || !valid_rfc3339_utc(&wire.occurred_at)
+        || [
+            expected_agent_session_id,
+            expected_runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        ]
+        .iter()
+        .any(Uuid::is_nil)
+    {
+        return Err(ChatError::InvalidInput);
+    }
     match wire.event_type.as_str() {
         "item.artifact.started" => {
-            let payload: WireArtifactStarted =
-                serde_json::from_value(wire.payload).map_err(|_| ChatError::InvalidInput)?;
+            let payload: WireArtifactStarted = serde_json::from_value(wire.payload.clone())
+                .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "in_progress" {
                 return Err(ChatError::InvalidInput);
             }
@@ -757,8 +914,8 @@ pub fn decode_artifact_event_v3(
             Ok(ArtifactEventV3::Started(identity))
         }
         "item.artifact.progress" => {
-            let payload: WireArtifactProgress =
-                serde_json::from_value(wire.payload).map_err(|_| ChatError::InvalidInput)?;
+            let payload: WireArtifactProgress = serde_json::from_value(wire.payload.clone())
+                .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "in_progress"
                 || payload.stage.is_none() && payload.progress_percent.is_none()
                 || payload
@@ -794,8 +951,8 @@ pub fn decode_artifact_event_v3(
             })
         }
         "item.artifact.completed" => {
-            let payload: WireArtifactCompleted =
-                serde_json::from_value(wire.payload).map_err(|_| ChatError::InvalidInput)?;
+            let payload: WireArtifactCompleted = serde_json::from_value(wire.payload.clone())
+                .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "ready" {
                 return Err(ChatError::InvalidInput);
             }
@@ -818,8 +975,8 @@ pub fn decode_artifact_event_v3(
             Ok(ArtifactEventV3::Completed(manifest))
         }
         "item.artifact.failed" => {
-            let payload: WireArtifactFailed =
-                serde_json::from_value(wire.payload).map_err(|_| ChatError::InvalidInput)?;
+            let payload: WireArtifactFailed = serde_json::from_value(wire.payload.clone())
+                .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "failed"
                 || payload
                     .message
@@ -849,6 +1006,69 @@ pub fn decode_artifact_event_v3(
 }
 
 impl ChatRepository {
+    pub fn commit_artifact_event_progress(
+        &mut self,
+        progress: &TurnProgress,
+        event: &ArtifactEventV3,
+    ) -> Result<(), ChatError> {
+        if matches!(event, ArtifactEventV3::Completed(_)) {
+            return Err(ChatError::InvalidInput);
+        }
+        self.connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(map_sqlite_error)?;
+        let result = (|| {
+            persist_turn_progress_on_connection(&self.connection, &self.scope, progress)?;
+            match event {
+                ArtifactEventV3::Started(identity) => self.record_artifact_started(identity),
+                ArtifactEventV3::Progress {
+                    identity,
+                    stage,
+                    progress_percent,
+                } => self.record_artifact_progress(identity, *stage, *progress_percent),
+                ArtifactEventV3::Failed {
+                    identity,
+                    error_code,
+                    retryable,
+                } => self.record_artifact_failed(identity, error_code, *retryable),
+                ArtifactEventV3::Completed(_) => Err(ChatError::InvalidInput),
+            }
+        })();
+        finish_manual_transaction(&self.connection, result)
+    }
+
+    pub fn commit_artifact_failure_with_cursor(
+        &mut self,
+        progress: &TurnProgress,
+        identity: &ArtifactIdentity,
+        error_code: &str,
+        retryable: bool,
+    ) -> Result<(), ChatError> {
+        self.commit_artifact_event_progress(
+            progress,
+            &ArtifactEventV3::Failed {
+                identity: identity.clone(),
+                error_code: error_code.to_owned(),
+                retryable,
+            },
+        )
+    }
+
+    pub fn commit_existing_artifact_cursor(
+        &mut self,
+        progress: &TurnProgress,
+        manifest: &ArtifactManifest,
+    ) -> Result<StoredArtifactCommit, ChatError> {
+        self.connection
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(map_sqlite_error)?;
+        let result = (|| {
+            persist_turn_progress_on_connection(&self.connection, &self.scope, progress)?;
+            self.artifact_commit(manifest)
+        })();
+        finish_manual_transaction(&self.connection, result)
+    }
+
     fn require_owned_artifact_turn(
         &self,
         session_id: Uuid,
@@ -1214,6 +1434,34 @@ impl ChatRepository {
         local_committed_at: i64,
         ack_id: Uuid,
     ) -> Result<ArtifactCommit, ChatError> {
+        self.commit_artifact_internal(manifest, downloaded, local_committed_at, ack_id, None)
+    }
+
+    pub fn commit_artifact_with_cursor(
+        &mut self,
+        manifest: &ArtifactManifest,
+        downloaded: &DownloadedArtifact,
+        local_committed_at: i64,
+        ack_id: Uuid,
+        progress: &TurnProgress,
+    ) -> Result<ArtifactCommit, ChatError> {
+        self.commit_artifact_internal(
+            manifest,
+            downloaded,
+            local_committed_at,
+            ack_id,
+            Some(progress),
+        )
+    }
+
+    fn commit_artifact_internal(
+        &mut self,
+        manifest: &ArtifactManifest,
+        downloaded: &DownloadedArtifact,
+        local_committed_at: i64,
+        ack_id: Uuid,
+        progress: Option<&TurnProgress>,
+    ) -> Result<ArtifactCommit, ChatError> {
         manifest.validate()?;
         validate_downloaded(manifest, downloaded)?;
         if local_committed_at < 0 || ack_id.is_nil() {
@@ -1223,6 +1471,9 @@ impl ChatRepository {
             .checked_add(ARTIFACT_RETENTION_SECONDS)
             .ok_or(ChatError::InvalidInput)?;
         let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        if let Some(progress) = progress {
+            persist_turn_progress_on_connection(&transaction, &self.scope, progress)?;
+        }
         let row_id: i64 = transaction
             .query_row(
                 "SELECT rowid FROM chat_output_artifacts
@@ -1395,6 +1646,134 @@ impl ChatRepository {
             return Err(ChatError::NotFound);
         }
         Ok(())
+    }
+
+    pub fn pending_artifact_acknowledgements(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<PendingArtifactAcknowledgement>, ChatError> {
+        if !(1..=64).contains(&limit) {
+            return Err(ChatError::InvalidInput);
+        }
+        type PendingRow = (
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<String>,
+            String,
+            i64,
+            String,
+            bool,
+            String,
+            String,
+            i64,
+            i64,
+        );
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT a.artifact_id, a.session_id, a.turn_id, a.kind, a.provenance,
+                        a.ordinal, a.display_name, a.media_type, a.byte_size, a.sha256,
+                        a.poster_media_type IS NOT NULL, s.agent_session_id,
+                        a.ack_id, a.local_committed_at, a.expires_at
+                 FROM chat_output_artifacts a
+                 JOIN chat_sessions s ON s.id=a.session_id
+                 WHERE a.owner_user_id=?1 AND a.tenant_id=?2
+                   AND a.state='ready' AND a.ack_state='pending'
+                 ORDER BY a.local_committed_at, a.artifact_id
+                 LIMIT ?3",
+            )
+            .map_err(map_sqlite_error)?;
+        let rows = statement
+            .query_map(
+                params![
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    i64::try_from(limit).map_err(|_| ChatError::InvalidInput)?
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
+                        row.get(14)?,
+                    ))
+                },
+            )
+            .map_err(map_sqlite_error)?
+            .collect::<rusqlite::Result<Vec<PendingRow>>>()
+            .map_err(map_sqlite_error)?;
+        rows.into_iter()
+            .map(
+                |(
+                    artifact_id,
+                    session_id,
+                    turn_id,
+                    kind,
+                    provenance,
+                    ordinal,
+                    display_name,
+                    media_type,
+                    byte_size,
+                    sha256,
+                    has_poster,
+                    agent_session_id,
+                    ack_id,
+                    local_committed_at,
+                    expires_at,
+                )| {
+                    let artifact_id = parse_uuid(&artifact_id)?;
+                    let agent_session_id = parse_uuid(&agent_session_id)?;
+                    let manifest = ArtifactManifest {
+                        artifact_id,
+                        agent_session_id,
+                        local_session_id: parse_uuid(&session_id)?,
+                        local_turn_id: parse_uuid(&turn_id)?,
+                        kind: ArtifactKind::parse(&kind)?,
+                        provenance: ArtifactProvenance::parse(&provenance)?,
+                        ordinal: usize::try_from(ordinal)
+                            .map_err(|_| ChatError::DatabaseUnavailable)?,
+                        display_name,
+                        media_type,
+                        size_bytes: usize::try_from(byte_size)
+                            .map_err(|_| ChatError::DatabaseUnavailable)?,
+                        sha256,
+                        content_href: format!(
+                            "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content"
+                        ),
+                        poster_href: has_poster.then(|| {
+                            format!(
+                                "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/poster"
+                            )
+                        }),
+                    };
+                    manifest.validate()?;
+                    Ok(PendingArtifactAcknowledgement {
+                        manifest,
+                        commit: ArtifactCommit {
+                            artifact_id,
+                            ack_id: parse_uuid(&ack_id)?,
+                            local_committed_at,
+                            expires_at,
+                        },
+                    })
+                },
+            )
+            .collect()
     }
 
     pub(crate) fn read_ready_image(
@@ -2303,6 +2682,63 @@ impl ChatRepository {
             self.checkpoint_after_delete()?;
         }
         Ok(ids.len())
+    }
+}
+
+fn persist_turn_progress_on_connection(
+    connection: &rusqlite::Connection,
+    scope: &super::database::ChatScope,
+    progress: &TurnProgress,
+) -> Result<(), ChatError> {
+    if progress.local_turn_id.is_nil() {
+        return Err(ChatError::InvalidInput);
+    }
+    validate_message_output(&progress.assistant_text)?;
+    validate_cursor(&progress.cursor)?;
+    let session_id: String = connection
+        .query_row(
+            "SELECT t.session_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+             WHERE t.id=?1 AND t.status IN ('streaming', 'stopping')
+               AND s.owner_user_id=?2 AND s.tenant_id=?3",
+            params![
+                progress.local_turn_id.to_string(),
+                scope.owner_user_id,
+                scope.tenant_id
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite_error)?
+        .ok_or(ChatError::ConversationConflict)?;
+    let changed = connection
+        .execute(
+            "UPDATE chat_messages SET content=?1
+             WHERE turn_id=?2 AND role='assistant' AND status='pending'",
+            params![progress.assistant_text, progress.local_turn_id.to_string()],
+        )
+        .map_err(map_sqlite_error)?;
+    if changed != 1 {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    advance_cursor(connection, &session_id, &progress.cursor)
+}
+
+fn finish_manual_transaction<T>(
+    connection: &rusqlite::Connection,
+    result: Result<T, ChatError>,
+) -> Result<T, ChatError> {
+    match result {
+        Ok(value) => match connection.execute_batch("COMMIT") {
+            Ok(()) => Ok(value),
+            Err(error) => {
+                let _ = connection.execute_batch("ROLLBACK");
+                Err(map_sqlite_error(error))
+            }
+        },
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
     }
 }
 
@@ -4182,6 +4618,167 @@ mod tests {
                 .read_ready_video(session_id, turn_id, artifact_id, 1_001)
                 .unwrap(),
             Err(ReadyVideoReadError::Integrity)
+        );
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn artifact_state_assistant_projection_and_v3_cursor_commit_or_rollback_together() {
+        let root = std::env::temp_dir().join(format!("yijie-s10b-atomic-{}", Uuid::now_v7()));
+        let owner = Uuid::now_v7();
+        let tenant = Uuid::now_v7();
+        let project_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let operation_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let runtime_thread_id = Uuid::now_v7();
+        let runtime_turn_id = Uuid::now_v7();
+        let artifact_id = Uuid::now_v7();
+        let stream_id = Uuid::now_v7();
+        let scope = ChatScope::new(owner.to_string(), tenant.to_string()).unwrap();
+        let mut repository = ChatRepository::open(
+            &root,
+            &DatabaseKey::from_bytes([0x51; 32]),
+            ReceiptKey::from_bytes([0x52; 32]),
+            scope,
+        )
+        .unwrap();
+        repository.connection.execute(
+            "INSERT INTO chat_projects(id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at)
+             VALUES (?1, ?2, ?3, 'fixture', ?4, ?5, 1)",
+            params![project_id.to_string(), owner.to_string(), tenant.to_string(), "a".repeat(64), vec![1_u8]],
+        ).unwrap();
+        repository.connection.execute(
+            "INSERT INTO chat_sessions(id, owner_user_id, tenant_id, project_id, title, title_source,
+               title_job_status, created_at, last_activity_at, agent_session_id, runtime_thread_id)
+             VALUES (?1, ?2, ?3, ?4, 'fixture', 'fallback', 'not_started', 1, 1, ?5, ?6)",
+            params![session_id.to_string(), owner.to_string(), tenant.to_string(), project_id.to_string(), agent_session_id.to_string(), runtime_thread_id.to_string()],
+        ).unwrap();
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, runtime_turn_id, status)
+             VALUES (?1, ?2, ?3, ?4, 'streaming')",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    operation_id.to_string(),
+                    runtime_turn_id.to_string()
+                ],
+            )
+            .unwrap();
+        repository.connection.execute(
+            "INSERT INTO chat_messages(id, session_id, turn_id, role, content, status, ordinal, created_at)
+             VALUES (?1, ?2, ?3, 'assistant', '', 'pending', 0, 1)",
+            params![Uuid::now_v7().to_string(), session_id.to_string(), turn_id.to_string()],
+        ).unwrap();
+
+        let identity = ArtifactIdentity {
+            artifact_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::File,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: Some("safe.csv".to_owned()),
+        };
+        let first = TurnProgress {
+            local_turn_id: turn_id,
+            assistant_text: "durable-prefix".to_owned(),
+            cursor: super::super::database::StoredEventCursor {
+                stream_id,
+                sequence: 1,
+                event_id: Uuid::now_v7(),
+            },
+        };
+        repository
+            .commit_artifact_event_progress(&first, &ArtifactEventV3::Started(identity.clone()))
+            .unwrap();
+        let conflicting = ArtifactIdentity {
+            ordinal: 1,
+            ..identity.clone()
+        };
+        let second = TurnProgress {
+            local_turn_id: turn_id,
+            assistant_text: "must-roll-back".to_owned(),
+            cursor: super::super::database::StoredEventCursor {
+                stream_id,
+                sequence: 2,
+                event_id: Uuid::now_v7(),
+            },
+        };
+        assert_eq!(
+            repository
+                .commit_artifact_event_progress(&second, &ArtifactEventV3::Started(conflicting)),
+            Err(ChatError::ConversationConflict)
+        );
+        let stored: (String, i64, String) = repository
+            .connection
+            .query_row(
+                "SELECT m.content, c.sequence, a.state
+             FROM chat_messages m
+             JOIN chat_event_cursors c ON c.session_id=m.session_id
+             JOIN chat_output_artifacts a ON a.turn_id=m.turn_id
+             WHERE m.turn_id=?1 AND m.role='assistant'",
+                [turn_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            stored,
+            ("durable-prefix".to_owned(), 1, "announced".to_owned())
+        );
+
+        let content = b"name,value\nalpha,1\n".to_vec();
+        let digest = format!("{:x}", Sha256::digest(&content));
+        let manifest = ArtifactManifest {
+            artifact_id,
+            agent_session_id,
+            local_session_id: session_id,
+            local_turn_id: turn_id,
+            kind: ArtifactKind::File,
+            provenance: ArtifactProvenance::Synthetic,
+            ordinal: 0,
+            display_name: identity.display_name,
+            media_type: "text/csv".to_owned(),
+            size_bytes: content.len(),
+            sha256: digest.clone(),
+            content_href: format!(
+                "/v3/agent-sessions/{agent_session_id}/artifacts/{artifact_id}/content"
+            ),
+            poster_href: None,
+        };
+        repository.begin_artifact_transfer(&manifest).unwrap();
+        let commit = repository
+            .commit_artifact_with_cursor(
+                &manifest,
+                &DownloadedArtifact {
+                    content: DownloadedResource {
+                        media_type: manifest.media_type.clone(),
+                        size_bytes: content.len(),
+                        sha256: digest,
+                        bytes: content,
+                    },
+                    poster: None,
+                },
+                100,
+                Uuid::now_v7(),
+                &second,
+            )
+            .unwrap();
+        let ready: (String, String, i64) = repository.connection.query_row(
+            "SELECT state, ack_state, sequence FROM chat_output_artifacts
+             JOIN chat_event_cursors ON chat_event_cursors.session_id=chat_output_artifacts.session_id
+             WHERE artifact_id=?1",
+            [artifact_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(ready, ("ready".to_owned(), "pending".to_owned(), 2));
+        assert_eq!(
+            repository.pending_artifact_acknowledgements(64).unwrap()[0].commit,
+            commit
         );
         drop(repository);
         fs::remove_dir_all(root).unwrap();

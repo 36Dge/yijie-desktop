@@ -23,15 +23,17 @@ mod worker;
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
 use crate::native_auth::NativeAuthRuntime;
 pub use application::{
-    AuthorizedConversationApplication, ConversationApplication, ConversationCoordinator,
-    ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome, LiveReasoningProjection,
-    LiveTurnProjection, ReducerOutcome, ReducerOutcomeKind, TurnEventReducer, TurnProjectionSink,
+    ArtifactResyncReason, AuthorizedConversationApplication, ConversationApplication,
+    ConversationCoordinator, ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome,
+    LiveReasoningProjection, LiveTurnProjection, ReducerOutcome, ReducerOutcomeKind,
+    TurnEventReducer, TurnProjectionSink,
 };
 pub use artifact::{
-    decode_artifact_event_v3, ArtifactCommit, ArtifactEventV3, ArtifactIdentity, ArtifactKind,
-    ArtifactManifest, ArtifactProgressStage, ArtifactProjection, ArtifactProvenance,
-    ArtifactTransferOutcome, ArtifactTransferService, DownloadedArtifact, DownloadedResource,
-    StoredArtifactCommit, TransferDisposition, ARTIFACT_RETENTION_SECONDS,
+    decode_artifact_event_envelope_v3, decode_artifact_event_v3, ArtifactCommit, ArtifactEventV3,
+    ArtifactIdentity, ArtifactKind, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
+    ArtifactProvenance, ArtifactTransferOutcome, ArtifactTransferService, DownloadedArtifact,
+    DownloadedResource, PendingArtifactAcknowledgement, StoredArtifactCommit, TransferDisposition,
+    ARTIFACT_RETENTION_SECONDS,
 };
 pub use artifact_file_native::ArtifactFileNativeRuntime;
 pub use artifact_native::ArtifactNativeRuntime;
@@ -52,13 +54,14 @@ pub use database::{
 pub use error::{ChatCommandError, ChatError};
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
 pub use host_domain::{
-    HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupReason,
-    HostCleanupSurfaceStatus, HostCleanupSurfaces, HostErrorCode, HostEvent, HostEventCursor,
-    HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSession,
-    HostSessionFailure, HostSessionState, HostTurnStatus,
+    HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
+    HostCleanupReason, HostCleanupSurfaceStatus, HostCleanupSurfaces, HostErrorCode, HostEvent,
+    HostEventCursor, HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus,
+    HostSession, HostSessionFailure, HostSessionState, HostStreamEvent, HostTurnStatus,
 };
 pub use ipc::{
-    ChatIpcRuntime, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION, CHAT_IPC_V3_SCHEMA_VERSION,
+    ChatIpcRuntime, CHAT_ARTIFACT_LIVE_EVENT_CHANNEL, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION,
+    CHAT_IPC_V3_SCHEMA_VERSION,
 };
 pub use keychain::{
     DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore, DATABASE_KEYCHAIN_ACCOUNT,
@@ -674,7 +677,16 @@ impl ChatRuntime {
             RuntimeMode::Disabled => return Err(ChatError::Disabled),
             RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
         };
-        Ok(ConversationApplication::new(database, host, public_tasks))
+        let configured = std::env::var(ARTIFACTS_V3_FLAG).ok();
+        if artifacts_v3_transfer_enabled(configured.as_deref()) {
+            Ok(ConversationApplication::new_with_artifacts_v3(
+                database,
+                host,
+                public_tasks,
+            ))
+        } else {
+            Ok(ConversationApplication::new(database, host, public_tasks))
+        }
     }
 
     pub async fn local_offline_conversation_application(

@@ -7,7 +7,8 @@ use super::database::HostTurnInputBlock;
 use super::host_domain::{
     parse_cleanup_reason, parse_cleanup_surface, parse_host_error_code, protocol_error,
     HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupSurfaces, HostErrorCode,
-    HostEvent, HostEventCursor, HostSession, HostSessionFailure, HostSessionState, SseDecoder,
+    HostEvent, HostEventCursor, HostSession, HostSessionFailure, HostSessionState, HostStreamEvent,
+    SseDecoder,
 };
 use super::sidecar::HostConnection;
 use base64::Engine;
@@ -94,6 +95,14 @@ impl Debug for HostEventStream {
 
 impl HostEventStream {
     pub async fn next_event(&mut self) -> Result<Option<HostEvent>, HostBridgeError> {
+        match self.next_stream_event().await? {
+            Some(HostStreamEvent::Ordinary(event)) => Ok(Some(event)),
+            Some(HostStreamEvent::Artifact(_)) => Err(protocol_error()),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn next_stream_event(&mut self) -> Result<Option<HostStreamEvent>, HostBridgeError> {
         if let Some(event) = self.decoder.next() {
             return Ok(Some(event));
         }
@@ -512,16 +521,22 @@ impl HostBridge {
         }
     }
 
-    pub async fn open_event_stream_v2(
+    async fn open_event_stream(
         &self,
         session_id: Uuid,
         cursor: Option<HostEventCursor>,
+        schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
+        if !matches!(schema_version, 2 | 3) {
+            return Err(protocol_error());
+        }
         let mut request = self
             .authorized_request(
                 Method::GET,
-                &format!("/v2/agent-sessions/{session_id}/events?event_schema_version=2"),
+                &format!(
+                    "/v{schema_version}/agent-sessions/{session_id}/events?event_schema_version={schema_version}"
+                ),
             )
             .await?;
         if let Some(cursor) = cursor {
@@ -536,7 +551,8 @@ impl HostBridge {
         validate_no_store(response.headers())?;
         if header_text(response.headers(), CONTENT_TYPE)? != "text/event-stream"
             || header_text_name(response.headers(), "X-Accel-Buffering")? != "no"
-            || header_text_name(response.headers(), "X-Yijie-Event-Schema-Version")? != "2"
+            || header_text_name(response.headers(), "X-Yijie-Event-Schema-Version")?
+                != schema_version.to_string()
         {
             return Err(protocol_error());
         }
@@ -551,9 +567,25 @@ impl HostBridge {
         };
         Ok(HostEventStream {
             response,
-            decoder: SseDecoder::new(stream_id, last_sequence),
+            decoder: SseDecoder::new(stream_id, last_sequence, schema_version),
             finished: false,
         })
+    }
+
+    pub async fn open_event_stream_v2(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 2).await
+    }
+
+    pub async fn open_event_stream_v3(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 3).await
     }
 
     pub async fn download_artifact(
@@ -1823,6 +1855,63 @@ mod tests {
             "GET /v2/agent-sessions/{session_id}/events?event_schema_version=2 HTTP/1.1"
         )));
         assert!(requests[1].contains(&format!("last-event-id: {stream_id}:4")));
+    }
+
+    #[tokio::test]
+    async fn v3_stream_uses_only_exact_negotiated_route_and_returns_common_artifact_envelope() {
+        let token = TestToken::new(0o600);
+        let stream_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let event_id = Uuid::now_v7();
+        let data = serde_json::json!({
+            "schema_version": 3,
+            "event_id": event_id,
+            "stream_id": stream_id,
+            "sequence": 1,
+            "occurred_at": "2026-08-20T00:00:00Z",
+            "task_id": Uuid::now_v7(),
+            "agent_session_id": agent_session_id,
+            "codex_thread_id": Uuid::now_v7(),
+            "turn_id": Uuid::now_v7(),
+            "event_type": "item.artifact.started",
+            "terminal": false,
+            "payload": {
+                "artifact_id": Uuid::now_v7(),
+                "kind": "image",
+                "provenance": "synthetic",
+                "status": "in_progress",
+                "ordinal": 0
+            }
+        });
+        let body = format!("id: {stream_id}:1\nevent: item.artifact.started\ndata: {data}\n\n");
+        let stream_response = response(
+            "200 OK",
+            &[
+                ("Content-Type", "text/event-stream"),
+                ("Cache-Control", "no-store"),
+                ("X-Accel-Buffering", "no"),
+                ("X-Yijie-Event-Schema-Version", "3"),
+                ("X-Yijie-Event-Stream-ID", stream_id.to_string().as_str()),
+            ],
+            &body,
+        );
+        let (port, server) = serve(vec![ready_response(NONCE), stream_response]).await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        let mut stream = bridge
+            .open_event_stream_v3(agent_session_id, None)
+            .await
+            .unwrap();
+        let Some(HostStreamEvent::Artifact(event)) = stream.next_stream_event().await.unwrap()
+        else {
+            panic!("Artifact envelope expected");
+        };
+        assert_eq!(event.event_id, event_id);
+        assert_eq!(event.cursor.sequence, 1);
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "GET /v3/agent-sessions/{agent_session_id}/events?event_schema_version=3 HTTP/1.1"
+        )));
+        assert!(!requests[1].contains("/v2/"));
     }
 
     #[tokio::test]

@@ -303,6 +303,49 @@ pub struct HostEvent {
     pub kind: HostEventKind,
 }
 
+pub struct HostArtifactEventV3 {
+    pub cursor: HostEventCursor,
+    pub event_type: String,
+    pub event_id: Uuid,
+    pub task_id: Uuid,
+    pub agent_session_id: Uuid,
+    pub codex_thread_id: Uuid,
+    pub turn_id: Uuid,
+    pub occurred_at: String,
+    pub payload: Value,
+}
+
+impl Debug for HostArtifactEventV3 {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostArtifactEventV3")
+            .field("cursor", &self.cursor)
+            .field("event_type", &self.event_type)
+            .field("event_id", &self.event_id)
+            .field("task_id", &self.task_id)
+            .field("agent_session_id", &self.agent_session_id)
+            .field("codex_thread_id", &self.codex_thread_id)
+            .field("turn_id", &self.turn_id)
+            .field("occurred_at", &self.occurred_at)
+            .field("payload", &"[ARTIFACT_METADATA]")
+            .finish()
+    }
+}
+
+pub enum HostStreamEvent {
+    Ordinary(HostEvent),
+    Artifact(HostArtifactEventV3),
+}
+
+impl Debug for HostStreamEvent {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ordinary(event) => event.fmt(formatter),
+            Self::Artifact(event) => event.fmt(formatter),
+        }
+    }
+}
+
 impl Debug for HostEvent {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -427,15 +470,17 @@ struct ProblemPayload {
 }
 
 pub(super) struct SseDecoder {
+    schema_version: u8,
     expected_stream: Uuid,
     last_sequence: u64,
     buffer: Vec<u8>,
-    ready: VecDeque<HostEvent>,
+    ready: VecDeque<HostStreamEvent>,
 }
 
 impl SseDecoder {
-    pub(super) fn new(expected_stream: Uuid, last_sequence: u64) -> Self {
+    pub(super) fn new(expected_stream: Uuid, last_sequence: u64, schema_version: u8) -> Self {
         Self {
+            schema_version,
             expected_stream,
             last_sequence,
             buffer: Vec::new(),
@@ -470,6 +515,7 @@ impl SseDecoder {
             if let Some(event) = parse_sse_frame(
                 &self.buffer[consumed..frame_end],
                 self.expected_stream,
+                self.schema_version,
                 &mut self.last_sequence,
             )? {
                 self.ready.push_back(event);
@@ -482,7 +528,7 @@ impl SseDecoder {
         Ok(())
     }
 
-    pub(super) fn next(&mut self) -> Option<HostEvent> {
+    pub(super) fn next(&mut self) -> Option<HostStreamEvent> {
         self.ready.pop_front()
     }
 
@@ -513,8 +559,9 @@ fn frame_boundary(bytes: &[u8]) -> Option<(usize, usize)> {
 fn parse_sse_frame(
     frame: &[u8],
     expected_stream: Uuid,
+    schema_version: u8,
     last_sequence: &mut u64,
-) -> Result<Option<HostEvent>, HostBridgeError> {
+) -> Result<Option<HostStreamEvent>, HostBridgeError> {
     if frame.len() > MAX_EVENT_BYTES {
         return Err(protocol_error());
     }
@@ -553,11 +600,18 @@ fn parse_sse_frame(
         return Err(protocol_error());
     }
     let (id_stream, id_sequence) = parse_cursor_text(id)?;
-    if id_stream != expected_stream || id_sequence <= *last_sequence {
+    if id_stream != expected_stream
+        || id_sequence < *last_sequence
+        || schema_version == 2 && id_sequence == *last_sequence
+    {
         return Err(protocol_error());
     }
-    let parsed = parse_event_json(data, expected_stream)?;
-    if parsed.cursor.sequence != id_sequence || parsed.event_type != event_type {
+    let parsed = parse_event_json(data, expected_stream, schema_version)?;
+    let (parsed_cursor, parsed_event_type) = match &parsed {
+        HostStreamEvent::Ordinary(event) => (event.cursor, event.event_type.as_str()),
+        HostStreamEvent::Artifact(event) => (event.cursor, event.event_type.as_str()),
+    };
+    if parsed_cursor.sequence != id_sequence || parsed_event_type != event_type {
         return Err(protocol_error());
     }
     *last_sequence = id_sequence;
@@ -581,13 +635,18 @@ fn parse_cursor_text(value: &str) -> Result<(Uuid, u64), HostBridgeError> {
     Ok((stream, sequence))
 }
 
-fn parse_event_json(data: &str, expected_stream: Uuid) -> Result<HostEvent, HostBridgeError> {
+fn parse_event_json(
+    data: &str,
+    expected_stream: Uuid,
+    schema_version: u8,
+) -> Result<HostStreamEvent, HostBridgeError> {
     if data.is_empty() || data.len() > MAX_EVENT_BYTES || data.contains('\r') || data.contains('\n')
     {
         return Err(protocol_error());
     }
     let wire: WireEvent = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if wire.schema_version != 2
+    if !matches!(schema_version, 2 | 3)
+        || wire.schema_version != schema_version
         || wire.sequence == 0
         || wire.occurred_at.is_empty()
         || wire.occurred_at.len() > 64
@@ -617,11 +676,16 @@ fn parse_event_json(data: &str, expected_stream: Uuid) -> Result<HostEvent, Host
         return Err(protocol_error());
     }
     let turn_id = wire.turn_id.as_deref().map(parse_uuid).transpose()?;
+    let maximum_item_id_bytes = if schema_version == 3 {
+        MAX_CONTEXT_BYTES
+    } else {
+        MAX_ITEM_ID_BYTES
+    };
     let item_id = wire
         .item_id
         .map(|value| {
             if value.is_empty()
-                || value.len() > MAX_ITEM_ID_BYTES
+                || value.len() > maximum_item_id_bytes
                 || value.contains('\r')
                 || value.contains('\n')
                 || value.contains('\0')
@@ -633,6 +697,29 @@ fn parse_event_json(data: &str, expected_stream: Uuid) -> Result<HostEvent, Host
         })
         .transpose()?;
     let event_type = wire.event_type;
+    if schema_version == 3 && is_artifact_event_type(&event_type) {
+        let turn_id = turn_id.ok_or_else(protocol_error)?;
+        if wire.terminal {
+            return Err(protocol_error());
+        }
+        return Ok(HostStreamEvent::Artifact(HostArtifactEventV3 {
+            cursor: HostEventCursor {
+                stream_id,
+                sequence: wire.sequence,
+            },
+            event_type,
+            event_id: parse_uuid(&wire.event_id)?,
+            task_id: parse_uuid(&wire.task_id)?,
+            agent_session_id: parse_uuid(&wire.agent_session_id)?,
+            codex_thread_id: parse_uuid(&wire.codex_thread_id)?,
+            turn_id,
+            occurred_at: wire.occurred_at,
+            payload: wire.payload,
+        }));
+    }
+    if schema_version == 3 && !is_v3_ordinary_event_type(&event_type) {
+        return Err(protocol_error());
+    }
     let kind = parse_event_kind(
         &event_type,
         wire.terminal,
@@ -640,7 +727,7 @@ fn parse_event_json(data: &str, expected_stream: Uuid) -> Result<HostEvent, Host
         item_id.as_deref(),
         wire.payload,
     )?;
-    Ok(HostEvent {
+    Ok(HostStreamEvent::Ordinary(HostEvent {
         cursor: HostEventCursor {
             stream_id,
             sequence: wire.sequence,
@@ -654,7 +741,33 @@ fn parse_event_json(data: &str, expected_stream: Uuid) -> Result<HostEvent, Host
         item_id,
         occurred_at: wire.occurred_at,
         kind,
-    })
+    }))
+}
+
+fn is_artifact_event_type(value: &str) -> bool {
+    matches!(
+        value,
+        "item.artifact.started"
+            | "item.artifact.progress"
+            | "item.artifact.completed"
+            | "item.artifact.failed"
+    )
+}
+
+fn is_v3_ordinary_event_type(value: &str) -> bool {
+    matches!(
+        value,
+        "thread.started"
+            | "turn.started"
+            | "item.started"
+            | "item.agent_message.delta"
+            | "item.reasoning_text.delta"
+            | "item.reasoning_text.finalized"
+            | "item.completed"
+            | "turn.completed"
+            | "error"
+            | "warning"
+    )
 }
 
 fn parse_event_kind(
@@ -942,9 +1055,12 @@ mod tests {
         ] {
             let data = fixture(name).replace(['\r', '\n'], "");
             let frame = format!("id: {stream}:{sequence}\nevent: {event_name}\ndata: {data}\n\n");
-            let mut decoder = SseDecoder::new(stream, sequence - 1);
+            let mut decoder = SseDecoder::new(stream, sequence - 1, 2);
             decoder.push(frame.as_bytes()).unwrap();
-            let event = decoder.next().expect("typed canonical event");
+            let HostStreamEvent::Ordinary(event) = decoder.next().expect("typed canonical event")
+            else {
+                panic!("ordinary event expected");
+            };
             assert_eq!(event.cursor.sequence, sequence);
             let debug = format!("{event:?}");
             assert!(!debug.contains("先比较合成约束"));
@@ -972,9 +1088,11 @@ mod tests {
             "id: {stream}:8\nevent: future.content.variant\ndata: {}\n\n",
             serde_json::to_string(&data).unwrap()
         );
-        let mut decoder = SseDecoder::new(stream, 7);
+        let mut decoder = SseDecoder::new(stream, 7, 2);
         decoder.push(frame.as_bytes()).unwrap();
-        let event = decoder.next().unwrap();
+        let HostStreamEvent::Ordinary(event) = decoder.next().unwrap() else {
+            panic!("ordinary event expected");
+        };
         assert!(matches!(event.kind, HostEventKind::Unknown));
         assert!(!format!("{event:?}").contains("must-be-dropped"));
     }
@@ -1001,11 +1119,11 @@ mod tests {
             "id: {stream}:2\nevent: item.reasoning_text.delta\ndata: {}\n\n",
             serde_json::to_string(&base).unwrap()
         );
-        let mut decoder = SseDecoder::new(stream, 1);
+        let mut decoder = SseDecoder::new(stream, 1, 2);
         assert!(decoder.push(frame.as_bytes()).is_err());
 
         let malformed = format!("id: {stream}:01\nevent: warning\ndata: {{}}\n\n");
-        let mut decoder = SseDecoder::new(stream, 0);
+        let mut decoder = SseDecoder::new(stream, 0, 2);
         assert!(decoder.push(malformed.as_bytes()).is_err());
     }
 
@@ -1015,9 +1133,40 @@ mod tests {
         let heartbeat = ": heartbeat\n\n";
         let chunk = heartbeat.repeat((MAX_EVENT_BYTES / heartbeat.len()) + 2);
         assert!(chunk.len() > MAX_EVENT_BYTES);
-        let mut decoder = SseDecoder::new(stream, 0);
+        let mut decoder = SseDecoder::new(stream, 0, 2);
         decoder.push(chunk.as_bytes()).unwrap();
         decoder.finish().unwrap();
         assert!(decoder.next().is_none());
+    }
+
+    #[test]
+    fn v3_decoder_allows_exact_replay_for_reducer_but_rejects_unknown_required_shapes() {
+        let stream = Uuid::now_v7();
+        let event_id = Uuid::now_v7();
+        let body = serde_json::json!({
+            "schema_version": 3,
+            "event_id": event_id,
+            "stream_id": stream,
+            "sequence": 1,
+            "occurred_at": "2026-08-20T00:00:00Z",
+            "task_id": Uuid::now_v7(),
+            "agent_session_id": Uuid::now_v7(),
+            "codex_thread_id": Uuid::now_v7(),
+            "turn_id": Uuid::now_v7(),
+            "event_type": "item.artifact.started",
+            "terminal": false,
+            "payload": {}
+        });
+        let frame = format!("id: {stream}:1\nevent: item.artifact.started\ndata: {body}\n\n");
+        let mut decoder = SseDecoder::new(stream, 0, 3);
+        decoder.push(frame.as_bytes()).unwrap();
+        decoder.push(frame.as_bytes()).unwrap();
+        assert!(matches!(decoder.next(), Some(HostStreamEvent::Artifact(_))));
+        assert!(matches!(decoder.next(), Some(HostStreamEvent::Artifact(_))));
+
+        let mut unknown = body;
+        unknown["event_type"] = serde_json::json!("future.required.variant");
+        let frame = format!("id: {stream}:2\nevent: future.required.variant\ndata: {unknown}\n\n");
+        assert!(decoder.push(frame.as_bytes()).is_err());
     }
 }

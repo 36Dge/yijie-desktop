@@ -105,10 +105,10 @@ export function validateLock(lock) {
     lock.consumer?.mode !== "hand-written-rust-adapter" ||
     lock.consumer?.adapter_path !== "src-tauri/src/chat/host_bridge.rs" ||
     lock.consumer?.adapter_sha256 !==
-      "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2" ||
+      "da621e8ba7aeccfffce07ff89c412c80941be5c4d472b25d7e210bf90d88c93b" ||
     lock.consumer?.readiness_path !== "src-tauri/src/chat/mod.rs" ||
     lock.consumer?.readiness_sha256 !==
-      "807817989e7c28afb4e001f1d3e416be235f2dc3511a8763781ad3ebdeb56d0a" ||
+      "76731f70cbe9451397008666080500484accf7c8114b7f21be5b1ad8708a87e6" ||
     lock.consumer?.public_lock_path !== "contracts/public-api.lock.json" ||
     lock.consumer?.serialization_test !==
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection" ||

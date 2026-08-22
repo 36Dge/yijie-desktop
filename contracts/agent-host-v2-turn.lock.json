@@ -28,9 +28,9 @@
   "consumer": {
     "mode": "hand-written-rust-adapter",
     "adapter_path": "src-tauri/src/chat/host_bridge.rs",
-    "adapter_sha256": "e6fcdf3a823122e3c42c27b758d7a7454bf66f3fef0511a4ed3bd756d10652c2",
+    "adapter_sha256": "da621e8ba7aeccfffce07ff89c412c80941be5c4d472b25d7e210bf90d88c93b",
     "readiness_path": "src-tauri/src/chat/mod.rs",
-    "readiness_sha256": "807817989e7c28afb4e001f1d3e416be235f2dc3511a8763781ad3ebdeb56d0a",
+    "readiness_sha256": "76731f70cbe9451397008666080500484accf7c8114b7f21be5b1ad8708a87e6",
     "public_lock_path": "contracts/public-api.lock.json",
     "serialization_test": "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection",
     "approved_rust_generator": "N/A",

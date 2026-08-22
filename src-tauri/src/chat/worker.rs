@@ -1,9 +1,9 @@
 use super::artifact::{
-    ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
-    DownloadedArtifact, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
-    ReadyImageReadError, ReadyReportContent, ReadyReportReadError, ReadyVideoContent,
-    ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError, StoredArtifactCommit,
-    TransferDisposition,
+    ArtifactCommit, ArtifactEventV3, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage,
+    ArtifactProjection, DownloadedArtifact, PendingArtifactAcknowledgement, ReadyFileContent,
+    ReadyFileReadError, ReadyImageContent, ReadyImageReadError, ReadyReportContent,
+    ReadyReportReadError, ReadyVideoContent, ReadyVideoRangeContent, ReadyVideoRangeRequest,
+    ReadyVideoReadError, StoredArtifactCommit, TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
 #[cfg(feature = "feat126-s10-driver")]
@@ -232,6 +232,33 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn commit_artifact_event_progress(
+        &self,
+        progress: TurnProgress,
+        event: ArtifactEventV3,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| repository.commit_artifact_event_progress(&progress, &event))
+            .await
+    }
+
+    pub async fn commit_artifact_failure_with_cursor(
+        &self,
+        progress: TurnProgress,
+        identity: ArtifactIdentity,
+        error_code: String,
+        retryable: bool,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.commit_artifact_failure_with_cursor(
+                &progress,
+                &identity,
+                &error_code,
+                retryable,
+            )
+        })
+        .await
+    }
+
     pub async fn record_artifact_progress(
         &self,
         identity: ArtifactIdentity,
@@ -278,11 +305,49 @@ impl DatabaseWorker {
         .await
     }
 
+    pub async fn commit_artifact_with_cursor(
+        &self,
+        manifest: ArtifactManifest,
+        downloaded: DownloadedArtifact,
+        local_committed_at: i64,
+        ack_id: uuid::Uuid,
+        progress: TurnProgress,
+    ) -> Result<ArtifactCommit, ChatError> {
+        self.call(move |repository| {
+            repository.commit_artifact_with_cursor(
+                &manifest,
+                &downloaded,
+                local_committed_at,
+                ack_id,
+                &progress,
+            )
+        })
+        .await
+    }
+
     pub async fn artifact_commit(
         &self,
         manifest: ArtifactManifest,
     ) -> Result<StoredArtifactCommit, ChatError> {
         self.call(move |repository| repository.artifact_commit(&manifest))
+            .await
+    }
+
+    pub async fn commit_existing_artifact_cursor(
+        &self,
+        progress: TurnProgress,
+        manifest: ArtifactManifest,
+    ) -> Result<StoredArtifactCommit, ChatError> {
+        self.call(move |repository| {
+            repository.commit_existing_artifact_cursor(&progress, &manifest)
+        })
+        .await
+    }
+
+    pub async fn pending_artifact_acknowledgements(
+        &self,
+    ) -> Result<Vec<PendingArtifactAcknowledgement>, ChatError> {
+        self.call(|repository| repository.pending_artifact_acknowledgements(64))
             .await
     }
 
