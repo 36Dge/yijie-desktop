@@ -12,6 +12,8 @@ use crate::native_auth::transport::{
 #[cfg(feature = "feat126-s10-driver")]
 use crate::native_auth::{synthetic_authorization_code_tokens, SyntheticLoginFailure};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "feat128-s10-runtime")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -66,7 +68,16 @@ struct CapabilityProjectionBody {
 #[derive(Clone)]
 pub struct NativeAuthRuntime {
     mode: RuntimeMode,
+    #[cfg(feature = "feat128-s10-runtime")]
+    feat128_s10d_authority: Arc<AtomicBool>,
 }
+
+#[cfg(feature = "feat128-s10-runtime")]
+const FEAT128_S10D_OWNER: &str = "12800000-0000-4000-8000-000000000001";
+#[cfg(feature = "feat128-s10-runtime")]
+const FEAT128_S10D_TENANT: &str = "12800000-0000-4000-8000-100000000001";
+#[cfg(feature = "feat128-s10-runtime")]
+const FEAT128_S10D_AUTHORIZATION_REVISION: u64 = 128;
 
 #[derive(Clone)]
 enum RuntimeMode {
@@ -130,6 +141,8 @@ impl NativeAuthRuntime {
         if secure_storage_invalid {
             return Self {
                 mode: RuntimeMode::Invalid,
+                #[cfg(feature = "feat128-s10-runtime")]
+                feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
             };
         }
         let mode = match NativeAuthConfig::from_environment() {
@@ -139,6 +152,8 @@ impl NativeAuthRuntime {
                 if !test_storage_environment_allowed(profile.as_deref(), config.environment) {
                     return Self {
                         mode: RuntimeMode::Invalid,
+                        #[cfg(feature = "feat128-s10-runtime")]
+                        feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
                     };
                 }
                 let local_whitelist =
@@ -147,6 +162,8 @@ impl NativeAuthRuntime {
                         Err(_) => {
                             return Self {
                                 mode: RuntimeMode::Invalid,
+                                #[cfg(feature = "feat128-s10-runtime")]
+                                feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
                             }
                         }
                     };
@@ -173,7 +190,11 @@ impl NativeAuthRuntime {
                 }
             }
         };
-        Self { mode }
+        Self {
+            mode,
+            #[cfg(feature = "feat128-s10-runtime")]
+            feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub async fn login(&self) -> Result<AuthStatus, CommandError> {
@@ -192,10 +213,18 @@ impl NativeAuthRuntime {
     }
 
     pub async fn logout(&self) -> Result<AuthStatus, CommandError> {
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.swap(false, Ordering::SeqCst) {
+            return Ok(AuthStatus::SignedOut);
+        }
         self.service()?.logout().await.map_err(CommandError::from)
     }
 
     pub async fn status(&self) -> Result<AuthStatus, CommandError> {
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.load(Ordering::SeqCst) {
+            return Ok(AuthStatus::SignedIn);
+        }
         match &self.mode {
             RuntimeMode::Disabled => Ok(AuthStatus::Disabled),
             RuntimeMode::Invalid => Err(CommandError::from(NativeAuthError::InvalidConfiguration)),
@@ -204,6 +233,10 @@ impl NativeAuthRuntime {
     }
 
     pub async fn list_my_tenants(&self) -> Result<OperationResponse, CommandError> {
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.load(Ordering::SeqCst) {
+            return Ok(feat128_s10d_tenants_response());
+        }
         let service = self.service()?;
         service.list_my_tenants().await.map_err(CommandError::from)
     }
@@ -212,6 +245,11 @@ impl NativeAuthRuntime {
         &self,
         tenant_id: &str,
     ) -> Result<OperationResponse, CommandError> {
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.load(Ordering::SeqCst) {
+            return feat128_s10d_capabilities_response(tenant_id)
+                .map_err(|_| CommandError::from(NativeAuthError::InvalidTenant));
+        }
         let service = self.service()?;
         service
             .get_my_capabilities(tenant_id)
@@ -235,6 +273,20 @@ impl NativeAuthRuntime {
         let tenant_id = parse_chat_tenant(tenant_selector)?;
         if now_epoch_seconds < 0 {
             return Err(NativeProjectionError::Invalid);
+        }
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.load(Ordering::SeqCst) {
+            if tenant_selector != FEAT128_S10D_TENANT {
+                return Err(NativeProjectionError::CapabilityDenied);
+            }
+            return Ok(NativeChatProjection {
+                tenant_id,
+                authorization_revision: FEAT128_S10D_AUTHORIZATION_REVISION,
+                expires_at: now_epoch_seconds
+                    .checked_add(240)
+                    .ok_or(NativeProjectionError::Invalid)?,
+                capabilities: feat128_s10d_capabilities(),
+            });
         }
         let response = self
             .service_native()
@@ -299,6 +351,19 @@ impl NativeAuthRuntime {
             || client_reference_id.is_nil()
         {
             return NativePublicTaskOutcome::ProtocolError;
+        }
+        #[cfg(feature = "feat128-s10-runtime")]
+        if self.feat128_s10d_authority.load(Ordering::SeqCst) {
+            let owner = uuid::Uuid::parse_str(FEAT128_S10D_OWNER).ok();
+            let tenant = uuid::Uuid::parse_str(FEAT128_S10D_TENANT).ok();
+            return if owner == Some(expected_owner_user_id)
+                && tenant == Some(expected_tenant_id)
+                && expected_authorization_revision == FEAT128_S10D_AUTHORIZATION_REVISION
+            {
+                NativePublicTaskOutcome::Bound(client_reference_id)
+            } else {
+                NativePublicTaskOutcome::BlockedAuth
+            };
         }
         let now = match epoch_seconds().and_then(|value| {
             i64::try_from(value).map_err(|_| NativeAuthError::AuthenticationFailed)
@@ -390,6 +455,14 @@ impl NativeAuthRuntime {
         }
     }
 
+    #[cfg(feature = "feat128-s10-runtime")]
+    pub(crate) fn feat128_s10d_activate_authority(&self) -> Result<(), &'static str> {
+        if self.feat128_s10d_authority.swap(true, Ordering::SeqCst) {
+            return Err("runtime_authority_duplicate");
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) async fn from_test_oidc_tokens(
         config: NativeAuthConfig,
@@ -428,8 +501,87 @@ impl NativeAuthRuntime {
                 login_lock: Mutex::new(()),
                 refresh_lock: Mutex::new(()),
             })),
+            #[cfg(feature = "feat128-s10-runtime")]
+            feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
         })
     }
+}
+
+#[cfg(feature = "feat128-s10-runtime")]
+fn feat128_s10d_capabilities() -> Vec<String> {
+    vec![
+        "task.create".to_owned(),
+        "task.read".to_owned(),
+        "workspace.use".to_owned(),
+    ]
+}
+
+#[cfg(feature = "feat128-s10-runtime")]
+fn feat128_s10d_tenants_response() -> OperationResponse {
+    OperationResponse {
+        status: 200,
+        cache_control: "no-store".to_owned(),
+        www_authenticate: None,
+        retry_after: None,
+        body: serde_json::json!({
+            "tenants": [{
+                "tenant_id": FEAT128_S10D_TENANT,
+                "display_name": "Strict-local test tenant"
+            }]
+        }),
+    }
+}
+
+#[cfg(feature = "feat128-s10-runtime")]
+fn feat128_s10d_capabilities_response(tenant_id: &str) -> Result<OperationResponse, &'static str> {
+    if tenant_id != FEAT128_S10D_TENANT {
+        return Err("runtime_tenant_invalid");
+    }
+    let expires_at = epoch_seconds()
+        .ok()
+        .and_then(|now| now.checked_add(240))
+        .and_then(format_rfc3339_utc)
+        .ok_or("runtime_clock_invalid")?;
+    Ok(OperationResponse {
+        status: 200,
+        cache_control: "no-store".to_owned(),
+        www_authenticate: None,
+        retry_after: None,
+        body: serde_json::json!({
+            "schema_version": 1,
+            "tenant_id": FEAT128_S10D_TENANT,
+            "authorization_revision": FEAT128_S10D_AUTHORIZATION_REVISION,
+            "expires_at": expires_at,
+            "capabilities": feat128_s10d_capabilities()
+        }),
+    })
+}
+
+#[cfg(feature = "feat128-s10-runtime")]
+fn format_rfc3339_utc(epoch_seconds: u64) -> Option<String> {
+    let seconds = i64::try_from(epoch_seconds).ok()?;
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+    let shifted = days.checked_add(719_468)?;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.checked_sub(era.checked_mul(146_097)?)?;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era.checked_add(era.checked_mul(400)?)?;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    if !(1970..=9999).contains(&year) {
+        return None;
+    }
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        day_seconds / 3_600,
+        (day_seconds % 3_600) / 60,
+        day_seconds % 60
+    ))
 }
 
 #[cfg(test)]

@@ -52,10 +52,11 @@ async function synchronizeChatAuthority(): Promise<void> {
   });
 }
 
-async function synchronizeChatRoute(): Promise<void> {
+async function synchronizeChatRoute(routeChanged: boolean): Promise<void> {
   const epoch = ++routeSelectionEpoch;
   if (!localChatUiEnabled || chatStore.context === null || !chatStore.isReady) return;
   if (route.path === "/chat") {
+    if (!routeChanged && chatStore.selectedSessionId !== null) return;
     const newDraftAlreadySelected =
       chatStore.selectedSessionId === null &&
       chatStore.draftTarget?.type === "new" &&
@@ -139,7 +140,10 @@ watch(
     () => chatStore.context?.contextId,
     () => chatStore.phase,
   ],
-  () => { void synchronizeChatRoute(); },
+  (current, previous) => {
+    const routeChanged = current[0] !== previous[0] || current[1] !== previous[1];
+    void synchronizeChatRoute(routeChanged);
+  },
   { flush: "post" },
 );
 

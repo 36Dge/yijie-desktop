@@ -27,6 +27,8 @@ use super::public_tasks::{
     PublicTaskControlPlane, PublicTaskCreateIntent, PublicTaskCreateOutcome, PublicTaskIssueCode,
 };
 use super::worker::DatabaseWorker;
+#[cfg(feature = "feat128-s10-runtime")]
+use crate::feat128_s10d_runtime::{feat128_s10d_record_native_artifact, Feat128S10dArtifactStage};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1854,6 +1856,30 @@ impl ConversationApplication {
                         ReducerOutcome::Progress => {}
                     }
                     let cursor_progress = reducer.progress()?;
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    let runtime_transition = match &artifact {
+                        ArtifactEventV3::Started(identity) => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Announced,
+                        ),
+                        ArtifactEventV3::Progress { identity, .. } => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Progress,
+                        ),
+                        ArtifactEventV3::Completed(manifest) => (
+                            manifest.artifact_id,
+                            manifest.kind,
+                            manifest.ordinal,
+                            Feat128S10dArtifactStage::Ready,
+                        ),
+                        ArtifactEventV3::Failed { .. } => {
+                            return Err(ChatError::ConversationConflict)
+                        }
+                    };
                     match artifact {
                         ArtifactEventV3::Completed(manifest) => {
                             if let Err(error) = artifact_transfers
@@ -1874,6 +1900,14 @@ impl ConversationApplication {
                                 .await?;
                         }
                     }
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    feat128_s10d_record_native_artifact(
+                        runtime_transition.0,
+                        runtime_transition.1,
+                        runtime_transition.2,
+                        runtime_transition.3,
+                    )
+                    .map_err(|_| ChatError::ConversationConflict)?;
                     if progress_dirty {
                         sink.publish(reducer.projection(false)?)?;
                     }
@@ -3133,6 +3167,24 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    fn http_response_bytes(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len()
+        )
+        .into_bytes();
+        for (name, value) in headers {
+            response.extend_from_slice(name.as_bytes());
+            response.extend_from_slice(b": ");
+            response.extend_from_slice(value.as_bytes());
+            response.extend_from_slice(b"\r\n");
+        }
+        response.extend_from_slice(b"\r\n");
+        response.extend_from_slice(body);
+        response
+    }
+
+    #[cfg(target_os = "macos")]
     fn ready_response(nonce: &str) -> String {
         http_response(
             "200 OK",
@@ -3196,6 +3248,25 @@ mod tests {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 requests.push(read_request(&mut stream).await);
                 stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+            requests
+        });
+        (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn serve_http_bytes(
+        responses: Vec<Vec<u8>>,
+    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::with_capacity(responses.len());
+            for response in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                requests.push(read_request(&mut stream).await);
+                stream.write_all(&response).await.unwrap();
                 stream.shutdown().await.unwrap();
             }
             requests
@@ -3881,9 +3952,43 @@ mod tests {
             thread_id: Uuid::now_v7(),
             turn_id: Uuid::now_v7(),
         };
-        let artifact_id = Uuid::now_v7();
-        let content = b"name,value\nlocal,4\n";
-        let digest = format!("{:x}", sha2::Sha256::digest(content));
+        struct MixedArtifact<'a> {
+            id: Uuid,
+            kind: &'a str,
+            display_name: &'a str,
+            media_type: &'a str,
+            content: Vec<u8>,
+        }
+        let mixed_artifacts = [
+            MixedArtifact {
+                id: Uuid::now_v7(),
+                kind: "image",
+                display_name: "synthetic.png",
+                media_type: "image/png",
+                content: include_bytes!("../../icons/32x32.png").to_vec(),
+            },
+            MixedArtifact {
+                id: Uuid::now_v7(),
+                kind: "video",
+                display_name: "synthetic.mp4",
+                media_type: "video/mp4",
+                content: b"\0\0\0\x0cftypisom".to_vec(),
+            },
+            MixedArtifact {
+                id: Uuid::now_v7(),
+                kind: "file",
+                display_name: "synthetic.csv",
+                media_type: "text/csv",
+                content: b"name,value\nlocal,4\n".to_vec(),
+            },
+            MixedArtifact {
+                id: Uuid::now_v7(),
+                kind: "report",
+                display_name: "synthetic-report.json",
+                media_type: "application/vnd.yijie.report+json;version=1",
+                content: br#"{"schema_version":1,"title":"Synthetic","generated_at":"2026-08-20T00:00:00Z","sections":[]}"#.to_vec(),
+            },
+        ];
         let session_body = serde_json::json!({
             "session": {
                 "task_id": identity.task_id,
@@ -3928,15 +4033,6 @@ mod tests {
                 identity.stream_id
             )
         };
-        let artifact_payload = |status: &str| {
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "kind": "file",
-                "provenance": "synthetic",
-                "status": status,
-                "ordinal": 0
-            })
-        };
         let mut sse_body = String::new();
         sse_body.push_str(&frame(
             1,
@@ -3945,43 +4041,60 @@ mod tests {
             false,
             serde_json::json!({"delta":"v3 answer"}),
         ));
-        let mut started = artifact_payload("in_progress");
-        started["display_name"] = serde_json::json!("synthetic.csv");
+        let mut sequence = 2_u64;
+        for (ordinal, artifact) in mixed_artifacts.iter().enumerate() {
+            let item_id = format!("artifact-{}", artifact.id);
+            let base_payload = |status: &str| {
+                serde_json::json!({
+                    "artifact_id": artifact.id,
+                    "kind": artifact.kind,
+                    "provenance": "synthetic",
+                    "status": status,
+                    "ordinal": ordinal
+                })
+            };
+            let mut started = base_payload("in_progress");
+            started["display_name"] = serde_json::json!(artifact.display_name);
+            sse_body.push_str(&frame(
+                sequence,
+                Some(&item_id),
+                "item.artifact.started",
+                false,
+                started,
+            ));
+            sequence += 1;
+            let mut progress = base_payload("in_progress");
+            progress["stage"] = serde_json::json!("generating");
+            progress["progress_percent"] = serde_json::json!(50.0);
+            sse_body.push_str(&frame(
+                sequence,
+                Some(&item_id),
+                "item.artifact.progress",
+                false,
+                progress,
+            ));
+            sequence += 1;
+            let mut completed = base_payload("ready");
+            completed["display_name"] = serde_json::json!(artifact.display_name);
+            completed["media_type"] = serde_json::json!(artifact.media_type);
+            completed["size_bytes"] = serde_json::json!(artifact.content.len());
+            completed["sha256"] =
+                serde_json::json!(format!("{:x}", sha2::Sha256::digest(&artifact.content)));
+            completed["content_href"] = serde_json::json!(format!(
+                "/v3/agent-sessions/{}/artifacts/{}/content",
+                identity.agent_session_id, artifact.id
+            ));
+            sse_body.push_str(&frame(
+                sequence,
+                Some(&item_id),
+                "item.artifact.completed",
+                false,
+                completed,
+            ));
+            sequence += 1;
+        }
         sse_body.push_str(&frame(
-            2,
-            Some("artifact"),
-            "item.artifact.started",
-            false,
-            started,
-        ));
-        let mut progress = artifact_payload("in_progress");
-        progress["stage"] = serde_json::json!("generating");
-        progress["progress_percent"] = serde_json::json!(50.0);
-        sse_body.push_str(&frame(
-            3,
-            Some("artifact"),
-            "item.artifact.progress",
-            false,
-            progress,
-        ));
-        let mut completed = artifact_payload("ready");
-        completed["display_name"] = serde_json::json!("synthetic.csv");
-        completed["media_type"] = serde_json::json!("text/csv");
-        completed["size_bytes"] = serde_json::json!(content.len());
-        completed["sha256"] = serde_json::json!(digest);
-        completed["content_href"] = serde_json::json!(format!(
-            "/v3/agent-sessions/{}/artifacts/{artifact_id}/content",
-            identity.agent_session_id
-        ));
-        sse_body.push_str(&frame(
-            4,
-            Some("artifact"),
-            "item.artifact.completed",
-            false,
-            completed,
-        ));
-        sse_body.push_str(&frame(
-            5,
+            sequence,
             None,
             "turn.completed",
             true,
@@ -3999,38 +4112,45 @@ mod tests {
             ],
             &sse_body,
         );
-        let etag = format!("\"{digest}\"");
-        let content_response = http_response(
-            "200 OK",
-            &[
-                ("Content-Type", "text/csv"),
-                ("Cache-Control", "no-store"),
-                ("ETag", &etag),
-                ("Content-Disposition", "attachment; filename=synthetic.csv"),
-                ("Accept-Ranges", "bytes"),
-                ("X-Content-Type-Options", "nosniff"),
-            ],
-            std::str::from_utf8(content).unwrap(),
-        );
-        let (port, server) = serve_http(vec![
-            ready_response(NONCE),
-            json_response("201 Created", &session_body),
-            ready_response(NONCE),
+        let mut responses = vec![
+            ready_response(NONCE).into_bytes(),
+            json_response("201 Created", &session_body).into_bytes(),
+            ready_response(NONCE).into_bytes(),
             json_response(
                 "202 Accepted",
                 &serde_json::json!({"turn_id": identity.turn_id}).to_string(),
-            ),
-            ready_response(NONCE),
-            stream_response,
-            ready_response(NONCE),
-            content_response,
-            ready_response(NONCE),
-            json_response(
-                "500 Internal Server Error",
-                r#"{"error":{"code":"internal_error","message":"synthetic"}}"#,
-            ),
-        ])
-        .await;
+            )
+            .into_bytes(),
+            ready_response(NONCE).into_bytes(),
+            stream_response.into_bytes(),
+        ];
+        for artifact in &mixed_artifacts {
+            let digest = format!("{:x}", sha2::Sha256::digest(&artifact.content));
+            let etag = format!("\"{digest}\"");
+            let disposition = format!("attachment; filename={}", artifact.display_name);
+            responses.push(ready_response(NONCE).into_bytes());
+            responses.push(http_response_bytes(
+                "200 OK",
+                &[
+                    ("Content-Type", artifact.media_type),
+                    ("Cache-Control", "no-store"),
+                    ("ETag", &etag),
+                    ("Content-Disposition", &disposition),
+                    ("Accept-Ranges", "bytes"),
+                    ("X-Content-Type-Options", "nosniff"),
+                ],
+                &artifact.content,
+            ));
+            responses.push(ready_response(NONCE).into_bytes());
+            responses.push(
+                json_response(
+                    "500 Internal Server Error",
+                    r#"{"error":{"code":"internal_error","message":"synthetic"}}"#,
+                )
+                .into_bytes(),
+            );
+        }
+        let (port, server) = serve_http_bytes(responses).await;
         let bridge = Arc::new(
             HostBridge::from_connection(HostConnection {
                 port,
@@ -4066,22 +4186,32 @@ mod tests {
             .load_artifacts_for_turns(vec![pending.turn_id])
             .await
             .unwrap();
-        assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].state, "ready");
-        let pending_ack = database
-            .pending_artifact_acknowledgements()
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("ready commit must retain ACK intent after Host failure");
+        assert_eq!(artifacts.len(), 4);
+        assert_eq!(
+            artifacts
+                .iter()
+                .map(|artifact| (
+                    artifact.ordinal,
+                    artifact.kind.as_str(),
+                    artifact.state.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, "image", "ready"),
+                (1, "video", "ready"),
+                (2, "file", "ready"),
+                (3, "report", "ready"),
+            ]
+        );
+        let pending_acks = database.pending_artifact_acknowledgements().await.unwrap();
+        assert_eq!(pending_acks.len(), 4);
         let history = application
             .load_history(pending.session_id, None, None)
             .await
             .unwrap();
         assert_eq!(history.turns[0].messages[1].content, "v3 answer");
         let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 10);
+        assert_eq!(requests.len(), 22);
         assert!(requests[5].contains(&format!(
             "/v3/agent-sessions/{}/events?event_schema_version=3",
             identity.agent_session_id
@@ -4089,28 +4219,31 @@ mod tests {
         assert!(!requests
             .iter()
             .any(|request| request.contains("/v2/agent-sessions")));
-        assert!(requests[7].contains(&format!(
-            "/v3/agent-sessions/{}/artifacts/{artifact_id}/content",
-            identity.agent_session_id
-        )));
-        assert!(requests[9].contains(&format!(
-            "/v3/agent-sessions/{}/artifacts/{artifact_id}/ack",
-            identity.agent_session_id
-        )));
+        for (index, artifact) in mixed_artifacts.iter().enumerate() {
+            assert!(requests[7 + (index * 4)].contains(&format!(
+                "/v3/agent-sessions/{}/artifacts/{}/content",
+                identity.agent_session_id, artifact.id
+            )));
+            assert!(requests[9 + (index * 4)].contains(&format!(
+                "/v3/agent-sessions/{}/artifacts/{}/ack",
+                identity.agent_session_id, artifact.id
+            )));
+        }
         drop(application);
-        let recovery_body = serde_json::json!({
-            "artifact_id": artifact_id,
-            "ack_id": pending_ack.commit.ack_id,
-            "status": "acknowledged",
-            "cleanup_status": "completed",
-            "acknowledged_at": "2026-08-20T00:00:06Z"
-        })
-        .to_string();
-        let (recovery_port, recovery_server) = serve_http(vec![
-            ready_response(NONCE),
-            json_response("200 OK", &recovery_body),
-        ])
-        .await;
+        let mut recovery_responses = Vec::with_capacity(8);
+        for pending_ack in &pending_acks {
+            let recovery_body = serde_json::json!({
+                "artifact_id": pending_ack.manifest.artifact_id,
+                "ack_id": pending_ack.commit.ack_id,
+                "status": "acknowledged",
+                "cleanup_status": "completed",
+                "acknowledged_at": "2026-08-20T00:00:06Z"
+            })
+            .to_string();
+            recovery_responses.push(ready_response(NONCE));
+            recovery_responses.push(json_response("200 OK", &recovery_body));
+        }
+        let (recovery_port, recovery_server) = serve_http(recovery_responses).await;
         let recovery_host = Arc::new(
             HostBridge::from_connection(HostConnection {
                 port: recovery_port,
@@ -4122,7 +4255,7 @@ mod tests {
         let recovery = ArtifactTransferService::new(recovery_host, database.clone());
         assert_eq!(
             recovery.recover_pending_acknowledgements().await.unwrap(),
-            1
+            4
         );
         assert!(database
             .pending_artifact_acknowledgements()
@@ -4130,11 +4263,13 @@ mod tests {
             .unwrap()
             .is_empty());
         let recovery_requests = recovery_server.await.unwrap();
-        assert_eq!(recovery_requests.len(), 2);
-        assert!(recovery_requests[1].contains(&format!(
-            "/v3/agent-sessions/{}/artifacts/{artifact_id}/ack",
-            identity.agent_session_id
-        )));
+        assert_eq!(recovery_requests.len(), 8);
+        for (index, pending_ack) in pending_acks.iter().enumerate() {
+            assert!(recovery_requests[1 + (index * 2)].contains(&format!(
+                "/v3/agent-sessions/{}/artifacts/{}/ack",
+                identity.agent_session_id, pending_ack.manifest.artifact_id
+            )));
+        }
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

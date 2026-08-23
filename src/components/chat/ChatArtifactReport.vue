@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, type Component, watch } from "vue";
 import {
   ChatArtifactReportNativeClientError,
   type ChatArtifactReportNativeClient,
@@ -17,8 +17,8 @@ import {
   type ArtifactReportChartModel,
 } from "../../domain/chat-artifact-report-chart";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
-import YjChartCard from "../yijie/YjChartCard.vue";
 import YjIcon from "../yijie/YjIcon.vue";
+import { loadChatArtifactReportChartRenderer } from "./chat-artifact-report-chart-renderer";
 
 type PreviewPhase = "idle" | "loading" | "previewed" | "error";
 type SafeError = Readonly<{ message: string; retryable: boolean }>;
@@ -57,6 +57,8 @@ const projection = ref<ArtifactReportPreviewResult | null>(null);
 const previewError = ref<SafeError | null>(null);
 const previewTrigger = ref<HTMLButtonElement | null>(null);
 const previewRegion = ref<HTMLElement | null>(null);
+const chartRenderer = shallowRef<Component>();
+const chartRendererUnavailable = ref(false);
 const saving = ref(false);
 const saveFeedback = ref<string | null>(null);
 const saveTone = ref<SaveTone>("muted");
@@ -64,6 +66,7 @@ let identityEpoch = 0;
 let previewRequest = 0;
 let saveRequest = 0;
 let disposed = false;
+let chartRendererLoadStarted = false;
 
 const busy = computed(() => phase.value === "loading");
 
@@ -100,6 +103,35 @@ const chartDisplays = computed<ReadonlyMap<number, ChartDisplay>>(() => {
 
 function chartDisplay(ordinal: number): ChartDisplay | undefined {
   return chartDisplays.value.get(ordinal);
+}
+
+function chartRendererStatus(display: ChartDisplay): "loading" | "unavailable" | "not-applicable" {
+  if (display.model.status !== "renderable") return "not-applicable";
+  return chartRendererUnavailable.value ? "unavailable" : "loading";
+}
+
+function chartFallbackMessage(display: ChartDisplay): string {
+  if (display.model.status !== "renderable") return "本节仅展示权威表格。";
+  return chartRendererUnavailable.value
+    ? "图表增强不可用，以下表格仍包含本节的权威数据。"
+    : "图表增强正在准备，以下表格已可阅读。";
+}
+
+function loadChartRendererIfNeeded(): void {
+  if (
+    chartRendererLoadStarted ||
+    chartRenderer.value !== undefined ||
+    chartRendererUnavailable.value ||
+    ![...chartDisplays.value.values()].some((display) => display.model.status === "renderable")
+  ) return;
+  chartRendererLoadStarted = true;
+  void loadChatArtifactReportChartRenderer()
+    .then((renderer) => {
+      if (!disposed) chartRenderer.value = renderer;
+    })
+    .catch(() => {
+      if (!disposed) chartRendererUnavailable.value = true;
+    });
 }
 
 function scalar(value: ArtifactReportScalar): string {
@@ -171,6 +203,7 @@ async function openPreview(): Promise<void> {
     if (disposed || request !== previewRequest || epoch !== identityEpoch || !available.value) return;
     projection.value = result;
     phase.value = "previewed";
+    loadChartRendererIfNeeded();
     await nextTick();
     previewRegion.value?.focus();
   } catch (error: unknown) {
@@ -377,7 +410,41 @@ onBeforeUnmount(() => {
             <p v-if="chartDisplay(section.ordinal)?.budgetExhausted" class="artifact-report__notice" role="note">
               已达到安全图表增强上限，本节仅展示权威表格。
             </p>
-            <YjChartCard v-if="chartDisplay(section.ordinal)" :model="chartDisplay(section.ordinal)!.model" />
+            <component
+              :is="chartRenderer"
+              v-if="chartDisplay(section.ordinal) && chartRenderer"
+              :model="chartDisplay(section.ordinal)!.model"
+            />
+            <div
+              v-else-if="chartDisplay(section.ordinal)"
+              class="artifact-report__chart-fallback"
+              data-testid="artifact-report-chart-fallback"
+              :data-renderer-status="chartRendererStatus(chartDisplay(section.ordinal)!)"
+            >
+              <p role="status" aria-live="polite">{{ chartFallbackMessage(chartDisplay(section.ordinal)!) }}</p>
+              <div class="artifact-report__table-region" tabindex="0" aria-label="图表数据表格，可横向滚动">
+                <table>
+                  <caption>{{ chartDisplay(section.ordinal)!.model.title }}数据</caption>
+                  <thead>
+                    <tr>
+                      <th
+                        v-for="(column, columnIndex) in chartDisplay(section.ordinal)!.model.table.columns"
+                        :key="columnIndex"
+                        scope="col"
+                      >{{ column }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(row, rowIndex) in chartDisplay(section.ordinal)!.model.table.rows"
+                      :key="rowIndex"
+                    >
+                      <td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </template>
 
           <div v-else-if="section.type === 'callout'" class="artifact-report__callout" :class="`artifact-report__callout--${section.tone}`" role="note">
@@ -492,6 +559,8 @@ onBeforeUnmount(() => {
 
 .artifact-report__sections { display: grid; gap: var(--yj-space-4); }
 .artifact-report__section { display: grid; min-width: 0; gap: var(--yj-space-2); }
+.artifact-report__chart-fallback { display: grid; gap: var(--yj-space-2); }
+.artifact-report__chart-fallback > p { margin: 0; color: var(--yj-color-text-secondary); }
 .artifact-report__section + .artifact-report__section {
   padding-top: var(--yj-space-4);
   border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);

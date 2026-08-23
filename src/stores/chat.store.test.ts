@@ -390,9 +390,84 @@ describe("chat view-model store", () => {
     expect(artifacts.authority).toBeNull();
   });
 
+  it("trails exactly one Artifact resync when notifications arrive during the final control-plane read", async () => {
+    let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
+    const controlPlaneStarted = new Deferred<void>();
+    const delayedControlPlane = new Deferred<Awaited<ReturnType<ChatClient["getSessionControlPlane"]>>>();
+    const historyWithoutArtifacts = Object.freeze({
+      ...artifactHistory(),
+      turns: Object.freeze(artifactHistory().turns.map((turn) => Object.freeze({
+        ...turn,
+        artifacts: Object.freeze([]),
+      }))),
+    });
+    let historyCalls = 0;
+    const loadHistoryV3 = vi.fn<ChatClient["loadHistoryV3"]>(async () => {
+      historyCalls += 1;
+      return historyCalls <= 2 ? historyWithoutArtifacts : artifactHistory();
+    });
+    const resyncSessionV2 = vi.fn<ChatClient["resyncSessionV2"]>(
+      async (_context, sessionId) => projection(sessionId),
+    );
+    const { client } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneStarted.resolve();
+        return delayedControlPlane.promise.then((status) => ({ ...status, sessionId }));
+      },
+      loadHistoryV3,
+      resyncSessionV2,
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-s10c-${storeSequence++}`)();
+    const store = createChatStoreDefinition(client, `chat-s10c-${storeSequence++}`, () => ({
+      liveClient: {
+        listen: async (handler) => {
+          artifactHandler = handler;
+          return () => undefined;
+        },
+      },
+      store: artifacts,
+      authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+    }))();
+
+    await store.bind(TENANT);
+    const selection = store.selectSession(SESSION_A);
+    await controlPlaneStarted.promise;
+    expect(loadHistoryV3).toHaveBeenCalledTimes(2);
+
+    const changed: ChatArtifactLiveEvent = {
+      schemaVersion: 1,
+      subscriptionId: "019c1a00-0000-7000-8000-00000000000a",
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      eventId: "019c1a00-0000-7000-8000-000000000046",
+      notificationSequence: "1",
+      kind: "artifact_changed",
+      payload: {},
+    };
+    artifactHandler(changed);
+    artifactHandler(changed);
+    delayedControlPlane.resolve({
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await selection;
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+
+    expect(resyncSessionV2).toHaveBeenCalledTimes(2);
+    expect(loadHistoryV3).toHaveBeenCalledTimes(3);
+    expect(artifacts.artifactsForTurn(SESSION_A, TURN_A)).toMatchObject([
+      { artifactId: ARTIFACT_A, status: "ready" },
+    ]);
+  });
+
   it("bounds Artifact refresh to one in-flight plus one trailing and resets sequence per subscription", async () => {
     let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
     const delayedRefresh = new Deferred<ReturnType<typeof artifactHistory>>();
+    const subscriptionOrder: string[] = [];
     const subscriptionIds = [
       "019c1a00-0000-7000-8000-00000000000a",
       "019c1a00-0000-7000-8000-00000000000b",
@@ -409,7 +484,15 @@ describe("chat view-model store", () => {
       async (_context, sessionId) => projection(sessionId),
     );
     const { client } = fakeClient({
-      subscribeSession: async () => subscriptionIds[subscribeCalls++] ?? subscriptionIds[2],
+      subscribeSession: async () => {
+        const subscriptionId = subscriptionIds[subscribeCalls++] ?? subscriptionIds[2];
+        subscriptionOrder.push(`subscribe:${subscriptionId}`);
+        return subscriptionId;
+      },
+      unsubscribeSession: async (_contextId, subscriptionId) => {
+        subscriptionOrder.push(`unsubscribe:${subscriptionId}`);
+        return true;
+      },
       resyncSessionV2,
       loadHistoryV3,
     });
@@ -461,6 +544,12 @@ describe("chat view-model store", () => {
 
     expect(resyncSessionV2).toHaveBeenCalledTimes(3);
     expect(loadHistoryV3).toHaveBeenCalledTimes(4);
+    expect(subscriptionOrder.indexOf(`subscribe:${subscriptionIds[1]}`)).toBeLessThan(
+      subscriptionOrder.indexOf(`unsubscribe:${subscriptionIds[0]}`),
+    );
+    expect(subscriptionOrder.indexOf(`subscribe:${subscriptionIds[2]}`)).toBeLessThan(
+      subscriptionOrder.indexOf(`unsubscribe:${subscriptionIds[1]}`),
+    );
 
     artifactHandler(changed(subscriptionIds[1], "5", "019c1a00-0000-7000-8000-000000000045"));
     for (let index = 0; index < 8; index += 1) await Promise.resolve();

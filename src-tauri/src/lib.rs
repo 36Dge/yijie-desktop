@@ -2,6 +2,8 @@ pub mod chat;
 #[cfg(feature = "feat126-s10-driver")]
 mod feat126_s10_driver;
 mod feat126_secure_storage;
+#[cfg(feature = "feat128-s10-runtime")]
+mod feat128_s10d_runtime;
 #[cfg(feature = "feat128-s7b-runtime")]
 mod feat128_s7b_runtime;
 mod native_auth;
@@ -133,6 +135,10 @@ pub fn run() {
     let feat128_s7b_runtime =
         feat128_s7b_runtime::Feat128S7bRuntimeHarness::from_environment(secure_storage.profile())
             .unwrap_or_else(|failure| panic!("{failure}"));
+    #[cfg(feature = "feat128-s10-runtime")]
+    let feat128_s10d_runtime =
+        feat128_s10d_runtime::Feat128S10dRuntime::from_environment(secure_storage.profile())
+            .unwrap_or_else(|failure| panic!("{failure}"));
     let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
@@ -142,6 +148,8 @@ pub fn run() {
         .manage(ArtifactVideoNativeRuntime::new());
     #[cfg(feature = "feat128-s7b-runtime")]
     let builder = builder.manage(feat128_s7b_runtime);
+    #[cfg(feature = "feat128-s10-runtime")]
+    let builder = builder.manage(feat128_s10d_runtime);
     let builder = builder.on_window_event(|window, event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
             window
@@ -228,6 +236,8 @@ pub fn run() {
             ));
             #[cfg(feature = "feat128-s7b-runtime")]
             feat128_s7b_runtime::Feat128S7bRuntimeHarness::start_watchdog(app.handle().clone());
+            #[cfg(feature = "feat128-s10-runtime")]
+            feat128_s10d_runtime::Feat128S10dRuntime::start_watchdog(app.handle().clone());
             Ok(())
         }
     });
@@ -288,7 +298,13 @@ pub fn run() {
         #[cfg(feature = "feat128-s7b-runtime")]
         feat128_s7b_runtime::feat128_s7b_runtime_seed,
         #[cfg(feature = "feat128-s7b-runtime")]
-        feat128_s7b_runtime::feat128_s7b_runtime_result
+        feat128_s7b_runtime::feat128_s7b_runtime_result,
+        #[cfg(feature = "feat128-s10-runtime")]
+        feat128_s10d_runtime::feat128_s10d_runtime_prepare_v1,
+        #[cfg(feature = "feat128-s10-runtime")]
+        feat128_s10d_runtime::feat128_s10d_runtime_checkpoint_v1,
+        #[cfg(feature = "feat128-s10-runtime")]
+        feat128_s10d_runtime::feat128_s10d_runtime_finish_v1
     ]);
     #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.invoke_handler(tauri::generate_handler![

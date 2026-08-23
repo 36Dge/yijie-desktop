@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 const root = document.querySelector("#app");
 const featureDriverEnabled = import.meta.env.VITE_FEAT126_S10_DRIVER === "true";
 const feat128S7bRuntimeEnabled = import.meta.env.VITE_FEAT128_S7B_RUNTIME === "true";
+const feat128S10dRuntimeEnabled = import.meta.env.VITE_FEAT128_S10D_RUNTIME === "true";
 
-if (featureDriverEnabled && feat128S7bRuntimeEnabled) {
+if ([featureDriverEnabled, feat128S7bRuntimeEnabled, feat128S10dRuntimeEnabled].filter(Boolean).length > 1) {
   throw new Error("test_driver_conflict");
 } else if (feat128S7bRuntimeEnabled) {
   if (root === null) throw new Error("application_root_missing");
@@ -39,6 +40,12 @@ if (featureDriverEnabled && feat128S7bRuntimeEnabled) {
       import("./router"),
       import("./styles/main.css"),
     ]);
-    createApp(App).use(createPinia()).use(router).mount(root);
+    const app = createApp(App).use(createPinia()).use(router);
+    app.mount(root);
+    await router.isReady();
+    if (feat128S10dRuntimeEnabled) {
+      const { runFeat128S10dRuntimeController } = await import("./feat128/s10d-runtime-controller");
+      await runFeat128S10dRuntimeController();
+    }
   })();
 }

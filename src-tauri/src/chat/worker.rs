@@ -88,6 +88,12 @@ impl DatabaseWorker {
         })
     }
 
+    #[cfg(feature = "feat128-s10-runtime")]
+    pub(super) async fn feat128_s10d_checkpoint(&self) -> Result<(), ChatError> {
+        self.call(|repository| repository.checkpoint_after_delete())
+            .await
+    }
+
     async fn call<T, F>(&self, operation: F) -> Result<T, ChatError>
     where
         T: Send + 'static,

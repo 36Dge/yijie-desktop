@@ -72,7 +72,7 @@
       {
         "role": "database_worker",
         "path": "src-tauri/src/chat/worker.rs",
-        "sha256": "47decb75f2f2663210de72870c6f3850973cd2a193a4be52245b3003645173c2"
+        "sha256": "602fe3db2e013c09ac2daf30e0f65013017f08213db1057a9e7a0b8700d898cf"
       },
       {
         "role": "private_ipc_adapter",
@@ -82,12 +82,12 @@
       {
         "role": "interrupt_lifecycle",
         "path": "src-tauri/src/chat/application.rs",
-        "sha256": "950aed2c80f06a9a1234cee572dd03bef95fe313b3870db4475ea2027985c5ce"
+        "sha256": "df87a667ec887eda5de4f3c07ccfdeae66409eeef7bbea9bd1e37f2aaa809f2c"
       },
       {
         "role": "runtime_gate",
         "path": "src-tauri/src/chat/mod.rs",
-        "sha256": "76731f70cbe9451397008666080500484accf7c8114b7f21be5b1ad8708a87e6"
+        "sha256": "8fee9b6df8ec1bc217efcdb2c0f7277f07e426c2c31cf159f77e68bc15a6fd5a"
       },
       {
         "role": "sqlcipher_schema_v8",

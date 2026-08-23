@@ -1079,14 +1079,14 @@ export function createChatStoreDefinition(
             !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, secondHistory)
           ) return;
           authoritativeHistory = secondHistory;
-          const lateNotifications = bufferedArtifactEvents;
-          bufferedArtifactEvents = [];
-          for (const event of lateNotifications) {
-            if (artifactEventNeedsRefresh(event)) trailingArtifactRefresh = true;
-          }
         }
         applyResync(projection, authoritativeHistory);
         await refreshControlPlane();
+        const lateNotifications = bufferedArtifactEvents;
+        bufferedArtifactEvents = [];
+        for (const event of lateNotifications) {
+          if (artifactEventNeedsRefresh(event)) trailingArtifactRefresh = true;
+        }
         bufferingEvents = false;
         bufferingArtifactEvents = false;
         const pending = bufferedEvents;
@@ -1212,7 +1212,6 @@ export function createChatStoreDefinition(
         try {
           await ensureSessionEventListeners();
           artifactAuthorityToken = establishArtifactAuthority(sessionId);
-          await client.unsubscribeSession(bound.contextId, previousSubscription).catch(() => false);
           const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
           if (!isCurrent(epoch, controller, sessionId)) {
             void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
@@ -1223,6 +1222,7 @@ export function createChatStoreDefinition(
           seenEventIds.clear();
           seenEventOrder.length = 0;
           resetArtifactStream();
+          await client.unsubscribeSession(bound.contextId, previousSubscription).catch(() => false);
           bufferingArtifactEvents = artifactIntegration !== null;
           const projection = await client.resyncSessionV2(
             bound.contextId,

@@ -5,7 +5,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineComponent } from "vue";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ChatArtifactReportNativeClientError,
   type ChatArtifactReportNativeClient,
@@ -17,6 +17,7 @@ import type {
 import type { ChatArtifact } from "../../domain/chat-ipc";
 import { createArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactReport from "./ChatArtifactReport.vue";
+import * as chartRendererLoader from "./chat-artifact-report-chart-renderer";
 
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000901";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000902";
@@ -147,12 +148,92 @@ function mountReport(options: {
   });
 }
 
+beforeEach(() => {
+  vi.spyOn(chartRendererLoader, "loadChatArtifactReportChartRenderer").mockResolvedValue(ChartStub);
+});
+
 afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
 });
 
 describe("ChatArtifactReport", () => {
+  it("keeps the report module loadable when the optional chart renderer rejects during evaluation", async () => {
+    vi.resetModules();
+    vi.doMock("../yijie/YjChartCard.vue", () => {
+      throw new Error("SENSITIVE-ECHARTS-MODULE-EVALUATION-ERROR");
+    });
+
+    try {
+      await expect(Promise.all([
+        import("./ChatArtifactReport.vue"),
+        import("../../pages/chat/ChatPage.vue"),
+      ])).resolves.toHaveLength(2);
+    } finally {
+      vi.doUnmock("../yijie/YjChartCard.vue");
+      vi.resetModules();
+    }
+  });
+
+  it("contains a rejected chart renderer and preserves the authorized report as an accessible table fallback", async () => {
+    const rejectingLoader = vi.fn(async () => {
+      throw new Error("SENSITIVE-ECHARTS-MODULE-EVALUATION-ERROR");
+    });
+    vi.resetModules();
+    vi.doMock("./chat-artifact-report-chart-renderer", () => ({
+      loadChatArtifactReportChartRenderer: rejectingLoader,
+    }));
+    const consoleSpies = [
+      vi.spyOn(console, "log").mockImplementation(() => undefined),
+      vi.spyOn(console, "error").mockImplementation(() => undefined),
+      vi.spyOn(console, "warn").mockImplementation(() => undefined),
+    ];
+
+    try {
+      const { default: IsolatedReport } = await import("./ChatArtifactReport.vue");
+      const wrapper = mount(IsolatedReport, {
+        attachTo: document.body,
+        props: {
+          artifact: artifact(),
+          contextId: CONTEXT_ID,
+          client: client(knownProjection(Object.freeze([
+            section({ ordinal: 0, id: "summary", type: "summary", required: true, truncated: false, heading: "摘要", text: "其他报告区块保持可用。" }),
+            chartSection(1, "bar"),
+            section({ ordinal: 2, id: "callout", type: "callout", required: false, truncated: false, tone: "warning", title: "提示", text: "回落后仍可阅读。" }),
+          ]))),
+        },
+        global: { stubs: { YjChartCard: ChartStub } },
+      });
+
+      expect(rejectingLoader).not.toHaveBeenCalled();
+      await wrapper.get("[data-testid='artifact-report-open']").trigger("click");
+      await flushPromises();
+
+      expect(rejectingLoader).toHaveBeenCalledTimes(1);
+      expect(wrapper.text()).toContain(AUTHORIZED_MARKER);
+      expect(wrapper.text()).toContain("其他报告区块保持可用");
+      expect(wrapper.text()).toContain("回落后仍可阅读");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback']").attributes("data-renderer-status")).toBe("unavailable");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback']").text()).toContain("图表增强不可用");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback'] table").text()).toContain("分类");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback'] table").text()).toContain("数值");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback'] table").text()).toContain("A");
+      expect(wrapper.get("[data-testid='artifact-report-chart-fallback'] table").text()).toContain("1");
+      expect(wrapper.text()).not.toContain("SENSITIVE-ECHARTS-MODULE-EVALUATION-ERROR");
+      expect(consoleSpies.every((spy) => spy.mock.calls.length === 0)).toBe(true);
+
+      await wrapper.get("[data-testid='artifact-report-close']").trigger("click");
+      await wrapper.get("[data-testid='artifact-report-open']").trigger("click");
+      await flushPromises();
+      expect(rejectingLoader).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+      expect(document.body.textContent).not.toContain(AUTHORIZED_MARKER);
+    } finally {
+      vi.doUnmock("./chat-artifact-report-chart-renderer");
+      vi.resetModules();
+    }
+  });
+
   it("fails closed for non-report, non-ready, missing client, or an untrusted context", () => {
     expect(mountReport({ artifactOverrides: { kind: "file" } }).find("[data-testid='artifact-report']").exists()).toBe(false);
     expect(mountReport({ artifactOverrides: { status: "processing", mediaType: null, sizeBytes: null, localCommittedAt: null, expiresAt: null } }).find("[data-testid='artifact-report']").exists()).toBe(false);
@@ -353,7 +434,10 @@ describe("ChatArtifactReport", () => {
     expect(consoleSpies.every((spy) => spy.mock.calls.length === 0)).toBe(true);
 
     const source = readFileSync(resolve(process.cwd(), "src/components/chat/ChatArtifactReport.vue"), "utf8");
+    const loaderSource = readFileSync(resolve(process.cwd(), "src/components/chat/chat-artifact-report-chart-renderer.ts"), "utf8");
     expect(source).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(source).not.toContain('import YjChartCard from "../yijie/YjChartCard.vue"');
+    expect(loaderSource).toContain('import("../yijie/YjChartCard.vue")');
     expect(source).not.toMatch(/v-html|\binvoke\s*\(|\bfetch\s*\(|localStorage|sessionStorage|indexedDB|\bconsole\.|useRouter|defineStore/);
     await wrapper.get("[data-testid='artifact-report-open']").trigger("click");
     await flushPromises();

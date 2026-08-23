@@ -75,4 +75,45 @@ describe("App chat route synchronization", () => {
     expect(store.phase).toBe("ready");
     wrapper.unmount();
   });
+
+  it("does not clear a newly selected session on a phase-only change before navigation commits", async () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: () => "#000000",
+    }));
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useChatStore(pinia);
+    store.phase = "resyncing";
+    store.context = {
+      contextId: "019c1a00-0000-7000-8000-000000000003",
+      expiresAtEpochSeconds: 2_000_000_000,
+      allowedActions: ["read_sessions"],
+    };
+    store.selectedSessionId = "019c1a00-0000-7000-8000-000000000004";
+    const clearSelectedSession = vi.spyOn(store, "clearSelectedSession");
+    const page = { template: "<div />" };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/chat", component: page },
+        { path: "/chat/:sessionId", component: page },
+        { path: "/settings", component: page },
+      ],
+    });
+    await router.push("/chat");
+    await router.isReady();
+    const wrapper = shallowMount(App, { global: { plugins: [pinia, router] } });
+
+    store.phase = "ready";
+    await flushPromises();
+
+    expect(clearSelectedSession).not.toHaveBeenCalled();
+    expect(store.selectedSessionId).toBe("019c1a00-0000-7000-8000-000000000004");
+    wrapper.unmount();
+  });
 });

@@ -469,6 +469,16 @@ impl ChatRuntime {
         let Some(selection) = native_project::pick_project().await? else {
             return Ok(None);
         };
+        self.register_project_selection(worker, selection)
+            .await
+            .map(Some)
+    }
+
+    async fn register_project_selection(
+        &self,
+        worker: DatabaseWorker,
+        selection: native_project::ProjectSelection,
+    ) -> Result<database::ProjectSummary, ChatError> {
         if let RuntimeMode::Local(config) = &self.mode {
             if let Some(profile) = &config.secure_storage {
                 profile
@@ -479,7 +489,6 @@ impl ChatRuntime {
         worker
             .register_project(selection.canonical_path, selection.bookmark)
             .await
-            .map(Some)
     }
 
     #[cfg(feature = "feat126-s10-driver")]
@@ -503,10 +512,58 @@ impl ChatRuntime {
         })
         .await
         .map_err(|_| ChatError::ProjectUnavailable)??;
-        self.database()
-            .await?
-            .register_project(selection.canonical_path, selection.bookmark)
+        self.register_project_selection(self.database().await?, selection)
             .await
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    pub(crate) async fn feat128_s10d_register_profile_project(
+        &self,
+        project_path: PathBuf,
+    ) -> Result<database::ProjectSummary, ChatError> {
+        let profile = match &self.mode {
+            RuntimeMode::Local(config) => config
+                .secure_storage
+                .clone()
+                .ok_or(ChatError::InvalidConfiguration)?,
+            RuntimeMode::Disabled => return Err(ChatError::Disabled),
+            RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
+        };
+        let canonical = database::validate_project_path(&project_path)
+            .map_err(|_| ChatError::ProjectUnavailable)?;
+        if canonical != project_path {
+            return Err(ChatError::ProjectUnavailable);
+        }
+        profile
+            .validate_project_path(&canonical)
+            .map_err(|_| ChatError::ProjectUnavailable)?;
+        let selection = tokio::task::spawn_blocking(move || {
+            native_project::create_selection(&canonical)?.ok_or(ChatError::ProjectUnavailable)
+        })
+        .await
+        .map_err(|_| ChatError::ProjectUnavailable)??;
+        self.register_project_selection(self.database().await?, selection)
+            .await
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    pub(crate) async fn feat128_s10d_shutdown(&self) -> Result<(), ChatError> {
+        *self.host_bridge.lock().await = None;
+        let sidecar_result = match &self.sidecar {
+            Some(sidecar) => sidecar.stop().await.map(|_| ()),
+            None => Ok(()),
+        };
+        let database_result = match self.worker.lock().await.take() {
+            Some(worker) => {
+                let checkpoint = worker.feat128_s10d_checkpoint().await;
+                let closed = tokio::task::spawn_blocking(move || drop(worker))
+                    .await
+                    .map_err(|_| ChatError::DatabaseUnavailable);
+                checkpoint.and(closed)
+            }
+            None => Ok(()),
+        };
+        sidecar_result.and(database_result)
     }
 
     #[cfg(feature = "feat126-s10-driver")]
@@ -820,6 +877,29 @@ mod tests {
     #[cfg(feature = "feat126-s10-driver")]
     use uuid::Uuid;
 
+    #[cfg(feature = "feat128-s10-runtime")]
+    fn feat128_s10d_test_runtime(profile: Arc<Feat126SecureStorageProfile>) -> ChatRuntime {
+        let scope = database::ChatScope::new(
+            "12800000-0000-4000-8000-000000000001".to_owned(),
+            "12800000-0000-4000-8000-100000000001".to_owned(),
+        )
+        .expect("test chat scope");
+        let authorization = ChatAuthorizationManager::new(&scope).ok();
+        ChatRuntime {
+            mode: RuntimeMode::Local(LocalChatConfig {
+                chat_directory: profile.desktop_app_data().join("chat"),
+                scope,
+                secure_storage: Some(profile),
+                public_tasks: Arc::new(public_tasks::FixedPublicTaskControlPlane::new([])),
+            }),
+            authorization,
+            worker: Mutex::new(None),
+            initialization: Mutex::new(()),
+            sidecar: None,
+            host_bridge: Mutex::new(None),
+        }
+    }
+
     #[cfg(feature = "feat126-s10-driver")]
     fn resumed_session(candidate: &database::Feat126ResumeCandidate) -> HostSession {
         HostSession {
@@ -900,6 +980,105 @@ mod tests {
         for forbidden in ["bearer", "sqlcipher", "projectPath", "binary", "token"] {
             assert!(!encoded.contains(forbidden));
         }
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    #[tokio::test]
+    async fn feat128_s10d_bootstrap_registers_only_the_exact_profile_project_idempotently() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let project_path = root.join("project");
+        let runtime = feat128_s10d_test_runtime(profile.clone());
+
+        let first = runtime
+            .feat128_s10d_register_profile_project(project_path.clone())
+            .await
+            .expect("register exact profile project");
+        let second = runtime
+            .feat128_s10d_register_profile_project(project_path)
+            .await
+            .expect("repeat exact profile project registration");
+        assert_eq!(first.id, second.id);
+
+        let projects = runtime
+            .list_projects()
+            .await
+            .expect("production project list");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, first.id);
+        let worker = runtime
+            .database()
+            .await
+            .expect("production database authority");
+        assert!(worker
+            .list_sessions(None, None)
+            .await
+            .expect("session authority")
+            .sessions
+            .is_empty());
+        let lifetime = worker.thread_lifetime_probe();
+        drop(worker);
+        drop(runtime);
+        assert!(lifetime.upgrade().is_none());
+        std::fs::remove_dir_all(profile.desktop_app_data().join("chat"))
+            .expect("remove closed isolated chat database");
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile)
+            .expect("cleanup isolated profile");
+        assert!(!root.exists());
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    #[tokio::test]
+    async fn feat128_s10d_bootstrap_rejects_noncanonical_mismatched_and_missing_projects() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let runtime = feat128_s10d_test_runtime(profile.clone());
+        let exact = root.join("project");
+
+        for rejected in [
+            exact.join("..").join("project"),
+            profile.desktop_app_data().to_path_buf(),
+            root.join("missing"),
+        ] {
+            assert_eq!(
+                runtime
+                    .feat128_s10d_register_profile_project(rejected)
+                    .await,
+                Err(ChatError::ProjectUnavailable)
+            );
+        }
+        drop(runtime);
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile)
+            .expect("cleanup isolated profile");
+        assert!(!root.exists());
+    }
+
+    #[cfg(feature = "feat128-s10-runtime")]
+    #[tokio::test]
+    async fn feat128_s10d_shutdown_checkpoints_and_drops_the_database_worker() {
+        let (root, profile) = crate::feat126_secure_storage::ephemeral_test_profile();
+        let runtime = feat128_s10d_test_runtime(profile.clone());
+        let worker = runtime.database().await.expect("database worker");
+        worker
+            .schema_version()
+            .await
+            .expect("initialize production database");
+        let lifetime = worker.thread_lifetime_probe();
+        drop(worker);
+
+        runtime
+            .feat128_s10d_shutdown()
+            .await
+            .expect("feature-only graceful shutdown");
+
+        assert!(lifetime.upgrade().is_none());
+        assert!(!profile
+            .desktop_app_data()
+            .join("chat/conversations.db-wal")
+            .exists());
+        std::fs::remove_dir_all(profile.desktop_app_data().join("chat"))
+            .expect("remove closed isolated chat database");
+        crate::feat126_secure_storage::cleanup_ephemeral_test_profile(&profile)
+            .expect("cleanup isolated profile");
+        assert!(!root.exists());
     }
 
     #[test]
