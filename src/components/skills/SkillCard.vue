@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useId } from "vue";
 import { NButton, NSwitch, NTag, NTooltip } from "naive-ui";
 import {
   skillCanInstall,
@@ -29,6 +29,11 @@ const emit = defineEmits<{
 
 const titleId = useId();
 const descriptionId = useId();
+const installTooltipHovered = ref(false);
+const installTooltipFocused = ref(false);
+const installTooltipVisible = computed(
+  () => installTooltipHovered.value || installTooltipFocused.value,
+);
 const iconName = computed<YjIconName>(() =>
   isYjIconName(props.skill.iconKey) ? props.skill.iconKey : "plugin",
 );
@@ -146,7 +151,11 @@ function requestUninstall(event: MouseEvent): void {
             @update:value="emit('enabled-change', skill.id, $event)"
           />
         </template>
-        <n-tooltip v-else-if="installable" trigger="hover">
+        <n-tooltip
+          v-else-if="installable"
+          trigger="manual"
+          :show="installTooltipVisible"
+        >
           <template #trigger>
             <n-button
               class="skill-card__install"
@@ -155,6 +164,10 @@ function requestUninstall(event: MouseEvent): void {
               :loading="operation === 'install'"
               :disabled="pending"
               :aria-label="`${installActionLabel} ${skill.displayName}`"
+              @mouseenter="installTooltipHovered = true"
+              @mouseleave="installTooltipHovered = false"
+              @focus="installTooltipFocused = true"
+              @blur="installTooltipFocused = false"
               @click="emit('install', skill.id)"
             >
               <template #icon><YjIcon name="plus" size="lg" /></template>

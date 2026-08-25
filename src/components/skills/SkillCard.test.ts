@@ -62,15 +62,27 @@ afterEach(() => {
 });
 
 describe("SkillCard", () => {
-  it("offers one labelled install control with the required tooltip", async () => {
+  it("offers one labelled install control with a hover and keyboard-focus tooltip", async () => {
     const wrapper = mountCard();
     const install = wrapper.get(`button[aria-label="安装 跨境营销文案"]`);
 
     const tooltip = wrapper.getComponent(NTooltip);
-    expect(tooltip.props("trigger")).toBe("hover");
+    expect(tooltip.props("trigger")).toBe("manual");
+    expect(tooltip.props("show")).toBe(false);
     expect(tooltip.vm.$slots.default?.().some((node) =>
       typeof node.children === "string" && node.children.includes("安装")
     )).toBe(true);
+
+    await install.trigger("mouseenter");
+    expect(tooltip.props("show")).toBe(true);
+    await install.trigger("mouseleave");
+    expect(tooltip.props("show")).toBe(false);
+
+    await install.trigger("focus");
+    expect(tooltip.props("show")).toBe(true);
+    await install.trigger("blur");
+    expect(tooltip.props("show")).toBe(false);
+
     await install.trigger("click");
 
     expect(wrapper.emitted("install")).toEqual([[SKILL_ID]]);
