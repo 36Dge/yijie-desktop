@@ -9,6 +9,7 @@ import {
 } from "../api/skill-native-client";
 import {
   projectSkillCategories,
+  skillCanInstall,
   type ManagedSkillProjection,
   type SkillCatalogSnapshot,
 } from "../domain/skill-marketplace";
@@ -76,12 +77,22 @@ export function createSkillStoreDefinition(
     let reconcileReason: SkillScanReason | null = null;
     let disposed = false;
 
-    function applySnapshot(snapshot: SkillCatalogSnapshot): void {
+    function applySnapshot(
+      snapshot: SkillCatalogSnapshot,
+      completedSkillId: string | null = null,
+    ): void {
       skills.value = snapshot.skills;
       scannedAt.value = snapshot.scannedAt;
       phase.value = snapshot.skills.length === 0 ? "empty" : "ready";
       lastFailure.value = null;
-      operationErrors.value = Object.freeze({});
+      const nextErrors = Object.fromEntries(
+        Object.entries(operationErrors.value).filter(([skillId]) => {
+          if (skillId === completedSkillId) return false;
+          const skill = snapshot.skills.find((entry) => entry.id === skillId);
+          return skill !== undefined && skillCanInstall(skill);
+        }),
+      );
+      operationErrors.value = Object.freeze(nextErrors);
     }
 
     function setOperation(skillId: string, operation: SkillOperationKind | null): void {
@@ -180,7 +191,7 @@ export function createSkillStoreDefinition(
       setOperationError(skillId, null);
       let succeeded = false;
       try {
-        applySnapshot(await mutation());
+        applySnapshot(await mutation(), skillId);
         succeeded = true;
       } catch (error: unknown) {
         const kind = failureKind(error);

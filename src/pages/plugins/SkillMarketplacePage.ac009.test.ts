@@ -247,6 +247,13 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
       .toContain("内置 Skill 资源未通过完整性或路径安全校验");
     expect(wrapper.get(`button[aria-label="重试安装 跨境营销文案"]`)).toBeDefined();
 
+    window.dispatchEvent(new Event("focus"));
+    await flushPromises();
+    expect(nativeMock.scan).toHaveBeenLastCalledWith("window_resume", expect.any(AbortSignal));
+    expect(wrapper.get(`button[aria-label="重试安装 跨境营销文案"]`)).toBeDefined();
+    expect(wrapper.get(".skill-card [role=alert]").text())
+      .toContain("内置 Skill 资源未通过完整性或路径安全校验");
+
     await wrapper.get(`button[aria-label="重试安装 跨境营销文案"]`).trigger("click");
     await flushPromises();
     expect(nativeMock.install).toHaveBeenCalledTimes(2);

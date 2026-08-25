@@ -212,4 +212,53 @@ describe("Skill store", () => {
     expect(store.operationErrors[SKILL_ID]).toContain("本地 Skill 服务暂不可用");
     expect(store.operationErrors[SKILL_ID]).not.toContain("private host response");
   });
+
+  it("keeps an install retry through window reconciliation and clears it after success", async () => {
+    const initial = snapshot();
+    const scan = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(initial);
+    const install = vi.fn()
+      .mockRejectedValueOnce(new SkillNativeClientError("bundle-invalid"))
+      .mockResolvedValueOnce(snapshot({
+        installationStatus: "installed",
+        enabled: true,
+        runtimeVisible: true,
+      }));
+    const store = createStore(client({ scan, install }));
+    await store.open(true);
+
+    expect(await store.install(SKILL_ID)).toBe(false);
+    expect(store.operationErrors[SKILL_ID]).toContain("完整性或路径安全校验");
+
+    await store.refresh(true, "window_resume");
+    expect(scan).toHaveBeenLastCalledWith("window_resume", expect.any(AbortSignal));
+    expect(store.skills[0]?.installationStatus).toBe("not_installed");
+    expect(store.operationErrors[SKILL_ID]).toContain("完整性或路径安全校验");
+
+    expect(await store.install(SKILL_ID)).toBe(true);
+    expect(store.skills[0]?.installationStatus).toBe("installed");
+    expect(store.operationErrors[SKILL_ID]).toBeUndefined();
+  });
+
+  it("drops stale operation errors when a read no longer exposes an install retry", async () => {
+    const scan = vi.fn()
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot({
+        installationStatus: "installed",
+        enabled: true,
+        runtimeVisible: true,
+      }));
+    const store = createStore(client({
+      scan,
+      install: vi.fn(async () => { throw new SkillNativeClientError("bundle-invalid"); }),
+    }));
+    await store.open(true);
+    expect(await store.install(SKILL_ID)).toBe(false);
+    expect(store.operationErrors[SKILL_ID]).toBeDefined();
+
+    await store.refresh(true, "directory_changed");
+    expect(store.skills[0]?.installationStatus).toBe("installed");
+    expect(store.operationErrors[SKILL_ID]).toBeUndefined();
+  });
 });
