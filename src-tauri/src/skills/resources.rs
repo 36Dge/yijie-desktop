@@ -157,6 +157,12 @@ fn install_root_fingerprint(path: &Path) -> Option<[u8; 32]> {
                 return None;
             }
             let entry_path = entry.path();
+            // Host state and transaction names are reserved with this prefix.
+            // Including them would feed each scan's journal write back into the
+            // watcher and continuously request another renderer scan.
+            if is_host_managed_internal_entry(&entry_path) {
+                continue;
+            }
             let metadata = fs::symlink_metadata(&entry_path).ok()?;
             let relative = entry_path.strip_prefix(path).ok()?.to_path_buf();
             let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
@@ -184,6 +190,11 @@ fn install_root_fingerprint(path: &Path) -> Option<[u8; 32]> {
         digest.update(modified.subsec_nanos().to_le_bytes());
     }
     Some(digest.finalize().into())
+}
+
+fn is_host_managed_internal_entry(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.as_encoded_bytes().starts_with(b".yijie-"))
 }
 
 fn require_absolute(path: &Path) -> Result<(), SkillRootsError> {
@@ -640,8 +651,36 @@ mod tests {
     }
 
     #[test]
-    fn install_root_fingerprint_changes_when_a_skill_directory_is_moved() {
-        let root = TestRoot::new("fingerprint");
+    fn install_root_fingerprint_ignores_host_state_and_transaction_mutations() {
+        let root = TestRoot::new("fingerprint-host-state");
+        let installed = root.path().join("installed");
+        let state = installed.join(".yijie-state");
+        let staging = installed.join(".yijie-staging--operation");
+        fs::create_dir_all(&state).unwrap();
+        fs::create_dir_all(&staging).unwrap();
+        fs::write(state.join("operations.json"), b"{\"operations\":[]}").unwrap();
+        fs::write(staging.join("SKILL.md"), b"staged content").unwrap();
+
+        let before = install_root_fingerprint(&installed).unwrap();
+        fs::write(
+            state.join("operations.json"),
+            b"{\"operations\":[{\"status\":\"complete\"}]}",
+        )
+        .unwrap();
+        fs::write(state.join("operations.json.tmp"), b"host transaction").unwrap();
+        fs::write(
+            staging.join("SKILL.md"),
+            b"changed staged transaction content",
+        )
+        .unwrap();
+        let after = install_root_fingerprint(&installed).unwrap();
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn install_root_fingerprint_detects_real_skill_move_delete_and_content_changes() {
+        let root = TestRoot::new("fingerprint-skill-content");
         let installed = root.path().join("installed");
         fs::create_dir(&installed).unwrap();
         let skill = installed.join("yijie.content-marketing.copywriting");
@@ -649,15 +688,21 @@ mod tests {
         fs::write(skill.join("SKILL.md"), b"fixture").unwrap();
 
         let before = install_root_fingerprint(&installed).unwrap();
-        fs::rename(
-            &skill,
-            root.path()
-                .join("yijie.content-marketing.copywriting.moved"),
+        let moved_skill = installed.join("yijie.content-marketing.copywriting.moved");
+        fs::rename(&skill, &moved_skill).unwrap();
+        let after_move = install_root_fingerprint(&installed).unwrap();
+
+        assert_ne!(before, after_move);
+
+        let before_content_change = after_move;
+        fs::write(
+            moved_skill.join("SKILL.md"),
+            b"fixture with changed Skill content",
         )
         .unwrap();
-        let after = install_root_fingerprint(&installed).unwrap();
+        let after_content_change = install_root_fingerprint(&installed).unwrap();
 
-        assert_ne!(before, after);
+        assert_ne!(before_content_change, after_content_change);
 
         let nested_skill = installed.join("yijie.market-research.company-research");
         let references = nested_skill.join("references");
