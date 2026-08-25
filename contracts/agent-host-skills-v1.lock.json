@@ -120,7 +120,7 @@
       { "path": "src-tauri/src/skills/host.rs", "sha256": "2e2a0589626994400fabcd1005489b86a3268560f8cd4c959eb120a3d3efec88" },
       { "path": "src-tauri/src/skills/mod.rs", "sha256": "7b2503de36a8c82d23b2d8b8902d15a8c6739c8cf775f21e0dd050c88c09a9a8" },
       { "path": "src-tauri/src/skills/catalog.rs", "sha256": "c5f322e6b46af4970a4e77c37810a0d62986bfb106d10ce47cba153ec8f14363" },
-      { "path": "src-tauri/src/skills/resources.rs", "sha256": "f6a0863634f07a3e42bb9cac317223f4026359d6929666bae1ce465869c034d8" },
+      { "path": "src-tauri/src/skills/resources.rs", "sha256": "5353f19eb43366cad86f7767111631892f6784860d991943bbce8c85b030556a" },
       { "path": "src-tauri/src/local_profile.rs", "sha256": "2a93581622ad08d15d5d9243ea17fdfedfd834c481e833930e36fad78b5eba57" },
       { "path": "src-tauri/src/native_auth/runtime.rs", "sha256": "778a8a0305f0bb0eefc0d5f25ecaf18103b94ffe0ca33f1889035af8e6f18c1f" },
       { "path": "src-tauri/src/chat/host_bridge.rs", "sha256": "54a99dd0bab6b5570219114cb910caeaf9c759aabefb46a964945a8510642425" },
