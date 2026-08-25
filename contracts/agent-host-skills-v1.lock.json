@@ -1,100 +1,109 @@
 {
-  "schema_version": 1,
-  "contract_version": "0.5.0",
+  "schema_version": 2,
+  "contract_version": "0.5.1",
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "full_commit": "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
+  "full_commit": "164b14f609537d727a52326832da04430aecc4ab",
   "sources": {
     "openapi": {
       "path": "openapi/agent-host/agent-host.yaml",
-      "sha256": "406b55dad02d5a3d489955bcf29c973b94252c3e300f8ff853709a71d6874431"
+      "sha256": "f1aefb55285a12963a37e0cc008f90e7b081373d77623ce92127b06e1fbcdb31"
     },
     "bundle_manifest_schema": {
-      "path": "jsonschema/skills/skill-bundle-manifest-v1.schema.json",
-      "sha256": "d86185a1d5f4d9a136c88b679d50ac3e83bcc2b722eee39cba674c5be3b88469"
+      "path": "jsonschema/skills/skill-bundle-manifest-v2.schema.json",
+      "sha256": "39a898111ba3dcae2f369fdcb571a2e892830d1d0a57c90ab6210a0ab897a649"
     },
     "runtime_projection": {
       "path": "compatibility/agent-host-runtime-v1.json",
-      "sha256": "6b7662d4237486300456f16abd0305fe1ea267b70a85e497ba7ab15a654939ee"
+      "sha256": "5eadca026cdc8813cf529fa8e074de7532a2c78bebc5c89d9364180942869311"
+    }
+  },
+  "providers": {
+    "agent_host": {
+      "repository": "https://github.com/36Dge/yijie-agent-host.git",
+      "full_commit": "1b7bfd1ce4323e52035b2ba1e62842c2d332d9ed",
+      "contracts_lock_path": "api/contracts.lock",
+      "skills_lock_path": "api/skills.lock"
+    },
+    "skills": {
+      "repository": "https://github.com/36Dge/yijie-skills.git",
+      "full_commit": "10c45bec29603b002e861e1499d5b4e684251af5",
+      "version": "0.3.0",
+      "source_tree_sha256": "3247a14004c76170cf41a2d854e2ceffa1fd43de6e0ca8bb596f1d61d9be1029",
+      "contracts_lock_path": "contracts/lock.json",
+      "local_manifest_sha256": "cc2b9be4d0e640e0888e97f6f7a09149a248386931786a7a089c8094304d94a5",
+      "desktop_release_manifest_sha256": "9f8459077615514183fdd4c81ff3b6b2ef1ea735257b04c040399d4c91c1daa2",
+      "archive_inventory_sha256": "0bfb2d66b484b281cc7e22667d611dda81c6ab862ece5b78da4e8301fc497715"
     }
   },
   "fixture_trees": [
     {
       "path": "tests/fixtures/agent/host-skills-v1",
-      "git_tree_oid": "80138d31544965e6ccca142bfbd311e17906ea08"
+      "git_tree_oid": "ab2333f05fe5138fd7c32e6758ae4c6ed327c095"
     },
     {
-      "path": "tests/fixtures/skills/bundle-v1",
-      "git_tree_oid": "7afc9656d56523b929c85ffc9ba45f093a0e0e4a"
+      "path": "tests/fixtures/skills/bundle-v2",
+      "git_tree_oid": "bbe9754ef64f99416e43b75fe2b60fc26d15f799"
     }
   ],
   "fixtures": [
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/enabled-request.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/enabled-request.json",
+      "schema": "SkillEnabledRequest",
       "sha256": "93710bb7a9b86e33ea77d5457c413c0a7e252b94f65101fe4c4d6e9f25bd9707"
     },
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/error-archive-unsafe.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/error-archive-unsafe.json",
+      "schema": "SkillErrorResponse",
       "sha256": "1560f14bbd25015957b0bb354c65e21db8f8095658d43acfeb6b0deaf1a6d8a1"
     },
     {
+      "source_path": "tests/fixtures/agent/host-skills-v1/error-skill-not-installable.json",
+      "schema": "SkillErrorResponse",
+      "sha256": "f11b42113be11c568ffa101bdbded6c016647cb7df715de15750784a7bd05b57"
+    },
+    {
       "source_path": "tests/fixtures/agent/host-skills-v1/install-request.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/install-request.json",
-      "sha256": "b4c78555a4c1f902cd1ee36f3ad9b8cb4e6605b1036409212a0f2d866b782aea"
+      "schema": "SkillInstallRequest",
+      "sha256": "e18177533442814bf3af145444f56433de1367fc0737f1a9782a61c0ad9f78bd"
     },
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/list-response.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/list-response.json",
-      "sha256": "2981547dd55b44c05e36462a679d6bfd1b01657522d886699422e702b88ffb56"
+      "schema": "SkillListResponse",
+      "sha256": "c615889a263cf2d9c78b0704dc46c57200dd6a0b748ddcb4c72ae818c88923a2"
     },
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/mutation-response.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/mutation-response.json",
+      "schema": "SkillMutationResponse",
       "sha256": "bbbe2947e7f17948f44a107e54e5a569f632262493a1d6c7e4c4368b14bcf22d"
     },
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/scan-request.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/scan-request.json",
+      "schema": "SkillScanRequest",
       "sha256": "7de0414955e6671feba9bcad577d6dfb6e861f910788b1a382d62cd7e2726202"
     },
     {
       "source_path": "tests/fixtures/agent/host-skills-v1/uninstall-request.json",
-      "snapshot_path": "tests/fixtures/agent-host-skills-v1/uninstall-request.json",
+      "schema": "SkillUninstallRequest",
       "sha256": "e3f0f4a4213009fa5d25b56e760c93919c53d097b726cb02cbe4930b5d004a9a"
     }
   ],
+  "bundle_fixture": {
+    "manifest_path": "tests/fixtures/skills/bundle-v2/manifest-catalog-38.json",
+    "manifest_sha256": "407d0760e1d06ef3446955fba19b39da26d1f740b2f63b601edae903b1664c18",
+    "archive_path": "tests/fixtures/skills/bundle-v2/packages/fixture-copywriting-0.1.0.zip",
+    "archive_sha256": "0be8fb3745a32207c6dedb46090044763d47aa64ccf0147653591cb1c9171032",
+    "skill_count": 38,
+    "category_counts": "5/9/7/9/8",
+    "installable_count": 1,
+    "blocked_count": 37,
+    "blocked_install_error": "skill_not_installable"
+  },
   "operations": [
-    {
-      "method": "get",
-      "path": "/v1/skills",
-      "operation_id": "listManagedSkills",
-      "required_capability": "plugin.read"
-    },
-    {
-      "method": "post",
-      "path": "/v1/skills/scan-operations",
-      "operation_id": "scanManagedSkills",
-      "required_capability": "plugin.manage"
-    },
-    {
-      "method": "post",
-      "path": "/v1/skills/{skill_id}/install-operations",
-      "operation_id": "installManagedSkill",
-      "required_capability": "plugin.manage"
-    },
-    {
-      "method": "put",
-      "path": "/v1/skills/{skill_id}/enabled",
-      "operation_id": "setManagedSkillEnabled",
-      "required_capability": "plugin.manage"
-    },
-    {
-      "method": "post",
-      "path": "/v1/skills/{skill_id}/uninstall-operations",
-      "operation_id": "uninstallManagedSkill",
-      "required_capability": "plugin.manage"
-    }
+    { "method": "get", "path": "/v1/skills", "operation_id": "listManagedSkills", "required_capability": "plugin.read" },
+    { "method": "post", "path": "/v1/skills/scan-operations", "operation_id": "scanManagedSkills", "required_capability": "plugin.manage" },
+    { "method": "post", "path": "/v1/skills/{skill_id}/install-operations", "operation_id": "installManagedSkill", "required_capability": "plugin.manage" },
+    { "method": "put", "path": "/v1/skills/{skill_id}/enabled", "operation_id": "setManagedSkillEnabled", "required_capability": "plugin.manage" },
+    { "method": "post", "path": "/v1/skills/{skill_id}/uninstall-operations", "operation_id": "uninstallManagedSkill", "required_capability": "plugin.manage" }
   ],
   "parser": {
     "package": "@redocly/openapi-core",
@@ -102,55 +111,22 @@
     "api": "parseYaml",
     "provided_by": "openapi-typescript@7.13.0"
   },
-  "validator": {
-    "package": "ajv",
-    "version": "8.17.1"
-  },
+  "validator": { "package": "ajv", "version": "8.17.1" },
   "consumer": {
     "owner": "段成威",
     "mode": "hand-written-rust-adapter",
     "implementation_status": "implemented",
     "implementation_files": [
-      {
-        "path": "src-tauri/src/skills/host.rs",
-        "sha256": "669202ef3a7798c3573c74b90b4f64eaa6114d0a1ee5d1c8aba6cd0d0b211bdd"
-      },
-      {
-        "path": "src-tauri/src/skills/mod.rs",
-        "sha256": "304493e4afcaa69af778b4ac96f7dbc145099a6a4829b8a4d2d62947f9f7c5c8"
-      },
-      {
-        "path": "src-tauri/src/skills/catalog.rs",
-        "sha256": "0cad0ed138170fac3bb526d89a29d0a52ce61e55c06f2945ec23a39305f4d182"
-      },
-      {
-        "path": "src-tauri/src/skills/resources.rs",
-        "sha256": "049ab6307697b546997a0bc9656a78efd836733d5366fddd23e3e2297dc2f377"
-      },
-      {
-        "path": "src-tauri/src/local_profile.rs",
-        "sha256": "2a93581622ad08d15d5d9243ea17fdfedfd834c481e833930e36fad78b5eba57"
-      },
-      {
-        "path": "src-tauri/src/native_auth/runtime.rs",
-        "sha256": "778a8a0305f0bb0eefc0d5f25ecaf18103b94ffe0ca33f1889035af8e6f18c1f"
-      },
-      {
-        "path": "src-tauri/src/chat/host_bridge.rs",
-        "sha256": "5517be0351222ac461578ad5e3a2b0ec6516c5df622d13d9b687e1494b8a5467"
-      },
-      {
-        "path": "src-tauri/src/chat/host_domain.rs",
-        "sha256": "35955038bb31eb17955a47eee8fad02895c2d798288dd3e98db10f2347687bf6"
-      },
-      {
-        "path": "src-tauri/src/chat/sidecar.rs",
-        "sha256": "9d9cea204a4e9235d1242a5fdac06eb1babdebce1f0fbdfde7ba8ae153ff08b3"
-      },
-      {
-        "path": "src-tauri/src/lib.rs",
-        "sha256": "9da5975ccd3144a13149c17114999553a5377e00b6ae67119977dbee61d6519c"
-      }
+      { "path": "src-tauri/src/skills/host.rs", "sha256": "2e2a0589626994400fabcd1005489b86a3268560f8cd4c959eb120a3d3efec88" },
+      { "path": "src-tauri/src/skills/mod.rs", "sha256": "7b2503de36a8c82d23b2d8b8902d15a8c6739c8cf775f21e0dd050c88c09a9a8" },
+      { "path": "src-tauri/src/skills/catalog.rs", "sha256": "c5f322e6b46af4970a4e77c37810a0d62986bfb106d10ce47cba153ec8f14363" },
+      { "path": "src-tauri/src/skills/resources.rs", "sha256": "f6a0863634f07a3e42bb9cac317223f4026359d6929666bae1ce465869c034d8" },
+      { "path": "src-tauri/src/local_profile.rs", "sha256": "2a93581622ad08d15d5d9243ea17fdfedfd834c481e833930e36fad78b5eba57" },
+      { "path": "src-tauri/src/native_auth/runtime.rs", "sha256": "778a8a0305f0bb0eefc0d5f25ecaf18103b94ffe0ca33f1889035af8e6f18c1f" },
+      { "path": "src-tauri/src/chat/host_bridge.rs", "sha256": "54a99dd0bab6b5570219114cb910caeaf9c759aabefb46a964945a8510642425" },
+      { "path": "src-tauri/src/chat/host_domain.rs", "sha256": "35955038bb31eb17955a47eee8fad02895c2d798288dd3e98db10f2347687bf6" },
+      { "path": "src-tauri/src/chat/sidecar.rs", "sha256": "9d9cea204a4e9235d1242a5fdac06eb1babdebce1f0fbdfde7ba8ae153ff08b3" },
+      { "path": "src-tauri/src/lib.rs", "sha256": "bc5ff5cca5c38fe1b9eee7dcb838b03dec2c086d71f753d9d4ca224677ef7667" }
     ],
     "approved_rust_generator": "N/A",
     "generator_rationale": "No Rust OpenAPI generator is approved for the Desktop native boundary; exact-source fixtures and a reviewed closed adapter are required."
@@ -161,7 +137,7 @@
     "approved_on": "2026-08-25",
     "expires_on": "2026-11-23",
     "status": "active",
-    "scope": "Time-bounded hand-written Rust adapter for the owner-only Agent Host Skills v1 API.",
+    "scope": "Time-bounded hand-written Rust adapter for the owner-only Agent Host Skills v1 API and Manifest v2 projection.",
     "removal_trigger": "Remove or re-review when an approved Rust generator exists, the pinned source changes, or before a signed release candidate."
   }
 }

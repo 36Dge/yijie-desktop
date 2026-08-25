@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   NAlert,
   NButton,
@@ -9,6 +10,7 @@ import {
   useMessage,
 } from "naive-ui";
 import type { SkillCategory } from "../../domain/skill-marketplace";
+import { skillNativeClient } from "../../api/skill-native-client";
 import type { YjIconName } from "../../icons/registry";
 import { usePermissionStore } from "../../stores/permission.store";
 import {
@@ -35,6 +37,8 @@ const skillStore = useSkillStore();
 const message = useMessage();
 const uninstallTargetId = ref<string | null>(null);
 let uninstallTrigger: HTMLElement | null = null;
+let unlistenDirectoryChanged: UnlistenFn | null = null;
+let pageUnmounted = false;
 
 const canManage = computed(() => permissionStore.hasCapability("plugin.manage"));
 const uninstallTarget = computed(() =>
@@ -107,6 +111,22 @@ function handleWindowFocus(): void {
   void skillStore.refresh(canManage.value, "window_resume");
 }
 
+async function subscribeDirectoryChanges(): Promise<void> {
+  try {
+    const unlisten = await skillNativeClient.subscribeDirectoryChanged(() => {
+      if (pageUnmounted) return;
+      void skillStore.refresh(canManage.value, "directory_changed");
+    });
+    if (pageUnmounted) {
+      unlisten();
+      return;
+    }
+    unlistenDirectoryChanged = unlisten;
+  } catch {
+    // Window focus and explicit rescans remain the bounded recovery path.
+  }
+}
+
 watch(canManage, (allowed, previous) => {
   if (!allowed && previous) void closeUninstallDialog();
   if (allowed !== previous && skillStore.phase !== "idle") {
@@ -115,12 +135,17 @@ watch(canManage, (allowed, previous) => {
 });
 
 onMounted(() => {
+  pageUnmounted = false;
   window.addEventListener("focus", handleWindowFocus);
+  void subscribeDirectoryChanges();
   void loadPage();
 });
 
 onBeforeUnmount(() => {
+  pageUnmounted = true;
   window.removeEventListener("focus", handleWindowFocus);
+  unlistenDirectoryChanged?.();
+  unlistenDirectoryChanged = null;
 });
 </script>
 

@@ -23,6 +23,14 @@ fail() {
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 
+# This is the immutable preflight for Contracts 0.5.1, Agent Host 1b7bfd1 and
+# Skills 0.3.0. It must run before executing the Host producer checkout.
+cd "$desktop_root"
+YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
+YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
+YIJIE_DESKTOP_SKILLS_DIR="$workspace_root/yijie-skills" \
+  pnpm skills:sync:local
+
 mkdir -p "$host_root/.local/bin" "$host_home" "$codex_home"
 chmod 0700 "$runtime_root" "$host_home" "$codex_home"
 
@@ -38,9 +46,6 @@ fi
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
 fi
-
-cd "$desktop_root"
-pnpm skills:sync:local
 
 exec env \
   -u YIJIE_DESKTOP_NATIVE_AUTH_ENABLED \

@@ -13,6 +13,14 @@ export type SkillExecutionMode = "model-only" | "tool-assisted" | "unknown";
 export type SkillNetworkAccess = "none" | "optional" | "required" | "unknown";
 export type SkillFilesystemAccess = "none" | "read" | "write" | "unknown";
 export type SkillCatalogStatus = "installable" | "blocked" | "unknown";
+export type SkillCatalogBlockedReason =
+  | "source_unverified"
+  | "license_unverified"
+  | "distribution_not_authorized"
+  | "security_review_pending"
+  | "capability_unavailable"
+  | "maintenance_ended"
+  | "unknown";
 export type SkillMaintenanceStatus = "maintained" | "unmaintained" | "unknown";
 export type SkillCapabilityReadiness = "ready" | "degraded" | "blocked" | "unknown";
 export type SkillInstallationStatus =
@@ -58,6 +66,7 @@ export interface ManagedSkillProjection {
   readonly filesystemAccess: SkillFilesystemAccess;
   readonly requiredTools: readonly string[];
   readonly catalogStatus: SkillCatalogStatus;
+  readonly catalogBlockedReason: SkillCatalogBlockedReason | null;
   readonly maintenanceStatus: SkillMaintenanceStatus;
   readonly capabilityReadiness: SkillCapabilityReadiness;
   readonly installationStatus: SkillInstallationStatus;
@@ -113,6 +122,7 @@ const SKILL_FIELDS = new Set([
   "filesystemAccess",
   "requiredTools",
   "catalogStatus",
+  "catalogBlockedReason",
   "maintenanceStatus",
   "capabilityReadiness",
   "installationStatus",
@@ -143,6 +153,14 @@ const EXECUTION_MODES = ["model-only", "tool-assisted"] as const;
 const NETWORK_ACCESS = ["none", "optional", "required"] as const;
 const FILESYSTEM_ACCESS = ["none", "read", "write"] as const;
 const CATALOG_STATUSES = ["installable", "blocked"] as const;
+const CATALOG_BLOCKED_REASONS = [
+  "source_unverified",
+  "license_unverified",
+  "distribution_not_authorized",
+  "security_review_pending",
+  "capability_unavailable",
+  "maintenance_ended",
+] as const;
 const MAINTENANCE_STATUSES = ["maintained", "unmaintained"] as const;
 const CAPABILITY_READINESS = ["ready", "degraded", "blocked"] as const;
 const INSTALLATION_STATUSES = [
@@ -270,6 +288,20 @@ function parseSkill(value: unknown): ManagedSkillProjection {
     "capabilityReadiness",
     CAPABILITY_READINESS,
   );
+  const catalogStatus = openEnum(value.catalogStatus, "catalogStatus", CATALOG_STATUSES);
+  const catalogBlockedReason = value.catalogBlockedReason === undefined || value.catalogBlockedReason === null
+    ? null
+    : openEnum(
+      value.catalogBlockedReason,
+      "catalogBlockedReason",
+      CATALOG_BLOCKED_REASONS,
+    );
+  if (
+    (catalogStatus === "blocked" && catalogBlockedReason === null) ||
+    (catalogStatus !== "blocked" && catalogBlockedReason !== null)
+  ) {
+    throw new SkillProjectionError("catalogBlockedReason");
+  }
   if (typeof value.enabled !== "boolean" || typeof value.runtimeVisible !== "boolean") {
     throw new SkillProjectionError("visibility");
   }
@@ -278,7 +310,7 @@ function parseSkill(value: unknown): ManagedSkillProjection {
     (value.runtimeVisible && (
       !value.enabled ||
       installationStatus !== "installed" ||
-      capabilityReadiness !== "ready"
+      (capabilityReadiness !== "ready" && capabilityReadiness !== "degraded")
     ))
   ) {
     throw new SkillProjectionError("visibility");
@@ -310,7 +342,8 @@ function parseSkill(value: unknown): ManagedSkillProjection {
       FILESYSTEM_ACCESS,
     ),
     requiredTools: boundedStringArray(value.requiredTools, "requiredTools", 32, 128, TOOL_NAME),
-    catalogStatus: openEnum(value.catalogStatus, "catalogStatus", CATALOG_STATUSES),
+    catalogStatus,
+    catalogBlockedReason,
     maintenanceStatus: openEnum(
       value.maintenanceStatus,
       "maintenanceStatus",
@@ -424,12 +457,35 @@ export function skillCapabilitySummary(skill: ManagedSkillProjection): string {
 export function skillCanInstall(skill: ManagedSkillProjection): boolean {
   return (
     skill.catalogStatus === "installable" &&
-    skill.capabilityReadiness === "ready" &&
+    (skill.capabilityReadiness === "ready" || skill.capabilityReadiness === "degraded") &&
     skill.executionMode !== "unknown" &&
     skill.networkAccess !== "unknown" &&
     skill.filesystemAccess !== "unknown" &&
     (skill.installationStatus === "not_installed" || skill.installationStatus === "error")
   );
+}
+
+export function skillCatalogBlockedReasonLabel(
+  reason: SkillCatalogBlockedReason | null,
+): string | null {
+  switch (reason) {
+    case null:
+      return null;
+    case "source_unverified":
+      return "来源尚未通过审核，暂不可安装。";
+    case "license_unverified":
+      return "许可尚未通过审核，暂不可安装。";
+    case "distribution_not_authorized":
+      return "尚未取得桌面分发授权，暂不可安装。";
+    case "security_review_pending":
+      return "安全审核尚未完成，暂不可安装。";
+    case "capability_unavailable":
+      return "所需能力当前不可用，暂不可安装。";
+    case "maintenance_ended":
+      return "此 Skill 已停止维护，暂不可安装。";
+    case "unknown":
+      return "暂不可安装；请升级客户端以查看最新审核信息。";
+  }
 }
 
 export function skillFailureMessage(code: SkillFailureCode): string | null {

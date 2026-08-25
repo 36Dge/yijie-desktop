@@ -121,6 +121,71 @@ describe("SkillCard", () => {
     expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe("plugin");
   });
 
+  it("keeps an installable degraded Skill actionable before and after Runtime confirmation", async () => {
+    const projection = skill({
+      executionMode: "tool-assisted",
+      networkAccess: "required",
+      requiredTools: ["browser.search"],
+      capabilityReadiness: "degraded",
+    });
+    const wrapper = mountCard(projection);
+    expect(wrapper.get(`button[aria-label="安装 跨境营销文案"]`)).toBeDefined();
+    expect(wrapper.text()).toContain("可安装 · 需工具");
+
+    await wrapper.setProps({
+      skill: skill({
+        executionMode: "tool-assisted",
+        networkAccess: "required",
+        requiredTools: ["browser.search"],
+        capabilityReadiness: "degraded",
+        installationStatus: "installed",
+        enabled: true,
+        runtimeVisible: true,
+      }),
+    });
+    expect(wrapper.text()).toContain("模型可用");
+    expect(wrapper.getComponent(NSwitch).props("value")).toBe(true);
+  });
+
+  it("shows the stable blocked reason and exposes no install control", () => {
+    const wrapper = mountCard(skill({
+      catalogStatus: "blocked",
+      catalogBlockedReason: "license_unverified",
+      capabilityReadiness: "blocked",
+    }));
+
+    expect(wrapper.text()).toContain("许可尚未通过审核");
+    expect(wrapper.text()).toContain("暂不可安装");
+    expect(wrapper.find(".skill-card__install").exists()).toBe(false);
+  });
+
+  it("turns an install failure into an explicit retry action", () => {
+    const wrapper = mount(SkillCard, {
+      attachTo: document.body,
+      props: {
+        skill: skill(),
+        canManage: true,
+        operationError: "Skill 安装失败，未保留不完整文件。",
+      },
+    });
+
+    expect(wrapper.get(`button[aria-label="重试安装 跨境营销文案"]`)).toBeDefined();
+    expect(String(wrapper.getComponent(NTooltip).vm.$slots.default?.()[0]?.children).trim())
+      .toBe("重试安装");
+  });
+
+  it.each([
+    "edit",
+    "skillContent",
+    "skillOperations",
+    "skillResearch",
+    "skillSourcing",
+    "skillTraffic",
+  ])("renders the reviewed iconKey %s without fallback", (iconKey) => {
+    const wrapper = mountCard(skill({ iconKey }));
+    expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe(iconKey);
+  });
+
   it("has no serious or critical accessibility violations", async () => {
     const wrapper = mountCard(skill({
       installationStatus: "installed",

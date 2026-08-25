@@ -9,6 +9,8 @@ lerna-debug.log*
 
 node_modules
 .contracts-source
+.agent-host-source
+.skills-source
 dist
 dist-ssr
 *.local

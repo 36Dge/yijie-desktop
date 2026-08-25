@@ -277,6 +277,9 @@ pub fn run() {
                 local_profile,
                 skill_roots,
             ));
+            if let Some(roots) = app.state::<SkillRuntime>().roots() {
+                skills::watch_skill_install_root(app.handle().clone(), roots.install_root.clone());
+            }
             let startup_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let runtime = startup_app.state::<SkillRuntime>();

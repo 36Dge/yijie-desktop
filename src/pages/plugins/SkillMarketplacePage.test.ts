@@ -14,12 +14,17 @@ import SkillMarketplacePage from "./SkillMarketplacePage.vue";
 
 const SKILL_ID = "yijie.content-marketing.copywriting";
 const permissionState = vi.hoisted(() => ({ canManage: true }));
+const directoryEventState = vi.hoisted(() => ({
+  handler: null as (() => void) | null,
+  unlisten: vi.fn(),
+}));
 const nativeMock = vi.hoisted(() => ({
   list: vi.fn(),
   scan: vi.fn(),
   install: vi.fn(),
   setEnabled: vi.fn(),
   uninstall: vi.fn(),
+  subscribeDirectoryChanged: vi.fn(),
 }));
 
 vi.mock("../../stores/permission.store", () => ({
@@ -69,6 +74,35 @@ function snapshot(
   });
 }
 
+function reviewedCatalogSnapshot(): SkillCatalogSnapshot {
+  const template = snapshot().skills[0]!;
+  const categories = [
+    ["sourcing-selection", 5, "skillSourcing"],
+    ["market-research", 9, "skillResearch"],
+    ["content-marketing", 7, "skillContent"],
+    ["traffic-advertising", 9, "skillTraffic"],
+    ["store-operations", 8, "skillOperations"],
+  ] as const;
+  return parseSkillCatalogSnapshot({
+    schemaVersion: 1,
+    scannedAt: "2026-08-25T08:00:00Z",
+    skills: categories.flatMap(([category, count, iconKey]) =>
+      Array.from({ length: count }, (_, index) => ({
+        ...template,
+        id: `yijie.${category}.fixture-${index}`,
+        runtimeName: `${category}-fixture-${index}`,
+        category,
+        order: index,
+        displayName: `${category} ${index}`,
+        iconKey,
+        executionMode: index === 0 ? "model-only" : "tool-assisted",
+        networkAccess: index === 0 ? "none" : "required",
+        requiredTools: index === 0 ? [] : ["browser.search"],
+        capabilityReadiness: index === 0 ? "ready" : "degraded",
+      }))),
+  });
+}
+
 const TestHost = defineComponent({
   components: { NMessageProvider, SkillMarketplacePage },
   template: `
@@ -98,6 +132,8 @@ function buttonByText(wrapper: ReturnType<typeof mountPage>, text: string) {
 
 beforeEach(() => {
   permissionState.canManage = true;
+  directoryEventState.handler = null;
+  directoryEventState.unlisten.mockReset();
   const initial = snapshot();
   nativeMock.list.mockResolvedValue(initial);
   nativeMock.scan.mockResolvedValue(initial);
@@ -114,6 +150,10 @@ beforeEach(() => {
     })
   );
   nativeMock.uninstall.mockResolvedValue(initial);
+  nativeMock.subscribeDirectoryChanged.mockImplementation(async (handler: () => void) => {
+    directoryEventState.handler = handler;
+    return directoryEventState.unlisten;
+  });
 });
 
 afterEach(() => {
@@ -140,6 +180,17 @@ describe("SkillMarketplacePage", () => {
     ]);
     expect(wrapper.findAll(".skill-card")).toHaveLength(1);
     expect(wrapper.text()).toContain("跨境营销文案");
+  });
+
+  it("renders all 38 reviewed cards with exact 5/9/7/9/8 category counts", async () => {
+    nativeMock.scan.mockResolvedValue(reviewedCatalogSnapshot());
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.findAll(".skill-card")).toHaveLength(38);
+    expect(wrapper.findAll(".yj-section__count").map((count) => count.text()))
+      .toEqual(["5", "9", "7", "9", "8"]);
+    expect(wrapper.findAll('button[aria-label^="安装 "]')).toHaveLength(38);
   });
 
   it("installs from the renderer-safe skill ID and converges to native state", async () => {
@@ -191,6 +242,38 @@ describe("SkillMarketplacePage", () => {
     expect(nativeMock.scan).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("当前仅可查看 Skill");
     expect(wrapper.find(`button[aria-label="安装 跨境营销文案"]`).exists()).toBe(false);
+  });
+
+  it("rescans after a content-free native directory change and unlistens on teardown", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    nativeMock.scan.mockClear();
+
+    directoryEventState.handler?.();
+    await flushPromises();
+
+    expect(nativeMock.scan).toHaveBeenCalledWith("directory_changed", expect.any(AbortSignal));
+    wrapper.unmount();
+    expect(directoryEventState.unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores an externally moved installed Skill to the offline install action", async () => {
+    nativeMock.scan
+      .mockResolvedValueOnce(snapshot({
+        installationStatus: "installed",
+        enabled: true,
+        runtimeVisible: true,
+      }))
+      .mockResolvedValueOnce(snapshot());
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get('[aria-label="停用 跨境营销文案"]')).toBeDefined();
+
+    directoryEventState.handler?.();
+    await flushPromises();
+
+    expect(wrapper.find('[aria-label="停用 跨境营销文案"]').exists()).toBe(false);
+    expect(wrapper.get('button[aria-label="安装 跨境营销文案"]')).toBeDefined();
   });
 
   it("has no serious or critical accessibility violations in the real catalog state", async () => {

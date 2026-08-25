@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   parseSkillCatalogSnapshot,
   SkillProjectionError,
@@ -13,6 +14,7 @@ export const SKILL_SCAN_REASONS = [
   "directory_changed",
   "user_retry",
 ] as const;
+export const SKILL_DIRECTORY_CHANGED_EVENT_CHANNEL = "skills-directory-changed-v1" as const;
 
 export type SkillScanReason = (typeof SKILL_SCAN_REASONS)[number];
 export type SkillNativeFailureKind =
@@ -34,12 +36,17 @@ export interface SkillNativeClient {
   install(skillId: string): Promise<SkillCatalogSnapshot>;
   setEnabled(skillId: string, enabled: boolean): Promise<SkillCatalogSnapshot>;
   uninstall(skillId: string): Promise<SkillCatalogSnapshot>;
+  subscribeDirectoryChanged(handler: () => void): Promise<UnlistenFn>;
 }
 
 export type SkillNativeInvoker = (
   command: string,
   arguments_?: Record<string, unknown>,
 ) => Promise<unknown>;
+export type SkillNativeListen = (
+  channel: string,
+  handler: (payload: unknown) => void,
+) => Promise<UnlistenFn>;
 
 export class SkillNativeClientError extends Error {
   constructor(readonly kind: SkillNativeFailureKind) {
@@ -58,6 +65,9 @@ async function tauriInvoker(
   return invoke<unknown>(command, arguments_);
 }
 
+const tauriListen: SkillNativeListen = (channel, handler) =>
+  listen<unknown>(channel, (event) => handler(event.payload));
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -67,6 +77,12 @@ function errorCode(value: unknown): string | null {
   if (typeof value.code === "string") return value.code;
   if (isRecord(value.error) && typeof value.error.code === "string") return value.error.code;
   return null;
+}
+
+export function isSkillDirectoryChangedPayload(value: unknown): boolean {
+  return isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    value.schemaVersion === 1;
 }
 
 function mapNativeFailure(error: unknown): SkillNativeClientError {
@@ -148,6 +164,7 @@ function withAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
 
 export function createSkillNativeClient(
   nativeInvoke: SkillNativeInvoker = tauriInvoker,
+  nativeListen: SkillNativeListen = tauriListen,
 ): SkillNativeClient {
   async function run(
     command: string,
@@ -182,6 +199,11 @@ export function createSkillNativeClient(
     async uninstall(skillId) {
       validateSkillId(skillId);
       return await run("skills_uninstall_v1", { skillId });
+    },
+    subscribeDirectoryChanged(handler) {
+      return nativeListen(SKILL_DIRECTORY_CHANGED_EVENT_CHANNEL, (payload) => {
+        if (isSkillDirectoryChangedPayload(payload)) handler();
+      });
     },
   };
 }

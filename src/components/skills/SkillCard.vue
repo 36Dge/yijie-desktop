@@ -3,6 +3,7 @@ import { computed, useId } from "vue";
 import { NButton, NSwitch, NTag, NTooltip } from "naive-ui";
 import {
   skillCanInstall,
+  skillCatalogBlockedReasonLabel,
   skillCapabilitySummary,
   skillFailureMessage,
   skillRiskLabel,
@@ -33,11 +34,17 @@ const iconName = computed<YjIconName>(() =>
 );
 const installed = computed(() => props.skill.installationStatus === "installed");
 const installable = computed(() => props.canManage && skillCanInstall(props.skill));
+const blockedReason = computed(() =>
+  skillCatalogBlockedReasonLabel(props.skill.catalogBlockedReason),
+);
 const capabilitySummary = computed(() => skillCapabilitySummary(props.skill));
 const sourceLabel = computed(() => skillSourceLabel(props.skill.sourceType));
 const riskLabel = computed(() => skillRiskLabel(props.skill.riskLevel));
 const failureMessage = computed(() =>
   props.operationError ?? skillFailureMessage(props.skill.failureCode),
+);
+const installActionLabel = computed(() =>
+  failureMessage.value === null ? "安装" : "重试安装",
 );
 const pending = computed(() => props.operation !== null && props.operation !== undefined);
 const enabledLabel = computed(() =>
@@ -61,6 +68,9 @@ const status = computed<{
     case "uninstall":
       return { label: "正在卸载", type: "default" };
   }
+  if (props.skill.catalogStatus === "blocked") {
+    return { label: "暂不可安装", type: "warning" };
+  }
   if (props.skill.installationStatus === "error" || failureMessage.value !== null) {
     return { label: "需要处理", type: "error" };
   }
@@ -70,19 +80,20 @@ const status = computed<{
   if (props.skill.installationStatus === "uninstalling") {
     return { label: "正在卸载", type: "default" };
   }
-  if (props.skill.catalogStatus === "blocked") {
-    return { label: "暂不可安装", type: "warning" };
+  if (props.skill.catalogStatus === "unknown") {
+    return { label: "状态不兼容", type: "error" };
   }
-  if (
-    props.skill.capabilityReadiness === "blocked" ||
-    props.skill.capabilityReadiness === "degraded"
-  ) {
+  if (props.skill.capabilityReadiness === "blocked") {
     return { label: "能力未就绪", type: "warning" };
   }
   if (props.skill.installationStatus === "unknown") {
     return { label: "状态不兼容", type: "error" };
   }
-  if (!installed.value) return { label: "未安装", type: "default" };
+  if (!installed.value) {
+    return props.skill.capabilityReadiness === "degraded"
+      ? { label: "可安装 · 需工具", type: "warning" }
+      : { label: "未安装", type: "default" };
+  }
   if (!props.skill.enabled) return { label: "已停用", type: "default" };
   if (!props.skill.runtimeVisible) return { label: "正在同步", type: "warning" };
   return { label: "模型可用", type: "success" };
@@ -143,13 +154,13 @@ function requestUninstall(event: MouseEvent): void {
               circle
               :loading="operation === 'install'"
               :disabled="pending"
-              :aria-label="`安装 ${skill.displayName}`"
+              :aria-label="`${installActionLabel} ${skill.displayName}`"
               @click="emit('install', skill.id)"
             >
               <template #icon><YjIcon name="plus" size="lg" /></template>
             </n-button>
           </template>
-          安装
+          {{ installActionLabel }}
         </n-tooltip>
       </div>
     </div>
@@ -170,6 +181,10 @@ function requestUninstall(event: MouseEvent): void {
       <span :title="skill.licenseExpression">许可：{{ skill.licenseExpression }}</span>
       <span v-if="skill.maintenanceStatus === 'unmaintained'">不再随客户端维护</span>
     </div>
+
+    <p v-if="blockedReason" class="skill-card__blocked-reason" role="status">
+      {{ blockedReason }}
+    </p>
 
     <p v-if="failureMessage" class="skill-card__error" role="alert">
       {{ failureMessage }}
@@ -233,6 +248,7 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__title,
 .skill-card__description,
+.skill-card__blocked-reason,
 .skill-card__error {
   margin: var(--yj-space-0);
 }
@@ -328,10 +344,18 @@ function requestUninstall(event: MouseEvent): void {
   white-space: nowrap;
 }
 
+.skill-card__blocked-reason,
 .skill-card__error {
-  color: var(--yj-color-error);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
+}
+
+.skill-card__blocked-reason {
+  color: var(--yj-color-warning);
+}
+
+.skill-card__error {
+  color: var(--yj-color-error);
 }
 
 @media (hover: none) {

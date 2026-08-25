@@ -5,6 +5,7 @@ import {
   checkAgentHostSkillsContract,
   safeRelativePath,
   sha256,
+  validateBundleFixture,
   validateExceptionWindow,
   validateLock,
   validateRuntimeProjection,
@@ -16,8 +17,8 @@ const lock = JSON.parse(
   await readFile(path.join(repositoryRoot, "contracts/agent-host-skills-v1.lock.json"), "utf8"),
 );
 
-describe("Agent Host Skills v1 contract pin", () => {
-  it("pins the immutable 0.5.0 source, operation set and fixture snapshots", async () => {
+describe("Agent Host Skills v1 API / Manifest v2 contract pin", () => {
+  it("pins Contracts 0.5.1, exact providers, operations and source fixtures", async () => {
     expect(validateLock(structuredClone(lock))).toEqual(lock);
     expect(sha256("yijie-skills-v1")).toBe(
       "7d797b359d4d5ade6c16ba1d6dec78f5be3f057d05c2b5691da65eb32ff4cef0",
@@ -55,7 +56,7 @@ describe("Agent Host Skills v1 contract pin", () => {
 
   it("keeps Runtime Skills method and notification projection closed", () => {
     const projection = {
-      contracts_version: "0.5.0",
+      contracts_version: "0.5.1",
       runtime: {
         repository_commit: "0ce5902ed400866be0196886bb78f693a004d68d",
         upstream_tag: "rust-v0.144.6",
@@ -71,11 +72,16 @@ describe("Agent Host Skills v1 contract pin", () => {
     expect(() => validateRuntimeProjection(projection)).toThrow("Runtime Skills projection drifted");
   });
 
-  it("fails closed until every reviewed native implementation digest is present", async () => {
-    if (lock.consumer.implementation_status === "pending_digest_refresh") {
-      await expect(verifyImplementationPins(lock)).rejects.toThrow("digest refresh is pending");
-    } else {
-      await expect(verifyImplementationPins(lock)).resolves.toBeUndefined();
-    }
+  it("keeps the synthetic catalog at 38 entries and 5/9/7/9/8", async () => {
+    const manifest = JSON.parse(
+      await readFile(path.resolve(repositoryRoot, "../yijie-contracts", lock.bundle_fixture.manifest_path), "utf8"),
+    );
+    expect(() => validateBundleFixture(manifest, lock)).not.toThrow();
+    manifest.skills.pop();
+    expect(() => validateBundleFixture(manifest, lock)).toThrow("exactly 38");
+  });
+
+  it("fails closed unless every reviewed native implementation digest matches", async () => {
+    await expect(verifyImplementationPins(lock)).resolves.toBeUndefined();
   });
 });

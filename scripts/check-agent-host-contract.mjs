@@ -13,10 +13,10 @@ const lockPath = path.join(repositoryRoot, "contracts/agent-host-v2-turn.lock.js
 const generatorRoot = path.join(repositoryRoot, "tools/public-api-generator");
 const checkOnly = process.argv.includes("--check");
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const PINNED_COMMIT = "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b";
+const PINNED_COMMIT = "164b14f609537d727a52326832da04430aecc4ab";
 const PINNED_SOURCE_PATH = "openapi/agent-host/agent-host.yaml";
 const PINNED_SOURCE_SHA256 =
-  "406b55dad02d5a3d489955bcf29c973b94252c3e300f8ff853709a71d6874431";
+  "f1aefb55285a12963a37e0cc008f90e7b081373d77623ce92127b06e1fbcdb31";
 const PINNED_FIXTURE_SOURCE_PATH = "tests/fixtures/agent/host-v2/turn-request.json";
 const PINNED_FIXTURE_SHA256 =
   "ec464ce56f749852e65be8d1472d8f5d8cccc82c89d2dd16fab33fbdbe62decc";
@@ -85,7 +85,7 @@ export function validateLock(lock) {
   if (
     !lock ||
     lock.schema_version !== 1 ||
-    lock.contract_version !== "0.5.0" ||
+    lock.contract_version !== "0.5.1" ||
     lock.repository !== PINNED_REPOSITORY ||
     lock.full_commit !== PINNED_COMMIT ||
     lock.source?.path !== PINNED_SOURCE_PATH ||
@@ -105,10 +105,10 @@ export function validateLock(lock) {
     lock.consumer?.mode !== "hand-written-rust-adapter" ||
     lock.consumer?.adapter_path !== "src-tauri/src/chat/host_bridge.rs" ||
     lock.consumer?.adapter_sha256 !==
-      "5517be0351222ac461578ad5e3a2b0ec6516c5df622d13d9b687e1494b8a5467" ||
+      "54a99dd0bab6b5570219114cb910caeaf9c759aabefb46a964945a8510642425" ||
     lock.consumer?.readiness_path !== "src-tauri/src/chat/mod.rs" ||
     lock.consumer?.readiness_sha256 !==
-      "29248c14570d85cdc15a210b6099988c5972a4e5c88c9ce71ded968fb25b9a4d" ||
+      "7cbfc9c99a4133188608616d41b6933adb6d7e1dc14270e754f5e992a9d93d56" ||
     lock.consumer?.public_lock_path !== "contracts/public-api.lock.json" ||
     lock.consumer?.serialization_test !==
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection" ||

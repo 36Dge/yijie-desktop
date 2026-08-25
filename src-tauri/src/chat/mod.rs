@@ -130,7 +130,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b";
+const CONTRACT_COMMIT: &str = "164b14f609537d727a52326832da04430aecc4ab";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
@@ -722,9 +722,12 @@ impl ChatRuntime {
             &self.mode,
             RuntimeMode::Local(config) if config.demo_fast
         );
-        if !enabled || self.host_bridge.lock().await.is_some() {
+        if !enabled {
             return Ok(());
         }
+        // `start_sidecar` is idempotent while the owned process is healthy and
+        // refreshes Supervisor state before rebuilding the nonce-bound bridge.
+        // Never trust a cached bridge after the child may have exited.
         self.start_sidecar().await.map(|_| ())
     }
 

@@ -6,6 +6,16 @@ use std::fs;
 use std::path::Path;
 
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+const SKILLS_VERSION: &str = "0.3.0";
+const SKILLS_REPOSITORY: &str = "https://github.com/36Dge/yijie-skills.git";
+const SKILLS_COMMIT: &str = "10c45bec29603b002e861e1499d5b4e684251af5";
+const SKILLS_SOURCE_TREE_SHA256: &str =
+    "3247a14004c76170cf41a2d854e2ceffa1fd43de6e0ca8bb596f1d61d9be1029";
+const LOCAL_DEVELOPMENT_MANIFEST_SHA256: &str =
+    "cc2b9be4d0e640e0888e97f6f7a09149a248386931786a7a089c8094304d94a5";
+const DESKTOP_RELEASE_MANIFEST_SHA256: &str =
+    "9f8459077615514183fdd4c81ff3b6b2ef1ea735257b04c040399d4c91c1daa2";
+const EXPECTED_SKILL_COUNT: usize = 38;
 
 #[derive(Clone, Debug)]
 pub(super) struct SkillCatalog {
@@ -32,8 +42,9 @@ pub(super) struct SkillCatalogEntry {
     pub filesystem_access: String,
     pub required_tools: Vec<String>,
     pub catalog_status: String,
+    pub catalog_blocked_reason: Option<String>,
     pub maintenance_status: String,
-    pub archive_sha256: String,
+    pub archive_sha256: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,13 +83,17 @@ struct ManifestSkill {
     display_name: String,
     description: String,
     version: String,
-    entrypoint: String,
+    #[serde(default)]
+    catalog_entry_mode: Option<String>,
+    #[serde(default)]
+    entrypoint: Option<String>,
     icon: ManifestIcon,
     risk: ManifestRisk,
     provenance: ManifestProvenance,
     license: ManifestLicense,
     capabilities: ManifestCapabilities,
-    archive: ManifestArchive,
+    #[serde(default)]
+    archive: Option<ManifestArchive>,
     release: ManifestRelease,
 }
 
@@ -143,6 +158,8 @@ struct ManifestArchive {
 struct ManifestRelease {
     catalog_status: String,
     maintenance_status: String,
+    #[serde(default)]
+    blocked_reason: Option<String>,
 }
 
 pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogError> {
@@ -162,7 +179,7 @@ pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogEr
     let revision = format!("{:x}", Sha256::digest(&bytes));
     let manifest: BundleManifest =
         serde_json::from_slice(&bytes).map_err(|_| CatalogError::Invalid)?;
-    validate_manifest(&manifest, &roots.bundle_root)?;
+    validate_manifest(&manifest, &roots.bundle_root, &revision)?;
 
     let entries = manifest
         .skills
@@ -185,36 +202,44 @@ pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogEr
             filesystem_access: skill.capabilities.filesystem,
             required_tools: skill.capabilities.required_tools,
             catalog_status: skill.release.catalog_status,
+            catalog_blocked_reason: skill.release.blocked_reason,
             maintenance_status: skill.release.maintenance_status,
-            archive_sha256: skill.archive.sha256,
+            archive_sha256: skill.archive.map(|archive| archive.sha256),
         })
         .collect();
     Ok(SkillCatalog { revision, entries })
 }
 
-fn validate_manifest(manifest: &BundleManifest, bundle_root: &Path) -> Result<(), CatalogError> {
-    if manifest.schema_version != 1
+fn validate_manifest(
+    manifest: &BundleManifest,
+    bundle_root: &Path,
+    revision: &str,
+) -> Result<(), CatalogError> {
+    if manifest.schema_version != 2
         || manifest.bundle_id != "yijie.desktop.skill-packages"
-        || !valid_semantic_version(&manifest.bundle_version)
+        || manifest.bundle_version != SKILLS_VERSION
         || !matches!(
             manifest.distribution_channel.as_str(),
             "local-development" | "desktop-release"
         )
-        || manifest.source.repository.is_empty()
+        || manifest.source.repository != SKILLS_REPOSITORY
+        || manifest.source.revision_kind != "git-commit"
+        || manifest.source.revision != SKILLS_COMMIT
+        || manifest.source.tree_sha256 != SKILLS_SOURCE_TREE_SHA256
+        || manifest.skills.len() != EXPECTED_SKILL_COUNT
         || !matches!(
-            manifest.source.revision_kind.as_str(),
-            "git-commit" | "working-tree"
+            (manifest.distribution_channel.as_str(), revision),
+            ("local-development", LOCAL_DEVELOPMENT_MANIFEST_SHA256)
+                | ("desktop-release", DESKTOP_RELEASE_MANIFEST_SHA256)
         )
-        || !valid_hex(&manifest.source.revision, 40)
-        || !valid_hex(&manifest.source.tree_sha256, 64)
-        || manifest.skills.is_empty()
-        || manifest.skills.len() > 256
     {
         return Err(CatalogError::Invalid);
     }
 
     let mut ids = HashSet::with_capacity(manifest.skills.len());
     let mut runtime_names = HashSet::with_capacity(manifest.skills.len());
+    let mut archive_paths = HashSet::with_capacity(manifest.skills.len());
+    let mut category_counts = [0usize; 5];
     for skill in &manifest.skills {
         if !ids.insert(skill.id.as_str())
             || !runtime_names.insert(skill.runtime_name.as_str())
@@ -222,13 +247,33 @@ fn validate_manifest(manifest: &BundleManifest, bundle_root: &Path) -> Result<()
         {
             return Err(CatalogError::Invalid);
         }
-        validate_archive(bundle_root, &skill.archive)?;
+        category_counts[category_index(&skill.category).ok_or(CatalogError::Invalid)?] += 1;
+        if let Some(archive) = &skill.archive {
+            if !archive_paths.insert(archive.path.as_str()) {
+                return Err(CatalogError::Invalid);
+            }
+            validate_archive(bundle_root, archive)?;
+        }
+    }
+    if category_counts != [5, 9, 7, 9, 8] {
+        return Err(CatalogError::Invalid);
     }
     Ok(())
 }
 
 fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
-    valid_skill_id(&skill.id)
+    let mode = skill.catalog_entry_mode.as_deref().unwrap_or("bundled");
+    let archive_valid = skill.archive.as_ref().is_some_and(|archive| {
+        valid_archive_path(&archive.path)
+            && valid_hex(&archive.sha256, 64)
+            && archive.compressed_size_bytes > 0
+            && archive.compressed_size_bytes <= 67_108_864
+            && archive.uncompressed_size_bytes > 0
+            && archive.uncompressed_size_bytes <= 67_108_864
+            && archive.file_count > 0
+            && archive.file_count <= 2_048
+    });
+    let common_valid = valid_skill_id(&skill.id)
         && valid_runtime_name(&skill.runtime_name)
         && matches!(
             skill.category.as_str(),
@@ -242,7 +287,7 @@ fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
         && bounded_text(&skill.display_name, 80)
         && bounded_text(&skill.description, 240)
         && valid_semantic_version(&skill.version)
-        && skill.entrypoint == "SKILL.md"
+        && matches!(mode, "bundled" | "catalog-only")
         && skill.icon.registry == "yj-icon-v1"
         && valid_icon_key(&skill.icon.key)
         && matches!(
@@ -262,17 +307,21 @@ fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
         && valid_relative_reference(&skill.provenance.source_reference)
         && valid_semantic_version(&skill.provenance.source_version)
         && valid_hex(&skill.provenance.source_sha256, 64)
-        && skill.provenance.review_status == "verified"
+        && matches!(
+            skill.provenance.review_status.as_str(),
+            "verified" | "blocked"
+        )
         && bounded_text(&skill.provenance.reviewed_by, 128)
         && valid_date_time(&skill.provenance.reviewed_at)
         && bounded_text(&skill.license.expression, 128)
-        && skill.license.redistribution_status == "verified"
+        && matches!(
+            skill.license.redistribution_status.as_str(),
+            "verified" | "unverified" | "blocked"
+        )
         && matches!(
             skill.license.authorization_scope.as_str(),
-            "local-development" | "desktop-distribution"
+            "none" | "local-development" | "desktop-distribution"
         )
-        && (distribution_channel != "desktop-release"
-            || skill.license.authorization_scope == "desktop-distribution")
         && valid_relative_reference(&skill.license.evidence_reference)
         && bounded_text(&skill.license.reviewed_by, 128)
         && valid_date_time(&skill.license.reviewed_at)
@@ -301,12 +350,114 @@ fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
             skill.release.maintenance_status.as_str(),
             "maintained" | "unmaintained"
         )
-        && skill.archive.compressed_size_bytes > 0
-        && skill.archive.compressed_size_bytes <= 67_108_864
-        && skill.archive.uncompressed_size_bytes > 0
-        && skill.archive.uncompressed_size_bytes <= 67_108_864
-        && skill.archive.file_count > 0
-        && skill.archive.file_count <= 2_048
+        && unique_bounded_text(&skill.risk.reasons)
+        && unique_required_tools(&skill.capabilities.required_tools);
+    if !common_valid {
+        return false;
+    }
+
+    match (mode, skill.release.catalog_status.as_str()) {
+        ("bundled", "installable") => {
+            skill.entrypoint.as_deref() == Some("SKILL.md")
+                && archive_valid
+                && skill.provenance.review_status == "verified"
+                && skill.license.redistribution_status == "verified"
+                && matches!(
+                    skill.license.authorization_scope.as_str(),
+                    "local-development" | "desktop-distribution"
+                )
+                && (distribution_channel != "desktop-release"
+                    || skill.license.authorization_scope == "desktop-distribution")
+                && skill.release.blocked_reason.is_none()
+        }
+        ("bundled", "blocked") => {
+            skill.entrypoint.as_deref() == Some("SKILL.md")
+                && archive_valid
+                && skill
+                    .release
+                    .blocked_reason
+                    .as_deref()
+                    .is_none_or(valid_blocked_reason)
+        }
+        ("catalog-only", "blocked") => {
+            skill.entrypoint.is_none()
+                && skill.archive.is_none()
+                && matches!(
+                    skill.license.redistribution_status.as_str(),
+                    "unverified" | "blocked"
+                )
+                && skill.license.authorization_scope == "none"
+                && skill
+                    .release
+                    .blocked_reason
+                    .as_deref()
+                    .is_some_and(valid_blocked_reason)
+        }
+        _ => false,
+    }
+}
+
+fn category_index(category: &str) -> Option<usize> {
+    match category {
+        "sourcing-selection" => Some(0),
+        "market-research" => Some(1),
+        "content-marketing" => Some(2),
+        "traffic-advertising" => Some(3),
+        "store-operations" => Some(4),
+        _ => None,
+    }
+}
+
+fn valid_blocked_reason(value: &str) -> bool {
+    matches!(
+        value,
+        "source_unverified"
+            | "license_unverified"
+            | "distribution_not_authorized"
+            | "security_review_pending"
+            | "capability_unavailable"
+            | "maintenance_ended"
+    )
+}
+
+fn unique_bounded_text(values: &[String]) -> bool {
+    let mut unique = HashSet::with_capacity(values.len());
+    values
+        .iter()
+        .all(|value| bounded_text(value, 160) && unique.insert(value.as_str()))
+}
+
+fn unique_required_tools(values: &[String]) -> bool {
+    let mut unique = HashSet::with_capacity(values.len());
+    values
+        .iter()
+        .all(|value| valid_tool_name(value) && unique.insert(value.as_str()))
+}
+
+fn valid_tool_name(value: &str) -> bool {
+    valid_segmented_lower(value, 3, 128, &['.', '/', '-'], true)
+        || valid_segmented_tool_with_underscore(value)
+}
+
+fn valid_segmented_tool_with_underscore(value: &str) -> bool {
+    if !(3..=128).contains(&value.len())
+        || !value.is_ascii()
+        || !value.as_bytes()[0].is_ascii_lowercase()
+    {
+        return false;
+    }
+    let mut previous_separator = false;
+    for byte in value.bytes() {
+        let separator = matches!(byte, b'.' | b'/' | b'-');
+        if separator && previous_separator {
+            return false;
+        }
+        if !(separator || byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_') {
+            return false;
+        }
+        previous_separator = separator;
+    }
+    !previous_separator
 }
 
 fn validate_archive(bundle_root: &Path, archive: &ManifestArchive) -> Result<(), CatalogError> {
@@ -440,6 +591,7 @@ fn valid_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn semantic_version_and_identifiers_are_closed() {
@@ -451,5 +603,29 @@ mod tests {
         }
         assert!(valid_skill_id("yijie.content-marketing.copywriting"));
         assert!(!valid_skill_id("../copywriting"));
+    }
+
+    #[test]
+    fn exact_reviewed_v2_bundle_loads_when_the_integration_root_is_supplied() {
+        let Some(bundle_root) = std::env::var_os("YIJIE_DESKTOP_SKILL_BUNDLE_TEST_ROOT") else {
+            return;
+        };
+        let roots = SkillRoots {
+            bundle_root: PathBuf::from(bundle_root),
+            install_root: PathBuf::new(),
+        };
+        let catalog = load_catalog(&roots).expect("load exact reviewed Skill bundle");
+        assert_eq!(catalog.entries.len(), EXPECTED_SKILL_COUNT);
+        let mut category_counts = [0usize; 5];
+        for entry in &catalog.entries {
+            category_counts[category_index(&entry.category).unwrap()] += 1;
+            assert_eq!(entry.catalog_status, "installable");
+            assert!(entry.catalog_blocked_reason.is_none());
+            assert!(entry
+                .archive_sha256
+                .as_deref()
+                .is_some_and(|value| valid_hex(value, 64)));
+        }
+        assert_eq!(category_counts, [5, 9, 7, 9, 8]);
     }
 }

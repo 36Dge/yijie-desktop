@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createSkillNativeClient,
+  SKILL_DIRECTORY_CHANGED_EVENT_CHANNEL,
   SkillNativeClientError,
 } from "./skill-native-client";
 
@@ -88,6 +89,57 @@ describe("Skill native client", () => {
       name: "SkillNativeClientError",
       kind: "incompatible",
     });
+  });
+
+  it("consumes the 0.5.1 blocked reason without accepting private metadata", async () => {
+    const client = createSkillNativeClient(async () => snapshotWire([
+      skillWire({
+        catalogStatus: "blocked",
+        catalogBlockedReason: "security_review_pending",
+        capabilityReadiness: "blocked",
+      }),
+    ]));
+
+    await expect(client.list()).resolves.toMatchObject({
+      skills: [{
+        catalogStatus: "blocked",
+        catalogBlockedReason: "security_review_pending",
+      }],
+    });
+  });
+
+  it("accepts only the content-free directory-change event payload", async () => {
+    let receive: (payload: unknown) => void = () => {
+      throw new Error("native listener was not registered");
+    };
+    const unlisten = vi.fn();
+    const nativeListen = vi.fn(async (_channel: string, handler: (payload: unknown) => void) => {
+      receive = handler;
+      return unlisten;
+    });
+    const client = createSkillNativeClient(async () => snapshotWire(), nativeListen);
+    const changed = vi.fn();
+
+    const stop = await client.subscribeDirectoryChanged(changed);
+    expect(nativeListen).toHaveBeenCalledWith(
+      SKILL_DIRECTORY_CHANGED_EVENT_CHANNEL,
+      expect.any(Function),
+    );
+    for (const payload of [
+      null,
+      {},
+      { schemaVersion: 2 },
+      { schemaVersion: 1, path: "/private/skills" },
+      { schemaVersion: 1, skillId: "private" },
+    ]) {
+      receive(payload);
+    }
+    expect(changed).not.toHaveBeenCalled();
+
+    receive({ schemaVersion: 1 });
+    expect(changed).toHaveBeenCalledTimes(1);
+    stop();
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
   it.each([

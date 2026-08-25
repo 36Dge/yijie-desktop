@@ -1,11 +1,24 @@
+use super::host::{reconcile_background, SkillRuntime};
+use crate::chat::ChatRuntime;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
 
 const BUNDLE_DIRECTORY: &str = "skill-packages";
 const BUNDLE_MANIFEST: &str = "bundle-manifest.json";
 const SKILLS_DIRECTORY: &str = "skills";
 const INSTALLED_DIRECTORY: &str = "installed";
+pub(crate) const SKILLS_DIRECTORY_CHANGED_EVENT: &str = "skills-directory-changed-v1";
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillsDirectoryChangedEvent {
+    schema_version: u8,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillRoots {
@@ -94,6 +107,83 @@ pub fn resolve_skill_roots(
         bundle_root,
         install_root,
     })
+}
+
+/// Emits only a content-free invalidation signal. The renderer must request a
+/// fresh Host scan; filesystem paths and Skill identifiers never cross IPC.
+pub(crate) fn watch_skill_install_root(app: AppHandle, install_root: PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        let initial_root = install_root.clone();
+        let mut previous =
+            tokio::task::spawn_blocking(move || install_root_fingerprint(&initial_root))
+                .await
+                .unwrap_or(None);
+        let mut interval = tokio::time::interval(Duration::from_millis(750));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let watched_root = install_root.clone();
+            let current =
+                tokio::task::spawn_blocking(move || install_root_fingerprint(&watched_root))
+                    .await
+                    .unwrap_or(None);
+            if current == previous {
+                continue;
+            }
+            previous = current;
+            let runtime = app.state::<SkillRuntime>();
+            let chat = app.state::<ChatRuntime>();
+            reconcile_background(&runtime, &chat, "directory_changed").await;
+            let _ = app.emit(
+                SKILLS_DIRECTORY_CHANGED_EVENT,
+                SkillsDirectoryChangedEvent { schema_version: 1 },
+            );
+        }
+    });
+}
+
+fn install_root_fingerprint(path: &Path) -> Option<[u8; 32]> {
+    const MAX_WATCHED_ENTRIES: usize = 8_192;
+    let mut pending = vec![path.to_path_buf()];
+    let mut records = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .ok()?
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        for entry in entries {
+            if records.len() >= MAX_WATCHED_ENTRIES {
+                return None;
+            }
+            let entry_path = entry.path();
+            let metadata = fs::symlink_metadata(&entry_path).ok()?;
+            let relative = entry_path.strip_prefix(path).ok()?.to_path_buf();
+            let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+            records.push((
+                relative,
+                metadata.len(),
+                metadata.file_type().is_file(),
+                metadata.file_type().is_dir(),
+                metadata.file_type().is_symlink(),
+                modified,
+            ));
+            if metadata.file_type().is_dir() {
+                pending.push(entry_path);
+            }
+        }
+    }
+    records.sort_by(|first, second| first.0.cmp(&second.0));
+    let mut digest = Sha256::new();
+    for (relative, length, is_file, is_directory, is_symlink, modified) in records {
+        digest.update(relative.as_os_str().as_encoded_bytes());
+        digest.update([0]);
+        digest.update(length.to_le_bytes());
+        digest.update([is_file as u8, is_directory as u8, is_symlink as u8]);
+        digest.update(modified.as_secs().to_le_bytes());
+        digest.update(modified.subsec_nanos().to_le_bytes());
+    }
+    Some(digest.finalize().into())
 }
 
 fn require_absolute(path: &Path) -> Result<(), SkillRootsError> {
@@ -547,5 +637,36 @@ mod tests {
             resolve_skill_roots(Path::new("resource"), Path::new("app-data")),
             Err(SkillRootsError::PathNotAbsolute)
         );
+    }
+
+    #[test]
+    fn install_root_fingerprint_changes_when_a_skill_directory_is_moved() {
+        let root = TestRoot::new("fingerprint");
+        let installed = root.path().join("installed");
+        fs::create_dir(&installed).unwrap();
+        let skill = installed.join("yijie.content-marketing.copywriting");
+        fs::create_dir(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), b"fixture").unwrap();
+
+        let before = install_root_fingerprint(&installed).unwrap();
+        fs::rename(
+            &skill,
+            root.path()
+                .join("yijie.content-marketing.copywriting.moved"),
+        )
+        .unwrap();
+        let after = install_root_fingerprint(&installed).unwrap();
+
+        assert_ne!(before, after);
+
+        let nested_skill = installed.join("yijie.market-research.company-research");
+        let references = nested_skill.join("references");
+        fs::create_dir_all(&references).unwrap();
+        let nested_source = references.join("method.md");
+        fs::write(&nested_source, b"fixture").unwrap();
+        let before_nested_delete = install_root_fingerprint(&installed).unwrap();
+        fs::remove_file(nested_source).unwrap();
+        let after_nested_delete = install_root_fingerprint(&installed).unwrap();
+        assert_ne!(before_nested_delete, after_nested_delete);
     }
 }

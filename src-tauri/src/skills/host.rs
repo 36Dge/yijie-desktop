@@ -4,12 +4,15 @@ use crate::chat::{
     ChatError, ChatRuntime, HostBridge, HostBridgeError, HostBridgeErrorKind, HostErrorCode,
     HostManagedSkill, HostSkillSnapshot,
 };
+use semver::Version;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tauri::State;
 use uuid::Uuid;
 
 const IPC_SCHEMA_VERSION: u8 = 1;
+const BLOCKED_INSTALL_ARCHIVE_SENTINEL: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
 
 enum SkillRuntimeMode {
     Disabled,
@@ -105,6 +108,14 @@ impl SkillRuntime {
             .scan_managed_skills(Uuid::now_v7(), reason)
             .await
             .map_err(SkillCommandError::from_host)?;
+        let snapshot = if matches!(
+            reason,
+            "startup" | "app_upgrade" | "page_open" | "user_retry"
+        ) {
+            upgrade_outdated_installations(catalog, &host, snapshot).await?
+        } else {
+            snapshot
+        };
         merge_snapshot(catalog, snapshot)
     }
 
@@ -129,7 +140,10 @@ impl SkillRuntime {
             skill_id,
             Uuid::now_v7(),
             &entry.version,
-            &entry.archive_sha256,
+            entry
+                .archive_sha256
+                .as_deref()
+                .unwrap_or(BLOCKED_INSTALL_ARCHIVE_SENTINEL),
             &before.catalog_revision,
         )
         .await
@@ -206,6 +220,8 @@ struct SkillDto {
     filesystem_access: String,
     required_tools: Vec<String>,
     catalog_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    catalog_blocked_reason: Option<String>,
     maintenance_status: String,
     capability_readiness: String,
     installation_status: String,
@@ -315,6 +331,7 @@ impl SkillCommandError {
                     Self::new("uninstall_failed", true, "retry")
                 }
                 Some(HostErrorCode::ScanFailed) => Self::new("scan_failed", true, "retry"),
+                Some(HostErrorCode::InternalError) => Self::new("internal_error", true, "retry"),
                 _ => Self::new("skill_contract_mismatch", false, "update_app"),
             },
             HostBridgeErrorKind::Disabled => Self::disabled(),
@@ -376,10 +393,13 @@ fn validate_host_snapshot(
         let entry = catalog_by_id
             .get(state.id.as_str())
             .ok_or_else(contract_mismatch)?;
+        let version_matches =
+            state.version == entry.version || state.installation_status == "installed";
         if !ids.insert(state.id.as_str())
             || state.runtime_name != entry.runtime_name
-            || state.version != entry.version
+            || !version_matches
             || state.catalog_status != entry.catalog_status
+            || state.catalog_blocked_reason != entry.catalog_blocked_reason
             || state.maintenance_status != entry.maintenance_status
         {
             return Err(contract_mismatch());
@@ -396,7 +416,7 @@ fn merge_skill(entry: &SkillCatalogEntry, state: &HostManagedSkill) -> SkillDto 
         order: entry.order,
         display_name: entry.display_name.clone(),
         description: entry.description.clone(),
-        version: entry.version.clone(),
+        version: state.version.clone(),
         icon_key: entry.icon_key.clone(),
         risk_level: entry.risk_level.clone(),
         risk_reasons: entry.risk_reasons.clone(),
@@ -407,6 +427,7 @@ fn merge_skill(entry: &SkillCatalogEntry, state: &HostManagedSkill) -> SkillDto 
         filesystem_access: entry.filesystem_access.clone(),
         required_tools: entry.required_tools.clone(),
         catalog_status: state.catalog_status.clone(),
+        catalog_blocked_reason: state.catalog_blocked_reason.clone(),
         maintenance_status: state.maintenance_status.clone(),
         capability_readiness: state.capability_readiness.clone(),
         installation_status: state.installation_status.clone(),
@@ -414,6 +435,59 @@ fn merge_skill(entry: &SkillCatalogEntry, state: &HostManagedSkill) -> SkillDto 
         runtime_visible: state.runtime_visible,
         failure_code: state.failure_code.clone(),
     }
+}
+
+async fn upgrade_outdated_installations(
+    catalog: &SkillCatalog,
+    host: &std::sync::Arc<HostBridge>,
+    snapshot: HostSkillSnapshot,
+) -> Result<HostSkillSnapshot, SkillCommandError> {
+    validate_host_snapshot(catalog, &snapshot)?;
+    let entries = catalog
+        .entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut attempted = false;
+    for state in &snapshot.skills {
+        let Some(entry) = entries.get(state.id.as_str()) else {
+            return Err(contract_mismatch());
+        };
+        if state.installation_status != "installed" || entry.catalog_status != "installable" {
+            continue;
+        }
+        if !catalog_version_is_newer(&entry.version, &state.version)? {
+            continue;
+        }
+        let Some(archive_sha256) = entry.archive_sha256.as_deref() else {
+            return Err(contract_mismatch());
+        };
+        attempted = true;
+        let _ = host
+            .install_managed_skill(
+                &entry.id,
+                Uuid::now_v7(),
+                &entry.version,
+                archive_sha256,
+                &snapshot.catalog_revision,
+            )
+            .await;
+    }
+    if !attempted {
+        return Ok(snapshot);
+    }
+    host.list_managed_skills()
+        .await
+        .map_err(SkillCommandError::from_host)
+}
+
+fn catalog_version_is_newer(
+    catalog_version: &str,
+    installed_version: &str,
+) -> Result<bool, SkillCommandError> {
+    let catalog_version = Version::parse(catalog_version).map_err(|_| contract_mismatch())?;
+    let installed_version = Version::parse(installed_version).map_err(|_| contract_mismatch())?;
+    Ok(catalog_version.cmp_precedence(&installed_version).is_gt())
 }
 
 fn contract_mismatch() -> SkillCommandError {
@@ -477,6 +551,58 @@ pub(crate) async fn reconcile_background(
 mod tests {
     use super::*;
 
+    fn catalog_and_state(
+        version: &str,
+        installation_status: &str,
+    ) -> (SkillCatalog, HostSkillSnapshot) {
+        let id = "yijie.content-marketing.copywriting".to_owned();
+        let catalog = SkillCatalog {
+            revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            entries: vec![SkillCatalogEntry {
+                id: id.clone(),
+                runtime_name: "copywriting".to_owned(),
+                category: "content-marketing".to_owned(),
+                order: 0,
+                display_name: "文案创作".to_owned(),
+                description: "fixture".to_owned(),
+                version: "0.2.0".to_owned(),
+                icon_key: "edit".to_owned(),
+                risk_level: "low".to_owned(),
+                risk_reasons: vec!["fixture".to_owned()],
+                source_type: "internal".to_owned(),
+                license_expression: "LicenseRef-YiJie".to_owned(),
+                execution_mode: "model-only".to_owned(),
+                network_access: "none".to_owned(),
+                filesystem_access: "none".to_owned(),
+                required_tools: vec![],
+                catalog_status: "installable".to_owned(),
+                catalog_blocked_reason: None,
+                maintenance_status: "maintained".to_owned(),
+                archive_sha256: Some(
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
+                ),
+            }],
+        };
+        let snapshot = HostSkillSnapshot {
+            catalog_revision: catalog.revision.clone(),
+            scanned_at: "2026-08-25T00:00:00Z".to_owned(),
+            skills: vec![HostManagedSkill {
+                id,
+                runtime_name: "copywriting".to_owned(),
+                version: version.to_owned(),
+                catalog_status: "installable".to_owned(),
+                catalog_blocked_reason: None,
+                maintenance_status: "maintained".to_owned(),
+                capability_readiness: "ready".to_owned(),
+                installation_status: installation_status.to_owned(),
+                enabled: installation_status == "installed",
+                runtime_visible: installation_status == "installed",
+                failure_code: String::new(),
+            }],
+        };
+        (catalog, snapshot)
+    }
+
     #[test]
     fn errors_are_content_free_and_renderer_safe() {
         assert_eq!(
@@ -490,5 +616,46 @@ mod tests {
         assert!(!fields.contains("path"));
         assert!(!fields.contains("token"));
         assert!(!fields.contains("bearer"));
+        assert_eq!(
+            serde_json::to_string(&SkillCommandError::from_host(HostBridgeError::rejected(
+                HostErrorCode::InternalError
+            ),))
+            .unwrap(),
+            r#"{"code":"internal_error","retryable":true,"recovery":"retry"}"#
+        );
+    }
+
+    #[test]
+    fn installed_rollback_version_remains_usable_but_uninstalled_version_must_match_catalog() {
+        let (catalog, installed_old) = catalog_and_state("0.1.0", "installed");
+        assert!(validate_host_snapshot(&catalog, &installed_old).is_ok());
+        let merged = merge_snapshot(&catalog, installed_old).unwrap();
+        assert_eq!(merged.skills[0].version, "0.1.0");
+
+        let (catalog, not_installed_old) = catalog_and_state("0.1.0", "not_installed");
+        assert_eq!(
+            validate_host_snapshot(&catalog, &not_installed_old),
+            Err(contract_mismatch())
+        );
+    }
+
+    #[test]
+    fn automatic_upgrade_uses_semver_precedence_without_downgrading() {
+        assert_eq!(catalog_version_is_newer("0.2.0", "0.1.0"), Ok(true));
+        assert_eq!(catalog_version_is_newer("0.2.0", "0.3.0"), Ok(false));
+        assert_eq!(
+            catalog_version_is_newer("0.2.0-rc.2", "0.2.0-rc.1"),
+            Ok(true)
+        );
+        assert_eq!(catalog_version_is_newer("0.2.0", "0.2.0-rc.2"), Ok(true));
+        assert_eq!(catalog_version_is_newer("0.2.0-rc.2", "0.2.0"), Ok(false));
+        assert_eq!(
+            catalog_version_is_newer("0.2.0+desktop.2", "0.2.0+desktop.1"),
+            Ok(false)
+        );
+        assert_eq!(
+            catalog_version_is_newer("not-semver", "0.2.0"),
+            Err(contract_mismatch())
+        );
     }
 }

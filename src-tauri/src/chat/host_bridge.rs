@@ -243,6 +243,8 @@ pub struct HostManagedSkill {
     pub runtime_name: String,
     pub version: String,
     pub catalog_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_blocked_reason: Option<String>,
     pub maintenance_status: String,
     pub capability_readiness: String,
     pub installation_status: String,
@@ -1165,6 +1167,14 @@ fn validate_managed_skill(skill: &HostManagedSkill) -> Result<(), HostBridgeErro
         || !valid_runtime_name(&skill.runtime_name)
         || !valid_semantic_version(&skill.version)
         || !matches!(skill.catalog_status.as_str(), "installable" | "blocked")
+        || match skill.catalog_status.as_str() {
+            "installable" => skill.catalog_blocked_reason.is_some(),
+            "blocked" => !skill
+                .catalog_blocked_reason
+                .as_deref()
+                .is_some_and(valid_catalog_blocked_reason),
+            _ => true,
+        }
         || !matches!(
             skill.maintenance_status.as_str(),
             "maintained" | "unmaintained"
@@ -1196,14 +1206,23 @@ fn validate_managed_skill(skill: &HostManagedSkill) -> Result<(), HostBridgeErro
         )
         || (skill.installation_status == "not_installed"
             && (skill.enabled || skill.runtime_visible))
-        || (skill.runtime_visible
-            && (!skill.enabled
-                || skill.installation_status != "installed"
-                || skill.capability_readiness != "ready"))
+        || (skill.runtime_visible && (!skill.enabled || skill.installation_status != "installed"))
     {
         return Err(protocol_error());
     }
     Ok(())
+}
+
+fn valid_catalog_blocked_reason(value: &str) -> bool {
+    matches!(
+        value,
+        "source_unverified"
+            | "license_unverified"
+            | "distribution_not_authorized"
+            | "security_review_pending"
+            | "capability_unavailable"
+            | "maintenance_ended"
+    )
 }
 
 fn valid_skill_id(value: &str) -> bool {
@@ -1960,7 +1979,7 @@ mod tests {
             "version": "0.1.0",
             "catalog_status": "installable",
             "maintenance_status": "maintained",
-            "capability_readiness": "ready",
+            "capability_readiness": "degraded",
             "installation_status": "installed",
             "enabled": true,
             "runtime_visible": true,
@@ -1976,7 +1995,7 @@ mod tests {
                 "version": "0.1.0",
                 "catalog_status": "installable",
                 "maintenance_status": "maintained",
-                "capability_readiness": "ready",
+                "capability_readiness": "degraded",
                 "installation_status": "not_installed",
                 "enabled": false,
                 "runtime_visible": false,
@@ -2073,6 +2092,48 @@ mod tests {
         assert_eq!(install_body["expected_archive_sha256"], archive_sha256);
         assert_eq!(install_body["catalog_revision"], catalog_revision);
         assert_eq!(install_body.as_object().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn managed_skill_accepts_closed_blocked_reason_and_degraded_runtime_visibility() {
+        let blocked: HostManagedSkill = serde_json::from_value(serde_json::json!({
+            "id": "yijie.content-marketing.blocked-fixture",
+            "runtime_name": "blocked-fixture",
+            "version": "0.1.0",
+            "catalog_status": "blocked",
+            "catalog_blocked_reason": "license_unverified",
+            "maintenance_status": "maintained",
+            "capability_readiness": "blocked",
+            "installation_status": "not_installed",
+            "enabled": false,
+            "runtime_visible": false,
+            "failure_code": ""
+        }))
+        .unwrap();
+        assert!(validate_managed_skill(&blocked).is_ok());
+
+        let degraded: HostManagedSkill = serde_json::from_value(serde_json::json!({
+            "id": "yijie.content-marketing.copywriting",
+            "runtime_name": "copywriting",
+            "version": "0.1.0",
+            "catalog_status": "installable",
+            "maintenance_status": "maintained",
+            "capability_readiness": "degraded",
+            "installation_status": "installed",
+            "enabled": true,
+            "runtime_visible": true,
+            "failure_code": ""
+        }))
+        .unwrap();
+        assert!(validate_managed_skill(&degraded).is_ok());
+
+        let mut invalid_installable = degraded;
+        invalid_installable.catalog_blocked_reason = Some("license_unverified".to_owned());
+        assert!(validate_managed_skill(&invalid_installable).is_err());
+
+        let mut invalid = blocked;
+        invalid.catalog_blocked_reason = None;
+        assert!(validate_managed_skill(&invalid).is_err());
     }
 
     #[tokio::test]

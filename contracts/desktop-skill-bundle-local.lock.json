@@ -1,51 +1,76 @@
 {
-  "schema_version": 1,
-  "profile": {
-    "environment": "local",
-    "local_profile": "demo_fast"
-  },
+  "schema_version": 2,
   "contracts": {
+    "version": "0.5.1",
     "repository": "https://github.com/36Dge/yijie-contracts.git",
-    "full_commit": "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
-    "schema_path": "jsonschema/skills/skill-bundle-manifest-v1.schema.json",
-    "schema_sha256": "d86185a1d5f4d9a136c88b679d50ac3e83bcc2b722eee39cba674c5be3b88469"
+    "full_commit": "164b14f609537d727a52326832da04430aecc4ab",
+    "schema_path": "jsonschema/skills/skill-bundle-manifest-v2.schema.json",
+    "schema_sha256": "39a898111ba3dcae2f369fdcb571a2e892830d1d0a57c90ab6210a0ab897a649"
+  },
+  "agent_host": {
+    "repository": "https://github.com/36Dge/yijie-agent-host.git",
+    "full_commit": "1b7bfd1ce4323e52035b2ba1e62842c2d332d9ed",
+    "contracts_lock_path": "api/contracts.lock",
+    "skills_lock_path": "api/skills.lock"
   },
   "producer": {
+    "name": "@yijie/skills",
+    "version": "0.3.0",
     "repository": "https://github.com/36Dge/yijie-skills.git",
-    "head_commit": "c0aaba17f9ba5534e133b67b9eac43bb7210694f",
-    "package_command": "pnpm --dir ../yijie-skills package",
-    "contract_lock_path": "contracts/lock.json"
+    "full_commit": "10c45bec29603b002e861e1499d5b4e684251af5",
+    "source_tree_sha256": "3247a14004c76170cf41a2d854e2ceffa1fd43de6e0ca8bb596f1d61d9be1029",
+    "contract_lock_path": "contracts/lock.json",
+    "package_commands": {
+      "local-development": "pnpm --dir ../yijie-skills package",
+      "desktop-release": "pnpm --dir ../yijie-skills package:desktop-release"
+    }
   },
-  "bundle": {
+  "catalog": {
     "bundle_id": "yijie.desktop.skill-packages",
-    "bundle_version": "0.1.0",
-    "distribution_channel": "local-development",
-    "manifest_path": "dist/skill-packages/bundle-manifest.json",
-    "manifest_sha256": "091de202783ae2658d3a8ce3c0ceaedfef023d71fa84c94ff040e72c9421bb2c",
-    "source_revision_kind": "git-commit",
-    "source_revision": "c0aaba17f9ba5534e133b67b9eac43bb7210694f",
-    "source_tree_sha256": "df1fd6c2534fde5f5661bf1004b0a65700df430990e042ce7f9e2f2552b71418",
-    "skills": [
-      {
-        "id": "yijie.content-marketing.copywriting",
-        "version": "0.1.0",
-        "archive_path": "packages/yijie.content-marketing.copywriting-0.1.0.zip",
-        "archive_sha256": "987dae7003064fa1d0b00a37be0f130eb973a55f966fbf43faf2ed8af84c5138",
-        "archive_size_bytes": 7255,
-        "authorization_scope": "local-development"
-      }
-    ]
+    "bundle_version": "0.3.0",
+    "skill_count": 38,
+    "installable_count": 38,
+    "blocked_count": 0,
+    "category_counts": {
+      "sourcing-selection": 5,
+      "market-research": 9,
+      "content-marketing": 7,
+      "traffic-advertising": 9,
+      "store-operations": 8
+    },
+    "archive_inventory_sha256": "0bfb2d66b484b281cc7e22667d611dda81c6ab862ece5b78da4e8301fc497715"
+  },
+  "channels": {
+    "local-development": {
+      "profile": {
+        "environment": "local",
+        "local_profile": "demo_fast"
+      },
+      "manifest_path": "dist/skill-packages/bundle-manifest.json",
+      "manifest_sha256": "cc2b9be4d0e640e0888e97f6f7a09149a248386931786a7a089c8094304d94a5",
+      "generated_root": ".local/skill-packages",
+      "tauri_overlay": "src-tauri/tauri.demo-fast.conf.json",
+      "required_authorization_scope": "desktop-distribution"
+    },
+    "desktop-release": {
+      "manifest_path": "dist/skill-packages-desktop-release/bundle-manifest.json",
+      "manifest_sha256": "9f8459077615514183fdd4c81ff3b6b2ef1ea735257b04c040399d4c91c1daa2",
+      "generated_root": ".local/skill-packages-desktop-release",
+      "tauri_overlay": "src-tauri/tauri.desktop-release.conf.json",
+      "required_authorization_scope": "desktop-distribution"
+    }
   },
   "desktop_resource": {
-    "generated_root": ".local/skill-packages",
-    "tauri_overlay": "src-tauri/tauri.demo-fast.conf.json",
-    "bundle_target": "skill-packages"
-  },
-  "release_boundary": {
+    "bundle_target": "skill-packages",
     "default_tauri_config": "src-tauri/tauri.conf.json",
     "default_includes_skill_bundle": false,
-    "desktop_release_required_channel": "desktop-release",
-    "desktop_release_required_authorization_scope": "desktop-distribution",
-    "status": "blocked_pending_license"
+    "default_build_channel": "desktop-release",
+    "assurance_scope": "desktop-release-resource-channel-only",
+    "runtime_claim": "none",
+    "canonical_runtime_profile": {
+      "environment": "local",
+      "local_profile": "demo_fast"
+    },
+    "status": "resource_channel_ready"
   }
 }

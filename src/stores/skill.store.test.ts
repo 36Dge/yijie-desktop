@@ -64,6 +64,7 @@ function client(overrides: Partial<SkillNativeClient> = {}): SkillNativeClient {
       runtimeVisible: enabled,
     })),
     uninstall: vi.fn(async () => initial),
+    subscribeDirectoryChanged: vi.fn(async () => () => undefined),
     ...overrides,
   };
 }

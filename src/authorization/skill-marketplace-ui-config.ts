@@ -1,10 +1,20 @@
-import { demoFastLocalProfileEnabled } from "./local-profile";
+import { isDemoFastLocalProfile } from "./local-profile";
+
+const EXPLICITLY_ENABLED = "true";
 
 export function isSkillMarketplaceUiEnabled(
   environment: unknown,
   profile: unknown,
+  explicitEnabled?: unknown,
 ): boolean {
-  return environment === "local" && profile === "demo_fast";
+  return (
+    isDemoFastLocalProfile(environment, profile) ||
+    explicitEnabled === EXPLICITLY_ENABLED
+  );
 }
 
-export const skillMarketplaceUiEnabled = demoFastLocalProfileEnabled;
+export const skillMarketplaceUiEnabled = isSkillMarketplaceUiEnabled(
+  import.meta.env.VITE_YIJIE_ENV,
+  import.meta.env.VITE_YIJIE_LOCAL_PROFILE,
+  import.meta.env.VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED,
+);
