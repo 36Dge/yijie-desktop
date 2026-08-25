@@ -23,15 +23,26 @@
 
 ## 本地开发
 
+标准 Tauri 本地启动默认使用无需用户登录的 Demo 快速闭环入口：
+
+```bash
+pnpm tauri:dev
+```
+
+`pnpm tauri:demo-fast` 是同一入口的显式别名。两者都会直达 Chat 主页面并自动启动本地
+Agent Host / Codex Runtime。只有明确调试底层 Tauri 且不需要完整业务环境时才使用
+`pnpm tauri:dev:raw`。详细边界见
+[`docs/local-development.md`](docs/local-development.md)。
+
 ```bash
 pnpm install
 pnpm dev
 ```
 
-Tauri 开发：
+底层 Tauri 调试（不装配完整业务环境）：
 
 ```bash
-pnpm tauri:dev
+pnpm tauri:dev:raw
 ```
 
 设计系统文档：
@@ -46,9 +57,14 @@ pnpm docs:dev
 
 ```bash
 pnpm lint
+pnpm test
 pnpm build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+`pnpm test` 默认执行 `demo_fast` 测试面，不运行历史 S10D-H production harness checker。
+只有明确验证 `production_hardened` 时运行 `pnpm test:production-hardened` 或
+`make test-production-hardened`；该入口保留 S10D-H checker，在其 WAL/axe RCA 完成前应继续如实失败。
 
 ## 安全要求
 

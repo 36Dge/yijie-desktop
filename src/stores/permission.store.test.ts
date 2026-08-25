@@ -201,7 +201,7 @@ describe("permission store", () => {
     expect(store.capabilities).toEqual(["store.read"]);
   });
 
-  it("clears an expired snapshot before refreshing it", async () => {
+  it("refreshes early without dropping the current authorized view", async () => {
     const refreshed = new Deferred<PermissionProjection>();
     let capabilityCalls = 0;
     const store = createStore({
@@ -217,9 +217,10 @@ describe("permission store", () => {
     expect(store.capabilities).toEqual(["task.read"]);
 
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(store.phase).toBe("loading");
-    expect(store.capabilities).toEqual([]);
-    expect(store.authorizationRevision).toBeNull();
+    expect(store.phase).toBe("ready");
+    expect(store.capabilities).toEqual(["task.read"]);
+    expect(store.authorizationRevision).toBe(1);
+    expect(store.hasCapability("task.read")).toBe(false);
 
     refreshed.resolve(projection(TENANT_A, 2, ["task.create"], NOW + 60_000));
     await Promise.resolve();

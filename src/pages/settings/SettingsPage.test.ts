@@ -48,6 +48,16 @@ async function mountLocalWhitelistSettings() {
   return mount(SettingsPage, { global: { plugins: [pinia] } });
 }
 
+async function mountDemoFastSettings() {
+  vi.stubEnv("VITE_YIJIE_ENV", "local");
+  vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
+  vi.stubEnv("VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED", "true");
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  const { default: SettingsPage } = await import("./SettingsPage.vue");
+  return mount(SettingsPage, { global: { plugins: [pinia] } });
+}
+
 describe("Settings permission recovery", () => {
   it("SETTINGS-001 renders zero-tenant recovery without a protected module", async () => {
     const { store, mountPage } = await mountEnabledSettings();
@@ -146,5 +156,18 @@ describe("Settings local whitelist login", () => {
     resolveLogin?.("signed_in");
     await submitted;
     await flushPromises();
+  });
+});
+
+describe("Settings local demo profile", () => {
+  it("SETTINGS-008 renders no login, logout, account, or password controls", async () => {
+    const wrapper = await mountDemoFastSettings();
+
+    expect(wrapper.text()).toContain("本地快速验证模式");
+    expect(wrapper.text()).toContain("无需登录");
+    expect(wrapper.find("#local-login-username").exists()).toBe(false);
+    expect(wrapper.find("#local-login-password").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("登录或更换账户");
+    expect(wrapper.text()).not.toContain("退出登录");
   });
 });

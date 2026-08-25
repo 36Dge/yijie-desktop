@@ -5,6 +5,7 @@ const accepted = {
   ready: true,
   tenantId: "019c1a00-0000-7000-8000-000000000002",
   authorizationRevision: 7,
+  expiresAt: "2026-08-24T00:00:00Z",
   canCreateTask: true,
   canReadTask: true,
 };
@@ -19,6 +20,34 @@ describe("Chat permission lifecycle", () => {
 
     await lifecycle.synchronize(accepted);
     expect(calls).toEqual(["dispose", `bind:${accepted.tenantId}`]);
+  });
+
+  it("keeps an unchanged authorized scope bound across permission refreshes", async () => {
+    const store = {
+      dispose: vi.fn(async () => undefined),
+      bind: vi.fn(async () => undefined),
+    };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+
+    await lifecycle.synchronize(accepted);
+    await lifecycle.synchronize({ ...accepted });
+
+    expect(store.dispose).toHaveBeenCalledTimes(1);
+    expect(store.bind).toHaveBeenCalledTimes(1);
+  });
+
+  it("renews the Chat context when the permission projection expiry advances", async () => {
+    const store = {
+      dispose: vi.fn(async () => undefined),
+      bind: vi.fn(async () => undefined),
+    };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+
+    await lifecycle.synchronize(accepted);
+    await lifecycle.synchronize({ ...accepted, expiresAt: "2026-08-24T00:04:00Z" });
+
+    expect(store.dispose).toHaveBeenCalledTimes(2);
+    expect(store.bind).toHaveBeenCalledTimes(2);
   });
 
   it("never binds when default-off, signed out, revisionless, or capabilityless", async () => {

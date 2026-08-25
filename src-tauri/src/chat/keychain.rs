@@ -2,6 +2,10 @@ use super::error::ChatError;
 use crate::feat126_secure_storage::{
     EphemeralSecretFile, EphemeralSecretRole, Feat126SecureStorageProfile,
 };
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
 use std::sync::Arc;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -58,12 +62,14 @@ pub trait ReceiptKeyStore: Send + Sync {
 
 pub enum ProtectedDatabaseKeyStore {
     Ephemeral(EphemeralSecretFile),
+    LocalDemo(LocalDemoSecretFile),
     #[cfg(target_os = "macos")]
     Protected(std::sync::Arc<keyring_core::Entry>),
 }
 
 pub enum ProtectedReceiptKeyStore {
     Ephemeral(EphemeralSecretFile),
+    LocalDemo(LocalDemoSecretFile),
     #[cfg(target_os = "macos")]
     Protected(std::sync::Arc<keyring_core::Entry>),
 }
@@ -102,6 +108,10 @@ impl ProtectedDatabaseKeyStore {
             Err(ChatError::SecureStorageUnavailable)
         }
     }
+
+    pub(crate) fn new_local_demo(path: PathBuf) -> Result<Self, ChatError> {
+        Ok(Self::LocalDemo(LocalDemoSecretFile::new(path)?))
+    }
 }
 
 impl ProtectedReceiptKeyStore {
@@ -138,11 +148,18 @@ impl ProtectedReceiptKeyStore {
             Err(ChatError::SecureStorageUnavailable)
         }
     }
+
+    pub(crate) fn new_local_demo(path: PathBuf) -> Result<Self, ChatError> {
+        Ok(Self::LocalDemo(LocalDemoSecretFile::new(path)?))
+    }
 }
 
 impl DatabaseKeyStore for ProtectedDatabaseKeyStore {
     fn load_or_create(&self, database_exists: bool) -> Result<DatabaseKey, ChatError> {
         match self {
+            Self::LocalDemo(file) => file
+                .load_or_create(database_exists)
+                .map(DatabaseKey::from_bytes),
             Self::Ephemeral(file) => match file.load().map_err(map_ephemeral_error)? {
                 Some(secret) => decode_key(secret.as_slice()),
                 None if database_exists => Err(ChatError::DatabaseKeyMissing),
@@ -180,6 +197,9 @@ impl DatabaseKeyStore for ProtectedDatabaseKeyStore {
 impl ReceiptKeyStore for ProtectedReceiptKeyStore {
     fn load_or_create(&self, database_exists: bool) -> Result<ReceiptKey, ChatError> {
         match self {
+            Self::LocalDemo(file) => file
+                .load_or_create(database_exists)
+                .map(ReceiptKey::from_bytes),
             Self::Ephemeral(file) => match file.load().map_err(map_ephemeral_error)? {
                 Some(secret) => decode_receipt_key(secret.as_slice()),
                 None if database_exists => Err(ChatError::DatabaseKeyMissing),
@@ -212,6 +232,121 @@ impl ReceiptKeyStore for ProtectedReceiptKeyStore {
             },
         }
     }
+}
+
+#[derive(Clone)]
+pub(crate) struct LocalDemoSecretFile {
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for LocalDemoSecretFile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("LocalDemoSecretFile([OWNER_ONLY])")
+    }
+}
+
+impl LocalDemoSecretFile {
+    fn new(path: PathBuf) -> Result<Self, ChatError> {
+        if !path.is_absolute() || path.file_name().is_none() {
+            return Err(ChatError::SecureStorageUnavailable);
+        }
+        Ok(Self { path })
+    }
+
+    fn load_or_create(&self, database_exists: bool) -> Result<[u8; 32], ChatError> {
+        self.prepare_parent()?;
+        if let Some(key) = self.load()? {
+            return Ok(key);
+        }
+        if database_exists {
+            return Err(ChatError::DatabaseKeyMissing);
+        }
+        let mut key = [0_u8; 32];
+        getrandom::fill(&mut key).map_err(|_| ChatError::SecureStorageUnavailable)?;
+        match self.create(&key) {
+            Ok(()) => Ok(key),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                key.zeroize();
+                self.load()?.ok_or(ChatError::SecureStorageUnavailable)
+            }
+            Err(_) => {
+                key.zeroize();
+                Err(ChatError::SecureStorageUnavailable)
+            }
+        }
+    }
+
+    fn prepare_parent(&self) -> Result<(), ChatError> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or(ChatError::SecureStorageUnavailable)?;
+        fs::create_dir_all(parent).map_err(|_| ChatError::SecureStorageUnavailable)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .map_err(|_| ChatError::SecureStorageUnavailable)?;
+        let metadata =
+            fs::symlink_metadata(parent).map_err(|_| ChatError::SecureStorageUnavailable)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || metadata.uid() != current_uid()
+            || metadata.permissions().mode() & 0o777 != 0o700
+        {
+            return Err(ChatError::SecureStorageUnavailable);
+        }
+        Ok(())
+    }
+
+    fn load(&self) -> Result<Option<[u8; 32]>, ChatError> {
+        let path_metadata = match fs::symlink_metadata(&self.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(ChatError::SecureStorageUnavailable),
+        };
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.is_file()
+            || path_metadata.uid() != current_uid()
+            || path_metadata.permissions().mode() & 0o777 != 0o600
+            || path_metadata.len() != 32
+        {
+            return Err(ChatError::SecureStorageUnavailable);
+        }
+        let file = File::open(&self.path).map_err(|_| ChatError::SecureStorageUnavailable)?;
+        let opened = file
+            .metadata()
+            .map_err(|_| ChatError::SecureStorageUnavailable)?;
+        if opened.dev() != path_metadata.dev() || opened.ino() != path_metadata.ino() {
+            return Err(ChatError::SecureStorageUnavailable);
+        }
+        let mut bytes = Vec::with_capacity(32);
+        file.take(33)
+            .read_to_end(&mut bytes)
+            .map_err(|_| ChatError::SecureStorageUnavailable)?;
+        let decoded = decode_local_demo_key(&bytes)?;
+        bytes.zeroize();
+        Ok(Some(decoded))
+    }
+
+    fn create(&self, key: &[u8; 32]) -> Result<(), std::io::Error> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&self.path)?;
+        file.write_all(key)?;
+        file.sync_all()?;
+        Ok(())
+    }
+}
+
+fn decode_local_demo_key(bytes: &[u8]) -> Result<[u8; 32], ChatError> {
+    bytes
+        .try_into()
+        .map_err(|_| ChatError::SecureStorageUnavailable)
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and does not dereference memory.
+    unsafe { libc::geteuid() }
 }
 
 fn map_ephemeral_error(_error: crate::feat126_secure_storage::SecureStorageError) -> ChatError {
@@ -256,6 +391,43 @@ mod tests {
             decode_receipt_key(b"receipt-canary"),
             Err(ChatError::SecureStorageUnavailable)
         ));
+    }
+
+    #[test]
+    fn local_demo_keys_are_owner_only_separate_and_restart_stable() {
+        let root = std::env::temp_dir().join(format!("yijie-local-demo-{}", uuid::Uuid::now_v7()));
+        let database_path = root.join("secrets/chat-sqlcipher-v1.secret");
+        let receipt_path = root.join("secrets/receipt-hmac-v1.secret");
+        let database = ProtectedDatabaseKeyStore::new_local_demo(database_path.clone()).unwrap();
+        let receipt = ProtectedReceiptKeyStore::new_local_demo(receipt_path.clone()).unwrap();
+        let first_database = database.load_or_create(false).unwrap();
+        let first_receipt = receipt.load_or_create(false).unwrap();
+        assert_ne!(first_database.expose(), first_receipt.expose());
+        assert_eq!(
+            fs::metadata(database_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(receipt_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let restarted_database = ProtectedDatabaseKeyStore::new_local_demo(
+            root.join("secrets/chat-sqlcipher-v1.secret"),
+        )
+        .unwrap();
+        let restarted_receipt =
+            ProtectedReceiptKeyStore::new_local_demo(root.join("secrets/receipt-hmac-v1.secret"))
+                .unwrap();
+        assert_eq!(
+            restarted_database.load_or_create(true).unwrap().expose(),
+            first_database.expose()
+        );
+        assert_eq!(
+            restarted_receipt.load_or_create(true).unwrap().expose(),
+            first_receipt.expose()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

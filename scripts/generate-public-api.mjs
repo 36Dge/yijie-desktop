@@ -12,7 +12,7 @@ const lockPath = path.join(repositoryRoot, "contracts/public-api.lock.json");
 const generatorRoot = path.join(repositoryRoot, "tools/public-api-generator");
 const checkOnly = process.argv.includes("--check");
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const PINNED_COMMIT = "ea48fe190e18afba728712d1e2cc79cda57f581b";
+const PINNED_COMMIT = "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b";
 const PINNED_GENERATOR_COMMAND =
   "pnpm --dir tools/public-api-generator exec openapi-typescript openapi/public/public.yaml";
 const PINNED_FIXTURE_PATHS = new Set([
@@ -53,7 +53,7 @@ export function validateLock(lock) {
   if (
     !lock ||
     lock.schema_version !== 1 ||
-    lock.contract_version !== "0.4.0-candidate" ||
+    lock.contract_version !== "0.5.0" ||
     lock.repository !== PINNED_REPOSITORY ||
     lock.full_commit !== PINNED_COMMIT ||
     !/^[0-9a-f]{64}$/.test(lock.source_sha256 ?? "") ||

@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED?: string;
   readonly VITE_YIJIE_ENV?: string;
   readonly VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED?: string;
+  readonly VITE_YIJIE_LOCAL_PROFILE?: string;
+  readonly VITE_YIJIE_CHAT_LOCAL_UI_ENABLED?: string;
 }
 
 interface ImportMeta {

@@ -14,6 +14,7 @@ import {
 } from "../authorization/app-permission-policy";
 import { authoritativePermissionUiEnabled } from "../authorization/permission-ui-config";
 import { localChatUiEnabled } from "../authorization/chat-ui-config";
+import { skillMarketplaceUiEnabled } from "../authorization/skill-marketplace-ui-config";
 import type { KnownCapability } from "../domain/permissions";
 import { usePermissionStore } from "../stores/permission.store";
 
@@ -21,14 +22,14 @@ const RootRoutePage: Component = { render: () => null };
 
 export interface AppPageLoaders {
   chat: () => Promise<Component>;
-  tasks: () => Promise<Component>;
+  plugins: () => Promise<Component>;
   settings: () => Promise<Component>;
   accessDenied: () => Promise<Component>;
 }
 
 const APP_PAGE_LOADERS: AppPageLoaders = {
   chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
-  tasks: async () => (await import("../pages/tasks/TasksPage.vue")).default,
+  plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
 };
@@ -66,6 +67,7 @@ function policySnapshot(boundary: RouterPermissionBoundary): PermissionPolicySna
 export function createAppRouteRecords(
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
   chatUiEnabled = localChatUiEnabled,
+  skillUiEnabled = skillMarketplaceUiEnabled,
 ): readonly RouteRecordRaw[] {
   const records: RouteRecordRaw[] = [
     {
@@ -94,16 +96,16 @@ export function createAppRouteRecords(
         documentTitle: "任务对话 · 易界 AI",
       },
     },
-    {
-      path: "/tasks",
-      name: "tasks",
-      component: pageLoaders.tasks,
-      meta: {
-        navKey: "taskHistory",
-        documentTitle: "任务记录 · 易界 AI",
-      },
-    },
   );
+  if (skillUiEnabled) records.push({
+    path: "/plugins",
+    name: "plugins",
+    component: pageLoaders.plugins,
+    meta: {
+      navKey: "plugin",
+      documentTitle: "Skill 广场 · 易界 AI",
+    },
+  });
   records.push(
     {
       path: "/settings",
@@ -148,10 +150,11 @@ export function createAppRouter(
   permissionBoundary: RouterPermissionBoundary = productionPermissionBoundary,
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
   chatUiEnabled = localChatUiEnabled,
+  skillUiEnabled = skillMarketplaceUiEnabled,
 ) {
   const appRouter = createRouter({
     history,
-    routes: createAppRouteRecords(pageLoaders, chatUiEnabled),
+    routes: createAppRouteRecords(pageLoaders, chatUiEnabled, skillUiEnabled),
   });
 
   appRouter.beforeEach(async (route) => {
@@ -162,7 +165,10 @@ export function createAppRouter(
       return resolveRootRoute({ ...policySnapshot(permissionBoundary), chatUiEnabled });
     }
 
-    if (!chatUiEnabled && (route.path === "/chat" || route.path === "/tasks" || route.path.startsWith("/chat/"))) {
+    if (!chatUiEnabled && (route.path === "/chat" || route.path.startsWith("/chat/"))) {
+      return { path: "/settings", replace: true };
+    }
+    if (!skillUiEnabled && route.path === "/plugins") {
       return { path: "/settings", replace: true };
     }
 

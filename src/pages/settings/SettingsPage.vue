@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { NCard, NText } from "naive-ui";
 import { nativeAuthClient } from "../../api/native-auth-client";
+import { demoFastLocalProfileEnabled } from "../../authorization/local-profile";
 import { localWhitelistLoginEnabled } from "../../authorization/local-whitelist-login-config";
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
 import type { PermissionPhase } from "../../domain/permissions";
@@ -182,7 +183,14 @@ async function selectTenant(tenantId: string): Promise<void> {
       <h1 id="settings-page-title" class="page__title">设置</h1>
 
       <n-card class="page__card" title="账户与权限" :bordered="false">
-        <div v-if="!authoritativePermissionUiEnabled" class="access-state" role="status">
+        <div v-if="demoFastLocalProfileEnabled" class="access-state" role="status">
+          <h2>本地快速验证模式</h2>
+          <n-text>
+            当前进程已自动绑定本地 Demo 身份与工作空间，无需登录、账号或密码。
+          </n-text>
+        </div>
+
+        <div v-else-if="!authoritativePermissionUiEnabled" class="access-state" role="status">
           <h2>权威权限界面未启用</h2>
           <n-text>
             当前构建保持安全关闭，只提供设置恢复入口，不显示或加载受保护业务模块。
@@ -346,7 +354,7 @@ async function selectTenant(tenantId: string): Promise<void> {
       </n-card>
 
       <n-card class="page__card" title="Sidecar" :bordered="false">
-        <n-text>桌面端会在后续版本管理 Codex Runtime 与 yijie-agent-host sidecar。</n-text>
+        <n-text>Desktop 自动管理 Codex Runtime 与 yijie-agent-host sidecar，无需用户登录。</n-text>
       </n-card>
     </div>
   </section>

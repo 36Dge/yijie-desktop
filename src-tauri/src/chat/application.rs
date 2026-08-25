@@ -35,6 +35,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use uuid::Uuid;
 
+const ORPHANED_TERMINAL_REPLAY_GRACE: Duration = Duration::from_secs(2);
+
 #[cfg(feature = "feat126-s10-driver")]
 pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
     let identity = ProbeEventIdentity {
@@ -1725,6 +1727,20 @@ impl ConversationApplication {
             .transpose()
             .map_err(|_| ChatError::OrchestrationUnavailable)?;
         let host = self.host()?;
+        let host_snapshot = host
+            .get_session(context.agent_session_id)
+            .await
+            .map_err(map_host_error)?;
+        if host_snapshot.task_id != context.task_id
+            || host_snapshot.agent_session_id != context.agent_session_id
+            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let replay_must_supply_terminal = matches!(
+            host_snapshot.state,
+            HostSessionState::Idle | HostSessionState::Failed
+        ) && host_snapshot.active_turn_id.is_none();
         let mut stream = match host
             .open_event_stream_v3(context.agent_session_id, cursor)
             .await
@@ -1758,7 +1774,41 @@ impl ConversationApplication {
         let mut unflushed_events = 0_usize;
         let mut last_flush = Instant::now();
         loop {
-            let event = match stream.next_stream_event().await {
+            let next_event = if replay_must_supply_terminal {
+                match tokio::time::timeout(
+                    ORPHANED_TERMINAL_REPLAY_GRACE,
+                    stream.next_stream_event(),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        if progress_dirty {
+                            self.database
+                                .persist_turn_progress(reducer.progress()?)
+                                .await?;
+                            sink.publish(reducer.projection(false)?)?;
+                        }
+                        self.database
+                            .finalize_orphaned_turn_without_stream(
+                                reducer.session_id,
+                                reducer.local_turn_id,
+                                reducer.runtime_turn_id,
+                                unix_seconds()?,
+                            )
+                            .await?;
+                        sink.publish_artifact_resync_required(
+                            reducer.session_id,
+                            reducer.local_turn_id,
+                            ArtifactResyncReason::ProtocolError,
+                        )?;
+                        return Ok(());
+                    }
+                }
+            } else {
+                stream.next_stream_event().await
+            };
+            let event = match next_event {
                 Ok(Some(event)) => event,
                 Ok(None) => {
                     if progress_dirty {
@@ -4005,6 +4055,22 @@ mod tests {
             }
         })
         .to_string();
+        let active_session_body = serde_json::json!({
+            "session": {
+                "task_id": identity.task_id,
+                "agent_session_id": identity.agent_session_id,
+                "codex_thread_id": identity.thread_id,
+                "active_turn_id": identity.turn_id,
+                "state": "active",
+                "cwd": project_path,
+                "model": "MiniMax-M3",
+                "model_provider": "minimax",
+                "failure_code": "",
+                "created_at": "2026-08-20T00:00:00Z",
+                "updated_at": "2026-08-20T00:00:02Z"
+            }
+        })
+        .to_string();
         let frame = |sequence: u64,
                      item_id: Option<&str>,
                      event_type: &str,
@@ -4122,6 +4188,8 @@ mod tests {
             )
             .into_bytes(),
             ready_response(NONCE).into_bytes(),
+            json_response("200 OK", &active_session_body).into_bytes(),
+            ready_response(NONCE).into_bytes(),
             stream_response.into_bytes(),
         ];
         for artifact in &mixed_artifacts {
@@ -4211,8 +4279,8 @@ mod tests {
             .unwrap();
         assert_eq!(history.turns[0].messages[1].content, "v3 answer");
         let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 22);
-        assert!(requests[5].contains(&format!(
+        assert_eq!(requests.len(), 24);
+        assert!(requests[7].contains(&format!(
             "/v3/agent-sessions/{}/events?event_schema_version=3",
             identity.agent_session_id
         )));
@@ -4220,11 +4288,11 @@ mod tests {
             .iter()
             .any(|request| request.contains("/v2/agent-sessions")));
         for (index, artifact) in mixed_artifacts.iter().enumerate() {
-            assert!(requests[7 + (index * 4)].contains(&format!(
+            assert!(requests[9 + (index * 4)].contains(&format!(
                 "/v3/agent-sessions/{}/artifacts/{}/content",
                 identity.agent_session_id, artifact.id
             )));
-            assert!(requests[9 + (index * 4)].contains(&format!(
+            assert!(requests[11 + (index * 4)].contains(&format!(
                 "/v3/agent-sessions/{}/artifacts/{}/ack",
                 identity.agent_session_id, artifact.id
             )));

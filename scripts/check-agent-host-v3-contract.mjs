@@ -11,12 +11,12 @@ const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const lockPath = path.join(repositoryRoot, "contracts/agent-host-v3-artifacts.lock.json");
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const PINNED_COMMIT = "ea48fe190e18afba728712d1e2cc79cda57f581b";
-const PINNED_VERSION = "0.4.0-candidate";
+const PINNED_COMMIT = "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b";
+const PINNED_VERSION = "0.5.0";
 const SOURCE_PINS = Object.freeze({
   openapi: [
     "openapi/agent-host/agent-host.yaml",
-    "cf72ba8dd6910e8454ad60feeffa5e82583303b441dad78e49910fbdb9f5420f",
+    "406b55dad02d5a3d489955bcf29c973b94252c3e300f8ff853709a71d6874431",
   ],
   event_schema: [
     "jsonschema/agent/session-event-v3.schema.json",
@@ -39,12 +39,12 @@ const FIXTURE_TREE_PINS = new Map([
 ]);
 const IMPLEMENTATION_PINS = new Map([
   ["src-tauri/src/chat/artifact.rs", ["wire_and_storage_adapter", "e25d15c8f5caa75e6e001fee1b90379e9c675859b8b46ec9c513fe96fa2f5adc"]],
-  ["src-tauri/src/chat/host_bridge.rs", ["host_resource_transport", "da621e8ba7aeccfffce07ff89c412c80941be5c4d472b25d7e210bf90d88c93b"]],
-  ["src-tauri/src/chat/database.rs", ["database_lifecycle", "3e2c591eb991904225f8d7edbfef1150fe3b527f92c382802bef3a853619c97f"]],
-  ["src-tauri/src/chat/worker.rs", ["database_worker", "602fe3db2e013c09ac2daf30e0f65013017f08213db1057a9e7a0b8700d898cf"]],
-  ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "421f49eae08789f6ba421bbe690e1df2fccb228492426f7508da4e9ed1720484"]],
-  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "df87a667ec887eda5de4f3c07ccfdeae66409eeef7bbea9bd1e37f2aaa809f2c"]],
-  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "8fee9b6df8ec1bc217efcdb2c0f7277f07e426c2c31cf159f77e68bc15a6fd5a"]],
+  ["src-tauri/src/chat/host_bridge.rs", ["host_resource_transport", "5517be0351222ac461578ad5e3a2b0ec6516c5df622d13d9b687e1494b8a5467"]],
+  ["src-tauri/src/chat/database.rs", ["database_lifecycle", "5257c4cf501b2cd890cd35e944c4bae928a80bb7733abc32b3bf316931ba5f5b"]],
+  ["src-tauri/src/chat/worker.rs", ["database_worker", "d84455e3828d08c4f1ff4983a779bb75b67fcf29067dd3c65a2306a164ea3178"]],
+  ["src-tauri/src/chat/ipc.rs", ["private_ipc_adapter", "b3b4c1e40bb4594b4393f1dc2165ae4353682e6172d13006905d21d4b124add0"]],
+  ["src-tauri/src/chat/application.rs", ["interrupt_lifecycle", "1f93f2d0e2bf64e0034acfc12ec56ede1c7624c1ffae77c47bb72d0225c51b52"]],
+  ["src-tauri/src/chat/mod.rs", ["runtime_gate", "29248c14570d85cdc15a210b6099988c5972a4e5c88c9ce71ded968fb25b9a4d"]],
   ["src-tauri/migrations/chat/0008_chat_output_artifacts.sql", ["sqlcipher_schema_v8", "bec50a16583b216380f5f19728342772ff211ca2ebb88c0ff83b2e44d3fa9a15"]],
   ["src-tauri/schemas/chat-ipc-v3.schema.json", ["private_ipc_v3_schema", "ac61e2f1377e8a5ea44fd8611b05bdbb39e5188f42c142342d7de8401375f3f2"]],
   ["src/domain/chat-ipc.ts", ["typescript_private_ipc_adapter", "2fbec6e363ab75733efdfde538392423248a4c23d4460e7669f9e666fa51ac64"]],

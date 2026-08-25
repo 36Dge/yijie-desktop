@@ -16,8 +16,8 @@ export interface PermissionLifecycle {
 
 export function createPermissionLifecycle(
   store: PermissionLifecycleStore,
-  routeToRecovery: () => Promise<void> | void,
   visibilityDocument: VisibilityDocument,
+  refreshWhenReturningToForeground = true,
 ): PermissionLifecycle {
   let started = false;
   let wasHidden = visibilityDocument.visibilityState === "hidden";
@@ -27,7 +27,6 @@ export function createPermissionLifecycle(
     if (foregroundRefresh !== null) {
       return foregroundRefresh;
     }
-    await routeToRecovery();
     const refresh = store.refresh();
     foregroundRefresh = refresh.finally(() => {
       foregroundRefresh = null;
@@ -42,7 +41,7 @@ export function createPermissionLifecycle(
     }
     if (wasHidden) {
       wasHidden = false;
-      void refreshOnForeground();
+      if (refreshWhenReturningToForeground) void refreshOnForeground();
     }
   }
 

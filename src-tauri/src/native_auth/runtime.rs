@@ -5,6 +5,10 @@ use super::{
     RefreshTokenBinding, RefreshTokenRecord, RefreshTokenStore, SecretValue, StoredRefreshToken,
 };
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+use crate::local_profile::{
+    demo_fast_capabilities, LocalRuntimeProfile, DEMO_FAST_AUTHORIZATION_REVISION,
+    DEMO_FAST_OWNER_USER_ID, DEMO_FAST_PROJECTION_TTL_SECONDS, DEMO_FAST_TENANT_ID,
+};
 use crate::native_auth::loopback::LoopbackCallback;
 use crate::native_auth::transport::{
     OperationResponse, OperationTransport, PublicTaskErrorCode, PublicTaskTransportOutcome,
@@ -83,6 +87,7 @@ const FEAT128_S10D_AUTHORIZATION_REVISION: u64 = 128;
 enum RuntimeMode {
     Disabled,
     Invalid,
+    DemoFast,
     Ready(Arc<AuthService>),
 }
 
@@ -137,6 +142,7 @@ impl NativeAuthRuntime {
     pub(crate) fn from_environment_with_test_profile(
         profile: Option<std::sync::Arc<Feat126SecureStorageProfile>>,
         secure_storage_invalid: bool,
+        local_profile: LocalRuntimeProfile,
     ) -> Self {
         if secure_storage_invalid {
             return Self {
@@ -145,48 +151,52 @@ impl NativeAuthRuntime {
                 feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
             };
         }
-        let mode = match NativeAuthConfig::from_environment() {
-            Ok(None) => RuntimeMode::Disabled,
-            Err(_) => RuntimeMode::Invalid,
-            Ok(Some(config)) => {
-                if !test_storage_environment_allowed(profile.as_deref(), config.environment) {
-                    return Self {
-                        mode: RuntimeMode::Invalid,
-                        #[cfg(feature = "feat128-s10-runtime")]
-                        feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
-                    };
-                }
-                let local_whitelist =
-                    match LocalWhitelistConfig::from_environment(config.environment) {
-                        Ok(config) => config,
-                        Err(_) => {
-                            return Self {
-                                mode: RuntimeMode::Invalid,
-                                #[cfg(feature = "feat128-s10-runtime")]
-                                feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
-                            }
-                        }
-                    };
-                let binding = RefreshTokenBinding::from_config(&config);
-                match (
-                    OidcClient::new(config.clone()),
-                    ProtectedKeychainStore::new_with_test_profile(profile.clone()),
-                    OperationTransport::new(&config),
-                ) {
-                    (Ok(oidc), Ok(store), Ok(transport)) => {
-                        RuntimeMode::Ready(Arc::new(AuthService {
-                            oidc,
-                            binding,
-                            store: Arc::new(store),
-                            transport,
-                            access: Mutex::new(None),
-                            local_whitelist,
-                            storage_blocked: Mutex::new(false),
-                            login_lock: Mutex::new(()),
-                            refresh_lock: Mutex::new(()),
-                        }))
+        let mode = if local_profile.is_demo_fast() {
+            RuntimeMode::DemoFast
+        } else {
+            match NativeAuthConfig::from_environment() {
+                Ok(None) => RuntimeMode::Disabled,
+                Err(_) => RuntimeMode::Invalid,
+                Ok(Some(config)) => {
+                    if !test_storage_environment_allowed(profile.as_deref(), config.environment) {
+                        return Self {
+                            mode: RuntimeMode::Invalid,
+                            #[cfg(feature = "feat128-s10-runtime")]
+                            feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
+                        };
                     }
-                    _ => RuntimeMode::Invalid,
+                    let local_whitelist =
+                        match LocalWhitelistConfig::from_environment(config.environment) {
+                            Ok(config) => config,
+                            Err(_) => {
+                                return Self {
+                                    mode: RuntimeMode::Invalid,
+                                    #[cfg(feature = "feat128-s10-runtime")]
+                                    feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
+                                }
+                            }
+                        };
+                    let binding = RefreshTokenBinding::from_config(&config);
+                    match (
+                        OidcClient::new(config.clone()),
+                        ProtectedKeychainStore::new_with_test_profile(profile.clone()),
+                        OperationTransport::new(&config),
+                    ) {
+                        (Ok(oidc), Ok(store), Ok(transport)) => {
+                            RuntimeMode::Ready(Arc::new(AuthService {
+                                oidc,
+                                binding,
+                                store: Arc::new(store),
+                                transport,
+                                access: Mutex::new(None),
+                                local_whitelist,
+                                storage_blocked: Mutex::new(false),
+                                login_lock: Mutex::new(()),
+                                refresh_lock: Mutex::new(()),
+                            }))
+                        }
+                        _ => RuntimeMode::Invalid,
+                    }
                 }
             }
         };
@@ -198,6 +208,9 @@ impl NativeAuthRuntime {
     }
 
     pub async fn login(&self) -> Result<AuthStatus, CommandError> {
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            return Ok(AuthStatus::SignedIn);
+        }
         self.service()?.login().await.map_err(CommandError::from)
     }
 
@@ -206,6 +219,9 @@ impl NativeAuthRuntime {
         username: &str,
         password: &str,
     ) -> Result<AuthStatus, CommandError> {
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            return Ok(AuthStatus::SignedIn);
+        }
         self.service()?
             .local_whitelist_login(username, password)
             .await
@@ -216,6 +232,9 @@ impl NativeAuthRuntime {
         #[cfg(feature = "feat128-s10-runtime")]
         if self.feat128_s10d_authority.swap(false, Ordering::SeqCst) {
             return Ok(AuthStatus::SignedOut);
+        }
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            return Ok(AuthStatus::SignedIn);
         }
         self.service()?.logout().await.map_err(CommandError::from)
     }
@@ -228,6 +247,7 @@ impl NativeAuthRuntime {
         match &self.mode {
             RuntimeMode::Disabled => Ok(AuthStatus::Disabled),
             RuntimeMode::Invalid => Err(CommandError::from(NativeAuthError::InvalidConfiguration)),
+            RuntimeMode::DemoFast => Ok(AuthStatus::SignedIn),
             RuntimeMode::Ready(service) => service.status().await.map_err(CommandError::from),
         }
     }
@@ -236,6 +256,9 @@ impl NativeAuthRuntime {
         #[cfg(feature = "feat128-s10-runtime")]
         if self.feat128_s10d_authority.load(Ordering::SeqCst) {
             return Ok(feat128_s10d_tenants_response());
+        }
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            return Ok(demo_fast_tenants_response());
         }
         let service = self.service()?;
         service.list_my_tenants().await.map_err(CommandError::from)
@@ -248,6 +271,10 @@ impl NativeAuthRuntime {
         #[cfg(feature = "feat128-s10-runtime")]
         if self.feat128_s10d_authority.load(Ordering::SeqCst) {
             return feat128_s10d_capabilities_response(tenant_id)
+                .map_err(|_| CommandError::from(NativeAuthError::InvalidTenant));
+        }
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            return demo_fast_capabilities_response(tenant_id)
                 .map_err(|_| CommandError::from(NativeAuthError::InvalidTenant));
         }
         let service = self.service()?;
@@ -273,6 +300,22 @@ impl NativeAuthRuntime {
         let tenant_id = parse_chat_tenant(tenant_selector)?;
         if now_epoch_seconds < 0 {
             return Err(NativeProjectionError::Invalid);
+        }
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            if tenant_selector != DEMO_FAST_TENANT_ID {
+                return Err(NativeProjectionError::CapabilityDenied);
+            }
+            return Ok(NativeChatProjection {
+                tenant_id,
+                authorization_revision: DEMO_FAST_AUTHORIZATION_REVISION,
+                expires_at: now_epoch_seconds
+                    .checked_add(
+                        i64::try_from(DEMO_FAST_PROJECTION_TTL_SECONDS)
+                            .map_err(|_| NativeProjectionError::Invalid)?,
+                    )
+                    .ok_or(NativeProjectionError::Invalid)?,
+                capabilities: demo_fast_capabilities(),
+            });
         }
         #[cfg(feature = "feat128-s10-runtime")]
         if self.feat128_s10d_authority.load(Ordering::SeqCst) {
@@ -351,6 +394,18 @@ impl NativeAuthRuntime {
             || client_reference_id.is_nil()
         {
             return NativePublicTaskOutcome::ProtocolError;
+        }
+        if matches!(self.mode, RuntimeMode::DemoFast) {
+            let owner = uuid::Uuid::parse_str(DEMO_FAST_OWNER_USER_ID).ok();
+            let tenant = uuid::Uuid::parse_str(DEMO_FAST_TENANT_ID).ok();
+            return if owner == Some(expected_owner_user_id)
+                && tenant == Some(expected_tenant_id)
+                && expected_authorization_revision == DEMO_FAST_AUTHORIZATION_REVISION
+            {
+                NativePublicTaskOutcome::Bound(client_reference_id)
+            } else {
+                NativePublicTaskOutcome::BlockedAuth
+            };
         }
         #[cfg(feature = "feat128-s10-runtime")]
         if self.feat128_s10d_authority.load(Ordering::SeqCst) {
@@ -451,6 +506,7 @@ impl NativeAuthRuntime {
         match &self.mode {
             RuntimeMode::Disabled => Err(NativeAuthError::Disabled),
             RuntimeMode::Invalid => Err(NativeAuthError::InvalidConfiguration),
+            RuntimeMode::DemoFast => Err(NativeAuthError::Disabled),
             RuntimeMode::Ready(service) => Ok(service),
         }
     }
@@ -507,6 +563,45 @@ impl NativeAuthRuntime {
     }
 }
 
+fn demo_fast_tenants_response() -> OperationResponse {
+    OperationResponse {
+        status: 200,
+        cache_control: "no-store".to_owned(),
+        www_authenticate: None,
+        retry_after: None,
+        body: serde_json::json!({
+            "tenants": [{
+                "tenant_id": DEMO_FAST_TENANT_ID,
+                "display_name": "Local Demo Workspace"
+            }]
+        }),
+    }
+}
+
+fn demo_fast_capabilities_response(tenant_id: &str) -> Result<OperationResponse, &'static str> {
+    if tenant_id != DEMO_FAST_TENANT_ID {
+        return Err("local_demo_tenant_invalid");
+    }
+    let expires_at = epoch_seconds()
+        .ok()
+        .and_then(|now| now.checked_add(DEMO_FAST_PROJECTION_TTL_SECONDS))
+        .and_then(format_rfc3339_utc)
+        .ok_or("local_demo_clock_invalid")?;
+    Ok(OperationResponse {
+        status: 200,
+        cache_control: "no-store".to_owned(),
+        www_authenticate: None,
+        retry_after: None,
+        body: serde_json::json!({
+            "schema_version": 1,
+            "tenant_id": DEMO_FAST_TENANT_ID,
+            "authorization_revision": DEMO_FAST_AUTHORIZATION_REVISION,
+            "expires_at": expires_at,
+            "capabilities": demo_fast_capabilities()
+        }),
+    })
+}
+
 #[cfg(feature = "feat128-s10-runtime")]
 fn feat128_s10d_capabilities() -> Vec<String> {
     vec![
@@ -557,7 +652,6 @@ fn feat128_s10d_capabilities_response(tenant_id: &str) -> Result<OperationRespon
     })
 }
 
-#[cfg(feature = "feat128-s10-runtime")]
 fn format_rfc3339_utc(epoch_seconds: u64) -> Option<String> {
     let seconds = i64::try_from(epoch_seconds).ok()?;
     let days = seconds.div_euclid(86_400);
@@ -1205,6 +1299,68 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
+
+    fn demo_fast_runtime() -> NativeAuthRuntime {
+        NativeAuthRuntime {
+            mode: RuntimeMode::DemoFast,
+            #[cfg(feature = "feat128-s10-runtime")]
+            feat128_s10d_authority: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[tokio::test]
+    async fn demo_fast_authority_requires_no_login_or_transport() {
+        let runtime = demo_fast_runtime();
+        assert_eq!(runtime.status().await, Ok(AuthStatus::SignedIn));
+
+        let tenants = runtime.list_my_tenants().await.expect("local tenants");
+        assert_eq!(tenants.status, 200);
+        assert_eq!(tenants.body["tenants"][0]["tenant_id"], DEMO_FAST_TENANT_ID);
+
+        let capabilities = runtime
+            .get_my_capabilities(DEMO_FAST_TENANT_ID)
+            .await
+            .expect("local capabilities");
+        assert_eq!(capabilities.status, 200);
+        assert_eq!(
+            capabilities.body["capabilities"],
+            serde_json::json!([
+                "knowledge.read",
+                "plugin.manage",
+                "plugin.read",
+                "schedule.read",
+                "store.read",
+                "task.create",
+                "task.read",
+                "workspace.use"
+            ])
+        );
+
+        let projection = runtime
+            .chat_projection(DEMO_FAST_TENANT_ID, 1_800_000_000)
+            .await
+            .expect("local chat projection");
+        assert_eq!(projection.authorization_revision, 1);
+        assert_eq!(projection.expires_at, 1_800_000_240);
+
+        let owner = uuid::Uuid::parse_str(DEMO_FAST_OWNER_USER_ID).unwrap();
+        let tenant = uuid::Uuid::parse_str(DEMO_FAST_TENANT_ID).unwrap();
+        let operation = uuid::Uuid::now_v7();
+        let reference = uuid::Uuid::now_v7();
+        assert_eq!(
+            runtime
+                .create_chat_public_task(owner, tenant, 1, operation, reference)
+                .await,
+            NativePublicTaskOutcome::Bound(reference)
+        );
+        assert_eq!(
+            runtime
+                .create_chat_public_task(owner, tenant, 2, operation, reference)
+                .await,
+            NativePublicTaskOutcome::BlockedAuth
+        );
+        assert_eq!(runtime.logout().await, Ok(AuthStatus::SignedIn));
+    }
 
     #[test]
     fn ephemeral_secret_profile_is_rejected_for_production_auth() {

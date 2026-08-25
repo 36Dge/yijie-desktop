@@ -31,7 +31,7 @@ function pageLoaders(): { loaders: AppPageLoaders; chat: ReturnType<typeof vi.fn
     chat,
     loaders: {
       chat,
-      tasks: async () => page,
+      plugins: async () => page,
       settings: async () => page,
       accessDenied: async () => page,
     },
@@ -41,7 +41,7 @@ function pageLoaders(): { loaders: AppPageLoaders; chat: ReturnType<typeof vi.fn
 describe("app router", () => {
   it.each([
     [["task.create", "task.read"] as const, "/chat", "chat"],
-    [["task.read"] as const, "/tasks", "tasks"],
+    [["task.read"] as const, "/settings", "settings"],
     [[] as const, "/settings", "settings"],
   ])("ROUTE-001 resolves the root policy for %j", async (capabilities, path, name) => {
     const router = createAppRouter(createMemoryHistory(), boundary(capabilities), undefined, true);
@@ -81,7 +81,6 @@ describe("app router", () => {
 
   it.each([
     ["/chat", "chat", ["task.create"] as const],
-    ["/tasks", "tasks", ["task.read"] as const],
     ["/settings", "settings", [] as const],
   ])("ROUTE-003 resolves the allowed direct entry %s", async (path, name, capabilities) => {
     const router = createAppRouter(createMemoryHistory(), boundary(capabilities), undefined, true);
@@ -128,8 +127,45 @@ describe("app router", () => {
       "/access-denied",
     ]);
     expect(APP_ROUTE_RECORDS.map((route) => route.path)).not.toEqual(
-      expect.arrayContaining(["/store", "/workspace", "/scheduled-tasks", "/plugins", "/knowledge"]),
+      expect.arrayContaining(["/tasks", "/store", "/workspace", "/scheduled-tasks", "/plugins", "/knowledge"]),
     );
+  });
+
+  it("FEAT-129 protects the local Skill marketplace with plugin.read", async () => {
+    const allowed = createAppRouter(
+      createMemoryHistory(),
+      boundary(["plugin.read"]),
+      undefined,
+      true,
+      true,
+    );
+    await allowed.push("/plugins");
+    await allowed.isReady();
+    expect(allowed.currentRoute.value.name).toBe("plugins");
+
+    const denied = createAppRouter(
+      createMemoryHistory(),
+      boundary(["plugin.manage"]),
+      undefined,
+      true,
+      true,
+    );
+    await denied.push("/plugins");
+    await denied.isReady();
+    expect(denied.currentRoute.value.path).toBe("/access-denied");
+  });
+
+  it("FEAT-129 keeps /plugins closed outside the exact local feature profile", async () => {
+    const router = createAppRouter(
+      createMemoryHistory(),
+      boundary(["plugin.read"]),
+      undefined,
+      true,
+      false,
+    );
+    await router.push("/plugins");
+    await router.isReady();
+    expect(router.currentRoute.value.path).toBe("/settings");
   });
 
   it("ROUTE-007 keeps route names, navigation keys, and document titles aligned", () => {
@@ -154,12 +190,6 @@ describe("app router", () => {
         documentTitle: "任务对话 · 易界 AI",
       },
       {
-        path: "/tasks",
-        name: "tasks",
-        navKey: "taskHistory",
-        documentTitle: "任务记录 · 易界 AI",
-      },
-      {
         path: "/settings",
         name: "settings",
         navKey: "settings",
@@ -174,6 +204,14 @@ describe("app router", () => {
     ]);
   });
 
+  it("FEAT-129 registers the local marketplace title and navigation key", () => {
+    expect(createAppRouteRecords(undefined, true, true).find((route) => route.path === "/plugins"))
+      .toMatchObject({
+        name: "plugins",
+        meta: { navKey: "plugin", documentTitle: "Skill 广场 · 易界 AI" },
+      });
+  });
+
   it("ROUTE-008 synchronizes the title and focuses the route heading", () => {
     const focus = vi.fn();
     const heading = { focus, tabIndex: 0 };
@@ -182,10 +220,10 @@ describe("app router", () => {
       querySelector: vi.fn(() => heading),
     } as unknown as Document;
 
-    syncRouteTitle({ documentTitle: "任务记录 · 易界 AI" }, routeDocument);
+    syncRouteTitle({ documentTitle: "任务对话 · 易界 AI" }, routeDocument);
     focusRouteHeading(routeDocument);
 
-    expect(routeDocument.title).toBe("任务记录 · 易界 AI");
+    expect(routeDocument.title).toBe("任务对话 · 易界 AI");
     expect(routeDocument.querySelector).toHaveBeenCalledWith("main h1");
     expect(heading.tabIndex).toBe(-1);
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });

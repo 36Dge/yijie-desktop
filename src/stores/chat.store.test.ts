@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatClient } from "../api/chat-client";
 import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
+  ChatAllowedAction,
   ChatAttachment,
   ChatAttachmentImportEvent,
   ChatControlPlaneEvent,
@@ -33,6 +34,11 @@ const SESSION_B = "019c1a00-0000-7000-8000-000000000006";
 const TURN_A = "019c1a00-0000-7000-8000-000000000007";
 const SESSION_CREATED = "019c1a00-0000-7000-8000-000000000008";
 const ARTIFACT_A = "019c1a00-0000-7000-8000-000000000019";
+const ALL_ALLOWED_ACTIONS = Object.freeze([
+  "read_sessions", "create_session", "submit_turn", "rename_session", "pin_session",
+  "interrupt_turn", "delete_session", "read_projects", "use_project", "pin_project",
+  "remove_project", "read_cleanup",
+] as const satisfies readonly ChatAllowedAction[]);
 
 let storeSequence = 0;
 
@@ -174,11 +180,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     bindContext: async () => ({
       contextId: CONTEXT,
       expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
-      allowedActions: [
-        "read_sessions", "create_session", "submit_turn", "rename_session", "pin_session",
-        "interrupt_turn", "delete_session", "read_projects", "use_project", "pin_project",
-        "remove_project", "read_cleanup",
-      ],
+      allowedActions: ALL_ALLOWED_ACTIONS,
     }),
     listProjects: async () => [],
     pickProject: async () => null,
@@ -306,6 +308,67 @@ describe("chat view-model store", () => {
     }
   });
 
+  it("keeps task.read-only history usable without invoking create-only draft commands", async () => {
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async () => {
+      throw new Error("read-only history must not prepare a writable draft");
+    });
+    const listProjects = vi.fn<ChatClient["listProjects"]>(async () => [{
+      projectId: "019c1a00-0000-7000-8000-000000000009",
+      safeName: "Read-only Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    }]);
+    const listSessions = vi.fn<ChatClient["listSessions"]>(async () => ({
+      sessions: [session(SESSION_A), session(SESSION_B)],
+      nextCursor: null,
+    }));
+    const resyncSessionV2 = vi.fn<ChatClient["resyncSessionV2"]>(async (_context, sessionId) =>
+      projection(sessionId)
+    );
+    const { client } = fakeClient({
+      bindContext: async () => ({
+        contextId: CONTEXT,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ["read_sessions", "read_projects", "read_cleanup"],
+      }),
+      listProjects,
+      listSessions,
+      listDraftAttachments,
+      resyncSessionV2,
+    });
+    const store = createStore(client);
+
+    await store.bind(TENANT);
+
+    expect(store.phase).toBe("ready");
+    expect(store.projects).toHaveLength(1);
+    expect(store.sessions).toHaveLength(2);
+    expect(store.draftTarget).toBeNull();
+    expect(store.draftTargetReady).toBe(false);
+    expect(store.canSend).toBe(false);
+
+    await store.selectSession(SESSION_A);
+
+    expect(store.phase).toBe("ready");
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.history?.turns).toEqual([]);
+    expect(store.draftTarget).toBeNull();
+    expect(listDraftAttachments).not.toHaveBeenCalled();
+    expect(listProjects).toHaveBeenCalledWith(CONTEXT);
+    expect(listSessions).toHaveBeenCalledWith(CONTEXT);
+    expect(resyncSessionV2).toHaveBeenCalledWith(CONTEXT, SESSION_A, 20, expect.any(AbortSignal));
+
+    await store.clearSelectedSession();
+
+    expect(store.phase).toBe("ready");
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.draftTarget).toBeNull();
+    await expect(store.retryDraftRecovery()).resolves.toBe(false);
+    expect(store.phase).toBe("ready");
+    expect(listDraftAttachments).not.toHaveBeenCalled();
+  });
+
   it("subscribes both channels before v3 history, coalesces initial invalidation, and isolates the v3 cursor", async () => {
     const order: string[] = [];
     let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
@@ -390,7 +453,7 @@ describe("chat view-model store", () => {
     expect(artifacts.authority).toBeNull();
   });
 
-  it("trails exactly one Artifact resync when notifications arrive during the final control-plane read", async () => {
+  it("trails exactly one Artifact metadata refresh without resyncing the chat session", async () => {
     let artifactHandler: (event: ChatArtifactLiveEvent) => void = () => undefined;
     const controlPlaneStarted = new Deferred<void>();
     const delayedControlPlane = new Deferred<Awaited<ReturnType<ChatClient["getSessionControlPlane"]>>>();
@@ -457,7 +520,7 @@ describe("chat view-model store", () => {
     await selection;
     for (let index = 0; index < 20; index += 1) await Promise.resolve();
 
-    expect(resyncSessionV2).toHaveBeenCalledTimes(2);
+    expect(resyncSessionV2).toHaveBeenCalledTimes(1);
     expect(loadHistoryV3).toHaveBeenCalledTimes(3);
     expect(artifacts.artifactsForTurn(SESSION_A, TURN_A)).toMatchObject([
       { artifactId: ARTIFACT_A, status: "ready" },
@@ -533,31 +596,33 @@ describe("chat view-model store", () => {
     for (let index = 0; index < 12 && historyCalls < 3; index += 1) await Promise.resolve();
     expect(historyCalls).toBe(3);
 
-    artifactHandler(changed(subscriptionIds[1], "1", "019c1a00-0000-7000-8000-000000000042"));
+    artifactHandler(changed(subscriptionIds[0], "2", "019c1a00-0000-7000-8000-000000000042"));
+    delayedRefresh.resolve(artifactHistory());
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+
+    expect(resyncSessionV2).toHaveBeenCalledTimes(1);
+    expect(loadHistoryV3).toHaveBeenCalledTimes(4);
+
     artifactHandler({
-      ...changed(subscriptionIds[1], "4", "019c1a00-0000-7000-8000-000000000043"),
+      ...changed(subscriptionIds[0], "4", "019c1a00-0000-7000-8000-000000000043"),
       kind: "resync_required",
       payload: { reason: "sequence_gap" },
     });
-    delayedRefresh.resolve(artifactHistory());
     for (let index = 0; index < 30; index += 1) await Promise.resolve();
 
-    expect(resyncSessionV2).toHaveBeenCalledTimes(3);
-    expect(loadHistoryV3).toHaveBeenCalledTimes(4);
+    expect(resyncSessionV2).toHaveBeenCalledTimes(2);
+    expect(loadHistoryV3).toHaveBeenCalledTimes(5);
     expect(subscriptionOrder.indexOf(`subscribe:${subscriptionIds[1]}`)).toBeLessThan(
       subscriptionOrder.indexOf(`unsubscribe:${subscriptionIds[0]}`),
     );
-    expect(subscriptionOrder.indexOf(`subscribe:${subscriptionIds[2]}`)).toBeLessThan(
-      subscriptionOrder.indexOf(`unsubscribe:${subscriptionIds[1]}`),
-    );
 
-    artifactHandler(changed(subscriptionIds[1], "5", "019c1a00-0000-7000-8000-000000000045"));
+    artifactHandler(changed(subscriptionIds[0], "5", "019c1a00-0000-7000-8000-000000000045"));
     for (let index = 0; index < 8; index += 1) await Promise.resolve();
-    expect(resyncSessionV2).toHaveBeenCalledTimes(3);
+    expect(resyncSessionV2).toHaveBeenCalledTimes(2);
 
     artifactHandler({
       schemaVersion: 1,
-      subscriptionId: subscriptionIds[2],
+      subscriptionId: subscriptionIds[1],
       contextId: CONTEXT,
       sessionId: SESSION_A,
       turnId: TURN_A,
@@ -792,6 +857,40 @@ describe("chat view-model store", () => {
     expect(importAttachments).toHaveBeenCalledOnce();
   });
 
+  it("returns from an unavailable deleted-session draft to a clean sendable new-task draft", async () => {
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async (_context, target) => {
+      if (target.type === "new") return [];
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_resource_not_found",
+        retryable: false,
+        recovery: "none",
+      });
+    });
+    const store = createStore(fakeClient({ listDraftAttachments }).client);
+    await store.bind(TENANT);
+
+    await store.selectSession(SESSION_A);
+    expect(store.phase).toBe("unavailable");
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.draftTarget).toEqual(chatSessionDraftTarget(SESSION_A));
+    expect(store.draftTargetReady).toBe(false);
+    expect(store.attachmentErrorCode).toBe("chat_resource_not_found");
+    expect(store.canSend).toBe(false);
+
+    await store.clearSelectedSession();
+
+    expect(store.phase).toBe("ready");
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftTargetReady).toBe(true);
+    expect(store.attachmentErrorCode).toBeNull();
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.canSend).toBe(true);
+    expect(store.canAttach).toBe(true);
+    expect(listDraftAttachments).toHaveBeenLastCalledWith(CONTEXT, CHAT_NEW_DRAFT_TARGET);
+  });
+
   it("reports whether an interrupt request crossed the authority boundary", async () => {
     const interruptTurn = vi.fn(async (_context: string, sessionId: string, operationId: string) => ({
       sessionId,
@@ -871,6 +970,64 @@ describe("chat view-model store", () => {
     }
     expect(resync).toHaveBeenCalledTimes(2);
     expect(store.liveAssistantText).toBe("");
+  });
+
+  it("reloads authoritative history and clears the live projection after a terminal event", async () => {
+    let resyncCalls = 0;
+    const completedProjection: ChatResyncProjection = Object.freeze({
+      session: Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+      history: Object.freeze({
+        turns: Object.freeze([Object.freeze({
+          turnId: TURN_A,
+          status: "completed" as const,
+          terminalAt: 2,
+          reasoningStatus: "complete" as const,
+          reasoningReasonCode: null,
+          messages: Object.freeze([Object.freeze({
+            messageId: "019c1a00-0000-7000-8000-000000000021",
+            role: "assistant" as const,
+            content: "persisted answer",
+            status: "completed",
+            ordinal: 0,
+            createdAt: 2,
+          })]),
+          reasoning: Object.freeze([]),
+          artifacts: Object.freeze([]),
+        })]),
+        nextCursor: null,
+      }),
+      cleanup: null,
+    });
+    const resyncSession = vi.fn(async (_context: string, sessionId: string) => {
+      resyncCalls += 1;
+      return resyncCalls === 1 ? projection(sessionId) : completedProjection;
+    });
+    const { client, emit } = fakeClient({ resyncSession });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emit(event(
+      "1",
+      "019c1a00-0000-7000-8000-00000000000d",
+      "assistant_append",
+      { text: "persisted answer" },
+    ));
+    emit(event(
+      "2",
+      "019c1a00-0000-7000-8000-00000000000e",
+      "turn_terminal",
+      { status: "completed" },
+    ));
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+    expect(store.phase).toBe("ready");
+    expect(store.liveAssistantText).toBe("");
+    expect(store.liveReasoning).toEqual([]);
+    expect(store.liveTurnStatus).toBe("completed");
+    expect(store.history?.turns[0]?.messages[0]?.content).toBe("persisted answer");
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus).toBe("completed");
   });
 
   it("keeps control-plane projection authoritative across duplicate, gap, and stale events", async () => {
@@ -1699,8 +1856,174 @@ describe("chat view-model store", () => {
     expect(store.sessions.map((value) => value.sessionId)).toEqual([SESSION_B]);
     expect(disposition).toEqual({
       kind: "navigate",
+      deletedSessionId: SESSION_A,
       nextSessionId: SESSION_B,
       path: `/chat/${SESSION_B}`,
     });
+  });
+
+  it("polls a pending deletion to completion when the unavailable session has no live subscription", async () => {
+    let listCount = 0;
+    const pending = {
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    };
+    const complete = {
+      ...pending,
+      desktopState: "complete" as const,
+      hostState: "complete" as const,
+      runtimeState: "complete" as const,
+      outcomeCode: "cleanup_complete",
+      completedAt: 2,
+      expiresAt: 3,
+    };
+    const getCleanupStatus = vi.fn(async () => complete);
+    const { client } = fakeClient({
+      listSessions: async () => {
+        listCount += 1;
+        return listCount === 1
+          ? { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }
+          : { sessions: [session(SESSION_B)], nextCursor: null };
+      },
+      deleteSession: async () => pending,
+      getCleanupStatus,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(await store.deleteSelected()).toEqual({
+      kind: "cleanup_pending",
+      deletedSessionId: SESSION_A,
+      nextSessionId: null,
+      path: `/chat/${SESSION_A}`,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(getCleanupStatus).toHaveBeenCalledWith(CONTEXT, pending.operationId);
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.sessions.map((value) => value.sessionId)).toEqual([SESSION_B]);
+    expect(store.deleteDisposition).toEqual({
+      kind: "navigate",
+      deletedSessionId: SESSION_A,
+      nextSessionId: SESSION_B,
+      path: `/chat/${SESSION_B}`,
+    });
+  });
+
+  it("does not redirect a newer selection when completed-cleanup lists arrive late", async () => {
+    const delayedSessions = new Deferred<Awaited<ReturnType<ChatClient["listSessions"]>>>();
+    let listCalls = 0;
+    const { client } = fakeClient({
+      listSessions: async () => {
+        listCalls += 1;
+        return listCalls === 1
+          ? { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }
+          : delayedSessions.promise;
+      },
+      deleteSession: async () => ({
+        operationId: "019c1a00-0000-7000-8000-000000000015",
+        desktopState: "complete",
+        hostState: "complete",
+        runtimeState: "complete",
+        outcomeCode: "cleanup_complete",
+        lastErrorCode: null,
+        requestedAt: 1,
+        completedAt: 2,
+        expiresAt: 3,
+      }),
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    const staleCleanup = store.deleteSelected();
+    for (let index = 0; index < 8 && listCalls < 2; index += 1) await Promise.resolve();
+    expect(listCalls).toBe(2);
+    await store.selectSession(SESSION_B);
+    delayedSessions.resolve({ sessions: [session(SESSION_B)], nextCursor: null });
+
+    await expect(staleCleanup).resolves.toBeNull();
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.deleteDisposition).toBeNull();
+    expect(store.cleanupStatus).toBeNull();
+  });
+
+  it("drops a stale project mutation result after the authority rebinds", async () => {
+    const nextTenant = "019c1a00-0000-7000-8000-000000000010";
+    const oldProject = {
+      projectId: "019c1a00-0000-7000-8000-000000000011",
+      safeName: "Old tenant project",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    };
+    const newProject = { ...oldProject, projectId: "019c1a00-0000-7000-8000-000000000012", safeName: "New tenant project" };
+    const delayedPin = new Deferred<string>();
+    const listProjects = vi.fn<ChatClient["listProjects"]>(async (contextId) =>
+      contextId === CONTEXT ? [oldProject] : [newProject]
+    );
+    const { client } = fakeClient({
+      bindContext: async (tenant) => ({
+        contextId: tenant === TENANT ? CONTEXT : CONTEXT_B,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ALL_ALLOWED_ACTIONS,
+      }),
+      listProjects,
+      setProjectPinned: async () => delayedPin.promise,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+
+    const staleMutation = store.setProjectPinned(oldProject.projectId, true);
+    await store.bind(nextTenant);
+    delayedPin.resolve("019c1a00-0000-7000-8000-000000000013");
+    await staleMutation;
+
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(store.projects.map((project) => project.safeName)).toEqual(["New tenant project"]);
+    expect(listProjects.mock.calls.map(([contextId]) => contextId)).toEqual([CONTEXT, CONTEXT_B]);
+  });
+
+  it("drops a stale deletion result after the authority rebinds", async () => {
+    const nextTenant = "019c1a00-0000-7000-8000-000000000010";
+    const delayedDelete = new Deferred<Awaited<ReturnType<ChatClient["deleteSession"]>>>();
+    const { client } = fakeClient({
+      bindContext: async (tenant) => ({
+        contextId: tenant === TENANT ? CONTEXT : CONTEXT_B,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ALL_ALLOWED_ACTIONS,
+      }),
+      deleteSession: async () => delayedDelete.promise,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    const staleDeletion = store.deleteSelected();
+    await store.bind(nextTenant);
+    delayedDelete.resolve({
+      operationId: "019c1a00-0000-7000-8000-000000000014",
+      desktopState: "pending",
+      hostState: "pending",
+      runtimeState: "pending",
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+
+    await expect(staleDeletion).resolves.toBeNull();
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(store.cleanupStatus).toBeNull();
+    expect(store.deleteDisposition).toBeNull();
   });
 });

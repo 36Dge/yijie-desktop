@@ -21,7 +21,9 @@ mod sidecar;
 mod worker;
 
 use crate::feat126_secure_storage::Feat126SecureStorageProfile;
+use crate::local_profile::LocalRuntimeProfile;
 use crate::native_auth::NativeAuthRuntime;
+use crate::skills::SkillRoots;
 pub use application::{
     ArtifactResyncReason, AuthorizedConversationApplication, ConversationApplication,
     ConversationCoordinator, ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome,
@@ -53,6 +55,7 @@ pub use database::{
 };
 pub use error::{ChatCommandError, ChatError};
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
+pub(crate) use host_bridge::{HostManagedSkill, HostSkillSnapshot};
 pub use host_domain::{
     HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
     HostCleanupReason, HostCleanupSurfaceStatus, HostCleanupSurfaces, HostErrorCode, HostEvent,
@@ -127,7 +130,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "ea48fe190e18afba728712d1e2cc79cda57f581b";
+const CONTRACT_COMMIT: &str = "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
@@ -137,9 +140,11 @@ fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
 #[derive(Clone)]
 struct LocalChatConfig {
     chat_directory: PathBuf,
+    demo_fast_secret_directory: Option<PathBuf>,
     scope: database::ChatScope,
     secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
     public_tasks: Arc<dyn PublicTaskControlPlane>,
+    demo_fast: bool,
 }
 
 enum RuntimeMode {
@@ -223,6 +228,8 @@ impl ChatRuntime {
         secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
         secure_storage_invalid: bool,
         native_auth: NativeAuthRuntime,
+        local_profile: LocalRuntimeProfile,
+        skill_roots: Option<SkillRoots>,
     ) -> Self {
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
@@ -246,15 +253,23 @@ impl ChatRuntime {
                 (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
                     Ok(scope) => match (scope.owner_uuid(), scope.tenant_uuid()) {
                         (Ok(owner_user_id), Ok(tenant_id)) => RuntimeMode::Local(LocalChatConfig {
-                            chat_directory: secure_storage
-                                .as_ref()
-                                .map(|profile| profile.desktop_app_data().join("chat"))
-                                .unwrap_or_else(|| app_data_directory.join("chat")),
+                            chat_directory: if local_profile.is_demo_fast() {
+                                app_data_directory.join("demo-fast-v1").join("chat")
+                            } else {
+                                secure_storage
+                                    .as_ref()
+                                    .map(|profile| profile.desktop_app_data().join("chat"))
+                                    .unwrap_or_else(|| app_data_directory.join("chat"))
+                            },
+                            demo_fast_secret_directory: local_profile
+                                .is_demo_fast()
+                                .then(|| app_data_directory.join("demo-fast-v1").join("secrets")),
                             public_tasks: Arc::new(NativePublicTaskControlPlane::new(
                                 native_auth.clone(),
                                 owner_user_id,
                                 tenant_id,
                             )),
+                            demo_fast: local_profile.is_demo_fast(),
                             scope,
                             secure_storage: secure_storage.clone(),
                         }),
@@ -265,7 +280,10 @@ impl ChatRuntime {
                 _ => RuntimeMode::Invalid,
             }
         };
-        let sidecar = match SidecarSupervisor::from_environment() {
+        let sidecar = match SidecarSupervisor::from_environment_for_desktop(
+            local_profile.is_demo_fast(),
+            skill_roots,
+        ) {
             Ok(supervisor) => Some(Arc::new(supervisor)),
             Err(_) => {
                 mode = RuntimeMode::Invalid;
@@ -300,8 +318,20 @@ impl ChatRuntime {
             return Ok(worker);
         }
         let worker = tokio::task::spawn_blocking(move || {
-            let key_store = ProtectedDatabaseKeyStore::new(config.secure_storage.clone())?;
-            let receipt_key_store = ProtectedReceiptKeyStore::new(config.secure_storage.clone())?;
+            let (key_store, receipt_key_store) = match config.demo_fast_secret_directory {
+                Some(directory) => (
+                    ProtectedDatabaseKeyStore::new_local_demo(
+                        directory.join("chat-sqlcipher-v1.secret"),
+                    )?,
+                    ProtectedReceiptKeyStore::new_local_demo(
+                        directory.join("receipt-hmac-v1.secret"),
+                    )?,
+                ),
+                None => (
+                    ProtectedDatabaseKeyStore::new(config.secure_storage.clone())?,
+                    ProtectedReceiptKeyStore::new(config.secure_storage.clone())?,
+                ),
+            };
             DatabaseWorker::start(
                 config.chat_directory,
                 config.scope,
@@ -687,6 +717,25 @@ impl ChatRuntime {
         }
     }
 
+    pub(crate) async fn ensure_demo_fast_sidecar(&self) -> Result<(), ChatError> {
+        let enabled = matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.demo_fast
+        );
+        if !enabled || self.host_bridge.lock().await.is_some() {
+            return Ok(());
+        }
+        self.start_sidecar().await.map(|_| ())
+    }
+
+    pub(crate) async fn shutdown_for_app_exit(&self) -> Result<(), ChatError> {
+        *self.host_bridge.lock().await = None;
+        match &self.sidecar {
+            Some(sidecar) => sidecar.stop().await.map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
     async fn stop_sidecar(&self) -> Result<SidecarState, ChatError> {
         match self.mode {
             RuntimeMode::Local(_) => {
@@ -888,9 +937,11 @@ mod tests {
         ChatRuntime {
             mode: RuntimeMode::Local(LocalChatConfig {
                 chat_directory: profile.desktop_app_data().join("chat"),
+                demo_fast_secret_directory: None,
                 scope,
                 secure_storage: Some(profile),
                 public_tasks: Arc::new(public_tasks::FixedPublicTaskControlPlane::new([])),
+                demo_fast: false,
             }),
             authorization,
             worker: Mutex::new(None),
@@ -957,6 +1008,34 @@ mod tests {
         assert_eq!(status.schema_version, None);
         assert_eq!(status.contract_commit, CONTRACT_COMMIT);
         assert_eq!(status.sidecar, SidecarState::Disabled);
+    }
+
+    #[tokio::test]
+    async fn app_exit_shutdown_clears_host_bridge_and_is_idempotent() {
+        let bridge = HostBridge::from_connection(sidecar::HostConnection {
+            port: 18080,
+            token_path: PathBuf::from("/private/tmp/yijie-test-api-token"),
+            instance_nonce: "019fbd88-cbc3-7bf1-934d-7b05cd693f80".to_owned(),
+        })
+        .expect("synthetic loopback Host connection");
+        let runtime = ChatRuntime {
+            mode: RuntimeMode::Disabled,
+            authorization: None,
+            worker: Mutex::new(None),
+            initialization: Mutex::new(()),
+            sidecar: None,
+            host_bridge: Mutex::new(Some(Arc::new(bridge))),
+        };
+
+        runtime
+            .shutdown_for_app_exit()
+            .await
+            .expect("first app-exit shutdown");
+        assert!(runtime.host_bridge.lock().await.is_none());
+        runtime
+            .shutdown_for_app_exit()
+            .await
+            .expect("idempotent app-exit shutdown");
     }
 
     #[tokio::test]

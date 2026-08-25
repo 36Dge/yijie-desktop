@@ -1,4 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  demoFastLocalProfileEnabled,
+  shouldResetDemoFastStartupPath,
+} from "./authorization/local-profile";
 
 const root = document.querySelector("#app");
 const featureDriverEnabled = import.meta.env.VITE_FEAT126_S10_DRIVER === "true";
@@ -33,6 +37,9 @@ if ([featureDriverEnabled, feat128S7bRuntimeEnabled, feat128S10dRuntimeEnabled].
 } else {
   if (root === null) throw new Error("application_root_missing");
   void (async () => {
+    if (shouldResetDemoFastStartupPath(demoFastLocalProfileEnabled, window.location.pathname)) {
+      window.history.replaceState(window.history.state, "", "/");
+    }
     const [{ createApp }, { createPinia }, { default: App }, { router }] = await Promise.all([
       import("vue"),
       import("pinia"),
@@ -41,8 +48,11 @@ if ([featureDriverEnabled, feat128S7bRuntimeEnabled, feat128S10dRuntimeEnabled].
       import("./styles/main.css"),
     ]);
     const app = createApp(App).use(createPinia()).use(router);
-    app.mount(root);
     await router.isReady();
+    if (demoFastLocalProfileEnabled && router.currentRoute.value.path !== "/chat") {
+      await router.replace("/chat");
+    }
+    app.mount(root);
     if (feat128S10dRuntimeEnabled) {
       const { runFeat128S10dRuntimeController } = await import("./feat128/s10d-runtime-controller");
       await runFeat128S10dRuntimeController();

@@ -126,6 +126,40 @@ describe("ChatArtifactShell", () => {
     expect(trusted.get("[aria-live='polite']").text()).not.toContain("57%");
   });
 
+  it("shows safe failed-generation recovery without exposing provider error details", async () => {
+    const retryable = mount(ChatArtifactShell, {
+      attachTo: document.body,
+      props: {
+        artifact: artifact(0, {
+          provenance: "provider",
+          status: "failed",
+          errorCode: "provider_raw_/Users/demo/minimax.key_bearer",
+          retryable: true,
+        }),
+        contextId: CONTEXT_ID,
+      },
+    });
+    expect(retryable.text()).toContain("服务生成");
+    expect(retryable.get("[data-testid='artifact-failure-guidance']").text())
+      .toBe("图片生成失败，可在输入框重新提交需求。");
+    expect(retryable.html()).not.toMatch(/(?:\/Users\/|minimax\.key|bearer|provider_raw)/i);
+    expect((await axe.run(retryable.element)).violations).toEqual([]);
+    retryable.unmount();
+
+    const terminal = mount(ChatArtifactShell, {
+      props: {
+        artifact: artifact(1, {
+          status: "failed",
+          errorCode: "artifact_request_invalid",
+          retryable: false,
+        }),
+        contextId: CONTEXT_ID,
+      },
+    });
+    expect(terminal.get("[data-testid='artifact-failure-guidance']").text())
+      .toBe("图片生成失败，请调整需求后重新提交。");
+  });
+
   it("escapes the safe name and keeps the image action surface metadata-only", async () => {
     const wrapper = mount(ChatArtifactList, {
       attachTo: document.body,

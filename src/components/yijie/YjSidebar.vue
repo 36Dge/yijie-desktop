@@ -19,6 +19,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   toggle: [];
+  "recover-new-task": [];
 }>();
 
 const mainEntries = computed(() => props.entries.filter((entry) => entry.placement === "main"));
@@ -28,8 +29,14 @@ const toggleLabel = computed(() => (props.collapsed ? "展开侧栏" : "收起�
 function isSelected(entry: AppNavEntry): boolean {
   if (entry.kind !== "item" || entry.disabled) return false;
   return entry.key === "newTask"
-    ? props.currentPath === "/chat" || props.currentPath.startsWith("/chat/")
+    ? props.currentPath === "/chat"
     : entry.to === props.currentPath;
+}
+
+function handleEntryClick(entry: AppNavEntry): void {
+  if (entry.kind === "item" && entry.key === "newTask" && props.currentPath === "/chat") {
+    emit("recover-new-task");
+  }
 }
 </script>
 
@@ -56,16 +63,35 @@ function isSelected(entry: AppNavEntry): boolean {
 
     <nav class="yj-sidebar__navigation" aria-label="应用导航">
       <ul class="yj-sidebar__list yj-sidebar__list--main">
-        <li v-for="entry in mainEntries" :key="entry.key">
-          <div v-if="entry.kind === 'divider'" class="yj-sidebar__divider" role="separator" />
+        <li
+          v-for="entry in mainEntries"
+          :key="entry.key"
+          :class="{ 'yj-sidebar__history-entry': entry.kind === 'section' && entry.key === 'taskHistory' }"
+        >
+          <div
+            v-if="entry.kind === 'section'"
+            class="yj-sidebar__section"
+            :class="{
+              'yj-sidebar__section--collapsed': collapsed,
+              'yj-sidebar__section--active': currentPath.startsWith('/chat/'),
+            }"
+            role="heading"
+            aria-level="2"
+            :aria-label="collapsed ? entry.label : undefined"
+            :title="collapsed ? entry.label : undefined"
+          >
+            <YjIcon :name="entry.icon" :tone="currentPath.startsWith('/chat/') ? 'primary' : 'default'" />
+            <span v-if="!collapsed" class="yj-sidebar__section-label">{{ entry.label }}</span>
+          </div>
           <YjNavItem
             v-else
             :item="entry"
             :collapsed="collapsed"
             :selected="isSelected(entry)"
+            @click="handleEntryClick(entry)"
           />
           <ChatSidebarTree
-            v-if="showChatTree && entry.kind === 'item' && entry.key === 'newTask'"
+            v-if="showChatTree && entry.kind === 'section' && entry.key === 'taskHistory'"
             :current-path="currentPath"
           />
         </li>
@@ -171,10 +197,10 @@ function isSelected(entry: AppNavEntry): boolean {
 }
 
 .yj-sidebar__list--main {
+  flex: 1;
   min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
 }
 
 .yj-sidebar__list--bottom {
@@ -182,10 +208,43 @@ function isSelected(entry: AppNavEntry): boolean {
   padding-top: var(--yj-space-4);
 }
 
-.yj-sidebar__divider {
-  height: 1px;
-  margin: var(--yj-space-3);
-  background: var(--yj-color-border-subtle);
+.yj-sidebar__history-entry {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  margin-top: var(--yj-space-3);
+}
+
+.yj-sidebar__section {
+  display: flex;
+  min-height: var(--yj-space-10);
+  flex: none;
+  align-items: center;
+  gap: var(--yj-space-3);
+  padding: var(--yj-space-2) var(--yj-space-3);
+  border-radius: var(--yj-radius-md);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-body);
+  font-weight: var(--yj-font-weight-semibold);
+  line-height: var(--yj-line-height-body);
+}
+
+.yj-sidebar__section--active {
+  color: var(--yj-color-brand-text);
+}
+
+.yj-sidebar__section--collapsed {
+  justify-content: center;
+  padding-inline: var(--yj-space-2);
+}
+
+.yj-sidebar__section-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 700px) {

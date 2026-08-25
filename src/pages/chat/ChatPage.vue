@@ -70,10 +70,11 @@ const stableError = computed(() => errorNotice(
   actionErrorCode.value ?? chatStore.controlPlane?.issueCode ?? chatStore.lastErrorCode,
 ));
 const isStreaming = computed(() => chatStore.phase === "streaming");
-const isHistoryLoading = computed(() => isSessionRoute.value && (
-  chatStore.phase === "resyncing" ||
-  (chatStore.history === null && ["binding", "loading", "ready"].includes(chatStore.phase))
-));
+const isHistoryLoading = computed(() =>
+  isSessionRoute.value &&
+  chatStore.history === null &&
+  ["binding", "loading", "resyncing", "ready"].includes(chatStore.phase),
+);
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
   chatStore.canAttach && !submitting.value && !isStreaming.value,
@@ -242,7 +243,11 @@ async function recoverReadiness(): Promise<void> {
 
 async function handleStableErrorAction(): Promise<void> {
   const code = actionErrorCode.value ?? chatStore.lastErrorCode;
-  if (code === "chat_resource_not_found") return void router.replace("/chat");
+  if (code === "chat_resource_not_found") {
+    if (route.path !== "/chat") return void router.replace("/chat");
+    await chatStore.clearSelectedSession();
+    return;
+  }
   if (code === "chat_project_invalid") return void pickProject();
   if (code === "chat_context_invalid" || code === "chat_unauthenticated") return void router.replace("/settings");
   if (!chatStore.draftTargetReady) {

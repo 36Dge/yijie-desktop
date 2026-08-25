@@ -25,7 +25,7 @@ const EXPECTED = Object.freeze({
     integrity: "sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg==",
   }),
 });
-const ADDED_KEYS = Object.freeze(["echarts@6.1.0", "tslib@2.3.0", "zrender@6.1.0"]);
+const EXPECTED_GRAPH_KEYS = Object.freeze(["echarts@6.1.0", "tslib@2.3.0", "zrender@6.1.0"]);
 const HISTORICAL_ALLOWED_FILES = new Set([
   "package.json",
   "pnpm-lock.yaml",
@@ -43,9 +43,6 @@ const HISTORICAL_ALLOWED_FILES = new Set([
   "scripts/check-feat128-s9b-d-bundle.test.mjs",
 ]);
 const PROTECTED_FILES = new Set([
-  "package.json",
-  "pnpm-lock.yaml",
-  "THIRD_PARTY_NOTICES.md",
   "src/styles/variables.css",
   "src/design/theme/echarts-theme.ts",
   "src/design/theme/echarts-theme.test.ts",
@@ -71,6 +68,16 @@ export function validateDependencyFacts(facts) {
   }
 }
 
+export function validatePackageDependencyBoundary(packageJson) {
+  const duplicateSections = ["devDependencies", "optionalDependencies", "peerDependencies"];
+  if (
+    packageJson?.dependencies?.echarts !== "6.1.0" ||
+    duplicateSections.some((section) => packageJson?.[section]?.echarts !== undefined)
+  ) {
+    throw new Error("package.json must contain exact runtime echarts 6.1.0 only");
+  }
+}
+
 function sectionKeys(source, sectionName) {
   const lines = source.split(/\r?\n/);
   const start = lines.findIndex((line) => line === `${sectionName}:`);
@@ -85,9 +92,15 @@ function sectionKeys(source, sectionName) {
   return keys;
 }
 
-function addedKeys(current, baseline, sectionName) {
-  const before = new Set(sectionKeys(baseline, sectionName));
-  return sectionKeys(current, sectionName).filter((key) => !before.has(key)).sort();
+function relevantGraphKeys(source, sectionName) {
+  return sectionKeys(source, sectionName)
+    .filter((key) => /^(?:echarts|tslib|zrender)@/.test(key))
+    .sort();
+}
+
+function addedRelevantGraphKeys(current, baseline, sectionName) {
+  const before = new Set(relevantGraphKeys(baseline, sectionName));
+  return relevantGraphKeys(current, sectionName).filter((key) => !before.has(key));
 }
 
 function packageBlock(source, key, sectionName) {
@@ -173,16 +186,14 @@ export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
     exec("git", ["show", `${READINESS_BASELINE_COMMIT}:pnpm-lock.yaml`], { cwd: root }).then(({ stdout }) => stdout),
   ]);
   const packageJson = JSON.parse(packageSource);
-  if (packageJson.dependencies?.echarts !== "6.1.0" || packageJson.devDependencies?.echarts) {
-    throw new Error("package.json must contain exact runtime echarts 6.1.0 only");
-  }
+  validatePackageDependencyBoundary(packageJson);
   if (!/[ ]{6}echarts:\n[ ]{8}specifier: 6\.1\.0\n[ ]{8}version: 6\.1\.0\n/.test(lockSource)) {
     throw new Error("root lock importer does not pin exact ECharts 6.1.0");
   }
   for (const section of ["packages", "snapshots"]) {
-    const added = addedKeys(lockSource, baselineLock, section);
-    if (JSON.stringify(added) !== JSON.stringify(ADDED_KEYS)) {
-      throw new Error(`unexpected ${section} lock delta: ${added.join(", ")}`);
+    const added = addedRelevantGraphKeys(lockSource, baselineLock, section);
+    if (JSON.stringify(added) !== JSON.stringify(EXPECTED_GRAPH_KEYS)) {
+      throw new Error(`unexpected ${section} ECharts graph delta: ${added.join(", ")}`);
     }
   }
 

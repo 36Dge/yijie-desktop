@@ -167,7 +167,6 @@ const router = createRouter({
     { path: "/chat", component: ChatPage },
     { path: "/chat/:sessionId", component: ChatPage },
     { path: "/fixture/drag-overlay", component: DragOverlayFixture },
-    { path: "/tasks", component: { template: "<div>任务记录</div>" } },
     { path: "/settings", component: { template: "<div>设置</div>" } },
   ],
 });

@@ -26,10 +26,8 @@ describe("permission lifecycle", () => {
     const visibilityDocument = new FakeVisibilityDocument();
     const ensureInitialized = vi.fn(async () => undefined);
     const refresh = vi.fn(async () => undefined);
-    const routeToRecovery = vi.fn(async () => undefined);
     const lifecycle = createPermissionLifecycle(
       { ensureInitialized, refresh },
-      routeToRecovery,
       visibilityDocument,
     );
 
@@ -41,7 +39,6 @@ describe("permission lifecycle", () => {
     await Promise.resolve();
 
     expect(ensureInitialized).toHaveBeenCalledTimes(1);
-    expect(routeToRecovery).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
 
     lifecycle.stop();
@@ -53,12 +50,28 @@ describe("permission lifecycle", () => {
     const refresh = vi.fn(async () => undefined);
     const lifecycle = createPermissionLifecycle(
       { ensureInitialized: async () => undefined, refresh },
-      () => undefined,
       visibilityDocument,
     );
     await lifecycle.start();
 
     visibilityDocument.changeTo("visible");
+    visibilityDocument.changeTo("visible");
+    await Promise.resolve();
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh the no-auth Demo profile when the window returns to foreground", async () => {
+    const visibilityDocument = new FakeVisibilityDocument();
+    const refresh = vi.fn(async () => undefined);
+    const lifecycle = createPermissionLifecycle(
+      { ensureInitialized: async () => undefined, refresh },
+      visibilityDocument,
+      false,
+    );
+    await lifecycle.start();
+
+    visibilityDocument.changeTo("hidden");
     visibilityDocument.changeTo("visible");
     await Promise.resolve();
 

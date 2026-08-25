@@ -20,7 +20,7 @@ describe("Agent Host v3 Artifact contract pin", () => {
       "68d3662172283464e44cf899afbc1f7aeaea24e7ea257e559fa0f1364bccf6bb",
     );
     expect(() => safeRelativePath("../agent-host.yaml")).toThrow();
-    expect(() => validateLock({ ...lock, full_commit: "ea48fe1" })).toThrow();
+    expect(() => validateLock({ ...lock, full_commit: "d6dff90" })).toThrow();
     expect(() => validateLock({
       ...lock,
       sources: {

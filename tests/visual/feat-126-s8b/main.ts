@@ -26,10 +26,33 @@ const projects: readonly ChatProject[] = Object.freeze([
   { projectId: "019c1a00-0000-7000-8000-000000000010", safeName: "Local Design Workspace", pinnedAt: null, lastUsedAt: 4, available: true },
 ]);
 
-const sessions: readonly ChatSession[] = Object.freeze([
+const baseSessions: readonly ChatSession[] = Object.freeze([
   { sessionId: SESSION_ID, projectId: PROJECT_ID, title: "完善 FEAT-126 对话界面", titleSource: "model", pinnedAt: 2, lastActivityAt: 9, latestTurnStatus: "streaming", projectAvailable: true },
   { sessionId: "019c1a00-0000-7000-8000-000000000003", projectId: PROJECT_ID, title: "核对本地删除边界", titleSource: "model", pinnedAt: null, lastActivityAt: 8, latestTurnStatus: "completed", projectAvailable: true },
   { sessionId: "019c1a00-0000-7000-8000-000000000004", projectId: PROJECT_ID, title: "验证数据库迁移", titleSource: "renamed", pinnedAt: null, lastActivityAt: 7, latestTurnStatus: "completed", projectAvailable: true },
+]);
+const sessions: readonly ChatSession[] = Object.freeze([
+  ...baseSessions,
+  ...Array.from({ length: 14 }, (_, index): ChatSession => ({
+    sessionId: `019c1a00-0000-7000-8000-${String(20 + index).padStart(12, "0")}`,
+    projectId: index % 2 === 0 ? PROJECT_ID : projects[1]!.projectId,
+    title: `合成任务记录 ${String(index + 1).padStart(2, "0")}`,
+    titleSource: "fallback",
+    pinnedAt: null,
+    lastActivityAt: 100 - index,
+    latestTurnStatus: index % 3 === 0 ? "failed" : "completed",
+    projectAvailable: true,
+  })),
+  {
+    sessionId: "019c1a00-0000-7000-8000-000000000099",
+    projectId: "019c1a00-0000-7000-8000-000000000098",
+    title: "已移除项目的历史对话",
+    titleSource: "fallback",
+    pinnedAt: null,
+    lastActivityAt: 0,
+    latestTurnStatus: "completed",
+    projectAvailable: false,
+  },
 ]);
 
 const history: ChatHistoryPage = Object.freeze({
@@ -101,7 +124,6 @@ const router = createRouter({
   routes: [
     { path: "/chat", component: ChatPage },
     { path: "/chat/:sessionId", component: ChatPage },
-    { path: "/tasks", component: { template: "<div>任务记录</div>" } },
     { path: "/settings", component: { template: "<div>设置</div>" } },
   ],
 });

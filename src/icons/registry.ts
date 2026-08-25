@@ -3,6 +3,7 @@ import {
   ArrowDown,
   Bot,
   CalendarClock,
+  ChartNoAxesCombined,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -16,7 +17,10 @@ import {
   LayoutDashboard,
   LibraryBig,
   ListTodo,
+  Megaphone,
   Image,
+  MousePointerClick,
+  PackageSearch,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -33,6 +37,7 @@ import {
   Trash2,
   TriangleAlert,
   UserRound,
+  Wrench,
   X,
   ZoomIn,
   ZoomOut,
@@ -68,6 +73,11 @@ export const iconRegistry = {
   shield: ShieldCheck,
   stop: CircleStop,
   store: Store,
+  skillContent: Megaphone,
+  skillOperations: Wrench,
+  skillResearch: ChartNoAxesCombined,
+  skillSourcing: PackageSearch,
+  skillTraffic: MousePointerClick,
   taskHistory: ListTodo,
   trash: Trash2,
   user: UserRound,
@@ -78,3 +88,7 @@ export const iconRegistry = {
 } as const satisfies Record<string, Component>;
 
 export type YjIconName = keyof typeof iconRegistry;
+
+export function isYjIconName(value: string): value is YjIconName {
+  return Object.prototype.hasOwnProperty.call(iconRegistry, value);
+}

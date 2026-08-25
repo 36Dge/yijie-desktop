@@ -2,6 +2,7 @@ export interface ChatAuthoritySnapshot {
   readonly ready: boolean;
   readonly tenantId: string | null;
   readonly authorizationRevision: number | null;
+  readonly expiresAt: string | null;
   readonly canCreateTask: boolean;
   readonly canReadTask: boolean;
 }
@@ -21,18 +22,38 @@ export function createChatPermissionLifecycle(
   enabled: boolean,
 ): ChatPermissionLifecycle {
   let epoch = 0;
+  let desiredAuthorityKey: string | null = null;
+
+  function authorityKey(snapshot: ChatAuthoritySnapshot): string | null {
+    if (
+      !enabled ||
+      !snapshot.ready ||
+      snapshot.tenantId === null ||
+      snapshot.authorizationRevision === null ||
+      (!snapshot.canCreateTask && !snapshot.canReadTask)
+    ) {
+      return null;
+    }
+    return [
+      snapshot.tenantId,
+      snapshot.authorizationRevision,
+      snapshot.expiresAt ?? "",
+      snapshot.canCreateTask ? "create" : "",
+      snapshot.canReadTask ? "read" : "",
+    ].join(":");
+  }
 
   return {
     async synchronize(snapshot) {
+      const nextAuthorityKey = authorityKey(snapshot);
+      if (nextAuthorityKey === desiredAuthorityKey) return;
+      desiredAuthorityKey = nextAuthorityKey;
       const current = ++epoch;
       await store.dispose();
       if (
         current !== epoch ||
-        !enabled ||
-        !snapshot.ready ||
-        snapshot.tenantId === null ||
-        snapshot.authorizationRevision === null ||
-        (!snapshot.canCreateTask && !snapshot.canReadTask)
+        nextAuthorityKey === null ||
+        snapshot.tenantId === null
       ) {
         return;
       }
@@ -40,6 +61,7 @@ export function createChatPermissionLifecycle(
     },
     async stop() {
       epoch += 1;
+      desiredAuthorityKey = null;
       await store.dispose();
     },
   };

@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 
-export type AppRoutePath = "/chat" | "/tasks" | "/settings";
+export type AppRoutePath = "/chat" | "/plugins" | "/settings";
 export type AppNavPlacement = "main" | "bottom";
 export type AppNavItemKey =
   | "newTask"
@@ -29,14 +29,16 @@ export interface DisabledAppNavItem extends AppNavItemBase {
   disabled: true;
 }
 
-export interface AppNavDivider {
-  kind: "divider";
-  key: "businessDivider";
+export interface AppNavSection {
+  kind: "section";
+  key: "taskHistory";
+  label: string;
+  icon: YjIconName;
   placement: "main";
 }
 
 export type AppNavItem = EnabledAppNavItem | DisabledAppNavItem;
-export type AppNavEntry = AppNavItem | AppNavDivider;
+export type AppNavEntry = AppNavItem | AppNavSection;
 export type AppNavVisibilityProjection = Readonly<Partial<Record<AppNavItemKey, boolean>>>;
 
 export const APP_NAVIGATION = [
@@ -48,20 +50,6 @@ export const APP_NAVIGATION = [
     placement: "main",
     disabled: false,
     to: "/chat",
-  },
-  {
-    kind: "item",
-    key: "taskHistory",
-    label: "任务记录",
-    icon: "taskHistory",
-    placement: "main",
-    disabled: false,
-    to: "/tasks",
-  },
-  {
-    kind: "divider",
-    key: "businessDivider",
-    placement: "main",
   },
   {
     kind: "item",
@@ -93,7 +81,8 @@ export const APP_NAVIGATION = [
     label: "插件",
     icon: "plugin",
     placement: "main",
-    disabled: true,
+    disabled: false,
+    to: "/plugins",
   },
   {
     kind: "item",
@@ -102,6 +91,13 @@ export const APP_NAVIGATION = [
     icon: "knowledge",
     placement: "main",
     disabled: true,
+  },
+  {
+    kind: "section",
+    key: "taskHistory",
+    label: "任务记录",
+    icon: "taskHistory",
+    placement: "main",
   },
   {
     kind: "item",
@@ -118,32 +114,5 @@ export function resolveAppNavigation(
   entries: readonly AppNavEntry[] = APP_NAVIGATION,
   visibility: AppNavVisibilityProjection = {},
 ): AppNavEntry[] {
-  const resolved: AppNavEntry[] = [];
-  let pendingDivider: AppNavDivider | undefined;
-
-  for (const entry of entries) {
-    if (entry.kind === "divider") {
-      pendingDivider = entry;
-      continue;
-    }
-
-    if (visibility[entry.key] === false) {
-      continue;
-    }
-
-    const previousEntry = resolved[resolved.length - 1];
-    if (
-      pendingDivider &&
-      previousEntry?.kind === "item" &&
-      previousEntry.placement === pendingDivider.placement &&
-      entry.placement === pendingDivider.placement
-    ) {
-      resolved.push(pendingDivider);
-    }
-
-    pendingDivider = undefined;
-    resolved.push(entry);
-  }
-
-  return resolved;
+  return entries.filter((entry) => visibility[entry.key] !== false);
 }

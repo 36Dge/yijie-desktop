@@ -3413,6 +3413,97 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)
     }
 
+    pub fn finalize_orphaned_turn_without_stream(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        runtime_turn_id: Uuid,
+        terminal_at: i64,
+    ) -> Result<(), ChatError> {
+        for value in [session_id, turn_id, runtime_turn_id] {
+            validate_non_nil(value)?;
+        }
+        if terminal_at < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let operation_id: String = transaction
+            .query_row(
+                "SELECT t.operation_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 WHERE s.id=?1 AND t.id=?2 AND t.runtime_turn_id=?3
+                   AND t.status IN ('streaming', 'stopping')
+                   AND s.owner_user_id=?4 AND s.tenant_id=?5",
+                params![
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    runtime_turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        transaction
+            .execute(
+                "UPDATE chat_messages SET status='failed'
+                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let changed = transaction
+            .execute(
+                "UPDATE chat_turns SET status='failed', terminal_at=?1,
+                   reasoning_status='unavailable', reasoning_reason_code='host_shutdown'
+                 WHERE id=?2 AND runtime_turn_id=?3 AND status IN ('streaming', 'stopping')",
+                params![
+                    terminal_at,
+                    turn_id.to_string(),
+                    runtime_turn_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='start_turn' AND state IN ('inflight', 'done')",
+                [operation_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "UPDATE chat_output_artifacts SET state='failed', content_blob=NULL, poster_blob=NULL,
+                   progress_stage=NULL, progress_percent=NULL, local_committed_at=NULL,
+                   expires_at=NULL, ack_id=NULL, ack_state=NULL, acknowledged_at=NULL,
+                   error_code='host_shutdown', retryable=1
+                 WHERE session_id=?1 AND turn_id=?2 AND owner_user_id=?3 AND tenant_id=?4
+                   AND state IN ('announced', 'generating', 'processing', 'transferring')",
+                params![
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
+                params![terminal_at, session_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
     pub fn suspend_started_turn_retry(
         &mut self,
         operation_id: Uuid,
@@ -4513,6 +4604,36 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             if stored_hash.as_deref() != Some(keyed_hash.as_str()) {
                 return Err(ChatError::ConversationConflict);
+            }
+            return Ok(status);
+        }
+        if let Some(status) = self.deletion_status_for_session(session_id)? {
+            if status.completed_at.is_none() && status.outcome_code == "retry_limit_exceeded" {
+                let changed = self
+                    .connection
+                    .execute(
+                        "UPDATE chat_deletion_jobs
+                         SET desktop_state=CASE WHEN desktop_state='complete' THEN desktop_state ELSE 'pending' END,
+                             host_state=CASE WHEN host_state='complete' THEN host_state ELSE 'pending' END,
+                             runtime_state=CASE WHEN runtime_state='complete' THEN runtime_state ELSE 'pending' END,
+                             updated_at=?1, next_attempt_at=?1, attempt_count=0,
+                             lease_expires_at=0, outcome_code='pending', last_error_code=NULL
+                         WHERE operation_id=?2 AND session_id=?3 AND keyed_session_hash=?4
+                           AND outcome_code='retry_limit_exceeded'",
+                        params![
+                            now,
+                            status.operation_id.to_string(),
+                            session_id.to_string(),
+                            keyed_hash
+                        ],
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if changed != 1 {
+                    return Err(ChatError::ConversationConflict);
+                }
+                return self
+                    .deletion_status(status.operation_id)?
+                    .ok_or(ChatError::DatabaseUnavailable);
             }
             return Ok(status);
         }
@@ -7172,6 +7293,48 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_host_terminal_fails_closed_and_releases_recovery_queue() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 18);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, now);
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+
+        repository
+            .finalize_orphaned_turn_without_stream(
+                context.session_id,
+                context.turn_id,
+                context.runtime_turn_id,
+                now + 1,
+            )
+            .unwrap();
+
+        assert!(repository
+            .recovery_snapshot()
+            .unwrap()
+            .active_session_ids
+            .is_empty());
+        assert_eq!(
+            repository.outbox_state(context.turn_operation_id).unwrap(),
+            OutboxState::Done
+        );
+        let history = repository
+            .load_history(context.session_id, None, None)
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(
+            history.turns[0].reasoning_reason_code.as_deref(),
+            Some("host_shutdown")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn expired_outbox_lease_recovers_after_restart_without_creating_duplicate_rows() {
         let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -7644,6 +7807,123 @@ mod tests {
                 .operation_id,
             delete_operation
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_deletion_retry_reuses_and_rearms_the_durable_operation() {
+        let root = std::env::temp_dir().join(format!("yijie-s7c-delete-retry-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 34);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, now);
+        commit_synthetic_terminal(
+            &mut repository,
+            pending.session_id,
+            Uuid::now_v7(),
+            1,
+            "retry answer",
+        );
+
+        let original_operation = Uuid::now_v7();
+        let original = repository
+            .begin_session_deletion(pending.session_id, original_operation, now + 1)
+            .unwrap();
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_deletion_jobs SET attempt_count=5 WHERE operation_id=?1",
+                [original_operation.to_string()],
+            )
+            .unwrap();
+        let duplicate_confirmation = repository
+            .begin_session_deletion(pending.session_id, Uuid::now_v7(), now + 2)
+            .unwrap();
+        assert_eq!(duplicate_confirmation.operation_id, original_operation);
+        assert_eq!(duplicate_confirmation, original);
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_deletion_jobs", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT attempt_count FROM chat_deletion_jobs WHERE operation_id=?1",
+                    [original_operation.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            5
+        );
+
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_deletion_jobs
+                 SET host_state='complete', attempt_count=?1,
+                     next_attempt_at=?2, lease_expires_at=0
+                 WHERE operation_id=?3",
+                params![OUTBOX_MAX_ATTEMPTS, now + 3, original_operation.to_string()],
+            )
+            .unwrap();
+        assert!(repository
+            .claim_next_deletion(now + 3, 30)
+            .unwrap()
+            .is_none());
+        let exhausted = repository
+            .deletion_status(original_operation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(exhausted.outcome_code, "retry_limit_exceeded");
+        assert_eq!(exhausted.desktop_state, CleanupSurfaceState::Incomplete);
+        assert_eq!(exhausted.host_state, CleanupSurfaceState::Complete);
+        assert_eq!(exhausted.runtime_state, CleanupSurfaceState::Incomplete);
+
+        let resumed = repository
+            .begin_session_deletion(pending.session_id, Uuid::now_v7(), now + 4)
+            .unwrap();
+        assert_eq!(resumed.operation_id, original_operation);
+        assert_eq!(resumed.outcome_code, "pending");
+        assert_eq!(resumed.desktop_state, CleanupSurfaceState::Pending);
+        assert_eq!(resumed.host_state, CleanupSurfaceState::Complete);
+        assert_eq!(resumed.runtime_state, CleanupSurfaceState::Pending);
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT attempt_count FROM chat_deletion_jobs WHERE operation_id=?1",
+                    [original_operation.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            repository
+                .claim_next_deletion(now + 4, 30)
+                .unwrap()
+                .unwrap()
+                .operation_id,
+            original_operation
+        );
+
+        let other = repository
+            .create_session_and_enqueue(project_id, "other", Uuid::now_v7())
+            .unwrap();
+        assert_eq!(
+            repository.begin_session_deletion(other.session_id, original_operation, now + 5),
+            Err(ChatError::ConversationConflict)
+        );
+
         fs::remove_dir_all(root).unwrap();
     }
 

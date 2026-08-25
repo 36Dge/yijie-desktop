@@ -6,7 +6,11 @@ mod feat126_secure_storage;
 mod feat128_s10d_runtime;
 #[cfg(feature = "feat128-s7b-runtime")]
 mod feat128_s7b_runtime;
+mod local_profile;
 mod native_auth;
+#[cfg(target_os = "macos")]
+mod single_instance;
+mod skills;
 
 pub use feat126_secure_storage::feat126_secure_storage_test_control;
 
@@ -14,11 +18,14 @@ use chat::{
     ArtifactFileNativeRuntime, ArtifactNativeRuntime, ArtifactReportNativeRuntime,
     ArtifactVideoNativeRuntime, ChatIpcRuntime, ChatRuntime,
 };
+use local_profile::LocalRuntimeProfile;
 use native_auth::NativeAuthRuntime;
 #[cfg(not(feature = "feat126-s10-driver"))]
 use native_auth::{AuthStatus, CommandError, OperationResponse};
 #[cfg(not(feature = "feat126-s10-driver"))]
 use serde::Deserialize;
+#[cfg(not(feature = "feat126-s10-driver"))]
+use skills::SkillRuntime;
 use tauri::Manager;
 #[cfg(not(feature = "feat126-s10-driver"))]
 use tauri::State;
@@ -109,9 +116,24 @@ async fn get_my_capabilities(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    let _single_instance = match single_instance::acquire() {
+        Ok(guard) => guard,
+        Err(single_instance::AcquireError::AlreadyRunning) => return,
+        Err(
+            single_instance::AcquireError::UnsafeLockFile
+            | single_instance::AcquireError::Unavailable,
+        ) => {
+            eprintln!("yijie desktop single-instance guard unavailable");
+            std::process::exit(1);
+        }
+    };
     #[cfg(feature = "feat126-s10-driver")]
     chat::feat126_s10_driver_unregistered_command_guard();
     let secure_storage = feat126_secure_storage::Feat126SecureStorageBootstrap::from_environment();
+    let local_profile = LocalRuntimeProfile::from_environment();
+    let local_profile_invalid = local_profile.is_err();
+    let local_profile = local_profile.unwrap_or_default();
     #[cfg(feature = "feat126-s10-driver")]
     let driver = match feat126_s10_driver::Feat126S10DriverRuntime::from_environment(
         secure_storage.profile(),
@@ -126,7 +148,8 @@ pub fn run() {
     driver.start_startup_watchdog();
     let native_auth = NativeAuthRuntime::from_environment_with_test_profile(
         secure_storage.profile(),
-        secure_storage.is_invalid(),
+        secure_storage.is_invalid() || local_profile_invalid,
+        local_profile,
     );
     let chat_native_auth = native_auth.clone();
     let chat_secure_storage = secure_storage.profile();
@@ -209,8 +232,10 @@ pub fn run() {
                 app.manage(ChatRuntime::from_environment(
                     app_data_directory,
                     chat_secure_storage.clone(),
-                    chat_secure_storage_invalid,
+                    chat_secure_storage_invalid || local_profile_invalid,
                     chat_native_auth.clone(),
+                    local_profile,
+                    None,
                 ));
                 if let Err(failure_class) = setup_driver.start_control_monitor(app.handle().clone())
                 {
@@ -228,12 +253,36 @@ pub fn run() {
                     return Err(Box::new(error) as Box<dyn std::error::Error>);
                 }
             };
+            let skill_runtime = if local_profile.is_demo_fast() {
+                match app
+                    .path()
+                    .resource_dir()
+                    .map_err(|_| skills::SkillRootsError::PathUnavailable)
+                    .and_then(|resource_directory| {
+                        skills::resolve_skill_roots(&resource_directory, &app_data_directory)
+                    }) {
+                    Ok(roots) => SkillRuntime::from_roots(roots),
+                    Err(_) => SkillRuntime::unavailable(),
+                }
+            } else {
+                SkillRuntime::disabled()
+            };
+            let skill_roots = skill_runtime.roots();
+            app.manage(skill_runtime);
             app.manage(ChatRuntime::from_environment(
                 app_data_directory,
                 chat_secure_storage.clone(),
-                chat_secure_storage_invalid,
+                chat_secure_storage_invalid || local_profile_invalid,
                 chat_native_auth.clone(),
+                local_profile,
+                skill_roots,
             ));
+            let startup_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let runtime = startup_app.state::<SkillRuntime>();
+                let chat = startup_app.state::<ChatRuntime>();
+                skills::reconcile_background(&runtime, &chat, "startup").await;
+            });
             #[cfg(feature = "feat128-s7b-runtime")]
             feat128_s7b_runtime::Feat128S7bRuntimeHarness::start_watchdog(app.handle().clone());
             #[cfg(feature = "feat128-s10-runtime")]
@@ -250,6 +299,11 @@ pub fn run() {
         native_auth_status,
         list_my_tenants,
         get_my_capabilities,
+        skills::host::skills_list_v1,
+        skills::host::skills_scan_v1,
+        skills::host::skills_install_v1,
+        skills::host::skills_set_enabled_v1,
+        skills::host::skills_uninstall_v1,
         chat::chat_foundation_status,
         chat::chat_start_local_host,
         chat::chat_stop_local_host,
@@ -335,6 +389,15 @@ pub fn run() {
     }
     #[cfg(not(feature = "feat126-s10-driver"))]
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                // Tauri terminates the process after this callback, so managed state destructors
+                // are not a reliable place to stop the owned Host child.
+                let _ = tauri::async_runtime::block_on(
+                    app.state::<ChatRuntime>().shutdown_for_app_exit(),
+                );
+            }
+        });
 }

@@ -52,9 +52,23 @@ describe("app permission policy", () => {
     });
   });
 
+  it("FEAT-129 separates plugin navigation/read access from plugin management", () => {
+    const readOnly = snapshot(["plugin.read"]);
+    const manageOnly = snapshot(["plugin.manage"]);
+
+    expect(resolveNavigationVisibility(readOnly).plugin).toBe(true);
+    expect(requiredCapabilityForPath("/plugins")).toBe("plugin.read");
+    expect(canRenderProtectedPath("/plugins", readOnly)).toBe(true);
+    expect(canRenderProtectedPath("/plugins", manageOnly)).toBe(false);
+    expect(canRenderProtectedPath("/plugins", {
+      ...readOnly,
+      skillMarketplaceUiEnabled: false,
+    })).toBe(false);
+  });
+
   it.each([
     [["task.create", "task.read"] as const, "/chat"],
-    [["task.read"] as const, "/tasks"],
+    [["task.read"] as const, "/settings"],
     [[] as const, "/settings"],
   ])("POLICY-003 resolves root priority for %j", (capabilities, expected) => {
     expect(resolveRootRoute(snapshot(capabilities))).toBe(expected);
@@ -65,8 +79,8 @@ describe("app permission policy", () => {
 
     expect(requiredCapabilityForPath("/settings")).toBeNull();
     expect(requiredCapabilityForPath("/chat")).toBe("task.create");
+    expect(requiredCapabilityForPath("/tasks")).toBeNull();
     expect(canRenderProtectedPath("/settings", readOnly)).toBe(true);
-    expect(canRenderProtectedPath("/tasks", readOnly)).toBe(true);
     expect(canRenderProtectedPath("/chat", readOnly)).toBe(false);
   });
 });

@@ -41,6 +41,8 @@ const STORE_ID = "chat-conversation";
 const MAX_LIVE_ASSISTANT_BYTES = 1024 * 1024;
 const MAX_LIVE_REASONING_BYTES = 256 * 1024;
 const MAX_SEEN_EVENT_IDS = 256;
+const CLEANUP_POLL_INTERVAL_MS = 1_000;
+const CLEANUP_POLL_MAX_ATTEMPTS = 120;
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
 export const CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS = 220;
 const ATTACHMENT_IMPORT_TRANSITIONS = {
@@ -110,6 +112,7 @@ export interface LiveReasoningPart {
 
 export type DeleteDisposition = Readonly<{
   kind: "cleanup_pending" | "navigate";
+  deletedSessionId: string;
   nextSessionId: string | null;
   path: "/chat" | `/chat/${string}`;
 }>;
@@ -131,6 +134,8 @@ export interface ChatArtifactIntegration {
   readonly store: ChatArtifactStoreBoundary;
   readonly authority: () => ChatArtifactAuthoritySource | null;
 }
+
+type ArtifactEventDisposition = "ignore" | "refresh" | "resync";
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -235,8 +240,12 @@ export function createChatStoreDefinition(
     let controlPlaneSequence: bigint | null = null;
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let cleanupPollTimer: ReturnType<typeof setTimeout> | null = null;
+    let cleanupPollEpoch = 0;
     let resyncPromise: Promise<void> | null = null;
     let resyncTrailingRequested = false;
+    let artifactRefreshPromise: Promise<void> | null = null;
+    let artifactRefreshTrailingRequested = false;
     let draftEpoch = 0;
     let activeAttachmentImport: ActiveAttachmentImport | null = null;
     let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
@@ -307,8 +316,17 @@ export function createChatStoreDefinition(
       }
     }
 
+    function clearCleanupPoll(): void {
+      cleanupPollEpoch += 1;
+      if (cleanupPollTimer !== null) {
+        clearTimeout(cleanupPollTimer);
+        cleanupPollTimer = null;
+      }
+    }
+
     function clearSelection(): void {
       selectionEpoch += 1;
+      clearCleanupPoll();
       activeRead?.abort();
       activeRead = null;
       selectedSessionId.value = null;
@@ -332,6 +350,8 @@ export function createChatStoreDefinition(
       artifactIntegration?.store.clearAuthority();
       resyncPromise = null;
       resyncTrailingRequested = false;
+      artifactRefreshPromise = null;
+      artifactRefreshTrailingRequested = false;
     }
 
     function dropDraftReferences(): void {
@@ -346,6 +366,12 @@ export function createChatStoreDefinition(
       attachmentImporting.value = false;
       attachmentErrorCode.value = null;
       clearSubmissionAttempt();
+    }
+
+    function clearDraftTargetState(): void {
+      dropDraftReferences();
+      draftTarget.value = null;
+      draftTargetReady.value = false;
     }
 
     async function removePersistedDrafts(
@@ -835,6 +861,7 @@ export function createChatStoreDefinition(
         case "turn_terminal":
           liveTurnStatus.value = event.payload.status;
           phase.value = "ready";
+          void resyncSelected();
           break;
         case "cleanup_state":
           void refreshCleanupFromEvent(event);
@@ -858,28 +885,70 @@ export function createChatStoreDefinition(
       applyEvent(event);
     }
 
-    function artifactEventNeedsRefresh(event: ChatArtifactLiveEvent): boolean {
+    function classifyArtifactEvent(event: ChatArtifactLiveEvent): ArtifactEventDisposition {
       if (
         context.value === null ||
         event.contextId !== context.value.contextId ||
         event.subscriptionId !== subscriptionId ||
         event.sessionId !== selectedSessionId.value
       ) {
-        return false;
+        return "ignore";
       }
       if (event.kind === "context_invalidated") {
         lastErrorCode.value = "chat_context_invalid";
         clearAuthority("resync-required");
-        return false;
+        return "ignore";
       }
       const sequence = BigInt(event.notificationSequence);
       if (sequence <= artifactExpectedSequence) {
-        return !seenArtifactEventIds.has(event.eventId);
+        return seenArtifactEventIds.has(event.eventId) ? "ignore" : "resync";
       }
-      if (sequence !== artifactExpectedSequence + 1n) return true;
+      if (sequence !== artifactExpectedSequence + 1n) return "resync";
       artifactExpectedSequence = sequence;
       rememberArtifactEvent(event.eventId);
-      return true;
+      return event.kind === "artifact_changed" ? "refresh" : "resync";
+    }
+
+    function requestArtifactRefresh(): void {
+      if (artifactIntegration === null) return;
+      if (artifactRefreshPromise !== null) {
+        artifactRefreshTrailingRequested = true;
+        return;
+      }
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      const activeSubscription = subscriptionId;
+      const token = artifactAuthorityToken;
+      if (!bound || !sessionId || !activeSubscription || token === null) return;
+
+      const run = async (): Promise<void> => {
+        try {
+          const page = await client.loadHistoryV3(bound.contextId, sessionId, undefined, 20);
+          if (
+            context.value?.contextId !== bound.contextId ||
+            selectedSessionId.value !== sessionId ||
+            subscriptionId !== activeSubscription
+          ) return;
+          if (!artifactIntegration.store.ingestHistoryV3(token, page)) requestResync();
+        } catch {
+          if (
+            context.value?.contextId === bound.contextId &&
+            selectedSessionId.value === sessionId &&
+            subscriptionId === activeSubscription
+          ) requestResync();
+        }
+      };
+      const promise = run().finally(() => {
+        if (artifactRefreshPromise !== promise) return;
+        artifactRefreshPromise = null;
+        const runTrailing = artifactRefreshTrailingRequested &&
+          context.value?.contextId === bound.contextId &&
+          selectedSessionId.value === sessionId &&
+          subscriptionId === activeSubscription;
+        artifactRefreshTrailingRequested = false;
+        if (runTrailing) requestArtifactRefresh();
+      });
+      artifactRefreshPromise = promise;
     }
 
     function handleArtifactEvent(event: ChatArtifactLiveEvent): void {
@@ -901,7 +970,9 @@ export function createChatStoreDefinition(
         if (bufferedArtifactEvents.length > 64) resyncTrailingRequested = true;
         return;
       }
-      if (artifactEventNeedsRefresh(event)) requestResync();
+      const disposition = classifyArtifactEvent(event);
+      if (disposition === "refresh") requestArtifactRefresh();
+      if (disposition === "resync") requestResync();
     }
 
     function requestResync(): void {
@@ -962,7 +1033,11 @@ export function createChatStoreDefinition(
         sessions.value = nextSessions.sessions;
         sessionsCursor.value = nextSessions.nextCursor;
         localReadiness.value = nextReadiness;
-        await atBindStage("draft_attachments", switchDraftTarget(CHAT_NEW_DRAFT_TARGET));
+        if (hasAction("create_session")) {
+          await atBindStage("draft_attachments", switchDraftTarget(CHAT_NEW_DRAFT_TARGET));
+        } else {
+          clearDraftTargetState();
+        }
         if (bindEpoch !== authorityEpoch || context.value?.contextId !== bound.contextId) return;
         phase.value = "ready";
       } catch (error: unknown) {
@@ -1019,7 +1094,10 @@ export function createChatStoreDefinition(
         return;
       }
       lastErrorCode.value = null;
-      const targetSync = switchDraftTarget(chatSessionDraftTarget(sessionId));
+      const targetSync = hasAction("submit_turn")
+        ? switchDraftTarget(chatSessionDraftTarget(sessionId))
+        : Promise.resolve();
+      if (!hasAction("submit_turn")) clearDraftTargetState();
       const oldSubscription = subscriptionId;
       const oldSession = selectedSessionId.value;
       clearSelection();
@@ -1065,7 +1143,9 @@ export function createChatStoreDefinition(
           ) return;
           const initiallyBuffered = bufferedArtifactEvents;
           bufferedArtifactEvents = [];
-          for (const event of initiallyBuffered) artifactEventNeedsRefresh(event);
+          for (const event of initiallyBuffered) {
+            if (classifyArtifactEvent(event) === "resync") resyncTrailingRequested = true;
+          }
           const secondHistory = await client.loadHistoryV3(
             bound.contextId,
             sessionId,
@@ -1085,7 +1165,9 @@ export function createChatStoreDefinition(
         const lateNotifications = bufferedArtifactEvents;
         bufferedArtifactEvents = [];
         for (const event of lateNotifications) {
-          if (artifactEventNeedsRefresh(event)) trailingArtifactRefresh = true;
+          const disposition = classifyArtifactEvent(event);
+          if (disposition === "refresh") trailingArtifactRefresh = true;
+          if (disposition === "resync") resyncTrailingRequested = true;
         }
         bufferingEvents = false;
         bufferingArtifactEvents = false;
@@ -1094,9 +1176,11 @@ export function createChatStoreDefinition(
         activeRead = null;
         if (phase.value === "resyncing") phase.value = "ready";
         for (const event of pending) applyEvent(event);
-        if (trailingArtifactRefresh || resyncTrailingRequested) {
+        if (resyncTrailingRequested) {
           resyncTrailingRequested = false;
           requestResync();
+        } else if (trailingArtifactRefresh) {
+          requestArtifactRefresh();
         }
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
@@ -1121,9 +1205,10 @@ export function createChatStoreDefinition(
       ) {
         return;
       }
-      const targetSync = bound
+      const targetSync = bound && hasAction("create_session")
         ? switchDraftTarget(CHAT_NEW_DRAFT_TARGET)
         : Promise.resolve();
+      if (bound && !hasAction("create_session")) clearDraftTargetState();
       const oldSubscription = subscriptionId;
       clearSelection();
       if (bound && oldSubscription) {
@@ -1147,6 +1232,11 @@ export function createChatStoreDefinition(
       const bound = context.value;
       if (!bound) return false;
       const sessionId = selectedSessionId.value;
+      const requiredDraftAction = sessionId === null ? "create_session" : "submit_turn";
+      if (!hasAction(requiredDraftAction)) {
+        clearDraftTargetState();
+        return false;
+      }
       const expectedTarget = sessionId === null
         ? CHAT_NEW_DRAFT_TARGET
         : chatSessionDraftTarget(sessionId);
@@ -1253,7 +1343,9 @@ export function createChatStoreDefinition(
           bufferedArtifactEvents = [];
           let needsTrailingArtifactRefresh = false;
           for (const event of pendingArtifactEvents) {
-            if (artifactEventNeedsRefresh(event)) needsTrailingArtifactRefresh = true;
+            const disposition = classifyArtifactEvent(event);
+            if (disposition === "refresh") needsTrailingArtifactRefresh = true;
+            if (disposition === "resync") resyncTrailingRequested = true;
           }
           const pending = bufferedEvents;
           bufferedEvents = [];
@@ -1262,7 +1354,7 @@ export function createChatStoreDefinition(
           activeRead = null;
           if (phase.value === "resyncing") phase.value = "ready";
           for (const event of pending) applyEvent(event);
-          if (needsTrailingArtifactRefresh) resyncTrailingRequested = true;
+          if (needsTrailingArtifactRefresh && !resyncTrailingRequested) requestArtifactRefresh();
         } catch (error: unknown) {
           if (!isCurrent(epoch, controller, sessionId)) return;
           activeRead = null;
@@ -1668,6 +1760,7 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !hasAction("rename_session")) return;
       await client.renameSession(bound.contextId, sessionId, title, operationId());
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
       await reloadSessions();
     }
 
@@ -1676,6 +1769,7 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !hasAction("pin_session")) return;
       await client.setSessionPinned(bound.contextId, sessionId, pinned, operationId());
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
       await reloadSessions();
     }
 
@@ -1684,30 +1778,87 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !hasAction("interrupt_turn")) return false;
       await client.interruptTurn(bound.contextId, sessionId, operationId());
-      return true;
+      return context.value?.contextId === bound.contextId && selectedSessionId.value === sessionId;
     }
 
     function cleanupIsComplete(status: ChatCleanupStatus): boolean {
       return status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete";
     }
 
+    function scheduleSelectedCleanupPoll(
+      bound: BoundChatContext,
+      sessionId: string,
+      cleanupOperationId: string,
+    ): void {
+      clearCleanupPoll();
+      const pollEpoch = cleanupPollEpoch;
+      let attempts = 0;
+      const poll = async (): Promise<void> => {
+        cleanupPollTimer = null;
+        if (
+          cleanupPollEpoch !== pollEpoch ||
+          context.value?.contextId !== bound.contextId ||
+          selectedSessionId.value !== sessionId ||
+          cleanupStatus.value?.operationId !== cleanupOperationId
+        ) return;
+        try {
+          const status = await client.getCleanupStatus(bound.contextId, cleanupOperationId);
+          if (
+            cleanupPollEpoch !== pollEpoch ||
+            context.value?.contextId !== bound.contextId ||
+            selectedSessionId.value !== sessionId
+          ) return;
+          if (status !== null) {
+            cleanupStatus.value = status;
+            if (cleanupIsComplete(status)) {
+              clearCleanupPoll();
+              await finishCompletedCleanup(bound, sessionId, status);
+              return;
+            }
+            if (status.outcomeCode === "retry_limit_exceeded") {
+              clearCleanupPoll();
+              return;
+            }
+          }
+        } catch {
+          // A manual status check remains available; keep polling while this selection is current.
+        }
+        attempts += 1;
+        if (attempts >= CLEANUP_POLL_MAX_ATTEMPTS || cleanupPollEpoch !== pollEpoch) {
+          clearCleanupPoll();
+          return;
+        }
+        cleanupPollTimer = setTimeout(() => { void poll(); }, CLEANUP_POLL_INTERVAL_MS);
+      };
+      cleanupPollTimer = setTimeout(() => { void poll(); }, CLEANUP_POLL_INTERVAL_MS);
+    }
+
     async function finishCompletedCleanup(
       bound: BoundChatContext,
       deletedSessionId: string,
       status: ChatCleanupStatus,
-    ): Promise<DeleteDisposition> {
+    ): Promise<DeleteDisposition | null> {
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== deletedSessionId) {
+        return null;
+      }
       const oldSubscription = subscriptionId;
       if (oldSubscription) {
         await client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => false);
       }
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== deletedSessionId) {
+        return null;
+      }
       clearSelection();
+      const cleanupSelectionEpoch = selectionEpoch;
       const [nextProjects, nextSessions] = await Promise.all([
         client.listProjects(bound.contextId),
         client.listSessions(bound.contextId),
       ]);
-      if (context.value?.contextId !== bound.contextId) {
-        return Object.freeze({ kind: "navigate", nextSessionId: null, path: "/chat" });
-      }
+      if (
+        context.value?.contextId !== bound.contextId ||
+        selectionEpoch !== cleanupSelectionEpoch ||
+        selectedSessionId.value !== null
+      ) return null;
       projects.value = nextProjects;
       sessions.value = Object.freeze(nextSessions.sessions.filter((session) => session.sessionId !== deletedSessionId));
       sessionsCursor.value = nextSessions.nextCursor;
@@ -1715,6 +1866,7 @@ export function createChatStoreDefinition(
       const nextSessionId = sessions.value[0]?.sessionId ?? null;
       const disposition: DeleteDisposition = Object.freeze({
         kind: "navigate",
+        deletedSessionId,
         nextSessionId,
         path: nextSessionId === null ? "/chat" : `/chat/${nextSessionId}`,
       });
@@ -1727,10 +1879,13 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !hasAction("delete_session")) return null;
       const status = await client.deleteSession(bound.contextId, sessionId, operationId());
+      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return null;
       cleanupStatus.value = status;
       if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+      scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
       const disposition: DeleteDisposition = Object.freeze({
         kind: "cleanup_pending",
+        deletedSessionId: sessionId,
         nextSessionId: null,
         path: `/chat/${sessionId}`,
       });
@@ -1749,6 +1904,9 @@ export function createChatStoreDefinition(
       }
       cleanupStatus.value = status;
       if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+      if (status.outcomeCode !== "retry_limit_exceeded") {
+        scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
+      }
       return deleteDisposition.value;
     }
 
@@ -1757,7 +1915,9 @@ export function createChatStoreDefinition(
       if (!bound || !hasAction("use_project")) return null;
       const selected = await client.pickProject(bound.contextId, operationId());
       if (context.value?.contextId !== bound.contextId) return null;
-      projects.value = await client.listProjects(bound.contextId);
+      const nextProjects = await client.listProjects(bound.contextId);
+      if (context.value?.contextId !== bound.contextId) return null;
+      projects.value = nextProjects;
       return selected;
     }
 
@@ -1774,15 +1934,25 @@ export function createChatStoreDefinition(
       const bound = context.value;
       if (!bound || !hasAction("pin_project")) return;
       await client.setProjectPinned(bound.contextId, projectId, pinned, operationId());
-      projects.value = await client.listProjects(bound.contextId);
+      if (context.value?.contextId !== bound.contextId) return;
+      const nextProjects = await client.listProjects(bound.contextId);
+      if (context.value?.contextId !== bound.contextId) return;
+      projects.value = nextProjects;
     }
 
     async function removeProject(projectId: string): Promise<void> {
       const bound = context.value;
       if (!bound || !hasAction("remove_project")) return;
       await client.removeProject(bound.contextId, projectId, operationId());
-      projects.value = await client.listProjects(bound.contextId);
-      await reloadSessions();
+      if (context.value?.contextId !== bound.contextId) return;
+      const [nextProjects, nextSessions] = await Promise.all([
+        client.listProjects(bound.contextId),
+        client.listSessions(bound.contextId),
+      ]);
+      if (context.value?.contextId !== bound.contextId) return;
+      projects.value = nextProjects;
+      sessions.value = nextSessions.sessions;
+      sessionsCursor.value = nextSessions.nextCursor;
     }
 
     function clearForLogout(): void {

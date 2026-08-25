@@ -29,7 +29,22 @@ pub enum HostBridgeErrorKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostErrorCode {
     Unauthorized,
+    CapabilityDenied,
     InvalidRequest,
+    SkillNotFound,
+    SkillNotInstallable,
+    SkillOperationConflict,
+    SkillBusy,
+    BundleMissing,
+    BundleManifestInvalid,
+    ArchiveChecksumMismatch,
+    ArchiveUnsafe,
+    ArchiveTooLarge,
+    InstallFailed,
+    UninstallFailed,
+    ScanFailed,
+    RuntimeUnavailable,
+    RuntimeSyncFailed,
     SessionNotFound,
     TaskSessionExists,
     TurnActive,
@@ -65,7 +80,7 @@ impl HostBridgeError {
         Self { kind, code: None }
     }
 
-    pub(super) const fn rejected(code: HostErrorCode) -> Self {
+    pub(crate) const fn rejected(code: HostErrorCode) -> Self {
         Self {
             kind: HostBridgeErrorKind::Rejected,
             code: Some(code),
@@ -974,7 +989,22 @@ pub(super) const fn protocol_error() -> HostBridgeError {
 pub(super) fn parse_host_error_code(value: &str) -> HostErrorCode {
     match value {
         "unauthorized" => HostErrorCode::Unauthorized,
+        "capability_denied" => HostErrorCode::CapabilityDenied,
         "invalid_request" => HostErrorCode::InvalidRequest,
+        "skill_not_found" => HostErrorCode::SkillNotFound,
+        "skill_not_installable" => HostErrorCode::SkillNotInstallable,
+        "skill_operation_conflict" => HostErrorCode::SkillOperationConflict,
+        "skill_busy" => HostErrorCode::SkillBusy,
+        "bundle_missing" => HostErrorCode::BundleMissing,
+        "bundle_manifest_invalid" => HostErrorCode::BundleManifestInvalid,
+        "archive_checksum_mismatch" => HostErrorCode::ArchiveChecksumMismatch,
+        "archive_unsafe" => HostErrorCode::ArchiveUnsafe,
+        "archive_too_large" => HostErrorCode::ArchiveTooLarge,
+        "install_failed" => HostErrorCode::InstallFailed,
+        "uninstall_failed" => HostErrorCode::UninstallFailed,
+        "scan_failed" => HostErrorCode::ScanFailed,
+        "runtime_unavailable" => HostErrorCode::RuntimeUnavailable,
+        "runtime_sync_failed" => HostErrorCode::RuntimeSyncFailed,
         "session_not_found" => HostErrorCode::SessionNotFound,
         "task_session_exists" => HostErrorCode::TaskSessionExists,
         "turn_active" => HostErrorCode::TurnActive,

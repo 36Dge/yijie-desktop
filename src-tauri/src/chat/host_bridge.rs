@@ -19,6 +19,7 @@ use reqwest::header::{
 use reqwest::{Client, Method, Response, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -233,6 +234,80 @@ struct ErrorEnvelope {
 struct WireError {
     code: String,
     message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostManagedSkill {
+    pub id: String,
+    pub runtime_name: String,
+    pub version: String,
+    pub catalog_status: String,
+    pub maintenance_status: String,
+    pub capability_readiness: String,
+    pub installation_status: String,
+    pub enabled: bool,
+    pub runtime_visible: bool,
+    pub failure_code: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostSkillSnapshot {
+    pub catalog_revision: String,
+    pub scanned_at: String,
+    pub skills: Vec<HostManagedSkill>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillListResponse {
+    schema_version: u8,
+    catalog_revision: String,
+    scanned_at: String,
+    skills: Vec<HostManagedSkill>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillScanResponse {
+    operation_id: String,
+    outcome: String,
+    catalog_revision: String,
+    scanned_at: String,
+    skills: Vec<HostManagedSkill>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkillMutationResponse {
+    operation_id: String,
+    outcome: String,
+    skill: HostManagedSkill,
+}
+
+#[derive(Serialize)]
+struct SkillScanRequest<'a> {
+    operation_id: Uuid,
+    reason: &'a str,
+}
+
+#[derive(Serialize)]
+struct SkillInstallRequest<'a> {
+    operation_id: Uuid,
+    expected_version: &'a str,
+    expected_archive_sha256: &'a str,
+    catalog_revision: &'a str,
+}
+
+#[derive(Serialize)]
+struct SkillEnabledRequest {
+    operation_id: Uuid,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+struct SkillUninstallRequest {
+    operation_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -588,6 +663,141 @@ impl HostBridge {
         self.open_event_stream(session_id, cursor, 3).await
     }
 
+    pub(crate) async fn list_managed_skills(&self) -> Result<HostSkillSnapshot, HostBridgeError> {
+        let response = self
+            .authorized_request(Method::GET, "/v1/skills")
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_skill_rejection(response).await);
+        }
+        let body = read_json_body(response).await?;
+        let wire: SkillListResponse =
+            serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+        if wire.schema_version != 1 {
+            return Err(protocol_error());
+        }
+        validate_skill_snapshot(&wire.catalog_revision, &wire.scanned_at, &wire.skills)?;
+        Ok(HostSkillSnapshot {
+            catalog_revision: wire.catalog_revision,
+            scanned_at: wire.scanned_at,
+            skills: wire.skills,
+        })
+    }
+
+    pub(crate) async fn scan_managed_skills(
+        &self,
+        operation_id: Uuid,
+        reason: &str,
+    ) -> Result<HostSkillSnapshot, HostBridgeError> {
+        require_non_nil(operation_id)?;
+        if !matches!(
+            reason,
+            "startup"
+                | "page_open"
+                | "app_upgrade"
+                | "window_resume"
+                | "directory_changed"
+                | "user_retry"
+        ) {
+            return Err(protocol_error());
+        }
+        let response = self
+            .send_json(
+                Method::POST,
+                "/v1/skills/scan-operations",
+                &SkillScanRequest {
+                    operation_id,
+                    reason,
+                },
+            )
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_skill_rejection(response).await);
+        }
+        let body = read_json_body(response).await?;
+        let wire: SkillScanResponse =
+            serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+        if parse_required_uuid(&wire.operation_id)? != operation_id || wire.outcome != "complete" {
+            return Err(protocol_error());
+        }
+        validate_skill_snapshot(&wire.catalog_revision, &wire.scanned_at, &wire.skills)?;
+        Ok(HostSkillSnapshot {
+            catalog_revision: wire.catalog_revision,
+            scanned_at: wire.scanned_at,
+            skills: wire.skills,
+        })
+    }
+
+    pub(crate) async fn install_managed_skill(
+        &self,
+        skill_id: &str,
+        operation_id: Uuid,
+        expected_version: &str,
+        expected_archive_sha256: &str,
+        catalog_revision: &str,
+    ) -> Result<HostManagedSkill, HostBridgeError> {
+        validate_skill_request_identity(skill_id, operation_id)?;
+        if !valid_semantic_version(expected_version)
+            || !valid_sha256(expected_archive_sha256)
+            || !valid_sha256(catalog_revision)
+        {
+            return Err(protocol_error());
+        }
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!("/v1/skills/{skill_id}/install-operations"),
+                &SkillInstallRequest {
+                    operation_id,
+                    expected_version,
+                    expected_archive_sha256,
+                    catalog_revision,
+                },
+            )
+            .await?;
+        parse_skill_mutation_response(response, operation_id, skill_id).await
+    }
+
+    pub(crate) async fn set_managed_skill_enabled(
+        &self,
+        skill_id: &str,
+        operation_id: Uuid,
+        enabled: bool,
+    ) -> Result<HostManagedSkill, HostBridgeError> {
+        validate_skill_request_identity(skill_id, operation_id)?;
+        let response = self
+            .send_json(
+                Method::PUT,
+                &format!("/v1/skills/{skill_id}/enabled"),
+                &SkillEnabledRequest {
+                    operation_id,
+                    enabled,
+                },
+            )
+            .await?;
+        parse_skill_mutation_response(response, operation_id, skill_id).await
+    }
+
+    pub(crate) async fn uninstall_managed_skill(
+        &self,
+        skill_id: &str,
+        operation_id: Uuid,
+    ) -> Result<HostManagedSkill, HostBridgeError> {
+        validate_skill_request_identity(skill_id, operation_id)?;
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!("/v1/skills/{skill_id}/uninstall-operations"),
+                &SkillUninstallRequest { operation_id },
+            )
+            .await?;
+        parse_skill_mutation_response(response, operation_id, skill_id).await
+    }
+
     pub async fn download_artifact(
         &self,
         manifest: &ArtifactManifest,
@@ -900,6 +1110,180 @@ impl TryFrom<WireSession> for HostSession {
     }
 }
 
+async fn parse_skill_mutation_response(
+    response: Response,
+    expected_operation_id: Uuid,
+    expected_skill_id: &str,
+) -> Result<HostManagedSkill, HostBridgeError> {
+    if response.status() != StatusCode::OK {
+        return Err(parse_skill_rejection(response).await);
+    }
+    let body = read_json_body(response).await?;
+    let wire: SkillMutationResponse =
+        serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+    if parse_required_uuid(&wire.operation_id)? != expected_operation_id
+        || wire.outcome != "complete"
+        || wire.skill.id != expected_skill_id
+    {
+        return Err(protocol_error());
+    }
+    validate_managed_skill(&wire.skill)?;
+    Ok(wire.skill)
+}
+
+fn validate_skill_request_identity(
+    skill_id: &str,
+    operation_id: Uuid,
+) -> Result<(), HostBridgeError> {
+    require_non_nil(operation_id)?;
+    if !valid_skill_id(skill_id) {
+        return Err(protocol_error());
+    }
+    Ok(())
+}
+
+fn validate_skill_snapshot(
+    catalog_revision: &str,
+    scanned_at: &str,
+    skills: &[HostManagedSkill],
+) -> Result<(), HostBridgeError> {
+    if !valid_sha256(catalog_revision) || !valid_rfc3339_utc(scanned_at) || skills.len() > 256 {
+        return Err(protocol_error());
+    }
+    let mut ids = HashSet::with_capacity(skills.len());
+    for skill in skills {
+        validate_managed_skill(skill)?;
+        if !ids.insert(skill.id.as_str()) {
+            return Err(protocol_error());
+        }
+    }
+    Ok(())
+}
+
+fn validate_managed_skill(skill: &HostManagedSkill) -> Result<(), HostBridgeError> {
+    if !valid_skill_id(&skill.id)
+        || !valid_runtime_name(&skill.runtime_name)
+        || !valid_semantic_version(&skill.version)
+        || !matches!(skill.catalog_status.as_str(), "installable" | "blocked")
+        || !matches!(
+            skill.maintenance_status.as_str(),
+            "maintained" | "unmaintained"
+        )
+        || !matches!(
+            skill.capability_readiness.as_str(),
+            "ready" | "degraded" | "blocked"
+        )
+        || !matches!(
+            skill.installation_status.as_str(),
+            "not_installed" | "installing" | "installed" | "uninstalling" | "error"
+        )
+        || !matches!(
+            skill.failure_code.as_str(),
+            "" | "bundle_missing"
+                | "bundle_manifest_invalid"
+                | "archive_checksum_mismatch"
+                | "archive_unsafe"
+                | "archive_too_large"
+                | "install_receipt_invalid"
+                | "installed_files_missing"
+                | "installed_files_corrupt"
+                | "capability_unavailable"
+                | "runtime_unavailable"
+                | "runtime_sync_failed"
+                | "install_failed"
+                | "uninstall_failed"
+                | "scan_failed"
+        )
+        || (skill.installation_status == "not_installed"
+            && (skill.enabled || skill.runtime_visible))
+        || (skill.runtime_visible
+            && (!skill.enabled
+                || skill.installation_status != "installed"
+                || skill.capability_readiness != "ready"))
+    {
+        return Err(protocol_error());
+    }
+    Ok(())
+}
+
+fn valid_skill_id(value: &str) -> bool {
+    if !(3..=128).contains(&value.len()) || !value.is_ascii() {
+        return false;
+    }
+    let mut previous_separator = true;
+    for (index, byte) in value.bytes().enumerate() {
+        let separator = matches!(byte, b'.' | b'-');
+        let valid = byte.is_ascii_lowercase() || byte.is_ascii_digit() || separator;
+        if !valid || (index == 0 && !byte.is_ascii_lowercase()) || (separator && previous_separator)
+        {
+            return false;
+        }
+        previous_separator = separator;
+    }
+    !previous_separator
+}
+
+fn valid_runtime_name(value: &str) -> bool {
+    if value.is_empty() || value.len() > 64 || !value.is_ascii() {
+        return false;
+    }
+    let mut previous_dash = true;
+    for byte in value.bytes() {
+        let dash = byte == b'-';
+        if !(byte.is_ascii_lowercase() || byte.is_ascii_digit() || dash) || (dash && previous_dash)
+        {
+            return false;
+        }
+        previous_dash = dash;
+    }
+    !previous_dash
+}
+
+fn valid_semantic_version(value: &str) -> bool {
+    if value.is_empty() || value.len() > 128 || !value.is_ascii() {
+        return false;
+    }
+    let (without_build, build) = match value.split_once('+') {
+        Some((head, tail)) if !tail.is_empty() && !tail.contains('+') => (head, Some(tail)),
+        Some(_) => return false,
+        None => (value, None),
+    };
+    let (core, prerelease) = match without_build.split_once('-') {
+        Some((head, tail)) if !tail.is_empty() => (head, Some(tail)),
+        Some(_) => return false,
+        None => (without_build, None),
+    };
+    let core_parts = core.split('.').collect::<Vec<_>>();
+    if core_parts.len() != 3 || !core_parts.into_iter().all(valid_semver_number) {
+        return false;
+    }
+    if let Some(value) = prerelease {
+        if !valid_semver_identifiers(value, true) {
+            return false;
+        }
+    }
+    build.is_none_or(|value| valid_semver_identifiers(value, false))
+}
+
+fn valid_semver_number(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && (value == "0" || !value.starts_with('0'))
+}
+
+fn valid_semver_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
+    value.split('.').all(|part| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && (!reject_numeric_leading_zero
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+                || part == "0"
+                || !part.starts_with('0'))
+    })
+}
+
 async fn expect_json_status(
     response: Response,
     expected_status: StatusCode,
@@ -929,6 +1313,57 @@ async fn parse_rejection(response: Response) -> HostBridgeError {
         Err(error) => return error,
     };
     parse_rejection_body(status, &body)
+}
+
+async fn parse_skill_rejection(response: Response) -> HostBridgeError {
+    let status = response.status();
+    let body = match read_json_body(response).await {
+        Ok(body) => body,
+        Err(error) => return error,
+    };
+    let Ok(wire) = serde_json::from_slice::<ErrorEnvelope>(&body) else {
+        return protocol_error();
+    };
+    if validate_error_message(&wire.error.message).is_err() {
+        return protocol_error();
+    }
+    let code = parse_host_error_code(&wire.error.code);
+    let status_matches = match status {
+        StatusCode::BAD_REQUEST => code == HostErrorCode::InvalidRequest,
+        StatusCode::UNAUTHORIZED => code == HostErrorCode::Unauthorized,
+        StatusCode::FORBIDDEN => code == HostErrorCode::CapabilityDenied,
+        StatusCode::NOT_FOUND => code == HostErrorCode::SkillNotFound,
+        StatusCode::CONFLICT => matches!(
+            code,
+            HostErrorCode::SkillOperationConflict | HostErrorCode::SkillBusy
+        ),
+        StatusCode::UNPROCESSABLE_ENTITY => matches!(
+            code,
+            HostErrorCode::SkillNotInstallable
+                | HostErrorCode::BundleMissing
+                | HostErrorCode::BundleManifestInvalid
+                | HostErrorCode::ArchiveChecksumMismatch
+                | HostErrorCode::ArchiveUnsafe
+                | HostErrorCode::ArchiveTooLarge
+        ),
+        StatusCode::INTERNAL_SERVER_ERROR => matches!(
+            code,
+            HostErrorCode::InstallFailed
+                | HostErrorCode::UninstallFailed
+                | HostErrorCode::ScanFailed
+                | HostErrorCode::InternalError
+        ),
+        StatusCode::SERVICE_UNAVAILABLE => matches!(
+            code,
+            HostErrorCode::RuntimeUnavailable | HostErrorCode::RuntimeSyncFailed
+        ),
+        _ => false,
+    };
+    if status_matches {
+        HostBridgeError::rejected(code)
+    } else {
+        protocol_error()
+    }
 }
 
 fn parse_rejection_body(status: StatusCode, body: &[u8]) -> HostBridgeError {
@@ -1507,6 +1942,171 @@ mod tests {
             TOKEN.to_ascii_lowercase()
         )));
         assert!(!format!("{bridge:?}").contains(TOKEN));
+    }
+
+    #[tokio::test]
+    async fn skill_lifecycle_consumes_exact_v1_paths_and_pathless_bodies() {
+        let token = TestToken::new(0o600);
+        let skill_id = "yijie.content-marketing.copywriting";
+        let catalog_revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let archive_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let scan_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f70").unwrap();
+        let install_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f71").unwrap();
+        let enabled_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f72").unwrap();
+        let uninstall_id = Uuid::parse_str("019fbd88-cbc3-7bf1-934d-7b05cd693f73").unwrap();
+        let skill = serde_json::json!({
+            "id": skill_id,
+            "runtime_name": "copywriting",
+            "version": "0.1.0",
+            "catalog_status": "installable",
+            "maintenance_status": "maintained",
+            "capability_readiness": "ready",
+            "installation_status": "installed",
+            "enabled": true,
+            "runtime_visible": true,
+            "failure_code": ""
+        });
+        let list = serde_json::json!({
+            "schema_version": 1,
+            "catalog_revision": catalog_revision,
+            "scanned_at": "2026-08-25T00:00:00Z",
+            "skills": [{
+                "id": skill_id,
+                "runtime_name": "copywriting",
+                "version": "0.1.0",
+                "catalog_status": "installable",
+                "maintenance_status": "maintained",
+                "capability_readiness": "ready",
+                "installation_status": "not_installed",
+                "enabled": false,
+                "runtime_visible": false,
+                "failure_code": ""
+            }]
+        });
+        let scan = serde_json::json!({
+            "operation_id": scan_id,
+            "outcome": "complete",
+            "catalog_revision": catalog_revision,
+            "scanned_at": "2026-08-25T00:00:01Z",
+            "skills": list["skills"].clone()
+        });
+        let mutation = |operation_id: Uuid, skill: serde_json::Value| {
+            serde_json::json!({
+                "operation_id": operation_id,
+                "outcome": "complete",
+                "skill": skill
+            })
+        };
+        let mut removed = skill.clone();
+        removed["installation_status"] = serde_json::json!("not_installed");
+        removed["enabled"] = serde_json::json!(false);
+        removed["runtime_visible"] = serde_json::json!(false);
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response("200 OK", &list.to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &scan.to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &mutation(install_id, skill.clone()).to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &mutation(enabled_id, skill).to_string()),
+            ready_response(NONCE),
+            json_response("200 OK", &mutation(uninstall_id, removed).to_string()),
+        ])
+        .await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+
+        assert_eq!(
+            bridge.list_managed_skills().await.unwrap().catalog_revision,
+            catalog_revision
+        );
+        bridge
+            .scan_managed_skills(scan_id, "page_open")
+            .await
+            .unwrap();
+        bridge
+            .install_managed_skill(
+                skill_id,
+                install_id,
+                "0.1.0",
+                archive_sha256,
+                catalog_revision,
+            )
+            .await
+            .unwrap();
+        bridge
+            .set_managed_skill_enabled(skill_id, enabled_id, true)
+            .await
+            .unwrap();
+        bridge
+            .uninstall_managed_skill(skill_id, uninstall_id)
+            .await
+            .unwrap();
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 10);
+        for preflight in requests.iter().step_by(2) {
+            assert!(preflight.starts_with("GET /readyz HTTP/1.1"));
+            assert!(!preflight.to_ascii_lowercase().contains("authorization:"));
+        }
+        for authorized in requests.iter().skip(1).step_by(2) {
+            assert!(authorized.to_ascii_lowercase().contains(&format!(
+                "authorization: bearer {}",
+                TOKEN.to_ascii_lowercase()
+            )));
+            assert!(!authorized.contains("/Users/"));
+            assert!(!authorized.contains("SKILL.md"));
+        }
+        assert!(requests[1].starts_with("GET /v1/skills HTTP/1.1"));
+        assert!(requests[3].starts_with("POST /v1/skills/scan-operations HTTP/1.1"));
+        assert!(requests[5].starts_with(&format!(
+            "POST /v1/skills/{skill_id}/install-operations HTTP/1.1"
+        )));
+        assert!(requests[7].starts_with(&format!("PUT /v1/skills/{skill_id}/enabled HTTP/1.1")));
+        assert!(requests[9].starts_with(&format!(
+            "POST /v1/skills/{skill_id}/uninstall-operations HTTP/1.1"
+        )));
+        let install_body: serde_json::Value =
+            serde_json::from_str(requests[5].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(install_body["operation_id"], install_id.to_string());
+        assert_eq!(install_body["expected_version"], "0.1.0");
+        assert_eq!(install_body["expected_archive_sha256"], archive_sha256);
+        assert_eq!(install_body["catalog_revision"], catalog_revision);
+        assert_eq!(install_body.as_object().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn skill_401_and_403_remain_distinct_content_free_rejections() {
+        for (status, code, expected) in [
+            (
+                "401 Unauthorized",
+                "unauthorized",
+                HostErrorCode::Unauthorized,
+            ),
+            (
+                "403 Forbidden",
+                "capability_denied",
+                HostErrorCode::CapabilityDenied,
+            ),
+        ] {
+            let token = TestToken::new(0o600);
+            let body = serde_json::json!({
+                "error": { "code": code, "message": "Skill operation failed" }
+            });
+            let (port, server) = serve(vec![
+                ready_response(NONCE),
+                json_response(status, &body.to_string()),
+            ])
+            .await;
+            let error = bridge(port, token.path.clone(), NONCE)
+                .list_managed_skills()
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), HostBridgeErrorKind::Rejected);
+            assert_eq!(error.code(), Some(expected));
+            let requests = server.await.unwrap();
+            assert_eq!(requests.len(), 2);
+        }
     }
 
     #[tokio::test]

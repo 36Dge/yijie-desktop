@@ -7,30 +7,27 @@ describe("app navigation", () => {
 
     expect(resolved.map((entry) => entry.key)).toEqual([
       "newTask",
-      "taskHistory",
-      "businessDivider",
       "store",
       "workspace",
       "scheduledTask",
       "plugin",
       "knowledge",
+      "taskHistory",
       "settings",
     ]);
-    expect(
-      resolved.filter((entry) => entry.kind === "item").map((entry) => entry.label),
-    ).toEqual([
+    expect(resolved.map((entry) => entry.label)).toEqual([
       "新建任务",
-      "任务记录",
       "我的店铺",
       "工作台",
       "定时任务",
       "插件",
       "资料库",
+      "任务记录",
       "设置",
     ]);
   });
 
-  it("NAV-002 exposes only the three implemented routes", () => {
+  it("NAV-002 exposes only implemented routes and keeps task history non-navigable", () => {
     const resolvedItems = resolveAppNavigation(APP_NAVIGATION).filter(
       (entry) => entry.kind === "item",
     );
@@ -41,12 +38,16 @@ describe("app navigation", () => {
         .map((item) => ({ key: item.key, to: item.to })),
     ).toEqual([
       { key: "newTask", to: "/chat" },
-      { key: "taskHistory", to: "/tasks" },
+      { key: "plugin", to: "/plugins" },
       { key: "settings", to: "/settings" },
     ]);
     expect(resolvedItems.filter((item) => item.disabled).every((item) => !("to" in item))).toBe(
       true,
     );
+    const taskHistory = resolveAppNavigation(APP_NAVIGATION).find((entry) => entry.key === "taskHistory");
+    expect(taskHistory).toMatchObject({ kind: "section", label: "任务记录" });
+    expect(taskHistory && "to" in taskHistory).toBe(false);
+    expect(taskHistory && "disabled" in taskHistory).toBe(false);
   });
 
   it("NAV-003 removes hidden items before rendering", () => {
@@ -59,7 +60,7 @@ describe("app navigation", () => {
     expect(resolved.map((entry) => entry.key)).not.toContain("store");
   });
 
-  it("NAV-004 removes a divider when its entire following group is hidden", () => {
+  it("NAV-004 keeps the task history section after hidden business modules", () => {
     const resolved = resolveAppNavigation(APP_NAVIGATION, {
       knowledge: false,
       plugin: false,

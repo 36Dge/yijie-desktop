@@ -9,6 +9,7 @@ export interface PermissionPolicySnapshot {
   enabled: boolean;
   ready: boolean;
   chatUiEnabled?: boolean;
+  skillMarketplaceUiEnabled?: boolean;
   hasCapability(capability: KnownCapability): boolean;
 }
 
@@ -26,7 +27,7 @@ export const NAVIGATION_CAPABILITIES = {
 
 export const ROUTE_CAPABILITIES = {
   "/chat": "task.create",
-  "/tasks": "task.read",
+  "/plugins": "plugin.read",
 } as const satisfies Readonly<Record<Exclude<AppRoutePath, "/settings">, KnownCapability>>;
 
 export function resolveNavigationVisibility(
@@ -56,6 +57,7 @@ export function resolveNavigationVisibility(
     visibility.newTask = false;
     visibility.taskHistory = false;
   }
+  if (snapshot.skillMarketplaceUiEnabled === false) visibility.plugin = false;
 
   return visibility;
 }
@@ -69,9 +71,6 @@ export function resolveRootRoute(snapshot: PermissionPolicySnapshot): AppRoutePa
   }
   if (snapshot.hasCapability("task.create")) {
     return "/chat";
-  }
-  if (snapshot.hasCapability("task.read")) {
-    return "/tasks";
   }
   return "/settings";
 }
@@ -88,9 +87,10 @@ export function canRenderProtectedPath(
   snapshot: PermissionPolicySnapshot,
 ): boolean {
   const capability = requiredCapabilityForPath(path);
-  const chatUiAllowed = snapshot.chatUiEnabled !== false || (path !== "/chat" && path !== "/tasks" && !path.startsWith("/chat/"));
+  const chatUiAllowed = snapshot.chatUiEnabled !== false || (path !== "/chat" && !path.startsWith("/chat/"));
+  const skillUiAllowed = snapshot.skillMarketplaceUiEnabled !== false || path !== "/plugins";
   return (
-    chatUiAllowed && (capability === null ||
+    chatUiAllowed && skillUiAllowed && (capability === null ||
     (snapshot.enabled && snapshot.ready && snapshot.hasCapability(capability))
     )
   );

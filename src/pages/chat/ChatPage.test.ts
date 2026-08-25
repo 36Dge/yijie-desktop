@@ -160,6 +160,20 @@ afterEach(() => {
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("keeps the last committed conversation visible while metadata resyncs", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+
+    store.phase = "resyncing";
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.text()).not.toContain("正在读取本地对话");
+
+    store.history = null;
+    await flushPromises();
+    expect(wrapper.text()).toContain("正在读取本地对话");
+  });
+
   it("renders an empty-text assistant turn with trusted Artifact identity and all typed clients", async () => {
     const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
     const artifacts = useArtifactStore(pinia);
@@ -230,6 +244,37 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="添加图片或文件"]').exists()).toBe(true);
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音输入/);
+  });
+
+  it("uses the same-route recovery action to clear a deleted task and re-enable the new composer", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    store.phase = "unavailable";
+    store.selectedSessionId = SESSION_ID;
+    store.draftTarget = chatSessionDraftTarget(SESSION_ID);
+    store.draftTargetReady = false;
+    store.attachmentErrorCode = "chat_resource_not_found";
+    store.lastErrorCode = "chat_resource_not_found";
+    const clearSelectedSession = vi.spyOn(store, "clearSelectedSession").mockImplementation(async () => {
+      store.selectedSessionId = null;
+      store.draftTarget = CHAT_NEW_DRAFT_TARGET;
+      store.draftTargetReady = true;
+      store.attachmentErrorCode = null;
+      store.lastErrorCode = null;
+      store.phase = "ready";
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("任务不可用");
+    expect(wrapper.text()).toContain("附件处理失败");
+    await wrapper.get(".chat-notice__action").trigger("click");
+    await flushPromises();
+
+    expect(clearSelectedSession).toHaveBeenCalledOnce();
+    expect(wrapper.text()).not.toContain("任务不可用");
+    expect(wrapper.text()).not.toContain("附件处理失败");
+    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get("textarea").setValue("重新开始任务");
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
   it("uses the project strip as the native project selection entry", async () => {

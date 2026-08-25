@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ChatAttachment,
@@ -88,6 +89,17 @@ describe("ChatComposer", () => {
     expect(wrapper.text()).not.toContain("65536 字节");
     expect(wrapper.text()).not.toContain("Enter 发送");
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音|附件/);
+  });
+
+  it("FEAT-130 applies the refined new-task radius, contrast, and borderless hover tokens", () => {
+    const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
+    expect(source).toContain(`.chat-composer--new .chat-composer__project {
+  border-radius: var(--yj-radius-lg);
+  background: var(--yj-color-bg-app);
+}`);
+    expect(source).toContain(`.chat-composer__project--button:hover:not(:disabled) {
+  background: var(--yj-color-brand-soft);
+}`);
   });
 
   it("submits with Enter, keeps Shift+Enter for a newline, and never submits while composing", async () => {

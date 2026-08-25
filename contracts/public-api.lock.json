@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "contract_version": "0.4.0-candidate",
+  "contract_version": "0.5.0",
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "full_commit": "ea48fe190e18afba728712d1e2cc79cda57f581b",
+  "full_commit": "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
   "source_path": "openapi/public/public.yaml",
-  "source_sha256": "c8d9e6742802e0f0392ea8221a5fdd028f76107df893ab4c531da75f9e9e354b",
+  "source_sha256": "f70a88bab6f8fa6e813a828ed58f8559edeb3651812c601f31e2b8a516086518",
   "generator": {
     "package": "openapi-typescript",
     "version": "7.13.0",

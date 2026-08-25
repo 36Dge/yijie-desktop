@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       ".contracts-source",
+      ".local",
       "dist",
       "node_modules",
       "src-tauri/target",

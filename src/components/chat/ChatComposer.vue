@@ -382,13 +382,18 @@ function handlePaste(event: ClipboardEvent): void {
   text-align: left;
 }
 
+.chat-composer--new .chat-composer__project {
+  border-radius: var(--yj-radius-lg);
+  background: var(--yj-color-bg-app);
+}
+
 .chat-composer__project--button {
   cursor: pointer;
-  transition: border-color var(--yj-motion-fast) var(--yj-ease-standard), background var(--yj-motion-fast) var(--yj-ease-standard);
+  transition: background var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
 .chat-composer__project--button:hover:not(:disabled) {
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-brand-soft);
 }
 
 .chat-composer__project-name {

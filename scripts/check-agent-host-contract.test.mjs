@@ -23,12 +23,12 @@ const temporaryDirectories = [];
 
 const validLock = {
   schema_version: 1,
-  contract_version: "0.4.0-candidate",
+  contract_version: "0.5.0",
   repository: "https://github.com/36Dge/yijie-contracts.git",
-  full_commit: "ea48fe190e18afba728712d1e2cc79cda57f581b",
+  full_commit: "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
   source: {
     path: "openapi/agent-host/agent-host.yaml",
-    sha256: "cf72ba8dd6910e8454ad60feeffa5e82583303b441dad78e49910fbdb9f5420f",
+    sha256: "406b55dad02d5a3d489955bcf29c973b94252c3e300f8ff853709a71d6874431",
   },
   operation: {
     method: "post",
@@ -51,9 +51,9 @@ const validLock = {
   consumer: {
     mode: "hand-written-rust-adapter",
     adapter_path: "src-tauri/src/chat/host_bridge.rs",
-    adapter_sha256: "da621e8ba7aeccfffce07ff89c412c80941be5c4d472b25d7e210bf90d88c93b",
+    adapter_sha256: "5517be0351222ac461578ad5e3a2b0ec6516c5df622d13d9b687e1494b8a5467",
     readiness_path: "src-tauri/src/chat/mod.rs",
-    readiness_sha256: "8fee9b6df8ec1bc217efcdb2c0f7277f07e426c2c31cf159f77e68bc15a6fd5a",
+    readiness_sha256: "29248c14570d85cdc15a210b6099988c5972a4e5c88c9ce71ded968fb25b9a4d",
     public_lock_path: "contracts/public-api.lock.json",
     serialization_test:
       "chat::host_bridge::tests::start_turn_v2_adapter_serializes_canonical_contract_projection",

@@ -3670,6 +3670,10 @@ pub async fn chat_bind_context_v1(
     let context = manager
         .bind(projection, now)
         .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    chat_runtime
+        .ensure_demo_fast_sidecar()
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
     app.state::<super::artifact_native::ArtifactNativeRuntime>()
         .invalidate_all();
     app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()

@@ -4,12 +4,15 @@ import { useRoute } from "vue-router";
 import { resolveNavigationVisibility } from "../../authorization/app-permission-policy";
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
 import { localChatUiEnabled } from "../../authorization/chat-ui-config";
+import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { resolveAppNavigation } from "../../navigation/app-nav";
+import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import YjSidebar from "./YjSidebar.vue";
 
 const route = useRoute();
+const chatStore = useChatStore();
 const sidebarStore = useSidebarStore();
 const permissionStore = usePermissionStore();
 const isLocalChatRoute = computed(() => localChatUiEnabled && (
@@ -22,9 +25,16 @@ const navigationEntries = computed(() =>
       enabled: authoritativePermissionUiEnabled,
       ready: permissionStore.isReady,
       chatUiEnabled: localChatUiEnabled,
+      skillMarketplaceUiEnabled,
       hasCapability: permissionStore.hasCapability,
     }),
   ),
+);
+const sidebarCollapsed = computed(() => isLocalChatRoute.value ? false : sidebarStore.isCollapsed);
+const showTaskHistoryTree = computed(() =>
+  localChatUiEnabled &&
+  !sidebarCollapsed.value &&
+  navigationEntries.value.some((entry) => entry.kind === "section" && entry.key === "taskHistory"),
 );
 
 let storage: Storage | undefined;
@@ -38,17 +48,22 @@ if (typeof window !== "undefined") {
 }
 
 sidebarStore.hydrate(storage);
+
+function recoverCurrentNewTask(): void {
+  void chatStore.clearSelectedSession();
+}
 </script>
 
 <template>
   <div class="yj-app-shell" :class="{ 'yj-app-shell--chat': isLocalChatRoute }">
     <YjSidebar
       :entries="navigationEntries"
-      :collapsed="isLocalChatRoute ? false : sidebarStore.isCollapsed"
+      :collapsed="sidebarCollapsed"
       :current-path="route.path"
-      :show-chat-tree="isLocalChatRoute"
+      :show-chat-tree="showTaskHistoryTree"
       :allow-toggle="!isLocalChatRoute"
       @toggle="sidebarStore.toggle"
+      @recover-new-task="recoverCurrentNewTask"
     />
     <main class="yj-app-shell__content">
       <slot />

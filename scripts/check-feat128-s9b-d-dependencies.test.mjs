@@ -3,6 +3,7 @@ import {
   checkFeat128S9bDDependencies,
   validateDependencyFacts,
   validateHistoricalScopeFiles,
+  validatePackageDependencyBoundary,
   validateProtectedBoundaryFiles,
 } from "./check-feat128-s9b-d-dependencies.mjs";
 
@@ -32,6 +33,21 @@ describe("FEAT-128 S9B-D dependency boundary", () => {
     })).toThrow();
   });
 
+  it("freezes the ECharts package dependency semantically without freezing unrelated scripts", () => {
+    expect(() => validatePackageDependencyBoundary({
+      scripts: { "tauri:demo-fast": "./scripts/run-local-demo-fast.sh" },
+      dependencies: { echarts: "6.1.0", vue: "^3.5.13" },
+      devDependencies: { vitest: "4.1.10" },
+    })).not.toThrow();
+    expect(() => validatePackageDependencyBoundary({
+      dependencies: { echarts: "6.1.1" },
+    })).toThrow("exact runtime echarts 6.1.0 only");
+    expect(() => validatePackageDependencyBoundary({
+      dependencies: { echarts: "6.1.0" },
+      optionalDependencies: { echarts: "6.1.0" },
+    })).toThrow("exact runtime echarts 6.1.0 only");
+  });
+
   it("checks the actual package, lock, notice and static import boundary", async () => {
     await expect(checkFeat128S9bDDependencies()).resolves.toBeUndefined();
   });
@@ -39,6 +55,14 @@ describe("FEAT-128 S9B-D dependency boundary", () => {
   it("does not claim ownership of a legal downstream S9B-R path", () => {
     expect(() => validateProtectedBoundaryFiles([
       "src/components/chat/ChatArtifactReport.vue",
+    ])).not.toThrow();
+  });
+
+  it("allows unrelated package, lock and notice evolution after semantic validation", () => {
+    expect(() => validateProtectedBoundaryFiles([
+      "package.json",
+      "pnpm-lock.yaml",
+      "THIRD_PARTY_NOTICES.md",
     ])).not.toThrow();
   });
 

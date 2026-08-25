@@ -15,7 +15,9 @@
 - 不实现 Admin 管理后台、平台连接器或 Codex Runtime 源码；
 - 不直接访问 PostgreSQL、Redis 或第三方电商平台 API；
 - 不在前端持有或持久化平台 access token、refresh token、cookie 和生产凭据；
-- 不绕过服务端权限、审批或审计策略执行高风险操作；
+- 不绕过 public/production 服务端权限、审批或审计策略执行高风险操作；
+- `YIJIE_ENV=local + YIJIE_LOCAL_PROFILE=demo_fast` 按 ADR-0018 使用固定 native scope 免用户登录；
+  该例外不得进入 public/production；
 - 原生能力只放在 Tauri/Rust 边界，不为了普通前端逻辑新增 command 或 capability。
 
 ## 当前实现状态
@@ -95,6 +97,14 @@ make build
 pnpm tauri:dev
 pnpm docs:build
 ```
+
+标准 `pnpm tauri:dev` 与显式别名 `pnpm tauri:demo-fast` 都必须启动完整 demo_fast 免登录环境，
+不得要求用户先输入白名单账号密码或启动 Keycloak/OIDC。只有明确的底层调试才使用
+`pnpm tauri:dev:raw`，它不代表完整业务环境已装配。
+
+默认 `pnpm test` / `make test` 使用 `demo_fast` 测试面；历史 S10D-H checker 只由显式
+`pnpm test:production-hardened` / `make test-production-hardened` 执行。不得通过刷新 digest
+把未完成的 S10D-H WAL/axe RCA 伪装成 PASS。
 
 - 文档改动至少执行 `pnpm docs:build`；
 - Vue、TypeScript、store、API 或领域逻辑改动执行 `make lint && make test && make build`；

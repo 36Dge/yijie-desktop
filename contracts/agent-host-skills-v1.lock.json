@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.5.0",
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "full_commit": "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
+  "sources": {
+    "openapi": {
+      "path": "openapi/agent-host/agent-host.yaml",
+      "sha256": "406b55dad02d5a3d489955bcf29c973b94252c3e300f8ff853709a71d6874431"
+    },
+    "bundle_manifest_schema": {
+      "path": "jsonschema/skills/skill-bundle-manifest-v1.schema.json",
+      "sha256": "d86185a1d5f4d9a136c88b679d50ac3e83bcc2b722eee39cba674c5be3b88469"
+    },
+    "runtime_projection": {
+      "path": "compatibility/agent-host-runtime-v1.json",
+      "sha256": "6b7662d4237486300456f16abd0305fe1ea267b70a85e497ba7ab15a654939ee"
+    }
+  },
+  "fixture_trees": [
+    {
+      "path": "tests/fixtures/agent/host-skills-v1",
+      "git_tree_oid": "80138d31544965e6ccca142bfbd311e17906ea08"
+    },
+    {
+      "path": "tests/fixtures/skills/bundle-v1",
+      "git_tree_oid": "7afc9656d56523b929c85ffc9ba45f093a0e0e4a"
+    }
+  ],
+  "fixtures": [
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/enabled-request.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/enabled-request.json",
+      "sha256": "93710bb7a9b86e33ea77d5457c413c0a7e252b94f65101fe4c4d6e9f25bd9707"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/error-archive-unsafe.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/error-archive-unsafe.json",
+      "sha256": "1560f14bbd25015957b0bb354c65e21db8f8095658d43acfeb6b0deaf1a6d8a1"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/install-request.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/install-request.json",
+      "sha256": "b4c78555a4c1f902cd1ee36f3ad9b8cb4e6605b1036409212a0f2d866b782aea"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/list-response.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/list-response.json",
+      "sha256": "2981547dd55b44c05e36462a679d6bfd1b01657522d886699422e702b88ffb56"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/mutation-response.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/mutation-response.json",
+      "sha256": "bbbe2947e7f17948f44a107e54e5a569f632262493a1d6c7e4c4368b14bcf22d"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/scan-request.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/scan-request.json",
+      "sha256": "7de0414955e6671feba9bcad577d6dfb6e861f910788b1a382d62cd7e2726202"
+    },
+    {
+      "source_path": "tests/fixtures/agent/host-skills-v1/uninstall-request.json",
+      "snapshot_path": "tests/fixtures/agent-host-skills-v1/uninstall-request.json",
+      "sha256": "e3f0f4a4213009fa5d25b56e760c93919c53d097b726cb02cbe4930b5d004a9a"
+    }
+  ],
+  "operations": [
+    {
+      "method": "get",
+      "path": "/v1/skills",
+      "operation_id": "listManagedSkills",
+      "required_capability": "plugin.read"
+    },
+    {
+      "method": "post",
+      "path": "/v1/skills/scan-operations",
+      "operation_id": "scanManagedSkills",
+      "required_capability": "plugin.manage"
+    },
+    {
+      "method": "post",
+      "path": "/v1/skills/{skill_id}/install-operations",
+      "operation_id": "installManagedSkill",
+      "required_capability": "plugin.manage"
+    },
+    {
+      "method": "put",
+      "path": "/v1/skills/{skill_id}/enabled",
+      "operation_id": "setManagedSkillEnabled",
+      "required_capability": "plugin.manage"
+    },
+    {
+      "method": "post",
+      "path": "/v1/skills/{skill_id}/uninstall-operations",
+      "operation_id": "uninstallManagedSkill",
+      "required_capability": "plugin.manage"
+    }
+  ],
+  "parser": {
+    "package": "@redocly/openapi-core",
+    "version": "1.34.18",
+    "api": "parseYaml",
+    "provided_by": "openapi-typescript@7.13.0"
+  },
+  "validator": {
+    "package": "ajv",
+    "version": "8.17.1"
+  },
+  "consumer": {
+    "owner": "段成威",
+    "mode": "hand-written-rust-adapter",
+    "implementation_status": "implemented",
+    "implementation_files": [
+      {
+        "path": "src-tauri/src/skills/host.rs",
+        "sha256": "669202ef3a7798c3573c74b90b4f64eaa6114d0a1ee5d1c8aba6cd0d0b211bdd"
+      },
+      {
+        "path": "src-tauri/src/skills/mod.rs",
+        "sha256": "304493e4afcaa69af778b4ac96f7dbc145099a6a4829b8a4d2d62947f9f7c5c8"
+      },
+      {
+        "path": "src-tauri/src/skills/catalog.rs",
+        "sha256": "0cad0ed138170fac3bb526d89a29d0a52ce61e55c06f2945ec23a39305f4d182"
+      },
+      {
+        "path": "src-tauri/src/skills/resources.rs",
+        "sha256": "049ab6307697b546997a0bc9656a78efd836733d5366fddd23e3e2297dc2f377"
+      },
+      {
+        "path": "src-tauri/src/local_profile.rs",
+        "sha256": "2a93581622ad08d15d5d9243ea17fdfedfd834c481e833930e36fad78b5eba57"
+      },
+      {
+        "path": "src-tauri/src/native_auth/runtime.rs",
+        "sha256": "778a8a0305f0bb0eefc0d5f25ecaf18103b94ffe0ca33f1889035af8e6f18c1f"
+      },
+      {
+        "path": "src-tauri/src/chat/host_bridge.rs",
+        "sha256": "5517be0351222ac461578ad5e3a2b0ec6516c5df622d13d9b687e1494b8a5467"
+      },
+      {
+        "path": "src-tauri/src/chat/host_domain.rs",
+        "sha256": "35955038bb31eb17955a47eee8fad02895c2d798288dd3e98db10f2347687bf6"
+      },
+      {
+        "path": "src-tauri/src/chat/sidecar.rs",
+        "sha256": "9d9cea204a4e9235d1242a5fdac06eb1babdebce1f0fbdfde7ba8ae153ff08b3"
+      },
+      {
+        "path": "src-tauri/src/lib.rs",
+        "sha256": "9da5975ccd3144a13149c17114999553a5377e00b6ae67119977dbee61d6519c"
+      }
+    ],
+    "approved_rust_generator": "N/A",
+    "generator_rationale": "No Rust OpenAPI generator is approved for the Desktop native boundary; exact-source fixtures and a reviewed closed adapter are required."
+  },
+  "exception": {
+    "id": "EXC-129-001",
+    "owner": "段成威",
+    "approved_on": "2026-08-25",
+    "expires_on": "2026-11-23",
+    "status": "active",
+    "scope": "Time-bounded hand-written Rust adapter for the owner-only Agent Host Skills v1 API.",
+    "removal_trigger": "Remove or re-review when an approved Rust generator exists, the pinned source changes, or before a signed release candidate."
+  }
+}

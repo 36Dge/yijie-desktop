@@ -12,13 +12,21 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use crate::skills::SkillRoots;
+
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const FEAT126_FAKE_RESPONSES_BASE_URL: &str = "http://127.0.0.1:18082/v1";
 const FEAT126_DRIVER_NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
 const FEAT128_S10_PROFILE_ENV: &str = "YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED";
 const CHAT_ARTIFACTS_V3_ENV: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
+const FEAT128_IMAGE_GENERATION_ENV: &str = "YIJIE_FEAT128_IMAGE_GENERATION_ENABLED";
+const MODEL_PROVIDER_ENV: &str = "YIJIE_MODEL_PROVIDER";
+const MINIMAX_PROVIDER_ID: &str = "minimax";
+const MINIMAX_API_KEY_FILE_ENV: &str = "YIJIE_MINIMAX_API_KEY_FILE";
+const AGENT_HOST_PARENT_PID_ENV: &str = "YIJIE_AGENT_HOST_PARENT_PID";
 const FEAT128_SYNTHETIC_MANIFEST: &str = "feat128-artifact-v1";
 const MAX_CHILD_LOG_BYTES: u64 = 256 << 10;
+const MAX_PROVIDER_KEY_FILE_BYTES: u64 = 16 << 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FEAT126TestProfile {
@@ -39,6 +47,8 @@ pub struct SidecarConfig {
     test_profile: Option<FEAT126TestProfile>,
     artifact_v3_enabled: bool,
     feat128_s10_profile: bool,
+    image_generation_enabled: bool,
+    minimax_api_key_file: Option<PathBuf>,
 }
 
 impl SidecarConfig {
@@ -51,6 +61,7 @@ impl SidecarConfig {
                 || std::env::var_os(FEAT126_DRIVER_NONCE_ENV).is_some()
                 || std::env::var_os(FEAT128_S10_PROFILE_ENV).is_some()
                 || std::env::var_os(CHAT_ARTIFACTS_V3_ENV).is_some()
+                || std::env::var_os(FEAT128_IMAGE_GENERATION_ENV).is_some()
                 || feat128_child_profile_is_present()
             {
                 return Err(ChatError::InvalidConfiguration);
@@ -89,6 +100,19 @@ impl SidecarConfig {
         let test_profile = load_feat126_test_profile()?;
         let artifact_v3_enabled = read_exact_boolean_environment(CHAT_ARTIFACTS_V3_ENV)?;
         let feat128_s10_profile = read_exact_boolean_environment(FEAT128_S10_PROFILE_ENV)?;
+        let image_generation_enabled =
+            read_exact_boolean_environment(FEAT128_IMAGE_GENERATION_ENV)?;
+        let minimax_api_key_file = if image_generation_enabled {
+            optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?
+        } else {
+            None
+        };
+        validate_minimax_image_generation_configuration(
+            image_generation_enabled,
+            artifact_v3_enabled,
+            minimax_api_key_file.is_some(),
+            std::env::var_os("YIJIE_MINIMAX_API_KEY").is_some(),
+        )?;
         if feat128_child_profile_is_present() {
             return Err(ChatError::InvalidConfiguration);
         }
@@ -127,6 +151,8 @@ impl SidecarConfig {
             test_profile,
             artifact_v3_enabled,
             feat128_s10_profile,
+            image_generation_enabled,
+            minimax_api_key_file,
         }))
     }
 
@@ -139,6 +165,8 @@ impl SidecarConfig {
         instance_nonce: &str,
         log_directory: Option<&Path>,
         process_manifest: Option<&Path>,
+        demo_fast: bool,
+        skill_roots: Option<&SkillRoots>,
     ) -> Vec<(&'static str, String)> {
         let test_enabled = self.test_profile.is_some();
         let mut values = vec![
@@ -153,17 +181,30 @@ impl SidecarConfig {
                 test_enabled.to_string(),
             ),
             ("YIJIE_AGENT_HOST_V2_TITLE_ENABLED", "false".to_owned()),
-            (
-                "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
-                test_enabled.to_string(),
-            ),
+            ("YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED", "true".to_owned()),
             (
                 "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
                 "true".to_owned(),
             ),
             ("YIJIE_AGENT_HOST_INSTANCE_NONCE", instance_nonce.to_owned()),
+            (AGENT_HOST_PARENT_PID_ENV, std::process::id().to_string()),
             ("PATH", "/usr/bin:/bin".to_owned()),
         ];
+        if demo_fast {
+            values.push(("YIJIE_LOCAL_PROFILE", "demo_fast".to_owned()));
+        }
+        if let Some(roots) = skill_roots {
+            values.extend([
+                (
+                    "YIJIE_SKILL_BUNDLE_ROOT",
+                    roots.bundle_root.to_string_lossy().into_owned(),
+                ),
+                (
+                    "YIJIE_SKILL_INSTALL_ROOT",
+                    roots.install_root.to_string_lossy().into_owned(),
+                ),
+            ]);
+        }
         if let Some(profile) = &self.test_profile {
             values.extend([
                 ("YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED", "true".to_owned()),
@@ -205,6 +246,20 @@ impl SidecarConfig {
                 ),
             ]);
         }
+        if self.image_generation_enabled {
+            let key_file = self
+                .minimax_api_key_file
+                .as_ref()
+                .expect("validated image generation requires a key file");
+            values.extend([
+                (FEAT128_IMAGE_GENERATION_ENV, "true".to_owned()),
+                (MODEL_PROVIDER_ENV, MINIMAX_PROVIDER_ID.to_owned()),
+                (
+                    MINIMAX_API_KEY_FILE_ENV,
+                    key_file.to_string_lossy().into_owned(),
+                ),
+            ]);
+        }
         if let Some(value) = &self.codex_binary {
             values.push(("YIJIE_CODEX_BINARY", value.to_string_lossy().into_owned()));
         }
@@ -215,6 +270,21 @@ impl SidecarConfig {
             values.push(("YIJIE_CODEX_HOME", value.to_string_lossy().into_owned()));
         }
         values
+    }
+
+    fn validate_provider_key_file(&self) -> Result<(), ChatError> {
+        if !self.image_generation_enabled {
+            return Ok(());
+        }
+        let expected = self
+            .minimax_api_key_file
+            .as_deref()
+            .ok_or(ChatError::InvalidConfiguration)?;
+        let actual = validate_owner_only_provider_key_file(expected)?;
+        if actual != expected {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        Ok(())
     }
 }
 
@@ -266,6 +336,20 @@ fn validate_feat128_s10_profile_values(
             || !feat126_profile_enabled
             || !feature_compiled
             || provider_environment_present)
+    {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    Ok(())
+}
+
+fn validate_minimax_image_generation_configuration(
+    image_generation_enabled: bool,
+    artifact_v3_enabled: bool,
+    key_file_present: bool,
+    direct_key_present: bool,
+) -> Result<(), ChatError> {
+    if direct_key_present
+        || (image_generation_enabled && (!artifact_v3_enabled || !key_file_present))
     {
         return Err(ChatError::InvalidConfiguration);
     }
@@ -361,12 +445,20 @@ pub(super) struct HostConnection {
 
 pub struct SidecarSupervisor {
     config: Option<SidecarConfig>,
+    demo_fast: bool,
+    skill_roots: Option<SkillRoots>,
     client: reqwest::Client,
     inner: Mutex<SupervisorState>,
 }
 
 impl SidecarSupervisor {
-    pub fn from_environment() -> Result<Self, ChatError> {
+    pub fn from_environment_for_desktop(
+        demo_fast: bool,
+        skill_roots: Option<SkillRoots>,
+    ) -> Result<Self, ChatError> {
+        if !demo_fast && skill_roots.is_some() {
+            return Err(ChatError::InvalidConfiguration);
+        }
         let config = SidecarConfig::from_environment()?;
         let state = if config.is_some() {
             SidecarState::Stopped
@@ -382,6 +474,8 @@ impl SidecarSupervisor {
             .map_err(|_| ChatError::InvalidConfiguration)?;
         Ok(Self {
             config,
+            demo_fast,
+            skill_roots,
             client,
             inner: Mutex::new(SupervisorState {
                 state,
@@ -401,6 +495,7 @@ impl SidecarSupervisor {
 
     pub async fn start(&self) -> Result<SidecarState, ChatError> {
         let config = self.config.as_ref().ok_or(ChatError::Disabled)?;
+        config.validate_provider_key_file()?;
         self.refresh_child_state().await;
         let mut state = self.inner.lock().await;
         if state.cleanup_unknown {
@@ -438,6 +533,8 @@ impl SidecarSupervisor {
                     prepared
                         .as_ref()
                         .map(|capture| capture.process_manifest.as_path()),
+                    self.demo_fast,
+                    self.skill_roots.as_ref(),
                 ),
             )
             .stdin(Stdio::null())
@@ -1243,6 +1340,45 @@ fn optional_absolute_regular_file(name: &str) -> Result<Option<PathBuf>, ChatErr
         .map_err(|_| ChatError::InvalidConfiguration)
 }
 
+fn optional_owner_only_provider_key_file(name: &str) -> Result<Option<PathBuf>, ChatError> {
+    match std::env::var(name) {
+        Ok(value) if value.is_empty() => Ok(None),
+        Ok(value) => validate_owner_only_provider_key_file(Path::new(&value)).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(ChatError::InvalidConfiguration),
+    }
+}
+
+fn validate_owner_only_provider_key_file(path: &Path) -> Result<PathBuf, ChatError> {
+    if !path.is_absolute() {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    let path_metadata = fs::symlink_metadata(path).map_err(|_| ChatError::InvalidConfiguration)?;
+    if path_metadata.file_type().is_symlink()
+        || !path_metadata.is_file()
+        || path_metadata.uid() != unsafe { libc::geteuid() }
+        || !matches!(path_metadata.mode() & 0o777, 0o400 | 0o600)
+        || path_metadata.len() == 0
+        || path_metadata.len() > MAX_PROVIDER_KEY_FILE_BYTES
+    {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    let file = File::open(path).map_err(|_| ChatError::InvalidConfiguration)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| ChatError::InvalidConfiguration)?;
+    if !metadata.is_file()
+        || metadata.dev() != path_metadata.dev()
+        || metadata.ino() != path_metadata.ino()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || !matches!(metadata.mode() & 0o777, 0o400 | 0o600)
+        || metadata.len() != path_metadata.len()
+    {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    fs::canonicalize(path).map_err(|_| ChatError::InvalidConfiguration)
+}
+
 fn validate_executable(path: &Path) -> Result<PathBuf, ChatError> {
     if !path.is_absolute() {
         return Err(ChatError::InvalidConfiguration);
@@ -1414,8 +1550,16 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
         };
-        let environment = config.environment("019fbd88-cbc3-7bf1-934d-7b05cd693f80", None, None);
+        let environment = config.environment(
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            None,
+            None,
+            false,
+            None,
+        );
         let names = environment
             .iter()
             .map(|(name, _)| *name)
@@ -1431,6 +1575,7 @@ mod tests {
                 "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
                 "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
                 "YIJIE_AGENT_HOST_INSTANCE_NONCE",
+                "YIJIE_AGENT_HOST_PARENT_PID",
                 "PATH",
             ]
         );
@@ -1445,8 +1590,202 @@ mod tests {
                 && value == "019fbd88-cbc3-7bf1-934d-7b05cd693f80"
         }));
         assert!(environment.iter().any(|(name, value)| {
+            *name == AGENT_HOST_PARENT_PID_ENV && value == &std::process::id().to_string()
+        }));
+        assert!(environment.iter().any(|(name, value)| {
             *name == "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED" && value == "true"
         }));
+        assert!(environment.iter().any(|(name, value)| {
+            *name == "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED" && value == "true"
+        }));
+    }
+
+    #[test]
+    fn demo_fast_forwards_exact_profile_and_native_skill_roots_without_bearer() {
+        let config = SidecarConfig {
+            binary: PathBuf::from("/synthetic/host"),
+            host_home: PathBuf::from("/synthetic/home"),
+            port: 18080,
+            codex_binary: None,
+            codex_manifest: None,
+            codex_home: None,
+            test_profile: None,
+            artifact_v3_enabled: false,
+            feat128_s10_profile: false,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
+        };
+        let roots = SkillRoots {
+            bundle_root: PathBuf::from("/Applications/YiJie.app/Contents/Resources/skill-packages"),
+            install_root: PathBuf::from(
+                "/Users/test/Library/Application Support/YiJieAI/skills/installed",
+            ),
+        };
+        let environment = config.environment(
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            None,
+            None,
+            true,
+            Some(&roots),
+        );
+        for (name, expected) in [
+            ("YIJIE_LOCAL_PROFILE", "demo_fast"),
+            (
+                "YIJIE_SKILL_BUNDLE_ROOT",
+                "/Applications/YiJie.app/Contents/Resources/skill-packages",
+            ),
+            (
+                "YIJIE_SKILL_INSTALL_ROOT",
+                "/Users/test/Library/Application Support/YiJieAI/skills/installed",
+            ),
+        ] {
+            assert!(environment.iter().any(|(actual_name, actual_value)| {
+                *actual_name == name && actual_value == expected
+            }));
+        }
+        assert!(!environment.iter().any(|(name, _)| {
+            name.to_ascii_lowercase().contains("bearer")
+                || name.to_ascii_lowercase().contains("token")
+        }));
+    }
+
+    #[test]
+    fn minimax_key_file_path_is_owner_only_revalidated_and_narrowly_forwarded() {
+        let root = private_test_directory("minimax-key-file");
+        let path = root.join("minimax-api-key");
+        fs::write(&path, b"test-only-placeholder\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let canonical = validate_owner_only_provider_key_file(&path).unwrap();
+        let config = SidecarConfig {
+            binary: PathBuf::from("/synthetic/host"),
+            host_home: PathBuf::from("/synthetic/home"),
+            port: 18080,
+            codex_binary: None,
+            codex_manifest: None,
+            codex_home: None,
+            test_profile: None,
+            artifact_v3_enabled: true,
+            feat128_s10_profile: false,
+            image_generation_enabled: true,
+            minimax_api_key_file: Some(canonical.clone()),
+        };
+        assert_eq!(config.validate_provider_key_file(), Ok(()));
+        let environment = config.environment(
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            None,
+            None,
+            false,
+            None,
+        );
+        let provider_entries = environment
+            .iter()
+            .filter(|(name, _)| {
+                matches!(
+                    *name,
+                    FEAT128_IMAGE_GENERATION_ENV | MODEL_PROVIDER_ENV | MINIMAX_API_KEY_FILE_ENV
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(provider_entries.len(), 3);
+        assert_eq!(provider_entries[0].0, FEAT128_IMAGE_GENERATION_ENV);
+        assert_eq!(provider_entries[0].1, "true");
+        assert_eq!(provider_entries[1].0, MODEL_PROVIDER_ENV);
+        assert_eq!(provider_entries[1].1, MINIMAX_PROVIDER_ID);
+        assert_eq!(provider_entries[2].0, MINIMAX_API_KEY_FILE_ENV);
+        assert_eq!(provider_entries[2].1, canonical.to_string_lossy());
+        assert!(!environment
+            .iter()
+            .any(|(name, _)| *name == "YIJIE_MINIMAX_API_KEY"));
+        assert!(!environment
+            .iter()
+            .any(|(name, _)| *name == CHAT_ARTIFACTS_V3_ENV));
+
+        let disabled = SidecarConfig {
+            image_generation_enabled: false,
+            ..config.clone()
+        };
+        let disabled_environment = disabled.environment(
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            None,
+            None,
+            false,
+            None,
+        );
+        assert!(!disabled_environment.iter().any(|(name, _)| {
+            matches!(
+                *name,
+                FEAT128_IMAGE_GENERATION_ENV | MODEL_PROVIDER_ENV | MINIMAX_API_KEY_FILE_ENV
+            )
+        }));
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            config.validate_provider_key_file(),
+            Err(ChatError::InvalidConfiguration)
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).unwrap();
+        assert_eq!(config.validate_provider_key_file(), Ok(()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn minimax_key_file_configuration_rejects_direct_keys_and_unsafe_files() {
+        assert_eq!(
+            validate_minimax_image_generation_configuration(true, true, true, false),
+            Ok(())
+        );
+        assert_eq!(
+            validate_minimax_image_generation_configuration(true, false, true, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_image_generation_configuration(true, true, false, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_image_generation_configuration(false, false, true, false),
+            Ok(())
+        );
+        assert_eq!(
+            validate_minimax_image_generation_configuration(true, true, true, true),
+            Err(ChatError::InvalidConfiguration)
+        );
+
+        let root = private_test_directory("minimax-key-file-invalid");
+        let empty = root.join("empty");
+        fs::write(&empty, b"").unwrap();
+        fs::set_permissions(&empty, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_owner_only_provider_key_file(&empty),
+            Err(ChatError::InvalidConfiguration)
+        );
+
+        let oversized = root.join("oversized");
+        fs::write(
+            &oversized,
+            vec![b'x'; MAX_PROVIDER_KEY_FILE_BYTES as usize + 1],
+        )
+        .unwrap();
+        fs::set_permissions(&oversized, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_owner_only_provider_key_file(&oversized),
+            Err(ChatError::InvalidConfiguration)
+        );
+
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::write(&target, b"test-only-placeholder\n").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(
+            validate_owner_only_provider_key_file(&link),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_owner_only_provider_key_file(Path::new("relative-key")),
+            Err(ChatError::InvalidConfiguration)
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1524,6 +1863,8 @@ mod tests {
             test_profile: Some(profile),
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -1535,6 +1876,8 @@ mod tests {
             nonce,
             Some(&prepared.log_directory),
             Some(&prepared.process_manifest),
+            false,
+            None,
         );
         let names = environment
             .iter()
@@ -1549,6 +1892,7 @@ mod tests {
             "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
             "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
             "YIJIE_AGENT_HOST_INSTANCE_NONCE",
+            "YIJIE_AGENT_HOST_PARENT_PID",
             "PATH",
             "YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED",
             "YIJIE_FEAT126_S10_RUN_ID",
@@ -1600,11 +1944,19 @@ mod tests {
             }),
             artifact_v3_enabled: true,
             feat128_s10_profile: true,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
         };
         let host_root = create_private_directory(&root.join("host")).unwrap();
         let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
         let process_manifest = log_directory.join("process.json");
-        let environment = config.environment(NONCE, Some(&log_directory), Some(&process_manifest));
+        let environment = config.environment(
+            NONCE,
+            Some(&log_directory),
+            Some(&process_manifest),
+            false,
+            None,
+        );
         for (name, value) in [
             ("YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED", "true"),
             ("YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED", "true"),
@@ -1712,9 +2064,13 @@ mod tests {
                 }),
                 artifact_v3_enabled: false,
                 feat128_s10_profile: false,
+                image_generation_enabled: false,
+                minimax_api_key_file: None,
             };
             let supervisor = SidecarSupervisor {
                 config: Some(config),
+                demo_fast: false,
+                skill_roots: None,
                 client: reqwest::Client::builder().no_proxy().build().unwrap(),
                 inner: Mutex::new(SupervisorState {
                     state: SidecarState::Stopped,
@@ -1795,9 +2151,13 @@ mod tests {
             }),
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
         };
         let supervisor = SidecarSupervisor {
             config: Some(config),
+            demo_fast: false,
+            skill_roots: None,
             client: reqwest::Client::builder()
                 .no_proxy()
                 .connect_timeout(Duration::from_millis(250))
@@ -1860,7 +2220,8 @@ mod tests {
         let project = PathBuf::from(
             std::env::var("YIJIE_FEAT128_S10_PROJECT_DIR").expect("test project authority"),
         );
-        let supervisor = SidecarSupervisor::from_environment().expect("exact sidecar profile");
+        let supervisor = SidecarSupervisor::from_environment_for_desktop(false, None)
+            .expect("exact sidecar profile");
         assert_eq!(
             supervisor.start().await.expect("start exact Host child"),
             SidecarState::RuntimeReady
@@ -2150,6 +2511,8 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            image_generation_enabled: false,
+            minimax_api_key_file: None,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -2157,6 +2520,8 @@ mod tests {
             .unwrap();
         let supervisor = SidecarSupervisor {
             config: None,
+            demo_fast: false,
+            skill_roots: None,
             client,
             inner: Mutex::new(SupervisorState {
                 state: SidecarState::Stopped,

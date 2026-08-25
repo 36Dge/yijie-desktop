@@ -21,29 +21,89 @@ const renameValue = ref("");
 const actionPending = ref(false);
 const actionError = ref<string | null>(null);
 let lastDialogTrigger: HTMLElement | null = null;
+let knownProjectIds = new Set<string>();
 
-const sessionsByProject = computed(() => {
+interface ChatHistoryProjectGroup {
+  readonly projectId: string;
+  readonly project: ChatProject | null;
+  readonly label: string;
+  readonly sessions: readonly ChatSession[];
+}
+
+const historyGroups = computed<readonly ChatHistoryProjectGroup[]>(() => {
   const grouped = new Map<string, ChatSession[]>();
   for (const session of chatStore.sessions) {
     const group = grouped.get(session.projectId) ?? [];
     group.push(session);
     grouped.set(session.projectId, group);
   }
-  return grouped;
+  const availableProjectIds = new Set(chatStore.projects.map((project) => project.projectId));
+  const availableGroups = chatStore.projects.map((project) => ({
+    projectId: project.projectId,
+    project,
+    label: project.safeName,
+    sessions: grouped.get(project.projectId) ?? [],
+  }));
+  const removedGroups = [...grouped.entries()]
+    .filter(([projectId]) => !availableProjectIds.has(projectId))
+    .map(([projectId, sessions]) => ({
+      projectId,
+      project: null,
+      label: "项目已移除",
+      sessions,
+    }));
+  return [...availableGroups, ...removedGroups];
+});
+const treeLoading = computed(() => chatStore.phase === "binding" || chatStore.phase === "loading");
+const treeError = computed(() => {
+  if (chatStore.phase === "permission-denied" && !chatStore.hasAction("read_sessions")) {
+    return "无权读取任务记录";
+  }
+  if (chatStore.phase === "resync-required") return "任务记录需要重新同步，请稍后重试";
+  if (chatStore.phase === "unavailable" && historyGroups.value.length === 0) {
+    return "任务记录暂不可用，请稍后重试";
+  }
+  if (chatStore.phase === "unavailable") return "任务记录更新失败，已显示上次读取内容";
+  return null;
 });
 
 watch(
-  () => chatStore.projects,
-  (projects) => {
-    if (expandedProjectIds.value.size > 0) return;
-    expandedProjectIds.value = new Set(projects.map((project) => project.projectId));
+  historyGroups,
+  (groups) => {
+    const currentProjectIds = new Set(groups.map((group) => group.projectId));
+    const nextExpanded = new Set(
+      [...expandedProjectIds.value].filter((projectId) => currentProjectIds.has(projectId)),
+    );
+    for (const projectId of currentProjectIds) {
+      if (!knownProjectIds.has(projectId)) nextExpanded.add(projectId);
+    }
+    knownProjectIds = currentProjectIds;
+    expandedProjectIds.value = nextExpanded;
   },
   { immediate: true },
 );
 
-function projectSessions(projectId: string): readonly ChatSession[] {
-  return sessionsByProject.value.get(projectId) ?? [];
-}
+watch(
+  () => chatStore.context?.allowedActions,
+  () => {
+    let revoked = false;
+    if (renameSession.value && !chatStore.hasAction("rename_session")) {
+      renameSession.value = null;
+      revoked = true;
+    }
+    if (deleteSession.value && !chatStore.hasAction("delete_session")) {
+      deleteSession.value = null;
+      revoked = true;
+    }
+    if (removeProjectTarget.value && !chatStore.hasAction("remove_project")) {
+      removeProjectTarget.value = null;
+      revoked = true;
+    }
+    if (!revoked) return;
+    actionError.value = "操作权限已更新，请重新打开菜单";
+    void restoreDialogTrigger();
+  },
+);
 
 function toggleProject(projectId: string): void {
   const next = new Set(expandedProjectIds.value);
@@ -53,20 +113,28 @@ function toggleProject(projectId: string): void {
 }
 
 function projectMenuOptions(project: ChatProject): DropdownOption[] {
-  return [
-    { label: project.pinnedAt === null ? "置顶项目" : "取消置顶", key: "pin" },
-    { type: "divider", key: "divider" },
-    { label: "移除", key: "remove" },
-  ];
+  const options: DropdownOption[] = [];
+  if (chatStore.hasAction("pin_project")) {
+    options.push({ label: project.pinnedAt === null ? "置顶项目" : "取消置顶", key: "pin" });
+  }
+  if (chatStore.hasAction("remove_project")) {
+    if (options.length > 0) options.push({ type: "divider", key: "divider" });
+    options.push({ label: "移除", key: "remove" });
+  }
+  return options;
 }
 
 function sessionMenuOptions(session: ChatSession): DropdownOption[] {
-  return [
-    { label: "重命名", key: "rename" },
-    { label: session.pinnedAt === null ? "置顶" : "取消置顶", key: "pin" },
-    { type: "divider", key: "divider" },
-    { label: "永久删除", key: "delete" },
-  ];
+  const options: DropdownOption[] = [];
+  if (chatStore.hasAction("rename_session")) options.push({ label: "重命名", key: "rename" });
+  if (chatStore.hasAction("pin_session")) {
+    options.push({ label: session.pinnedAt === null ? "置顶" : "取消置顶", key: "pin" });
+  }
+  if (chatStore.hasAction("delete_session")) {
+    if (options.length > 0) options.push({ type: "divider", key: "divider" });
+    options.push({ label: "永久删除", key: "delete" });
+  }
+  return options;
 }
 
 async function openSession(session: ChatSession): Promise<void> {
@@ -186,39 +254,41 @@ async function confirmRemoveProject(): Promise<void> {
 </script>
 
 <template>
-  <section class="chat-tree" aria-label="聊天项目与最近任务">
+  <section class="chat-tree" aria-label="任务记录：项目与对话" :aria-busy="treeLoading">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
-    <p v-if="chatStore.phase === 'binding' || chatStore.phase === 'loading'" class="chat-tree__state" role="status">
+    <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
+    <p v-if="treeLoading" class="chat-tree__state" role="status">
       正在读取本地任务…
     </p>
-    <p v-else-if="chatStore.projects.length === 0" class="chat-tree__state">尚未添加聊天项目</p>
+    <p v-else-if="historyGroups.length === 0 && !treeError" class="chat-tree__state">暂无任务记录</p>
 
-    <ul v-else class="chat-tree__projects">
-      <li v-for="project in chatStore.projects" :key="project.projectId" class="chat-tree__project">
+    <ul v-else-if="historyGroups.length > 0" class="chat-tree__projects">
+      <li v-for="group in historyGroups" :key="group.projectId" class="chat-tree__project">
         <div class="chat-tree__project-row">
           <button
             class="chat-tree__expand"
             type="button"
-            :aria-expanded="expandedProjectIds.has(project.projectId)"
-            :aria-label="`${expandedProjectIds.has(project.projectId) ? '折叠' : '展开'}项目 ${project.safeName}`"
-            @click="toggleProject(project.projectId)"
+            :aria-expanded="expandedProjectIds.has(group.projectId)"
+            :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
+            @click="toggleProject(group.projectId)"
           >
-            <YjIcon :name="expandedProjectIds.has(project.projectId) ? 'chevronDown' : 'chevronRight'" size="xs" />
+            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'chevronDown' : 'chevronRight'" size="xs" />
           </button>
-          <YjIcon :name="expandedProjectIds.has(project.projectId) ? 'folderOpen' : 'folder'" size="sm" tone="muted" />
-          <span class="chat-tree__project-name" :title="project.safeName">{{ project.safeName }}</span>
-          <YjIcon v-if="project.pinnedAt !== null" name="pin" size="xs" tone="muted" />
+          <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" size="sm" tone="muted" />
+          <span class="chat-tree__project-name" :title="group.label">{{ group.label }}</span>
+          <YjIcon v-if="group.project?.pinnedAt !== null && group.project?.pinnedAt !== undefined" name="pin" size="xs" tone="muted" />
           <n-dropdown
+            v-if="group.project && projectMenuOptions(group.project).length > 0"
             trigger="click"
             placement="bottom-end"
-            :options="projectMenuOptions(project)"
+            :options="projectMenuOptions(group.project)"
             :disabled="actionPending"
-            @select="handleProjectAction(project, String($event))"
+            @select="handleProjectAction(group.project, String($event))"
           >
             <button
               class="chat-tree__more"
               type="button"
-              :aria-label="`项目 ${project.safeName} 的操作菜单`"
+              :aria-label="`项目 ${group.label} 的操作菜单`"
               @click.stop="rememberTrigger"
             >
               <YjIcon name="more" size="sm" />
@@ -226,8 +296,8 @@ async function confirmRemoveProject(): Promise<void> {
           </n-dropdown>
         </div>
 
-        <ul v-if="expandedProjectIds.has(project.projectId)" class="chat-tree__sessions">
-          <li v-for="session in projectSessions(project.projectId)" :key="session.sessionId" class="chat-tree__session">
+        <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
+          <li v-for="session in group.sessions" :key="session.sessionId" class="chat-tree__session">
             <button
               class="chat-tree__session-link"
               :class="{ 'chat-tree__session-link--active': currentPath === `/chat/${session.sessionId}` }"
@@ -242,6 +312,7 @@ async function confirmRemoveProject(): Promise<void> {
             </button>
             <YjIcon v-if="session.pinnedAt !== null" name="pin" size="xs" tone="muted" />
             <n-dropdown
+              v-if="currentPath === `/chat/${session.sessionId}` && sessionMenuOptions(session).length > 0"
               trigger="click"
               placement="bottom-end"
               :options="sessionMenuOptions(session)"
@@ -258,7 +329,7 @@ async function confirmRemoveProject(): Promise<void> {
               </button>
             </n-dropdown>
           </li>
-          <li v-if="projectSessions(project.projectId).length === 0" class="chat-tree__empty-session">暂无任务</li>
+          <li v-if="group.sessions.length === 0" class="chat-tree__empty-session">暂无对话</li>
         </ul>
       </li>
     </ul>
@@ -323,7 +394,14 @@ async function confirmRemoveProject(): Promise<void> {
 
 <style scoped>
 .chat-tree {
-  padding: var(--yj-space-1) 0 var(--yj-space-2) var(--yj-layout-chat-sidebar-indent);
+  min-height: 0;
+  flex: 1;
+  padding: var(--yj-space-1) var(--yj-space-1) var(--yj-space-2) var(--yj-layout-chat-sidebar-indent);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .chat-tree__projects,

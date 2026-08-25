@@ -8,7 +8,9 @@ import {
 import { createPermissionLifecycle, type PermissionLifecycle } from "./authorization/permission-lifecycle";
 import { authoritativePermissionUiEnabled } from "./authorization/permission-ui-config";
 import { localChatUiEnabled } from "./authorization/chat-ui-config";
+import { skillMarketplaceUiEnabled } from "./authorization/skill-marketplace-ui-config";
 import { createChatPermissionLifecycle } from "./authorization/chat-permission-lifecycle";
+import { demoFastLocalProfileEnabled } from "./authorization/local-profile";
 import {
   darkTheme,
   type GlobalThemeOverrides,
@@ -39,6 +41,7 @@ const permissionSnapshot = computed(() => ({
   enabled: authoritativePermissionUiEnabled,
   ready: permissionStore.isReady,
   chatUiEnabled: localChatUiEnabled,
+  skillMarketplaceUiEnabled,
   hasCapability: permissionStore.hasCapability,
 }));
 
@@ -47,16 +50,17 @@ async function synchronizeChatAuthority(): Promise<void> {
     ready: permissionStore.isReady,
     tenantId: permissionStore.selectedTenantId,
     authorizationRevision: permissionStore.authorizationRevision,
+    expiresAt: permissionStore.expiresAt,
     canCreateTask: permissionStore.hasCapability("task.create"),
     canReadTask: permissionStore.hasCapability("task.read"),
   });
 }
 
 async function synchronizeChatRoute(routeChanged: boolean): Promise<void> {
-  const epoch = ++routeSelectionEpoch;
-  if (!localChatUiEnabled || chatStore.context === null || !chatStore.isReady) return;
+  if (!localChatUiEnabled || chatStore.context === null) return;
+  const epoch = routeSelectionEpoch;
   if (route.path === "/chat") {
-    if (!routeChanged && chatStore.selectedSessionId !== null) return;
+    if (!routeChanged && (chatStore.selectedSessionId !== null || !chatStore.isReady)) return;
     const newDraftAlreadySelected =
       chatStore.selectedSessionId === null &&
       chatStore.draftTarget?.type === "new" &&
@@ -66,6 +70,7 @@ async function synchronizeChatRoute(routeChanged: boolean): Promise<void> {
     }
     return;
   }
+  if (!chatStore.isReady) return;
   if (!route.path.startsWith("/chat/")) return;
   const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : "";
   if (!opaqueSessionIdPattern.test(sessionId)) {
@@ -82,7 +87,6 @@ async function synchronizeChatRoute(routeChanged: boolean): Promise<void> {
     chatStore.lastErrorCode === "chat_resource_not_found" ||
     chatStore.lastErrorCode === "chat_project_invalid"
   ) {
-    await chatStore.clearSelectedSession();
     await router.replace("/chat");
   } else if (chatStore.lastErrorCode === "chat_context_invalid") {
     await router.replace("/settings");
@@ -103,17 +107,12 @@ function handleColorSchemeChange(event: MediaQueryListEvent): void {
   applyColorScheme(event.matches);
 }
 
-async function routeProtectedViewToRecovery(): Promise<void> {
-  if (requiredCapabilityForPath(route.path) !== null) {
-    await router.replace("/settings");
-  }
-}
-
 watch(
   [
     () => route.path,
     () => permissionStore.phase,
     () => permissionStore.authorizationRevision,
+    () => permissionStore.expiresAt,
     () => permissionStore.capabilities,
   ],
   async () => {
@@ -142,6 +141,8 @@ watch(
   ],
   (current, previous) => {
     const routeChanged = current[0] !== previous[0] || current[1] !== previous[1];
+    const contextChanged = current[2] !== previous[2];
+    if (routeChanged || contextChanged) routeSelectionEpoch += 1;
     void synchronizeChatRoute(routeChanged);
   },
   { flush: "post" },
@@ -150,7 +151,11 @@ watch(
 watch(
   () => chatStore.deleteDisposition,
   async (disposition) => {
-    if (disposition?.kind === "navigate" && route.path !== disposition.path) {
+    if (
+      disposition?.kind === "navigate" &&
+      route.path === `/chat/${disposition.deletedSessionId}` &&
+      route.path !== disposition.path
+    ) {
       await router.replace(disposition.path);
     }
   },
@@ -176,8 +181,8 @@ onMounted(() => {
   if (authoritativePermissionUiEnabled) {
     permissionLifecycle = createPermissionLifecycle(
       permissionStore,
-      routeProtectedViewToRecovery,
       document,
+      !demoFastLocalProfileEnabled,
     );
     void permissionLifecycle.start();
   }

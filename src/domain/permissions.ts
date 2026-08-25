@@ -1,5 +1,6 @@
 export const KNOWN_CAPABILITIES = [
   "knowledge.read",
+  "plugin.manage",
   "plugin.read",
   "schedule.read",
   "store.read",

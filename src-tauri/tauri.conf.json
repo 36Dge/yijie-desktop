@@ -23,7 +23,7 @@
       "capabilities": ["default"],
       "csp": {
         "default-src": "'self' customprotocol: asset:",
-        "connect-src": "ipc: http://ipc.localhost http://localhost:8080 http://127.0.0.1:8080 http://localhost:18080 http://127.0.0.1:18080 ws://localhost:1421 ws://127.0.0.1:1421",
+        "connect-src": "ipc: http://ipc.localhost http://localhost:8080 http://127.0.0.1:8080 ws://localhost:1421 ws://127.0.0.1:1421",
         "font-src": "'self' data:",
         "img-src": "'self' asset: http://asset.localhost blob: data: yijie-artifact-preview:",
         "media-src": "'self' yijie-artifact-video:",

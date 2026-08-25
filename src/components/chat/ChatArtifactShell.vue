@@ -50,6 +50,12 @@ const provenanceLabel = computed(() => ({
   tool: "工具生成",
 })[props.artifact.provenance]);
 const displayName = computed(() => props.artifact.displayName ?? `未命名${kindPresentation.value.label}`);
+const failureGuidance = computed(() => {
+  if (props.artifact.status !== "failed") return null;
+  return props.artifact.retryable
+    ? `${kindPresentation.value.label}生成失败，可在输入框重新提交需求。`
+    : `${kindPresentation.value.label}生成失败，请调整需求后重新提交。`;
+});
 const busy = computed(() =>
   props.artifact.status === "announced" ||
   props.artifact.status === "generating" ||
@@ -142,6 +148,15 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
         :processing="busy"
       />
     </div>
+
+    <p
+      v-if="failureGuidance"
+      class="artifact-shell__failure-guidance"
+      role="alert"
+      data-testid="artifact-failure-guidance"
+    >
+      {{ failureGuidance }}
+    </p>
   </article>
 </template>
 
@@ -218,6 +233,11 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
 .artifact-shell__stage::before { content: "·"; margin-right: var(--yj-space-2); }
 .artifact-shell__percent { font-variant-numeric: tabular-nums; }
 .artifact-shell__progress { width: 100%; }
+.artifact-shell__failure-guidance {
+  margin: 0;
+  color: var(--yj-color-error);
+  font-size: var(--yj-font-size-caption);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .artifact-shell { transition: none; }

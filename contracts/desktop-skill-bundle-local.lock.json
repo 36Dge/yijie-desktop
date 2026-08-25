@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "environment": "local",
+    "local_profile": "demo_fast"
+  },
+  "contracts": {
+    "repository": "https://github.com/36Dge/yijie-contracts.git",
+    "full_commit": "d6dff903e0c12b6a5e69599df1e33ef46d8bea6b",
+    "schema_path": "jsonschema/skills/skill-bundle-manifest-v1.schema.json",
+    "schema_sha256": "d86185a1d5f4d9a136c88b679d50ac3e83bcc2b722eee39cba674c5be3b88469"
+  },
+  "producer": {
+    "repository": "https://github.com/36Dge/yijie-skills.git",
+    "head_commit": "c0aaba17f9ba5534e133b67b9eac43bb7210694f",
+    "package_command": "pnpm --dir ../yijie-skills package",
+    "contract_lock_path": "contracts/lock.json"
+  },
+  "bundle": {
+    "bundle_id": "yijie.desktop.skill-packages",
+    "bundle_version": "0.1.0",
+    "distribution_channel": "local-development",
+    "manifest_path": "dist/skill-packages/bundle-manifest.json",
+    "manifest_sha256": "091de202783ae2658d3a8ce3c0ceaedfef023d71fa84c94ff040e72c9421bb2c",
+    "source_revision_kind": "git-commit",
+    "source_revision": "c0aaba17f9ba5534e133b67b9eac43bb7210694f",
+    "source_tree_sha256": "df1fd6c2534fde5f5661bf1004b0a65700df430990e042ce7f9e2f2552b71418",
+    "skills": [
+      {
+        "id": "yijie.content-marketing.copywriting",
+        "version": "0.1.0",
+        "archive_path": "packages/yijie.content-marketing.copywriting-0.1.0.zip",
+        "archive_sha256": "987dae7003064fa1d0b00a37be0f130eb973a55f966fbf43faf2ed8af84c5138",
+        "archive_size_bytes": 7255,
+        "authorization_scope": "local-development"
+      }
+    ]
+  },
+  "desktop_resource": {
+    "generated_root": ".local/skill-packages",
+    "tauri_overlay": "src-tauri/tauri.demo-fast.conf.json",
+    "bundle_target": "skill-packages"
+  },
+  "release_boundary": {
+    "default_tauri_config": "src-tauri/tauri.conf.json",
+    "default_includes_skill_bundle": false,
+    "desktop_release_required_channel": "desktop-release",
+    "desktop_release_required_authorization_scope": "desktop-distribution",
+    "status": "blocked_pending_license"
+  }
+}

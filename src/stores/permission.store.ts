@@ -10,6 +10,7 @@ import type {
 } from "../domain/permissions";
 
 const STORE_ID = "permissions";
+const PROJECTION_REFRESH_LEAD_MS = 30_000;
 
 function phaseForFailure(kind: PermissionFailureKind): PermissionPhase {
   return kind === "aborted" ? "idle" : kind;
@@ -54,13 +55,17 @@ export function createPermissionStoreDefinition(
       capabilities.value = Object.freeze([]);
     }
 
-    function startRequest(nextPhase: PermissionPhase): {
+    function startRequest(nextPhase: PermissionPhase, preserveProjection = false): {
       epoch: number;
       controller: AbortController;
     } {
       activeController?.abort();
-      phase.value = nextPhase;
-      clearProjection();
+      if (!preserveProjection) {
+        phase.value = nextPhase;
+        clearProjection();
+      } else {
+        clearExpiryTimer();
+      }
       requestEpoch += 1;
       const controller = new AbortController();
       activeController = controller;
@@ -109,7 +114,10 @@ export function createPermissionStoreDefinition(
       clearExpiryTimer();
       const scheduledEpoch = requestEpoch;
       const scheduledTenant = projection.tenantId;
-      const delay = Math.max(0, projection.expiresAtEpochMs - Date.now());
+      const delay = Math.max(
+        0,
+        projection.expiresAtEpochMs - Date.now() - PROJECTION_REFRESH_LEAD_MS,
+      );
       expiryTimer = setTimeout(() => {
         expiryTimer = null;
         if (
@@ -136,7 +144,12 @@ export function createPermissionStoreDefinition(
         return;
       }
 
-      const { epoch, controller } = startRequest("loading");
+      const preserveProjection =
+        selectedTenantId.value === selected.tenantId &&
+        isReady.value &&
+        expiresAtEpochMs !== null &&
+        expiresAtEpochMs > Date.now();
+      const { epoch, controller } = startRequest("loading", preserveProjection);
       selectedTenantId.value = selected.tenantId;
       try {
         const projection = await client.getMyCapabilities(selected.tenantId, controller.signal);
