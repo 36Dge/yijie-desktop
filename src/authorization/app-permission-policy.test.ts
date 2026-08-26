@@ -66,6 +66,23 @@ describe("app permission policy", () => {
     })).toBe(false);
   });
 
+  it("FEAT-150 protects the local store showcase with store.read", () => {
+    const allowed = snapshot(["store.read"]);
+    const denied = snapshot(["task.read"]);
+
+    expect(requiredCapabilityForPath("/store")).toBe("store.read");
+    expect(canRenderProtectedPath("/store", allowed)).toBe(true);
+    expect(canRenderProtectedPath("/store", denied)).toBe(false);
+    expect(canRenderProtectedPath("/store", {
+      ...allowed,
+      storeShowcaseUiEnabled: false,
+    })).toBe(false);
+    expect(resolveNavigationVisibility({
+      ...allowed,
+      storeShowcaseUiEnabled: false,
+    }).store).toBe(false);
+  });
+
   it.each([
     [["task.create", "task.read"] as const, "/chat"],
     [["task.read"] as const, "/settings"],

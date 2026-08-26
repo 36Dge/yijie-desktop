@@ -19,6 +19,21 @@ fail() {
   exit 1
 }
 
+image_generation_enabled="true"
+stable_api_only="false"
+case "$#" in
+  0) ;;
+  1)
+    [[ "$1" == "--stable-api-only" ]] || fail "unsupported arguments; expected no arguments or --stable-api-only"
+    image_generation_enabled="false"
+    stable_api_only="true"
+    runtime_root="$desktop_root/.local/feat131-stable"
+    host_home="$runtime_root/host-home"
+    codex_home="$runtime_root/codex-home"
+    ;;
+  *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
+esac
+
 [[ -x "$codex_binary" ]] || fail "Codex Runtime binary is missing"
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
@@ -42,6 +57,19 @@ fi
   cd "$host_root"
   go build -trimpath -o "$host_binary" ./cmd/desktop-host
 )
+
+if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
+  fail "loopback port $host_port became busy while preparing the local Demo"
+fi
+
+if [[ "$stable_api_only" == "true" ]]; then
+  pnpm tauri:build:demo-fast:stable
+  bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop"
+  [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "stable Desktop app bundle is missing"
+  launch_command=("$bundle_binary")
+else
+  launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)
+fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
@@ -71,7 +99,11 @@ exec env \
   -u YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED \
   -u YIJIE_FEAT128_SYNTHETIC_ENABLED \
   -u YIJIE_FEAT128_SYNTHETIC_MANIFEST \
+  -u YIJIE_MODEL_PROVIDER \
   -u YIJIE_MINIMAX_API_KEY \
+  -u YIJIE_MINIMAX_API_KEY_FILE \
+  -u YIJIE_FEAT128_IMAGE_GENERATION_ENABLED \
+  -u YIJIE_FEAT131_STABLE_ENTRY \
   -u YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \
@@ -89,12 +121,14 @@ exec env \
   YIJIE_CHAT_LOCAL_OWNER_USER_ID=12500000-0000-4000-8000-000000000001 \
   YIJIE_CHAT_LOCAL_TENANT_ID=12500000-0000-4000-8000-100000000001 \
   YIJIE_CHAT_ARTIFACTS_V3_ENABLED=true \
-  YIJIE_FEAT128_IMAGE_GENERATION_ENABLED=true \
+  YIJIE_MODEL_PROVIDER=minimax \
   YIJIE_MINIMAX_API_KEY_FILE="$provider_key_file" \
+  YIJIE_FEAT128_IMAGE_GENERATION_ENABLED="$image_generation_enabled" \
+  YIJIE_FEAT131_STABLE_ENTRY="$stable_api_only" \
   YIJIE_AGENT_HOST_BINARY="$host_binary" \
   YIJIE_AGENT_HOST_HOME="$host_home" \
   YIJIE_AGENT_HOST_PORT="$host_port" \
   YIJIE_CODEX_BINARY="$codex_binary" \
   YIJIE_CODEX_MANIFEST="$codex_manifest" \
   YIJIE_CODEX_HOME="$codex_home" \
-  pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json
+  "${launch_command[@]}"

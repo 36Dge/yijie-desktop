@@ -5,6 +5,7 @@ import { resolveNavigationVisibility } from "../../authorization/app-permission-
 import { authoritativePermissionUiEnabled } from "../../authorization/permission-ui-config";
 import { localChatUiEnabled } from "../../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
+import { storeShowcaseUiEnabled } from "../../authorization/store-showcase-ui-config";
 import { resolveAppNavigation } from "../../navigation/app-nav";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -26,6 +27,7 @@ const navigationEntries = computed(() =>
       ready: permissionStore.isReady,
       chatUiEnabled: localChatUiEnabled,
       skillMarketplaceUiEnabled,
+      storeShowcaseUiEnabled,
       hasCapability: permissionStore.hasCapability,
     }),
   ),

@@ -125,8 +125,8 @@
       { "path": "src-tauri/src/native_auth/runtime.rs", "sha256": "778a8a0305f0bb0eefc0d5f25ecaf18103b94ffe0ca33f1889035af8e6f18c1f" },
       { "path": "src-tauri/src/chat/host_bridge.rs", "sha256": "54a99dd0bab6b5570219114cb910caeaf9c759aabefb46a964945a8510642425" },
       { "path": "src-tauri/src/chat/host_domain.rs", "sha256": "35955038bb31eb17955a47eee8fad02895c2d798288dd3e98db10f2347687bf6" },
-      { "path": "src-tauri/src/chat/sidecar.rs", "sha256": "9d9cea204a4e9235d1242a5fdac06eb1babdebce1f0fbdfde7ba8ae153ff08b3" },
-      { "path": "src-tauri/src/lib.rs", "sha256": "bc5ff5cca5c38fe1b9eee7dcb838b03dec2c086d71f753d9d4ca224677ef7667" }
+      { "path": "src-tauri/src/chat/sidecar.rs", "sha256": "bb5e71e18bdf17eada1266980fff61293780f011a4adae4da5970c05052a3ce5" },
+      { "path": "src-tauri/src/lib.rs", "sha256": "2d69c1399a919429d23f26eaa14515998adfbaf29820eff09d2dec95550925cc" }
     ],
     "approved_rust_generator": "N/A",
     "generator_rationale": "No Rust OpenAPI generator is approved for the Desktop native boundary; exact-source fixtures and a reviewed closed adapter are required."

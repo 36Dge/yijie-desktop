@@ -1,0 +1,137 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureFamily": "feat131-desktop-replay-v1",
+  "referenceAppVersion": "26.818.61809",
+  "referenceAppBuild": "7019",
+  "scenarioId": "GS-013",
+  "provenance": "synthetic",
+  "coveredVariants": ["missing-delta"],
+  "fixedNowEpochMs": 1787702400000,
+  "tenantSelector": "feat131-synthetic-local",
+  "ids": {
+    "contextId": "019c1a00-0000-7000-8000-000000000303",
+    "projectId": "019c1a00-0000-7000-8000-000000000309",
+    "sessionId": "019c1a00-0000-7000-8000-000000000305",
+    "turnId": "019c1a00-0000-7000-8000-000000000307",
+    "subscriptionIds": [
+      "019c1a00-0000-7000-8000-00000000030a",
+      "019c1a00-0000-7000-8000-00000000030b"
+    ]
+  },
+  "resyncSnapshots": [
+    {
+      "session": {
+        "sessionId": "019c1a00-0000-7000-8000-000000000305",
+        "projectId": "019c1a00-0000-7000-8000-000000000309",
+        "title": "合成序列恢复场景",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1787702400,
+        "latestTurnStatus": null,
+        "projectAvailable": true
+      },
+      "history": { "turns": [], "nextCursor": null },
+      "cleanup": null
+    },
+    {
+      "session": {
+        "sessionId": "019c1a00-0000-7000-8000-000000000305",
+        "projectId": "019c1a00-0000-7000-8000-000000000309",
+        "title": "合成序列恢复场景",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1787702403,
+        "latestTurnStatus": "completed",
+        "projectAvailable": true
+      },
+      "history": {
+        "turns": [
+          {
+            "turnId": "019c1a00-0000-7000-8000-000000000307",
+            "status": "completed",
+            "terminalAt": 1787702403,
+            "reasoningStatus": "unavailable",
+            "reasoningReasonCode": "projection_recovered",
+            "messages": [
+              {
+                "messageId": "019c1a00-0000-7000-8000-000000000321",
+                "role": "assistant",
+                "content": "已从合成权威快照恢复。",
+                "contentBlocks": [
+                  { "type": "text", "text": "已从合成权威快照恢复。" }
+                ],
+                "status": "completed",
+                "ordinal": 0,
+                "createdAt": 1787702403000
+              }
+            ],
+            "reasoning": []
+          }
+        ],
+        "nextCursor": null
+      },
+      "cleanup": null
+    }
+  ],
+  "steps": [
+    {
+      "event": {
+        "schemaVersion": 1,
+        "subscriptionId": "019c1a00-0000-7000-8000-00000000030a",
+        "contextId": "019c1a00-0000-7000-8000-000000000303",
+        "sessionId": "019c1a00-0000-7000-8000-000000000305",
+        "turnId": "019c1a00-0000-7000-8000-000000000307",
+        "projectionSequence": "1",
+        "eventId": "019c1a00-0000-7000-8000-000000000311",
+        "kind": "assistant_append",
+        "payload": { "text": "第一段合成输出。" }
+      },
+      "expect": {
+        "phase": "streaming",
+        "selectedSessionId": "019c1a00-0000-7000-8000-000000000305",
+        "liveAssistantText": "第一段合成输出。",
+        "liveReasoningTexts": [],
+        "liveTurnStatus": null,
+        "historyAssistantText": null,
+        "historyTurnStatus": null,
+        "lastErrorCode": null,
+        "controlPlaneState": "bound"
+      }
+    },
+    {
+      "event": {
+        "schemaVersion": 1,
+        "subscriptionId": "019c1a00-0000-7000-8000-00000000030a",
+        "contextId": "019c1a00-0000-7000-8000-000000000303",
+        "sessionId": "019c1a00-0000-7000-8000-000000000305",
+        "turnId": "019c1a00-0000-7000-8000-000000000307",
+        "projectionSequence": "3",
+        "eventId": "019c1a00-0000-7000-8000-000000000313",
+        "kind": "assistant_append",
+        "payload": { "text": "此段因序列缺口不应被采用。" }
+      },
+      "expect": {
+        "phase": "resyncing",
+        "selectedSessionId": "019c1a00-0000-7000-8000-000000000305",
+        "liveAssistantText": "",
+        "liveReasoningTexts": [],
+        "liveTurnStatus": null,
+        "historyAssistantText": null,
+        "historyTurnStatus": null,
+        "lastErrorCode": null,
+        "controlPlaneState": "bound"
+      }
+    }
+  ],
+  "expectedAfterSettle": {
+    "phase": "ready",
+    "selectedSessionId": "019c1a00-0000-7000-8000-000000000305",
+    "liveAssistantText": "",
+    "liveReasoningTexts": [],
+    "liveTurnStatus": "completed",
+    "historyAssistantText": "已从合成权威快照恢复。",
+    "historyTurnStatus": "completed",
+    "lastErrorCode": null,
+    "controlPlaneState": "bound"
+  }
+}

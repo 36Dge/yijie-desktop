@@ -15,6 +15,7 @@ import {
 import { authoritativePermissionUiEnabled } from "../authorization/permission-ui-config";
 import { localChatUiEnabled } from "../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../authorization/skill-marketplace-ui-config";
+import { storeShowcaseUiEnabled } from "../authorization/store-showcase-ui-config";
 import type { KnownCapability } from "../domain/permissions";
 import { usePermissionStore } from "../stores/permission.store";
 
@@ -22,6 +23,7 @@ const RootRoutePage: Component = { render: () => null };
 
 export interface AppPageLoaders {
   chat: () => Promise<Component>;
+  store: () => Promise<Component>;
   plugins: () => Promise<Component>;
   settings: () => Promise<Component>;
   accessDenied: () => Promise<Component>;
@@ -29,6 +31,7 @@ export interface AppPageLoaders {
 
 const APP_PAGE_LOADERS: AppPageLoaders = {
   chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
+  store: async () => (await import("../pages/store/StorePage.vue")).default,
   plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
@@ -68,6 +71,7 @@ export function createAppRouteRecords(
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
   chatUiEnabled = localChatUiEnabled,
   skillUiEnabled = skillMarketplaceUiEnabled,
+  storeUiEnabled = storeShowcaseUiEnabled,
 ): readonly RouteRecordRaw[] {
   const records: RouteRecordRaw[] = [
     {
@@ -104,6 +108,15 @@ export function createAppRouteRecords(
     meta: {
       navKey: "plugin",
       documentTitle: "Skill 广场 · 易界 AI",
+    },
+  });
+  if (storeUiEnabled) records.push({
+    path: "/store",
+    name: "store",
+    component: pageLoaders.store,
+    meta: {
+      navKey: "store",
+      documentTitle: "我的店铺 · 易界 AI",
     },
   });
   records.push(
@@ -151,10 +164,11 @@ export function createAppRouter(
   pageLoaders: AppPageLoaders = APP_PAGE_LOADERS,
   chatUiEnabled = localChatUiEnabled,
   skillUiEnabled = skillMarketplaceUiEnabled,
+  storeUiEnabled = storeShowcaseUiEnabled,
 ) {
   const appRouter = createRouter({
     history,
-    routes: createAppRouteRecords(pageLoaders, chatUiEnabled, skillUiEnabled),
+    routes: createAppRouteRecords(pageLoaders, chatUiEnabled, skillUiEnabled, storeUiEnabled),
   });
 
   appRouter.beforeEach(async (route) => {
@@ -169,6 +183,9 @@ export function createAppRouter(
       return { path: "/settings", replace: true };
     }
     if (!skillUiEnabled && route.path === "/plugins") {
+      return { path: "/settings", replace: true };
+    }
+    if (!storeUiEnabled && route.path === "/store") {
       return { path: "/settings", replace: true };
     }
 

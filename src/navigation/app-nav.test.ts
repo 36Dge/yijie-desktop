@@ -38,6 +38,7 @@ describe("app navigation", () => {
         .map((item) => ({ key: item.key, to: item.to })),
     ).toEqual([
       { key: "newTask", to: "/chat" },
+      { key: "store", to: "/store" },
       { key: "plugin", to: "/plugins" },
       { key: "settings", to: "/settings" },
     ]);

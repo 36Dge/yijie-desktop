@@ -1,0 +1,112 @@
+{
+  "fixtureSchemaVersion": 1,
+  "fixtureFamily": "feat131-desktop-replay-v1",
+  "referenceAppVersion": "26.818.61809",
+  "referenceAppBuild": "7019",
+  "scenarioId": "GS-012",
+  "provenance": "synthetic",
+  "coveredVariants": ["resync-required", "recovered"],
+  "fixedNowEpochMs": 1787702400000,
+  "tenantSelector": "feat131-synthetic-local",
+  "ids": {
+    "contextId": "019c1a00-0000-7000-8000-000000000203",
+    "projectId": "019c1a00-0000-7000-8000-000000000209",
+    "sessionId": "019c1a00-0000-7000-8000-000000000205",
+    "turnId": "019c1a00-0000-7000-8000-000000000207",
+    "subscriptionIds": [
+      "019c1a00-0000-7000-8000-00000000020a",
+      "019c1a00-0000-7000-8000-00000000020b"
+    ]
+  },
+  "resyncSnapshots": [
+    {
+      "session": {
+        "sessionId": "019c1a00-0000-7000-8000-000000000205",
+        "projectId": "019c1a00-0000-7000-8000-000000000209",
+        "title": "合成恢复场景",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1787702400,
+        "latestTurnStatus": null,
+        "projectAvailable": true
+      },
+      "history": { "turns": [], "nextCursor": null },
+      "cleanup": null
+    },
+    {
+      "session": {
+        "sessionId": "019c1a00-0000-7000-8000-000000000205",
+        "projectId": "019c1a00-0000-7000-8000-000000000209",
+        "title": "合成恢复场景",
+        "titleSource": "fallback",
+        "pinnedAt": null,
+        "lastActivityAt": 1787702402,
+        "latestTurnStatus": null,
+        "projectAvailable": true
+      },
+      "history": { "turns": [], "nextCursor": null },
+      "cleanup": null
+    }
+  ],
+  "steps": [
+    {
+      "event": {
+        "schemaVersion": 1,
+        "subscriptionId": "019c1a00-0000-7000-8000-00000000020a",
+        "contextId": "019c1a00-0000-7000-8000-000000000203",
+        "sessionId": "019c1a00-0000-7000-8000-000000000205",
+        "turnId": "019c1a00-0000-7000-8000-000000000207",
+        "projectionSequence": "1",
+        "eventId": "019c1a00-0000-7000-8000-000000000211",
+        "kind": "assistant_append",
+        "payload": { "text": "正在处理合成恢复场景。" }
+      },
+      "expect": {
+        "phase": "streaming",
+        "selectedSessionId": "019c1a00-0000-7000-8000-000000000205",
+        "liveAssistantText": "正在处理合成恢复场景。",
+        "liveReasoningTexts": [],
+        "liveTurnStatus": null,
+        "historyAssistantText": null,
+        "historyTurnStatus": null,
+        "lastErrorCode": null,
+        "controlPlaneState": "bound"
+      }
+    },
+    {
+      "event": {
+        "schemaVersion": 1,
+        "subscriptionId": "019c1a00-0000-7000-8000-00000000020a",
+        "contextId": "019c1a00-0000-7000-8000-000000000203",
+        "sessionId": "019c1a00-0000-7000-8000-000000000205",
+        "turnId": "019c1a00-0000-7000-8000-000000000207",
+        "projectionSequence": "2",
+        "eventId": "019c1a00-0000-7000-8000-000000000212",
+        "kind": "resync_required",
+        "payload": { "reason": "backpressure" }
+      },
+      "expect": {
+        "phase": "resyncing",
+        "selectedSessionId": "019c1a00-0000-7000-8000-000000000205",
+        "liveAssistantText": "",
+        "liveReasoningTexts": [],
+        "liveTurnStatus": null,
+        "historyAssistantText": null,
+        "historyTurnStatus": null,
+        "lastErrorCode": null,
+        "controlPlaneState": "bound"
+      }
+    }
+  ],
+  "expectedAfterSettle": {
+    "phase": "ready",
+    "selectedSessionId": "019c1a00-0000-7000-8000-000000000205",
+    "liveAssistantText": "",
+    "liveReasoningTexts": [],
+    "liveTurnStatus": null,
+    "historyAssistantText": null,
+    "historyTurnStatus": null,
+    "lastErrorCode": null,
+    "controlPlaneState": "bound"
+  }
+}

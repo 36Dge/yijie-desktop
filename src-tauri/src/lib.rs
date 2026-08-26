@@ -119,6 +119,12 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let _single_instance = match single_instance::acquire() {
         Ok(guard) => guard,
+        Err(single_instance::AcquireError::AlreadyRunning)
+            if std::env::var("YIJIE_FEAT131_STABLE_ENTRY").as_deref() == Ok("true") =>
+        {
+            eprintln!("yijie desktop instance is already running");
+            std::process::exit(1);
+        }
         Err(single_instance::AcquireError::AlreadyRunning) => return,
         Err(
             single_instance::AcquireError::UnsafeLockFile

@@ -39,6 +39,7 @@ async function mountSidebar(capabilities: readonly KnownCapability[]) {
     routes: [
       { path: "/chat", component: defineComponent({ template: "<div />" }) },
       { path: "/chat/:sessionId", component: defineComponent({ template: "<div />" }) },
+      { path: "/store", component: defineComponent({ template: "<div />" }) },
       { path: "/plugins", component: defineComponent({ template: "<div />" }) },
       { path: "/settings", component: defineComponent({ template: "<div />" }) },
     ],
@@ -87,6 +88,16 @@ describe("YjSidebar permission rendering", () => {
 
     expect(pluginLink?.attributes("href")).toBe("/plugins");
     expect(wrapper.find('[aria-label="插件，即将开放"]').exists()).toBe(false);
+  });
+
+  it("FEAT-150 renders the allowed store showcase as an enabled selected route", async () => {
+    const wrapper = await mountSidebar(["store.read"]);
+    await wrapper.setProps({ currentPath: "/store" });
+    const storeLink = wrapper.findAll("a").find((link) => link.text().includes("我的店铺"));
+
+    expect(storeLink?.attributes("href")).toBe("/store");
+    expect(storeLink?.attributes("aria-current")).toBe("page");
+    expect(wrapper.find('[aria-label="我的店铺，即将开放"]').exists()).toBe(false);
   });
 
   it("FEAT-126 hides the sidebar visibility control when chat owns the fixed App Shell", async () => {

@@ -24,13 +24,20 @@ function boundary(
   };
 }
 
-function pageLoaders(): { loaders: AppPageLoaders; chat: ReturnType<typeof vi.fn> } {
+function pageLoaders(): {
+  loaders: AppPageLoaders;
+  chat: ReturnType<typeof vi.fn>;
+  store: ReturnType<typeof vi.fn>;
+} {
   const page = defineComponent({ template: "<h1>test page</h1>" });
   const chat = vi.fn(async () => page);
+  const store = vi.fn(async () => page);
   return {
     chat,
+    store,
     loaders: {
       chat,
+      store,
       plugins: async () => page,
       settings: async () => page,
       accessDenied: async () => page,
@@ -131,6 +138,52 @@ describe("app router", () => {
     );
   });
 
+  it("FEAT-150 registers and protects the local store showcase", async () => {
+    const deniedPages = pageLoaders();
+    const allowed = createAppRouter(
+      createMemoryHistory(),
+      boundary(["store.read"]),
+      undefined,
+      true,
+      true,
+      true,
+    );
+    await allowed.push("/store");
+    await allowed.isReady();
+    expect(allowed.currentRoute.value).toMatchObject({
+      path: "/store",
+      name: "store",
+      meta: { navKey: "store", documentTitle: "我的店铺 · 易界 AI" },
+    });
+
+    const denied = createAppRouter(
+      createMemoryHistory(),
+      boundary(["task.read"]),
+      deniedPages.loaders,
+      true,
+      true,
+      true,
+    );
+    await denied.push("/store");
+    await denied.isReady();
+    expect(denied.currentRoute.value.path).toBe("/access-denied");
+    expect(deniedPages.store).not.toHaveBeenCalled();
+  });
+
+  it("FEAT-150 keeps /store closed outside the exact local feature profile", async () => {
+    const router = createAppRouter(
+      createMemoryHistory(),
+      boundary(["store.read"]),
+      undefined,
+      true,
+      true,
+      false,
+    );
+    await router.push("/store");
+    await router.isReady();
+    expect(router.currentRoute.value.path).toBe("/settings");
+  });
+
   it("FEAT-129 protects the local Skill marketplace with plugin.read", async () => {
     const allowed = createAppRouter(
       createMemoryHistory(),
@@ -209,6 +262,14 @@ describe("app router", () => {
       .toMatchObject({
         name: "plugins",
         meta: { navKey: "plugin", documentTitle: "Skill 广场 · 易界 AI" },
+      });
+  });
+
+  it("FEAT-150 registers the store title and navigation key", () => {
+    expect(createAppRouteRecords(undefined, true, true, true).find((route) => route.path === "/store"))
+      .toMatchObject({
+        name: "store",
+        meta: { navKey: "store", documentTitle: "我的店铺 · 易界 AI" },
       });
   });
 

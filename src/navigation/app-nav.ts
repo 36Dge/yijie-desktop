@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 
-export type AppRoutePath = "/chat" | "/plugins" | "/settings";
+export type AppRoutePath = "/chat" | "/store" | "/plugins" | "/settings";
 export type AppNavPlacement = "main" | "bottom";
 export type AppNavItemKey =
   | "newTask"
@@ -57,7 +57,8 @@ export const APP_NAVIGATION = [
     label: "我的店铺",
     icon: "store",
     placement: "main",
-    disabled: true,
+    disabled: false,
+    to: "/store",
   },
   {
     kind: "item",

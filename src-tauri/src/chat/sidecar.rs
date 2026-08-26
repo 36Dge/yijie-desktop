@@ -47,6 +47,7 @@ pub struct SidecarConfig {
     test_profile: Option<FEAT126TestProfile>,
     artifact_v3_enabled: bool,
     feat128_s10_profile: bool,
+    minimax_provider_enabled: bool,
     image_generation_enabled: bool,
     minimax_api_key_file: Option<PathBuf>,
 }
@@ -62,6 +63,7 @@ impl SidecarConfig {
                 || std::env::var_os(FEAT128_S10_PROFILE_ENV).is_some()
                 || std::env::var_os(CHAT_ARTIFACTS_V3_ENV).is_some()
                 || std::env::var_os(FEAT128_IMAGE_GENERATION_ENV).is_some()
+                || feat128_provider_environment_is_present()
                 || feat128_child_profile_is_present()
             {
                 return Err(ChatError::InvalidConfiguration);
@@ -102,12 +104,11 @@ impl SidecarConfig {
         let feat128_s10_profile = read_exact_boolean_environment(FEAT128_S10_PROFILE_ENV)?;
         let image_generation_enabled =
             read_exact_boolean_environment(FEAT128_IMAGE_GENERATION_ENV)?;
-        let minimax_api_key_file = if image_generation_enabled {
-            optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?
-        } else {
-            None
-        };
-        validate_minimax_image_generation_configuration(
+        let minimax_provider_enabled =
+            parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
+        let minimax_api_key_file = optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?;
+        validate_minimax_provider_configuration(
+            minimax_provider_enabled,
             image_generation_enabled,
             artifact_v3_enabled,
             minimax_api_key_file.is_some(),
@@ -151,6 +152,7 @@ impl SidecarConfig {
             test_profile,
             artifact_v3_enabled,
             feat128_s10_profile,
+            minimax_provider_enabled,
             image_generation_enabled,
             minimax_api_key_file,
         }))
@@ -247,12 +249,14 @@ impl SidecarConfig {
             ]);
         }
         if self.image_generation_enabled {
+            values.push((FEAT128_IMAGE_GENERATION_ENV, "true".to_owned()));
+        }
+        if self.minimax_provider_enabled {
             let key_file = self
                 .minimax_api_key_file
                 .as_ref()
-                .expect("validated image generation requires a key file");
+                .expect("validated MiniMax provider requires a key file");
             values.extend([
-                (FEAT128_IMAGE_GENERATION_ENV, "true".to_owned()),
                 (MODEL_PROVIDER_ENV, MINIMAX_PROVIDER_ID.to_owned()),
                 (
                     MINIMAX_API_KEY_FILE_ENV,
@@ -273,7 +277,7 @@ impl SidecarConfig {
     }
 
     fn validate_provider_key_file(&self) -> Result<(), ChatError> {
-        if !self.image_generation_enabled {
+        if !self.minimax_provider_enabled {
             return Ok(());
         }
         let expected = self
@@ -285,6 +289,10 @@ impl SidecarConfig {
             return Err(ChatError::InvalidConfiguration);
         }
         Ok(())
+    }
+
+    fn forceful_child_cleanup_enabled(&self) -> bool {
+        !self.minimax_provider_enabled || self.image_generation_enabled
     }
 }
 
@@ -300,6 +308,22 @@ fn parse_exact_boolean_value(value: &str) -> Result<bool, ChatError> {
     match value {
         "true" => Ok(true),
         "" | "false" => Ok(false),
+        _ => Err(ChatError::InvalidConfiguration),
+    }
+}
+
+fn read_optional_environment(name: &str) -> Result<String, ChatError> {
+    match std::env::var(name) {
+        Ok(value) => Ok(value),
+        Err(std::env::VarError::NotPresent) => Ok(String::new()),
+        Err(std::env::VarError::NotUnicode(_)) => Err(ChatError::InvalidConfiguration),
+    }
+}
+
+fn parse_minimax_provider(value: &str) -> Result<bool, ChatError> {
+    match value {
+        "" => Ok(false),
+        MINIMAX_PROVIDER_ID => Ok(true),
         _ => Err(ChatError::InvalidConfiguration),
     }
 }
@@ -342,14 +366,16 @@ fn validate_feat128_s10_profile_values(
     Ok(())
 }
 
-fn validate_minimax_image_generation_configuration(
+fn validate_minimax_provider_configuration(
+    minimax_provider_enabled: bool,
     image_generation_enabled: bool,
     artifact_v3_enabled: bool,
     key_file_present: bool,
     direct_key_present: bool,
 ) -> Result<(), ChatError> {
     if direct_key_present
-        || (image_generation_enabled && (!artifact_v3_enabled || !key_file_present))
+        || minimax_provider_enabled != key_file_present
+        || (image_generation_enabled && (!artifact_v3_enabled || !minimax_provider_enabled))
     {
         return Err(ChatError::InvalidConfiguration);
     }
@@ -538,7 +564,7 @@ impl SidecarSupervisor {
                 ),
             )
             .stdin(Stdio::null())
-            .kill_on_drop(true);
+            .kill_on_drop(config.forceful_child_cleanup_enabled());
         if prepared.is_some() {
             command.stdout(Stdio::piped()).stderr(Stdio::piped());
         } else {
@@ -636,7 +662,10 @@ impl SidecarSupervisor {
             if tokio::time::Instant::now() >= deadline {
                 let identity = state.child_identity.clone();
                 let exit_status = match (state.child.as_mut(), identity.as_ref()) {
-                    (Some(child), Some(identity)) => terminate_child(child, identity).await,
+                    (Some(child), Some(identity)) => {
+                        terminate_child(child, identity, config.forceful_child_cleanup_enabled())
+                            .await
+                    }
                     _ => None,
                 };
                 if exit_status.is_none() && state.child.is_some() {
@@ -662,7 +691,16 @@ impl SidecarSupervisor {
         let identity = state.child_identity.clone();
         let had_child = state.child.is_some();
         let exit_status = match (state.child.as_mut(), identity.as_ref()) {
-            (Some(child), Some(identity)) => terminate_child(child, identity).await,
+            (Some(child), Some(identity)) => {
+                terminate_child(
+                    child,
+                    identity,
+                    self.config
+                        .as_ref()
+                        .is_none_or(SidecarConfig::forceful_child_cleanup_enabled),
+                )
+                .await
+            }
             _ => None,
         };
         if had_child && exit_status.is_none() {
@@ -690,7 +728,16 @@ impl SidecarSupervisor {
         let had_child = state.child.is_some();
         let identity = state.child_identity.clone();
         let exit_status = match (state.child.as_mut(), identity.as_ref()) {
-            (Some(child), Some(identity)) => terminate_child(child, identity).await,
+            (Some(child), Some(identity)) => {
+                terminate_child(
+                    child,
+                    identity,
+                    self.config
+                        .as_ref()
+                        .is_none_or(SidecarConfig::forceful_child_cleanup_enabled),
+                )
+                .await
+            }
             _ => None,
         };
         if !strict_driver_stop_outcome_known(had_child, exit_status.as_ref()) {
@@ -834,7 +881,11 @@ fn valid_instance_response(response: &reqwest::Response, instance_nonce: &str) -
             .is_some_and(|length| length <= 1024)
 }
 
-async fn terminate_child(child: &mut Child, expected: &OwnedProcessIdentity) -> Option<ExitStatus> {
+async fn terminate_child(
+    child: &mut Child,
+    expected: &OwnedProcessIdentity,
+    forceful_cleanup_enabled: bool,
+) -> Option<ExitStatus> {
     match child.try_wait() {
         Ok(Some(status)) => return Some(status),
         Ok(None) => {}
@@ -854,6 +905,9 @@ async fn terminate_child(child: &mut Child, expected: &OwnedProcessIdentity) -> 
                 Ok(Some(status)) => return Some(status),
                 Ok(None) => {}
                 Err(_) => return None,
+            }
+            if !forceful_cleanup_enabled {
+                return None;
             }
             if child.id() != Some(expected.pid)
                 || owned_process_identity_matches(expected).ok() != Some(true)
@@ -1498,9 +1552,9 @@ mod tests {
             start_time_microseconds: expected.start_time_microseconds.saturating_add(1),
             ..expected.clone()
         };
-        assert!(terminate_child(&mut child, &reused).await.is_none());
+        assert!(terminate_child(&mut child, &reused, true).await.is_none());
         assert!(child.try_wait().unwrap().is_none());
-        assert!(terminate_child(&mut child, &expected).await.is_some());
+        assert!(terminate_child(&mut child, &expected, true).await.is_some());
     }
 
     #[test]
@@ -1550,6 +1604,7 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };
@@ -1612,6 +1667,7 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };
@@ -1666,6 +1722,7 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: true,
             feat128_s10_profile: false,
+            minimax_provider_enabled: true,
             image_generation_enabled: true,
             minimax_api_key_file: Some(canonical.clone()),
         };
@@ -1700,54 +1757,70 @@ mod tests {
             .iter()
             .any(|(name, _)| *name == CHAT_ARTIFACTS_V3_ENV));
 
-        let disabled = SidecarConfig {
+        let stable_api_only = SidecarConfig {
             image_generation_enabled: false,
             ..config.clone()
         };
-        let disabled_environment = disabled.environment(
+        let stable_environment = stable_api_only.environment(
             "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
             None,
             None,
             false,
             None,
         );
-        assert!(!disabled_environment.iter().any(|(name, _)| {
-            matches!(
-                *name,
-                FEAT128_IMAGE_GENERATION_ENV | MODEL_PROVIDER_ENV | MINIMAX_API_KEY_FILE_ENV
-            )
+        assert!(!stable_environment
+            .iter()
+            .any(|(name, _)| *name == FEAT128_IMAGE_GENERATION_ENV));
+        assert!(stable_environment
+            .iter()
+            .any(|(name, value)| *name == MODEL_PROVIDER_ENV && value == MINIMAX_PROVIDER_ID));
+        assert!(stable_environment.iter().any(|(name, value)| {
+            *name == MINIMAX_API_KEY_FILE_ENV && value == &canonical.to_string_lossy()
         }));
-
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        assert_eq!(
-            config.validate_provider_key_file(),
-            Err(ChatError::InvalidConfiguration)
-        );
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o400)).unwrap();
-        assert_eq!(config.validate_provider_key_file(), Ok(()));
+        assert!(config.forceful_child_cleanup_enabled());
+        assert!(!stable_api_only.forceful_child_cleanup_enabled());
+        assert_eq!(stable_api_only.validate_provider_key_file(), Ok(()));
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn minimax_key_file_configuration_rejects_direct_keys_and_unsafe_files() {
+        assert_eq!(parse_minimax_provider(""), Ok(false));
+        assert_eq!(parse_minimax_provider(MINIMAX_PROVIDER_ID), Ok(true));
         assert_eq!(
-            validate_minimax_image_generation_configuration(true, true, true, false),
-            Ok(())
-        );
-        assert_eq!(
-            validate_minimax_image_generation_configuration(true, false, true, false),
+            parse_minimax_provider("unsupported"),
             Err(ChatError::InvalidConfiguration)
         );
         assert_eq!(
-            validate_minimax_image_generation_configuration(true, true, false, false),
-            Err(ChatError::InvalidConfiguration)
-        );
-        assert_eq!(
-            validate_minimax_image_generation_configuration(false, false, true, false),
+            validate_minimax_provider_configuration(true, true, true, true, false),
             Ok(())
         );
         assert_eq!(
-            validate_minimax_image_generation_configuration(true, true, true, true),
+            validate_minimax_provider_configuration(true, false, false, true, false),
+            Ok(())
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(false, false, false, false, false),
+            Ok(())
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(true, false, false, false, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(false, false, false, true, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(true, true, false, true, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(false, true, true, false, false),
+            Err(ChatError::InvalidConfiguration)
+        );
+        assert_eq!(
+            validate_minimax_provider_configuration(true, false, false, true, true),
             Err(ChatError::InvalidConfiguration)
         );
 
@@ -1863,6 +1936,7 @@ mod tests {
             test_profile: Some(profile),
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };
@@ -1944,6 +2018,7 @@ mod tests {
             }),
             artifact_v3_enabled: true,
             feat128_s10_profile: true,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };
@@ -2064,6 +2139,7 @@ mod tests {
                 }),
                 artifact_v3_enabled: false,
                 feat128_s10_profile: false,
+                minimax_provider_enabled: false,
                 image_generation_enabled: false,
                 minimax_api_key_file: None,
             };
@@ -2151,6 +2227,7 @@ mod tests {
             }),
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };
@@ -2511,6 +2588,7 @@ mod tests {
             test_profile: None,
             artifact_v3_enabled: false,
             feat128_s10_profile: false,
+            minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
         };

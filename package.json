@@ -31,8 +31,10 @@
     "tauri:dev": "./scripts/run-local-demo-fast.sh",
     "tauri:dev:raw": "tauri dev",
     "tauri:demo-fast": "./scripts/run-local-demo-fast.sh",
+    "tauri:demo-fast:stable": "./scripts/run-local-demo-fast.sh --stable-api-only",
     "tauri:build": "node scripts/run-tauri-build.mjs",
     "tauri:build:demo-fast": "pnpm skills:sync:local && VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.demo-fast.conf.json",
+    "tauri:build:demo-fast:stable": "pnpm skills:sync:local && VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.feat131-stable.conf.json",
     "tauri": "tauri"
   },
   "dependencies": {
