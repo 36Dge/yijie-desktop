@@ -1,7 +1,17 @@
 import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { chatClient, type ChatClient } from "../api/chat-client";
+import {
+  chatClient,
+  type ChatClient,
+  type ChatInvalidEventScope,
+} from "../api/chat-client";
+import {
+  conversationMessageItemId,
+  conversationReasoningItemOrdinal,
+  historyPageToConversationSnapshot,
+  projectionEventToConversation,
+} from "../api/chat-conversation-adapter";
 import {
   chatArtifactLiveClient,
   type ChatArtifactLiveClient,
@@ -31,6 +41,15 @@ import {
   chatSessionDraftTarget,
 } from "../domain/chat-ipc";
 import {
+  createConversationState,
+  reconcileConversationSnapshot,
+  reduceConversationEvent,
+  selectConversationItem,
+  selectConversationTurn,
+  type ConversationItem,
+  type ConversationState,
+} from "../domain/conversation-state";
+import {
   useArtifactStore,
   type ArtifactAuthority,
   type ArtifactAuthorityToken,
@@ -40,7 +59,7 @@ import { usePermissionStore } from "./permission.store";
 const STORE_ID = "chat-conversation";
 const MAX_LIVE_ASSISTANT_BYTES = 1024 * 1024;
 const MAX_LIVE_REASONING_BYTES = 256 * 1024;
-const MAX_SEEN_EVENT_IDS = 256;
+const MAX_SEEN_ARTIFACT_EVENT_IDS = 256;
 const CLEANUP_POLL_INTERVAL_MS = 1_000;
 const CLEANUP_POLL_MAX_ATTEMPTS = 120;
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
@@ -161,6 +180,15 @@ function phaseForError(error: unknown): ChatViewPhase {
   }
 }
 
+function projectInvalidError(): ChatClientError {
+  return new ChatClientError({
+    schemaVersion: 1,
+    code: "chat_project_invalid",
+    retryable: false,
+    recovery: "reselect_project",
+  });
+}
+
 export function createChatStoreDefinition(
   client: ChatClient,
   storeId = STORE_ID,
@@ -175,6 +203,7 @@ export function createChatStoreDefinition(
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
     const history = shallowRef<ChatHistoryPage | null>(null);
+    const conversationState = shallowRef<ConversationState>(createConversationState());
     const liveAssistantText = ref("");
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
     const liveTurnStatus = ref<string | null>(null);
@@ -227,7 +256,6 @@ export function createChatStoreDefinition(
     let authorityEpoch = 0;
     let listenerEpoch = 0;
     let subscriptionId: string | null = null;
-    let expectedSequence = 0n;
     let eventUnlisten: UnlistenFn | null = null;
     let eventListenerPromise: Promise<void> | null = null;
     let sessionListenerEpoch = 0;
@@ -255,8 +283,6 @@ export function createChatStoreDefinition(
     let bufferedArtifactEvents: ChatArtifactLiveEvent[] = [];
     let artifactExpectedSequence = 0n;
     let artifactAuthorityToken: ArtifactAuthorityToken | null = null;
-    const seenEventIds = new Set<string>();
-    const seenEventOrder: string[] = [];
     const seenArtifactEventIds = new Set<string>();
     const seenArtifactEventOrder: string[] = [];
 
@@ -284,19 +310,10 @@ export function createChatStoreDefinition(
       pendingSubmission = null;
     }
 
-    function rememberEvent(eventId: string): void {
-      seenEventIds.add(eventId);
-      seenEventOrder.push(eventId);
-      while (seenEventOrder.length > MAX_SEEN_EVENT_IDS) {
-        const oldest = seenEventOrder.shift();
-        if (oldest) seenEventIds.delete(oldest);
-      }
-    }
-
     function rememberArtifactEvent(eventId: string): void {
       seenArtifactEventIds.add(eventId);
       seenArtifactEventOrder.push(eventId);
-      while (seenArtifactEventOrder.length > MAX_SEEN_EVENT_IDS) {
+      while (seenArtifactEventOrder.length > MAX_SEEN_ARTIFACT_EVENT_IDS) {
         const oldest = seenArtifactEventOrder.shift();
         if (oldest) seenArtifactEventIds.delete(oldest);
       }
@@ -331,6 +348,7 @@ export function createChatStoreDefinition(
       activeRead = null;
       selectedSessionId.value = null;
       history.value = null;
+      conversationState.value = createConversationState();
       liveAssistantText.value = "";
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
@@ -339,9 +357,6 @@ export function createChatStoreDefinition(
       controlPlaneSequence = null;
       deleteDisposition.value = null;
       subscriptionId = null;
-      expectedSequence = 0n;
-      seenEventIds.clear();
-      seenEventOrder.length = 0;
       bufferedEvents = [];
       bufferingEvents = false;
       bufferingArtifactEvents = false;
@@ -504,7 +519,7 @@ export function createChatStoreDefinition(
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
       const generation = sessionListenerEpoch;
-      const pending = client.onEvent(handleEvent, requestResync)
+      const pending = client.onEvent(handleEvent, handleInvalidEvent)
         .then((unlisten) => {
           if (generation !== sessionListenerEpoch) {
             unlisten();
@@ -801,75 +816,184 @@ export function createChatStoreDefinition(
       }
     }
 
-    function reasoningKey(itemOrdinal: number, contentIndex: number): string {
-      return `${itemOrdinal}:${contentIndex}`;
+    function itemText(item: ConversationItem | null): string {
+      if (item === null) return "";
+      return item.contentBlocks
+        .filter((block) => block.type === "text" || block.type === "code")
+        .map((block) => block.text)
+        .join("");
+    }
+
+    function liveProjection(
+      state: ConversationState,
+      threadId: string,
+      turnId: string,
+    ): Readonly<{
+      assistantText: string;
+      reasoning: readonly LiveReasoningPart[];
+      turnStatus: string | null;
+    }> {
+      const assistantText = itemText(selectConversationItem(
+        state,
+        threadId,
+        turnId,
+        conversationMessageItemId(turnId, "assistant"),
+      ));
+      const reasoning = Object.values(state.items)
+        .filter((item) => item.threadId === threadId && item.turnId === turnId && item.kind === "reasoning")
+        .flatMap((item) => {
+          const itemOrdinal = conversationReasoningItemOrdinal(turnId, item.itemId);
+          if (itemOrdinal === null) return [];
+          return item.contentBlocks
+            .filter((block) => block.type === "text" || block.type === "code")
+            .map((block) => Object.freeze({
+              itemOrdinal,
+              contentIndex: block.blockIndex,
+              text: block.text,
+            }));
+        })
+        .sort((left, right) =>
+          left.itemOrdinal - right.itemOrdinal || left.contentIndex - right.contentIndex
+        );
+      const turn = selectConversationTurn(state, threadId, turnId);
+      const turnStatus = turn?.terminalStatus ?? (
+        turn?.status === "in_progress" ? "streaming" : turn?.status ?? null
+      );
+      return Object.freeze({
+        assistantText,
+        reasoning: Object.freeze(reasoning),
+        turnStatus,
+      });
+    }
+
+    function compatibilityTurnStatus(
+      state: ConversationState,
+      threadId: string,
+      turnId: string,
+    ): string | null {
+      const turn = selectConversationTurn(state, threadId, turnId);
+      if (turn === null || turn.status === "recovery_required") return null;
+      if (turn.terminalStatus !== null) return turn.terminalStatus;
+      if (turn.status === "in_progress" || turn.status === "waiting_approval") return "streaming";
+      return turn.status;
+    }
+
+    function syncSelectedTurnLifecycle(
+      state: ConversationState,
+      threadId: string,
+      turnId: string,
+    ): void {
+      const status = compatibilityTurnStatus(state, threadId, turnId);
+      if (status === null || selectedSessionId.value !== threadId) return;
+      liveTurnStatus.value = status;
+
+      const currentHistory = history.value;
+      if (currentHistory?.turns.some((turn) => turn.turnId === turnId && turn.status !== status)) {
+        history.value = Object.freeze({
+          ...currentHistory,
+          turns: Object.freeze(currentHistory.turns.map((turn) =>
+            turn.turnId === turnId ? Object.freeze({ ...turn, status }) : turn
+          )),
+        });
+      }
+
+      const latestTurn = Object.values(state.turns)
+        .filter((turn) => turn.threadId === threadId)
+        .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
+      if (latestTurn?.turnId !== turnId) return;
+      if (sessions.value.some((session) =>
+        session.sessionId === threadId && session.latestTurnStatus !== status
+      )) {
+        sessions.value = Object.freeze(sessions.value.map((session) =>
+          session.sessionId === threadId
+            ? Object.freeze({ ...session, latestTurnStatus: status })
+            : session
+        ));
+      }
+    }
+
+    function syncLiveProjection(projected: ReturnType<typeof liveProjection>): boolean {
+      if (
+        utf8Bytes(projected.assistantText) > MAX_LIVE_ASSISTANT_BYTES ||
+        projected.reasoning.reduce((total, part) => total + utf8Bytes(part.text), 0) >
+          MAX_LIVE_REASONING_BYTES
+      ) {
+        return false;
+      }
+      liveAssistantText.value = projected.assistantText;
+      liveReasoning.value = projected.reasoning;
+      liveTurnStatus.value = projected.turnStatus;
+      return true;
+    }
+
+    function handleInvalidEvent(scope?: ChatInvalidEventScope | null): void {
+      if (scope !== null && scope !== undefined && (
+        context.value === null ||
+        scope.contextId !== context.value.contextId ||
+        scope.subscriptionId !== subscriptionId ||
+        scope.sessionId !== selectedSessionId.value
+      )) {
+        return;
+      }
+      requestResync();
     }
 
     function applyEvent(event: ChatProjectionEvent): void {
+      const bound = context.value;
       if (
-        context.value === null ||
-        event.contextId !== context.value.contextId ||
+        bound === null ||
+        event.contextId !== bound.contextId ||
         event.subscriptionId !== subscriptionId ||
         event.sessionId !== selectedSessionId.value
-      ) {
-        return;
-      }
-      if (event.kind === "context_invalidated") {
+      ) return;
+
+      const adapted = projectionEventToConversation(event);
+      if (adapted.kind === "context_invalidated") {
         lastErrorCode.value = "chat_context_invalid";
         clearAuthority("resync-required");
         return;
       }
-      const sequence = BigInt(event.projectionSequence);
-      if (sequence <= expectedSequence) {
-        if (seenEventIds.has(event.eventId)) return;
-        requestResync();
-        return;
-      }
-      if (sequence !== expectedSequence + 1n) {
-        requestResync();
-        return;
-      }
-      expectedSequence = sequence;
-      rememberEvent(event.eventId);
-      switch (event.kind) {
-        case "assistant_append": {
-          const next = liveAssistantText.value + event.payload.text;
-          if (utf8Bytes(next) > MAX_LIVE_ASSISTANT_BYTES) return requestResync();
-          liveAssistantText.value = next;
-          phase.value = "streaming";
-          break;
-        }
-        case "reasoning_append": {
-          const key = reasoningKey(event.payload.itemOrdinal, event.payload.contentIndex);
-          const current = new Map(liveReasoning.value.map((part) => [reasoningKey(part.itemOrdinal, part.contentIndex), part]));
-          const previous = current.get(key)?.text ?? "";
-          current.set(key, Object.freeze({
-            itemOrdinal: event.payload.itemOrdinal,
-            contentIndex: event.payload.contentIndex,
-            text: previous + event.payload.text,
-          }));
-          const next = [...current.values()].sort((left, right) => left.itemOrdinal - right.itemOrdinal || left.contentIndex - right.contentIndex);
-          if (next.reduce((total, part) => total + utf8Bytes(part.text), 0) > MAX_LIVE_REASONING_BYTES) return requestResync();
-          liveReasoning.value = Object.freeze(next);
-          phase.value = "streaming";
-          break;
-        }
-        case "turn_state":
-          liveTurnStatus.value = event.payload.status;
-          phase.value = "streaming";
-          break;
-        case "turn_terminal":
-          liveTurnStatus.value = event.payload.status;
-          phase.value = "ready";
-          void resyncSelected();
-          break;
-        case "cleanup_state":
-          void refreshCleanupFromEvent(event);
-          break;
-        case "resync_required":
+      if (adapted.kind === "cleanup_state") {
+        const previous = conversationState.value;
+        const next = reduceConversationEvent(previous, adapted.event);
+        if (next === previous) return;
+        conversationState.value = next;
+        if (next.syncStatus === "recovery_required") {
           requestResync();
-          break;
+          return;
+        }
+        void refreshCleanupFromEvent(event);
+        return;
       }
+      if (adapted.kind === "resync_required") {
+        requestResync();
+        return;
+      }
+      if (event.turnId === undefined) {
+        requestResync();
+        return;
+      }
+
+      const previous = conversationState.value;
+      const next = reduceConversationEvent(previous, adapted.event);
+      if (next === previous) return;
+      const projected = liveProjection(next, event.sessionId, event.turnId);
+      if (!syncLiveProjection(projected)) {
+        requestResync();
+        return;
+      }
+      conversationState.value = next;
+      if (next.syncStatus === "recovery_required") {
+        requestResync();
+        return;
+      }
+      syncSelectedTurnLifecycle(next, event.sessionId, event.turnId);
+      if (event.kind === "turn_terminal") {
+        phase.value = "ready";
+        void resyncSelected();
+        return;
+      }
+      phase.value = "streaming";
     }
 
     function handleEvent(event: ChatProjectionEvent): void {
@@ -984,16 +1108,33 @@ export function createChatStoreDefinition(
     }
 
     async function refreshCleanupFromEvent(event: ChatProjectionEvent): Promise<void> {
-      if (event.kind !== "cleanup_state" || context.value === null) return;
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      const activeSubscription = subscriptionId;
+      const cleanupSelectionEpoch = selectionEpoch;
+      if (
+        event.kind !== "cleanup_state" || bound === null || sessionId === null ||
+        activeSubscription === null || event.contextId !== bound.contextId ||
+        event.sessionId !== sessionId || event.subscriptionId !== activeSubscription
+      ) return;
       const operation = event.payload.operationId;
       if (typeof operation !== "string") return requestResync();
+      const isCurrentCleanupEvent = (): boolean => (
+        context.value?.contextId === bound.contextId &&
+        selectionEpoch === cleanupSelectionEpoch &&
+        selectedSessionId.value === sessionId &&
+        subscriptionId === activeSubscription
+      );
       try {
         if (cleanupStatus.value?.operationId !== operation) {
-          cleanupStatus.value = await client.getCleanupStatus(context.value.contextId, operation);
+          const status = await client.getCleanupStatus(bound.contextId, operation);
+          if (!isCurrentCleanupEvent()) return;
+          cleanupStatus.value = status;
         }
+        if (!isCurrentCleanupEvent()) return;
         await refreshSelectedCleanup();
       } catch {
-        requestResync();
+        if (isCurrentCleanupEvent()) requestResync();
       }
     }
 
@@ -1270,7 +1411,12 @@ export function createChatStoreDefinition(
       if (projection.session.sessionId !== selectedSessionId.value) {
         throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync" });
       }
-      history.value = authoritativeHistory;
+      const snapshot = historyPageToConversationSnapshot(
+        projection.session.sessionId,
+        authoritativeHistory,
+      );
+      const nextConversation = reconcileConversationSnapshot(conversationState.value, snapshot);
+      conversationState.value = nextConversation;
       cleanupStatus.value = projection.cleanup;
       const projectedSessionIndex = sessions.value.findIndex((session) =>
         session.sessionId === projection.session.sessionId,
@@ -1280,9 +1426,37 @@ export function createChatStoreDefinition(
         : Object.freeze(sessions.value.map((session, index) =>
             index === projectedSessionIndex ? projection.session : session,
           ));
-      liveAssistantText.value = "";
-      liveReasoning.value = Object.freeze([]);
-      liveTurnStatus.value = projection.session.latestTurnStatus;
+      const projectedLiveTurn = Object.values(nextConversation.turns)
+        .filter((turn) => turn.threadId === projection.session.sessionId && (
+          turn.status === "in_progress" || turn.status === "queued" ||
+          turn.status === "waiting_approval" || turn.status === "recovery_required"
+        ))
+        .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
+      if (projectedLiveTurn !== undefined) {
+        const projected = liveProjection(
+          nextConversation,
+          projection.session.sessionId,
+          projectedLiveTurn.turnId,
+        );
+        if (!syncLiveProjection(projected)) {
+          throw new ChatClientError({
+            schemaVersion: 1,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+      } else {
+        liveAssistantText.value = "";
+        liveReasoning.value = Object.freeze([]);
+        liveTurnStatus.value = projection.session.latestTurnStatus;
+      }
+      if (nextConversation.syncStatus === "recovery_required") {
+        lastErrorCode.value = "chat_protocol_error";
+        phase.value = "resync-required";
+        return;
+      }
+      history.value = authoritativeHistory;
     }
 
     async function resyncSelected(): Promise<void> {
@@ -1308,9 +1482,6 @@ export function createChatStoreDefinition(
             throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
           }
           subscriptionId = nextSubscription;
-          expectedSequence = 0n;
-          seenEventIds.clear();
-          seenEventOrder.length = 0;
           resetArtifactStream();
           await client.unsubscribeSession(bound.contextId, previousSubscription).catch(() => false);
           bufferingArtifactEvents = artifactIntegration !== null;
@@ -1397,10 +1568,27 @@ export function createChatStoreDefinition(
         if (!isCurrent(epoch, controller, sessionId)) return;
         if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
         const known = new Set(history.value?.turns.map((turn) => turn.turnId));
-        history.value = Object.freeze({
+        const mergedHistory = Object.freeze({
           turns: Object.freeze([...(history.value?.turns ?? []), ...page.turns.filter((turn) => !known.has(turn.turnId))]),
           nextCursor: page.nextCursor,
         });
+        const currentConversation = conversationState.value;
+        const reconciled = reconcileConversationSnapshot(
+          currentConversation,
+          historyPageToConversationSnapshot(sessionId, mergedHistory),
+        );
+        conversationState.value = Object.freeze({
+          ...reconciled,
+          streamPositions: currentConversation.streamPositions,
+          processedEventIds: currentConversation.processedEventIds,
+        });
+        if (conversationState.value.syncStatus === "recovery_required") {
+          lastErrorCode.value = "chat_protocol_error";
+          phase.value = "resync-required";
+          activeRead = null;
+          return;
+        }
+        history.value = mergedHistory;
         activeRead = null;
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
@@ -1658,14 +1846,54 @@ export function createChatStoreDefinition(
 
     async function createSession(projectId: string, input: string): Promise<string | null> {
       const bound = context.value;
-      if (!bound || !canSend.value || !hasAction("create_session") || !hasAction("use_project")) return null;
+      if (
+        !bound || selectedSessionId.value !== null || !canSend.value ||
+        !hasAction("create_session") || !hasAction("use_project")
+      ) return null;
       const blocks = turnContentBlocks(input);
       if (blocks === null) return null;
       const attemptKey = submissionKey("create", projectId, input, blocks);
+      const attemptAuthorityEpoch = authorityEpoch;
+      const attemptSelectionEpoch = selectionEpoch;
+      const attemptDraftEpoch = draftEpoch;
+      const isCurrentCreateAuthority = (): boolean => (
+        authorityEpoch === attemptAuthorityEpoch &&
+        context.value?.contextId === bound.contextId &&
+        selectionEpoch === attemptSelectionEpoch &&
+        selectedSessionId.value === null &&
+        draftEpoch === attemptDraftEpoch &&
+        sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET)
+      );
+      const canDispatchCreateAttempt = (): boolean => (
+        isCurrentCreateAuthority() &&
+        canSend.value &&
+        hasAction("create_session") &&
+        hasAction("use_project")
+      );
+      let project: ChatProject | null;
+      try {
+        project = await revalidateProject(projectId);
+      } catch (error: unknown) {
+        if (!canDispatchCreateAttempt()) return null;
+        throw error;
+      }
+      if (project === null || !canDispatchCreateAttempt()) return null;
+      if (project.projectId !== projectId || !project.available) throw projectInvalidError();
+      const currentBlocks = turnContentBlocks(input);
+      if (
+        currentBlocks === null ||
+        submissionKey("create", projectId, input, currentBlocks) !== attemptKey
+      ) return null;
       const attemptOperationId = submissionOperation(attemptKey);
       const created = draftAttachments.value.length > 0
-        ? await client.createSessionV2(bound.contextId, projectId, blocks, attemptOperationId)
+        ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
         : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
+      const settledBlocks = turnContentBlocks(input);
+      if (
+        !isCurrentCreateAuthority() ||
+        settledBlocks === null ||
+        submissionKey("create", projectId, input, settledBlocks) !== attemptKey
+      ) return null;
       if (created.operationId !== attemptOperationId) {
         throw new ChatClientError({
           schemaVersion: 2,
@@ -1684,7 +1912,18 @@ export function createChatStoreDefinition(
             : "chat_protocol_error";
         }
       }
+      if (
+        authorityEpoch !== attemptAuthorityEpoch ||
+        context.value?.contextId !== bound.contextId ||
+        selectionEpoch !== attemptSelectionEpoch ||
+        selectedSessionId.value !== null
+      ) return null;
       await selectSession(created.sessionId);
+      if (
+        authorityEpoch !== attemptAuthorityEpoch ||
+        context.value?.contextId !== bound.contextId ||
+        selectedSessionId.value !== created.sessionId
+      ) return null;
       return created.sessionId;
     }
 
@@ -1695,6 +1934,18 @@ export function createChatStoreDefinition(
       const blocks = turnContentBlocks(input);
       if (blocks === null) return;
       const attemptKey = submissionKey("submit", sessionId, input, blocks);
+      const attemptAuthorityEpoch = authorityEpoch;
+      const attemptSelectionEpoch = selectionEpoch;
+      const attemptDraftEpoch = draftEpoch;
+      const attemptTarget = chatSessionDraftTarget(sessionId);
+      const isCurrentSubmitAuthority = (): boolean => (
+        authorityEpoch === attemptAuthorityEpoch &&
+        context.value?.contextId === bound.contextId &&
+        selectionEpoch === attemptSelectionEpoch &&
+        selectedSessionId.value === sessionId &&
+        draftEpoch === attemptDraftEpoch &&
+        sameDraftTarget(draftTarget.value, attemptTarget)
+      );
       const attemptOperationId = submissionOperation(attemptKey);
       let created;
       if (draftAttachments.value.length > 0) {
@@ -1702,6 +1953,12 @@ export function createChatStoreDefinition(
       } else {
         created = await client.submitTurn(bound.contextId, sessionId, input, attemptOperationId);
       }
+      const settledBlocks = turnContentBlocks(input);
+      if (
+        !isCurrentSubmitAuthority() ||
+        settledBlocks === null ||
+        submissionKey("submit", sessionId, input, settledBlocks) !== attemptKey
+      ) return;
       if (created.operationId !== attemptOperationId) {
         throw new ChatClientError({
           schemaVersion: 2,
@@ -1965,6 +2222,7 @@ export function createChatStoreDefinition(
     }
 
     async function dispose(): Promise<void> {
+      const pendingResync = resyncPromise;
       clearAuthority("idle");
       listenerEpoch += 1;
       releaseSessionListeners();
@@ -1972,6 +2230,8 @@ export function createChatStoreDefinition(
       controlPlaneUnlisten = null;
       attachmentImportUnlisten?.();
       attachmentImportUnlisten = null;
+      await pendingResync?.catch(() => undefined);
+      releaseSessionListeners();
     }
 
     return {
@@ -1982,6 +2242,7 @@ export function createChatStoreDefinition(
       sessionsCursor,
       selectedSessionId,
       history,
+      conversationState,
       liveAssistantText,
       liveReasoning,
       liveTurnStatus,

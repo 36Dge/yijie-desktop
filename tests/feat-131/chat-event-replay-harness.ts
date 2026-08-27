@@ -13,12 +13,11 @@ import {
   type ChatViewPhase,
 } from "../../src/stores/chat.store";
 
-export const FEAT131_REPLAY_FIXTURE_FAMILY = "feat131-desktop-replay-v1" as const;
+export const FEAT131_REPLAY_FIXTURE_FAMILY = "feat131-desktop-replay-v2" as const;
 export const FEAT131_REPLAY_HARNESS_CANARY = "feat131-replay-harness-test-only" as const;
-export const FEAT131_FROZEN_REFERENCE = Object.freeze({
-  app: "Codex Desktop",
-  version: "26.818.61809",
-  build: "7019",
+export const FEAT131_REFERENCE_POLICY = Object.freeze({
+  id: "codex-inspired-approximate-parity-v1-2026-08-27",
+  mode: "owner-approved-inference",
 });
 export const FEAT131_REQUIRED_SCENARIO_IDS = Object.freeze(
   Array.from({ length: 13 }, (_, index) => `GS-${String(index + 1).padStart(3, "0")}`),
@@ -75,8 +74,8 @@ const CAPABILITY_CLASSES = new Set([
 
 type JsonRecord = Record<string, unknown>;
 
-export type ReplayProvenance = "reference-observation" | "real-runtime" | "synthetic";
-export type ReplayObservationStatus = "reference-observed" | "reference-unobserved";
+export type ReplayProvenance = "real-runtime" | "synthetic";
+export type ReplayReferenceBasis = "owner-approved-inference" | "owner-excluded";
 
 export interface ChatReplaySnapshot {
   readonly phase: ChatViewPhase;
@@ -96,10 +95,10 @@ export interface ChatReplayStep {
 }
 
 export interface ChatReplayFixture {
-  readonly fixtureSchemaVersion: 1;
+  readonly fixtureSchemaVersion: 2;
   readonly fixtureFamily: typeof FEAT131_REPLAY_FIXTURE_FAMILY;
-  readonly referenceAppVersion: typeof FEAT131_FROZEN_REFERENCE.version;
-  readonly referenceAppBuild: typeof FEAT131_FROZEN_REFERENCE.build;
+  readonly referencePolicyId: typeof FEAT131_REFERENCE_POLICY.id;
+  readonly referencePolicyMode: typeof FEAT131_REFERENCE_POLICY.mode;
   readonly scenarioId: string;
   readonly provenance: ReplayProvenance;
   readonly coveredVariants: readonly string[];
@@ -126,27 +125,18 @@ export interface Feat131ScenarioCatalogEntry {
   readonly assetKind: "replay" | "metadata-only";
   readonly replayedVariants: readonly string[];
   readonly provenance: ReplayProvenance | null;
-  readonly observationStatus: ReplayObservationStatus;
+  readonly referenceBasis: ReplayReferenceBasis;
   readonly replayFixture: string | null;
 }
 
 export interface Feat131ScenarioCatalog {
-  readonly catalogSchemaVersion: 1;
+  readonly catalogSchemaVersion: 2;
   readonly fixtureFamily: typeof FEAT131_REPLAY_FIXTURE_FAMILY;
-  readonly referenceAppVersion: typeof FEAT131_FROZEN_REFERENCE.version;
-  readonly referenceAppBuild: typeof FEAT131_FROZEN_REFERENCE.build;
-  readonly frozenAt: string;
+  readonly referencePolicyId: typeof FEAT131_REFERENCE_POLICY.id;
+  readonly referencePolicyMode: typeof FEAT131_REFERENCE_POLICY.mode;
+  readonly policyEffectiveAt: string;
   readonly scenarios: readonly Feat131ScenarioCatalogEntry[];
 }
-
-export type ReferenceVersionAssessment = Readonly<{
-  status: "match" | "drift";
-  frozenVersion: typeof FEAT131_FROZEN_REFERENCE.version;
-  frozenBuild: typeof FEAT131_FROZEN_REFERENCE.build;
-  observedVersion: string;
-  observedBuild: string;
-  baselineAction: "use-frozen-baseline" | "report-only";
-}>;
 
 function record(value: unknown, label: string): JsonRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -264,8 +254,8 @@ export function parseChatReplayFixture(value: unknown): ChatReplayFixture {
   exactKeys(fixture, [
     "fixtureSchemaVersion",
     "fixtureFamily",
-    "referenceAppVersion",
-    "referenceAppBuild",
+    "referencePolicyId",
+    "referencePolicyMode",
     "scenarioId",
     "provenance",
     "coveredVariants",
@@ -277,17 +267,17 @@ export function parseChatReplayFixture(value: unknown): ChatReplayFixture {
     "expectedAfterSettle",
   ], "fixture");
   if (
-    fixture.fixtureSchemaVersion !== 1 ||
+    fixture.fixtureSchemaVersion !== 2 ||
     fixture.fixtureFamily !== FEAT131_REPLAY_FIXTURE_FAMILY ||
-    fixture.referenceAppVersion !== FEAT131_FROZEN_REFERENCE.version ||
-    fixture.referenceAppBuild !== FEAT131_FROZEN_REFERENCE.build
+    fixture.referencePolicyId !== FEAT131_REFERENCE_POLICY.id ||
+    fixture.referencePolicyMode !== FEAT131_REFERENCE_POLICY.mode
   ) {
-    throw new Error("feat131-replay-invalid:frozen-reference");
+    throw new Error("feat131-replay-invalid:reference-policy");
   }
   const scenarioId = stringValue(fixture.scenarioId, "scenarioId");
   if (!SCENARIO_ID_PATTERN.test(scenarioId)) throw new Error("feat131-replay-invalid:scenarioId");
   const provenance = stringValue(fixture.provenance, "provenance") as ReplayProvenance;
-  if (!new Set<ReplayProvenance>(["reference-observation", "real-runtime", "synthetic"]).has(provenance)) {
+  if (!new Set<ReplayProvenance>(["real-runtime", "synthetic"]).has(provenance)) {
     throw new Error("feat131-replay-invalid:provenance");
   }
   if (!Array.isArray(fixture.coveredVariants) || fixture.coveredVariants.length < 1 || fixture.coveredVariants.length > 8) {
@@ -350,10 +340,10 @@ export function parseChatReplayFixture(value: unknown): ChatReplayFixture {
   }));
 
   return Object.freeze({
-    fixtureSchemaVersion: 1,
+    fixtureSchemaVersion: 2,
     fixtureFamily: FEAT131_REPLAY_FIXTURE_FAMILY,
-    referenceAppVersion: FEAT131_FROZEN_REFERENCE.version,
-    referenceAppBuild: FEAT131_FROZEN_REFERENCE.build,
+    referencePolicyId: FEAT131_REFERENCE_POLICY.id,
+    referencePolicyMode: FEAT131_REFERENCE_POLICY.mode,
     scenarioId,
     provenance,
     coveredVariants,
@@ -378,22 +368,22 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
   exactKeys(catalog, [
     "catalogSchemaVersion",
     "fixtureFamily",
-    "referenceAppVersion",
-    "referenceAppBuild",
-    "frozenAt",
+    "referencePolicyId",
+    "referencePolicyMode",
+    "policyEffectiveAt",
     "scenarios",
   ], "catalog");
   if (
-    catalog.catalogSchemaVersion !== 1 ||
+    catalog.catalogSchemaVersion !== 2 ||
     catalog.fixtureFamily !== FEAT131_REPLAY_FIXTURE_FAMILY ||
-    catalog.referenceAppVersion !== FEAT131_FROZEN_REFERENCE.version ||
-    catalog.referenceAppBuild !== FEAT131_FROZEN_REFERENCE.build
+    catalog.referencePolicyId !== FEAT131_REFERENCE_POLICY.id ||
+    catalog.referencePolicyMode !== FEAT131_REFERENCE_POLICY.mode
   ) {
-    throw new Error("feat131-catalog-invalid:frozen-reference");
+    throw new Error("feat131-catalog-invalid:reference-policy");
   }
-  const frozenAt = stringValue(catalog.frozenAt, "catalog.frozenAt");
-  if (!/^20[0-9]{2}-[01][0-9]-[0-3][0-9]$/.test(frozenAt)) {
-    throw new Error("feat131-catalog-invalid:frozenAt");
+  const policyEffectiveAt = stringValue(catalog.policyEffectiveAt, "catalog.policyEffectiveAt");
+  if (!/^20[0-9]{2}-[01][0-9]-[0-3][0-9]$/.test(policyEffectiveAt)) {
+    throw new Error("feat131-catalog-invalid:policyEffectiveAt");
   }
   if (!Array.isArray(catalog.scenarios) || catalog.scenarios.length < 13 || catalog.scenarios.length > 64) {
     throw new Error("feat131-catalog-invalid:scenarios");
@@ -409,7 +399,7 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
       "assetKind",
       "replayedVariants",
       "provenance",
-      "observationStatus",
+      "referenceBasis",
       "replayFixture",
     ], `catalog.scenarios[${index}]`);
     const scenarioId = stringValue(entry.scenarioId, `catalog.scenarios[${index}].scenarioId`);
@@ -443,19 +433,18 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
     ) {
       throw new Error(`feat131-catalog-invalid:replayedVariants:${index}`);
     }
-    const observationStatus = stringValue(
-      entry.observationStatus,
-      `catalog.scenarios[${index}].observationStatus`,
-    ) as ReplayObservationStatus;
-    if (observationStatus !== "reference-observed" && observationStatus !== "reference-unobserved") {
-      throw new Error(`feat131-catalog-invalid:observationStatus:${index}`);
+    const referenceBasis = stringValue(
+      entry.referenceBasis,
+      `catalog.scenarios[${index}].referenceBasis`,
+    ) as ReplayReferenceBasis;
+    if (referenceBasis !== "owner-approved-inference" && referenceBasis !== "owner-excluded") {
+      throw new Error(`feat131-catalog-invalid:referenceBasis:${index}`);
     }
     const provenance = entry.provenance === null
       ? null
       : stringValue(entry.provenance, `catalog.scenarios[${index}].provenance`) as ReplayProvenance;
     if (
       provenance !== null &&
-      provenance !== "reference-observation" &&
       provenance !== "real-runtime" &&
       provenance !== "synthetic"
     ) {
@@ -476,6 +465,18 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
     } else if (replayedVariants.length !== 0 || provenance !== null || replayFixture !== null) {
       throw new Error(`feat131-catalog-invalid:metadata-only:${index}`);
     }
+    if (scenarioId === "GS-006") {
+      if (
+        referenceBasis !== "owner-excluded" ||
+        capabilityClass !== "intentional product difference" ||
+        entry.ownerFeature !== "FEAT-131" ||
+        assetKind !== "metadata-only"
+      ) {
+        throw new Error("feat131-catalog-invalid:GS-006-owner-exclusion");
+      }
+    } else if (referenceBasis !== "owner-approved-inference") {
+      throw new Error(`feat131-catalog-invalid:referenceBasis:${index}`);
+    }
     return Object.freeze({
       scenarioId,
       title: stringValue(entry.title, `catalog.scenarios[${index}].title`),
@@ -485,7 +486,7 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
       assetKind,
       replayedVariants,
       provenance,
-      observationStatus,
+      referenceBasis,
       replayFixture,
     });
   }));
@@ -497,29 +498,12 @@ export function parseFeat131ScenarioCatalog(value: unknown): Feat131ScenarioCata
     throw new Error("feat131-catalog-invalid:required-scenarios");
   }
   return Object.freeze({
-    catalogSchemaVersion: 1,
+    catalogSchemaVersion: 2,
     fixtureFamily: FEAT131_REPLAY_FIXTURE_FAMILY,
-    referenceAppVersion: FEAT131_FROZEN_REFERENCE.version,
-    referenceAppBuild: FEAT131_FROZEN_REFERENCE.build,
-    frozenAt,
+    referencePolicyId: FEAT131_REFERENCE_POLICY.id,
+    referencePolicyMode: FEAT131_REFERENCE_POLICY.mode,
+    policyEffectiveAt,
     scenarios,
-  });
-}
-
-export function assessReferenceVersionDrift(
-  observedVersion: string,
-  observedBuild: string,
-): ReferenceVersionAssessment {
-  const version = stringValue(observedVersion, "observedVersion");
-  const build = stringValue(observedBuild, "observedBuild");
-  const matches = version === FEAT131_FROZEN_REFERENCE.version && build === FEAT131_FROZEN_REFERENCE.build;
-  return Object.freeze({
-    status: matches ? "match" : "drift",
-    frozenVersion: FEAT131_FROZEN_REFERENCE.version,
-    frozenBuild: FEAT131_FROZEN_REFERENCE.build,
-    observedVersion: version,
-    observedBuild: build,
-    baselineAction: matches ? "use-frozen-baseline" : "report-only",
   });
 }
 

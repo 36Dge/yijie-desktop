@@ -2,7 +2,6 @@
 import { computed, ref } from "vue";
 import StoreSceneCard from "../../components/store/StoreSceneCard.vue";
 import YjEmpty from "../../components/yijie/YjEmpty.vue";
-import YjIcon from "../../components/yijie/YjIcon.vue";
 import YjMetricCard from "../../components/yijie/YjMetricCard.vue";
 import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
@@ -61,18 +60,6 @@ function updateRoleFilter(value: string): void {
         title="我的店铺"
         description="把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。"
       />
-
-      <div class="store-page__demo-notice" role="status">
-        <span class="store-page__demo-icon" aria-hidden="true">
-          <YjIcon name="store" tone="primary" />
-        </span>
-        <div>
-          <p class="store-page__demo-title">演示内容</p>
-          <p class="store-page__demo-copy">
-            本页指标、趋势和场景热度均为本地合成内容，不代表任何真实店铺表现。
-          </p>
-        </div>
-      </div>
 
       <div class="store-page__module store-page__module--brief">
         <YjSection
@@ -215,51 +202,18 @@ function updateRoleFilter(value: string): void {
   gap: var(--yj-space-6);
 }
 
-.store-page__demo-notice {
-  display: flex;
-  align-items: flex-start;
-  padding: var(--yj-space-4);
-  border: var(--yj-border-width) solid var(--yj-color-brand-border);
-  border-radius: var(--yj-radius-lg);
-  color: var(--yj-color-text-secondary);
-  background: var(--yj-color-brand-soft);
-  gap: var(--yj-space-3);
-}
-
-.store-page__demo-icon {
-  display: inline-flex;
-  width: var(--yj-space-8);
-  height: var(--yj-space-8);
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--yj-radius-full);
-  background: var(--yj-color-bg-card);
-}
-
-.store-page__demo-title,
-.store-page__demo-copy,
 .store-page__brief-title,
 .store-page__brief-description,
 .store-page__filter-summary {
   margin: var(--yj-space-0);
 }
 
-.store-page__demo-title {
-  color: var(--yj-color-text-primary);
-  font-size: var(--yj-font-size-body);
-  font-weight: var(--yj-font-weight-semibold);
-  line-height: var(--yj-line-height-body);
-}
-
-.store-page__demo-copy,
 .store-page__brief-description,
 .store-page__filter-summary {
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
 
-.store-page__demo-copy,
 .store-page__brief-description {
   color: var(--yj-color-text-secondary);
 }
@@ -274,6 +228,7 @@ function updateRoleFilter(value: string): void {
     var(--yj-color-brand-soft),
     var(--yj-color-bg-page)
   );
+  box-shadow: var(--yj-shadow-xs);
 }
 
 .store-page__brief-panel {
@@ -300,8 +255,14 @@ function updateRoleFilter(value: string): void {
 }
 
 .store-page__source-label {
+  display: inline-flex;
+  min-width: var(--yj-space-12);
+  height: var(--yj-space-8);
   flex: none;
-  padding: var(--yj-space-1) var(--yj-space-2);
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: var(--yj-space-1) var(--yj-space-3);
   border-radius: var(--yj-radius-full);
   color: var(--yj-color-brand-text);
   background: var(--yj-color-brand-soft);

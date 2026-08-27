@@ -9,6 +9,8 @@ import {
 
 const REQUEST_ID = "019c1a00-0000-7000-8000-000000000001";
 const CONTEXT_ID = "019c1a00-0000-7000-8000-000000000003";
+const SESSION_ID = "019c1a00-0000-7000-8000-000000000004";
+const SUBSCRIPTION_ID = "019c1a00-0000-7000-8000-000000000005";
 
 function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
   return { invoke, listen: async () => () => undefined };
@@ -120,6 +122,81 @@ describe("chat client", () => {
     await client.onEvent(vi.fn(), invalid);
     listener({ hostBearer: "secret" });
     expect(invalid).toHaveBeenCalledOnce();
+    expect(invalid).toHaveBeenCalledWith(null);
+  });
+
+  it("extracts only a safe routing scope from malformed current and old-session events", async () => {
+    let listener!: (payload: unknown) => void;
+    const invalid = vi.fn();
+    const client = createChatClient({
+      invoke: async () => undefined,
+      listen: async (_channel, handler) => {
+        listener = handler;
+        return () => undefined;
+      },
+    });
+    await client.onEvent(vi.fn(), invalid);
+
+    listener({
+      schemaVersion: 1,
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+      kind: "malformed_current",
+      payload: { text: "private current body" },
+    });
+    const oldSessionId = "019c1a00-0000-7000-8000-000000000006";
+    const oldSubscriptionId = "019c1a00-0000-7000-8000-000000000007";
+    listener({
+      contextId: CONTEXT_ID,
+      sessionId: oldSessionId,
+      subscriptionId: oldSubscriptionId,
+      body: { token: "private old body" },
+    });
+
+    expect(invalid).toHaveBeenNthCalledWith(1, {
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+    });
+    expect(invalid).toHaveBeenNthCalledWith(2, {
+      contextId: CONTEXT_ID,
+      sessionId: oldSessionId,
+      subscriptionId: oldSubscriptionId,
+    });
+    expect(JSON.stringify(invalid.mock.calls)).not.toContain("payload");
+    expect(JSON.stringify(invalid.mock.calls)).not.toContain("body");
+    expect(JSON.stringify(invalid.mock.calls)).not.toContain("private");
+  });
+
+  it("returns null routing scope for non-objects and malformed event IDs", async () => {
+    let listener!: (payload: unknown) => void;
+    const invalid = vi.fn();
+    const client = createChatClient({
+      invoke: async () => undefined,
+      listen: async (_channel, handler) => {
+        listener = handler;
+        return () => undefined;
+      },
+    });
+    await client.onEvent(vi.fn(), invalid);
+
+    listener(null);
+    listener("not-an-event");
+    listener({
+      contextId: CONTEXT_ID,
+      sessionId: "not-a-uuid",
+      subscriptionId: SUBSCRIPTION_ID,
+      payload: { text: "must not escape" },
+    });
+    listener({
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      subscriptionId: "00000000-0000-0000-0000-000000000000",
+    });
+
+    expect(invalid).toHaveBeenCalledTimes(4);
+    expect(invalid.mock.calls).toEqual([[null], [null], [null], [null]]);
   });
 
   it("listens for aggregate attachment progress and rejects leaked file metadata", async () => {

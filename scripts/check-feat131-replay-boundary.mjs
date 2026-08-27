@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 export const FEAT131_REPLAY_BUNDLE_CANARIES = Object.freeze([
   "feat131-desktop-replay-v1",
+  "feat131-desktop-replay-v2",
+  "referenceAppVersion",
+  "referenceAppBuild",
+  "codex-inspired-approximate-parity-v1-2026-08-27",
   "feat131-replay-harness-test-only",
   "GS-001-streaming-complete.synthetic.json",
   "GS-012-resync-recovery.synthetic.json",

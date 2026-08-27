@@ -350,6 +350,14 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("<script>not executable</script>");
     expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="模型回答，正在生成"]').exists()).toBe(true);
+    expect(wrapper.find(".chat-message__streaming").exists()).toBe(true);
+
+    store.phase = "ready";
+    await flushPromises();
+    expect(wrapper.find('[aria-label="模型回答"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="模型回答，正在生成"]').exists()).toBe(false);
+    expect(wrapper.find(".chat-message__streaming").exists()).toBe(false);
   });
 
   it("selects through the unified plus entry and permits an attachment-only task", async () => {

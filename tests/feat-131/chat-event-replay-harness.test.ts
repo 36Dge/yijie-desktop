@@ -1,9 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  FEAT131_FROZEN_REFERENCE,
+  FEAT131_REFERENCE_POLICY,
   FEAT131_REQUIRED_SCENARIO_IDS,
-  assessReferenceVersionDrift,
   createChatEventReplayHarness,
   parseChatReplayFixture,
   parseFeat131ScenarioCatalog,
@@ -20,7 +19,7 @@ const EXPECTED_CAPABILITY_CLASSES = Object.freeze({
   "GS-003": "requires Host/Contracts projection",
   "GS-004": "requires Host/Contracts projection",
   "GS-005": "requires Host/Contracts projection",
-  "GS-006": "requires Host/Contracts projection",
+  "GS-006": "intentional product difference",
   "GS-007": "requires Host/Contracts projection",
   "GS-008": "available",
   "GS-009": "available",
@@ -47,10 +46,10 @@ afterEach(() => {
 });
 
 describe("FEAT-131 scenario catalog", () => {
-  it("freezes exactly GS-001 through GS-013 and binds only real test assets", () => {
+  it("registers exactly GS-001 through GS-013 under the owner-approved inference policy", () => {
     const catalog = parseFeat131ScenarioCatalog(readJson(CATALOG_FILE));
-    expect(catalog.referenceAppVersion).toBe(FEAT131_FROZEN_REFERENCE.version);
-    expect(catalog.referenceAppBuild).toBe(FEAT131_FROZEN_REFERENCE.build);
+    expect(catalog.referencePolicyId).toBe(FEAT131_REFERENCE_POLICY.id);
+    expect(catalog.referencePolicyMode).toBe(FEAT131_REFERENCE_POLICY.mode);
     expect(catalog.scenarios.map((scenario) => scenario.scenarioId).sort())
       .toEqual([...FEAT131_REQUIRED_SCENARIO_IDS].sort());
     expect(Object.fromEntries(catalog.scenarios.map((scenario) => [
@@ -68,8 +67,8 @@ describe("FEAT-131 scenario catalog", () => {
       expect(fixture.scenarioId).toBe(entry.scenarioId);
       expect(fixture.provenance).toBe("synthetic");
       expect(fixture.coveredVariants).toEqual(entry.replayedVariants);
-      expect(fixture.referenceAppVersion).toBe(catalog.referenceAppVersion);
-      expect(fixture.referenceAppBuild).toBe(catalog.referenceAppBuild);
+      expect(fixture.referencePolicyId).toBe(catalog.referencePolicyId);
+      expect(fixture.referencePolicyMode).toBe(catalog.referencePolicyMode);
     }
 
     const metadataOnly = catalog.scenarios.filter((scenario) => scenario.assetKind === "metadata-only");
@@ -85,6 +84,17 @@ describe("FEAT-131 scenario catalog", () => {
       .toEqual(["allow", "deny", "expired"]);
     expect(catalog.scenarios.find((scenario) => scenario.scenarioId === "GS-013")?.replayedVariants)
       .toEqual(["missing-delta"]);
+    expect(catalog.scenarios.find((scenario) => scenario.scenarioId === "GS-006"))
+      .toMatchObject({
+        ownerFeature: "FEAT-131",
+        capabilityClass: "intentional product difference",
+        assetKind: "metadata-only",
+        referenceBasis: "owner-excluded",
+        replayFixture: null,
+      });
+    expect(catalog.scenarios.filter((scenario) => scenario.scenarioId !== "GS-006")
+      .every((scenario) => scenario.referenceBasis === "owner-approved-inference"))
+      .toBe(true);
   });
 
   it.each([
@@ -139,25 +149,24 @@ describe("FEAT-131 scenario catalog", () => {
     }))).toThrow("feat131-replay-sensitive");
   });
 
-  it("reports an installed-version drift without changing the frozen baseline", () => {
+  it("fails closed on a reference policy mismatch without mutating the catalog", () => {
     const catalogValue = readJson(CATALOG_FILE);
     const before = JSON.stringify(catalogValue);
-    expect(assessReferenceVersionDrift("26.900.0", "8000")).toEqual({
-      status: "drift",
-      frozenVersion: "26.818.61809",
-      frozenBuild: "7019",
-      observedVersion: "26.900.0",
-      observedBuild: "8000",
-      baselineAction: "report-only",
-    });
-    expect(JSON.stringify(catalogValue)).toBe(before);
-
     const changedCatalog = {
       ...(catalogValue as Record<string, unknown>),
-      referenceAppBuild: "8000",
+      referencePolicyId: "unapproved-reference-policy",
     };
     expect(() => parseFeat131ScenarioCatalog(changedCatalog))
-      .toThrow("feat131-catalog-invalid:frozen-reference");
+      .toThrow("feat131-catalog-invalid:reference-policy");
+    expect(JSON.stringify(catalogValue)).toBe(before);
+
+    const fixtureValue = readJson("GS-001-streaming-complete.synthetic.json");
+    const changedFixture = {
+      ...(fixtureValue as Record<string, unknown>),
+      referencePolicyMode: "unapproved-mode",
+    };
+    expect(() => parseChatReplayFixture(changedFixture))
+      .toThrow("feat131-replay-invalid:reference-policy");
   });
 });
 

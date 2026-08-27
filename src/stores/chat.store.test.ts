@@ -1,7 +1,15 @@
 import { createPinia, setActivePinia } from "pinia";
 import { watch } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatClient } from "../api/chat-client";
+import type { ChatClient, ChatInvalidEventScope } from "../api/chat-client";
+import {
+  conversationMessageItemId,
+  conversationReasoningItemId,
+} from "../api/chat-conversation-adapter";
+import {
+  selectConversationItem,
+  selectConversationTurn,
+} from "../domain/conversation-state";
 import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
   ChatAllowedAction,
@@ -170,10 +178,10 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   emit: (event: ChatProjectionEvent) => void;
   emitControlPlane: (event: ChatControlPlaneEvent) => void;
   emitAttachmentImport: (event: ChatAttachmentImportEvent) => void;
-  invalidate: () => void;
+  invalidate: (scope?: ChatInvalidEventScope | null) => void;
 } {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
-  let invalidHandler: () => void = () => undefined;
+  let invalidHandler: (scope?: ChatInvalidEventScope | null) => void = () => undefined;
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
   const client: ChatClient = {
@@ -184,7 +192,13 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     }),
     listProjects: async () => [],
     pickProject: async () => null,
-    revalidateProject: async () => { throw new Error("not used"); },
+    revalidateProject: async (_context, projectId) => ({
+      projectId,
+      safeName: "Synthetic Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    }),
     setProjectPinned: async (_context, _project, _pinned, operation) => operation,
     removeProject: async (_context, _project, operation) => operation,
     createSession: async (_context, _project, _input, operation) => ({ sessionId: SESSION_A, turnId: TURN_A, operationId: operation }),
@@ -269,7 +283,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     emit: (value) => eventHandler(value),
     emitControlPlane: (value) => controlPlaneHandler(value),
     emitAttachmentImport: (value) => attachmentImportHandler(value),
-    invalidate: () => invalidHandler(),
+    invalidate: (scope) => invalidHandler(scope),
   };
 }
 
@@ -957,7 +971,15 @@ describe("chat view-model store", () => {
     );
     emit(first);
     emit(first);
+    emit({ ...first, projectionSequence: "99" });
     expect(store.liveAssistantText).toBe("hello");
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )?.contentBlocks).toEqual([{ blockIndex: 0, type: "text", text: "hello" }]);
+    expect(resync).toHaveBeenCalledTimes(1);
 
     emit(event(
       "3",
@@ -970,6 +992,174 @@ describe("chat view-model store", () => {
     }
     expect(resync).toHaveBeenCalledTimes(2);
     expect(store.liveAssistantText).toBe("");
+  });
+
+  it("tracks cleanup events in the shared projection sequence before refreshing cleanup", async () => {
+    const cleanupOperationId = "019c1a00-0000-7000-8000-000000000099";
+    const pendingCleanup = Object.freeze({
+      operationId: cleanupOperationId,
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const getCleanupStatus = vi.fn(async () => pendingCleanup);
+    const resync = vi.fn(async (_context: string, sessionId: string) => projection(sessionId));
+    const { client, emit } = fakeClient({ getCleanupStatus, resyncSession: resync });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(resync).toHaveBeenCalledTimes(1);
+
+    const cleanup = event(
+      "1",
+      "019c1a00-0000-7000-8000-000000000041",
+      "cleanup_state",
+      { operationId: cleanupOperationId, state: "pending" },
+    );
+    emit(cleanup);
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    const cleanupRefreshCalls = getCleanupStatus.mock.calls.length;
+    expect(cleanupRefreshCalls).toBeGreaterThan(0);
+
+    emit(cleanup);
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(getCleanupStatus).toHaveBeenCalledTimes(cleanupRefreshCalls);
+
+    emit(event(
+      "2",
+      "019c1a00-0000-7000-8000-000000000042",
+      "assistant_append",
+      { text: "after-cleanup" },
+    ));
+    expect(store.liveAssistantText).toBe("after-cleanup");
+    expect(resync).toHaveBeenCalledTimes(1);
+
+    emit(event(
+      "4",
+      "019c1a00-0000-7000-8000-000000000043",
+      "cleanup_state",
+      { operationId: cleanupOperationId, state: "pending" },
+    ));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(resync).toHaveBeenCalledTimes(2);
+    expect(getCleanupStatus).toHaveBeenCalledTimes(cleanupRefreshCalls);
+  });
+
+  it("drops a late cleanup refresh after switching sessions", async () => {
+    const cleanupOperationId = "019c1a00-0000-7000-8000-000000000098";
+    const delayedCleanup = new Deferred<Awaited<ReturnType<ChatClient["getCleanupStatus"]>>>();
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>(
+      async () => delayedCleanup.promise,
+    );
+    const { client, emit } = fakeClient({ getCleanupStatus });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emit(event(
+      "1",
+      "019c1a00-0000-7000-8000-000000000044",
+      "cleanup_state",
+      { operationId: cleanupOperationId, state: "pending" },
+    ));
+    for (let index = 0; index < 8 && getCleanupStatus.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(getCleanupStatus).toHaveBeenCalledWith(CONTEXT, cleanupOperationId);
+
+    await store.selectSession(SESSION_B);
+    delayedCleanup.resolve(Object.freeze({
+      operationId: cleanupOperationId,
+      desktopState: "complete",
+      hostState: "complete",
+      runtimeState: "complete",
+      outcomeCode: "cleanup_complete",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: 2,
+      expiresAt: 3,
+    }));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.cleanupStatus).toBeNull();
+    expect(store.deleteDisposition).toBeNull();
+    expect(getCleanupStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects interleaved assistant and reasoning events through the unified reducer", async () => {
+    const { client, emit } = fakeClient();
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emit(event("1", "019c1a00-0000-7000-8000-000000000031", "assistant_append", { text: "A1" }));
+    emit(event("2", "019c1a00-0000-7000-8000-000000000032", "reasoning_append", {
+      itemOrdinal: 0,
+      contentIndex: 0,
+      text: "R1",
+    }));
+    emit(event("3", "019c1a00-0000-7000-8000-000000000033", "assistant_append", { text: "A2" }));
+    emit(event("4", "019c1a00-0000-7000-8000-000000000034", "reasoning_append", {
+      itemOrdinal: 0,
+      contentIndex: 0,
+      text: "R2",
+    }));
+
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )?.contentBlocks).toEqual([{ blockIndex: 0, type: "text", text: "A1A2" }]);
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationReasoningItemId(TURN_A, 0),
+    )?.contentBlocks).toEqual([{ blockIndex: 0, type: "text", text: "R1R2" }]);
+    expect(store.liveAssistantText).toBe("A1A2");
+    expect(store.liveReasoning.map((part) => part.text)).toEqual(["R1R2"]);
+  });
+
+  it("ignores late valid and safely scoped malformed events after switching A to B", async () => {
+    const resyncSession = vi.fn(async (_context: string, sessionId: string) => projection(sessionId));
+    const { client, emit, invalidate } = fakeClient({ resyncSession });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.selectSession(SESSION_B);
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+
+    emit(event(
+      "1",
+      "019c1a00-0000-7000-8000-000000000035",
+      "assistant_append",
+      { text: "late-a" },
+    ));
+    invalidate({
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      subscriptionId: "019c1a00-0000-7000-8000-00000000000a",
+    });
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.liveAssistantText).toBe("");
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+
+    invalidate({
+      contextId: CONTEXT,
+      sessionId: SESSION_B,
+      subscriptionId: "019c1a00-0000-7000-8000-00000000000b",
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(resyncSession).toHaveBeenCalledTimes(3);
   });
 
   it("reloads authoritative history and clears the live projection after a terminal event", async () => {
@@ -1028,6 +1218,170 @@ describe("chat view-model store", () => {
     expect(store.liveTurnStatus).toBe("completed");
     expect(store.history?.turns[0]?.messages[0]?.content).toBe("persisted answer");
     expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus).toBe("completed");
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)).toMatchObject({
+      status: "completed",
+      terminalStatus: "completed",
+    });
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )).toMatchObject({
+      status: "completed",
+      reconciliation: "matched",
+      contentBlocks: [{ blockIndex: 0, type: "text", text: "persisted answer" }],
+    });
+  });
+
+  it("keeps domain, history, and sidebar lifecycle aligned when terminal resync fails", async () => {
+    const queuedProjection: ChatResyncProjection = Object.freeze({
+      session: Object.freeze({ ...session(SESSION_A), latestTurnStatus: "queued" }),
+      history: Object.freeze({
+        turns: Object.freeze([Object.freeze({
+          turnId: TURN_A,
+          status: "queued",
+          terminalAt: null,
+          reasoningStatus: "incomplete",
+          reasoningReasonCode: null,
+          messages: Object.freeze([]),
+          reasoning: Object.freeze([]),
+          artifacts: Object.freeze([]),
+        })]),
+        nextCursor: null,
+      }),
+      cleanup: null,
+    });
+    let resyncCalls = 0;
+    const resyncSession = vi.fn(async () => {
+      resyncCalls += 1;
+      if (resyncCalls === 1) return queuedProjection;
+      throw new ChatClientError({
+        schemaVersion: 1,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client, emit } = fakeClient({ resyncSession });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emit(event(
+      "1",
+      "019c1a00-0000-7000-8000-00000000003a",
+      "assistant_append",
+      { text: "safe live answer" },
+    ));
+
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)?.status)
+      .toBe("in_progress");
+    expect(store.liveTurnStatus).toBe("streaming");
+    expect(store.history?.turns[0]?.status).toBe("streaming");
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("streaming");
+
+    emit(event(
+      "2",
+      "019c1a00-0000-7000-8000-00000000003b",
+      "turn_terminal",
+      { status: "completed" },
+    ));
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)).toMatchObject({
+      status: "completed",
+      terminalStatus: "completed",
+    });
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )).toMatchObject({
+      status: "completed",
+      reconciliation: "not_applicable",
+      contentBlocks: [{ blockIndex: 0, type: "text", text: "safe live answer" }],
+    });
+    expect(store.liveTurnStatus).toBe("completed");
+    expect(store.history?.turns[0]?.status).toBe("completed");
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("completed");
+  });
+
+  it("treats an unseen live Turn as latest when terminal resync fails", async () => {
+    const liveTurnId = "019c1a00-0000-7000-8000-000000000001";
+    const historicalProjection: ChatResyncProjection = Object.freeze({
+      session: Object.freeze({ ...session(SESSION_A), latestTurnStatus: "failed" }),
+      history: Object.freeze({
+        turns: Object.freeze([Object.freeze({
+          turnId: TURN_A,
+          status: "failed" as const,
+          terminalAt: 1,
+          reasoningStatus: "incomplete" as const,
+          reasoningReasonCode: null,
+          messages: Object.freeze([]),
+          reasoning: Object.freeze([]),
+          artifacts: Object.freeze([]),
+        })]),
+        nextCursor: null,
+      }),
+      cleanup: null,
+    });
+    let resyncCalls = 0;
+    const resyncSession = vi.fn(async () => {
+      resyncCalls += 1;
+      if (resyncCalls === 1) return historicalProjection;
+      throw new ChatClientError({
+        schemaVersion: 1,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client, emit } = fakeClient({ resyncSession });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emit({
+      ...event(
+        "1",
+        "019c1a00-0000-7000-8000-00000000004a",
+        "assistant_append",
+        { text: "new live answer" },
+      ),
+      turnId: liveTurnId,
+    });
+
+    expect(selectConversationTurn(store.conversationState, SESSION_A, liveTurnId)).toMatchObject({
+      ordinal: 1,
+      status: "in_progress",
+    });
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("streaming");
+
+    emit({
+      ...event(
+        "2",
+        "019c1a00-0000-7000-8000-00000000004b",
+        "turn_terminal",
+        { status: "completed" },
+      ),
+      turnId: liveTurnId,
+    });
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, liveTurnId)).toMatchObject({
+      ordinal: 1,
+      status: "completed",
+      terminalStatus: "completed",
+    });
+    expect(store.sessions.find((value) => value.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("completed");
   });
 
   it("keeps control-plane projection authoritative across duplicate, gap, and stale events", async () => {
@@ -1553,6 +1907,335 @@ describe("chat view-model store", () => {
     expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
     expect(store.draftAttachments).toEqual([attachment()]);
     expect(removeAttachment).not.toHaveBeenCalled();
+  });
+
+  it("revalidates a project before every create attempt while reusing the create operation id", async () => {
+    const generatedIds = [
+      "019c1a00-0000-7000-8000-00000000000c",
+      "019c1a00-0000-7000-8000-00000000000d",
+      "019c1a00-0000-7000-8000-00000000000e",
+    ];
+    vi.stubGlobal("crypto", { randomUUID: () => generatedIds.shift() ?? "019c1a00-0000-7000-8000-00000000000f" });
+    const calls: string[] = [];
+    const createOperationIds: string[] = [];
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>(async (_context, projectId) => {
+      calls.push("revalidate");
+      return {
+        projectId,
+        safeName: "Synthetic Workspace",
+        pinnedAt: null,
+        lastUsedAt: 1,
+        available: true,
+      };
+    });
+    const createSession = vi.fn<ChatClient["createSession"]>(async (_context, _project, _input, operation) => {
+      calls.push("create");
+      createOperationIds.push(operation);
+      throw new ChatClientError({
+        schemaVersion: 1,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const store = createStore(fakeClient({ revalidateProject, createSession }).client);
+    await store.bind(TENANT);
+
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "same task"))
+      .rejects.toMatchObject({ shape: { code: "chat_temporarily_unavailable" } });
+    await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "same task"))
+      .rejects.toMatchObject({ shape: { code: "chat_temporarily_unavailable" } });
+
+    expect(calls).toEqual(["revalidate", "create", "revalidate", "create"]);
+    expect(revalidateProject).toHaveBeenCalledTimes(2);
+    expect(createOperationIds).toEqual([
+      "019c1a00-0000-7000-8000-00000000000d",
+      "019c1a00-0000-7000-8000-00000000000d",
+    ]);
+  });
+
+  it("rejects an invalid project before v2 create and preserves the attachment draft", async () => {
+    const invalidProjectId = "019c1a00-0000-7000-8000-000000000009";
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>();
+    const store = createStore(fakeClient({
+      pickAttachments: async () => [attachment()],
+      revalidateProject: async () => ({
+        projectId: invalidProjectId,
+        safeName: "Unavailable Workspace",
+        pinnedAt: null,
+        lastUsedAt: 1,
+        available: false,
+      }),
+      createSessionV2,
+    }).client);
+    await store.bind(TENANT);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+    const retainedDraft = store.draftAttachments;
+
+    await expect(store.createSession(invalidProjectId, "keep this input"))
+      .rejects.toMatchObject({
+        shape: {
+          schemaVersion: 1,
+          code: "chat_project_invalid",
+          retryable: false,
+          recovery: "reselect_project",
+        },
+      });
+
+    expect(createSessionV2).not.toHaveBeenCalled();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftTargetReady).toBe(true);
+    expect(store.draftAttachments).toBe(retainedDraft);
+    expect(store.draftAttachments).toEqual([attachment()]);
+  });
+
+  it("does not create in context B when context A changes during project revalidation", async () => {
+    const nextTenant = "019c1a00-0000-7000-8000-000000000010";
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const delayedProject = new Deferred<Awaited<ReturnType<ChatClient["revalidateProject"]>>>();
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>(async () => delayedProject.promise);
+    const createSession = vi.fn<ChatClient["createSession"]>();
+    const store = createStore(fakeClient({
+      bindContext: async (tenant) => ({
+        contextId: tenant === TENANT ? CONTEXT : CONTEXT_B,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ALL_ALLOWED_ACTIONS,
+      }),
+      revalidateProject,
+      createSession,
+    }).client);
+    await store.bind(TENANT);
+
+    const staleCreate = store.createSession(projectId, "context A task");
+    expect(revalidateProject).toHaveBeenCalledWith(CONTEXT, projectId, expect.any(String));
+    await store.bind(nextTenant);
+    delayedProject.resolve({
+      projectId,
+      safeName: "Context A Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    });
+
+    await expect(staleCreate).resolves.toBeNull();
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("ignores an accepted create response after rebinding without clearing context B's draft", async () => {
+    const nextTenant = "019c1a00-0000-7000-8000-000000000010";
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const delayedCreate = new Deferred<Awaited<ReturnType<ChatClient["createSession"]>>>();
+    let createOperationId: string | null = null;
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operation) => {
+        createOperationId = operation;
+        return delayedCreate.promise;
+      },
+    );
+    const listSessions = vi.fn<ChatClient["listSessions"]>(async () => ({
+      sessions: [session(SESSION_A), session(SESSION_B)],
+      nextCursor: null,
+    }));
+    const subscribeSession = vi.fn<ChatClient["subscribeSession"]>(
+      async () => "019c1a00-0000-7000-8000-00000000000a",
+    );
+    const store = createStore(fakeClient({
+      bindContext: async (tenant) => ({
+        contextId: tenant === TENANT ? CONTEXT : CONTEXT_B,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ALL_ALLOWED_ACTIONS,
+      }),
+      listDraftAttachments: async (contextId, target) =>
+        contextId === CONTEXT_B && target.type === "new" ? [attachment()] : [],
+      listSessions,
+      createSession,
+      subscribeSession,
+    }).client);
+    await store.bind(TENANT);
+
+    const staleCreate = store.createSession(projectId, "context A task");
+    for (let index = 0; index < 8 && createSession.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(createSession).toHaveBeenCalledWith(CONTEXT, projectId, "context A task", expect.any(String));
+    await store.bind(nextTenant);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    delayedCreate.resolve({
+      sessionId: SESSION_CREATED,
+      turnId: TURN_A,
+      operationId: createOperationId ?? "missing-operation-id",
+    });
+
+    await expect(staleCreate).resolves.toBeNull();
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(listSessions).toHaveBeenCalledTimes(2);
+    expect(subscribeSession).not.toHaveBeenCalled();
+  });
+
+  it("does not select the created A session when rebinding during its session-list refresh", async () => {
+    const nextTenant = "019c1a00-0000-7000-8000-000000000010";
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const delayedReload = new Deferred<Awaited<ReturnType<ChatClient["listSessions"]>>>();
+    let contextAListCalls = 0;
+    const listSessions = vi.fn<ChatClient["listSessions"]>(async (contextId) => {
+      if (contextId === CONTEXT) {
+        contextAListCalls += 1;
+        if (contextAListCalls === 2) return delayedReload.promise;
+      }
+      return { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null };
+    });
+    const subscribeSession = vi.fn<ChatClient["subscribeSession"]>(
+      async () => "019c1a00-0000-7000-8000-00000000000a",
+    );
+    const store = createStore(fakeClient({
+      bindContext: async (tenant) => ({
+        contextId: tenant === TENANT ? CONTEXT : CONTEXT_B,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: ALL_ALLOWED_ACTIONS,
+      }),
+      listDraftAttachments: async (contextId, target) =>
+        contextId === CONTEXT_B && target.type === "new" ? [attachment()] : [],
+      listSessions,
+      subscribeSession,
+    }).client);
+    await store.bind(TENANT);
+
+    const staleCreate = store.createSession(projectId, "context A task");
+    for (let index = 0; index < 8 && contextAListCalls < 2; index += 1) {
+      await Promise.resolve();
+    }
+    expect(contextAListCalls).toBe(2);
+    await store.bind(nextTenant);
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    delayedReload.resolve({ sessions: [session(SESSION_CREATED)], nextCursor: null });
+
+    await expect(staleCreate).resolves.toBeNull();
+    expect(store.context?.contextId).toBe(CONTEXT_B);
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(listSessions).toHaveBeenCalledTimes(3);
+    expect(subscribeSession).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale create response before validating its operation id", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const delayedCreate = new Deferred<Awaited<ReturnType<ChatClient["createSession"]>>>();
+    const createSession = vi.fn<ChatClient["createSession"]>(async () => delayedCreate.promise);
+    const store = createStore(fakeClient({ createSession }).client);
+    await store.bind(TENANT);
+
+    const staleCreate = store.createSession(projectId, "context A task");
+    for (let index = 0; index < 8 && createSession.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(createSession).toHaveBeenCalledOnce();
+    store.clearForLogout();
+    delayedCreate.resolve({
+      sessionId: SESSION_CREATED,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-000000000099",
+    });
+
+    await expect(staleCreate).resolves.toBeNull();
+    expect(store.context).toBeNull();
+    expect(store.phase).toBe("signed-out");
+  });
+
+  it("accepts the current submit response after a live event makes the session non-sendable", async () => {
+    const delayedSubmit = new Deferred<Awaited<ReturnType<ChatClient["submitTurnV2"]>>>();
+    let submitOperationId: string | null = null;
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(
+      async (_context, _session, _blocks, operation) => {
+        submitOperationId = operation;
+        return delayedSubmit.promise;
+      },
+    );
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(
+      async (_context, sessionId) => projection(sessionId),
+    );
+    const { client, emit } = fakeClient({
+      pickAttachments: async () => [attachment()],
+      submitTurnV2,
+      resyncSession,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+    expect(store.draftAttachments).toEqual([attachment()]);
+
+    const acceptedSubmit = store.submitTurn("session A task");
+    for (let index = 0; index < 8 && submitTurnV2.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(submitTurnV2).toHaveBeenCalledOnce();
+
+    emit(event(
+      "1",
+      "019c1a00-0000-7000-8000-00000000004c",
+      "turn_state",
+      { status: "streaming" },
+    ));
+    expect(store.phase).toBe("streaming");
+    expect(store.canSend).toBe(false);
+    delayedSubmit.resolve({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: submitOperationId ?? "missing-operation-id",
+    });
+
+    await expect(acceptedSubmit).resolves.toBeUndefined();
+    expect(store.draftAttachments).toEqual([]);
+    expect(resyncSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores an accepted submit response after selecting B without clearing B's draft", async () => {
+    const delayedSubmit = new Deferred<Awaited<ReturnType<ChatClient["submitTurn"]>>>();
+    let submitOperationId: string | null = null;
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>(
+      async (_context, _session, _input, operation) => {
+        submitOperationId = operation;
+        return delayedSubmit.promise;
+      },
+    );
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(
+      async (_context, sessionId) => projection(sessionId),
+    );
+    const store = createStore(fakeClient({
+      listDraftAttachments: async (_context, target) =>
+        target.type === "session" && target.sessionId === SESSION_B ? [attachment()] : [],
+      submitTurn,
+      resyncSession,
+    }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    const staleSubmit = store.submitTurn("session A task");
+    for (let index = 0; index < 8 && submitTurn.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(submitTurn).toHaveBeenCalledWith(CONTEXT, SESSION_A, "session A task", expect.any(String));
+    await store.selectSession(SESSION_B);
+    expect(store.draftAttachments).toEqual([attachment()]);
+    delayedSubmit.resolve({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: submitOperationId ?? "missing-operation-id",
+    });
+
+    await expect(staleSubmit).resolves.toBeUndefined();
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.draftTarget).toEqual(chatSessionDraftTarget(SESSION_B));
+    expect(store.draftAttachments).toEqual([attachment()]);
+    expect(resyncSession).toHaveBeenCalledTimes(2);
   });
 
   it("creates an attachment-only v2 turn and clears the draft only after success", async () => {

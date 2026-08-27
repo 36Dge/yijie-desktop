@@ -541,10 +541,14 @@ onBeforeUnmount(() => {
             default-expanded
           />
 
-          <article v-if="chatStore.liveAssistantText" class="chat-message chat-message--assistant" aria-label="模型回答，正在生成">
+          <article
+            v-if="chatStore.liveAssistantText"
+            class="chat-message chat-message--assistant"
+            :aria-label="isStreaming ? '模型回答，正在生成' : '模型回答'"
+          >
             <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
             <div class="chat-message__body">{{ chatStore.liveAssistantText }}</div>
-            <span class="chat-message__streaming" aria-hidden="true" />
+            <span v-if="isStreaming" class="chat-message__streaming" aria-hidden="true" />
           </article>
           <div v-else-if="isStreaming" class="chat-streaming" role="status">
             <span class="chat-empty__loader" aria-hidden="true" />

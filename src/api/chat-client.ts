@@ -64,6 +64,12 @@ export interface ChatClientTransport {
   readonly listen: ListenFn;
 }
 
+export interface ChatInvalidEventScope {
+  readonly contextId: string;
+  readonly sessionId: string;
+  readonly subscriptionId: string;
+}
+
 export interface ChatClient {
   bindContext(tenantSelector: string): Promise<BoundChatContext>;
   listProjects(contextId: string, signal?: AbortSignal): Promise<readonly ChatProject[]>;
@@ -109,7 +115,7 @@ export interface ChatClient {
   cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
   onEvent(
     handler: (event: ChatProjectionEvent) => void,
-    onInvalid?: () => void,
+    onInvalid?: (scope?: ChatInvalidEventScope | null) => void,
   ): Promise<UnlistenFn>;
   onControlPlaneEvent(
     handler: (event: ChatControlPlaneEvent) => void,
@@ -125,6 +131,29 @@ const productionTransport: ChatClientTransport = {
   invoke: (command, arguments_) => invoke<unknown>(command, arguments_),
   listen: (channel, handler) => listen<unknown>(channel, (event) => handler(event.payload)),
 };
+
+const CHAT_ROUTING_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function invalidEventScope(payload: unknown): ChatInvalidEventScope | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  try {
+    const candidate = payload as Record<string, unknown>;
+    const contextId = candidate.contextId;
+    const sessionId = candidate.sessionId;
+    const subscriptionId = candidate.subscriptionId;
+    if (
+      typeof contextId !== "string" ||
+      typeof sessionId !== "string" ||
+      typeof subscriptionId !== "string" ||
+      !CHAT_ROUTING_UUID_PATTERN.test(contextId) ||
+      !CHAT_ROUTING_UUID_PATTERN.test(sessionId) ||
+      !CHAT_ROUTING_UUID_PATTERN.test(subscriptionId)
+    ) return null;
+    return Object.freeze({ contextId, sessionId, subscriptionId });
+  } catch {
+    return null;
+  }
+}
 
 function requestId(): string {
   return crypto.randomUUID().toLowerCase();
@@ -415,7 +444,7 @@ export function createChatClient(transport: ChatClientTransport = productionTran
           handler(parseChatProjectionEvent(payload));
         } catch (error: unknown) {
           if (!(error instanceof ChatContractError)) throw error;
-          onInvalid?.();
+          onInvalid?.(invalidEventScope(payload));
         }
       });
     },

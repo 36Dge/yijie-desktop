@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("StorePage", () => {
-  it("FEAT-150 renders the three required modules and explicit synthetic-data boundary", () => {
+  it("FEAT-150 renders the three required modules without the removed demo notice", () => {
     const wrapper = mountPage();
 
     expect(wrapper.get("h1").text()).toBe("我的店铺");
@@ -39,8 +39,10 @@ describe("StorePage", () => {
       "精选场景",
       "角色场景推荐",
     ]);
-    expect(wrapper.text()).toContain("本页指标、趋势和场景热度均为本地合成内容");
+    expect(wrapper.text()).not.toContain("演示内容");
+    expect(wrapper.text()).not.toContain("不代表任何真实店铺表现");
     expect(wrapper.text()).toContain("无店铺数据连接");
+    expect(wrapper.text()).toContain("本地合成");
   });
 
   it("FEAT-150 exposes all 18 reference states with the approved defaults", () => {

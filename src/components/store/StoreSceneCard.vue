@@ -61,14 +61,6 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
   background: var(--yj-color-bg-card);
   box-shadow: var(--yj-shadow-xs);
   gap: var(--yj-space-4);
-  transition:
-    border-color var(--yj-motion-fast) var(--yj-ease-standard),
-    box-shadow var(--yj-motion-fast) var(--yj-ease-standard);
-}
-
-.store-scene-card:hover {
-  border-color: var(--yj-color-border-default);
-  box-shadow: var(--yj-shadow-card);
 }
 
 .store-scene-card__badges {
@@ -81,29 +73,34 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
 }
 
 .store-scene-card__badge {
-  padding: var(--yj-space-1) var(--yj-space-2);
-  border: var(--yj-border-width) solid var(--yj-color-brand-border);
+  display: inline-flex;
+  min-width: var(--yj-space-12);
+  height: var(--yj-space-8);
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  padding: var(--yj-space-1) var(--yj-space-3);
+  border: 0;
   border-radius: var(--yj-radius-full);
   color: var(--yj-color-brand-text);
   background: var(--yj-color-brand-soft);
   font-size: var(--yj-font-size-caption);
+  font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-caption);
+  white-space: nowrap;
 }
 
 .store-scene-card__badge--warning {
-  border-color: var(--yj-color-border-subtle);
-  color: var(--yj-color-warning);
+  color: var(--yj-color-text-primary);
   background: var(--yj-color-warning-soft);
 }
 
 .store-scene-card__badge--error {
-  border-color: var(--yj-color-border-subtle);
-  color: var(--yj-color-error);
+  color: var(--yj-color-text-primary);
   background: var(--yj-color-error-soft);
 }
 
 .store-scene-card__badge--neutral {
-  border-color: var(--yj-color-border-subtle);
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-bg-subtle);
 }

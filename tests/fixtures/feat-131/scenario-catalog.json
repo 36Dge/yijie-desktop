@@ -1,9 +1,9 @@
 {
-  "catalogSchemaVersion": 1,
-  "fixtureFamily": "feat131-desktop-replay-v1",
-  "referenceAppVersion": "26.818.61809",
-  "referenceAppBuild": "7019",
-  "frozenAt": "2026-08-26",
+  "catalogSchemaVersion": 2,
+  "fixtureFamily": "feat131-desktop-replay-v2",
+  "referencePolicyId": "codex-inspired-approximate-parity-v1-2026-08-27",
+  "referencePolicyMode": "owner-approved-inference",
+  "policyEffectiveAt": "2026-08-27",
   "scenarios": [
     {
       "scenarioId": "GS-001",
@@ -14,7 +14,7 @@
       "assetKind": "replay",
       "replayedVariants": ["streaming", "completed"],
       "provenance": "synthetic",
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": "GS-001-streaming-complete.synthetic.json"
     },
     {
@@ -26,7 +26,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -38,7 +38,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -50,7 +50,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -62,19 +62,19 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
       "scenarioId": "GS-006",
-      "title": "文件修改与 Diff",
+      "title": "文件修改与 Diff（明确不实现）",
       "variants": ["file-change", "diff"],
-      "ownerFeature": "FEAT-138",
-      "capabilityClass": "requires Host/Contracts projection",
+      "ownerFeature": "FEAT-131",
+      "capabilityClass": "intentional product difference",
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-excluded",
       "replayFixture": null
     },
     {
@@ -86,7 +86,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -98,7 +98,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -110,7 +110,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -122,7 +122,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -134,7 +134,7 @@
       "assetKind": "metadata-only",
       "replayedVariants": [],
       "provenance": null,
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": null
     },
     {
@@ -146,7 +146,7 @@
       "assetKind": "replay",
       "replayedVariants": ["resync-required", "recovered"],
       "provenance": "synthetic",
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": "GS-012-resync-recovery.synthetic.json"
     },
     {
@@ -158,7 +158,7 @@
       "assetKind": "replay",
       "replayedVariants": ["missing-delta"],
       "provenance": "synthetic",
-      "observationStatus": "reference-unobserved",
+      "referenceBasis": "owner-approved-inference",
       "replayFixture": "GS-013-sequence-gap.synthetic.json"
     }
   ]
