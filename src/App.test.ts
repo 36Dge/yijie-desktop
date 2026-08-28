@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { flushPromises, shallowMount } from "@vue/test-utils";
+import { flushPromises, mount, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,60 @@ afterEach(() => {
 });
 
 describe("App chat route synchronization", () => {
+  it("applies accessible frontend zoom and cleans root state on unmount", async () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: () => "#000000",
+    }));
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const page = { template: "<div />" };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/chat", component: page },
+        { path: "/settings", component: page },
+      ],
+    });
+    await router.push("/chat");
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+    const zoomEvent = new KeyboardEvent("keydown", {
+      key: "=",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    window.dispatchEvent(zoomEvent);
+    await flushPromises();
+
+    expect(zoomEvent.defaultPrevented).toBe(true);
+    expect(document.documentElement.style.getPropertyValue("zoom")).toBe("1.2");
+    expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-width"))
+      .toBe("983.3333333333334px");
+    expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-height"))
+      .toBe("633.3333333333334px");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-viewport-width"))
+      .toBe("83.33333333333333vw");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-viewport-height"))
+      .toBe("83.33333333333333vh");
+    expect(document.documentElement.dataset.uiZoomPercent).toBe("120");
+    expect(wrapper.get(".app-zoom-announcement").text()).toBe("界面缩放 120%");
+
+    wrapper.unmount();
+
+    expect(document.documentElement.style.getPropertyValue("zoom")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-width")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-height")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-viewport-width")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-viewport-height")).toBe("");
+    expect(document.documentElement.dataset.uiZoomPercent).toBeUndefined();
+  });
+
   it("keeps a ready /chat draft stable without clearing it again", async () => {
     vi.stubGlobal("matchMedia", () => ({
       matches: false,

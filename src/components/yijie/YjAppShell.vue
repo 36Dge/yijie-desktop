@@ -79,7 +79,7 @@ function recoverCurrentNewTask(): void {
   width: 100%;
   min-width: var(--yj-layout-window-min-width);
   min-height: var(--yj-layout-window-min-height);
-  height: 100vh;
+  height: var(--yj-ui-viewport-height, 100vh);
   overflow: hidden;
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-app);

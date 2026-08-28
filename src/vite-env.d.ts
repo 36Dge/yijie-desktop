@@ -8,6 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED?: string;
   readonly VITE_YIJIE_LOCAL_PROFILE?: string;
   readonly VITE_YIJIE_CHAT_LOCAL_UI_ENABLED?: string;
+  readonly VITE_YIJIE_LEGACY_CHAT_TIMELINE_ROLLBACK_ENABLED?: string;
   readonly VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED?: string;
 }
 

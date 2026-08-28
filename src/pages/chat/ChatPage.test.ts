@@ -9,19 +9,27 @@ import {
   CHAT_NEW_DRAFT_TARGET,
   ChatClientError,
   chatSessionDraftTarget,
-    type ChatAttachment,
-    type ChatAttachmentImportEvent,
+  type ChatAttachment,
+  type ChatAttachmentImportEvent,
   type ChatHistoryPage,
   type ChatProject,
   type ChatSession,
 } from "../../domain/chat-ipc";
+import {
+  createConversationState,
+  hydrateConversationState,
+  reconcileConversationSnapshot,
+} from "../../domain/conversation-state";
+import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
 import { useChatStore } from "../../stores/chat.store";
 import { useArtifactStore } from "../../stores/artifact.store";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
+import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
+import { LEGACY_CHAT_TIMELINE_ROLLBACK_KEY } from "../../authorization/chat-timeline-ui-config";
 import ChatPage from "./ChatPage.vue";
 
 type MockDragDropPayload =
@@ -111,7 +119,31 @@ const HISTORY: ChatHistoryPage = {
   nextCursor: null,
 };
 
-async function mountPage(path: string, active = false) {
+const HISTORY_WITHOUT_REASONING: ChatHistoryPage = Object.freeze({
+  turns: Object.freeze([Object.freeze({
+    ...HISTORY.turns[0],
+    reasoning: Object.freeze([]),
+  })]),
+  nextCursor: null,
+});
+
+function setHistoryProjection(
+  store: ReturnType<typeof useChatStore>,
+  history: ChatHistoryPage,
+): void {
+  store.history = history;
+  store.conversationState = reconcileConversationSnapshot(
+    createConversationState(),
+    historyPageToConversationSnapshot(SESSION_ID, history),
+  );
+}
+
+async function mountPage(
+  path: string,
+  active = false,
+  activeHistory: ChatHistoryPage = HISTORY,
+  legacyTimelineRollback = false,
+) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -131,7 +163,8 @@ async function mountPage(path: string, active = false) {
   store.selectedSessionId = active ? SESSION_ID : null;
   store.draftTarget = active ? chatSessionDraftTarget(SESSION_ID) : CHAT_NEW_DRAFT_TARGET;
   store.draftTargetReady = true;
-  store.history = active ? HISTORY : null;
+  if (active) setHistoryProjection(store, activeHistory);
+  else store.history = null;
   store.localReadiness = {
     lifecycle: "ready", host: "ready", runtime: "ready", storage: "ready",
     canSend: true, issueCode: null, retryable: false, recovery: "none",
@@ -146,7 +179,13 @@ async function mountPage(path: string, active = false) {
   });
   await router.push(path);
   await router.isReady();
-  const wrapper = mount(ChatPage, { attachTo: document.body, global: { plugins: [pinia, router] } });
+  const wrapper = mount(ChatPage, {
+    attachTo: document.body,
+    global: {
+      plugins: [pinia, router],
+      provide: { [LEGACY_CHAT_TIMELINE_ROLLBACK_KEY as symbol]: legacyTimelineRollback },
+    },
+  });
   await flushPromises();
   return { wrapper, store, router, pinia };
 }
@@ -171,7 +210,168 @@ describe("FEAT-126 ChatPage", () => {
 
     store.history = null;
     await flushPromises();
-    expect(wrapper.text()).toContain("正在读取本地对话");
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.text()).not.toContain("正在读取本地对话");
+  });
+
+  it("uses the FEAT-132 Timeline exclusively when the projection is complete", async () => {
+    const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue();
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { wrapper } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
+    expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.text()).toContain("检查标题");
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.findAll(".chat-message__attachment")).toHaveLength(1);
+    expect(wrapper.text()).toContain("synthetic-brief.pdf");
+    expect(wrapper.text()).toContain("文件 · 4 KB");
+
+    const textCopyActions = wrapper.findAll('[aria-label="复制文本"]');
+    expect(textCopyActions).toHaveLength(2);
+    await textCopyActions[1]!.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith("标题检查完成");
+    expect(wrapper.text()).toContain("已复制");
+  });
+
+  it("injects exact fenced-code copy without giving Timeline clipboard authority", async () => {
+    const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue();
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const code = "const answer = 42;";
+    const codeHistory: ChatHistoryPage = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        ...HISTORY_WITHOUT_REASONING.turns[0],
+        messages: Object.freeze([
+          HISTORY_WITHOUT_REASONING.turns[0].messages[0],
+          Object.freeze({
+            ...HISTORY_WITHOUT_REASONING.turns[0].messages[1],
+            content: `答案如下：\n\n\`\`\`ts\n${code}\n\`\`\``,
+          }),
+        ]),
+      })]),
+      nextCursor: null,
+    });
+    const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true, codeHistory);
+
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
+    const codeCopy = wrapper.get('[aria-label="复制代码"]');
+    await codeCopy.trigger("click");
+    await flushPromises();
+
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(code);
+    expect(wrapper.get("pre code").text()).toBe(code);
+    expect(wrapper.find("script").exists()).toBe(false);
+  });
+
+  it("does not switch the renderer when metadata-only reasoning enters the projection", async () => {
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    const timelineElement = wrapper.getComponent(ChatTimeline).element;
+    const loadReasoning = vi.spyOn(store, "loadReasoning");
+
+    setHistoryProjection(store, HISTORY);
+    await flushPromises();
+
+    expect(wrapper.getComponent(ChatTimeline).element).toBe(timelineElement);
+    expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.text()).toContain("此过程仅包含状态元数据；详情未进入当前对话投影。");
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(loadReasoning).not.toHaveBeenCalled();
+  });
+
+  it("does not enter the legacy renderer when the default selector has no Thread", async () => {
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+
+    store.conversationState = createConversationState();
+    await flushPromises();
+
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(false);
+    expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.text()).toContain("正在同步对话状态");
+    expect(wrapper.text()).not.toContain("模型推理记录");
+  });
+
+  it("does not treat an active empty reasoning Item as historical authority loss", async () => {
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    store.conversationState = hydrateConversationState({
+      threads: [{ threadId: SESSION_ID, status: "active" }],
+      turns: [{
+        threadId: SESSION_ID,
+        turnId: TURN_ID,
+        ordinal: 0,
+        status: "in_progress",
+        terminalStatus: null,
+      }],
+      items: [{
+        threadId: SESSION_ID,
+        turnId: TURN_ID,
+        itemId: `${TURN_ID}:reasoning:0`,
+        ordinal: 100,
+        kind: "reasoning",
+        status: "streaming",
+        contentBlocks: [],
+      }],
+    });
+    await flushPromises();
+
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
+    expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.text()).toContain("本轮正在处理中");
+    expect(wrapper.text()).not.toContain("仅包含状态元数据");
+  });
+
+  it("presents deterministic Chat permission denial without hiding confirmed history", async () => {
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    store.controlPlane = {
+      sessionId: SESSION_ID,
+      state: "denied",
+      issueCode: "chat_capability_denied",
+      retryable: false,
+      recovery: "none",
+    };
+    await flushPromises();
+
+    const denied = wrapper.get(".chat-workspace__permission-denied");
+    expect(denied.text()).toContain("当前工作区权限不足");
+    expect(denied.text()).toContain("已经确认的对话内容仍会保留显示");
+    expect(denied.find("button").exists()).toBe(false);
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
+    expect(wrapper.text()).toContain("标题检查完成");
+
+    store.controlPlane = null;
+    store.context = {
+      contextId: store.context!.contextId,
+      expiresAtEpochSeconds: 2_000_000_000,
+      allowedActions: ["submit_turn", "read_projects"],
+    };
+    await flushPromises();
+    expect(wrapper.get(".chat-workspace__permission-denied").text())
+      .toContain("当前工作区权限不足");
+    expect(wrapper.text()).toContain("标题检查完成");
   });
 
   it("renders an empty-text assistant turn with trusted Artifact identity and all typed clients", async () => {
@@ -180,6 +380,7 @@ describe("FEAT-126 ChatPage", () => {
     const artifactHistory: ChatHistoryPage = Object.freeze({
       turns: Object.freeze([Object.freeze({
         ...HISTORY.turns[0],
+        reasoning: Object.freeze([]),
         messages: Object.freeze([
           HISTORY.turns[0].messages[0],
           Object.freeze({ ...HISTORY.turns[0].messages[1], content: "" }),
@@ -211,9 +412,13 @@ describe("FEAT-126 ChatPage", () => {
       sessionId: SESSION_ID,
     });
     artifacts.ingestHistoryV3(artifacts.captureAuthority(), artifactHistory);
-    store.history = artifactHistory;
+    setHistoryProjection(store, artifactHistory);
     await flushPromises();
 
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
+    expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.findAll(".chat-message__attachment")).toHaveLength(1);
+    expect(wrapper.findAllComponents(ChatArtifactList)).toHaveLength(1);
     const list = wrapper.getComponent(ChatArtifactList);
     expect(list.props("contextId")).toBe(store.context!.contextId);
     expect(list.props("nativeClient")).toBe(chatArtifactNativeClient);
@@ -229,6 +434,16 @@ describe("FEAT-126 ChatPage", () => {
     expect(results.violations.filter((violation) =>
       violation.impact === "serious" || violation.impact === "critical",
     )).toEqual([]);
+
+    artifacts.replaceAuthority({
+      authorizationRevision: 8,
+      contextId: "019c1a00-0000-7000-8000-000000000099",
+      tenantId: "019c1a00-0000-7000-8000-000000000022",
+      sessionId: SESSION_ID,
+    });
+    await flushPromises();
+    expect(wrapper.findComponent(ChatArtifactList).exists()).toBe(false);
+    expect(wrapper.text()).toContain("safe-metadata.txt");
   });
 
   it("creates exactly one session from the real composer and routes only after success", async () => {
@@ -333,8 +548,10 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
   });
 
-  it("renders historical and streaming assistant/raw reasoning as literal selectable text", async () => {
-    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  it("uses the legacy renderer only through the explicit rollback boundary", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, HISTORY, true);
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(false);
+    expect(wrapper.find(".chat-turn").exists()).toBe(true);
     expect(wrapper.text()).toContain("检查标题");
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).toContain("synthetic-brief.pdf");

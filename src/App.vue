@@ -24,6 +24,13 @@ import YjAppShell from "./components/yijie/YjAppShell.vue";
 import { createNaiveThemeOverrides } from "./design/theme/naive-theme";
 import { usePermissionStore } from "./stores/permission.store";
 import { useChatStore } from "./stores/chat.store";
+import {
+  nextUiZoomPercent,
+  UI_ZOOM_DEFAULT_PERCENT,
+  uiZoomCssValue,
+  uiZoomedViewportCss,
+  uiZoomedWindowMinimumCss,
+} from "./domain/ui-zoom";
 import "./styles/variables.css";
 
 const route = useRoute();
@@ -31,6 +38,7 @@ const router = useRouter();
 const permissionStore = usePermissionStore();
 const chatStore = useChatStore();
 const isDark = ref(false);
+const uiZoomPercent = ref(UI_ZOOM_DEFAULT_PERCENT);
 const themeOverrides = ref<GlobalThemeOverrides>();
 let colorSchemeQuery: MediaQueryList | undefined;
 let permissionLifecycle: PermissionLifecycle | undefined;
@@ -109,6 +117,25 @@ function handleColorSchemeChange(event: MediaQueryListEvent): void {
   applyColorScheme(event.matches);
 }
 
+function applyUiZoom(percent: number): void {
+  const windowMinimum = uiZoomedWindowMinimumCss(percent);
+  const viewport = uiZoomedViewportCss(percent);
+  document.documentElement.style.setProperty("zoom", uiZoomCssValue(percent));
+  document.documentElement.style.setProperty("--yj-layout-window-min-width", windowMinimum.width);
+  document.documentElement.style.setProperty("--yj-layout-window-min-height", windowMinimum.height);
+  document.documentElement.style.setProperty("--yj-ui-viewport-width", viewport.width);
+  document.documentElement.style.setProperty("--yj-ui-viewport-height", viewport.height);
+  document.documentElement.dataset.uiZoomPercent = String(percent);
+}
+
+function handleUiZoomShortcut(event: KeyboardEvent): void {
+  const nextPercent = nextUiZoomPercent(uiZoomPercent.value, event);
+  if (nextPercent === null) return;
+  event.preventDefault();
+  uiZoomPercent.value = nextPercent;
+  applyUiZoom(nextPercent);
+}
+
 watch(
   [
     () => route.path,
@@ -179,6 +206,8 @@ onMounted(() => {
   colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
   applyColorScheme(colorSchemeQuery.matches);
   colorSchemeQuery.addEventListener("change", handleColorSchemeChange);
+  applyUiZoom(uiZoomPercent.value);
+  window.addEventListener("keydown", handleUiZoomShortcut);
 
   if (authoritativePermissionUiEnabled) {
     permissionLifecycle = createPermissionLifecycle(
@@ -192,6 +221,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   colorSchemeQuery?.removeEventListener("change", handleColorSchemeChange);
+  window.removeEventListener("keydown", handleUiZoomShortcut);
+  document.documentElement.style.removeProperty("zoom");
+  document.documentElement.style.removeProperty("--yj-layout-window-min-width");
+  document.documentElement.style.removeProperty("--yj-layout-window-min-height");
+  document.documentElement.style.removeProperty("--yj-ui-viewport-width");
+  document.documentElement.style.removeProperty("--yj-ui-viewport-height");
+  delete document.documentElement.dataset.uiZoomPercent;
   permissionLifecycle?.stop();
   void chatPermissionLifecycle.stop();
 });
@@ -199,6 +235,12 @@ onBeforeUnmount(() => {
 
 <template>
   <n-config-provider :theme="isDark ? darkTheme : null" :theme-overrides="themeOverrides">
+    <p
+      class="app-zoom-announcement"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >界面缩放 {{ uiZoomPercent }}%</p>
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>
@@ -212,3 +254,17 @@ onBeforeUnmount(() => {
     </n-message-provider>
   </n-config-provider>
 </template>
+
+<style scoped>
+.app-zoom-announcement {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+</style>

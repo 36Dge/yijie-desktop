@@ -73,6 +73,11 @@ defineSlots<{
   "attachment-reference"(props: {
     block: ConversationTimelineAttachmentReferenceContentBlock;
   }): unknown;
+  "code-actions"(props: {
+    codeIdentity: string;
+    text: string;
+    language: string | null;
+  }): unknown;
 }>();
 
 function stableKey(...parts: readonly string[]): string {
@@ -438,7 +443,26 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
         tabindex="0"
         aria-label="代码内容，可横向滚动"
       >
-        <span v-if="node.language" class="chat-safe-content__language">{{ node.language }}</span>
+        <div
+          v-if="node.language || $slots['code-actions']"
+          class="chat-safe-content__code-header"
+        >
+          <span v-if="node.language" class="chat-safe-content__language">{{ node.language }}</span>
+          <span v-else class="chat-safe-content__language">代码</span>
+          <div
+            v-if="$slots['code-actions']"
+            class="chat-safe-content__code-actions"
+            role="group"
+            aria-label="代码操作"
+          >
+            <slot
+              name="code-actions"
+              :code-identity="node.key"
+              :text="node.text"
+              :language="node.language"
+            />
+          </div>
+        </div>
         <pre><code>{{ node.text }}</code></pre>
       </div>
 
@@ -565,12 +589,30 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
   outline-offset: var(--yj-space-1);
 }
 
-.chat-safe-content__language {
+.chat-safe-content__code-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--yj-space-2);
   padding: var(--yj-space-1) var(--yj-space-3);
   border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
+}
+
+.chat-safe-content__language {
+  min-width: 0;
   color: var(--yj-color-text-tertiary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-safe-content__code-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .chat-safe-content pre {

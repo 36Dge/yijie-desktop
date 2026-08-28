@@ -36,6 +36,12 @@ const slots = defineSlots<{
     block: ConversationTimelineAttachmentReferenceContentBlock;
   }): unknown;
   "item-actions"(props: { item: ConversationTimelineItemViewModel }): unknown;
+  "code-actions"(props: {
+    item: ConversationTimelineItemViewModel;
+    codeIdentity: string;
+    text: string;
+    language: string | null;
+  }): unknown;
 }>();
 
 const headingId = `${useId()}-heading`;
@@ -217,6 +223,14 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
             <code>unsupported_content</code>
           </div>
 
+          <p
+            v-else-if="item.kind === 'reasoning' && item.domainStatus === 'completed' && item.contentBlocks.length === 0"
+            class="chat-turn-group__metadata-only"
+            role="note"
+          >
+            此过程仅包含状态元数据；详情未进入当前对话投影。
+          </p>
+
           <ChatSafeContent
             v-else
             :blocks="item.contentBlocks"
@@ -233,6 +247,18 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
               #attachment-reference="{ block }"
             >
               <slot name="attachment-reference" :item="item" :block="block" />
+            </template>
+            <template
+              v-if="slots['code-actions']"
+              #code-actions="{ codeIdentity, text, language }"
+            >
+              <slot
+                name="code-actions"
+                :item="item"
+                :code-identity="codeIdentity"
+                :text="text"
+                :language="language"
+              />
             </template>
           </ChatSafeContent>
 
@@ -349,6 +375,13 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
+}
+
+.chat-turn-group__metadata-only {
+  margin: var(--yj-space-0);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
 }
 
 .chat-turn-group__unknown code,

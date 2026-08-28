@@ -82,6 +82,49 @@ describe("ChatSafeContent", () => {
     expect(wrapper.get(".chat-safe-content__table-region").attributes("tabindex")).toBe("0");
   });
 
+  it("passes fenced and explicit code through the typed action slot without rewriting text", () => {
+    const explicitText = "  const explicit = true;\n";
+    const blocks: readonly ConversationTimelineContentBlock[] = deepFreeze([
+      textBlock("```ts\nconst fenced = true;\n```", "markdown-block"),
+      {
+        identity: "explicit-block",
+        blockIndex: 1,
+        type: "code",
+        language: "typescript",
+        text: explicitText,
+      },
+    ]);
+    const seen: Array<{
+      codeIdentity: string;
+      text: string;
+      language: string | null;
+    }> = [];
+    const wrapper = mount(ChatSafeContent, {
+      props: { blocks },
+      slots: {
+        "code-actions": (scope: {
+          codeIdentity: string;
+          text: string;
+          language: string | null;
+        }) => {
+          seen.push(scope);
+          return h("button", { type: "button", class: "code-action" }, "复制代码");
+        },
+      },
+    });
+
+    expect(wrapper.findAll(".code-action")).toHaveLength(2);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatchObject({ text: "const fenced = true;", language: "ts" });
+    expect(seen[0]?.codeIdentity).toContain("markdown-block");
+    expect(seen[1]).toEqual({
+      codeIdentity: "explicit-block",
+      text: explicitText,
+      language: "typescript",
+    });
+    expect(wrapper.findAll("[role='group'][aria-label='代码操作']")).toHaveLength(2);
+  });
+
   it("renders benign markup as literal text and offers an unparsed plain mode", () => {
     const rich = mount(ChatSafeContent, {
       props: {

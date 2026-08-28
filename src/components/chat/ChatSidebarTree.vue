@@ -509,7 +509,7 @@ async function confirmRemoveProject(): Promise<void> {
 }
 .chat-tree__load-more:hover { background: var(--yj-color-bg-subtle); }
 
-.chat-tree__dialog { width: min(440px, calc(100vw - var(--yj-space-12))); }
+.chat-tree__dialog { width: min(440px, calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-12))); }
 .chat-tree__dialog-copy { margin: 0 0 var(--yj-space-4); color: var(--yj-color-text-secondary); line-height: var(--yj-line-height-body); }
 .chat-tree__dialog-error { margin: var(--yj-space-2) 0 0; color: var(--yj-color-error); font-size: var(--yj-font-size-caption); }
 .chat-tree__dialog-actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); margin-top: var(--yj-space-5); }

@@ -10,6 +10,7 @@ describe("iconRegistry", () => {
       "chevronDown",
       "chevronRight",
       "collapseSidebar",
+      "copy",
       "dismiss",
       "download",
       "edit",

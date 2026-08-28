@@ -637,8 +637,8 @@ onBeforeUnmount(() => {
 
 .artifact-image__dialog {
   display: grid;
-  width: min(calc(100vw - var(--yj-space-8)), var(--yj-layout-chat-column-max));
-  max-height: calc(100vh - var(--yj-space-8));
+  width: min(calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)), var(--yj-layout-chat-column-max));
+  max-height: calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8));
   overflow: hidden;
   grid-template-rows: auto minmax(0, 1fr) auto;
   border: var(--yj-border-width) solid var(--yj-color-border-default);
@@ -677,7 +677,7 @@ onBeforeUnmount(() => {
 .artifact-image__dialog-image {
   display: block;
   max-width: 100%;
-  max-height: calc(100vh - (var(--yj-space-16) * 4));
+  max-height: calc(var(--yj-ui-viewport-height, 100vh) - (var(--yj-space-16) * 4));
   object-fit: contain;
   transform-origin: center;
   transition: transform var(--yj-motion-base) var(--yj-ease-standard);
@@ -709,8 +709,8 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .artifact-image__dialog {
-    width: calc(100vw - var(--yj-space-4));
-    max-height: calc(100vh - var(--yj-space-4));
+    width: calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-4));
+    max-height: calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-4));
   }
   .artifact-image__toolbar { flex-wrap: wrap; }
 }

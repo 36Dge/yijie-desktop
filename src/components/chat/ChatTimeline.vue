@@ -27,6 +27,12 @@ const slots = defineSlots<{
     block: ConversationTimelineAttachmentReferenceContentBlock;
   }): unknown;
   "item-actions"(props: { item: ConversationTimelineItemViewModel }): unknown;
+  "code-actions"(props: {
+    item: ConversationTimelineItemViewModel;
+    codeIdentity: string;
+    text: string;
+    language: string | null;
+  }): unknown;
 }>();
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
@@ -106,6 +112,18 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
           </template>
           <template v-if="slots['item-actions']" #item-actions="{ item }">
             <slot name="item-actions" :item="item" />
+          </template>
+          <template
+            v-if="slots['code-actions']"
+            #code-actions="{ item, codeIdentity, text, language }"
+          >
+            <slot
+              name="code-actions"
+              :item="item"
+              :code-identity="codeIdentity"
+              :text="text"
+              :language="language"
+            />
           </template>
         </ChatTurnGroup>
       </li>

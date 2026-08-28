@@ -14,7 +14,7 @@
 
 body {
   min-width: 320px;
-  min-height: 100vh;
+  min-height: var(--yj-ui-viewport-height, 100vh);
   margin: 0;
 }
 
@@ -29,5 +29,16 @@ button {
 }
 
 #app {
-  min-height: 100vh;
+  min-height: var(--yj-ui-viewport-height, 100vh);
+}
+
+html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"]) .yj-sidebar--chat-tree {
+  width: 196px;
+  flex-basis: 196px;
+}
+
+html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"])
+  .yj-sidebar--chat-tree
+  .yj-sidebar__navigation {
+  padding-inline: var(--yj-space-2);
 }

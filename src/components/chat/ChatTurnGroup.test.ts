@@ -148,6 +148,47 @@ describe("ChatTurnGroup", () => {
     });
   });
 
+  it("labels completed metadata-only reasoning without inventing a second content authority", () => {
+    const turn = projectedTurn({
+      items: [{
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        itemId: "reasoning-metadata-only",
+        ordinal: 0,
+        kind: "reasoning",
+        status: "completed",
+        contentBlocks: [],
+      }],
+    });
+    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+
+    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.text()).toContain("已完成");
+    expect(wrapper.text()).toContain("此过程仅包含状态元数据；详情未进入当前对话投影。");
+    expect(wrapper.get(".chat-turn-group__metadata-only").attributes("role")).toBe("note");
+    expect(wrapper.find(".chat-safe-content").exists()).toBe(false);
+  });
+
+  it("does not label an active empty reasoning Item as metadata-only history", () => {
+    const turn = projectedTurn({
+      status: "in_progress",
+      items: [{
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        itemId: "reasoning-active-empty",
+        ordinal: 0,
+        kind: "reasoning",
+        status: "streaming",
+        contentBlocks: [],
+      }],
+    });
+    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+
+    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.text()).not.toContain("仅包含状态元数据");
+    expect(wrapper.find(".chat-turn-group__metadata-only").exists()).toBe(false);
+  });
+
   it("renders lifecycle progress, terminal notes, and aggregated notices outside the Item list", () => {
     const activeCases: readonly [ConversationTurnStatus, string][] = [
       ["queued", "本轮正在等待处理"],
@@ -254,6 +295,46 @@ describe("ChatTurnGroup", () => {
       scope.item === projectedItem && scope.block === attachmentBlock)).toBe(true);
     expect(actionSlot.mock.calls.every(([scope]) => scope.item === projectedItem)).toBe(true);
     expect(wrapper.get("[role='group']").attributes("aria-label")).toBe("生成内容操作");
+  });
+
+  it("forwards code actions with the same frozen Item and exact code payload", () => {
+    const turn = projectedTurn({
+      items: [{
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        itemId: "assistant-code",
+        ordinal: 0,
+        kind: "assistant_message",
+        status: "completed",
+        contentBlocks: [{
+          blockIndex: 0,
+          type: "code",
+          language: "ts",
+          text: "const answer = 42;",
+        }],
+      }],
+    });
+    const item = turn.items[0]!;
+    const codeAction = vi.fn((scope: {
+      item: ConversationTimelineItemViewModel;
+      codeIdentity: string;
+      text: string;
+      language: string | null;
+    }) => h("button", { type: "button", class: "code-action" }, scope.language ?? "复制代码"));
+    const wrapper = mount(ChatTurnGroup, {
+      props: { turn, position: 1 },
+      slots: { "code-actions": codeAction },
+    });
+
+    expect(wrapper.findAll(".code-action")).toHaveLength(1);
+    expect(codeAction).toHaveBeenCalledOnce();
+    expect(codeAction.mock.calls[0]?.[0]).toMatchObject({
+      item,
+      text: "const answer = 42;",
+      language: "ts",
+    });
+    expect(codeAction.mock.calls[0]?.[0].item).toBe(item);
+    expect(codeAction.mock.calls[0]?.[0].codeIdentity).toBe(item.contentBlocks[0]?.identity);
   });
 
   it("keeps disclosure state attached to stable identity when the ViewModel order changes", async () => {

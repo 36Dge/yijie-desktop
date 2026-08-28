@@ -219,6 +219,47 @@ describe("ChatTimeline", () => {
     });
   });
 
+  it("relays typed code actions without taking clipboard authority", () => {
+    const timeline = projectedTimeline({
+      turns: [completedTurn("turn-main", 0)],
+      items: [{
+        threadId: THREAD_ID,
+        turnId: "turn-main",
+        itemId: "assistant-code",
+        ordinal: 0,
+        kind: "assistant_message",
+        status: "completed",
+        contentBlocks: [{
+          blockIndex: 0,
+          type: "code",
+          language: "ts",
+          text: "const answer = 42;",
+        }],
+      }],
+    });
+    const item = timeline.turns[0]!.items[0]!;
+    const codeAction = vi.fn((scope: {
+      item: ConversationTimelineItemViewModel;
+      codeIdentity: string;
+      text: string;
+      language: string | null;
+    }) => h("button", { type: "button", class: "timeline-code-action" }, scope.language ?? "复制代码"));
+    const wrapper = mount(ChatTimeline, {
+      props: { timeline },
+      slots: { "code-actions": codeAction },
+    });
+
+    expect(wrapper.findAll(".timeline-code-action")).toHaveLength(1);
+    expect(codeAction).toHaveBeenCalledOnce();
+    expect(codeAction.mock.calls[0]?.[0]).toMatchObject({
+      item,
+      text: "const answer = 42;",
+      language: "ts",
+    });
+    expect(codeAction.mock.calls[0]?.[0].item).toBe(item);
+    expect(codeAction.mock.calls[0]?.[0].codeIdentity).toBe(item.contentBlocks[0]?.identity);
+  });
+
   it("keeps disclosure state with stable Turn identity and consumes projected array order", async () => {
     const timeline = projectedTimeline({
       turns: [completedTurn("turn-a", 0), completedTurn("turn-b", 1)],

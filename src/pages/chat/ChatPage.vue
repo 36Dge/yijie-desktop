@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
 import { useRoute, useRouter } from "vue-router";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
+import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
+import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
 import type {
@@ -17,6 +19,13 @@ import type {
   ChatReasoningItem,
 } from "../../domain/chat-ipc";
 import { ChatClientError } from "../../domain/chat-ipc";
+import {
+  selectConversationTimeline,
+  type ConversationTimelineArtifactReferenceContentBlock,
+  type ConversationTimelineAttachmentReferenceContentBlock,
+  type ConversationTimelineItemViewModel,
+} from "../../domain/conversation-timeline";
+import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import {
   cleanupNotice,
   errorNotice,
@@ -30,11 +39,20 @@ import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client"
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
+import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
+import {
+  LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
+  legacyChatTimelineRollbackEnabled as configuredLegacyChatTimelineRollbackEnabled,
+} from "../../authorization/chat-timeline-ui-config";
 
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
 const artifactStore = useArtifactStore();
+const legacyChatTimelineRollbackEnabled = inject(
+  LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
+  configuredLegacyChatTimelineRollbackEnabled,
+);
 const prompt = ref("");
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
@@ -64,6 +82,12 @@ const activeProject = computed(() => chatStore.projects.find((project) =>
   project.projectId === selectedSession.value?.projectId,
 ) ?? null);
 const displayTurns = computed(() => sortHistoryTurns(chatStore.history?.turns ?? []));
+const conversationTimeline = computed(() => {
+  const sessionId = chatStore.selectedSessionId;
+  return sessionId === null
+    ? null
+    : selectConversationTimeline(chatStore.conversationState, sessionId);
+});
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
 const stableError = computed(() => errorNotice(
@@ -78,6 +102,14 @@ const isHistoryLoading = computed(() =>
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
   chatStore.canAttach && !submitting.value && !isStreaming.value,
+);
+const permissionDenied = computed(() =>
+  chatStore.lastErrorCode === "chat_capability_denied" ||
+  (chatStore.controlPlane?.state === "denied" &&
+    chatStore.controlPlane.issueCode === "chat_capability_denied") ||
+  (chatStore.context !== null && !chatStore.hasAction(
+    isSessionRoute.value ? "read_sessions" : "create_session",
+  )),
 );
 const statusAnnouncement = computed(() => {
   if (chatStore.phase === "resyncing") return "正在同步任务历史";
@@ -325,6 +357,37 @@ function attachmentSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function timelineAttachmentStatus(
+  attachment: ConversationTimelineAttachmentReferenceContentBlock,
+): string {
+  if (attachment.status === "expired") return "已过期";
+  if (attachment.status === "error_terminal") return "处理失败";
+  return attachment.kind === "image" ? "图片" : "文件";
+}
+
+function itemCopyText(item: ConversationTimelineItemViewModel): string {
+  return copyableTimelineItemText(item) ?? "";
+}
+
+function artifactsForTimelineReference(
+  item: ConversationTimelineItemViewModel,
+  block: ConversationTimelineArtifactReferenceContentBlock,
+) {
+  const authority = artifactStore.authority;
+  const context = chatStore.context;
+  const selectedSessionId = chatStore.selectedSessionId;
+  if (
+    authority === null ||
+    context === null ||
+    selectedSessionId === null ||
+    authority.contextId !== context.contextId ||
+    authority.sessionId !== selectedSessionId ||
+    item.threadId !== selectedSessionId
+  ) return Object.freeze([]);
+  return artifactStore.artifactsForTurn(item.threadId, item.turnId)
+    .filter((artifact) => artifact.artifactId === block.artifactId);
+}
+
 async function installDragDropListener(): Promise<void> {
   try {
     const currentWindow = getCurrentWindow();
@@ -444,116 +507,209 @@ onBeforeUnmount(() => {
             @click="loadOlderHistory"
           >读取更早的对话</button>
 
-          <div v-if="isHistoryLoading" class="chat-empty" role="status">
-            <span class="chat-empty__loader" aria-hidden="true" />
-            <strong>正在读取本地对话</strong>
-            <span>只会加载当前任务的历史记录。</span>
-          </div>
-
-          <div v-else-if="stableError && displayTurns.length === 0" class="chat-notice chat-notice--error" role="alert">
+          <div
+            v-if="permissionDenied"
+            class="chat-notice chat-notice--error chat-workspace__permission-denied"
+            role="alert"
+          >
             <YjIcon name="warning" size="lg" tone="error" />
             <div class="chat-notice__copy">
-              <strong>{{ stableError.title }}</strong>
-              <span>{{ stableError.detail }}</span>
+              <strong>当前工作区权限不足</strong>
+              <span>此页面暂不可用；已经确认的对话内容仍会保留显示。</span>
             </div>
-            <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
-              {{ stableError.actionLabel }}
-            </button>
           </div>
 
-          <div v-else-if="displayTurns.length === 0 && !isStreaming" class="chat-empty">
-            <YjIcon name="assistant" size="xl" tone="muted" />
-            <strong>对话正在准备</strong>
-            <span>第一条任务已保存到本机，模型输出会显示在这里。</span>
-          </div>
-
-          <article v-for="turn in displayTurns" :key="turn.turnId" class="chat-turn">
-            <div
-              v-for="message in turn.messages.filter((entry) => entry.role === 'user')"
-              :key="message.messageId"
-              class="chat-message chat-message--user"
-              aria-label="用户消息"
-            >
-              <div class="chat-message__label"><YjIcon name="user" size="xs" />你</div>
-              <div class="chat-message__blocks">
-                <template v-for="(block, blockIndex) in messageBlocks(message)" :key="`${message.messageId}-${blockIndex}`">
-                  <div v-if="block.type === 'text'" class="chat-message__body">{{ block.text }}</div>
-                  <div
-                    v-else
-                    class="chat-message__attachment"
-                    :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
-                  >
-                    <span class="chat-message__attachment-icon" aria-hidden="true">
-                      <YjIcon :name="block.type === 'image' ? 'image' : 'file'" size="sm" />
-                    </span>
-                    <span class="chat-message__attachment-copy">
-                      <strong :title="block.name">{{ block.name }}</strong>
-                      <span>{{ historyAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
-                    </span>
-                  </div>
-                </template>
+          <ChatTimeline
+            v-if="!legacyChatTimelineRollbackEnabled && conversationTimeline"
+            :timeline="conversationTimeline"
+          >
+            <template #item-actions="{ item }">
+              <ChatCopyAction
+                v-if="itemCopyText(item)"
+                :adapter="browserChatClipboardAdapter"
+                :text="itemCopyText(item)"
+              />
+            </template>
+            <template #code-actions="{ text }">
+              <ChatCopyAction
+                :adapter="browserChatClipboardAdapter"
+                :text="text"
+                kind="code"
+              />
+            </template>
+            <template #attachment-reference="{ block }">
+              <div
+                class="chat-message__attachment"
+                :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
+              >
+                <span class="chat-message__attachment-icon" aria-hidden="true">
+                  <YjIcon :name="block.kind === 'image' ? 'image' : 'file'" size="sm" />
+                </span>
+                <span class="chat-message__attachment-copy">
+                  <strong :title="block.name">{{ block.name }}</strong>
+                  <span>{{ timelineAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
+                </span>
               </div>
-              <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
+            </template>
+            <template #artifact-reference="{ item, block }">
+              <template
+                v-for="artifacts in [artifactsForTimelineReference(item, block)]"
+                :key="artifacts[0]?.artifactId ?? block.identity"
+              >
+                <ChatArtifactList
+                  v-if="chatStore.context && artifacts.length > 0"
+                  :artifacts="artifacts"
+                  :context-id="chatStore.context.contextId"
+                  :native-client="chatArtifactNativeClient"
+                  :video-native-client="chatArtifactVideoNativeClient"
+                  :file-native-client="chatArtifactFileNativeClient"
+                  :report-native-client="chatArtifactReportNativeClient"
+                />
+                <span v-else class="chat-timeline__artifact-fallback">
+                  <YjIcon name="file" size="sm" tone="muted" />
+                  {{ block.label ?? "生成内容" }}
+                </span>
+              </template>
+            </template>
+          </ChatTimeline>
+
+          <template v-else-if="legacyChatTimelineRollbackEnabled">
+            <div v-if="isHistoryLoading" class="chat-empty" role="status">
+              <span class="chat-empty__loader" aria-hidden="true" />
+              <strong>正在读取本地对话</strong>
+              <span>只会加载当前任务的历史记录。</span>
             </div>
+
+            <div v-else-if="stableError && !permissionDenied && displayTurns.length === 0" class="chat-notice chat-notice--error" role="alert">
+              <YjIcon name="warning" size="lg" tone="error" />
+              <div class="chat-notice__copy">
+                <strong>{{ stableError.title }}</strong>
+                <span>{{ stableError.detail }}</span>
+              </div>
+              <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
+                {{ stableError.actionLabel }}
+              </button>
+            </div>
+
+            <div v-else-if="displayTurns.length === 0 && !isStreaming" class="chat-empty">
+              <YjIcon name="assistant" size="xl" tone="muted" />
+              <strong>对话正在准备</strong>
+              <span>第一条任务已保存到本机，模型输出会显示在这里。</span>
+            </div>
+
+            <article v-for="turn in displayTurns" :key="turn.turnId" class="chat-turn">
+              <div
+                v-for="message in turn.messages.filter((entry) => entry.role === 'user')"
+                :key="message.messageId"
+                class="chat-message chat-message--user"
+                aria-label="用户消息"
+              >
+                <div class="chat-message__label"><YjIcon name="user" size="xs" />你</div>
+                <div class="chat-message__blocks">
+                  <template v-for="(block, blockIndex) in messageBlocks(message)" :key="`${message.messageId}-${blockIndex}`">
+                    <div v-if="block.type === 'text'" class="chat-message__body">{{ block.text }}</div>
+                    <div
+                      v-else
+                      class="chat-message__attachment"
+                      :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
+                    >
+                      <span class="chat-message__attachment-icon" aria-hidden="true">
+                        <YjIcon :name="block.type === 'image' ? 'image' : 'file'" size="sm" />
+                      </span>
+                      <span class="chat-message__attachment-copy">
+                        <strong :title="block.name">{{ block.name }}</strong>
+                        <span>{{ historyAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
+                      </span>
+                    </div>
+                  </template>
+                </div>
+                <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
+              </div>
+
+              <ChatReasoningDisclosure
+                v-if="turn.reasoning.length > 0"
+                :disclosure-id="`reasoning-${turn.turnId}`"
+                :metadata="turn.reasoning"
+                :items="reasoningItems[turn.turnId] ?? []"
+                :loading="reasoningLoading.has(turn.turnId)"
+                @load="loadReasoning(turn)"
+              />
+              <p v-if="reasoningFailed.has(turn.turnId)" class="chat-turn__reasoning-error" role="alert">
+                推理记录读取失败，请重新展开后再试。
+              </p>
+
+              <div
+                v-for="message in turn.messages.filter((entry) => entry.role === 'assistant')"
+                :key="message.messageId"
+                class="chat-message chat-message--assistant"
+                aria-label="模型回答"
+              >
+                <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
+                <div class="chat-message__body">{{ message.content }}</div>
+                <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
+              </div>
+
+              <ChatArtifactList
+                v-if="chatStore.context && chatStore.selectedSessionId === artifactStore.authority?.sessionId"
+                :artifacts="artifactStore.artifactsForTurn(chatStore.selectedSessionId, turn.turnId)"
+                :context-id="chatStore.context.contextId"
+                :native-client="chatArtifactNativeClient"
+                :video-native-client="chatArtifactVideoNativeClient"
+                :file-native-client="chatArtifactFileNativeClient"
+                :report-native-client="chatArtifactReportNativeClient"
+              />
+
+              <p v-if="turn.status === 'interrupted'" class="chat-turn__terminal">本轮生成已停止</p>
+              <p v-else-if="turn.status === 'failed'" class="chat-turn__terminal chat-turn__terminal--error">本轮生成失败，请重新提交</p>
+            </article>
 
             <ChatReasoningDisclosure
-              v-if="turn.reasoning.length > 0"
-              :disclosure-id="`reasoning-${turn.turnId}`"
-              :metadata="turn.reasoning"
-              :items="reasoningItems[turn.turnId] ?? []"
-              :loading="reasoningLoading.has(turn.turnId)"
-              @load="loadReasoning(turn)"
+              v-if="chatStore.liveReasoning.length > 0 || isStreaming"
+              disclosure-id="reasoning-live"
+              :live-parts="chatStore.liveReasoning"
+              live
+              default-expanded
             />
-            <p v-if="reasoningFailed.has(turn.turnId)" class="chat-turn__reasoning-error" role="alert">
-              推理记录读取失败，请重新展开后再试。
-            </p>
 
-            <div
-              v-for="message in turn.messages.filter((entry) => entry.role === 'assistant')"
-              :key="message.messageId"
+            <article
+              v-if="chatStore.liveAssistantText"
               class="chat-message chat-message--assistant"
-              aria-label="模型回答"
+              :aria-label="isStreaming ? '模型回答，正在生成' : '模型回答'"
             >
               <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
-              <div class="chat-message__body">{{ message.content }}</div>
-              <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
+              <div class="chat-message__body">{{ chatStore.liveAssistantText }}</div>
+              <span v-if="isStreaming" class="chat-message__streaming" aria-hidden="true" />
+            </article>
+            <div v-else-if="isStreaming" class="chat-streaming" role="status">
+              <span class="chat-empty__loader" aria-hidden="true" />
+              正在生成回答…
+            </div>
+          </template>
+
+          <template v-else>
+            <div v-if="isHistoryLoading" class="chat-empty" role="status">
+              <span class="chat-empty__loader" aria-hidden="true" />
+              <strong>正在读取本地对话</strong>
+              <span>只会加载当前任务的领域状态。</span>
             </div>
 
-            <ChatArtifactList
-              v-if="chatStore.context && chatStore.selectedSessionId === artifactStore.authority?.sessionId"
-              :artifacts="artifactStore.artifactsForTurn(chatStore.selectedSessionId, turn.turnId)"
-              :context-id="chatStore.context.contextId"
-              :native-client="chatArtifactNativeClient"
-              :video-native-client="chatArtifactVideoNativeClient"
-              :file-native-client="chatArtifactFileNativeClient"
-              :report-native-client="chatArtifactReportNativeClient"
-            />
+            <div v-else-if="stableError && !permissionDenied" class="chat-notice chat-notice--error" role="alert">
+              <YjIcon name="warning" size="lg" tone="error" />
+              <div class="chat-notice__copy">
+                <strong>{{ stableError.title }}</strong>
+                <span>{{ stableError.detail }}</span>
+              </div>
+              <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
+                {{ stableError.actionLabel }}
+              </button>
+            </div>
 
-            <p v-if="turn.status === 'interrupted'" class="chat-turn__terminal">本轮生成已停止</p>
-            <p v-else-if="turn.status === 'failed'" class="chat-turn__terminal chat-turn__terminal--error">本轮生成失败，请重新提交</p>
-          </article>
-
-          <ChatReasoningDisclosure
-            v-if="chatStore.liveReasoning.length > 0 || isStreaming"
-            disclosure-id="reasoning-live"
-            :live-parts="chatStore.liveReasoning"
-            live
-            default-expanded
-          />
-
-          <article
-            v-if="chatStore.liveAssistantText"
-            class="chat-message chat-message--assistant"
-            :aria-label="isStreaming ? '模型回答，正在生成' : '模型回答'"
-          >
-            <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
-            <div class="chat-message__body">{{ chatStore.liveAssistantText }}</div>
-            <span v-if="isStreaming" class="chat-message__streaming" aria-hidden="true" />
-          </article>
-          <div v-else-if="isStreaming" class="chat-streaming" role="status">
-            <span class="chat-empty__loader" aria-hidden="true" />
-            正在生成回答…
-          </div>
+            <div v-else class="chat-empty" role="status">
+              <YjIcon name="assistant" size="xl" tone="muted" />
+              <strong>{{ chatStore.selectedSessionId ? "正在同步对话状态" : "对话正在准备" }}</strong>
+              <span>{{ chatStore.selectedSessionId ? "已确认内容会在领域状态就绪后显示。" : "选择本地项目并输入任务，内容会按轮次显示在这里。" }}</span>
+            </div>
+          </template>
 
           <div v-if="cleanup" class="chat-notice" :class="`chat-notice--${cleanup.tone}`" role="status">
             <YjIcon :name="cleanup.tone === 'error' ? 'warning' : 'pending'" size="lg" :tone="cleanup.tone === 'error' ? 'error' : 'warning'" />
@@ -579,7 +735,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
-      <p v-if="stableError" class="chat-workspace__composer-error" role="alert">
+      <p v-if="stableError && !permissionDenied" class="chat-workspace__composer-error" role="alert">
         <strong>{{ stableError.title }}</strong> {{ stableError.detail }}
         <button v-if="stableError.actionLabel" type="button" @click="handleStableErrorAction">{{ stableError.actionLabel }}</button>
       </p>
@@ -758,6 +914,7 @@ onBeforeUnmount(() => {
 .chat-message__attachment-copy { display: flex; min-width: 0; flex-direction: column; }
 .chat-message__attachment-copy strong { overflow: hidden; font-size: var(--yj-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .chat-message__attachment-copy span { overflow: hidden; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
+.chat-timeline__artifact-fallback { display: inline-flex; min-width: 0; align-items: center; gap: var(--yj-space-2); color: var(--yj-color-text-secondary); }
 .chat-message__time { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-message__streaming { width: var(--yj-space-2); height: var(--yj-space-4); margin-left: var(--yj-space-1); border-radius: var(--yj-radius-xs); background: var(--yj-color-brand-active); animation: chat-caret 1s step-end infinite; }
 
@@ -807,7 +964,7 @@ onBeforeUnmount(() => {
 .chat-notice__copy span { font-size: var(--yj-font-size-caption); }
 .chat-notice__action { flex: none; padding: var(--yj-space-2) var(--yj-space-3); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
 
-.permission-dialog { width: min(480px, calc(100vw - var(--yj-space-12))); }
+.permission-dialog { width: min(480px, calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-12))); }
 .permission-dialog__status { display: flex; gap: var(--yj-space-3); color: var(--yj-color-text-primary); }
 .permission-dialog__status p { margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); }
 .permission-dialog__list { display: grid; gap: var(--yj-space-2); margin: var(--yj-space-5) 0; }
