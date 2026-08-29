@@ -54,6 +54,13 @@ const emit = defineEmits<{
   "unsupported-input": [message: string];
 }>();
 
+defineSlots<{
+  "active-turn-action"(props: {
+    disabled: boolean;
+    interrupt: () => void;
+  }): unknown;
+}>();
+
 const composing = ref(false);
 const composerElement = ref<HTMLElement | null>(null);
 const textareaElement = ref<HTMLTextAreaElement | null>(null);
@@ -229,6 +236,10 @@ function submit(): void {
   if (!sendDisabled.value && !composing.value) emit("submit");
 }
 
+function requestActiveTurnInterrupt(): void {
+  if (!submissionBusy.value) emit("interrupt");
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key !== "Enter" || event.shiftKey || composing.value || event.isComposing) return;
   event.preventDefault();
@@ -398,16 +409,24 @@ function handlePaste(event: ClipboardEvent): void {
             <span class="chat-composer__permission-value">只读 · 禁止写入</span>
           </button>
         </div>
-        <button
-          v-if="streaming"
-          class="chat-composer__send chat-composer__send--stop"
-          type="button"
-          aria-label="停止生成"
-          title="停止生成"
-          @click="emit('interrupt')"
-        >
-          <YjIcon name="stop" size="lg" />
-        </button>
+        <template v-if="streaming">
+          <slot
+            name="active-turn-action"
+            :disabled="submissionBusy"
+            :interrupt="requestActiveTurnInterrupt"
+          >
+            <button
+              class="chat-composer__send chat-composer__send--stop"
+              type="button"
+              :disabled="submissionBusy"
+              aria-label="停止生成"
+              title="停止生成"
+              @click="requestActiveTurnInterrupt"
+            >
+              <YjIcon name="stop" size="lg" />
+            </button>
+          </slot>
+        </template>
         <button
           v-else
           class="chat-composer__send"

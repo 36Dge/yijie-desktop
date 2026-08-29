@@ -10,6 +10,8 @@ import {
   selectConversationItem,
   selectConversationTurn,
 } from "../domain/conversation-state";
+import { selectConversationTimeline } from "../domain/conversation-timeline";
+import { CHAT_INPUT_MAX_BYTES } from "../domain/chat-ui";
 import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
   ChatAllowedAction,
@@ -447,6 +449,36 @@ describe("chat view-model store", () => {
     await expect(store.retryDraftRecovery()).resolves.toBe(false);
     expect(store.phase).toBe("ready");
     expect(listDraftAttachments).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new-task enabled rule closed without use_project authority", async () => {
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>();
+    const createSession = vi.fn<ChatClient["createSession"]>();
+    const store = createStore(fakeClient({
+      bindContext: async () => ({
+        contextId: CONTEXT,
+        expiresAtEpochSeconds: Math.floor(NOW / 1000) + 300,
+        allowedActions: [
+          "read_sessions",
+          "read_projects",
+          "create_session",
+        ],
+      }),
+      revalidateProject,
+      createSession,
+    }).client);
+    await store.bind(TENANT);
+
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftTargetReady).toBe(true);
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    await expect(store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "must stay local",
+    )).resolves.toEqual({ status: "not_accepted" });
+    expect(revalidateProject).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("subscribes both channels before v3 history, coalesces initial invalidation, and isolates the v3 cursor", async () => {
@@ -2358,6 +2390,96 @@ describe("chat view-model store", () => {
     });
   });
 
+  it("rejects over-limit UTF-8 create input before project validation or native dispatch", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const overLimit = "界".repeat(Math.floor(CHAT_INPUT_MAX_BYTES / 3) + 1);
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>(async () => ({
+      projectId,
+      safeName: "Synthetic Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    }));
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operationId) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const store = createStore(fakeClient({ revalidateProject, createSession }).client);
+    await store.bind(TENANT);
+
+    await expect(store.createSessionWithResult(projectId, overLimit))
+      .resolves.toEqual({ status: "not_accepted" });
+    expect(store.submissionState).toBe("idle");
+    expect(revalidateProject).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects over-limit UTF-8 reply input before native dispatch", async () => {
+    const overLimit = "界".repeat(Math.floor(CHAT_INPUT_MAX_BYTES / 3) + 1);
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>(
+      async (_context, sessionId, _input, operationId) => ({
+        sessionId,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const store = createStore(fakeClient({ submitTurn }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    await expect(store.submitTurnWithResult(overLimit))
+      .resolves.toEqual({ status: "not_accepted" });
+    expect(store.submissionState).toBe("idle");
+    expect(submitTurn).not.toHaveBeenCalled();
+  });
+
+  it("retains a new-task attachment when the current native response has a wrong operation id", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>(async () => ({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-000000000099",
+    }));
+    const store = createStore(fakeClient({
+      pickAttachments: async () => [attachment()],
+      createSessionV2,
+    }).client);
+    await store.bind(TENANT);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+
+    await expect(store.createSessionWithResult(projectId, "new task"))
+      .rejects.toMatchObject({ shape: { code: "chat_protocol_error" } });
+    expect(createSessionV2).toHaveBeenCalledOnce();
+    expect(store.submissionState).toBe("idle");
+    expect(store.draftAttachments).toEqual([attachment()]);
+  });
+
+  it("retains a reply attachment when the current native response has a wrong operation id", async () => {
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(async () => ({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-000000000099",
+    }));
+    const store = createStore(fakeClient({
+      pickAttachments: async () => [attachment()],
+      submitTurnV2,
+    }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
+
+    await expect(store.submitTurnWithResult("reply task"))
+      .rejects.toMatchObject({ shape: { code: "chat_protocol_error" } });
+    expect(submitTurnV2).toHaveBeenCalledOnce();
+    expect(store.submissionState).toBe("idle");
+    expect(store.draftAttachments).toEqual([attachment()]);
+  });
+
   it("projects one validating to submitting lifecycle around a create attempt", async () => {
     const projectId = "019c1a00-0000-7000-8000-000000000009";
     const projectResult = new Deferred<Awaited<ReturnType<ChatClient["revalidateProject"]>>>();
@@ -2529,34 +2651,93 @@ describe("chat view-model store", () => {
     }
   });
 
-  it("returns a sealed reply acceptance without waiting for post-durable resync", async () => {
+  it.each(["failed", "interrupted"] as const)(
+    "returns a sealed reply acceptance with one queued identity that survives %s resync",
+    async (terminalStatus) => {
     const delayedResync = new Deferred<Awaited<ReturnType<ChatClient["resyncSession"]>>>();
     let resyncCalls = 0;
     const resyncSession = vi.fn<ChatClient["resyncSession"]>(async (_context, sessionId) => {
       resyncCalls += 1;
       return resyncCalls === 1 ? projection(sessionId) : delayedResync.promise;
     });
-    const store = createStore(fakeClient({ resyncSession }).client);
+    const store = createStore(fakeClient({
+      pickAttachments: async () => [attachment()],
+      resyncSession,
+    }).client);
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
+    await store.pickAttachments();
+    await finishAttachmentImportPresentation();
 
     let settled: ChatSubmissionResult | null = null;
     const pending = store.submitTurnWithResult("reply task");
     void pending.then((result) => { settled = result; });
     for (let index = 0; index < 8 && settled === null; index += 1) await Promise.resolve();
 
+    const terminalProjection: ChatResyncProjection = Object.freeze({
+      session: Object.freeze({
+        ...session(SESSION_A),
+        latestTurnStatus: terminalStatus,
+      }),
+      history: Object.freeze({
+        turns: Object.freeze([Object.freeze({
+          turnId: TURN_A,
+          status: terminalStatus,
+          terminalAt: 2,
+          reasoningStatus: "unavailable",
+          reasoningReasonCode: terminalStatus === "interrupted" ? "turn_interrupted" : "runtime_error",
+          messages: Object.freeze([Object.freeze({
+            messageId: "019c1a00-0000-7000-8000-000000000041",
+            role: "user" as const,
+            content: "reply task",
+            contentBlocks: Object.freeze([
+              Object.freeze({ type: "text" as const, text: "reply task" }),
+              Object.freeze({ ...attachment(), status: "bound" as const }),
+            ]),
+            status: "committed",
+            ordinal: 0,
+            createdAt: 1,
+          })]),
+          reasoning: Object.freeze([]),
+          artifacts: Object.freeze([]),
+        })]),
+        nextCursor: null,
+      }),
+      cleanup: null,
+    });
+
     try {
       expect(settled).toMatchObject({ status: "local_durable_accepted" });
       expect(store.submissionState).toBe("idle");
+      expect(store.draftAttachments).toEqual([]);
+      const queuedTimeline = selectConversationTimeline(store.conversationState, SESSION_A);
+      const queuedTurn = queuedTimeline?.turns.find((turn) => turn.turnId === TURN_A);
+      const queuedUsers = queuedTurn?.items.filter((item) => item.presentation === "user_message") ?? [];
+      expect(queuedTurn?.domainStatus).toBe("queued");
+      expect(queuedUsers).toHaveLength(1);
+      expect(queuedUsers[0]?.contentBlocks).toHaveLength(2);
+      const queuedIdentity = queuedUsers[0]!.identity;
       for (let index = 0; index < 8 && resyncSession.mock.calls.length < 2; index += 1) {
         await Promise.resolve();
       }
       expect(resyncSession).toHaveBeenCalledTimes(2);
+      delayedResync.resolve(terminalProjection);
+      await vi.waitFor(() => {
+        expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)?.status)
+          .toBe(terminalStatus);
+      });
+      const terminalTimeline = selectConversationTimeline(store.conversationState, SESSION_A);
+      const terminalTurn = terminalTimeline?.turns.find((turn) => turn.turnId === TURN_A);
+      const terminalUsers = terminalTurn?.items.filter((item) => item.presentation === "user_message") ?? [];
+      expect(terminalUsers).toHaveLength(1);
+      expect(terminalUsers[0]?.identity).toBe(queuedIdentity);
+      expect(store.draftAttachments).toEqual([]);
     } finally {
-      delayedResync.resolve(projection(SESSION_A));
+      delayedResync.resolve(terminalProjection);
       await pending;
     }
-  });
+    },
+  );
 
   it("creates an attachment-only v2 turn and clears the draft only after success", async () => {
     const pickAttachments = vi.fn(async () => [attachment()]);

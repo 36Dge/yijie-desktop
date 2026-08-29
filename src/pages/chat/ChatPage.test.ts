@@ -20,6 +20,7 @@ import {
   hydrateConversationState,
   reconcileConversationSnapshot,
 } from "../../domain/conversation-state";
+import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
 import {
   useChatStore,
@@ -62,12 +63,13 @@ const TURN_ID = "019c1a00-0000-7000-8000-000000000003";
 function acceptedSubmission(
   sessionId = SESSION_ID,
   draftTarget = CHAT_NEW_DRAFT_TARGET,
+  turnId = TURN_ID,
 ): ChatSubmissionResult {
   return Object.freeze({
     status: "local_durable_accepted",
     draftTarget,
     sessionId,
-    turnId: TURN_ID,
+    turnId,
     operationId: "019c1a00-0000-7000-8000-000000000020",
   });
 }
@@ -153,6 +155,40 @@ function setHistoryProjection(
     createConversationState(),
     historyPageToConversationSnapshot(SESSION_ID, history),
   );
+}
+
+function historyWithAcceptedTurn(
+  turnId: string,
+  status: "queued" | "failed" | "interrupted",
+  input: string,
+): ChatHistoryPage {
+  return Object.freeze({
+    turns: Object.freeze([
+      ...HISTORY.turns,
+      Object.freeze({
+        turnId,
+        status,
+        terminalAt: status === "queued" ? null : 4,
+        reasoningStatus: status === "queued" ? "pending" : "unavailable",
+        reasoningReasonCode: status === "interrupted" ? "turn_interrupted" : null,
+        messages: Object.freeze([Object.freeze({
+          messageId: "019c1a00-0000-7000-8000-000000000021",
+          role: "user" as const,
+          content: input,
+          contentBlocks: Object.freeze([
+            Object.freeze({ type: "text" as const, text: input }),
+            Object.freeze({ ...READY_ATTACHMENT, status: "bound" as const }),
+          ]),
+          status: "committed",
+          ordinal: 0,
+          createdAt: 4,
+        })]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+      }),
+    ]),
+    nextCursor: null,
+  });
 }
 
 async function mountPage(
@@ -930,6 +966,74 @@ describe("FEAT-126 ChatPage", () => {
     expect(document.activeElement).toBe(textarea);
     expect(textarea.selectionStart).toBe(0);
     expect(textarea.selectionEnd).toBe(0);
+  });
+
+  it.each(["failed", "interrupted"] as const)(
+    "keeps one accepted user identity and never restores its drafts after %s",
+    async (terminalStatus) => {
+      const acceptedTurnId = "019c1a00-0000-7000-8000-000000000022";
+      const input = `提交后 ${terminalStatus}`;
+      const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+      store.draftAttachments = Object.freeze([READY_ATTACHMENT]);
+      vi.spyOn(store, "submitTurnWithResult").mockImplementation(async () => {
+        store.draftAttachments = Object.freeze([]);
+        setHistoryProjection(store, historyWithAcceptedTurn(acceptedTurnId, "queued", input));
+        return acceptedSubmission(
+          SESSION_ID,
+          chatSessionDraftTarget(SESSION_ID),
+          acceptedTurnId,
+        );
+      });
+
+      await wrapper.get("textarea").setValue(input);
+      wrapper.getComponent(ChatComposer).vm.$emit("submit");
+      await flushPromises();
+
+      const queuedTimeline = selectConversationTimeline(store.conversationState, SESSION_ID)!;
+      const queuedTurn = queuedTimeline.turns.find((turn) => turn.turnId === acceptedTurnId)!;
+      const queuedUsers = queuedTurn.items.filter((item) => item.presentation === "user_message");
+      expect(queuedTurn.domainStatus).toBe("queued");
+      expect(queuedUsers).toHaveLength(1);
+      expect(wrapper.text()).toContain(input);
+      expect(wrapper.text()).toContain("等待处理");
+      expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+      expect(store.draftAttachments).toEqual([]);
+
+      setHistoryProjection(
+        store,
+        historyWithAcceptedTurn(acceptedTurnId, terminalStatus, input),
+      );
+      await flushPromises();
+
+      const terminalTimeline = selectConversationTimeline(store.conversationState, SESSION_ID)!;
+      const terminalTurn = terminalTimeline.turns.find((turn) => turn.turnId === acceptedTurnId)!;
+      const terminalUsers = terminalTurn.items.filter((item) => item.presentation === "user_message");
+      expect(terminalUsers).toHaveLength(1);
+      expect(terminalUsers[0]?.identity).toBe(queuedUsers[0]?.identity);
+      expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+      expect(store.draftAttachments).toEqual([]);
+    },
+  );
+
+  it("keeps text and attachments after a current operation mismatch", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    store.draftAttachments = Object.freeze([READY_ATTACHMENT]);
+    vi.spyOn(store, "submitTurnWithResult").mockRejectedValue(new ChatClientError({
+      schemaVersion: 2,
+      code: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    }));
+
+    await wrapper.get("textarea").setValue("必须保留的内容");
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value)
+      .toBe("必须保留的内容");
+    expect(store.draftAttachments).toEqual([READY_ATTACHMENT]);
+    expect(wrapper.text()).toContain("synthetic-brief.pdf");
+    expect(wrapper.text()).toContain("本地组件状态不一致");
   });
 
   it("restores focus and the original selection after a non-accepted submit", async () => {

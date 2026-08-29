@@ -2,6 +2,7 @@
 
 import { mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
+import { h } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ChatAttachment,
@@ -44,7 +45,7 @@ function importEvent(
   };
 }
 
-function mountComposer(overrides: Record<string, unknown> = {}) {
+function mountComposer(overrides: Record<string, unknown> = {}, slots = {}) {
   return mount(ChatComposer, {
     props: {
       modelValue: "检查商品标题",
@@ -59,6 +60,7 @@ function mountComposer(overrides: Record<string, unknown> = {}) {
       recoveryAvailable: false,
       ...overrides,
     },
+    slots,
   });
 }
 
@@ -283,6 +285,51 @@ describe("ChatComposer", () => {
     expect(mountComposer({ selectedProjectId: null }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     expect(mountComposer({ canSend: false }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     expect(mountComposer({ streaming: true }).find('[aria-label="停止生成"]').exists()).toBe(true);
+  });
+
+  it("keeps the predecessor Stop as the active-turn-action fallback", async () => {
+    const wrapper = mountComposer({ streaming: true });
+    const stop = wrapper.get('[aria-label="停止生成"]');
+
+    expect(stop.attributes("disabled")).toBeUndefined();
+    await stop.trigger("click");
+
+    expect(wrapper.emitted("interrupt")).toHaveLength(1);
+  });
+
+  it("exposes one scoped active-turn-action slot without adding control semantics", async () => {
+    const renderAction = ({ disabled, interrupt }: {
+      disabled: boolean;
+      interrupt: () => void;
+    }) => h("button", {
+      type: "button",
+      disabled,
+      "aria-label": "FEAT-139 active Turn action",
+      onClick: interrupt,
+    }, "后续操作");
+    const wrapper = mountComposer(
+      { streaming: true },
+      { "active-turn-action": renderAction },
+    );
+
+    expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(false);
+    const action = wrapper.get('[aria-label="FEAT-139 active Turn action"]');
+    expect(action.attributes("disabled")).toBeUndefined();
+    await action.trigger("click");
+    expect(wrapper.emitted("interrupt")).toHaveLength(1);
+
+    const busy = mountComposer(
+      { streaming: true, submissionState: "submitting" },
+      { "active-turn-action": renderAction },
+    );
+    const busyAction = busy.get('[aria-label="FEAT-139 active Turn action"]');
+    expect(busyAction.attributes("disabled")).toBeDefined();
+    await busyAction.trigger("click");
+    expect(busy.emitted("interrupt")).toBeUndefined();
+
+    const idle = mountComposer({}, { "active-turn-action": renderAction });
+    expect(idle.find('[aria-label="FEAT-139 active Turn action"]').exists()).toBe(false);
+    expect(idle.find('[aria-label="发送任务"]').exists()).toBe(true);
   });
 
   it("routes file paste to the unified entry without exposing clipboard metadata", async () => {

@@ -27,8 +27,11 @@ import type {
   ChatControlPlaneEvent,
   ChatDraftTarget,
   ChatHistoryPage,
+  ChatHistoryTurn,
+  ChatHistoryTurnV4,
   ChatHistoryPageV4,
   ChatLocalReadiness,
+  ChatMessageContentBlock,
   ChatProjectionEvent,
   ChatProjectionEventV4,
   ChatProject,
@@ -55,6 +58,7 @@ import {
   type ConversationState,
 } from "../domain/conversation-state";
 import type { ChatComposerSubmissionState } from "../domain/chat-composer";
+import { CHAT_INPUT_MAX_BYTES } from "../domain/chat-ui";
 import {
   useArtifactStore,
   type ArtifactAuthority,
@@ -281,9 +285,9 @@ export function createChatStoreDefinition(
     const lastErrorCode = ref<string | null>(null);
     const lastBindFailureStage = ref<ChatBindFailureStage | null>(null);
     const isReady = computed(() => phase.value === "ready" || phase.value === "streaming");
-    const hasSendPermission = computed(() => context.value?.allowedActions.includes(
-      selectedSessionId.value === null ? "create_session" : "submit_turn",
-    ) === true);
+    const hasSendPermission = computed(() => selectedSessionId.value === null
+      ? hasAction("create_session") && hasAction("use_project")
+      : hasAction("submit_turn"));
     const canSend = computed(() =>
       phase.value === "ready" &&
       draftTargetReady.value &&
@@ -2072,6 +2076,7 @@ export function createChatStoreDefinition(
     }
 
     function turnContentBlocks(input: string): readonly ChatTurnContentBlock[] | null {
+      if (utf8Bytes(input) > CHAT_INPUT_MAX_BYTES) return null;
       const text = input.trim();
       if (attachmentImportAttempt.value !== null) return null;
       if (draftAttachments.value.some((attachment) => attachment.status !== "ready")) return null;
@@ -2086,6 +2091,96 @@ export function createChatStoreDefinition(
         attachmentId: attachment.attachmentId,
       })));
       return blocks.length > 0 ? Object.freeze(blocks) : null;
+    }
+
+    function locallyAcceptedContentBlocks(
+      blocks: readonly ChatTurnContentBlock[],
+      attachments: readonly ChatAttachment[],
+    ): readonly ChatMessageContentBlock[] {
+      const attachmentsById = new Map(attachments.map((attachment) => [
+        attachment.attachmentId,
+        attachment,
+      ]));
+      return Object.freeze(blocks.flatMap((block): readonly ChatMessageContentBlock[] => {
+        if (block.type === "text") return [Object.freeze({ type: "text", text: block.text })];
+        const attachment = attachmentsById.get(block.attachmentId);
+        return attachment === undefined
+          ? []
+          : [Object.freeze({ ...attachment, status: "bound" as const })];
+      }));
+    }
+
+    function projectLocallyAcceptedTurn(
+      sessionId: string,
+      turnId: string,
+      blocks: readonly ChatTurnContentBlock[],
+      attachments: readonly ChatAttachment[],
+    ): void {
+      const currentHistory = history.value;
+      if (currentHistory?.turns.some((turn) => turn.turnId === turnId)) return;
+      const contentBlocks = locallyAcceptedContentBlocks(blocks, attachments);
+      const content = contentBlocks
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      const queuedTurn: ChatHistoryTurn = Object.freeze({
+        turnId,
+        status: "queued",
+        terminalAt: null,
+        reasoningStatus: "pending",
+        reasoningReasonCode: null,
+        messages: Object.freeze([Object.freeze({
+          messageId: conversationMessageItemId(turnId, "user"),
+          role: "user",
+          content,
+          contentBlocks,
+          status: "committed",
+          ordinal: 0,
+          createdAt: Date.now(),
+        })]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+      });
+      let nextHistory: ChatHistoryAuthority;
+      if (streamingV4Enabled) {
+        const currentV4 = currentHistory !== null && isHistoryV4(currentHistory)
+          ? currentHistory
+          : null;
+        const queuedTurnV4: ChatHistoryTurnV4 = Object.freeze({
+          ...queuedTurn,
+          projectionAuthority: "legacy",
+          artifacts: Object.freeze([]),
+          terminalCode: null,
+          timelineItems: Object.freeze([]),
+          plan: null,
+          notices: Object.freeze([]),
+        });
+        nextHistory = Object.freeze({
+          turns: Object.freeze([...(currentV4?.turns ?? []), queuedTurnV4]),
+          nextCursor: currentV4?.nextCursor ?? null,
+          sessionNotices: currentV4?.sessionNotices ?? Object.freeze([]),
+          durableSequenceCut: currentV4?.durableSequenceCut ?? "0",
+        });
+      } else {
+        const currentLegacy = currentHistory !== null && !isHistoryV4(currentHistory)
+          ? currentHistory
+          : null;
+        nextHistory = Object.freeze({
+          turns: Object.freeze([...(currentLegacy?.turns ?? []), queuedTurn]),
+          nextCursor: currentLegacy?.nextCursor ?? null,
+        });
+      }
+      history.value = nextHistory;
+      conversationState.value = reconcileConversationSnapshot(
+        conversationState.value,
+        historyPageToConversationSnapshot(sessionId, nextHistory),
+      );
+      liveTurnStatus.value = "queued";
+      sessions.value = Object.freeze(sessions.value.map((session) =>
+        session.sessionId === sessionId
+          ? Object.freeze({ ...session, latestTurnStatus: "queued" })
+          : session
+      ));
     }
 
     async function createSessionWithResult(
@@ -2160,9 +2255,17 @@ export function createChatStoreDefinition(
           turnId: created.turnId,
           operationId: created.operationId,
         });
+        const acceptedAttachments = draftAttachments.value;
         dropDraftReferences();
+        const selection = selectSession(created.sessionId);
+        projectLocallyAcceptedTurn(
+          created.sessionId,
+          created.turnId,
+          currentBlocks,
+          acceptedAttachments,
+        );
         const synchronizeCreatedSession = async (): Promise<void> => {
-          await selectSession(created.sessionId);
+          await selection;
           if (
             authorityEpoch !== attemptAuthorityEpoch ||
             context.value?.contextId !== bound.contextId ||
@@ -2251,7 +2354,9 @@ export function createChatStoreDefinition(
           turnId: created.turnId,
           operationId: created.operationId,
         });
+        const acceptedAttachments = draftAttachments.value;
         dropDraftReferences();
+        projectLocallyAcceptedTurn(sessionId, created.turnId, settledBlocks, acceptedAttachments);
         void resyncSelected().catch((error: unknown) => {
           if (
             authorityEpoch === attemptAuthorityEpoch &&
