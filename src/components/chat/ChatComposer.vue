@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type {
+  ChatComposerFocusSnapshot,
+  ChatComposerSubmissionState,
+} from "../../domain/chat-composer";
 import type {
   ChatAttachment,
   ChatAttachmentImportEvent,
@@ -20,7 +24,7 @@ const props = withDefaults(defineProps<{
   readiness: ChatUiNotice;
   canSend: boolean;
   canAttach: boolean;
-  sending: boolean;
+  submissionState: ChatComposerSubmissionState;
   streaming: boolean;
   recoveryAvailable: boolean;
   attachments?: readonly ChatAttachment[];
@@ -51,6 +55,10 @@ const emit = defineEmits<{
 }>();
 
 const composing = ref(false);
+const composerElement = ref<HTMLElement | null>(null);
+const textareaElement = ref<HTMLTextAreaElement | null>(null);
+let resizeObserver: ResizeObserver | null = null;
+let observedComposerWidth: number | null = null;
 const selectedProject = computed(() => props.projects.find((project) =>
   project.projectId === props.selectedProjectId && project.available,
 ) ?? null);
@@ -70,16 +78,24 @@ const attachmentConstraintMessage = computed(() => {
     .reduce((total, attachment) => total + attachment.sizeBytes, 0);
   return imageBytes > 10 * 1024 * 1024 ? "每条消息中的图片总大小不能超过 10 MB。" : null;
 });
+const submissionBusy = computed(() => props.submissionState !== "idle");
 const sendDisabled = computed(() =>
-  props.sending || props.streaming || !props.canSend || validationMessage.value !== null ||
+  submissionBusy.value || props.streaming || !props.canSend || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
   attachmentConstraintMessage.value !== null ||
   (props.mode === "new" && selectedProject.value === null),
 );
-const sendLabel = computed(() => props.sending ? "正在提交" : "发送任务");
+const sendLabel = computed(() => {
+  if (props.submissionState === "validating") return "正在验证任务";
+  if (props.submissionState === "submitting") return "正在提交任务";
+  return "发送任务";
+});
+const submissionAnnouncement = computed(() => props.submissionState === "idle"
+  ? ""
+  : sendLabel.value);
 const attachmentButtonDisabled = computed(() =>
-  !props.canSend || !props.canAttach || props.sending || props.streaming ||
+  !props.canSend || !props.canAttach || submissionBusy.value || props.streaming ||
   props.attachmentImporting || props.attachments.length >= 10,
 );
 
@@ -135,8 +151,79 @@ function attachmentErrorMessage(code: string | null): string | null {
 }
 
 function updateInput(event: Event): void {
-  emit("update:modelValue", (event.target as HTMLTextAreaElement).value);
+  const textarea = event.target as HTMLTextAreaElement;
+  syncTextareaHeight(textarea);
+  emit("update:modelValue", textarea.value);
 }
+
+function syncTextareaHeight(textarea = textareaElement.value): void {
+  if (textarea === null) return;
+  textarea.style.height = "auto";
+  const contentHeight = textarea.scrollHeight;
+  if (contentHeight > 0) textarea.style.height = `${contentHeight}px`;
+  else textarea.style.removeProperty("height");
+  textarea.style.overflowY = contentHeight > textarea.clientHeight + 1 ? "auto" : "hidden";
+}
+
+function captureInputFocus(): ChatComposerFocusSnapshot | null {
+  const textarea = textareaElement.value;
+  if (textarea === null) return null;
+  return Object.freeze({
+    selectionStart: textarea.selectionStart,
+    selectionEnd: textarea.selectionEnd,
+    selectionDirection: textarea.selectionDirection,
+  });
+}
+
+function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
+  const textarea = textareaElement.value;
+  const composer = composerElement.value;
+  if (textarea === null || composer === null || submissionBusy.value) return false;
+  const activeElement = document.activeElement;
+  if (
+    activeElement !== null &&
+    activeElement !== document.body &&
+    activeElement !== document.documentElement &&
+    activeElement !== textarea &&
+    !composer.contains(activeElement)
+  ) return false;
+  const valueLength = textarea.value.length;
+  const selectionStart = Math.min(snapshot.selectionStart, valueLength);
+  const selectionEnd = Math.min(Math.max(snapshot.selectionEnd, selectionStart), valueLength);
+  textarea.focus({ preventScroll: true });
+  textarea.setSelectionRange(selectionStart, selectionEnd, snapshot.selectionDirection);
+  return true;
+}
+
+defineExpose({ captureInputFocus, restoreInputFocus });
+
+watch(
+  [
+    () => props.modelValue,
+    () => props.mode,
+    () => props.attachments.length,
+    () => props.attachmentImportAttempt?.operationId ?? null,
+  ],
+  () => syncTextareaHeight(),
+  { flush: "post" },
+);
+
+onMounted(() => {
+  syncTextareaHeight();
+  if (typeof ResizeObserver === "undefined" || composerElement.value === null) return;
+  resizeObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect.width;
+    if (width === undefined || width === observedComposerWidth) return;
+    observedComposerWidth = width;
+    syncTextareaHeight();
+  });
+  resizeObserver.observe(composerElement.value);
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+});
 
 function submit(): void {
   if (!sendDisabled.value && !composing.value) emit("submit");
@@ -159,12 +246,18 @@ function handlePaste(event: ClipboardEvent): void {
 </script>
 
 <template>
-  <section class="chat-composer" :class="`chat-composer--${mode}`" aria-label="任务输入区">
+  <section
+    ref="composerElement"
+    class="chat-composer"
+    :class="`chat-composer--${mode}`"
+    aria-label="任务输入区"
+    :aria-busy="submissionBusy ? 'true' : undefined"
+  >
     <button
       v-if="mode === 'new'"
       class="chat-composer__project chat-composer__project--button"
       type="button"
-      :disabled="sending || streaming"
+      :disabled="submissionBusy || streaming"
       :aria-label="selectedProject ? `更换项目，当前项目 ${projectName}` : '选择本地项目'"
       :title="selectedProject ? `更换项目：${projectName}` : '选择本地项目'"
       @click="emit('pick-project')"
@@ -192,7 +285,7 @@ function handlePaste(event: ClipboardEvent): void {
         v-if="recoveryAvailable && readiness.actionLabel"
         class="chat-composer__recovery"
         type="button"
-        :disabled="sending"
+        :disabled="submissionBusy"
         @click="emit('recover')"
       >
         <YjIcon name="refresh" size="xs" />
@@ -230,7 +323,7 @@ function handlePaste(event: ClipboardEvent): void {
               class="chat-composer__attachment-action"
               aria-label="移除失败的附件选择"
               title="移除失败的附件选择"
-              :disabled="sending || attachmentImporting"
+              :disabled="submissionBusy || attachmentImporting"
               @click="emit('dismiss-attachment-import', attachmentImportAttempt.operationId)"
             >
               <YjIcon name="dismiss" size="sm" />
@@ -256,7 +349,7 @@ function handlePaste(event: ClipboardEvent): void {
               class="chat-composer__attachment-action"
               :aria-label="`移除 ${attachment.name}`"
               :title="`移除 ${attachment.name}`"
-              :disabled="sending"
+              :disabled="submissionBusy"
               @click="emit('remove-attachment', attachment.attachmentId)"
             >
               <YjIcon name="dismiss" size="sm" />
@@ -265,10 +358,11 @@ function handlePaste(event: ClipboardEvent): void {
         </li>
       </ul>
       <textarea
+        ref="textareaElement"
         id="chat-task-input"
         class="chat-composer__textarea"
         :value="modelValue"
-        :disabled="sending"
+        :readonly="submissionBusy"
         :placeholder="mode === 'new' ? '描述你希望易界 AI 完成的任务…' : '继续输入任务需求…'"
         :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
         :aria-invalid="visibleValidationMessage ? 'true' : undefined"
@@ -332,6 +426,14 @@ function handlePaste(event: ClipboardEvent): void {
       </div>
     </div>
     <p
+      class="chat-composer__submission-status"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {{ submissionAnnouncement }}
+    </p>
+    <p
       v-if="visibleValidationMessage"
       id="chat-composer-validation"
       class="chat-composer__validation"
@@ -361,6 +463,18 @@ function handlePaste(event: ClipboardEvent): void {
 <style scoped>
 .chat-composer {
   width: min(100%, var(--yj-layout-chat-composer-max));
+}
+
+.chat-composer__submission-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0 0 0 0);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .chat-composer__project {
@@ -631,6 +745,9 @@ function handlePaste(event: ClipboardEvent): void {
   display: block;
   width: 100%;
   min-height: 136px;
+  max-height: min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px);
+  overflow-y: hidden;
+  overscroll-behavior: contain;
   resize: none;
   box-sizing: border-box;
   padding: var(--yj-space-4) var(--yj-space-4) var(--yj-space-16);

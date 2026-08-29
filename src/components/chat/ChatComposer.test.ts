@@ -54,7 +54,7 @@ function mountComposer(overrides: Record<string, unknown> = {}) {
       readiness: { title: "本地运行环境已就绪", detail: "只读", actionLabel: null, tone: "success" },
       canSend: true,
       canAttach: true,
-      sending: false,
+      submissionState: "idle",
       streaming: false,
       recoveryAvailable: false,
       ...overrides,
@@ -62,7 +62,10 @@ function mountComposer(overrides: Record<string, unknown> = {}) {
   });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("ChatComposer", () => {
   it("renders the project strip and keeps permission and send actions inside the input panel", async () => {
@@ -100,6 +103,13 @@ describe("ChatComposer", () => {
     expect(source).toContain(`.chat-composer__project--button:hover:not(:disabled) {
   background: var(--yj-color-brand-soft);
 }`);
+  });
+
+  it("caps local scrolling against the zoom-adjusted viewport", () => {
+    const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
+    expect(source).toContain(
+      "max-height: min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px);",
+    );
   });
 
   it("submits with Enter, keeps Shift+Enter for a newline, and never submits while composing", async () => {
@@ -144,6 +154,128 @@ describe("ChatComposer", () => {
     textarea.element.dispatchEvent(enter);
     expect(wrapper.emitted("submit")).toHaveLength(1);
     expect(enter.defaultPrevented).toBe(true);
+  });
+
+  it("grows to content, enables local scrolling at the cap, and preserves selection", async () => {
+    const wrapper = mountComposer();
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 260 });
+    Object.defineProperty(textarea, "clientHeight", { configurable: true, value: 180 });
+    textarea.focus();
+    textarea.value = "0123456789\n".repeat(20);
+    textarea.setSelectionRange(4, 9, "forward");
+
+    await wrapper.get("textarea").trigger("input");
+
+    expect(textarea.style.height).toBe("260px");
+    expect(textarea.style.overflowY).toBe("auto");
+    expect(textarea.selectionStart).toBe(4);
+    expect(textarea.selectionEnd).toBe(9);
+    expect(textarea.selectionDirection).toBe("forward");
+  });
+
+  it("shrinks after the controlled value clears and exposes a safe focus snapshot API", async () => {
+    const wrapper = mountComposer();
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    let scrollHeight = 220;
+    let clientHeight = 160;
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(textarea, "clientHeight", { configurable: true, get: () => clientHeight });
+    const composer = wrapper.vm as unknown as {
+      captureInputFocus(): {
+        selectionStart: number;
+        selectionEnd: number;
+        selectionDirection: "forward" | "backward" | "none";
+      } | null;
+      restoreInputFocus(snapshot: {
+        selectionStart: number;
+        selectionEnd: number;
+        selectionDirection: "forward" | "backward" | "none";
+      }): boolean;
+    };
+
+    textarea.focus();
+    textarea.setSelectionRange(2, 5, "backward");
+    const snapshot = composer.captureInputFocus();
+    expect(snapshot).toEqual({
+      selectionStart: 2,
+      selectionEnd: 5,
+      selectionDirection: "backward",
+    });
+
+    scrollHeight = 112;
+    clientHeight = 112;
+    await wrapper.setProps({ modelValue: "", submissionState: "idle" });
+    expect(textarea.style.height).toBe("112px");
+    expect(textarea.style.overflowY).toBe("hidden");
+
+    textarea.blur();
+    const focus = vi.spyOn(textarea, "focus");
+    expect(composer.restoreInputFocus(snapshot!)).toBe(true);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe(0);
+  });
+
+  it("remeasures on composer width and attachment-placeholder changes and disconnects cleanly", async () => {
+    let resizeCallback: ResizeObserverCallback = () => undefined;
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallback = callback;
+      }
+
+      observe = observe;
+      unobserve = vi.fn();
+      disconnect = disconnect;
+    });
+    const wrapper = mountComposer();
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    let scrollHeight = 240;
+    let clientHeight = 160;
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(textarea, "clientHeight", { configurable: true, get: () => clientHeight });
+    const notifyWidth = (width: number) => resizeCallback(
+      [{ contentRect: { width } } as ResizeObserverEntry],
+      {} as ResizeObserver,
+    );
+
+    notifyWidth(640);
+    expect(observe).toHaveBeenCalledOnce();
+    expect(textarea.style.height).toBe("240px");
+
+    scrollHeight = 180;
+    clientHeight = 180;
+    notifyWidth(640);
+    expect(textarea.style.height).toBe("240px");
+    notifyWidth(520);
+    expect(textarea.style.height).toBe("180px");
+
+    scrollHeight = 96;
+    clientHeight = 96;
+    await wrapper.setProps({ attachmentImportAttempt: importEvent("queued") });
+    expect(textarea.style.height).toBe("96px");
+
+    wrapper.unmount();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("announces validating and submitting from one closed submission state", async () => {
+    const wrapper = mountComposer({ submissionState: "validating" });
+    expect(wrapper.get(".chat-composer").attributes("aria-busy")).toBe("true");
+    expect(wrapper.get('[aria-label="正在验证任务"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[role="status"]').text()).toContain("正在验证任务");
+    expect(wrapper.get("textarea").attributes("readonly")).toBeDefined();
+    expect(wrapper.get("textarea").attributes("disabled")).toBeUndefined();
+
+    await wrapper.setProps({ submissionState: "submitting" });
+    expect(wrapper.get('[aria-label="正在提交任务"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[role="status"]').text()).toContain("正在提交任务");
+
+    await wrapper.setProps({ submissionState: "idle" });
+    expect(wrapper.get(".chat-composer").attributes("aria-busy")).toBeUndefined();
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
   it("disables send for blank input, missing project, unavailable readiness and active turn", async () => {
@@ -214,7 +346,7 @@ describe("ChatComposer", () => {
     expect(attachmentBlocked.find(".chat-composer__drop-overlay").exists()).toBe(false);
 
     for (const props of [
-      { sending: true },
+      { submissionState: "submitting" },
       { streaming: true },
       { attachmentImporting: true },
       { attachments: Array.from({ length: 10 }, (_, index) => ({

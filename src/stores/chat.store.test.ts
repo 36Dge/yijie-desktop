@@ -33,6 +33,7 @@ import {
   CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS,
   CHAT_DRAFT_ATTACHMENT_LIMIT,
   createChatStoreDefinition,
+  type ChatSubmissionResult,
 } from "./chat.store";
 import { createArtifactStoreDefinition } from "./artifact.store";
 
@@ -2008,8 +2009,10 @@ describe("chat view-model store", () => {
 
     await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "same task"))
       .rejects.toMatchObject({ shape: { code: "chat_temporarily_unavailable" } });
+    expect(store.submissionState).toBe("idle");
     await expect(store.createSession("019c1a00-0000-7000-8000-000000000009", "same task"))
       .rejects.toMatchObject({ shape: { code: "chat_temporarily_unavailable" } });
+    expect(store.submissionState).toBe("idle");
 
     expect(calls).toEqual(["revalidate", "create", "revalidate", "create"]);
     expect(revalidateProject).toHaveBeenCalledTimes(2);
@@ -2142,7 +2145,7 @@ describe("chat view-model store", () => {
     expect(subscribeSession).not.toHaveBeenCalled();
   });
 
-  it("does not select the created A session when rebinding during its session-list refresh", async () => {
+  it("does not leak the created A selection across rebinding during its post-durable refresh", async () => {
     const nextTenant = "019c1a00-0000-7000-8000-000000000010";
     const projectId = "019c1a00-0000-7000-8000-000000000009";
     const delayedReload = new Deferred<Awaited<ReturnType<ChatClient["listSessions"]>>>();
@@ -2171,7 +2174,7 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
 
     const staleCreate = store.createSession(projectId, "context A task");
-    for (let index = 0; index < 8 && contextAListCalls < 2; index += 1) {
+    for (let index = 0; index < 64 && contextAListCalls < 2; index += 1) {
       await Promise.resolve();
     }
     expect(contextAListCalls).toBe(2);
@@ -2180,13 +2183,15 @@ describe("chat view-model store", () => {
     expect(store.draftAttachments).toEqual([attachment()]);
     delayedReload.resolve({ sessions: [session(SESSION_CREATED)], nextCursor: null });
 
-    await expect(staleCreate).resolves.toBeNull();
+    await expect(staleCreate).resolves.toBe(SESSION_A);
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
     expect(store.context?.contextId).toBe(CONTEXT_B);
     expect(store.selectedSessionId).toBeNull();
     expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
     expect(store.draftAttachments).toEqual([attachment()]);
     expect(listSessions).toHaveBeenCalledTimes(3);
-    expect(subscribeSession).not.toHaveBeenCalled();
+    expect(subscribeSession).toHaveBeenCalledOnce();
+    expect(subscribeSession).toHaveBeenCalledWith(CONTEXT, SESSION_A);
   });
 
   it("ignores a stale create response before validating its operation id", async () => {
@@ -2351,6 +2356,206 @@ describe("chat view-model store", () => {
       turnId: TURN_A,
       operationId: "019c1a00-0000-7000-8000-00000000000c",
     });
+  });
+
+  it("projects one validating to submitting lifecycle around a create attempt", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const projectResult = new Deferred<Awaited<ReturnType<ChatClient["revalidateProject"]>>>();
+    const createResult = new Deferred<Awaited<ReturnType<ChatClient["createSession"]>>>();
+    const createSession = vi.fn<ChatClient["createSession"]>(async () => createResult.promise);
+    const store = createStore(fakeClient({
+      revalidateProject: async () => projectResult.promise,
+      createSession,
+    }).client);
+    await store.bind(TENANT);
+
+    const pending = store.createSessionWithResult(projectId, "new task");
+    expect(store.submissionState).toBe("validating");
+
+    projectResult.resolve({
+      projectId,
+      safeName: "Synthetic Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    });
+    for (let index = 0; index < 8 && createSession.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(store.submissionState).toBe("submitting");
+
+    createResult.resolve({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+    });
+    await expect(pending).resolves.toMatchObject({ status: "local_durable_accepted" });
+    expect(store.submissionState).toBe("idle");
+  });
+
+  it("rejects concurrent create attempts without revalidating or dispatching twice", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const projectResult = new Deferred<Awaited<ReturnType<ChatClient["revalidateProject"]>>>();
+    const createResult = new Deferred<Awaited<ReturnType<ChatClient["createSession"]>>>();
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>(
+      async () => projectResult.promise,
+    );
+    const createSession = vi.fn<ChatClient["createSession"]>(async () => createResult.promise);
+    const store = createStore(fakeClient({ revalidateProject, createSession }).client);
+    await store.bind(TENANT);
+
+    const pending = store.createSessionWithResult(projectId, "new task");
+    expect(store.submissionState).toBe("validating");
+    await expect(store.createSessionWithResult(projectId, "duplicate while validating"))
+      .resolves.toEqual({ status: "not_accepted" });
+    expect(revalidateProject).toHaveBeenCalledOnce();
+    expect(createSession).not.toHaveBeenCalled();
+
+    projectResult.resolve({
+      projectId,
+      safeName: "Synthetic Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    });
+    for (let index = 0; index < 8 && createSession.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(store.submissionState).toBe("submitting");
+    await expect(store.createSessionWithResult(projectId, "duplicate while submitting"))
+      .resolves.toEqual({ status: "not_accepted" });
+    expect(revalidateProject).toHaveBeenCalledOnce();
+    expect(createSession).toHaveBeenCalledOnce();
+
+    createResult.resolve({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+    });
+    await expect(pending).resolves.toMatchObject({ status: "local_durable_accepted" });
+    expect(store.submissionState).toBe("idle");
+  });
+
+  it("does not let a stale create finally reset a newer submission state", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const staleProjectResult = new Deferred<Awaited<ReturnType<ChatClient["revalidateProject"]>>>();
+    const currentCreateResult = new Deferred<Awaited<ReturnType<ChatClient["createSession"]>>>();
+    let revalidationCalls = 0;
+    let currentOperationId: string | null = null;
+    const revalidateProject = vi.fn<ChatClient["revalidateProject"]>(async (_context, requestedProjectId) => {
+      revalidationCalls += 1;
+      if (revalidationCalls === 1) return staleProjectResult.promise;
+      return {
+        projectId: requestedProjectId,
+        safeName: "Synthetic Workspace",
+        pinnedAt: null,
+        lastUsedAt: 1,
+        available: true,
+      };
+    });
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operationId) => {
+        currentOperationId = operationId;
+        return currentCreateResult.promise;
+      },
+    );
+    const store = createStore(fakeClient({ revalidateProject, createSession }).client);
+    await store.bind(TENANT);
+
+    const stale = store.createSessionWithResult(projectId, "stale task");
+    expect(store.submissionState).toBe("validating");
+    store.clearForLogout();
+    expect(store.submissionState).toBe("idle");
+    await store.bind(TENANT);
+
+    const current = store.createSessionWithResult(projectId, "current task");
+    for (let index = 0; index < 8 && createSession.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(revalidateProject).toHaveBeenCalledTimes(2);
+    expect(store.submissionState).toBe("submitting");
+
+    staleProjectResult.resolve({
+      projectId,
+      safeName: "Stale Workspace",
+      pinnedAt: null,
+      lastUsedAt: 1,
+      available: true,
+    });
+    await expect(stale).resolves.toEqual({ status: "not_accepted" });
+    expect(createSession).toHaveBeenCalledOnce();
+    expect(store.submissionState).toBe("submitting");
+
+    currentCreateResult.resolve({
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: currentOperationId ?? "missing-operation-id",
+    });
+    await expect(current).resolves.toMatchObject({ status: "local_durable_accepted" });
+    expect(store.submissionState).toBe("idle");
+  });
+
+  it("returns a sealed create acceptance without waiting for post-durable session reload", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const delayedReload = new Deferred<Awaited<ReturnType<ChatClient["listSessions"]>>>();
+    let listCalls = 0;
+    const listSessions = vi.fn<ChatClient["listSessions"]>(async () => {
+      listCalls += 1;
+      return listCalls === 1
+        ? { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }
+        : delayedReload.promise;
+    });
+    const store = createStore(fakeClient({ listSessions }).client);
+    await store.bind(TENANT);
+
+    let settled: ChatSubmissionResult | null = null;
+    const pending = store.createSessionWithResult(projectId, "new task");
+    void pending.then((result) => { settled = result; });
+    for (let index = 0; index < 8 && settled === null; index += 1) await Promise.resolve();
+
+    try {
+      expect(settled).toMatchObject({ status: "local_durable_accepted" });
+      expect(store.submissionState).toBe("idle");
+      expect(store.selectedSessionId).toBe(SESSION_A);
+      for (let index = 0; index < 32 && listSessions.mock.calls.length < 2; index += 1) {
+        await Promise.resolve();
+      }
+      expect(listSessions).toHaveBeenCalledTimes(2);
+    } finally {
+      delayedReload.resolve({ sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null });
+      await pending;
+    }
+  });
+
+  it("returns a sealed reply acceptance without waiting for post-durable resync", async () => {
+    const delayedResync = new Deferred<Awaited<ReturnType<ChatClient["resyncSession"]>>>();
+    let resyncCalls = 0;
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(async (_context, sessionId) => {
+      resyncCalls += 1;
+      return resyncCalls === 1 ? projection(sessionId) : delayedResync.promise;
+    });
+    const store = createStore(fakeClient({ resyncSession }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    let settled: ChatSubmissionResult | null = null;
+    const pending = store.submitTurnWithResult("reply task");
+    void pending.then((result) => { settled = result; });
+    for (let index = 0; index < 8 && settled === null; index += 1) await Promise.resolve();
+
+    try {
+      expect(settled).toMatchObject({ status: "local_durable_accepted" });
+      expect(store.submissionState).toBe("idle");
+      for (let index = 0; index < 8 && resyncSession.mock.calls.length < 2; index += 1) {
+        await Promise.resolve();
+      }
+      expect(resyncSession).toHaveBeenCalledTimes(2);
+    } finally {
+      delayedResync.resolve(projection(SESSION_A));
+      await pending;
+    }
   });
 
   it("creates an attachment-only v2 turn and clears the draft only after success", async () => {

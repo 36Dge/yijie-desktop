@@ -54,6 +54,7 @@ import {
   type ConversationItem,
   type ConversationState,
 } from "../domain/conversation-state";
+import type { ChatComposerSubmissionState } from "../domain/chat-composer";
 import {
   useArtifactStore,
   type ArtifactAuthority,
@@ -275,6 +276,7 @@ export function createChatStoreDefinition(
     const attachmentImportAttempt = shallowRef<ChatAttachmentImportEvent | null>(null);
     const attachmentImporting = ref(false);
     const attachmentErrorCode = ref<string | null>(null);
+    const submissionState = ref<ChatComposerSubmissionState>("idle");
     const deleteDisposition = shallowRef<DeleteDisposition | null>(null);
     const lastErrorCode = ref<string | null>(null);
     const lastBindFailureStage = ref<ChatBindFailureStage | null>(null);
@@ -336,6 +338,7 @@ export function createChatStoreDefinition(
     let draftEpoch = 0;
     let activeAttachmentImport: ActiveAttachmentImport | null = null;
     let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
+    let activeSubmissionToken: symbol | null = null;
     let bufferingEvents = false;
     let bufferedEvents: ChatProjectionAuthorityEvent[] = [];
     let bufferedEventBytes = 0;
@@ -370,6 +373,31 @@ export function createChatStoreDefinition(
 
     function clearSubmissionAttempt(): void {
       pendingSubmission = null;
+    }
+
+    function beginSubmission(): symbol | null {
+      if (submissionState.value !== "idle") return null;
+      const token = Symbol("chat-submission");
+      activeSubmissionToken = token;
+      submissionState.value = "validating";
+      return token;
+    }
+
+    function markSubmissionDispatching(token: symbol): boolean {
+      if (activeSubmissionToken !== token) return false;
+      submissionState.value = "submitting";
+      return true;
+    }
+
+    function finishSubmission(token: symbol): void {
+      if (activeSubmissionToken !== token) return;
+      activeSubmissionToken = null;
+      submissionState.value = "idle";
+    }
+
+    function resetSubmissionState(): void {
+      activeSubmissionToken = null;
+      submissionState.value = "idle";
     }
 
     function rememberArtifactEvent(eventId: string): void {
@@ -540,6 +568,7 @@ export function createChatStoreDefinition(
 
     function clearAuthority(nextPhase: ChatViewPhase): void {
       authorityEpoch += 1;
+      resetSubmissionState();
       const oldContext = context.value?.contextId;
       const oldSubscription = subscriptionId;
       clearSelection();
@@ -2070,85 +2099,98 @@ export function createChatStoreDefinition(
       ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const blocks = turnContentBlocks(input);
       if (blocks === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      const attemptKey = submissionKey("create", projectId, input, blocks);
-      const attemptAuthorityEpoch = authorityEpoch;
-      const attemptSelectionEpoch = selectionEpoch;
-      const attemptDraftEpoch = draftEpoch;
-      const isCurrentCreateAuthority = (): boolean => (
-        authorityEpoch === attemptAuthorityEpoch &&
-        context.value?.contextId === bound.contextId &&
-        selectionEpoch === attemptSelectionEpoch &&
-        selectedSessionId.value === null &&
-        draftEpoch === attemptDraftEpoch &&
-        sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET)
-      );
-      const canDispatchCreateAttempt = (): boolean => (
-        isCurrentCreateAuthority() &&
-        canSend.value &&
-        hasAction("create_session") &&
-        hasAction("use_project")
-      );
-      let project: ChatProject | null;
+      const submissionToken = beginSubmission();
+      if (submissionToken === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       try {
-        project = await revalidateProject(projectId);
-      } catch (error: unknown) {
-        if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
-        throw error;
-      }
-      if (project === null || !canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      if (project.projectId !== projectId || !project.available) throw projectInvalidError();
-      const currentBlocks = turnContentBlocks(input);
-      if (
-        currentBlocks === null ||
-        submissionKey("create", projectId, input, currentBlocks) !== attemptKey
-      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      const attemptOperationId = submissionOperation(attemptKey);
-      const created = streamingV4Enabled || draftAttachments.value.length > 0
-        ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
-        : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
-      const settledBlocks = turnContentBlocks(input);
-      if (
-        !isCurrentCreateAuthority() ||
-        settledBlocks === null ||
-        submissionKey("create", projectId, input, settledBlocks) !== attemptKey
-      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      if (created.operationId !== attemptOperationId) {
-        throw new ChatClientError({
-          schemaVersion: 2,
-          code: "chat_protocol_error",
-          retryable: false,
-          recovery: "resync",
-        });
-      }
-      dropDraftReferences();
-      try {
-        await reloadSessions();
-      } catch (error: unknown) {
-        if (context.value?.contextId === bound.contextId) {
-          lastErrorCode.value = error instanceof ChatClientError
-            ? error.shape.code
-            : "chat_protocol_error";
+        const attemptKey = submissionKey("create", projectId, input, blocks);
+        const attemptAuthorityEpoch = authorityEpoch;
+        const attemptSelectionEpoch = selectionEpoch;
+        const attemptDraftEpoch = draftEpoch;
+        const isCurrentCreateAuthority = (): boolean => (
+          authorityEpoch === attemptAuthorityEpoch &&
+          context.value?.contextId === bound.contextId &&
+          selectionEpoch === attemptSelectionEpoch &&
+          selectedSessionId.value === null &&
+          draftEpoch === attemptDraftEpoch &&
+          sameDraftTarget(draftTarget.value, CHAT_NEW_DRAFT_TARGET)
+        );
+        const canDispatchCreateAttempt = (): boolean => (
+          isCurrentCreateAuthority() &&
+          canSend.value &&
+          hasAction("create_session") &&
+          hasAction("use_project")
+        );
+        let project: ChatProject | null;
+        try {
+          project = await revalidateProject(projectId);
+        } catch (error: unknown) {
+          if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
+          throw error;
         }
+        if (project === null || !canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        if (project.projectId !== projectId || !project.available) throw projectInvalidError();
+        const currentBlocks = turnContentBlocks(input);
+        if (
+          currentBlocks === null ||
+          submissionKey("create", projectId, input, currentBlocks) !== attemptKey
+        ) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        const attemptOperationId = submissionOperation(attemptKey);
+        if (!markSubmissionDispatching(submissionToken)) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        const created = streamingV4Enabled || draftAttachments.value.length > 0
+          ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
+          : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
+        const settledBlocks = turnContentBlocks(input);
+        if (
+          !isCurrentCreateAuthority() ||
+          settledBlocks === null ||
+          submissionKey("create", projectId, input, settledBlocks) !== attemptKey
+        ) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        if (created.operationId !== attemptOperationId) {
+          throw new ChatClientError({
+            schemaVersion: 2,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+        const accepted: ChatSubmissionResult = Object.freeze({
+          status: "local_durable_accepted",
+          draftTarget: CHAT_NEW_DRAFT_TARGET,
+          sessionId: created.sessionId,
+          turnId: created.turnId,
+          operationId: created.operationId,
+        });
+        dropDraftReferences();
+        const synchronizeCreatedSession = async (): Promise<void> => {
+          await selectSession(created.sessionId);
+          if (
+            authorityEpoch !== attemptAuthorityEpoch ||
+            context.value?.contextId !== bound.contextId ||
+            selectedSessionId.value !== created.sessionId
+          ) return;
+          const page = await client.listSessions(bound.contextId);
+          if (
+            authorityEpoch !== attemptAuthorityEpoch ||
+            context.value?.contextId !== bound.contextId ||
+            selectedSessionId.value !== created.sessionId
+          ) return;
+          sessions.value = page.sessions;
+          sessionsCursor.value = page.nextCursor;
+        };
+        void synchronizeCreatedSession().catch((error: unknown) => {
+          if (
+            authorityEpoch === attemptAuthorityEpoch &&
+            context.value?.contextId === bound.contextId
+          ) {
+            lastErrorCode.value = error instanceof ChatClientError
+              ? error.shape.code
+              : "chat_protocol_error";
+          }
+        });
+        return accepted;
+      } finally {
+        finishSubmission(submissionToken);
       }
-      if (
-        authorityEpoch !== attemptAuthorityEpoch ||
-        context.value?.contextId !== bound.contextId ||
-        selectionEpoch !== attemptSelectionEpoch ||
-        selectedSessionId.value !== null
-      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      await selectSession(created.sessionId);
-      if (
-        authorityEpoch !== attemptAuthorityEpoch ||
-        context.value?.contextId !== bound.contextId ||
-        selectedSessionId.value !== created.sessionId
-      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      return Object.freeze({
-        status: "local_durable_accepted",
-        draftTarget: CHAT_NEW_DRAFT_TARGET,
-        sessionId: created.sessionId,
-        turnId: created.turnId,
-        operationId: created.operationId,
-      });
     }
 
     async function createSession(projectId: string, input: string): Promise<string | null> {
@@ -2164,49 +2206,67 @@ export function createChatStoreDefinition(
       }
       const blocks = turnContentBlocks(input);
       if (blocks === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      const attemptKey = submissionKey("submit", sessionId, input, blocks);
-      const attemptAuthorityEpoch = authorityEpoch;
-      const attemptSelectionEpoch = selectionEpoch;
-      const attemptDraftEpoch = draftEpoch;
-      const attemptTarget = chatSessionDraftTarget(sessionId);
-      const isCurrentSubmitAuthority = (): boolean => (
-        authorityEpoch === attemptAuthorityEpoch &&
-        context.value?.contextId === bound.contextId &&
-        selectionEpoch === attemptSelectionEpoch &&
-        selectedSessionId.value === sessionId &&
-        draftEpoch === attemptDraftEpoch &&
-        sameDraftTarget(draftTarget.value, attemptTarget)
-      );
-      const attemptOperationId = submissionOperation(attemptKey);
-      let created;
-      if (streamingV4Enabled || draftAttachments.value.length > 0) {
-        created = await client.submitTurnV2(bound.contextId, sessionId, blocks, attemptOperationId);
-      } else {
-        created = await client.submitTurn(bound.contextId, sessionId, input, attemptOperationId);
-      }
-      const settledBlocks = turnContentBlocks(input);
-      if (
-        !isCurrentSubmitAuthority() ||
-        settledBlocks === null ||
-        submissionKey("submit", sessionId, input, settledBlocks) !== attemptKey
-      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
-      if (created.operationId !== attemptOperationId) {
-        throw new ChatClientError({
-          schemaVersion: 2,
-          code: "chat_protocol_error",
-          retryable: false,
-          recovery: "resync",
+      const submissionToken = beginSubmission();
+      if (submissionToken === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
+      try {
+        const attemptKey = submissionKey("submit", sessionId, input, blocks);
+        const attemptAuthorityEpoch = authorityEpoch;
+        const attemptSelectionEpoch = selectionEpoch;
+        const attemptDraftEpoch = draftEpoch;
+        const attemptTarget = chatSessionDraftTarget(sessionId);
+        const isCurrentSubmitAuthority = (): boolean => (
+          authorityEpoch === attemptAuthorityEpoch &&
+          context.value?.contextId === bound.contextId &&
+          selectionEpoch === attemptSelectionEpoch &&
+          selectedSessionId.value === sessionId &&
+          draftEpoch === attemptDraftEpoch &&
+          sameDraftTarget(draftTarget.value, attemptTarget)
+        );
+        const attemptOperationId = submissionOperation(attemptKey);
+        if (!markSubmissionDispatching(submissionToken)) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        let created;
+        if (streamingV4Enabled || draftAttachments.value.length > 0) {
+          created = await client.submitTurnV2(bound.contextId, sessionId, blocks, attemptOperationId);
+        } else {
+          created = await client.submitTurn(bound.contextId, sessionId, input, attemptOperationId);
+        }
+        const settledBlocks = turnContentBlocks(input);
+        if (
+          !isCurrentSubmitAuthority() ||
+          settledBlocks === null ||
+          submissionKey("submit", sessionId, input, settledBlocks) !== attemptKey
+        ) return CHAT_SUBMISSION_NOT_ACCEPTED;
+        if (created.operationId !== attemptOperationId) {
+          throw new ChatClientError({
+            schemaVersion: 2,
+            code: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          });
+        }
+        const accepted: ChatSubmissionResult = Object.freeze({
+          status: "local_durable_accepted",
+          draftTarget: attemptTarget,
+          sessionId: created.sessionId,
+          turnId: created.turnId,
+          operationId: created.operationId,
         });
+        dropDraftReferences();
+        void resyncSelected().catch((error: unknown) => {
+          if (
+            authorityEpoch === attemptAuthorityEpoch &&
+            context.value?.contextId === bound.contextId &&
+            selectedSessionId.value === sessionId
+          ) {
+            lastErrorCode.value = error instanceof ChatClientError
+              ? error.shape.code
+              : "chat_protocol_error";
+          }
+        });
+        return accepted;
+      } finally {
+        finishSubmission(submissionToken);
       }
-      dropDraftReferences();
-      await resyncSelected();
-      return Object.freeze({
-        status: "local_durable_accepted",
-        draftTarget: attemptTarget,
-        sessionId: created.sessionId,
-        turnId: created.turnId,
-        operationId: created.operationId,
-      });
     }
 
     async function submitTurn(input: string): Promise<void> {
@@ -2497,6 +2557,7 @@ export function createChatStoreDefinition(
       attachmentImportAttempt,
       attachmentImporting,
       attachmentErrorCode,
+      submissionState,
       deleteDisposition,
       lastErrorCode,
       lastBindFailureStage,

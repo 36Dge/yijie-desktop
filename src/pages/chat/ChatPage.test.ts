@@ -571,12 +571,14 @@ describe("FEAT-126 ChatPage", () => {
     const createSession = vi.spyOn(store, "createSessionWithResult")
       .mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("检查标题");
+    (wrapper.get("textarea").element as HTMLTextAreaElement).focus();
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
 
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(createSession).toHaveBeenCalledWith(PROJECT_ID, "检查标题");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(document.activeElement).toBe(wrapper.get("textarea").element);
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="添加图片或文件"]').exists()).toBe(true);
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音输入/);
@@ -906,6 +908,104 @@ describe("FEAT-126 ChatPage", () => {
     expect(submitTurn).toHaveBeenCalledOnce();
     resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
     await flushPromises();
+  });
+
+  it("restores the textarea focus and clamps selection after local durable acceptance", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    await wrapper.get("textarea").setValue("提交后继续输入");
+    textarea.focus();
+    textarea.setSelectionRange(2, 6);
+
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    textarea.blur();
+    resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+    await flushPromises();
+
+    expect(textarea.value).toBe("");
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe(0);
+  });
+
+  it("restores focus and the original selection after a non-accepted submit", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    await wrapper.get("textarea").setValue("失败后保留选择");
+    textarea.focus();
+    textarea.setSelectionRange(2, 5, "backward");
+
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    textarea.blur();
+    resolveSubmit({ status: "not_accepted" });
+    await flushPromises();
+
+    expect(textarea.value).toBe("失败后保留选择");
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(2);
+    expect(textarea.selectionEnd).toBe(5);
+    expect(textarea.selectionDirection).toBe("backward");
+  });
+
+  it("does not steal focus when the user moves to another control during submit", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    await wrapper.get("textarea").setValue("不要抢焦点");
+    textarea.focus();
+
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    const external = document.createElement("button");
+    document.body.append(external);
+    external.focus();
+    resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+    await flushPromises();
+
+    expect(document.activeElement).toBe(external);
+  });
+
+  it("preserves an active conversation selection when submit settles", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+    const textarea = wrapper.get("textarea").element as HTMLTextAreaElement;
+    await wrapper.get("textarea").setValue("保留正文选择");
+    textarea.focus();
+
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    const conversation = wrapper.get(".chat-workspace__conversation").element;
+    const paragraph = conversation.querySelector(".chat-safe-content__paragraph");
+    expect(paragraph).not.toBeNull();
+    textarea.blur();
+    const range = document.createRange();
+    range.selectNodeContents(paragraph!);
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(selection.isCollapsed).toBe(false);
+    expect(conversation.contains(selection.anchorNode)).toBe(true);
+    expect(document.activeElement).toBe(document.body);
+
+    resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+    await flushPromises();
+
+    expect(selection.isCollapsed).toBe(false);
+    expect(selection.rangeCount).toBe(1);
+    expect(document.activeElement).toBe(document.body);
+    selection.removeAllRanges();
   });
 
   it("accepts native drops only inside the composer logical bounds", async () => {

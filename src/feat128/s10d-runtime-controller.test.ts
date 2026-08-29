@@ -56,7 +56,7 @@ function mountRuntimeComposer(overrides: Record<string, unknown> = {}): VueWrapp
       },
       canSend: false,
       canAttach: false,
-      sending: false,
+      submissionState: "idle",
       streaming: false,
       recoveryAvailable: false,
       "onUpdate:modelValue": (value: string) => {

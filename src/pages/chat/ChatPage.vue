@@ -27,6 +27,11 @@ import {
   createChatComposerDrafts,
   updateChatComposerDraft,
 } from "../../domain/chat-composer-draft";
+import type {
+  ChatComposerFocusSnapshot,
+  ChatComposerHandle,
+  ChatComposerSubmissionState,
+} from "../../domain/chat-composer";
 import {
   selectConversationTimeline,
   type ConversationTimelineArtifactReferenceContentBlock,
@@ -83,6 +88,11 @@ const prompt = computed({
 });
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
+const composer = ref<ChatComposerHandle | null>(null);
+const composerSubmissionState = computed<ChatComposerSubmissionState>(() => {
+  if (chatStore.submissionState !== "idle") return chatStore.submissionState;
+  return submitting.value ? "submitting" : "idle";
+});
 const actionErrorCode = ref<string | null>(null);
 const transientNotice = ref<string | null>(null);
 const permissionDialogOpen = ref(false);
@@ -142,7 +152,7 @@ const isHistoryLoading = computed(() =>
 );
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
-  chatStore.canAttach && !submitting.value && !isStreaming.value,
+  chatStore.canAttach && composerSubmissionState.value === "idle" && !isStreaming.value,
 );
 const permissionDenied = computed(() =>
   chatStore.lastErrorCode === "chat_capability_denied" ||
@@ -299,10 +309,12 @@ async function pickProject(): Promise<void> {
 
 async function submit(): Promise<void> {
   if (submitting.value) return;
+  const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
   transientNotice.value = null;
   const draftTargetAtStart = composerDraftTargetKey.value;
+  let focusRestoreTarget = draftTargetAtStart;
   const input = prompt.value.trim();
   try {
     if (isSessionRoute.value) {
@@ -335,10 +347,17 @@ async function submit(): Promise<void> {
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
     await router.push(`/chat/${result.sessionId}`);
+    focusRestoreTarget = chatComposerDraftKey(result.sessionId);
   } catch (error: unknown) {
     captureError(error);
   } finally {
     submitting.value = false;
+    await nextTick();
+    if (
+      focusSnapshot !== null &&
+      composerDraftTargetKey.value === focusRestoreTarget &&
+      !timelineSelectionActive()
+    ) composer.value?.restoreInputFocus(focusSnapshot);
   }
 }
 
@@ -544,6 +563,7 @@ onBeforeUnmount(() => {
       <p v-if="transientNotice" class="chat-entry__unsupported" role="alert">{{ transientNotice }}</p>
 
       <ChatComposer
+        ref="composer"
         v-model="prompt"
         mode="new"
         :projects="chatStore.projects"
@@ -551,7 +571,7 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :can-send="chatStore.canSend"
         :can-attach="attachmentInteractionAllowed"
-        :sending="submitting"
+        :submission-state="composerSubmissionState"
         :streaming="false"
         :recovery-available="canRecoverReadiness"
         :attachments="chatStore.draftAttachments"
@@ -838,6 +858,7 @@ onBeforeUnmount(() => {
       </p>
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
       <ChatComposer
+        ref="composer"
         v-model="prompt"
         mode="reply"
         :projects="chatStore.projects"
@@ -846,7 +867,7 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :can-send="chatStore.canSend"
         :can-attach="attachmentInteractionAllowed"
-        :sending="submitting"
+        :submission-state="composerSubmissionState"
         :streaming="isStreaming"
         :recovery-available="canRecoverReadiness"
           :attachments="chatStore.draftAttachments"
