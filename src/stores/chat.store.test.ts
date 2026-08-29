@@ -2303,6 +2303,56 @@ describe("chat view-model store", () => {
     expect(resyncSession).toHaveBeenCalledTimes(2);
   });
 
+  it("returns an explicit local durable result only for the current submit authority", async () => {
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>(
+      async (_context, sessionId, _input, submittedOperationId) => ({
+        sessionId,
+        turnId: TURN_A,
+        operationId: submittedOperationId,
+      }),
+    );
+    const store = createStore(fakeClient({ submitTurn }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    await expect(store.submitTurnWithResult("session A task")).resolves.toEqual({
+      status: "local_durable_accepted",
+      draftTarget: chatSessionDraftTarget(SESSION_A),
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+    });
+
+    store.localReadiness = {
+      lifecycle: "blocked",
+      host: "unavailable",
+      runtime: "unavailable",
+      storage: "ready",
+      canSend: false,
+      issueCode: "chat_host_unavailable",
+      retryable: true,
+      recovery: "start_or_retry",
+    };
+    await expect(store.submitTurnWithResult("blocked")).resolves.toEqual({
+      status: "not_accepted",
+    });
+    expect(submitTurn).toHaveBeenCalledOnce();
+  });
+
+  it("returns an explicit local durable result for a created session", async () => {
+    const projectId = "019c1a00-0000-7000-8000-000000000009";
+    const store = createStore(fakeClient().client);
+    await store.bind(TENANT);
+
+    await expect(store.createSessionWithResult(projectId, "new task")).resolves.toEqual({
+      status: "local_durable_accepted",
+      draftTarget: CHAT_NEW_DRAFT_TARGET,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+    });
+  });
+
   it("creates an attachment-only v2 turn and clears the draft only after success", async () => {
     const pickAttachments = vi.fn(async () => [attachment()]);
     const createSessionV2 = vi.fn(async (_context: string, _project: string, _blocks: unknown, operation: string) => ({

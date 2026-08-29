@@ -21,10 +21,14 @@ import {
   reconcileConversationSnapshot,
 } from "../../domain/conversation-state";
 import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
-import { useChatStore } from "../../stores/chat.store";
+import {
+  useChatStore,
+  type ChatSubmissionResult,
+} from "../../stores/chat.store";
 import { useArtifactStore } from "../../stores/artifact.store";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
+import ChatComposer from "../../components/chat/ChatComposer.vue";
 import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
@@ -54,6 +58,19 @@ vi.mock("@tauri-apps/api/window", () => ({
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 const TURN_ID = "019c1a00-0000-7000-8000-000000000003";
+
+function acceptedSubmission(
+  sessionId = SESSION_ID,
+  draftTarget = CHAT_NEW_DRAFT_TARGET,
+): ChatSubmissionResult {
+  return Object.freeze({
+    status: "local_durable_accepted",
+    draftTarget,
+    sessionId,
+    turnId: TURN_ID,
+    operationId: "019c1a00-0000-7000-8000-000000000020",
+  });
+}
 
 const PROJECT: ChatProject = {
   projectId: PROJECT_ID,
@@ -551,7 +568,8 @@ describe("FEAT-126 ChatPage", () => {
 
   it("creates exactly one session from the real composer and routes only after success", async () => {
     const { wrapper, store, router } = await mountPage("/chat");
-    const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);
+    const createSession = vi.spyOn(store, "createSessionWithResult")
+      .mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("检查标题");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
@@ -601,7 +619,8 @@ describe("FEAT-126 ChatPage", () => {
       store.projects = [PROJECT, SECOND_PROJECT];
       return SECOND_PROJECT;
     });
-    const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);
+    const createSession = vi.spyOn(store, "createSessionWithResult")
+      .mockResolvedValue(acceptedSubmission());
     expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
     expect(wrapper.find("select").exists()).toBe(false);
     await wrapper.get(".chat-composer__project--button").trigger("click");
@@ -618,7 +637,8 @@ describe("FEAT-126 ChatPage", () => {
 
   it("keeps input and displays stable recovery copy when create fails", async () => {
     const { wrapper, store, router } = await mountPage("/chat");
-    vi.spyOn(store, "createSession").mockRejectedValue(new Error("synthetic raw error /private/path"));
+    vi.spyOn(store, "createSessionWithResult")
+      .mockRejectedValue(new Error("synthetic raw error /private/path"));
     await wrapper.get("textarea").setValue("保留这段输入");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
@@ -686,7 +706,8 @@ describe("FEAT-126 ChatPage", () => {
       store.draftAttachments = [READY_ATTACHMENT];
       return [READY_ATTACHMENT];
     });
-    const createSession = vi.spyOn(store, "createSession").mockResolvedValue(SESSION_ID);
+    const createSession = vi.spyOn(store, "createSessionWithResult")
+      .mockResolvedValue(acceptedSubmission());
 
     await wrapper.get('[aria-label="添加图片或文件"]').trigger("click");
     await flushPromises();
@@ -769,9 +790,9 @@ describe("FEAT-126 ChatPage", () => {
 
   it("keeps the plus entry and native drop path disabled during a local submission", async () => {
     const { wrapper, store } = await mountPage("/chat");
-    let resolveCreate!: (sessionId: string | null) => void;
-    const pendingCreate = new Promise<string | null>((resolve) => { resolveCreate = resolve; });
-    vi.spyOn(store, "createSession").mockReturnValue(pendingCreate);
+    let resolveCreate!: (result: ChatSubmissionResult) => void;
+    const pendingCreate = new Promise<ChatSubmissionResult>((resolve) => { resolveCreate = resolve; });
+    vi.spyOn(store, "createSessionWithResult").mockReturnValue(pendingCreate);
     const importAttachmentPaths = vi.spyOn(store, "importAttachmentPaths");
     vi.spyOn(wrapper.get(".chat-composer").element, "getBoundingClientRect").mockReturnValue({
       left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300, x: 100, y: 100,
@@ -791,7 +812,99 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
     expect(importAttachmentPaths).not.toHaveBeenCalled();
 
-    resolveCreate(null);
+    resolveCreate({ status: "not_accepted" });
+    await flushPromises();
+  });
+
+  it("keeps a reply draft when the store does not locally accept it", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const submitTurn = vi.spyOn(store, "submitTurnWithResult")
+      .mockResolvedValue({ status: "not_accepted" });
+
+    await wrapper.get("textarea").setValue("不能丢失的回复");
+    await wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+
+    expect(submitTurn).toHaveBeenCalledWith("不能丢失的回复");
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value)
+      .toBe("不能丢失的回复");
+    expect(wrapper.text()).toContain("本地服务尚未就绪");
+  });
+
+  it("isolates text drafts while switching between session targets", async () => {
+    const sessionB = "019c1a00-0000-7000-8000-000000000011";
+    const { wrapper, router } = await mountPage(`/chat/${SESSION_ID}`, true);
+
+    await wrapper.get("textarea").setValue("会话 A 草稿");
+    await router.push(`/chat/${sessionB}`);
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+
+    await wrapper.get("textarea").setValue("会话 B 草稿");
+    await router.push(`/chat/${SESSION_ID}`);
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("会话 A 草稿");
+
+    await router.push(`/chat/${sessionB}`);
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("会话 B 草稿");
+  });
+
+  it("keeps a draft through the first context bind and clears it across authority changes", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    const boundContext = store.context!;
+    store.context = null;
+    await flushPromises();
+
+    await wrapper.get("textarea").setValue("绑定前草稿");
+    store.context = boundContext;
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("绑定前草稿");
+
+    store.context = {
+      ...boundContext,
+      contextId: "019c1a00-0000-7000-8000-000000000099",
+    };
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("does not clear another target when a late accepted submit resolves after navigation", async () => {
+    const sessionB = "019c1a00-0000-7000-8000-000000000011";
+    const { wrapper, store, router } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+
+    await wrapper.get("textarea").setValue("会话 A 在途草稿");
+    await wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await router.push(`/chat/${sessionB}`);
+    await flushPromises();
+    wrapper.getComponent(ChatComposer).vm.$emit("update:modelValue", "会话 B 草稿");
+    await flushPromises();
+
+    resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("会话 B 草稿");
+
+    await router.push(`/chat/${SESSION_ID}`);
+    await flushPromises();
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("会话 A 在途草稿");
+  });
+
+  it("coalesces duplicate submit events while the first intent is pending", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    let resolveSubmit!: (result: ChatSubmissionResult) => void;
+    const pendingSubmit = new Promise<ChatSubmissionResult>((resolve) => { resolveSubmit = resolve; });
+    const submitTurn = vi.spyOn(store, "submitTurnWithResult").mockReturnValue(pendingSubmit);
+
+    await wrapper.get("textarea").setValue("只提交一次");
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await Promise.resolve();
+
+    expect(submitTurn).toHaveBeenCalledOnce();
+    resolveSubmit(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
     await flushPromises();
   });
 

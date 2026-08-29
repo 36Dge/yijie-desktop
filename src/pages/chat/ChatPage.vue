@@ -13,12 +13,20 @@ import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
 import type {
   ChatAttachment,
+  ChatDraftTarget,
   ChatHistoryTurn,
   ChatMessage,
   ChatMessageContentBlock,
   ChatReasoningItem,
 } from "../../domain/chat-ipc";
 import { ChatClientError } from "../../domain/chat-ipc";
+import {
+  chatComposerDraftKey,
+  chatComposerDraftValue,
+  clearChatComposerDraft,
+  createChatComposerDrafts,
+  updateChatComposerDraft,
+} from "../../domain/chat-composer-draft";
 import {
   selectConversationTimeline,
   type ConversationTimelineArtifactReferenceContentBlock,
@@ -58,7 +66,21 @@ const legacyChatTimelineRollbackEnabled = inject(
   LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
   configuredLegacyChatTimelineRollbackEnabled,
 );
-const prompt = ref("");
+const composerDrafts = shallowRef(createChatComposerDrafts());
+const routeSessionId = computed(() => typeof route.params.sessionId === "string"
+  ? route.params.sessionId
+  : null);
+const composerDraftTargetKey = computed(() => chatComposerDraftKey(routeSessionId.value));
+const prompt = computed({
+  get: () => chatComposerDraftValue(composerDrafts.value, composerDraftTargetKey.value),
+  set: (value: string) => {
+    composerDrafts.value = updateChatComposerDraft(
+      composerDrafts.value,
+      composerDraftTargetKey.value,
+      value,
+    );
+  },
+});
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
 const actionErrorCode = ref<string | null>(null);
@@ -80,7 +102,7 @@ const {
   preservePositionWhile,
 } = useChatScroll(conversationScroller);
 
-const isSessionRoute = computed(() => typeof route.params.sessionId === "string");
+const isSessionRoute = computed(() => routeSessionId.value !== null);
 const selectedSession = computed(() => chatStore.sessions.find((session) =>
   session.sessionId === chatStore.selectedSessionId,
 ) ?? null);
@@ -162,6 +184,15 @@ watch(
     selectedProjectId.value = projects.find((project) => project.available)?.projectId ?? null;
   },
   { immediate: true },
+);
+
+watch(
+  () => chatStore.context?.contextId ?? null,
+  (contextId, previousContextId) => {
+    if (contextId === previousContextId) return;
+    if (previousContextId === null && contextId !== null) return;
+    composerDrafts.value = createChatComposerDrafts();
+  },
 );
 
 watch(
@@ -271,11 +302,20 @@ async function submit(): Promise<void> {
   submitting.value = true;
   actionErrorCode.value = null;
   transientNotice.value = null;
+  const draftTargetAtStart = composerDraftTargetKey.value;
   const input = prompt.value.trim();
   try {
     if (isSessionRoute.value) {
-      await chatStore.submitTurn(input);
-      prompt.value = "";
+      const result = await chatStore.submitTurnWithResult(input);
+      if (result.status !== "local_durable_accepted") {
+        actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
+        return;
+      }
+      if (
+        chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
+        composerDraftTargetKey.value !== draftTargetAtStart
+      ) return;
+      composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
       await nextTick();
       scrollToBottom();
       return;
@@ -284,18 +324,26 @@ async function submit(): Promise<void> {
       actionErrorCode.value = "chat_project_invalid";
       return;
     }
-    const sessionId = await chatStore.createSession(selectedProjectId.value, input);
-    if (!sessionId) {
+    const result = await chatStore.createSessionWithResult(selectedProjectId.value, input);
+    if (result.status !== "local_durable_accepted") {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
     }
-    prompt.value = "";
-    await router.push(`/chat/${sessionId}`);
+    if (
+      chatComposerDraftKeyFromTarget(result.draftTarget) !== draftTargetAtStart ||
+      composerDraftTargetKey.value !== draftTargetAtStart
+    ) return;
+    composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+    await router.push(`/chat/${result.sessionId}`);
   } catch (error: unknown) {
     captureError(error);
   } finally {
     submitting.value = false;
   }
+}
+
+function chatComposerDraftKeyFromTarget(target: ChatDraftTarget) {
+  return chatComposerDraftKey(target.type === "session" ? target.sessionId : null);
 }
 
 async function interrupt(): Promise<void> {

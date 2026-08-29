@@ -123,6 +123,20 @@ export type ChatViewPhase =
   | "signed-out"
   | "unavailable";
 
+export type ChatSubmissionResult =
+  | Readonly<{ status: "not_accepted" }>
+  | Readonly<{
+      status: "local_durable_accepted";
+      draftTarget: ChatDraftTarget;
+      sessionId: string;
+      turnId: string;
+      operationId: string;
+    }>;
+
+const CHAT_SUBMISSION_NOT_ACCEPTED: ChatSubmissionResult = Object.freeze({
+  status: "not_accepted",
+});
+
 function boundedValueStorageBytes(value: unknown, remaining: number): number {
   if (remaining <= 0 || value === null || value === undefined) return 0;
   if (typeof value === "string") return Math.min(remaining, value.length * 2);
@@ -2045,14 +2059,17 @@ export function createChatStoreDefinition(
       return blocks.length > 0 ? Object.freeze(blocks) : null;
     }
 
-    async function createSession(projectId: string, input: string): Promise<string | null> {
+    async function createSessionWithResult(
+      projectId: string,
+      input: string,
+    ): Promise<ChatSubmissionResult> {
       const bound = context.value;
       if (
         !bound || selectedSessionId.value !== null || !canSend.value ||
         !hasAction("create_session") || !hasAction("use_project")
-      ) return null;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const blocks = turnContentBlocks(input);
-      if (blocks === null) return null;
+      if (blocks === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const attemptKey = submissionKey("create", projectId, input, blocks);
       const attemptAuthorityEpoch = authorityEpoch;
       const attemptSelectionEpoch = selectionEpoch;
@@ -2075,16 +2092,16 @@ export function createChatStoreDefinition(
       try {
         project = await revalidateProject(projectId);
       } catch (error: unknown) {
-        if (!canDispatchCreateAttempt()) return null;
+        if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
         throw error;
       }
-      if (project === null || !canDispatchCreateAttempt()) return null;
+      if (project === null || !canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
       if (project.projectId !== projectId || !project.available) throw projectInvalidError();
       const currentBlocks = turnContentBlocks(input);
       if (
         currentBlocks === null ||
         submissionKey("create", projectId, input, currentBlocks) !== attemptKey
-      ) return null;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const attemptOperationId = submissionOperation(attemptKey);
       const created = streamingV4Enabled || draftAttachments.value.length > 0
         ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
@@ -2094,7 +2111,7 @@ export function createChatStoreDefinition(
         !isCurrentCreateAuthority() ||
         settledBlocks === null ||
         submissionKey("create", projectId, input, settledBlocks) !== attemptKey
-      ) return null;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       if (created.operationId !== attemptOperationId) {
         throw new ChatClientError({
           schemaVersion: 2,
@@ -2118,22 +2135,35 @@ export function createChatStoreDefinition(
         context.value?.contextId !== bound.contextId ||
         selectionEpoch !== attemptSelectionEpoch ||
         selectedSessionId.value !== null
-      ) return null;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       await selectSession(created.sessionId);
       if (
         authorityEpoch !== attemptAuthorityEpoch ||
         context.value?.contextId !== bound.contextId ||
         selectedSessionId.value !== created.sessionId
-      ) return null;
-      return created.sessionId;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
+      return Object.freeze({
+        status: "local_durable_accepted",
+        draftTarget: CHAT_NEW_DRAFT_TARGET,
+        sessionId: created.sessionId,
+        turnId: created.turnId,
+        operationId: created.operationId,
+      });
     }
 
-    async function submitTurn(input: string): Promise<void> {
+    async function createSession(projectId: string, input: string): Promise<string | null> {
+      const result = await createSessionWithResult(projectId, input);
+      return result.status === "local_durable_accepted" ? result.sessionId : null;
+    }
+
+    async function submitTurnWithResult(input: string): Promise<ChatSubmissionResult> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !canSend.value || !hasAction("submit_turn")) return;
+      if (!bound || !sessionId || !canSend.value || !hasAction("submit_turn")) {
+        return CHAT_SUBMISSION_NOT_ACCEPTED;
+      }
       const blocks = turnContentBlocks(input);
-      if (blocks === null) return;
+      if (blocks === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       const attemptKey = submissionKey("submit", sessionId, input, blocks);
       const attemptAuthorityEpoch = authorityEpoch;
       const attemptSelectionEpoch = selectionEpoch;
@@ -2159,7 +2189,7 @@ export function createChatStoreDefinition(
         !isCurrentSubmitAuthority() ||
         settledBlocks === null ||
         submissionKey("submit", sessionId, input, settledBlocks) !== attemptKey
-      ) return;
+      ) return CHAT_SUBMISSION_NOT_ACCEPTED;
       if (created.operationId !== attemptOperationId) {
         throw new ChatClientError({
           schemaVersion: 2,
@@ -2170,6 +2200,17 @@ export function createChatStoreDefinition(
       }
       dropDraftReferences();
       await resyncSelected();
+      return Object.freeze({
+        status: "local_durable_accepted",
+        draftTarget: attemptTarget,
+        sessionId: created.sessionId,
+        turnId: created.turnId,
+        operationId: created.operationId,
+      });
+    }
+
+    async function submitTurn(input: string): Promise<void> {
+      await submitTurnWithResult(input);
     }
 
     async function reloadSessions(): Promise<void> {
@@ -2477,7 +2518,9 @@ export function createChatStoreDefinition(
       removeDraftAttachment,
       dismissAttachmentImportAttempt,
       discardDraftAttachments,
+      createSessionWithResult,
       createSession,
+      submitTurnWithResult,
       submitTurn,
       reloadSessions,
       loadMoreSessions,
