@@ -110,8 +110,32 @@ describe("ChatComposer", () => {
   it("caps local scrolling against the zoom-adjusted viewport", () => {
     const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
     expect(source).toContain(
-      "max-height: min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px);",
+      "max-height: calc(min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px) - var(--chat-composer-action-row-height));",
     );
+  });
+
+  it("keeps capped long input content in a layout row above the bottom actions", () => {
+    const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
+    expect(source).toContain(
+      "--chat-composer-action-row-height: calc(var(--yj-space-10) + var(--yj-space-3));",
+    );
+    expect(source).toMatch(/\.chat-composer__textarea\s*\{[^}]*padding: var\(--yj-space-4\);/s);
+    expect(source).toContain(
+      "max-height: calc(min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px) - var(--chat-composer-action-row-height));",
+    );
+    expect(source).toMatch(/\.chat-composer__actions\s*\{[^}]*position: relative;/s);
+    expect(source).not.toMatch(/\.chat-composer__actions\s*\{[^}]*position: absolute;/s);
+  });
+
+  it("reserves a stable send-action column when 200% zoom narrows the composer", () => {
+    const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
+    expect(source).toMatch(/\.chat-composer__actions\s*\{[^}]*display: grid;/s);
+    expect(source).toMatch(
+      /\.chat-composer__actions\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/s,
+    );
+    expect(source).toMatch(/\.chat-composer__leading-actions\s*\{[^}]*overflow: hidden;/s);
+    expect(source).toMatch(/\.chat-composer__permission\s*\{[^}]*flex: 1 1 auto;/s);
+    expect(source).toMatch(/\.chat-composer__send\s*\{[^}]*justify-self: end;/s);
   });
 
   it("submits with Enter, keeps Shift+Enter for a newline, and never submits while composing", async () => {

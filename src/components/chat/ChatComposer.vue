@@ -481,6 +481,8 @@ function handlePaste(event: ClipboardEvent): void {
 
 <style scoped>
 .chat-composer {
+  --chat-composer-action-row-height: calc(var(--yj-space-10) + var(--yj-space-3));
+
   width: min(100%, var(--yj-layout-chat-composer-max));
 }
 
@@ -610,8 +612,11 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__project--button:focus-visible { z-index: 2; }
 
 .chat-composer__permission-value {
+  min-width: 0;
+  overflow: hidden;
   color: var(--yj-color-brand-text);
   font-weight: var(--yj-font-weight-semibold);
+  text-overflow: ellipsis;
 }
 
 .chat-composer__readiness {
@@ -661,6 +666,8 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__field {
   position: relative;
   z-index: 1;
+  min-width: 0;
+  overflow: hidden;
   margin-top: calc(var(--yj-space-2) * -1);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
@@ -763,13 +770,13 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__textarea {
   display: block;
   width: 100%;
-  min-height: 136px;
-  max-height: min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px);
+  min-height: calc(136px - var(--chat-composer-action-row-height));
+  max-height: calc(min(calc(var(--yj-ui-viewport-height, 100vh) * 0.36), 280px) - var(--chat-composer-action-row-height));
   overflow-y: hidden;
   overscroll-behavior: contain;
   resize: none;
   box-sizing: border-box;
-  padding: var(--yj-space-4) var(--yj-space-4) var(--yj-space-16);
+  padding: var(--yj-space-4);
   border: 0;
   border-radius: inherit;
   outline: none;
@@ -780,27 +787,33 @@ function handlePaste(event: ClipboardEvent): void {
   line-height: var(--yj-line-height-body);
 }
 
-.chat-composer--reply .chat-composer__textarea { min-height: 112px; }
-.chat-composer__attachments + .chat-composer__textarea { min-height: 96px; padding-top: var(--yj-space-3); }
+.chat-composer--reply .chat-composer__textarea { min-height: calc(112px - var(--chat-composer-action-row-height)); }
+.chat-composer__attachments + .chat-composer__textarea { min-height: calc(96px - var(--chat-composer-action-row-height)); padding-top: var(--yj-space-3); }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
 
 .chat-composer__actions {
-  position: absolute;
-  right: var(--yj-space-3);
-  bottom: var(--yj-space-3);
-  left: var(--yj-space-3);
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: var(--yj-space-3);
   min-width: 0;
+  padding: 0 var(--yj-space-3) var(--yj-space-3);
 }
 
 .chat-composer__leading-actions {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: var(--yj-space-1);
+  overflow: hidden;
+}
+
+.chat-composer__permission {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .chat-composer__drop-overlay {
@@ -849,6 +862,7 @@ function handlePaste(event: ClipboardEvent): void {
   height: var(--yj-space-10);
   align-items: center;
   justify-content: center;
+  justify-self: end;
   padding: 0;
   border: 0;
   border-radius: var(--yj-radius-full);
@@ -871,6 +885,7 @@ button:disabled { cursor: not-allowed; opacity: 0.64; }
 @media (max-width: 480px) {
   .chat-composer__permission {
     width: var(--yj-space-8);
+    flex: 0 0 var(--yj-space-8);
     justify-content: center;
     padding: 0;
   }
