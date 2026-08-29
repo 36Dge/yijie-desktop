@@ -14,6 +14,7 @@ import {
   validateExceptionWindow,
   validateLock,
   verifyContractsCheckout,
+  verifyPinnedGitFile,
 } from "./check-agent-host-contract.mjs";
 
 const exec = promisify(execFile);
@@ -129,10 +130,14 @@ describe("Agent Host v2 turn contract pin", () => {
     const checkoutLock = { ...validLock, full_commit: stdout.trim() };
 
     await expect(verifyContractsCheckout(checkoutLock, root)).resolves.toBeUndefined();
+    await writeFile(path.join(root, "second.txt"), "newer checkout\n");
+    await git(root, "add", "second.txt");
+    await git(root, "commit", "--quiet", "-m", "newer checkout");
+    await expect(verifyContractsCheckout(checkoutLock, root)).resolves.toBeUndefined();
     await expect(verifyContractsCheckout({
       ...checkoutLock,
       full_commit: "0".repeat(40),
-    }, root)).rejects.toThrow("contracts HEAD");
+    }, root)).rejects.toThrow("pinned commit");
     await expect(verifyContractsCheckout({
       ...checkoutLock,
       repository: "https://example.invalid/wrong-contracts.git",
@@ -147,8 +152,13 @@ describe("Agent Host v2 turn contract pin", () => {
   it("pins exact source/fixture bytes and validates canonical plus Rust projection", async () => {
     const lock = validateLock(structuredClone(validLock));
     const [source, fixtureSource, snapshot, parseYaml] = await Promise.all([
-      readFile(path.join(contractsRoot, lock.source.path)),
-      readFile(path.join(contractsRoot, lock.canonical_fixture.source_path)),
+      verifyPinnedGitFile(contractsRoot, lock.full_commit, lock.source.path, lock.source.sha256),
+      verifyPinnedGitFile(
+        contractsRoot,
+        lock.full_commit,
+        lock.canonical_fixture.source_path,
+        lock.canonical_fixture.source_sha256,
+      ),
       readFile(path.join(repositoryRoot, lock.canonical_fixture.snapshot_path)),
       loadPinnedOpenApiParser(lock),
     ]);
@@ -179,7 +189,12 @@ describe("Agent Host v2 turn contract pin", () => {
     const lock = validateLock(structuredClone(validLock));
     const [publicLock, readinessSource] = await Promise.all([
       readFile(path.join(repositoryRoot, lock.consumer.public_lock_path), "utf8").then(JSON.parse),
-      readFile(path.join(repositoryRoot, lock.consumer.readiness_path), "utf8"),
+      verifyPinnedGitFile(
+        repositoryRoot,
+        "af38353694c3eb045365b7f3450ffc8a95aaf8a1",
+        lock.consumer.readiness_path,
+        lock.consumer.readiness_sha256,
+      ).then((bytes) => bytes.toString("utf8")),
     ]);
     expect(() => validateConsumerPins(lock, publicLock, readinessSource)).not.toThrow();
     expect(() => validateConsumerPins(

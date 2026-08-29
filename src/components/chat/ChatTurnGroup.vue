@@ -11,11 +11,10 @@ import type {
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatTurnPlan from "./ChatTurnPlan.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
-
-const PROCESS_COLLAPSE_THRESHOLD = 320;
 
 defineProps<{
   turn: ConversationTimelineTurnViewModel;
@@ -47,11 +46,15 @@ const slots = defineSlots<{
 const headingId = `${useId()}-heading`;
 
 function itemLabel(item: ConversationTimelineItemViewModel): string {
-  switch (item.kind) {
+  switch (item.presentation) {
     case "user_message":
       return "用户消息";
-    case "assistant_message":
+    case "commentary":
+      return "处理过程";
+    case "final_answer":
       return "模型回答";
+    case "assistant_unclassified":
+      return "未分类模型消息";
     case "artifact":
       return "生成内容";
     case "reasoning":
@@ -63,11 +66,15 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
 }
 
 function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
-  switch (item.kind) {
+  switch (item.presentation) {
     case "user_message":
       return "user";
-    case "assistant_message":
+    case "final_answer":
       return "assistant";
+    case "commentary":
+      return "pending";
+    case "assistant_unclassified":
+      return "warning";
     case "artifact":
       return "file";
     case "reasoning":
@@ -79,6 +86,21 @@ function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
 }
 
 function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
+  if (item.presentation === "reasoning" && item.reasoning !== null) {
+    switch (item.reasoning?.status) {
+      case "in_progress":
+        return "进行中";
+      case "complete":
+        return "已完成";
+      case "incomplete":
+        return "未完整结束";
+      case "unavailable":
+        return "不可用";
+      case "unknown":
+      default:
+        return "状态未知";
+    }
+  }
   switch (item.domainStatus) {
     case "started":
       return "已开始";
@@ -86,6 +108,8 @@ function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
       return "进行中";
     case "completed":
       return "已完成";
+    case "incomplete":
+      return "未完整结束";
   }
 }
 
@@ -153,15 +177,54 @@ function noticeMessage(notice: ConversationTimelineNoticeViewModel): string {
   return notice.count > 1 ? `${message} 共 ${notice.count} 次。` : message;
 }
 
-function processTextLength(item: ConversationTimelineItemViewModel): number {
-  return item.contentBlocks.reduce((total, block) => {
-    if (block.type === "text" || block.type === "code") return total + block.text.length;
-    return total;
-  }, 0);
+function reasoningReasonLabel(item: ConversationTimelineItemViewModel): string | null {
+  switch (item.reasoning?.reasonCode) {
+    case "reasoning_not_emitted":
+      return "本轮未产生可显示的模型推理记录";
+    case "turn_interrupted":
+      return "本轮已中断";
+    case "stream_gap":
+      return "模型推理记录存在流缺口";
+    case "runtime_error":
+      return "运行时错误中断了模型推理记录";
+    case "limit_exceeded":
+      return "模型推理记录超过可用限制";
+    case "protocol_error":
+      return "模型推理记录协议状态异常";
+    case "host_shutdown":
+      return "Host 已停止";
+    case "unknown":
+      return "未提供具体原因";
+    case null:
+    case undefined:
+    default:
+      return null;
+  }
 }
 
-function processDefaultExpanded(item: ConversationTimelineItemViewModel): boolean {
-  return item.kind !== "reasoning" || processTextLength(item) <= PROCESS_COLLAPSE_THRESHOLD;
+function reasoningStateMessage(item: ConversationTimelineItemViewModel): string | null {
+  if (item.presentation !== "reasoning") return null;
+  const hasContent = item.contentBlocks.length > 0;
+  if (item.reasoning === null) {
+    if (item.domainStatus === "started" || item.domainStatus === "streaming") {
+      return hasContent ? null : "正在等待过程记录…";
+    }
+    return "此过程仅包含状态元数据；详情未进入当前对话投影。";
+  }
+  const reason = reasoningReasonLabel(item);
+  switch (item.reasoning?.status) {
+    case "in_progress":
+      return hasContent ? null : "正在等待模型推理记录…";
+    case "complete":
+      return hasContent ? null : "模型推理记录已完成，但没有可显示的正文。";
+    case "incomplete":
+      return `模型推理记录未完整结束，已保留可用内容${reason ? `；${reason}` : ""}。`;
+    case "unavailable":
+      return `模型推理记录不可用${reason ? `；${reason}` : ""}。`;
+    case "unknown":
+    default:
+      return "模型推理记录状态未知，已保留当前可用内容。";
+  }
 }
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
@@ -202,54 +265,64 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
       {{ turnStateMessage(turn) }}
     </p>
 
+    <ChatTurnPlan v-if="turn.plan" :key="turn.plan.identity" :plan="turn.plan" />
+
     <ol v-if="turn.items.length > 0" class="chat-turn-group__items" aria-label="本轮对话内容">
       <li
         v-for="item in turn.items"
         :key="item.identity"
         class="chat-turn-group__item"
-        :class="`chat-turn-group__item--${item.kind}`"
+        :class="`chat-turn-group__item--${item.presentation}`"
       >
         <ChatTimelineItemShell
           :item="item"
           :label="itemLabel(item)"
           :status-label="itemStatusLabel(item)"
           :icon="itemIcon(item)"
-          :collapsible="item.kind === 'reasoning'"
-          :default-expanded="processDefaultExpanded(item)"
+          :collapsible="item.collapsible"
+          :default-expanded="item.defaultExpanded"
           @disclosure-change="forwardDisclosure"
         >
-          <div v-if="item.kind === 'unknown'" class="chat-turn-group__unknown" role="note">
+          <div v-if="item.presentation === 'unknown'" class="chat-turn-group__unknown" role="note">
             <strong>此内容类型暂不支持</strong>
             <code>unsupported_content</code>
           </div>
 
           <p
-            v-else-if="item.kind === 'reasoning' && item.domainStatus === 'completed' && item.contentBlocks.length === 0"
-            class="chat-turn-group__metadata-only"
+            v-else-if="item.presentation === 'assistant_unclassified'"
+            class="chat-turn-group__unclassified"
             role="note"
           >
-            此过程仅包含状态元数据；详情未进入当前对话投影。
+            此消息未标注阶段，未将其视为最终回答。
+          </p>
+
+          <p
+            v-if="reasoningStateMessage(item)"
+            class="chat-turn-group__reasoning-state"
+            role="note"
+          >
+            {{ reasoningStateMessage(item) }}
           </p>
 
           <ChatSafeContent
-            v-else
+            v-if="item.presentation !== 'unknown' && item.contentBlocks.length > 0"
             :blocks="item.contentBlocks"
-            :mode="item.kind === 'reasoning' ? 'plain' : 'rich'"
+            :mode="item.contentMode"
           >
             <template
-              v-if="slots['artifact-reference']"
+              v-if="item.presentation !== 'reasoning' && slots['artifact-reference']"
               #artifact-reference="{ block }"
             >
               <slot name="artifact-reference" :item="item" :block="block" />
             </template>
             <template
-              v-if="slots['attachment-reference']"
+              v-if="item.presentation !== 'reasoning' && slots['attachment-reference']"
               #attachment-reference="{ block }"
             >
               <slot name="attachment-reference" :item="item" :block="block" />
             </template>
             <template
-              v-if="slots['code-actions']"
+              v-if="item.copyPolicy === 'text_and_code' && slots['code-actions']"
               #code-actions="{ codeIdentity, text, language }"
             >
               <slot
@@ -262,7 +335,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
             </template>
           </ChatSafeContent>
 
-          <template v-if="slots['item-actions']" #actions>
+          <template v-if="item.copyPolicy === 'text_and_code' && slots['item-actions']" #actions>
             <slot name="item-actions" :item="item" />
           </template>
         </ChatTimelineItemShell>
@@ -377,11 +450,17 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   line-height: var(--yj-line-height-body);
 }
 
-.chat-turn-group__metadata-only {
+.chat-turn-group__unclassified,
+.chat-turn-group__reasoning-state {
   margin: var(--yj-space-0);
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
+}
+
+.chat-turn-group__unclassified + .chat-safe-content,
+.chat-turn-group__reasoning-state + .chat-safe-content {
+  margin-block-start: var(--yj-space-3);
 }
 
 .chat-turn-group__unknown code,

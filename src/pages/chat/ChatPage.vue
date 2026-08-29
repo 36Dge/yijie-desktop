@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
@@ -26,6 +26,11 @@ import {
   type ConversationTimelineItemViewModel,
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
+import type { ConversationState } from "../../domain/conversation-state";
+import {
+  browserFrameProjectionScheduler,
+  createFrameBatchedProjection,
+} from "../../domain/frame-batched-projection";
 import {
   cleanupNotice,
   errorNotice,
@@ -64,6 +69,7 @@ const reasoningItems = ref<Readonly<Record<string, readonly ChatReasoningItem[]>
 const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
+const renderedConversationState = shallowRef(chatStore.conversationState);
 let dragDropUnlisten: UnlistenFn | null = null;
 let dragDropDisposed = false;
 const {
@@ -82,11 +88,24 @@ const activeProject = computed(() => chatStore.projects.find((project) =>
   project.projectId === selectedSession.value?.projectId,
 ) ?? null);
 const displayTurns = computed(() => sortHistoryTurns(chatStore.history?.turns ?? []));
+function timelineSelectionActive(): boolean {
+  const scroller = conversationScroller.value;
+  const selection = document.getSelection();
+  if (scroller === null || selection === null || selection.isCollapsed) return false;
+  return selection.anchorNode !== null && selection.focusNode !== null &&
+    scroller.contains(selection.anchorNode) && scroller.contains(selection.focusNode);
+}
+
+const timelineFrameProjection = createFrameBatchedProjection(
+  (state: ConversationState) => { renderedConversationState.value = state; },
+  browserFrameProjectionScheduler(),
+  () => !timelineSelectionActive(),
+);
 const conversationTimeline = computed(() => {
   const sessionId = chatStore.selectedSessionId;
   return sessionId === null
     ? null
-    : selectConversationTimeline(chatStore.conversationState, sessionId);
+    : selectConversationTimeline(renderedConversationState.value, sessionId);
 });
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
@@ -119,6 +138,24 @@ const statusAnnouncement = computed(() => {
 });
 
 watch(
+  [
+    () => chatStore.conversationState,
+    () => chatStore.phase,
+  ],
+  ([state, currentPhase]) => {
+    timelineFrameProjection.push(
+      state,
+      currentPhase === "streaming" || timelineSelectionActive(),
+    );
+  },
+  { flush: "sync" },
+);
+
+function flushTimelineAfterSelection(): void {
+  if (!timelineSelectionActive()) timelineFrameProjection.flush();
+}
+
+watch(
   () => chatStore.projects,
   (projects) => {
     if (selectedProjectId.value && projects.some((project) => project.projectId === selectedProjectId.value && project.available)) return;
@@ -130,6 +167,10 @@ watch(
 watch(
   () => chatStore.selectedSessionId,
   () => {
+    // Replace any presentation frame queued for the previous session. The
+    // semantic ConversationState remains synchronous; only its DOM projection
+    // is frame-batched.
+    timelineFrameProjection.push(chatStore.conversationState, false);
     reasoningItems.value = {};
     reasoningLoading.value = new Set();
     reasoningFailed.value = new Set();
@@ -147,13 +188,18 @@ watch(
   },
 );
 
+const presentedConversationChange = computed(() => legacyChatTimelineRollbackEnabled
+  ? [
+      chatStore.history?.turns.length ?? 0,
+      chatStore.liveAssistantText,
+      chatStore.liveReasoning.length,
+      chatStore.liveTurnStatus,
+    ]
+  : renderedConversationState.value,
+);
+
 watch(
-  [
-    () => chatStore.history?.turns.length ?? 0,
-    () => chatStore.liveAssistantText,
-    () => chatStore.liveReasoning.length,
-    () => chatStore.liveTurnStatus,
-  ],
+  presentedConversationChange,
   () => { void followNewContent(); },
   { flush: "post" },
 );
@@ -416,6 +462,7 @@ onMounted(() => {
   dragDropDisposed = false;
   updateScrollPosition();
   void installDragDropListener();
+  document.addEventListener("selectionchange", flushTimelineAfterSelection);
   if (isSessionRoute.value) void nextTick(() => scrollToBottom());
 });
 
@@ -423,6 +470,8 @@ onBeforeUnmount(() => {
   dragDropDisposed = true;
   dragDropUnlisten?.();
   dragDropUnlisten = null;
+  document.removeEventListener("selectionchange", flushTimelineAfterSelection);
+  timelineFrameProjection.dispose();
   void chatStore.deactivatePageSession();
 });
 </script>

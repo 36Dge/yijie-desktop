@@ -2,12 +2,17 @@ import type {
   ChatArtifact,
   ChatAttachment,
   ChatHistoryPage,
+  ChatHistoryPageV4,
   ChatHistoryTurn,
+  ChatHistoryTurnV4,
   ChatMessage,
   ChatMessageContentBlock,
   ChatProjectionEvent,
+  ChatProjectionEventV4,
+  ChatTimelineItemV4,
 } from "../domain/chat-ipc";
 import type {
+  ConversationAgentMessagePhase,
   ConversationContentBlock,
   ConversationEvent,
   ConversationItemSnapshot,
@@ -16,11 +21,17 @@ import type {
   ConversationTurnSnapshot,
   ConversationTurnStatus,
 } from "../domain/conversation-state";
+import {
+  conversationAgentMessagePhase,
+  conversationReasoningReasonCode,
+} from "../domain/conversation-state";
 
 const USER_ITEM_ORDINAL = 0;
 const REASONING_ITEM_ORDINAL_BASE = 100;
 const ASSISTANT_ITEM_ORDINAL = 200;
-const ARTIFACT_ITEM_ORDINAL_BASE = 300;
+// v4 Runtime Items occupy 1..512. Keep synthetic FEAT-128 Artifact shells in
+// their own deterministic range without colliding with source ordinals.
+const ARTIFACT_ITEM_ORDINAL_BASE = 1000;
 
 export type ConversationProjectionAdaptation =
   | Readonly<{ kind: "domain_event"; event: ConversationEvent }>
@@ -92,6 +103,20 @@ function messageBlocks(message: ChatMessage): readonly ConversationContentBlock[
     : Object.freeze([{ blockIndex: 0, type: "text", text: message.content }]);
 }
 
+function isNativePendingAssistantScaffold(message: ChatMessage): boolean {
+  if (
+    message.role !== "assistant" ||
+    message.status !== "pending" ||
+    message.content.length !== 0
+  ) {
+    return false;
+  }
+  const blocks = message.contentBlocks;
+  return blocks === undefined || blocks.length === 0 || (
+    blocks.length === 1 && blocks[0]?.type === "text" && blocks[0].text === " "
+  );
+}
+
 function turnStatus(status: string): ConversationTurnStatus {
   switch (status) {
     case "queued":
@@ -114,9 +139,13 @@ function terminalStatus(status: string): ConversationTerminalStatus | null {
     : null;
 }
 
-function messageItems(turn: ChatHistoryTurn): readonly ConversationItemSnapshot[] {
+function messageItems(
+  turn: ChatHistoryTurn,
+  includedRole: ChatMessage["role"] | null = null,
+): readonly ConversationItemSnapshot[] {
   const roleCounts: Record<ChatMessage["role"], number> = { user: 0, assistant: 0 };
   return [...turn.messages]
+    .filter((message) => includedRole === null || message.role === includedRole)
     .sort((left, right) => left.ordinal - right.ordinal || left.messageId.localeCompare(right.messageId))
     .map((message) => {
       const roleIndex = roleCounts[message.role];
@@ -130,6 +159,7 @@ function messageItems(turn: ChatHistoryTurn): readonly ConversationItemSnapshot[
           : ASSISTANT_ITEM_ORDINAL + roleIndex,
         kind: message.role === "user" ? "user_message" : "assistant_message",
         status: message.status === "pending" ? "streaming" : "completed",
+        agentMessagePhase: message.role === "assistant" ? "final_answer" : null,
         contentBlocks: messageBlocks(message),
       } satisfies ConversationItemSnapshot);
     });
@@ -178,10 +208,152 @@ function historyItems(threadId: string, turn: ChatHistoryTurn): readonly Convers
   return Object.freeze(items.map((item) => Object.freeze({ ...item, threadId })));
 }
 
+function itemKindV4(itemType: string): ConversationItemSnapshot["kind"] {
+  if (itemType === "agentMessage") return "assistant_message";
+  if (itemType === "reasoning") return "reasoning";
+  return "unknown";
+}
+
+function itemStatusV4(status: ChatTimelineItemV4["status"]): ConversationItemSnapshot["status"] {
+  if (status === "in_progress") return "streaming";
+  return status === "incomplete" ? "incomplete" : "completed";
+}
+
+function assistantPhaseV4(
+  itemType: string,
+  phase: "commentary" | "final_answer" | null,
+): ConversationAgentMessagePhase | null {
+  return itemType === "agentMessage" ? conversationAgentMessagePhase(phase) : null;
+}
+
+function timelineItemBlocksV4(
+  item: ChatTimelineItemV4,
+): readonly ConversationContentBlock[] {
+  if (item.itemType === "agentMessage") {
+    return item.text.length === 0
+      ? Object.freeze([])
+      : Object.freeze([{ blockIndex: 0, type: "text", text: item.text }]);
+  }
+  if (item.itemType === "reasoning") {
+    return Object.freeze([...item.reasoningParts]
+      .sort((left, right) => left.contentIndex - right.contentIndex)
+      .map((part) => Object.freeze({
+        blockIndex: part.contentIndex,
+        type: "text" as const,
+        text: part.text,
+      })));
+  }
+  return Object.freeze([{ blockIndex: 0, type: "unknown", code: "unsupported_content" }]);
+}
+
+function timelineItemV4(
+  threadId: string,
+  turnId: string,
+  item: ChatTimelineItemV4,
+): ConversationItemSnapshot {
+  const kind = itemKindV4(item.itemType);
+  return Object.freeze({
+    threadId,
+    turnId,
+    itemId: item.itemId,
+    ordinal: item.itemOrdinal,
+    kind,
+    status: itemStatusV4(item.status),
+    agentMessagePhase: assistantPhaseV4(item.itemType, item.phase),
+    reasoning: kind === "reasoning"
+      ? Object.freeze({
+          status: item.reasoningStatus ?? (
+            item.status === "in_progress" ? "in_progress" : "unknown"
+          ),
+          reasonCode: conversationReasoningReasonCode(item.reasoningReasonCode),
+        })
+      : null,
+    contentBlocks: timelineItemBlocksV4(item),
+    reconciliation: kind === "assistant_message" && item.status === "completed"
+      ? "matched"
+      : kind === "reasoning" && item.reasoningStatus !== null
+        ? "matched"
+        : "not_applicable",
+  });
+}
+
+function historyItemsV4(
+  threadId: string,
+  turn: ChatHistoryTurnV4,
+): readonly ConversationItemSnapshot[] {
+  if (turn.projectionAuthority === "legacy") {
+    const active = turn.status === "queued" || turn.status === "streaming" ||
+      turn.status === "stopping";
+    const legacyTurn = active
+      ? {
+          ...turn,
+          // The native schema creates a pending empty assistant row before the
+          // first durable v4 fact. It is storage scaffolding, not a real final
+          // answer. Preserve any non-empty legacy partial and all terminal
+          // legacy history.
+          messages: turn.messages.filter((message) => !isNativePendingAssistantScaffold(message)),
+        }
+      : turn;
+    return historyItems(threadId, legacyTurn);
+  }
+  const items = [
+    ...messageItems(turn, "user"),
+    ...turn.timelineItems.map((item) => timelineItemV4(threadId, turn.turnId, item)),
+    ...turn.artifacts.map((artifact) => artifactItem(turn, artifact)),
+  ];
+  return Object.freeze(items.map((item) => Object.freeze({ ...item, threadId })));
+}
+
+export function historyPageV4ToConversationSnapshot(
+  threadId: string,
+  page: ChatHistoryPageV4,
+): ConversationSnapshot {
+  const orderedTurns = [...page.turns]
+    .sort((left, right) => left.turnId.localeCompare(right.turnId));
+  const turns: ConversationTurnSnapshot[] = orderedTurns.map((turn, ordinal) => Object.freeze({
+    threadId,
+    turnId: turn.turnId,
+    ordinal,
+    status: turnStatus(turn.status),
+    terminalStatus: terminalStatus(turn.status),
+    terminalCode: turn.terminalCode,
+    plan: turn.plan === null || turn.plan.steps.length === 0
+      ? null
+      : Object.freeze({
+          explanation: turn.plan.explanation,
+          steps: Object.freeze(turn.plan.steps.map((step) => Object.freeze({
+            ordinal: step.ordinal,
+            text: step.step,
+            status: step.status,
+          }))),
+        }),
+    notices: Object.freeze(turn.notices.map((notice) => Object.freeze({
+      severity: notice.severity,
+      code: notice.severity === "error" ? "conversation_error" : "conversation_warning",
+    }))),
+  }));
+  const hasActiveTurn = turns.some((turn) =>
+    turn.status === "queued" || turn.status === "in_progress" || turn.status === "waiting_approval"
+  );
+  return Object.freeze({
+    threads: Object.freeze([Object.freeze({
+      threadId,
+      status: hasActiveTurn ? "active" : "ready",
+      notices: Object.freeze(page.sessionNotices.map(() => Object.freeze({
+        severity: "warning" as const,
+        code: "conversation_warning" as const,
+      }))),
+    })]),
+    turns: Object.freeze(turns),
+    items: Object.freeze(orderedTurns.flatMap((turn) => historyItemsV4(threadId, turn))),
+  });
+}
+
 export function historyPageToConversationSnapshot(
   threadId: string,
-  page: ChatHistoryPage,
+  page: ChatHistoryPage | ChatHistoryPageV4,
 ): ConversationSnapshot {
+  if ("sessionNotices" in page) return historyPageV4ToConversationSnapshot(threadId, page);
   const orderedTurns = [...page.turns].sort((left, right) => left.turnId.localeCompare(right.turnId));
   const turns: ConversationTurnSnapshot[] = orderedTurns.map((turn, ordinal) => Object.freeze({
     threadId,
@@ -203,7 +375,7 @@ export function historyPageToConversationSnapshot(
   });
 }
 
-function eventCursor(event: ChatProjectionEvent) {
+function eventCursor(event: ChatProjectionEvent | ChatProjectionEventV4) {
   return {
     eventId: event.eventId,
     streamId: event.subscriptionId,
@@ -212,16 +384,176 @@ function eventCursor(event: ChatProjectionEvent) {
   } as const;
 }
 
-function domainCursor(event: ChatProjectionEvent, turnId: string) {
+function domainCursor(event: ChatProjectionEvent | ChatProjectionEventV4, turnId: string) {
   return {
     ...eventCursor(event),
     turnId,
   } as const;
 }
 
-export function projectionEventToConversation(
-  event: ChatProjectionEvent,
+function lifecycleBlocksV4(
+  itemType: string,
+  text: string | null,
+): readonly ConversationContentBlock[] {
+  return itemType === "agentMessage" && text !== null && text.length > 0
+    ? Object.freeze([{ blockIndex: 0, type: "text", text }])
+    : Object.freeze([]);
+}
+
+function projectionEventV4ToConversation(
+  event: ChatProjectionEventV4,
 ): ConversationProjectionAdaptation {
+  if (event.kind === "context_invalidated") {
+    return Object.freeze({ kind: "context_invalidated" });
+  }
+  if (event.kind === "resync_required") {
+    return Object.freeze({ kind: "resync_required", reason: "projection_gap" });
+  }
+  if (event.kind === "notice" && event.payload.scope === "session") {
+    return Object.freeze({
+      kind: "domain_event",
+      event: Object.freeze({
+        ...eventCursor(event),
+        kind: "thread.notice",
+        severity: "warning",
+      }),
+    });
+  }
+  if (event.turnId === undefined) {
+    return Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
+  }
+  const cursor = domainCursor(event, event.turnId);
+  switch (event.kind) {
+    case "turn_started":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({ ...cursor, kind: "turn.started", ordinal: null }),
+      });
+    case "plan_updated":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "turn.plan.updated",
+          explanation: event.payload.explanation,
+          steps: Object.freeze(event.payload.steps.map((step) => Object.freeze({
+            text: step.step,
+            status: step.status,
+          }))),
+        }),
+      });
+    case "item_started": {
+      const itemKind = itemKindV4(event.payload.itemType);
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "item.started",
+          itemId: event.payload.itemId,
+          ordinal: event.payload.itemOrdinal,
+          itemKind,
+          agentMessagePhase: assistantPhaseV4(event.payload.itemType, event.payload.phase),
+          initialBlocks: lifecycleBlocksV4(event.payload.itemType, event.payload.text),
+        }),
+      });
+    }
+    case "item_completed": {
+      const itemKind = itemKindV4(event.payload.itemType);
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "item.completed",
+          itemId: event.payload.itemId,
+          ordinal: event.payload.itemOrdinal,
+          itemKind,
+          agentMessagePhase: assistantPhaseV4(event.payload.itemType, event.payload.phase),
+          ...(event.payload.itemType === "agentMessage"
+            ? { finalBlocks: lifecycleBlocksV4(event.payload.itemType, event.payload.text) }
+            : {}),
+        }),
+      });
+    }
+    case "agent_message_append":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "item.delta",
+          itemId: event.payload.itemId,
+          ordinal: event.payload.itemOrdinal,
+          itemKind: "assistant_message",
+          agentMessagePhase: conversationAgentMessagePhase(event.payload.phase),
+          blockIndex: 0,
+          blockType: "text",
+          delta: event.payload.text,
+        }),
+      });
+    case "reasoning_append":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "item.delta",
+          itemId: event.payload.itemId,
+          ordinal: event.payload.itemOrdinal,
+          itemKind: "reasoning",
+          blockIndex: event.payload.contentIndex,
+          blockType: "text",
+          delta: event.payload.text,
+        }),
+      });
+    case "reasoning_finalized":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "reasoning.finalized",
+          itemId: event.payload.itemId,
+          ordinal: event.payload.itemOrdinal,
+          status: event.payload.status,
+          reasonCode: conversationReasoningReasonCode(event.payload.reasonCode),
+          finalBlocks: Object.freeze([...event.payload.parts]
+            .sort((left, right) => left.contentIndex - right.contentIndex)
+            .map((part) => Object.freeze({
+              blockIndex: part.contentIndex,
+              type: "text" as const,
+              text: part.text,
+            }))),
+        }),
+      });
+    case "notice":
+      return event.payload.scope === "turn"
+        ? Object.freeze({
+            kind: "domain_event" as const,
+            event: Object.freeze({
+              ...cursor,
+              kind: "notice" as const,
+              severity: event.payload.severity,
+            }),
+          })
+        : Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
+    case "turn_terminal":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          kind: "turn.completed",
+          terminalStatus: event.payload.status,
+          terminalCode: event.payload.code,
+          unfinishedItemStatus: "incomplete",
+          unfinishedReasoningReasonCode: conversationReasoningReasonCode(
+            event.payload.unfinishedReasoningReasonCode,
+          ),
+        }),
+      });
+  }
+}
+
+export function projectionEventToConversation(
+  event: ChatProjectionEvent | ChatProjectionEventV4,
+): ConversationProjectionAdaptation {
+  if (event.schemaVersion === 4) return projectionEventV4ToConversation(event);
   if (event.kind === "context_invalidated") return Object.freeze({ kind: "context_invalidated" });
   if (event.kind === "cleanup_state") {
     return Object.freeze({

@@ -9,6 +9,7 @@ import {
   hydrateConversationState,
   type ConversationItemSnapshot,
   type ConversationNotice,
+  type ConversationPlanSnapshot,
   type ConversationTurnStatus,
 } from "../../domain/conversation-state";
 import {
@@ -19,6 +20,7 @@ import {
   type ConversationTimelineTurnViewModel,
 } from "../../domain/conversation-timeline";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
+import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";
@@ -33,6 +35,7 @@ function projectedTurn(options: {
   status?: ConversationTurnStatus;
   items?: readonly ConversationItemSnapshot[];
   notices?: readonly ConversationNotice[];
+  plan?: ConversationPlanSnapshot | null;
 } = {}): ConversationTimelineTurnViewModel {
   const status = options.status ?? "completed";
   const terminalStatus = status === "completed" || status === "failed" || status === "interrupted"
@@ -47,6 +50,7 @@ function projectedTurn(options: {
       status,
       terminalStatus,
       notices: options.notices,
+      plan: options.plan,
     }],
     items: options.items ?? [],
   }), THREAD_ID);
@@ -68,6 +72,10 @@ function message(
     ordinal,
     kind,
     status,
+    agentMessagePhase: kind === "assistant_message" ? "final_answer" : undefined,
+    reasoning: kind === "reasoning"
+      ? { status: status === "completed" ? "complete" : "in_progress", reasonCode: null }
+      : undefined,
     contentBlocks: [{ blockIndex: 0, type: "text", text }],
   };
 }
@@ -92,7 +100,7 @@ describe("ChatTurnGroup", () => {
       .toEqual([
         "chat-turn-group__item--user_message",
         "chat-turn-group__item--reasoning",
-        "chat-turn-group__item--assistant_message",
+        "chat-turn-group__item--final_answer",
         "chat-turn-group__item--unknown",
       ]);
     expect(itemElements[0]?.text()).toContain("用户消息");
@@ -111,7 +119,19 @@ describe("ChatTurnGroup", () => {
       .not.toBe(wrapper.get(".chat-turn-group__items").element);
   });
 
-  it("collapses only long process content and never hides the assistant answer", async () => {
+  it("labels an unfinished item separately from an explicitly completed item", () => {
+    const turn = projectedTurn({
+      status: "interrupted",
+      items: [message("partial-answer", 0, "assistant_message", "partial", "incomplete")],
+    });
+    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+
+    expect(wrapper.get(".chat-timeline-item-shell__status").text()).toBe("未完整结束");
+    expect(wrapper.get(".chat-timeline-item-shell").classes())
+      .toContain("chat-timeline-item-shell--incomplete");
+  });
+
+  it("collapses historical process content regardless of length and never hides the final answer", async () => {
     const shortReasoning = "**短过程保持字面量**".padEnd(320, "甲");
     const longReasoning = "**长过程保持字面量** [参考](https://docs.invalid)".padEnd(321, "乙");
     const assistant = "**最终回答可使用富文本**".padEnd(500, "丙");
@@ -126,29 +146,30 @@ describe("ChatTurnGroup", () => {
     const reasoningItems = wrapper.findAll(".chat-turn-group__item--reasoning");
 
     expect(reasoningItems).toHaveLength(2);
-    expect(reasoningItems[0]?.get("button").attributes("aria-expanded")).toBe("true");
+    expect(reasoningItems[0]?.get("button").attributes("aria-expanded")).toBe("false");
     expect(reasoningItems[0]?.find("strong").exists()).toBe(true);
-    expect(reasoningItems[0]?.find(".chat-safe-content strong").exists()).toBe(false);
+    expect(reasoningItems[0]?.find(".chat-timeline-item-shell__body").exists()).toBe(false);
     expect(reasoningItems[1]?.get("button").attributes("aria-expanded")).toBe("false");
     expect(reasoningItems[1]?.find(".chat-timeline-item-shell__body").exists()).toBe(false);
 
-    const assistantItem = wrapper.get(".chat-turn-group__item--assistant_message");
+    const assistantItem = wrapper.get(".chat-turn-group__item--final_answer");
     expect(assistantItem.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
     expect(assistantItem.get(".chat-timeline-item-shell__body").text()).toContain("最终回答");
     expect(assistantItem.get(".chat-safe-content strong").text()).toBe("最终回答可使用富文本");
 
-    await reasoningItems[1]?.get("button").trigger("click");
-    expect(reasoningItems[1]?.get("button").attributes("aria-expanded")).toBe("true");
-    expect(reasoningItems[1]?.get(".chat-timeline-item-shell__body").text())
-      .toContain("**长过程保持字面量**");
-    expect(reasoningItems[1]?.find(".chat-safe-content__inert-link").exists()).toBe(false);
+    await reasoningItems[0]?.get("button").trigger("click");
+    expect(reasoningItems[0]?.get("button").attributes("aria-expanded")).toBe("true");
+    expect(reasoningItems[0]?.get(".chat-timeline-item-shell__body").text())
+      .toContain("**短过程保持字面量**");
+    expect(reasoningItems[0]?.find(".chat-safe-content strong").exists()).toBe(false);
+    expect(reasoningItems[0]?.find(".chat-safe-content__inert-link").exists()).toBe(false);
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
-      itemIdentity: turn.items[1]?.identity,
+      itemIdentity: turn.items[0]?.identity,
       expanded: true,
     });
   });
 
-  it("labels completed metadata-only reasoning without inventing a second content authority", () => {
+  it("renders authoritative completed reasoning status without inventing content", async () => {
     const turn = projectedTurn({
       items: [{
         threadId: THREAD_ID,
@@ -157,6 +178,7 @@ describe("ChatTurnGroup", () => {
         ordinal: 0,
         kind: "reasoning",
         status: "completed",
+        reasoning: { status: "complete", reasonCode: null },
         contentBlocks: [],
       }],
     });
@@ -164,12 +186,13 @@ describe("ChatTurnGroup", () => {
 
     expect(wrapper.text()).toContain("过程记录");
     expect(wrapper.text()).toContain("已完成");
-    expect(wrapper.text()).toContain("此过程仅包含状态元数据；详情未进入当前对话投影。");
-    expect(wrapper.get(".chat-turn-group__metadata-only").attributes("role")).toBe("note");
+    expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
+    expect(wrapper.text()).toContain("模型推理记录已完成，但没有可显示的正文。");
+    expect(wrapper.get(".chat-turn-group__reasoning-state").attributes("role")).toBe("note");
     expect(wrapper.find(".chat-safe-content").exists()).toBe(false);
   });
 
-  it("does not label an active empty reasoning Item as metadata-only history", () => {
+  it("keeps active empty reasoning expanded with an explicit waiting state", () => {
     const turn = projectedTurn({
       status: "in_progress",
       items: [{
@@ -179,14 +202,115 @@ describe("ChatTurnGroup", () => {
         ordinal: 0,
         kind: "reasoning",
         status: "streaming",
+        reasoning: { status: "in_progress", reasonCode: null },
         contentBlocks: [],
       }],
     });
     const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
 
     expect(wrapper.text()).toContain("过程记录");
-    expect(wrapper.text()).not.toContain("仅包含状态元数据");
-    expect(wrapper.find(".chat-turn-group__metadata-only").exists()).toBe(false);
+    expect(wrapper.text()).toContain("正在等待模型推理记录…");
+    expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
+  });
+
+  it("renders unavailable and unknown reasoning states explicitly", async () => {
+    const turn = projectedTurn({
+      items: [{
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        itemId: "reasoning-unavailable",
+        ordinal: 0,
+        kind: "reasoning",
+        status: "completed",
+        reasoning: { status: "unavailable", reasonCode: "reasoning_not_emitted" },
+        contentBlocks: [],
+      }, {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        itemId: "reasoning-unknown",
+        ordinal: 1,
+        kind: "reasoning",
+        status: "completed",
+        reasoning: { status: "unknown", reasonCode: "unknown" },
+        contentBlocks: [],
+      }],
+    });
+    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const reasoningItems = wrapper.findAll(".chat-turn-group__item--reasoning");
+
+    expect(reasoningItems.map((item) => item.get(".chat-timeline-item-shell__status").text()))
+      .toEqual(["不可用", "状态未知"]);
+    expect(reasoningItems[0]?.text()).toContain("本轮未产生可显示的模型推理记录");
+    expect(reasoningItems[1]?.text()).toContain("模型推理记录状态未知");
+  });
+
+  it("renders phase-driven commentary, plan, reasoning, unclassified and final policies", () => {
+    const turn = projectedTurn({
+      status: "in_progress",
+      plan: {
+        explanation: "固定过程区",
+        steps: [{ ordinal: 0, text: "检查状态", status: "in_progress" }],
+      },
+      items: [{
+        ...message("commentary", 0, "assistant_message", "**过程说明**", "streaming"),
+        agentMessagePhase: "commentary",
+      }, {
+        ...message("unclassified", 1, "assistant_message", "最终回答：不能据此推断"),
+        agentMessagePhase: "unknown",
+      }, {
+        ...message("reasoning", 2, "reasoning", "**原始推理保持字面量**"),
+        reasoning: { status: "incomplete", reasonCode: "stream_gap" },
+        contentBlocks: [{
+          blockIndex: 0,
+          type: "code",
+          language: "md",
+          text: "**原始推理保持字面量**",
+        }],
+      }, {
+        ...message("final", 3, "assistant_message", "**最终正文**"),
+        agentMessagePhase: "final_answer",
+      }],
+    });
+    const wrapper = mount(ChatTurnGroup, {
+      props: { turn, position: 1 },
+      slots: {
+        "item-actions": ({ item }: { item: ConversationTimelineItemViewModel }) =>
+          h("button", { class: `action-${item.itemId}`, type: "button" }, "复制"),
+        "code-actions": ({ item }: { item: ConversationTimelineItemViewModel }) =>
+          h("button", { class: `code-action-${item.itemId}`, type: "button" }, "复制代码"),
+      },
+    });
+
+    const plan = wrapper.get(".chat-turn-plan");
+    const items = wrapper.get(".chat-turn-group__items");
+    expect(plan.element.compareDocumentPosition(items.element) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(plan.get("button").attributes("aria-expanded")).toBe("true");
+
+    const commentary = wrapper.get(".chat-turn-group__item--commentary");
+    expect(commentary.text()).toContain("处理过程");
+    expect(commentary.get("button").attributes("aria-expanded")).toBe("true");
+    expect(commentary.get(".chat-safe-content strong").text()).toBe("过程说明");
+
+    const unclassified = wrapper.get(".chat-turn-group__item--assistant_unclassified");
+    expect(unclassified.text()).toContain("未分类模型消息");
+    expect(unclassified.text()).toContain("未将其视为最终回答");
+    expect(unclassified.text()).not.toContain("模型回答");
+
+    const reasoning = wrapper.get(".chat-turn-group__item--reasoning");
+    expect(reasoning.text()).toContain("模型推理记录");
+    expect(reasoning.text()).toContain("未完整结束");
+    expect(reasoning.text()).toContain("流缺口");
+    expect(reasoning.find(".chat-safe-content strong").exists()).toBe(false);
+    expect(reasoning.find(".chat-safe-content__code-region").exists()).toBe(false);
+    expect(reasoning.text()).toContain("**原始推理保持字面量**");
+    expect(wrapper.find(".action-reasoning").exists()).toBe(false);
+    expect(wrapper.find(".code-action-reasoning").exists()).toBe(false);
+
+    const final = wrapper.get(".chat-turn-group__item--final_answer");
+    expect(final.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
+    expect(final.get(".chat-safe-content strong").text()).toBe("最终正文");
+    expect(wrapper.find(".action-final").exists()).toBe(true);
   });
 
   it("renders lifecycle progress, terminal notes, and aggregated notices outside the Item list", () => {
@@ -306,6 +430,7 @@ describe("ChatTurnGroup", () => {
         ordinal: 0,
         kind: "assistant_message",
         status: "completed",
+        agentMessagePhase: "final_answer",
         contentBlocks: [{
           blockIndex: 0,
           type: "code",
@@ -353,9 +478,11 @@ describe("ChatTurnGroup", () => {
     });
 
     function disclosureFor(itemId: string): HTMLButtonElement {
-      const marker = wrapper.get(`.identity-${itemId}`).element;
-      const article = marker.closest("article");
-      const button = article?.querySelector<HTMLButtonElement>(".chat-timeline-item-shell__disclosure");
+      const shell = wrapper.findAllComponents(ChatTimelineItemShell)
+        .find((candidate) => candidate.props("item").itemId === itemId);
+      const button = shell?.element.querySelector(
+        ".chat-timeline-item-shell__disclosure",
+      ) as HTMLButtonElement | null | undefined;
       if (button === null || button === undefined) throw new Error("fixture_missing_disclosure");
       return button;
     }

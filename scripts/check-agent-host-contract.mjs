@@ -22,6 +22,8 @@ const PINNED_FIXTURE_SHA256 =
   "ec464ce56f749852e65be8d1472d8f5d8cccc82c89d2dd16fab33fbdbe62decc";
 const PINNED_FIXTURE_SNAPSHOT_PATH =
   "src-tauri/fixtures/agent-host-v2/turn-request.json";
+// FEAT-134 adds a new closed consumer without rewriting the reviewed v2 bytes.
+const LEGACY_DESKTOP_BASELINE_COMMIT = "af38353694c3eb045365b7f3450ffc8a95aaf8a1";
 const PINNED_OPERATION_PATH = "/v2/agent-sessions/{agent_session_id}/turns";
 const PINNED_REQUEST_SCHEMA = "#/components/schemas/StartTurnV2Request";
 const CANONICAL_PROJECTION_OMISSIONS = Object.freeze([
@@ -156,13 +158,15 @@ async function git(contractsRoot, ...arguments_) {
 }
 
 export async function verifyContractsCheckout(lock, contractsRoot) {
-  const [head, status, origin] = await Promise.all([
-    git(contractsRoot, "rev-parse", "HEAD"),
+  const [commit, status, origin] = await Promise.all([
+    git(contractsRoot, "rev-parse", "--verify", `${lock.full_commit}^{commit}`).catch(() => {
+      throw new Error(`contracts pinned commit ${lock.full_commit} is unavailable`);
+    }),
     git(contractsRoot, "status", "--porcelain"),
     git(contractsRoot, "remote", "get-url", "origin"),
   ]);
-  if (head !== lock.full_commit) {
-    throw new Error(`contracts HEAD is ${head}, expected ${lock.full_commit}`);
+  if (commit !== lock.full_commit) {
+    throw new Error(`contracts pinned commit resolves to ${commit}, expected ${lock.full_commit}`);
   }
   if (status !== "") {
     throw new Error("contracts checkout is not clean");
@@ -170,6 +174,21 @@ export async function verifyContractsCheckout(lock, contractsRoot) {
   if (normalizeRepository(origin) !== normalizeRepository(lock.repository)) {
     throw new Error("contracts origin does not match the pinned repository");
   }
+}
+
+export async function verifyPinnedGitFile(root, commit, relativePath, expectedDigest) {
+  const safePath = safeRelativePath(relativePath);
+  const { stdout } = await exec(
+    "git",
+    ["-C", root, "show", `${commit}:${safePath}`],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  const contents = Buffer.from(stdout, "utf8");
+  const actualDigest = sha256(contents);
+  if (actualDigest !== expectedDigest) {
+    throw new Error(`SHA-256 for ${relativePath} is ${actualDigest}, expected ${expectedDigest}`);
+  }
+  return contents;
 }
 
 export async function verifyPinnedFile(root, relativePath, expectedDigest) {
@@ -337,9 +356,10 @@ export async function checkAgentHostContract() {
   );
   await verifyContractsCheckout(lock, contractsRoot);
   const [source, canonicalFixtureBytes, parseYaml] = await Promise.all([
-    verifyPinnedFile(contractsRoot, lock.source.path, lock.source.sha256),
-    verifyPinnedFile(
+    verifyPinnedGitFile(contractsRoot, lock.full_commit, lock.source.path, lock.source.sha256),
+    verifyPinnedGitFile(
       contractsRoot,
+      lock.full_commit,
       lock.canonical_fixture.source_path,
       lock.canonical_fixture.source_sha256,
     ),
@@ -372,13 +392,15 @@ export async function checkAgentHostContract() {
   const [publicLock, readinessSource, adapterSource] = await Promise.all([
     readFile(path.join(repositoryRoot, safeRelativePath(lock.consumer.public_lock_path)), "utf8")
       .then(JSON.parse),
-    verifyPinnedFile(
+    verifyPinnedGitFile(
       repositoryRoot,
+      LEGACY_DESKTOP_BASELINE_COMMIT,
       lock.consumer.readiness_path,
       lock.consumer.readiness_sha256,
     ).then((source) => source.toString("utf8")),
-    verifyPinnedFile(
+    verifyPinnedGitFile(
       repositoryRoot,
+      LEGACY_DESKTOP_BASELINE_COMMIT,
       lock.consumer.adapter_path,
       lock.consumer.adapter_sha256,
     ),

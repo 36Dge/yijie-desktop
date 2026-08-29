@@ -1,5 +1,13 @@
+use super::artifact::{load_artifacts_for_turns_from_connection, ArtifactProjection};
 use super::attachment::{PreparedAttachment, MAX_ATTACHMENTS_PER_MESSAGE, MAX_FILE_CONTEXT_BYTES};
 use super::error::{map_sqlite_error, ChatError};
+use super::feat134::{
+    Feat134HistoryProjection, Feat134HistoryTurn, Feat134Hydration, Feat134Projection,
+    Feat134ProjectionFailure, Feat134ProjectionFailureKind, TimelineDelta, TimelineItem,
+    TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity, TimelinePhase,
+    TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
+    TimelineTerminal, PROJECTION_CONFLICT_CODE, PROJECTION_LIMIT_EXCEEDED_CODE,
+};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
 use base64::Engine;
@@ -27,6 +35,12 @@ const MAX_REASONING_TURN_BYTES: usize = 256 * 1024;
 const MAX_REASONING_ITEMS: usize = 8;
 const MAX_REASONING_PARTS: usize = 8;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+const MAX_FEAT134_HISTORY_TURN_JSON_BYTES: usize = 3 * 1024 * 1024;
+const MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE: usize = 64;
+const MAX_FEAT134_OBSERVED_EVENTS_PER_TURN: usize = 10_000;
+const MAX_FEAT134_OBSERVED_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_FEAT134_OBSERVED_BYTES_PER_TURN: usize = 16 * 1024 * 1024;
+const FEAT134_LIMIT_REASON_CODE: &str = "limit_exceeded";
 const DEFAULT_PAGE_SIZE: usize = 20;
 const MAX_PAGE_SIZE: usize = 50;
 const OUTBOX_MAX_ATTEMPTS: i64 = 16;
@@ -304,9 +318,18 @@ impl std::fmt::Debug for HostTurnInputBlock {
 pub struct StartTurnDispatchV2 {
     pub operation_id: Uuid,
     pub session_id: Uuid,
+    pub task_id: Uuid,
     pub turn_id: Uuid,
     pub agent_session_id: Uuid,
+    pub codex_thread_id: Uuid,
     pub content_blocks: Vec<HostTurnInputBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedStartTurnProjection {
+    pub operation_id: Uuid,
+    pub session_id: Uuid,
+    pub turn_id: Uuid,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -539,6 +562,15 @@ pub struct HistoryTurn {
 pub struct HistoryPage {
     pub turns: Vec<HistoryTurn>,
     pub next_before_ordinal: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Feat134HistorySnapshot {
+    pub session: SessionSummary,
+    pub history: HistoryPage,
+    pub message_content_blocks: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+    pub artifacts: Vec<ArtifactProjection>,
+    pub feat134: Feat134HistoryProjection,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -1596,10 +1628,21 @@ impl ChatRepository {
             return Err(ChatError::InvalidInput);
         }
         self.expire_attachments(unix_seconds()?)?;
+        Self::load_message_content_blocks_from_connection(
+            &self.connection,
+            &self.scope,
+            message_ids,
+        )
+    }
+
+    fn load_message_content_blocks_from_connection(
+        connection: &Connection,
+        scope: &ChatScope,
+        message_ids: Vec<Uuid>,
+    ) -> Result<Vec<(Uuid, Vec<MessageContentBlockProjection>)>, ChatError> {
         let mut result = Vec::with_capacity(message_ids.len());
         for message_id in message_ids {
-            let mut statement = self
-                .connection
+            let mut statement = connection
                 .prepare(
                     "SELECT b.block_ordinal, b.block_type, b.text_content,
                             a.id, a.kind, a.safe_name, a.media_type, a.byte_size,
@@ -1626,11 +1669,7 @@ impl ChatRepository {
             );
             let rows = statement
                 .query_map(
-                    params![
-                        message_id.to_string(),
-                        self.scope.owner_user_id,
-                        self.scope.tenant_id,
-                    ],
+                    params![message_id.to_string(), scope.owner_user_id, scope.tenant_id,],
                     |row| {
                         Ok((
                             row.get(0)?,
@@ -2992,12 +3031,14 @@ impl ChatRepository {
         validate_non_nil(operation_id)?;
         let now = unix_seconds()?;
         self.expire_attachments(now)?;
-        let row: Option<(String, String, String, i64, Vec<u8>, String)> = self
+        let row: Option<(String, String, String, String, String, i64, Vec<u8>, String)> = self
             .connection
             .query_row(
-                "SELECT o.session_id, s.agent_session_id, t.id, o.payload_version,
+                "SELECT o.session_id, b.public_task_id, s.agent_session_id,
+                        s.runtime_thread_id, t.id, o.payload_version,
                         o.encrypted_payload, m.id
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
+                 JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
                  JOIN chat_turns t ON t.operation_id=o.operation_id AND t.session_id=s.id
                  JOIN chat_messages m ON m.turn_id=t.id AND m.role='user'
                  WHERE o.operation_id=?1 AND o.kind='start_turn' AND o.state='inflight'
@@ -3015,13 +3056,23 @@ impl ChatRepository {
                         row.get(3)?,
                         row.get(4)?,
                         row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
             .optional()
             .map_err(map_sqlite_error)?;
-        let (session_id, agent_session_id, turn_id, version, payload, message_id) =
-            row.ok_or(ChatError::ConversationConflict)?;
+        let (
+            session_id,
+            task_id,
+            agent_session_id,
+            codex_thread_id,
+            turn_id,
+            version,
+            payload,
+            message_id,
+        ) = row.ok_or(ChatError::ConversationConflict)?;
         if version != 2 {
             return Err(ChatError::DatabaseUnavailable);
         }
@@ -3182,8 +3233,10 @@ impl ChatRepository {
         Ok(StartTurnDispatchV2 {
             operation_id,
             session_id: parse_uuid_value(&session_id)?,
+            task_id: parse_uuid_value(&task_id)?,
             turn_id: parsed_turn,
             agent_session_id: parse_uuid_value(&agent_session_id)?,
+            codex_thread_id: parse_uuid_value(&codex_thread_id)?,
             content_blocks,
         })
     }
@@ -3504,6 +3557,40 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)
     }
 
+    pub fn suspend_uncertain_start_turn(&mut self, operation_id: Uuid) -> Result<(), ChatError> {
+        validate_non_nil(operation_id)?;
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE chat_outbox
+                 SET state='inflight', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='start_turn'
+                   AND payload_version=2 AND state='inflight'
+                   AND EXISTS(
+                     SELECT 1
+                     FROM chat_turns t
+                     JOIN chat_sessions s ON s.id=t.session_id
+                     WHERE t.operation_id=chat_outbox.operation_id
+                       AND t.session_id=chat_outbox.session_id
+                       AND t.status='queued' AND t.runtime_turn_id IS NULL
+                       AND NOT EXISTS(
+                         SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id
+                       )
+                       AND s.owner_user_id=?2 AND s.tenant_id=?3
+                   )",
+                params![
+                    operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        Ok(())
+    }
+
     pub fn suspend_started_turn_retry(
         &mut self,
         operation_id: Uuid,
@@ -3653,6 +3740,180 @@ impl ChatRepository {
         Ok(())
     }
 
+    pub fn finalize_failed_start_turn_dispatch(
+        &mut self,
+        operation_id: Uuid,
+        terminal_at: i64,
+    ) -> Result<FailedStartTurnProjection, ChatError> {
+        validate_non_nil(operation_id)?;
+        if terminal_at < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let row: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT t.id, t.session_id
+                 FROM chat_turns t
+                 JOIN chat_sessions s ON s.id=t.session_id
+                 JOIN chat_outbox o ON o.operation_id=t.operation_id
+                 WHERE t.operation_id=?1 AND o.kind='start_turn'
+                   AND o.session_id=t.session_id
+                   AND o.payload_version=2 AND o.state='inflight'
+                   AND t.status='queued' AND t.runtime_turn_id IS NULL
+                   AND NOT EXISTS(
+                     SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id
+                   )
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let (turn_id, session_id) = row.ok_or(ChatError::ConversationConflict)?;
+        let turn_changed = transaction
+            .execute(
+                "UPDATE chat_turns
+                 SET status='failed', terminal_at=?1,
+                     reasoning_status='unavailable', reasoning_reason_code='reasoning_not_emitted'
+                 WHERE id=?2 AND status='queued' AND runtime_turn_id IS NULL",
+                params![terminal_at, turn_id],
+            )
+            .map_err(map_constraint_or_database)?;
+        let outbox_changed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='start_turn'
+                   AND payload_version=2 AND state='inflight'",
+                [operation_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if turn_changed != 1 || outbox_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let session_changed = transaction
+            .execute(
+                "UPDATE chat_sessions
+                 SET last_activity_at=MAX(last_activity_at, ?1)
+                 WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4",
+                params![
+                    terminal_at,
+                    session_id,
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if session_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let session_id = parse_uuid_value(&session_id)?;
+        let turn_id = parse_uuid_value(&turn_id)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(FailedStartTurnProjection {
+            operation_id,
+            session_id,
+            turn_id,
+        })
+    }
+
+    pub fn recover_next_failed_start_turn_projection(
+        &mut self,
+        terminal_at: i64,
+    ) -> Result<Option<FailedStartTurnProjection>, ChatError> {
+        if terminal_at < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let row: Option<(String, String, String)> = transaction
+            .query_row(
+                "SELECT t.operation_id, t.id, t.session_id
+                 FROM chat_turns t
+                 JOIN chat_sessions s ON s.id=t.session_id
+                 JOIN chat_outbox o ON o.operation_id=t.operation_id
+                 WHERE o.kind='start_turn' AND o.payload_version=2
+                   AND o.session_id=t.session_id
+                   AND o.state='failed' AND t.status='queued'
+                   AND t.runtime_turn_id IS NULL
+                   AND NOT EXISTS(
+                     SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id
+                   )
+                   AND s.owner_user_id=?1 AND s.tenant_id=?2
+                 ORDER BY t.id ASC LIMIT 1",
+                params![self.scope.owner_user_id, self.scope.tenant_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let Some((operation_id, turn_id, session_id)) = row else {
+            transaction
+                .commit()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            return Ok(None);
+        };
+        let changed = transaction
+            .execute(
+                "UPDATE chat_turns
+                 SET status='failed', terminal_at=?1,
+                     reasoning_status='unavailable', reasoning_reason_code='reasoning_not_emitted'
+                 WHERE id=?2 AND status='queued' AND runtime_turn_id IS NULL",
+                params![terminal_at, turn_id],
+            )
+            .map_err(map_constraint_or_database)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let outbox_changed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND session_id=?2 AND kind='start_turn'
+                   AND payload_version=2 AND state='failed'",
+                params![operation_id, session_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if outbox_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let session_changed = transaction
+            .execute(
+                "UPDATE chat_sessions
+                 SET last_activity_at=MAX(last_activity_at, ?1)
+                 WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4",
+                params![
+                    terminal_at,
+                    session_id,
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if session_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let operation_id = parse_uuid_value(&operation_id)?;
+        let session_id = parse_uuid_value(&session_id)?;
+        let turn_id = parse_uuid_value(&turn_id)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(Some(FailedStartTurnProjection {
+            operation_id,
+            session_id,
+            turn_id,
+        }))
+    }
+
     pub fn active_turn_context(&self, session_id: Uuid) -> Result<ActiveTurnContext, ChatError> {
         validate_non_nil(session_id)?;
         type ActiveRow = (
@@ -3758,6 +4019,112 @@ impl ChatRepository {
         Ok(())
     }
 
+    pub fn reset_feat134_after_stream_change(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        expected: &StoredEventCursor,
+    ) -> Result<(), ChatError> {
+        validate_non_nil(session_id)?;
+        validate_non_nil(turn_id)?;
+        validate_cursor(expected)?;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let active: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                   WHERE t.id=?1 AND t.session_id=?2 AND t.status IN ('streaming', 'stopping')
+                     AND s.owner_user_id=?3 AND s.tenant_id=?4
+                 )",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if !active {
+            return Err(ChatError::ConversationConflict);
+        }
+        let changed = transaction
+            .execute(
+                "DELETE FROM chat_event_cursors
+                 WHERE session_id=?1 AND stream_id=?2 AND sequence=?3 AND event_id=?4",
+                params![
+                    session_id.to_string(),
+                    expected.stream_id.to_string(),
+                    i64::try_from(expected.sequence).map_err(|_| ChatError::InvalidInput)?,
+                    expected.event_id.to_string(),
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "DELETE FROM chat_observed_events_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_timeline_items_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_turn_plans_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_timeline_notices_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_turn_terminals_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_reasoning_items WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let message_changed = transaction
+            .execute(
+                "UPDATE chat_messages SET content=''
+                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if message_changed != 1 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_turns
+                 SET reasoning_status='pending', reasoning_reason_code=NULL, terminal_code=NULL
+                 WHERE id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
     pub fn persist_turn_progress(&mut self, progress: &TurnProgress) -> Result<(), ChatError> {
         validate_non_nil(progress.local_turn_id)?;
         validate_message_output(&progress.assistant_text)?;
@@ -3795,6 +4162,365 @@ impl ChatRepository {
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
+    pub fn persist_feat134_projection(
+        &mut self,
+        projection: &Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        if projection.terminal.is_some() {
+            return Err(ChatError::InvalidInput);
+        }
+        validate_feat134_projection(projection)?;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let durable_sequence =
+            persist_feat134_projection_transaction(&transaction, &self.scope, projection, true)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(durable_sequence)
+    }
+
+    pub fn commit_feat134_terminal(
+        &mut self,
+        projection: &Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        validate_feat134_projection(projection)?;
+        let terminal = projection
+            .terminal
+            .as_ref()
+            .ok_or(ChatError::InvalidInput)?;
+        let terminal_at = terminal.observed_at_ms / 1000;
+        let reasoning_items = projection.legacy_reasoning();
+        let (reasoning_status, reasoning_reason_code) =
+            aggregate_feat134_reasoning(terminal.status, &reasoning_items);
+        validate_reasoning(
+            reasoning_status,
+            reasoning_reason_code.as_deref(),
+            &reasoning_items,
+        )?;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let (session_id, operation_id, current_status): (String, String, String) = transaction
+            .query_row(
+                "SELECT t.session_id, t.operation_id, t.status
+                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    projection.turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        if !matches!(current_status.as_str(), "streaming" | "stopping") {
+            return Err(ChatError::ConversationConflict);
+        }
+        let durable_sequence =
+            persist_feat134_projection_transaction(&transaction, &self.scope, projection, false)?;
+        let message_status = if terminal.status == "failed" {
+            "failed"
+        } else {
+            "committed"
+        };
+        let changed = transaction
+            .execute(
+                "UPDATE chat_messages SET content=?1, status=?2
+                 WHERE turn_id=?3 AND role='assistant' AND status='pending'",
+                params![
+                    projection.assistant_text,
+                    message_status,
+                    projection.turn_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_turns
+                 SET status=?1, terminal_at=?2, terminal_code=?3,
+                     reasoning_status=?4, reasoning_reason_code=?5
+                 WHERE id=?6",
+                params![
+                    terminal.status,
+                    terminal_at,
+                    terminal.code,
+                    reasoning_status.as_str(),
+                    reasoning_reason_code,
+                    projection.turn_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        replace_reasoning(
+            &transaction,
+            &projection.turn_id.to_string(),
+            &reasoning_items,
+        )?;
+        let closed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",
+                [&operation_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if closed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
+                params![terminal_at, session_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(durable_sequence)
+    }
+
+    /// Closes a locally unrepresentable v4 Turn without persisting the offending snapshot.
+    ///
+    /// The Host event cursor is consumed atomically with a content-free failed terminal so the
+    /// same legal Host event cannot replay forever. Only the previously committed timeline prefix
+    /// is retained; any lifecycle/reasoning still in progress in that prefix becomes incomplete.
+    pub fn commit_feat134_projection_failure(
+        &mut self,
+        failure: &Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        validate_non_nil(failure.session_id)?;
+        validate_non_nil(failure.turn_id)?;
+        validate_cursor(&failure.cursor)?;
+        if failure.source_event_type.is_empty()
+            || failure.source_event_type.len() > 128
+            || failure.source_occurred_at.is_empty()
+            || failure.source_occurred_at.len() > 64
+            || failure.source_event_bytes == 0
+            || failure.source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES
+            || failure.observed_at_ms < 0
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        let (terminal_code, reasoning_reason_code, source_event_type) = match failure.kind {
+            Feat134ProjectionFailureKind::LimitExceeded => (
+                PROJECTION_LIMIT_EXCEEDED_CODE,
+                FEAT134_LIMIT_REASON_CODE,
+                "projection.limit_exceeded",
+            ),
+            Feat134ProjectionFailureKind::ProtocolConflict => (
+                PROJECTION_CONFLICT_CODE,
+                "protocol_error",
+                "projection.protocol_conflict",
+            ),
+        };
+        let terminal_at = failure.observed_at_ms / 1000;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let (session_id, operation_id, current_status, runtime_turn_id): (
+            String,
+            String,
+            String,
+            String,
+        ) = transaction
+            .query_row(
+                "SELECT t.session_id, t.operation_id, t.status, t.runtime_turn_id
+                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    failure.turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        if session_id != failure.session_id.to_string()
+            || !matches!(current_status.as_str(), "streaming" | "stopping")
+        {
+            return Err(ChatError::ConversationConflict);
+        }
+        let runtime_turn_id = parse_uuid_value(&runtime_turn_id)?;
+        let durable_sequence = next_feat134_durable_sequence(&transaction, &session_id)?;
+        transaction
+            .execute(
+                "INSERT INTO chat_observed_events_v4(
+                   event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
+                   event_type, source_occurred_at, observed_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    failure.cursor.event_id.to_string(),
+                    session_id,
+                    failure.turn_id.to_string(),
+                    failure.cursor.stream_id.to_string(),
+                    i64::try_from(failure.cursor.sequence).map_err(|_| ChatError::InvalidInput)?,
+                    i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?,
+                    failure.source_event_type,
+                    failure.source_occurred_at,
+                    failure.observed_at_ms,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+
+        // Preserve only the confirmed durable prefix and make its unfinished state explicit.
+        transaction
+            .execute(
+                "UPDATE chat_timeline_items_v4
+                 SET status='incomplete',
+                     completed_at_ms=COALESCE(completed_at_ms, MAX(started_at_ms, ?1))
+                 WHERE turn_id=?2 AND status='in_progress'",
+                params![failure.observed_at_ms, failure.turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let unfinished_reasoning_count = transaction
+            .execute(
+                "UPDATE chat_timeline_items_v4
+                 SET reasoning_status='incomplete',
+                     reasoning_reason_code=?1,
+                     reasoning_finalized_at_ms=MAX(started_at_ms, ?2)
+                 WHERE turn_id=?3 AND item_type='reasoning' AND reasoning_status IS NULL
+                   AND EXISTS(
+                     SELECT 1 FROM chat_timeline_reasoning_parts_v4 p
+                     WHERE p.turn_id=chat_timeline_items_v4.turn_id
+                       AND p.item_id=chat_timeline_items_v4.item_id
+                   )",
+                params![
+                    reasoning_reason_code,
+                    failure.observed_at_ms,
+                    failure.turn_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+
+        let notice = TimelineNotice {
+            source_event_id: failure.cursor.event_id,
+            source_sequence: failure.cursor.sequence,
+            source_occurred_at: failure.source_occurred_at.clone(),
+            scope: TimelineNoticeScope::Turn,
+            severity: TimelineNoticeSeverity::Error,
+            code: Some(terminal_code.to_owned()),
+            will_retry: false,
+            observed_at_ms: failure.observed_at_ms,
+        };
+        persist_feat134_notice(&transaction, &session_id, failure.turn_id, &notice)?;
+        let terminal = TimelineTerminal {
+            source_event_id: failure.cursor.event_id,
+            source_sequence: failure.cursor.sequence,
+            source_occurred_at: failure.source_occurred_at.clone(),
+            status: "failed",
+            code: Some(terminal_code.to_owned()),
+            unfinished_reasoning_reason_code: (unfinished_reasoning_count > 0)
+                .then(|| reasoning_reason_code.to_owned()),
+            observed_at_ms: failure.observed_at_ms,
+        };
+        transaction
+            .execute(
+                "INSERT INTO chat_turn_terminals_v4(
+                   turn_id, source_event_id, source_sequence, source_occurred_at,
+                   status, code, observed_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, 'failed', ?5, ?6)",
+                params![
+                    failure.turn_id.to_string(),
+                    terminal.source_event_id.to_string(),
+                    i64::try_from(terminal.source_sequence).map_err(|_| ChatError::InvalidInput)?,
+                    terminal.source_occurred_at,
+                    terminal_code,
+                    terminal.observed_at_ms,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let changed = transaction
+            .execute(
+                "UPDATE chat_messages SET status='failed'
+                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
+                [failure.turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_turns
+                 SET status='failed', terminal_at=?1, terminal_code=?2,
+                     reasoning_status='unavailable', reasoning_reason_code=?3
+                 WHERE id=?4",
+                params![
+                    terminal_at,
+                    terminal_code,
+                    reasoning_reason_code,
+                    failure.turn_id.to_string()
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let closed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",
+                [&operation_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if closed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
+                params![terminal_at, session_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        advance_cursor(&transaction, &session_id, &failure.cursor)?;
+
+        let assistant_text: String = transaction
+            .query_row(
+                "SELECT content FROM chat_messages
+                 WHERE turn_id=?1 AND role='assistant' AND status='failed'",
+                [failure.turn_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let items = load_feat134_items(&transaction, failure.turn_id)?;
+        let plan = load_feat134_plan(&transaction, failure.turn_id)?;
+        let turn_notices = load_feat134_notices(
+            &transaction,
+            None,
+            Some(failure.turn_id),
+            TimelineNoticeScope::Turn,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+
+        Ok(Feat134Projection {
+            session_id: failure.session_id,
+            turn_id: failure.turn_id,
+            cursor: failure.cursor.clone(),
+            source_event_type: source_event_type.to_owned(),
+            source_turn_id: Some(runtime_turn_id),
+            source_occurred_at: failure.source_occurred_at.clone(),
+            source_event_bytes: failure.source_event_bytes,
+            observed_at_ms: failure.observed_at_ms,
+            durable_sequence: Some(durable_sequence),
+            assistant_text,
+            items,
+            plan,
+            turn_notices,
+            session_notice: None,
+            terminal: Some(terminal.clone()),
+            delta: TimelineDelta::TurnTerminal(terminal),
+        })
     }
 
     pub fn commit_terminal_turn(&mut self, terminal: &TerminalTurnCommit) -> Result<(), ChatError> {
@@ -4016,55 +4742,7 @@ impl ChatRepository {
 
     pub fn session_summary(&self, session_id: Uuid) -> Result<SessionSummary, ChatError> {
         validate_non_nil(session_id)?;
-        type SummaryRow = (
-            String,
-            String,
-            String,
-            Option<i64>,
-            i64,
-            Option<String>,
-            bool,
-        );
-        let row: SummaryRow = self
-            .connection
-            .query_row(
-                "SELECT s.project_id, s.title, s.title_source, s.pinned_at,
-                        s.last_activity_at,
-                        (SELECT t.status FROM chat_turns t WHERE t.session_id=s.id
-                         ORDER BY t.rowid DESC LIMIT 1),
-                        p.removed_at IS NULL
-                 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id
-                 WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::NotFound)?;
-        Ok(SessionSummary {
-            session_id,
-            project_id: parse_uuid_value(&row.0)?,
-            title: row.1,
-            title_source: parse_title_source(&row.2)?,
-            pinned_at: row.3,
-            last_activity_at: row.4,
-            latest_turn_status: row.5,
-            project_available: row.6,
-        })
+        load_session_summary_from_connection(&self.connection, &self.scope, session_id)
     }
 
     pub fn load_history(
@@ -4075,19 +4753,102 @@ impl ChatRepository {
     ) -> Result<HistoryPage, ChatError> {
         validate_non_nil(session_id)?;
         let limit = page_size(requested_limit)?;
-        let before = before_ordinal
-            .map(|value| i64::try_from(value).map_err(|_| ChatError::InvalidInput))
-            .transpose()?
-            .unwrap_or(i64::MAX);
+        load_history_page_from_connection(
+            &self.connection,
+            &self.scope,
+            session_id,
+            before_ordinal,
+            limit,
+        )
+    }
+
+    pub fn load_feat134_history_snapshot(
+        &mut self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        requested_limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.load_feat134_history_snapshot_with_hook(
+            session_id,
+            before_ordinal,
+            requested_limit,
+            || Ok(()),
+        )
+    }
+
+    fn load_feat134_history_snapshot_with_hook<F>(
+        &mut self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        requested_limit: Option<usize>,
+        after_base_read: F,
+    ) -> Result<Feat134HistorySnapshot, ChatError>
+    where
+        F: FnOnce() -> Result<(), ChatError>,
+    {
+        validate_non_nil(session_id)?;
+        let limit = page_size(requested_limit)?;
+        // Attachment expiry is a write and therefore must complete before the read snapshot starts.
+        self.expire_attachments(unix_seconds()?)?;
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let session = load_session_summary_from_connection(&transaction, &self.scope, session_id)?;
+        let history = load_history_page_from_connection(
+            &transaction,
+            &self.scope,
+            session_id,
+            before_ordinal,
+            limit,
+        )?;
+        after_base_read()?;
+        let turn_ids = history
+            .turns
+            .iter()
+            .map(|turn| turn.turn_id)
+            .collect::<Vec<_>>();
+        let message_ids = history
+            .turns
+            .iter()
+            .flat_map(|turn| turn.messages.iter().map(|message| message.message_id))
+            .collect::<Vec<_>>();
+        let message_content_blocks = Self::load_message_content_blocks_from_connection(
+            &transaction,
+            &self.scope,
+            message_ids,
+        )?;
+        let artifacts =
+            load_artifacts_for_turns_from_connection(&transaction, &self.scope, &turn_ids)?;
+        let feat134 = load_feat134_history_projection_from_connection(
+            &transaction,
+            &self.scope,
+            session_id,
+            &turn_ids,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(Feat134HistorySnapshot {
+            session,
+            history,
+            message_content_blocks,
+            artifacts,
+            feat134,
+        })
+    }
+
+    pub fn load_feat134_hydration(&self, turn_id: Uuid) -> Result<Feat134Hydration, ChatError> {
+        validate_non_nil(turn_id)?;
         let owned: bool = self
             .connection
             .query_row(
                 "SELECT EXISTS(
-                   SELECT 1 FROM chat_sessions
-                   WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                   WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
                  )",
                 params![
-                    session_id.to_string(),
+                    turn_id.to_string(),
                     self.scope.owner_user_id,
                     self.scope.tenant_id
                 ],
@@ -4097,83 +4858,38 @@ impl ChatRepository {
         if !owned {
             return Err(ChatError::NotFound);
         }
-        let turn_limit = i64::try_from(limit + 1).map_err(|_| ChatError::InvalidInput)?;
-        let mut turn_statement = self
-            .connection
-            .prepare(
-                "SELECT t.id, t.runtime_turn_id, t.status, t.terminal_at,
-                        t.reasoning_status, t.reasoning_reason_code, MAX(m.ordinal) AS page_ordinal
-                 FROM chat_turns t JOIN chat_messages m ON m.turn_id=t.id
-                 WHERE t.session_id=?1
-                 GROUP BY t.id
-                 HAVING page_ordinal < ?2
-                 ORDER BY page_ordinal DESC, t.id DESC
-                 LIMIT ?3",
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let rows = turn_statement
-            .query_map(params![session_id.to_string(), before, turn_limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, i64>(6)?,
-                ))
-            })
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let has_more = rows.len() > limit;
-        let selected = rows.into_iter().take(limit).collect::<Vec<_>>();
-        let mut turns = selected
-            .iter()
-            .map(
-                |(
-                    turn_id,
-                    runtime_turn_id,
-                    status,
-                    terminal_at,
-                    reasoning_status,
-                    reasoning_reason_code,
-                    _,
-                )| {
-                    Ok(HistoryTurn {
-                        turn_id: parse_uuid_value(turn_id)?,
-                        runtime_turn_id: runtime_turn_id
-                            .as_deref()
-                            .map(parse_uuid_value)
-                            .transpose()?,
-                        status: status.clone(),
-                        terminal_at: *terminal_at,
-                        reasoning_status: reasoning_status.clone(),
-                        reasoning_reason_code: reasoning_reason_code.clone(),
-                        messages: Vec::new(),
-                        reasoning: Vec::new(),
-                    })
-                },
-            )
-            .collect::<Result<Vec<_>, ChatError>>()?;
-        if !turns.is_empty() {
-            let turn_ids = turns
-                .iter()
-                .map(|turn| turn.turn_id.to_string())
-                .collect::<Vec<_>>();
-            load_history_messages(&self.connection, &turn_ids, &mut turns)?;
-            load_history_reasoning_metadata(&self.connection, &turn_ids, &mut turns)?;
-        }
-        turns.reverse();
-        let next_before_ordinal = if has_more {
-            selected.last().and_then(|row| u64::try_from(row.6).ok())
-        } else {
-            None
-        };
-        Ok(HistoryPage {
-            turns,
-            next_before_ordinal,
+        Ok(Feat134Hydration {
+            items: load_feat134_items(&self.connection, turn_id)?,
+            plan: load_feat134_plan(&self.connection, turn_id)?,
+            turn_notices: load_feat134_notices(
+                &self.connection,
+                None,
+                Some(turn_id),
+                TimelineNoticeScope::Turn,
+            )?,
         })
+    }
+
+    pub fn load_feat134_history_projection(
+        &self,
+        session_id: Uuid,
+        turn_ids: &[Uuid],
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        validate_non_nil(session_id)?;
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let projection = load_feat134_history_projection_from_connection(
+            &transaction,
+            &self.scope,
+            session_id,
+            turn_ids,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(projection)
     }
 
     pub fn enqueue_title_job(
@@ -6343,6 +7059,882 @@ fn contains_forbidden_title_character(value: &str) -> bool {
     })
 }
 
+fn load_feat134_items(
+    connection: &Connection,
+    turn_id: Uuid,
+) -> Result<Vec<TimelineItem>, ChatError> {
+    type ItemRow = (
+        String,
+        i64,
+        String,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        i64,
+        Option<i64>,
+        String,
+        i64,
+        String,
+    );
+    let mut statement = connection
+        .prepare(
+            "SELECT item_id, item_ordinal, item_type, phase, status, text,
+                    reasoning_status, reasoning_reason_code, reasoning_finalized_at_ms,
+                    started_at_ms, completed_at_ms,
+                    source_event_id, source_sequence, source_occurred_at
+             FROM chat_timeline_items_v4 WHERE turn_id=?1
+             ORDER BY item_ordinal ASC",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map([turn_id.to_string()], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+                row.get(11)?,
+                row.get(12)?,
+                row.get(13)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<ItemRow>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let ordinal = usize::try_from(row.1).map_err(|_| ChatError::DatabaseUnavailable)?;
+        if ordinal != items.len() + 1 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let reasoning_parts = load_feat134_reasoning_parts(connection, turn_id, &row.0)?;
+        items.push(TimelineItem {
+            item_id: row.0,
+            item_ordinal: ordinal,
+            item_type: row.2,
+            phase: row.3.as_deref().map(parse_timeline_phase).transpose()?,
+            status: parse_timeline_item_status(&row.4)?,
+            text: row.5,
+            reasoning_status: row
+                .6
+                .as_deref()
+                .map(parse_timeline_reasoning_status)
+                .transpose()?,
+            reasoning_reason_code: row.7,
+            reasoning_finalized_at_ms: row.8,
+            reasoning_parts,
+            started_at_ms: row.9,
+            completed_at_ms: row.10,
+            source_event_id: parse_uuid_value(&row.11)?,
+            source_sequence: u64::try_from(row.12).map_err(|_| ChatError::DatabaseUnavailable)?,
+            source_occurred_at: row.13,
+        });
+    }
+    Ok(items)
+}
+
+fn load_feat134_reasoning_parts(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<Vec<TimelineReasoningPart>, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT content_index, text, byte_count
+             FROM chat_timeline_reasoning_parts_v4
+             WHERE turn_id=?1 AND item_id=?2 ORDER BY content_index ASC",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map(params![turn_id.to_string(), item_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut parts = Vec::with_capacity(rows.len());
+    for (index, text, byte_count) in rows {
+        let index = usize::try_from(index).map_err(|_| ChatError::DatabaseUnavailable)?;
+        if index != parts.len()
+            || usize::try_from(byte_count).map_err(|_| ChatError::DatabaseUnavailable)?
+                != text.len()
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        parts.push(TimelineReasoningPart {
+            content_index: index,
+            text,
+        });
+    }
+    Ok(parts)
+}
+
+fn load_feat134_plan(
+    connection: &Connection,
+    turn_id: Uuid,
+) -> Result<Option<TimelinePlan>, ChatError> {
+    let header: Option<(String, i64, String, Option<String>, i64)> = connection
+        .query_row(
+            "SELECT source_event_id, source_sequence, source_occurred_at,
+                    explanation, observed_at_ms
+             FROM chat_turn_plans_v4 WHERE turn_id=?1",
+            [turn_id.to_string()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let Some((event_id, sequence, occurred_at, explanation, observed_at_ms)) = header else {
+        return Ok(None);
+    };
+    let mut statement = connection
+        .prepare(
+            "SELECT ordinal, step, status FROM chat_turn_plan_steps_v4
+             WHERE turn_id=?1 ORDER BY ordinal ASC",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map([turn_id.to_string()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if rows.is_empty() {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    let mut steps = Vec::with_capacity(rows.len());
+    for (ordinal, step, status) in rows {
+        let ordinal = usize::try_from(ordinal).map_err(|_| ChatError::DatabaseUnavailable)?;
+        if ordinal != steps.len()
+            || !matches!(status.as_str(), "pending" | "in_progress" | "completed")
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        steps.push(TimelinePlanStep {
+            ordinal,
+            step,
+            status: match status.as_str() {
+                "pending" => "pending",
+                "in_progress" => "in_progress",
+                "completed" => "completed",
+                _ => unreachable!(),
+            },
+        });
+    }
+    Ok(Some(TimelinePlan {
+        source_event_id: parse_uuid_value(&event_id)?,
+        source_sequence: u64::try_from(sequence).map_err(|_| ChatError::DatabaseUnavailable)?,
+        source_occurred_at: occurred_at,
+        explanation,
+        steps,
+        observed_at_ms,
+    }))
+}
+
+fn load_feat134_notices(
+    connection: &Connection,
+    session_id: Option<Uuid>,
+    turn_id: Option<Uuid>,
+    scope: TimelineNoticeScope,
+) -> Result<Vec<TimelineNotice>, ChatError> {
+    let (query, identity) = match scope {
+        TimelineNoticeScope::Session => (
+            "SELECT source_event_id, source_sequence, source_occurred_at,
+                    severity, code, will_retry, observed_at_ms
+             FROM chat_timeline_notices_v4
+             WHERE session_id=?1 AND scope='session' AND turn_id IS NULL
+             ORDER BY observed_at_ms DESC, source_event_id DESC LIMIT 64",
+            session_id.ok_or(ChatError::InvalidInput)?,
+        ),
+        TimelineNoticeScope::Turn => (
+            "SELECT source_event_id, source_sequence, source_occurred_at,
+                    severity, code, will_retry, observed_at_ms
+             FROM chat_timeline_notices_v4
+             WHERE turn_id=?1 AND scope='turn'
+             ORDER BY source_sequence DESC, source_event_id DESC LIMIT 64",
+            turn_id.ok_or(ChatError::InvalidInput)?,
+        ),
+    };
+    let mut statement = connection
+        .prepare(query)
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut rows = statement
+        .query_map([identity.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, bool>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if rows.len() > MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    rows.reverse();
+    rows.into_iter()
+        .map(|row| {
+            Ok(TimelineNotice {
+                source_event_id: parse_uuid_value(&row.0)?,
+                source_sequence: u64::try_from(row.1)
+                    .map_err(|_| ChatError::DatabaseUnavailable)?,
+                source_occurred_at: row.2,
+                scope,
+                severity: match row.3.as_str() {
+                    "warning" => TimelineNoticeSeverity::Warning,
+                    "error" => TimelineNoticeSeverity::Error,
+                    _ => return Err(ChatError::DatabaseUnavailable),
+                },
+                code: row.4,
+                will_retry: row.5,
+                observed_at_ms: row.6,
+            })
+        })
+        .collect()
+}
+
+fn load_feat134_history_projection_from_connection(
+    connection: &Connection,
+    scope: &ChatScope,
+    session_id: Uuid,
+    turn_ids: &[Uuid],
+) -> Result<Feat134HistoryProjection, ChatError> {
+    if turn_ids.len() > MAX_PAGE_SIZE || turn_ids.iter().any(Uuid::is_nil) {
+        return Err(ChatError::InvalidInput);
+    }
+    let owned: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM chat_sessions
+               WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+             )",
+            params![session_id.to_string(), scope.owner_user_id, scope.tenant_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if !owned {
+        return Err(ChatError::NotFound);
+    }
+    let durable_sequence_cut = connection
+        .query_row(
+            "SELECT last_sequence FROM chat_projection_counters_v4 WHERE session_id=?1",
+            [session_id.to_string()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .unwrap_or(0);
+    let mut turns = Vec::with_capacity(turn_ids.len());
+    for turn_id in turn_ids {
+        let (terminal_code, v4_authority) = connection
+            .query_row(
+                "SELECT t.terminal_code,
+                        EXISTS(SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id)
+                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 WHERE t.id=?1 AND t.session_id=?2
+                   AND s.owner_user_id=?3 AND s.tenant_id=?4",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    scope.owner_user_id,
+                    scope.tenant_id
+                ],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        let items = load_feat134_items(connection, *turn_id)?;
+        let plan = load_feat134_plan(connection, *turn_id)?;
+        let notices =
+            load_feat134_notices(connection, None, Some(*turn_id), TimelineNoticeScope::Turn)?;
+        if !v4_authority
+            && (terminal_code.is_some()
+                || !items.is_empty()
+                || plan.is_some()
+                || !notices.is_empty())
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        turns.push(Feat134HistoryTurn {
+            turn_id: *turn_id,
+            v4_authority,
+            terminal_code,
+            items,
+            plan,
+            notices,
+        });
+    }
+    Ok(Feat134HistoryProjection {
+        turns,
+        session_notices: load_feat134_notices(
+            connection,
+            Some(session_id),
+            None,
+            TimelineNoticeScope::Session,
+        )?,
+        durable_sequence_cut,
+    })
+}
+
+fn parse_timeline_phase(value: &str) -> Result<TimelinePhase, ChatError> {
+    match value {
+        "commentary" => Ok(TimelinePhase::Commentary),
+        "final_answer" => Ok(TimelinePhase::FinalAnswer),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_timeline_item_status(value: &str) -> Result<TimelineItemStatus, ChatError> {
+    match value {
+        "in_progress" => Ok(TimelineItemStatus::InProgress),
+        "completed" => Ok(TimelineItemStatus::Completed),
+        "incomplete" => Ok(TimelineItemStatus::Incomplete),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_timeline_reasoning_status(value: &str) -> Result<TimelineReasoningStatus, ChatError> {
+    match value {
+        "complete" => Ok(TimelineReasoningStatus::Complete),
+        "incomplete" => Ok(TimelineReasoningStatus::Incomplete),
+        "unavailable" => Ok(TimelineReasoningStatus::Unavailable),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn validate_feat134_projection(projection: &Feat134Projection) -> Result<(), ChatError> {
+    match validate_feat134_projection_shape(projection) {
+        Err(ChatError::ProjectionLimitExceeded) => return Err(ChatError::InvalidInput),
+        result => result?,
+    }
+    if feat134_projection_requires_limit_terminal(projection)? {
+        return Err(ChatError::InvalidInput);
+    }
+    Ok(())
+}
+
+fn validate_feat134_projection_shape(projection: &Feat134Projection) -> Result<(), ChatError> {
+    validate_non_nil(projection.session_id)?;
+    if projection.durable_sequence.is_some() {
+        return Err(ChatError::InvalidInput);
+    }
+    validate_non_nil(projection.turn_id)?;
+    validate_cursor(&projection.cursor)?;
+    validate_message_output(&projection.assistant_text)?;
+    super::feat134::validate_reasoning_turn(&projection.items)?;
+    if projection.source_event_type.is_empty()
+        || projection.source_event_type.len() > 128
+        || projection.source_occurred_at.is_empty()
+        || projection.source_occurred_at.len() > 64
+        || projection.source_event_bytes == 0
+        || projection.source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES
+        || projection.observed_at_ms < 0
+        || projection.items.len() > 512
+        || projection.turn_notices.len() > 512
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    for (index, item) in projection.items.iter().enumerate() {
+        if item.item_ordinal != index + 1
+            || item.item_id.is_empty()
+            || item.item_id.chars().count() > 256
+            || item.item_type.is_empty()
+            || item.item_type.chars().count() > 256
+            || item.text.len() > MAX_MESSAGE_BYTES
+            || item.started_at_ms < 0
+            || item
+                .completed_at_ms
+                .is_some_and(|value| value < item.started_at_ms)
+            || item
+                .reasoning_finalized_at_ms
+                .is_some_and(|value| value < item.started_at_ms)
+            || (item.reasoning_status.is_some() != item.reasoning_finalized_at_ms.is_some())
+            || item.source_sequence == 0
+            || item.source_occurred_at.is_empty()
+            || item.source_occurred_at.len() > 64
+        {
+            return Err(ChatError::InvalidInput);
+        }
+    }
+    if projection
+        .turn_notices
+        .iter()
+        .any(|notice| notice.scope != TimelineNoticeScope::Turn)
+        || projection
+            .session_notice
+            .as_ref()
+            .is_some_and(|notice| notice.scope != TimelineNoticeScope::Session)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    Ok(())
+}
+
+pub(crate) fn feat134_projection_requires_limit_terminal(
+    projection: &Feat134Projection,
+) -> Result<bool, ChatError> {
+    if projection.assistant_text.len() > MAX_MESSAGE_BYTES
+        || projection.items.len() > 512
+        || projection.turn_notices.len() > 512
+    {
+        return Ok(true);
+    }
+    match super::feat134::validate_reasoning_turn(&projection.items) {
+        Err(ChatError::ProjectionLimitExceeded) => return Ok(true),
+        result => result?,
+    }
+    feat134_history_turn_json_bytes(projection)
+        .map(|bytes| bytes > MAX_FEAT134_HISTORY_TURN_JSON_BYTES)
+}
+
+fn feat134_history_turn_json_bytes(projection: &Feat134Projection) -> Result<usize, ChatError> {
+    let timeline_items = projection
+        .items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "sourceEventId": item.source_event_id.to_string(),
+                "sourceSequence": item.source_sequence.to_string(),
+                "sourceOccurredAt": item.source_occurred_at,
+                "itemId": item.item_id,
+                "itemOrdinal": item.item_ordinal,
+                "itemType": item.item_type,
+                "phase": item.phase.map(TimelinePhase::as_str),
+                "status": item.status.as_str(),
+                "text": item.text,
+                "reasoningStatus": item.reasoning_status.map(TimelineReasoningStatus::as_str),
+                "reasoningReasonCode": item.reasoning_reason_code,
+                "reasoningParts": item.reasoning_parts.iter().map(|part| serde_json::json!({
+                    "contentIndex": part.content_index,
+                    "text": part.text,
+                })).collect::<Vec<_>>(),
+                "startedAtMs": item.started_at_ms,
+                "completedAtMs": item.completed_at_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+    let plan = projection.plan.as_ref().map(|plan| {
+        serde_json::json!({
+            "sourceEventId": plan.source_event_id.to_string(),
+            "sourceSequence": plan.source_sequence.to_string(),
+            "sourceOccurredAt": plan.source_occurred_at,
+            "explanation": plan.explanation,
+            "steps": plan.steps.iter().map(|step| serde_json::json!({
+                "ordinal": step.ordinal,
+                "step": step.step,
+                "status": step.status,
+            })).collect::<Vec<_>>(),
+        })
+    });
+    let notices = projection
+        .turn_notices
+        .iter()
+        .rev()
+        .take(MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE)
+        .map(|notice| {
+            serde_json::json!({
+                "sourceEventId": notice.source_event_id.to_string(),
+                "sourceSequence": notice.source_sequence.to_string(),
+                "sourceOccurredAt": notice.source_occurred_at,
+                "scope": notice.scope.as_str(),
+                "severity": notice.severity.as_str(),
+                "code": notice.code,
+                "willRetry": notice.will_retry,
+                "observedAtMs": notice.observed_at_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_vec(&serde_json::json!({
+        "terminalCode": projection.terminal.as_ref().and_then(|terminal| terminal.code.as_ref()),
+        "timelineItems": timeline_items,
+        "plan": plan,
+        "notices": notices,
+    }))
+    .map(|encoded| encoded.len())
+    .map_err(|_| ChatError::InvalidInput)
+}
+
+fn persist_feat134_projection_transaction(
+    transaction: &Transaction<'_>,
+    scope: &ChatScope,
+    projection: &Feat134Projection,
+    update_assistant: bool,
+) -> Result<u64, ChatError> {
+    let session_id: String = transaction
+        .query_row(
+            "SELECT t.session_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+             WHERE t.id=?1 AND t.status IN ('streaming', 'stopping')
+               AND s.owner_user_id=?2 AND s.tenant_id=?3",
+            params![
+                projection.turn_id.to_string(),
+                scope.owner_user_id,
+                scope.tenant_id
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .ok_or(ChatError::ConversationConflict)?;
+    if session_id != projection.session_id.to_string() {
+        return Err(ChatError::ConversationConflict);
+    }
+    reserve_feat134_turn_event(
+        transaction,
+        projection.turn_id,
+        projection.source_event_bytes,
+    )?;
+    let durable_sequence = next_feat134_durable_sequence(transaction, &session_id)?;
+    transaction
+        .execute(
+            "INSERT INTO chat_observed_events_v4(
+               event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
+               event_type, source_occurred_at, observed_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                projection.cursor.event_id.to_string(),
+                session_id,
+                projection
+                    .source_turn_id
+                    .map(|_| projection.turn_id.to_string()),
+                projection.cursor.stream_id.to_string(),
+                i64::try_from(projection.cursor.sequence).map_err(|_| ChatError::InvalidInput)?,
+                i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?,
+                projection.source_event_type,
+                projection.source_occurred_at,
+                projection.observed_at_ms,
+            ],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if update_assistant {
+        let changed = transaction
+            .execute(
+                "UPDATE chat_messages SET content=?1
+                 WHERE turn_id=?2 AND role='assistant' AND status='pending'",
+                params![projection.assistant_text, projection.turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+    }
+    for item in &projection.items {
+        transaction
+            .execute(
+                "INSERT INTO chat_timeline_items_v4(
+                   turn_id, item_id, item_ordinal, item_type, phase, status, text,
+                   reasoning_status, reasoning_reason_code, reasoning_finalized_at_ms,
+                   started_at_ms, completed_at_ms, source_event_id, source_sequence,
+                   source_occurred_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 ON CONFLICT(turn_id, item_id) DO UPDATE SET
+                   item_ordinal=excluded.item_ordinal, item_type=excluded.item_type,
+                   phase=excluded.phase, status=excluded.status, text=excluded.text,
+                   reasoning_status=excluded.reasoning_status,
+                   reasoning_reason_code=excluded.reasoning_reason_code,
+                   reasoning_finalized_at_ms=excluded.reasoning_finalized_at_ms,
+                   started_at_ms=excluded.started_at_ms,
+                   completed_at_ms=excluded.completed_at_ms,
+                   source_event_id=excluded.source_event_id,
+                   source_sequence=excluded.source_sequence,
+                   source_occurred_at=excluded.source_occurred_at",
+                params![
+                    projection.turn_id.to_string(),
+                    item.item_id,
+                    i64::try_from(item.item_ordinal).map_err(|_| ChatError::InvalidInput)?,
+                    item.item_type,
+                    item.phase.map(TimelinePhase::as_str),
+                    item.status.as_str(),
+                    item.text,
+                    item.reasoning_status.map(TimelineReasoningStatus::as_str),
+                    item.reasoning_reason_code,
+                    item.reasoning_finalized_at_ms,
+                    item.started_at_ms,
+                    item.completed_at_ms,
+                    item.source_event_id.to_string(),
+                    i64::try_from(item.source_sequence).map_err(|_| ChatError::InvalidInput)?,
+                    item.source_occurred_at,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_timeline_reasoning_parts_v4 WHERE turn_id=?1 AND item_id=?2",
+                params![projection.turn_id.to_string(), item.item_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        for part in &item.reasoning_parts {
+            transaction
+                .execute(
+                    "INSERT INTO chat_timeline_reasoning_parts_v4(
+                       turn_id, item_id, content_index, text, byte_count
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        projection.turn_id.to_string(),
+                        item.item_id,
+                        i64::try_from(part.content_index).map_err(|_| ChatError::InvalidInput)?,
+                        part.text,
+                        i64::try_from(part.text.len()).map_err(|_| ChatError::InvalidInput)?,
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+    }
+    transaction
+        .execute(
+            "DELETE FROM chat_turn_plans_v4 WHERE turn_id=?1",
+            [projection.turn_id.to_string()],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if let Some(plan) = &projection.plan {
+        transaction
+            .execute(
+                "INSERT INTO chat_turn_plans_v4(
+                   turn_id, source_event_id, source_sequence, source_occurred_at,
+                   explanation, observed_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    projection.turn_id.to_string(),
+                    plan.source_event_id.to_string(),
+                    i64::try_from(plan.source_sequence).map_err(|_| ChatError::InvalidInput)?,
+                    plan.source_occurred_at,
+                    plan.explanation,
+                    plan.observed_at_ms,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        for step in &plan.steps {
+            transaction
+                .execute(
+                    "INSERT INTO chat_turn_plan_steps_v4(turn_id, ordinal, step, status)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        projection.turn_id.to_string(),
+                        i64::try_from(step.ordinal).map_err(|_| ChatError::InvalidInput)?,
+                        step.step,
+                        step.status,
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+    }
+    for notice in projection
+        .turn_notices
+        .iter()
+        .chain(projection.session_notice.iter())
+    {
+        persist_feat134_notice(transaction, &session_id, projection.turn_id, notice)?;
+    }
+    if let Some(terminal) = &projection.terminal {
+        transaction
+            .execute(
+                "INSERT INTO chat_turn_terminals_v4(
+                   turn_id, source_event_id, source_sequence, source_occurred_at,
+                   status, code, observed_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    projection.turn_id.to_string(),
+                    terminal.source_event_id.to_string(),
+                    i64::try_from(terminal.source_sequence).map_err(|_| ChatError::InvalidInput)?,
+                    terminal.source_occurred_at,
+                    terminal.status,
+                    terminal.code,
+                    terminal.observed_at_ms,
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+    }
+    advance_cursor(transaction, &session_id, &projection.cursor)?;
+    Ok(durable_sequence)
+}
+
+fn reserve_feat134_turn_event(
+    transaction: &Transaction<'_>,
+    turn_id: Uuid,
+    source_event_bytes: usize,
+) -> Result<(), ChatError> {
+    if source_event_bytes == 0 || source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES {
+        return Err(ChatError::InvalidInput);
+    }
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO chat_turn_projection_counters_v4(
+               turn_id, observed_event_count, observed_event_bytes
+             ) VALUES (?1, 0, 0)",
+            [turn_id.to_string()],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let (current_count, current_bytes): (i64, i64) = transaction
+        .query_row(
+            "SELECT observed_event_count, observed_event_bytes
+             FROM chat_turn_projection_counters_v4 WHERE turn_id=?1",
+            [turn_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let current_count =
+        usize::try_from(current_count).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let current_bytes =
+        usize::try_from(current_bytes).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let next_bytes = current_bytes
+        .checked_add(source_event_bytes)
+        .ok_or(ChatError::ProjectionLimitExceeded)?;
+    if current_count >= MAX_FEAT134_OBSERVED_EVENTS_PER_TURN
+        || next_bytes > MAX_FEAT134_OBSERVED_BYTES_PER_TURN
+    {
+        return Err(ChatError::ProjectionLimitExceeded);
+    }
+    let next_count = current_count
+        .checked_add(1)
+        .ok_or(ChatError::ProjectionLimitExceeded)?;
+    let changed = transaction
+        .execute(
+            "UPDATE chat_turn_projection_counters_v4
+             SET observed_event_count=?1, observed_event_bytes=?2
+             WHERE turn_id=?3 AND observed_event_count=?4 AND observed_event_bytes=?5",
+            params![
+                i64::try_from(next_count).map_err(|_| ChatError::DatabaseUnavailable)?,
+                i64::try_from(next_bytes).map_err(|_| ChatError::DatabaseUnavailable)?,
+                turn_id.to_string(),
+                i64::try_from(current_count).map_err(|_| ChatError::DatabaseUnavailable)?,
+                i64::try_from(current_bytes).map_err(|_| ChatError::DatabaseUnavailable)?,
+            ],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if changed != 1 {
+        return Err(ChatError::ConversationConflict);
+    }
+    Ok(())
+}
+
+fn next_feat134_durable_sequence(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+) -> Result<u64, ChatError> {
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO chat_projection_counters_v4(session_id, last_sequence)
+             VALUES (?1, 0)",
+            [session_id],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let current: i64 = transaction
+        .query_row(
+            "SELECT last_sequence FROM chat_projection_counters_v4 WHERE session_id=?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let next = current
+        .checked_add(1)
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    let changed = transaction
+        .execute(
+            "UPDATE chat_projection_counters_v4 SET last_sequence=?1
+             WHERE session_id=?2 AND last_sequence=?3",
+            params![next, session_id, current],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if changed != 1 {
+        return Err(ChatError::ConversationConflict);
+    }
+    u64::try_from(next).map_err(|_| ChatError::DatabaseUnavailable)
+}
+
+fn persist_feat134_notice(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    local_turn_id: Uuid,
+    notice: &TimelineNotice,
+) -> Result<(), ChatError> {
+    let turn_id = match notice.scope {
+        TimelineNoticeScope::Session => None,
+        TimelineNoticeScope::Turn => Some(local_turn_id.to_string()),
+    };
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO chat_timeline_notices_v4(
+               source_event_id, session_id, turn_id, source_sequence, source_occurred_at,
+               scope, severity, code, will_retry, observed_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                notice.source_event_id.to_string(),
+                session_id,
+                turn_id,
+                i64::try_from(notice.source_sequence).map_err(|_| ChatError::InvalidInput)?,
+                notice.source_occurred_at,
+                notice.scope.as_str(),
+                notice.severity.as_str(),
+                notice.code,
+                notice.will_retry,
+                notice.observed_at_ms,
+            ],
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    Ok(())
+}
+
+fn aggregate_feat134_reasoning(
+    terminal_status: &str,
+    items: &[ReasoningItem],
+) -> (ReasoningStatus, Option<String>) {
+    if let Some(item) = items
+        .iter()
+        .find(|item| item.status == ReasoningStatus::Incomplete)
+    {
+        return (ReasoningStatus::Incomplete, item.reason_code.clone());
+    }
+    if let Some(item) = items
+        .iter()
+        .find(|item| item.status == ReasoningStatus::Unavailable)
+    {
+        return (ReasoningStatus::Unavailable, item.reason_code.clone());
+    }
+    if !items.is_empty() {
+        return (ReasoningStatus::Complete, None);
+    }
+    let reason = match terminal_status {
+        "interrupted" => "turn_interrupted",
+        "failed" => "runtime_error",
+        _ => "reasoning_not_emitted",
+    };
+    (ReasoningStatus::Unavailable, Some(reason.to_owned()))
+}
+
 pub(super) fn validate_cursor(cursor: &StoredEventCursor) -> Result<(), ChatError> {
     validate_non_nil(cursor.stream_id)?;
     validate_non_nil(cursor.event_id)?;
@@ -6447,6 +8039,159 @@ fn replace_reasoning(
         }
     }
     Ok(())
+}
+
+fn load_session_summary_from_connection(
+    connection: &Connection,
+    scope: &ChatScope,
+    session_id: Uuid,
+) -> Result<SessionSummary, ChatError> {
+    type SummaryRow = (
+        String,
+        String,
+        String,
+        Option<i64>,
+        i64,
+        Option<String>,
+        bool,
+    );
+    let row: SummaryRow = connection
+        .query_row(
+            "SELECT s.project_id, s.title, s.title_source, s.pinned_at,
+                    s.last_activity_at,
+                    (SELECT t.status FROM chat_turns t WHERE t.session_id=s.id
+                     ORDER BY t.rowid DESC LIMIT 1),
+                    p.removed_at IS NULL
+             FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id
+             WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+            params![session_id.to_string(), scope.owner_user_id, scope.tenant_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .ok_or(ChatError::NotFound)?;
+    Ok(SessionSummary {
+        session_id,
+        project_id: parse_uuid_value(&row.0)?,
+        title: row.1,
+        title_source: parse_title_source(&row.2)?,
+        pinned_at: row.3,
+        last_activity_at: row.4,
+        latest_turn_status: row.5,
+        project_available: row.6,
+    })
+}
+
+fn load_history_page_from_connection(
+    connection: &Connection,
+    scope: &ChatScope,
+    session_id: Uuid,
+    before_ordinal: Option<u64>,
+    limit: usize,
+) -> Result<HistoryPage, ChatError> {
+    let before = before_ordinal
+        .map(|value| i64::try_from(value).map_err(|_| ChatError::InvalidInput))
+        .transpose()?
+        .unwrap_or(i64::MAX);
+    let owned: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM chat_sessions
+               WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+             )",
+            params![session_id.to_string(), scope.owner_user_id, scope.tenant_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if !owned {
+        return Err(ChatError::NotFound);
+    }
+    let turn_limit = i64::try_from(limit + 1).map_err(|_| ChatError::InvalidInput)?;
+    let mut turn_statement = connection
+        .prepare(
+            "SELECT t.id, t.runtime_turn_id, t.status, t.terminal_at,
+                    t.reasoning_status, t.reasoning_reason_code, MAX(m.ordinal) AS page_ordinal
+             FROM chat_turns t JOIN chat_messages m ON m.turn_id=t.id
+             WHERE t.session_id=?1
+             GROUP BY t.id
+             HAVING page_ordinal < ?2
+             ORDER BY page_ordinal DESC, t.id DESC
+             LIMIT ?3",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = turn_statement
+        .query_map(params![session_id.to_string(), before, turn_limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let has_more = rows.len() > limit;
+    let selected = rows.into_iter().take(limit).collect::<Vec<_>>();
+    let mut turns = selected
+        .iter()
+        .map(
+            |(
+                turn_id,
+                runtime_turn_id,
+                status,
+                terminal_at,
+                reasoning_status,
+                reasoning_reason_code,
+                _,
+            )| {
+                Ok(HistoryTurn {
+                    turn_id: parse_uuid_value(turn_id)?,
+                    runtime_turn_id: runtime_turn_id
+                        .as_deref()
+                        .map(parse_uuid_value)
+                        .transpose()?,
+                    status: status.clone(),
+                    terminal_at: *terminal_at,
+                    reasoning_status: reasoning_status.clone(),
+                    reasoning_reason_code: reasoning_reason_code.clone(),
+                    messages: Vec::new(),
+                    reasoning: Vec::new(),
+                })
+            },
+        )
+        .collect::<Result<Vec<_>, ChatError>>()?;
+    if !turns.is_empty() {
+        let turn_ids = turns
+            .iter()
+            .map(|turn| turn.turn_id.to_string())
+            .collect::<Vec<_>>();
+        load_history_messages(connection, &turn_ids, &mut turns)?;
+        load_history_reasoning_metadata(connection, &turn_ids, &mut turns)?;
+    }
+    turns.reverse();
+    let next_before_ordinal = if has_more {
+        selected.last().and_then(|row| u64::try_from(row.6).ok())
+    } else {
+        None
+    };
+    Ok(HistoryPage {
+        turns,
+        next_before_ordinal,
+    })
 }
 
 fn load_history_messages(
@@ -6859,6 +8604,7 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::{SourceIdentity, TimelineDelta, TimelineTerminal};
     use std::os::unix::fs::symlink;
 
     fn scope() -> ChatScope {
@@ -6952,6 +8698,41 @@ mod tests {
         (agent_session_id, thread_id)
     }
 
+    fn bind_and_claim_first_turn(
+        repository: &mut ChatRepository,
+        pending: &PendingConversation,
+        now: i64,
+    ) -> ClaimedOutbox {
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .expect("create outbox");
+        assert_eq!(create.operation_id, pending.create_operation_id);
+        let public_task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(create.operation_id, public_task_id, now)
+            .unwrap();
+        repository
+            .reschedule_outbox(create.operation_id, now)
+            .unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .expect("bound create outbox");
+        repository
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                public_task_id,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .expect("turn outbox")
+    }
+
     fn commit_synthetic_terminal(
         repository: &mut ChatRepository,
         session_id: Uuid,
@@ -7010,6 +8791,273 @@ mod tests {
             scope(),
         );
         assert!(matches!(wrong, Err(ChatError::DatabaseUnavailable)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_start_turn_dispatch_v2_atomically_terminalizes_only_the_queued_turn() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat134-turn-failure-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 51);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::Text("safe local fixture".to_owned())],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
+        assert_eq!(claimed.operation_id, pending.turn_operation_id);
+
+        let projection = repository
+            .finalize_failed_start_turn_dispatch(pending.turn_operation_id, now + 1)
+            .unwrap();
+        assert_eq!(projection.operation_id, pending.turn_operation_id);
+        assert_eq!(projection.session_id, pending.session_id);
+        assert_eq!(projection.turn_id, pending.turn_id);
+        assert_eq!(
+            repository.outbox_state(pending.turn_operation_id).unwrap(),
+            OutboxState::Failed
+        );
+        let snapshot = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(
+            snapshot.session.latest_turn_status.as_deref(),
+            Some("failed")
+        );
+        assert_eq!(snapshot.history.turns.len(), 1);
+        let turn = &snapshot.history.turns[0];
+        assert_eq!(turn.status, "failed");
+        assert_eq!(turn.runtime_turn_id, None);
+        assert_eq!(turn.terminal_at, Some(now + 1));
+        assert_eq!(turn.reasoning_status, "unavailable");
+        assert_eq!(
+            turn.reasoning_reason_code.as_deref(),
+            Some("reasoning_not_emitted")
+        );
+        assert_eq!(turn.messages.len(), 1);
+        assert_eq!(turn.messages[0].content, "safe local fixture");
+        assert!(!snapshot.feat134.turns[0].v4_authority);
+        assert_eq!(snapshot.feat134.turns[0].terminal_code, None);
+        assert!(snapshot.feat134.turns[0].items.is_empty());
+        assert!(snapshot.feat134.turns[0].plan.is_none());
+        assert!(snapshot.feat134.turns[0].notices.is_empty());
+        assert!(repository
+            .enqueue_turn_multimodal(
+                pending.session_id,
+                &[DraftContentBlock::Text("next safe fixture".to_owned())],
+                Uuid::now_v7(),
+            )
+            .is_ok());
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_start_turn_dispatch_ignores_v1_and_keeps_the_turn_queued() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat134-v1-turn-failure-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 52);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "legacy safe fixture", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
+        assert_eq!(
+            repository.start_turn_payload_version(claimed.operation_id),
+            Ok(1)
+        );
+
+        assert_eq!(
+            repository.finalize_failed_start_turn_dispatch(claimed.operation_id, now + 1),
+            Err(ChatError::ConversationConflict)
+        );
+        assert_eq!(
+            repository.suspend_uncertain_start_turn(claimed.operation_id),
+            Err(ChatError::ConversationConflict)
+        );
+        assert_eq!(
+            repository.outbox_state(claimed.operation_id).unwrap(),
+            OutboxState::Inflight
+        );
+        let next_attempt_at: Option<i64> = repository
+            .connection
+            .query_row(
+                "SELECT next_attempt_at FROM chat_outbox WHERE operation_id=?1",
+                [claimed.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(next_attempt_at.is_some());
+        let history = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].terminal_at, None);
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn uncertain_v2_start_is_neither_reclaimed_nor_failed_start_recovered() {
+        let root = std::env::temp_dir().join(format!(
+            "yijie-feat134-uncertain-v2-start-{}",
+            Uuid::now_v7()
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 53);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::Text("uncertain safe fixture".to_owned())],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
+        assert_eq!(
+            repository.start_turn_payload_version(claimed.operation_id),
+            Ok(2)
+        );
+
+        repository
+            .suspend_uncertain_start_turn(claimed.operation_id)
+            .unwrap();
+        let outbox: (String, Option<i64>, i64) = repository
+            .connection
+            .query_row(
+                "SELECT state, next_attempt_at, payload_version
+                 FROM chat_outbox WHERE operation_id=?1",
+                [claimed.operation_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(outbox, ("inflight".to_owned(), None, 2));
+        assert!(repository
+            .claim_next_conversation_outbox(now + 301, 30)
+            .unwrap()
+            .is_none());
+        assert!(repository
+            .recover_next_failed_start_turn_projection(now + 302)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repository.outbox_state(claimed.operation_id).unwrap(),
+            OutboxState::Inflight
+        );
+        let history = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+        assert_eq!(history.turns[0].terminal_at, None);
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_local_recovery_repairs_v2_and_ignores_failed_v1_with_queued_turn() {
+        let root =
+            std::env::temp_dir().join(format!("yijie-feat134-turn-recovery-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 54);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let legacy = repository
+            .create_session_and_enqueue(project_id, "legacy recovery fixture", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let legacy_claimed = bind_and_claim_first_turn(&mut repository, &legacy, now);
+        assert_eq!(
+            repository.start_turn_payload_version(legacy_claimed.operation_id),
+            Ok(1)
+        );
+        repository.fail_outbox(legacy_claimed.operation_id).unwrap();
+        assert_eq!(
+            repository
+                .load_history(legacy.session_id, None, Some(20))
+                .unwrap()
+                .turns[0]
+                .status,
+            "queued"
+        );
+
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::Text("safe recovery fixture".to_owned())],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
+        assert_eq!(
+            repository.start_turn_payload_version(claimed.operation_id),
+            Ok(2)
+        );
+        repository.fail_outbox(claimed.operation_id).unwrap();
+
+        let create_only = repository
+            .create_session_and_enqueue(project_id, "ignored create fixture", Uuid::now_v7())
+            .unwrap();
+        let claimed_create = repository
+            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
+            .unwrap()
+            .expect("create-only outbox");
+        assert_eq!(claimed_create.operation_id, create_only.create_operation_id);
+        repository.fail_outbox(claimed_create.operation_id).unwrap();
+
+        let recovered = repository
+            .recover_next_failed_start_turn_projection(now + 1)
+            .unwrap()
+            .expect("failed start-turn projection");
+        assert_eq!(recovered.operation_id, pending.turn_operation_id);
+        assert_eq!(recovered.session_id, pending.session_id);
+        assert_eq!(recovered.turn_id, pending.turn_id);
+        assert!(repository
+            .recover_next_failed_start_turn_projection(now + 2)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repository.outbox_state(legacy.turn_operation_id).unwrap(),
+            OutboxState::Failed
+        );
+        assert_eq!(
+            repository
+                .outbox_state(create_only.create_operation_id)
+                .unwrap(),
+            OutboxState::Failed
+        );
+        let legacy_history = repository
+            .load_history(legacy.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(legacy_history.turns[0].status, "queued");
+        assert_eq!(legacy_history.turns[0].terminal_at, None);
+        let history = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].terminal_at, Some(now + 1));
+        assert_eq!(
+            history.turns[0].reasoning_reason_code.as_deref(),
+            Some("reasoning_not_emitted")
+        );
+        assert!(repository
+            .enqueue_turn(pending.session_id, "next safe fixture", Uuid::now_v7())
+            .is_ok());
+
+        drop(repository);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -7303,7 +9351,16 @@ mod tests {
             .unwrap();
         let now = unix_seconds().unwrap();
         bind_and_accept_first_turn(&mut repository, &pending, now);
-        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let next_pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &next_pending, now);
+        let before = repository.recovery_snapshot().unwrap().active_session_ids;
+        assert_eq!(before.len(), 2);
+        let orphan_session_id = before[0];
+        let next_session_id = before[1];
+        let context = repository.active_turn_context(orphan_session_id).unwrap();
+        let next_context = repository.active_turn_context(next_session_id).unwrap();
 
         repository
             .finalize_orphaned_turn_without_stream(
@@ -7314,14 +9371,18 @@ mod tests {
             )
             .unwrap();
 
-        assert!(repository
-            .recovery_snapshot()
-            .unwrap()
-            .active_session_ids
-            .is_empty());
+        let after = repository.recovery_snapshot().unwrap().active_session_ids;
+        assert_eq!(after, vec![next_session_id]);
+        assert_eq!(after.first(), Some(&next_session_id));
         assert_eq!(
             repository.outbox_state(context.turn_operation_id).unwrap(),
             OutboxState::Done
+        );
+        assert_eq!(
+            repository
+                .outbox_state(next_context.turn_operation_id)
+                .unwrap(),
+            OutboxState::Inflight
         );
         let history = repository
             .load_history(context.session_id, None, None)
@@ -8685,12 +10746,14 @@ mod tests {
             .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
             .unwrap()
             .unwrap();
+        let agent_session_id = Uuid::now_v7();
+        let codex_thread_id = Uuid::now_v7();
         repository
             .bind_host_session_and_enqueue_turn(
                 create.operation_id,
                 public_task_id,
-                Uuid::now_v7(),
-                Uuid::now_v7(),
+                agent_session_id,
+                codex_thread_id,
             )
             .unwrap();
         let turn = repository
@@ -8700,6 +10763,9 @@ mod tests {
         let dispatch = repository
             .load_start_turn_dispatch_v2(turn.operation_id)
             .unwrap();
+        assert_eq!(dispatch.task_id, public_task_id);
+        assert_eq!(dispatch.agent_session_id, agent_session_id);
+        assert_eq!(dispatch.codex_thread_id, codex_thread_id);
         let context_bytes = dispatch
             .content_blocks
             .iter()
@@ -9317,6 +11383,805 @@ mod tests {
         );
         assert_eq!(result, Err(ChatError::DatabaseBusy));
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn feat134_history_snapshot_cannot_straddle_terminal_commit_and_durable_cut() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut reader = open_repository(&root, 93);
+        let shared_scope = reader.scope.clone();
+        let project_id = register_synthetic_project(&mut reader, &root);
+        let pending = reader
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut reader, &pending, unix_seconds().unwrap());
+        let context = reader.active_turn_context(pending.session_id).unwrap();
+        let stream_id = Uuid::now_v7();
+        let started_source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 1,
+            occurred_at: "2026-08-28T06:00:00Z".to_owned(),
+        };
+        let first_sequence = reader
+            .persist_feat134_projection(&Feat134Projection {
+                session_id: pending.session_id,
+                turn_id: context.turn_id,
+                cursor: StoredEventCursor {
+                    stream_id,
+                    sequence: 1,
+                    event_id: started_source.event_id,
+                },
+                source_event_type: "turn.started".to_owned(),
+                source_turn_id: Some(context.runtime_turn_id),
+                source_occurred_at: started_source.occurred_at.clone(),
+                source_event_bytes: 1,
+                observed_at_ms: 1_000,
+                durable_sequence: None,
+                assistant_text: String::new(),
+                items: Vec::new(),
+                plan: None,
+                turn_notices: Vec::new(),
+                session_notice: None,
+                terminal: None,
+                delta: TimelineDelta::TurnStarted(started_source),
+            })
+            .unwrap();
+        assert_eq!(first_sequence, 1);
+
+        let terminal_source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 2,
+            occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+        };
+        let terminal = TimelineTerminal {
+            source_event_id: terminal_source.event_id,
+            source_sequence: terminal_source.sequence,
+            source_occurred_at: terminal_source.occurred_at.clone(),
+            status: "completed",
+            code: Some("bounded_terminal".to_owned()),
+            unfinished_reasoning_reason_code: None,
+            observed_at_ms: 2_000,
+        };
+        let terminal_projection = Feat134Projection {
+            session_id: pending.session_id,
+            turn_id: context.turn_id,
+            cursor: StoredEventCursor {
+                stream_id,
+                sequence: 2,
+                event_id: terminal_source.event_id,
+            },
+            source_event_type: "turn.completed".to_owned(),
+            source_turn_id: Some(context.runtime_turn_id),
+            source_occurred_at: terminal_source.occurred_at,
+            source_event_bytes: 1,
+            observed_at_ms: 2_000,
+            durable_sequence: None,
+            assistant_text: "done".to_owned(),
+            items: Vec::new(),
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: Some(terminal.clone()),
+            delta: TimelineDelta::TurnTerminal(terminal),
+        };
+        let mut writer = open_repository_for_scope(&root, 93, shared_scope);
+        let straddled = reader
+            .load_feat134_history_snapshot_with_hook(pending.session_id, None, Some(20), || {
+                assert_eq!(writer.commit_feat134_terminal(&terminal_projection)?, 2);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            straddled.session.latest_turn_status.as_deref(),
+            Some("streaming")
+        );
+        assert_eq!(straddled.history.turns[0].status, "streaming");
+        assert_eq!(straddled.history.turns[0].terminal_at, None);
+        assert_eq!(straddled.feat134.turns[0].terminal_code, None);
+        assert_eq!(straddled.feat134.durable_sequence_cut, 1);
+
+        let current = reader
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(
+            current.session.latest_turn_status.as_deref(),
+            Some("completed")
+        );
+        assert_eq!(current.history.turns[0].status, "completed");
+        assert!(current.history.turns[0].terminal_at.is_some());
+        assert_eq!(
+            current.feat134.turns[0].terminal_code.as_deref(),
+            Some("bounded_terminal")
+        );
+        assert_eq!(current.feat134.durable_sequence_cut, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat134_durable_cut_is_zero_then_monotonic_across_ignored_and_stream_reset() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 94);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let initial = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(initial.feat134.durable_sequence_cut, 0);
+        assert!(!initial.feat134.turns[0].v4_authority);
+
+        let first_stream = Uuid::now_v7();
+        let ignored_event_id = Uuid::now_v7();
+        assert_eq!(
+            repository
+                .persist_feat134_projection(&Feat134Projection {
+                    session_id: pending.session_id,
+                    turn_id: context.turn_id,
+                    cursor: StoredEventCursor {
+                        stream_id: first_stream,
+                        sequence: 1,
+                        event_id: ignored_event_id,
+                    },
+                    source_event_type: "thread.started".to_owned(),
+                    source_turn_id: None,
+                    source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
+                    source_event_bytes: 1,
+                    observed_at_ms: 1,
+                    durable_sequence: None,
+                    assistant_text: String::new(),
+                    items: Vec::new(),
+                    plan: None,
+                    turn_notices: Vec::new(),
+                    session_notice: None,
+                    terminal: None,
+                    delta: TimelineDelta::Ignored,
+                })
+                .unwrap(),
+            1
+        );
+        let after_ignored = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(after_ignored.feat134.durable_sequence_cut, 1);
+        assert!(!after_ignored.feat134.turns[0].v4_authority);
+
+        let started_event_id = Uuid::now_v7();
+        let started_source = SourceIdentity {
+            event_id: started_event_id,
+            sequence: 2,
+            occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+        };
+        let expected = StoredEventCursor {
+            stream_id: first_stream,
+            sequence: 2,
+            event_id: started_event_id,
+        };
+        assert_eq!(
+            repository
+                .persist_feat134_projection(&Feat134Projection {
+                    session_id: pending.session_id,
+                    turn_id: context.turn_id,
+                    cursor: expected.clone(),
+                    source_event_type: "turn.started".to_owned(),
+                    source_turn_id: Some(context.runtime_turn_id),
+                    source_occurred_at: started_source.occurred_at.clone(),
+                    source_event_bytes: 1,
+                    observed_at_ms: 2,
+                    durable_sequence: None,
+                    assistant_text: String::new(),
+                    items: Vec::new(),
+                    plan: None,
+                    turn_notices: Vec::new(),
+                    session_notice: None,
+                    terminal: None,
+                    delta: TimelineDelta::TurnStarted(started_source),
+                })
+                .unwrap(),
+            2
+        );
+        repository
+            .reset_feat134_after_stream_change(pending.session_id, context.turn_id, &expected)
+            .unwrap();
+        let after_reset = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(after_reset.feat134.durable_sequence_cut, 2);
+        assert!(!after_reset.feat134.turns[0].v4_authority);
+
+        let second_stream = Uuid::now_v7();
+        let replayed_source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 1,
+            occurred_at: "2026-08-28T06:00:02Z".to_owned(),
+        };
+        assert_eq!(
+            repository
+                .persist_feat134_projection(&Feat134Projection {
+                    session_id: pending.session_id,
+                    turn_id: context.turn_id,
+                    cursor: StoredEventCursor {
+                        stream_id: second_stream,
+                        sequence: 1,
+                        event_id: replayed_source.event_id,
+                    },
+                    source_event_type: "turn.started".to_owned(),
+                    source_turn_id: Some(context.runtime_turn_id),
+                    source_occurred_at: replayed_source.occurred_at.clone(),
+                    source_event_bytes: 1,
+                    observed_at_ms: 3,
+                    durable_sequence: None,
+                    assistant_text: String::new(),
+                    items: Vec::new(),
+                    plan: None,
+                    turn_notices: Vec::new(),
+                    session_notice: None,
+                    terminal: None,
+                    delta: TimelineDelta::TurnStarted(replayed_source),
+                })
+                .unwrap(),
+            3
+        );
+        let current = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(current.feat134.durable_sequence_cut, 3);
+        assert!(current.feat134.turns[0].v4_authority);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat134_oversized_history_turn_rolls_back_before_durable_sequence_or_cursor() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 95);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let event_id = Uuid::now_v7();
+        let items = (1..=3)
+            .map(|item_ordinal| TimelineItem {
+                item_id: format!("commentary-{item_ordinal}"),
+                item_ordinal,
+                item_type: "agentMessage".to_owned(),
+                phase: Some(TimelinePhase::Commentary),
+                status: TimelineItemStatus::Completed,
+                text: "x".repeat(MAX_MESSAGE_BYTES),
+                reasoning_status: None,
+                reasoning_reason_code: None,
+                reasoning_parts: Vec::new(),
+                reasoning_finalized_at_ms: None,
+                started_at_ms: 1,
+                completed_at_ms: Some(2),
+                source_event_id: event_id,
+                source_sequence: 1,
+                source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let rejected = Feat134Projection {
+            session_id: pending.session_id,
+            turn_id: context.turn_id,
+            cursor: StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: 1,
+                event_id,
+            },
+            source_event_type: "item.completed".to_owned(),
+            source_turn_id: Some(context.runtime_turn_id),
+            source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
+            source_event_bytes: 1,
+            observed_at_ms: 2,
+            durable_sequence: None,
+            assistant_text: String::new(),
+            items: items.clone(),
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::ItemCompleted(items[2].clone()),
+        };
+        assert!(
+            feat134_history_turn_json_bytes(&rejected).unwrap()
+                > MAX_FEAT134_HISTORY_TURN_JSON_BYTES
+        );
+        assert_eq!(
+            repository.persist_feat134_projection(&rejected),
+            Err(ChatError::InvalidInput)
+        );
+        for table in [
+            "chat_projection_counters_v4",
+            "chat_observed_events_v4",
+            "chat_timeline_items_v4",
+            "chat_event_cursors",
+        ] {
+            let count: i64 = repository
+                .connection
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "oversized projection mutated {table}");
+        }
+
+        let accepted_event_id = Uuid::now_v7();
+        let mut accepted_items = items[..2].to_vec();
+        for item in &mut accepted_items {
+            item.source_event_id = accepted_event_id;
+        }
+        let accepted = Feat134Projection {
+            cursor: StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: 1,
+                event_id: accepted_event_id,
+            },
+            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+            items: accepted_items.clone(),
+            delta: TimelineDelta::ItemCompleted(accepted_items[1].clone()),
+            ..rejected
+        };
+        assert!(
+            feat134_history_turn_json_bytes(&accepted).unwrap()
+                <= MAX_FEAT134_HISTORY_TURN_JSON_BYTES
+        );
+        assert_eq!(repository.persist_feat134_projection(&accepted).unwrap(), 1);
+        let snapshot = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
+            .unwrap();
+        assert_eq!(snapshot.feat134.durable_sequence_cut, 1);
+        assert_eq!(snapshot.feat134.turns[0].items.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat134_projection_limit_consumes_cursor_and_reopens_only_incomplete_confirmed_prefix() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 96);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let stream_id = Uuid::now_v7();
+        let accepted_event_id = Uuid::now_v7();
+        let source_occurred_at = "2026-08-28T06:00:00Z".to_owned();
+        let confirmed_items = vec![
+            TimelineItem {
+                item_id: "confirmed-completed".to_owned(),
+                item_ordinal: 1,
+                item_type: "agentMessage".to_owned(),
+                phase: Some(TimelinePhase::Commentary),
+                status: TimelineItemStatus::Completed,
+                text: "a".repeat(MAX_MESSAGE_BYTES),
+                reasoning_status: None,
+                reasoning_reason_code: None,
+                reasoning_parts: Vec::new(),
+                reasoning_finalized_at_ms: None,
+                started_at_ms: 1,
+                completed_at_ms: Some(2),
+                source_event_id: accepted_event_id,
+                source_sequence: 1,
+                source_occurred_at: source_occurred_at.clone(),
+            },
+            TimelineItem {
+                item_id: "confirmed-streaming".to_owned(),
+                item_ordinal: 2,
+                item_type: "agentMessage".to_owned(),
+                phase: Some(TimelinePhase::Commentary),
+                status: TimelineItemStatus::InProgress,
+                text: "b".repeat(MAX_MESSAGE_BYTES),
+                reasoning_status: None,
+                reasoning_reason_code: None,
+                reasoning_parts: Vec::new(),
+                reasoning_finalized_at_ms: None,
+                started_at_ms: 2,
+                completed_at_ms: None,
+                source_event_id: accepted_event_id,
+                source_sequence: 1,
+                source_occurred_at: source_occurred_at.clone(),
+            },
+            TimelineItem {
+                item_id: "confirmed-reasoning".to_owned(),
+                item_ordinal: 3,
+                item_type: "reasoning".to_owned(),
+                phase: None,
+                status: TimelineItemStatus::InProgress,
+                text: String::new(),
+                reasoning_status: None,
+                reasoning_reason_code: None,
+                reasoning_parts: (0..2)
+                    .map(|content_index| TimelineReasoningPart {
+                        content_index,
+                        text: "r".repeat(MAX_REASONING_PART_BYTES),
+                    })
+                    .collect(),
+                reasoning_finalized_at_ms: None,
+                started_at_ms: 3,
+                completed_at_ms: None,
+                source_event_id: accepted_event_id,
+                source_sequence: 1,
+                source_occurred_at: source_occurred_at.clone(),
+            },
+        ];
+        let confirmed = Feat134Projection {
+            session_id: pending.session_id,
+            turn_id: context.turn_id,
+            cursor: StoredEventCursor {
+                stream_id,
+                sequence: 1,
+                event_id: accepted_event_id,
+            },
+            source_event_type: "item.reasoning_text.delta".to_owned(),
+            source_turn_id: Some(context.runtime_turn_id),
+            source_occurred_at: source_occurred_at.clone(),
+            source_event_bytes: 1,
+            observed_at_ms: 3,
+            durable_sequence: None,
+            assistant_text: String::new(),
+            items: confirmed_items.clone(),
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::ReasoningAppend {
+                source: SourceIdentity {
+                    event_id: accepted_event_id,
+                    sequence: 1,
+                    occurred_at: source_occurred_at.clone(),
+                },
+                item_id: "confirmed-reasoning".to_owned(),
+                item_ordinal: 3,
+                content_index: 0,
+                text: "r".repeat(MAX_REASONING_PART_BYTES),
+            },
+        };
+        assert!(!feat134_projection_requires_limit_terminal(&confirmed).unwrap());
+        assert_eq!(
+            repository.persist_feat134_projection(&confirmed).unwrap(),
+            1
+        );
+
+        let overflow_event_id = Uuid::now_v7();
+        let mut overflow_items = confirmed_items;
+        overflow_items.push(TimelineItem {
+            item_id: "offending-never-persisted".to_owned(),
+            item_ordinal: 4,
+            item_type: "agentMessage".to_owned(),
+            phase: Some(TimelinePhase::Commentary),
+            status: TimelineItemStatus::Completed,
+            text: "z".repeat(MAX_MESSAGE_BYTES),
+            reasoning_status: None,
+            reasoning_reason_code: None,
+            reasoning_parts: Vec::new(),
+            reasoning_finalized_at_ms: None,
+            started_at_ms: 4,
+            completed_at_ms: Some(4),
+            source_event_id: overflow_event_id,
+            source_sequence: 2,
+            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+        });
+        let overflow = Feat134Projection {
+            cursor: StoredEventCursor {
+                stream_id,
+                sequence: 2,
+                event_id: overflow_event_id,
+            },
+            source_event_type: "item.completed".to_owned(),
+            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+            observed_at_ms: 4,
+            items: overflow_items.clone(),
+            delta: TimelineDelta::ItemCompleted(overflow_items[3].clone()),
+            ..confirmed
+        };
+        assert!(feat134_projection_requires_limit_terminal(&overflow).unwrap());
+        let overflow_limit = Feat134ProjectionFailure::from_projection(&overflow);
+        let recovered = repository
+            .commit_feat134_projection_failure(&overflow_limit)
+            .unwrap();
+        assert_eq!(recovered.durable_sequence, Some(2));
+        assert_eq!(recovered.items.len(), 3);
+        assert_eq!(recovered.items[0].status, TimelineItemStatus::Completed);
+        assert_eq!(recovered.items[1].status, TimelineItemStatus::Incomplete);
+        assert_eq!(recovered.items[2].status, TimelineItemStatus::Incomplete);
+        assert_eq!(
+            recovered.items[2].reasoning_status,
+            Some(TimelineReasoningStatus::Incomplete)
+        );
+        assert_eq!(
+            recovered.items[2].reasoning_reason_code.as_deref(),
+            Some(FEAT134_LIMIT_REASON_CODE)
+        );
+        assert_eq!(
+            recovered.items[2]
+                .reasoning_parts
+                .iter()
+                .map(|part| part.text.len())
+                .sum::<usize>(),
+            MAX_REASONING_ITEM_BYTES
+        );
+        assert_eq!(
+            recovered.terminal.as_ref().unwrap().code.as_deref(),
+            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
+        );
+        assert_eq!(
+            recovered
+                .terminal
+                .as_ref()
+                .unwrap()
+                .unfinished_reasoning_reason_code
+                .as_deref(),
+            Some(FEAT134_LIMIT_REASON_CODE)
+        );
+        assert_eq!(
+            recovered.turn_notices.last().unwrap().code.as_deref(),
+            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
+        );
+        assert!(!recovered
+            .items
+            .iter()
+            .any(|item| item.item_id == "offending-never-persisted"));
+
+        let snapshot = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
+            .unwrap();
+        assert_eq!(snapshot.feat134.durable_sequence_cut, 2);
+        assert_eq!(snapshot.history.turns[0].status, "failed");
+        assert_eq!(
+            snapshot.history.turns[0].reasoning_reason_code.as_deref(),
+            Some(FEAT134_LIMIT_REASON_CODE)
+        );
+        assert_eq!(
+            snapshot.feat134.turns[0].terminal_code.as_deref(),
+            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
+        );
+        assert_eq!(snapshot.feat134.turns[0].items, recovered.items);
+        assert!(!snapshot.feat134.turns[0]
+            .items
+            .iter()
+            .any(|item| item.text.contains('z')));
+        assert_eq!(
+            repository.active_turn_context(pending.session_id),
+            Err(ChatError::NotFound)
+        );
+        assert_eq!(
+            repository.commit_feat134_projection_failure(&overflow_limit),
+            Err(ChatError::ConversationConflict),
+            "the consumed offending event cannot advance the durable cut twice"
+        );
+        let cursor: (i64, String) = repository
+            .connection
+            .query_row(
+                "SELECT sequence, event_id FROM chat_event_cursors WHERE session_id=?1",
+                [pending.session_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cursor, (2, overflow_event_id.to_string()));
+        assert_eq!(
+            repository
+                .connection
+                .query_row("SELECT count(*) FROM chat_observed_events_v4", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            2
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat134_event_count_limit_survives_restart_and_stream_reset() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let chat_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 97, chat_scope.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let first_stream = Uuid::now_v7();
+        let first_event_id = Uuid::now_v7();
+        let first = Feat134Projection {
+            session_id: pending.session_id,
+            turn_id: context.turn_id,
+            cursor: StoredEventCursor {
+                stream_id: first_stream,
+                sequence: 1,
+                event_id: first_event_id,
+            },
+            source_event_type: "turn.started".to_owned(),
+            source_turn_id: Some(context.runtime_turn_id),
+            source_occurred_at: "2026-08-28T08:00:00Z".to_owned(),
+            source_event_bytes: 1,
+            observed_at_ms: 1,
+            durable_sequence: None,
+            assistant_text: String::new(),
+            items: Vec::new(),
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::TurnStarted(SourceIdentity {
+                event_id: first_event_id,
+                sequence: 1,
+                occurred_at: "2026-08-28T08:00:00Z".to_owned(),
+            }),
+        };
+        assert_eq!(repository.persist_feat134_projection(&first).unwrap(), 1);
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_turn_projection_counters_v4
+                 SET observed_event_count=?1, observed_event_bytes=1 WHERE turn_id=?2",
+                params![
+                    i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap(),
+                    context.turn_id.to_string()
+                ],
+            )
+            .unwrap();
+        drop(repository);
+
+        let mut repository = open_repository_for_scope(&root, 97, chat_scope);
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT observed_event_count FROM chat_turn_projection_counters_v4
+                     WHERE turn_id=?1",
+                    [context.turn_id.to_string()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap()
+        );
+        repository
+            .reset_feat134_after_stream_change(pending.session_id, context.turn_id, &first.cursor)
+            .unwrap();
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT observed_event_count FROM chat_turn_projection_counters_v4
+                     WHERE turn_id=?1",
+                    [context.turn_id.to_string()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap()
+        );
+
+        let second_event_id = Uuid::now_v7();
+        let second = Feat134Projection {
+            cursor: StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: 1,
+                event_id: second_event_id,
+            },
+            source_occurred_at: "2026-08-28T08:00:01Z".to_owned(),
+            observed_at_ms: 2,
+            delta: TimelineDelta::TurnStarted(SourceIdentity {
+                event_id: second_event_id,
+                sequence: 1,
+                occurred_at: "2026-08-28T08:00:01Z".to_owned(),
+            }),
+            ..first
+        };
+        assert_eq!(
+            repository.persist_feat134_projection(&second),
+            Err(ChatError::ProjectionLimitExceeded)
+        );
+        assert_eq!(
+            repository
+                .connection
+                .query_row(
+                    "SELECT last_sequence FROM chat_projection_counters_v4 WHERE session_id=?1",
+                    [pending.session_id.to_string()],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1,
+            "rejected event must not advance the durable sequence"
+        );
+        let recovered = repository
+            .commit_feat134_projection_failure(&Feat134ProjectionFailure::from_projection(&second))
+            .unwrap();
+        assert_eq!(recovered.durable_sequence, Some(2));
+        assert_eq!(
+            recovered.terminal.unwrap().code.as_deref(),
+            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat134_notice_history_keeps_latest_64_per_scope_in_forward_order() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE chat_timeline_notices_v4(
+                   source_event_id TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   turn_id TEXT NULL,
+                   source_sequence INTEGER NOT NULL,
+                   source_occurred_at TEXT NOT NULL,
+                   scope TEXT NOT NULL,
+                   severity TEXT NOT NULL,
+                   code TEXT NULL,
+                   will_retry INTEGER NOT NULL,
+                   observed_at_ms INTEGER NOT NULL
+                 );",
+            )
+            .unwrap();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        for sequence in 1_i64..=65 {
+            connection
+                .execute(
+                    "INSERT INTO chat_timeline_notices_v4(
+                       source_event_id, session_id, turn_id, source_sequence,
+                       source_occurred_at, scope, severity, code, will_retry, observed_at_ms
+                     ) VALUES (?1, ?2, NULL, ?3, ?4, 'session', 'warning', NULL, 0, ?5)",
+                    params![
+                        Uuid::now_v7().to_string(),
+                        session_id.to_string(),
+                        sequence,
+                        "2026-08-28T06:00:00Z",
+                        sequence,
+                    ],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chat_timeline_notices_v4(
+                       source_event_id, session_id, turn_id, source_sequence,
+                       source_occurred_at, scope, severity, code, will_retry, observed_at_ms
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, 'turn', 'error', 'runtime_error', 0, ?6)",
+                    params![
+                        Uuid::now_v7().to_string(),
+                        session_id.to_string(),
+                        turn_id.to_string(),
+                        sequence,
+                        "2026-08-28T06:00:00Z",
+                        sequence,
+                    ],
+                )
+                .unwrap();
+        }
+
+        let session = load_feat134_notices(
+            &connection,
+            Some(session_id),
+            None,
+            TimelineNoticeScope::Session,
+        )
+        .unwrap();
+        let turn =
+            load_feat134_notices(&connection, None, Some(turn_id), TimelineNoticeScope::Turn)
+                .unwrap();
+        for notices in [&session, &turn] {
+            assert_eq!(notices.len(), MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE);
+            assert_eq!(notices.first().unwrap().source_sequence, 2);
+            assert_eq!(notices.last().unwrap().source_sequence, 65);
+            assert!(notices
+                .windows(2)
+                .all(|pair| pair[0].source_sequence < pair[1].source_sequence));
+        }
+        assert!(session
+            .iter()
+            .all(|notice| notice.scope == TimelineNoticeScope::Session));
+        assert!(turn
+            .iter()
+            .all(|notice| notice.scope == TimelineNoticeScope::Turn));
     }
 
     #[cfg(feature = "feat126-s10-driver")]

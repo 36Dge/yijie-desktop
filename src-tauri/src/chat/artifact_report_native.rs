@@ -406,8 +406,11 @@ fn map_chat_error(error: ChatError) -> ArtifactNativeCode {
         ChatError::DatabaseFull => ArtifactNativeCode::StorageFull,
         ChatError::ScopeDenied => ArtifactNativeCode::Unauthenticated,
         ChatError::InvalidInput => ArtifactNativeCode::InvalidRequest,
+        ChatError::ProjectionLimitExceeded => ArtifactNativeCode::LimitExceeded,
         ChatError::NotFound => ArtifactNativeCode::NotFound,
-        ChatError::ConversationConflict => ArtifactNativeCode::Conflict,
+        ChatError::ConversationConflict | ChatError::ProjectionReconciliationFailed => {
+            ArtifactNativeCode::Conflict
+        }
         ChatError::Disabled
         | ChatError::InvalidConfiguration
         | ChatError::SecureStorageUnavailable

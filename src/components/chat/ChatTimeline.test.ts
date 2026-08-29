@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   hydrateConversationState,
   type ConversationItemSnapshot,
+  type ConversationNotice,
   type ConversationThreadStatus,
   type ConversationTurnSnapshot,
 } from "../../domain/conversation-state";
@@ -19,6 +20,7 @@ import {
   type ConversationTimelineViewModel,
 } from "../../domain/conversation-timeline";
 import ChatTimeline from "./ChatTimeline.vue";
+import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
 
@@ -30,11 +32,16 @@ function deepFreeze<T>(value: T): T {
 
 function projectedTimeline(options: {
   threadStatus?: ConversationThreadStatus;
+  threadNotices?: readonly ConversationNotice[];
   turns?: readonly ConversationTurnSnapshot[];
   items?: readonly ConversationItemSnapshot[];
 } = {}): ConversationTimelineViewModel {
   const timeline = selectConversationTimeline(hydrateConversationState({
-    threads: [{ threadId: THREAD_ID, status: options.threadStatus ?? "ready" }],
+    threads: [{
+      threadId: THREAD_ID,
+      status: options.threadStatus ?? "ready",
+      notices: options.threadNotices,
+    }],
     turns: options.turns ?? [],
     items: options.items ?? [],
   }), THREAD_ID);
@@ -66,6 +73,10 @@ function message(
     ordinal,
     kind,
     status: "completed",
+    agentMessagePhase: kind === "assistant_message" ? "final_answer" : undefined,
+    reasoning: kind === "reasoning"
+      ? { status: "complete", reasonCode: null }
+      : undefined,
     contentBlocks: [{ blockIndex: 0, type: "text", text }],
   };
 }
@@ -105,6 +116,7 @@ describe("ChatTimeline", () => {
     });
     expect(loading.get("section.chat-timeline").attributes("aria-busy")).toBe("true");
     expect(loading.get("[role='status']").text()).toBe("正在加载对话…");
+    expect(loading.find(".chat-timeline__skeleton").exists()).toBe(true);
     expect(loading.find("button").exists()).toBe(false);
 
     const historicalItems = [message("turn-main", "answer", 0, "assistant_message", "保留的回答")];
@@ -204,14 +216,12 @@ describe("ChatTimeline", () => {
     expect(attachmentSlot.mock.calls.every(([scope]) =>
       scope.item === artifactItem && scope.block === attachmentBlock)).toBe(true);
     expect(wrapper.findAll(".action-artifact-item")).toHaveLength(1);
-    expect(wrapper.findAll(".action-reasoning")).toHaveLength(1);
+    expect(wrapper.findAll(".action-reasoning")).toHaveLength(0);
 
-    const reasoningArticle = wrapper.get(".action-reasoning").element.closest("article");
-    const disclosure = reasoningArticle?.querySelector<HTMLButtonElement>(
-      ".chat-timeline-item-shell__disclosure",
-    );
-    if (disclosure === null || disclosure === undefined) throw new Error("fixture_missing_disclosure");
-    disclosure.click();
+    const reasoningShell = wrapper.findAllComponents(ChatTimelineItemShell)
+      .find((shell) => shell.props("item").itemId === "reasoning");
+    if (reasoningShell === undefined) throw new Error("fixture_missing_reasoning");
+    await reasoningShell.get(".chat-timeline-item-shell__disclosure").trigger("click");
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
       itemIdentity: reasoningItem.identity,
@@ -229,6 +239,7 @@ describe("ChatTimeline", () => {
         ordinal: 0,
         kind: "assistant_message",
         status: "completed",
+        agentMessagePhase: "final_answer",
         contentBlocks: [{
           blockIndex: 0,
           type: "code",
@@ -277,10 +288,11 @@ describe("ChatTimeline", () => {
     });
 
     function disclosureFor(itemId: string): HTMLButtonElement {
-      const marker = wrapper.get(`.turn-identity-${itemId}`).element;
-      const disclosure = marker.closest("article")?.querySelector<HTMLButtonElement>(
+      const shell = wrapper.findAllComponents(ChatTimelineItemShell)
+        .find((candidate) => candidate.props("item").itemId === itemId);
+      const disclosure = shell?.element.querySelector(
         ".chat-timeline-item-shell__disclosure",
-      );
+      ) as HTMLButtonElement | null | undefined;
       if (disclosure === null || disclosure === undefined) {
         throw new Error("fixture_missing_disclosure");
       }
@@ -299,14 +311,16 @@ describe("ChatTimeline", () => {
       }),
     });
     const reorderedTurns = wrapper.findAll(".chat-timeline__turn");
-    expect(reorderedTurns[0]?.text()).toContain("reasoning-b");
-    expect(reorderedTurns[1]?.text()).toContain("reasoning-a");
+    expect(reorderedTurns).toHaveLength(2);
+    expect(wrapper.findAllComponents(ChatTimelineItemShell)
+      .map((shell) => shell.props("item").itemId)).toEqual(["reasoning-b", "reasoning-a"]);
     expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
     expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("is accessible and remains independent from ChatPage and state authorities", async () => {
     const timeline = projectedTimeline({
+      threadNotices: [{ severity: "warning", code: "conversation_warning" }],
       turns: [{
         ...completedTurn("turn-main", 0),
         notices: [{ severity: "warning", code: "conversation_warning" }],
@@ -323,6 +337,9 @@ describe("ChatTimeline", () => {
         "item-actions": () => h("button", { type: "button" }, "复制"),
       },
     });
+    expect(wrapper.get(".chat-timeline__notices").text())
+      .toContain("对话连接存在需要注意的信息");
+    expect(wrapper.get(".chat-timeline__notices code").text()).toBe("conversation_warning");
     expect((await axe.run(wrapper.element)).violations).toEqual([]);
     wrapper.unmount();
 

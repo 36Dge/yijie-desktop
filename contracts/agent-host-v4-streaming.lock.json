@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.6.0",
+  "contracts": {
+    "repository": "https://github.com/36Dge/yijie-contracts.git",
+    "full_commit": "3832a6c5e99b2a6365f193280fdb887c8fdbc2de",
+    "sources": {
+      "openapi": {
+        "path": "openapi/agent-host/agent-host.yaml",
+        "sha256": "49e2171e41e0fc11313a114c82ff09e11a0df396e4b366a03b0d7e3afe1766df"
+      },
+      "event_schema": {
+        "path": "jsonschema/agent/session-event-v4.schema.json",
+        "sha256": "d972806e59195c5e1f5fe810db6e1df80be349b77ecc4cf192ed0f391d9ed739"
+      },
+      "runtime_projection": {
+        "path": "compatibility/agent-host-runtime-v1.json",
+        "sha256": "6d28e3ad1bb941561ce08a231abf003dd0e69b5dcafe6376cc5987c3d1f07a00"
+      },
+      "protobuf": {
+        "path": "protobuf/yijie/events/v4/agent_session.proto",
+        "sha256": "7130ffad6f7d415bbaaf35a10bc380b2b75ecaaa4762dc871ce0a274472ecdea"
+      }
+    },
+    "fixture_tree": {
+      "path": "tests/fixtures/agent/session-event-v4",
+      "git_tree_oid": "34c1d28d00a5693c408803bdf42ed742bbe1448a"
+    }
+  },
+  "agent_host": {
+    "repository": "https://github.com/36Dge/yijie-agent-host.git",
+    "full_commit": "b9358f06f3a15aa17a2471cf0bb8bfd0e2b29bfe",
+    "contracts_lock": {
+      "path": "api/contracts.lock",
+      "sha256": "c1ae8d7d363269c29a1858142c07a1c6041d9fbd394c126539e12dee767934d9"
+    },
+    "sources": {
+      "openapi": {
+        "path": "api/openapi/agent-host.yaml",
+        "sha256": "49e2171e41e0fc11313a114c82ff09e11a0df396e4b366a03b0d7e3afe1766df"
+      },
+      "event_schema": {
+        "path": "api/jsonschema/agent-session-event-v4.schema.json",
+        "sha256": "d972806e59195c5e1f5fe810db6e1df80be349b77ecc4cf192ed0f391d9ed739"
+      },
+      "runtime_projection": {
+        "path": "api/compatibility/agent-host-runtime-v1.json",
+        "sha256": "6d28e3ad1bb941561ce08a231abf003dd0e69b5dcafe6376cc5987c3d1f07a00"
+      },
+      "generated_openapi": {
+        "path": "internal/contracts/agenthost.gen.go",
+        "sha256": "cc6948f3945a953d8c00d602afdf8ba80ccbfaf1e0180fbb7f310fd53bde8b30"
+      }
+    },
+    "fixture_tree": {
+      "path": "api/fixtures/agent/session-event-v4",
+      "git_tree_oid": "34c1d28d00a5693c408803bdf42ed742bbe1448a"
+    }
+  },
+  "toolchain": {
+    "parser": {
+      "package": "@redocly/openapi-core",
+      "version": "1.34.18",
+      "api": "parseYaml",
+      "provided_by": "openapi-typescript@7.13.0"
+    },
+    "validator": {
+      "package": "ajv",
+      "version": "8.17.1"
+    }
+  },
+  "activation": {
+    "environment": "local",
+    "local_profile": "demo_fast",
+    "launcher_script": "scripts/run-local-demo-fast.sh",
+    "launcher_argument": "--stable-api-only",
+    "package_entry": "tauri:demo-fast:stable",
+    "build_entry": "tauri:build:demo-fast:stable",
+    "runtime_flag": "YIJIE_FEAT134_STREAMING_ENABLED",
+    "compile_flag": "VITE_YIJIE_FEAT134_STREAMING_ENABLED",
+    "enabled_value": "true"
+  }
+}

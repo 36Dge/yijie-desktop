@@ -21,6 +21,7 @@ fail() {
 
 image_generation_enabled="true"
 stable_api_only="false"
+feat134_environment=()
 case "$#" in
   0) ;;
   1)
@@ -30,6 +31,10 @@ case "$#" in
     runtime_root="$desktop_root/.local/feat131-stable"
     host_home="$runtime_root/host-home"
     codex_home="$runtime_root/codex-home"
+    feat134_environment=(
+      YIJIE_FEAT134_STREAMING_ENABLED=true
+      VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
+    )
     ;;
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
@@ -38,9 +43,12 @@ esac
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 
-# This is the immutable preflight for Contracts 0.5.1, Agent Host 1b7bfd1 and
-# Skills 0.3.0. It must run before executing the Host producer checkout.
+# FEAT-134 first verifies its exact Contracts/Host v4 authority. The Skill
+# resource chain then retains its independent legacy immutable pins.
 cd "$desktop_root"
+YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
+YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
+  node scripts/check-agent-host-v4-contract.mjs
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
 YIJIE_DESKTOP_SKILLS_DIR="$workspace_root/yijie-skills" \
@@ -105,6 +113,9 @@ exec env \
   -u YIJIE_FEAT128_IMAGE_GENERATION_ENABLED \
   -u YIJIE_FEAT131_STABLE_ENTRY \
   -u YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED \
+  -u YIJIE_FEAT134_STREAMING_ENABLED \
+  -u VITE_YIJIE_FEAT134_STREAMING_ENABLED \
+  "${feat134_environment[@]}" \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \
   VITE_FEAT128_S10D_RUNTIME=false \

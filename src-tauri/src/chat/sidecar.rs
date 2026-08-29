@@ -20,6 +20,7 @@ const FEAT126_DRIVER_NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
 const FEAT128_S10_PROFILE_ENV: &str = "YIJIE_FEAT128_S10_TEST_PROFILE_ENABLED";
 const CHAT_ARTIFACTS_V3_ENV: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 const FEAT128_IMAGE_GENERATION_ENV: &str = "YIJIE_FEAT128_IMAGE_GENERATION_ENABLED";
+const FEAT134_STREAMING_ENV: &str = "YIJIE_FEAT134_STREAMING_ENABLED";
 const MODEL_PROVIDER_ENV: &str = "YIJIE_MODEL_PROVIDER";
 const MINIMAX_PROVIDER_ID: &str = "minimax";
 const MINIMAX_API_KEY_FILE_ENV: &str = "YIJIE_MINIMAX_API_KEY_FILE";
@@ -49,6 +50,7 @@ pub struct SidecarConfig {
     feat128_s10_profile: bool,
     minimax_provider_enabled: bool,
     image_generation_enabled: bool,
+    feat134_streaming_enabled: bool,
     minimax_api_key_file: Option<PathBuf>,
 }
 
@@ -63,6 +65,7 @@ impl SidecarConfig {
                 || std::env::var_os(FEAT128_S10_PROFILE_ENV).is_some()
                 || std::env::var_os(CHAT_ARTIFACTS_V3_ENV).is_some()
                 || std::env::var_os(FEAT128_IMAGE_GENERATION_ENV).is_some()
+                || std::env::var_os(FEAT134_STREAMING_ENV).is_some()
                 || feat128_provider_environment_is_present()
                 || feat128_child_profile_is_present()
             {
@@ -104,6 +107,11 @@ impl SidecarConfig {
         let feat128_s10_profile = read_exact_boolean_environment(FEAT128_S10_PROFILE_ENV)?;
         let image_generation_enabled =
             read_exact_boolean_environment(FEAT128_IMAGE_GENERATION_ENV)?;
+        let feat134_streaming_enabled = super::feat134::exact_local_enabled(
+            std::env::var(FEAT134_STREAMING_ENV).ok().as_deref(),
+            std::env::var("YIJIE_ENV").ok().as_deref(),
+            std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
+        )?;
         let minimax_provider_enabled =
             parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
         let minimax_api_key_file = optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?;
@@ -154,6 +162,7 @@ impl SidecarConfig {
             feat128_s10_profile,
             minimax_provider_enabled,
             image_generation_enabled,
+            feat134_streaming_enabled,
             minimax_api_key_file,
         }))
     }
@@ -194,6 +203,9 @@ impl SidecarConfig {
         ];
         if demo_fast {
             values.push(("YIJIE_LOCAL_PROFILE", "demo_fast".to_owned()));
+        }
+        if self.feat134_streaming_enabled {
+            values.push((FEAT134_STREAMING_ENV, "true".to_owned()));
         }
         if let Some(roots) = skill_roots {
             values.extend([
@@ -1603,6 +1615,7 @@ mod tests {
             codex_home: None,
             test_profile: None,
             artifact_v3_enabled: false,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -1666,6 +1679,7 @@ mod tests {
             codex_home: None,
             test_profile: None,
             artifact_v3_enabled: false,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -1721,6 +1735,7 @@ mod tests {
             codex_home: None,
             test_profile: None,
             artifact_v3_enabled: true,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: true,
             image_generation_enabled: true,
@@ -1935,6 +1950,7 @@ mod tests {
             codex_home: Some(root.join("codex-home")),
             test_profile: Some(profile),
             artifact_v3_enabled: false,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -2138,6 +2154,7 @@ mod tests {
                     instance_nonce: nonce.to_owned(),
                 }),
                 artifact_v3_enabled: false,
+                feat134_streaming_enabled: false,
                 feat128_s10_profile: false,
                 minimax_provider_enabled: false,
                 image_generation_enabled: false,
@@ -2226,6 +2243,7 @@ mod tests {
                 instance_nonce: NONCE.to_owned(),
             }),
             artifact_v3_enabled: false,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -2587,6 +2605,7 @@ mod tests {
             codex_home: None,
             test_profile: None,
             artifact_v3_enabled: false,
+            feat134_streaming_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,

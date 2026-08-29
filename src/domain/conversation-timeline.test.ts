@@ -301,7 +301,7 @@ describe("selectConversationTimeline", () => {
       ConversationTimelineRole,
     ][] = [
       ["user_message", "user"],
-      ["assistant_message", "assistant"],
+      ["assistant_message", "process"],
       ["reasoning", "process"],
       ["artifact", "assistant"],
       ["unknown", "system"],

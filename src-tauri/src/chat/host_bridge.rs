@@ -36,6 +36,12 @@ const MAX_TURN_V2_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_TURN_V2_FILE_CONTEXT_BYTES: usize = 256 * 1024;
 const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(not(test))]
+// The Host emits healthy SSE heartbeats every 15 seconds. FEAT-134 v4 waits for two
+// complete heartbeat windows before treating an otherwise silent stream as recoverable.
+const EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Default, Serialize)]
 pub struct HostTrace {
@@ -82,6 +88,7 @@ impl Debug for HostBridge {
 pub struct HostEventStream {
     response: Response,
     decoder: SseDecoder,
+    idle_timeout: Option<Duration>,
     finished: bool,
 }
 
@@ -89,6 +96,7 @@ impl Debug for HostEventStream {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("HostEventStream")
+            .field("idle_recovery_enabled", &self.idle_timeout.is_some())
             .field("finished", &self.finished)
             .finish()
     }
@@ -111,7 +119,15 @@ impl HostEventStream {
             return Ok(None);
         }
         loop {
-            match self.response.chunk().await.map_err(|_| transport_error())? {
+            let chunk = if let Some(idle_timeout) = self.idle_timeout {
+                tokio::time::timeout(idle_timeout, self.response.chunk())
+                    .await
+                    .map_err(|_| transport_error())?
+                    .map_err(|_| transport_error())?
+            } else {
+                self.response.chunk().await.map_err(|_| transport_error())?
+            };
+            match chunk {
                 Some(chunk) => {
                     self.decoder.push(&chunk)?;
                     if let Some(event) = self.decoder.next() {
@@ -605,7 +621,7 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2 | 3) {
+        if !matches!(schema_version, 2..=4) {
             return Err(protocol_error());
         }
         let mut request = self
@@ -645,6 +661,7 @@ impl HostBridge {
         Ok(HostEventStream {
             response,
             decoder: SseDecoder::new(stream_id, last_sequence, schema_version),
+            idle_timeout: (schema_version == 4).then_some(EVENT_STREAM_IDLE_TIMEOUT),
             finished: false,
         })
     }
@@ -663,6 +680,14 @@ impl HostBridge {
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
         self.open_event_stream(session_id, cursor, 3).await
+    }
+
+    pub async fn open_event_stream_v4(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 4).await
     }
 
     pub(crate) async fn list_managed_skills(&self) -> Result<HostSkillSnapshot, HostBridgeError> {
@@ -1823,6 +1848,41 @@ mod tests {
         (port, task)
     }
 
+    async fn serve_idle_event_stream(
+        stream_id: Uuid,
+        schema_version: u8,
+    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::with_capacity(2);
+            let (mut ready, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut ready).await);
+            ready
+                .write_all(ready_response(NONCE).as_bytes())
+                .await
+                .unwrap();
+            ready.shutdown().await.unwrap();
+
+            let (mut stream, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut stream).await);
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Cache-Control: no-store\r\n\
+                 X-Accel-Buffering: no\r\n\
+                 X-Yijie-Event-Schema-Version: {schema_version}\r\n\
+                 X-Yijie-Event-Stream-ID: {stream_id}\r\n\
+                 Connection: close\r\n\r\n"
+            );
+            stream.write_all(headers.as_bytes()).await.unwrap();
+            tokio::time::sleep(EVENT_STREAM_IDLE_TIMEOUT * 3).await;
+            stream.shutdown().await.unwrap();
+            requests
+        });
+        (port, task)
+    }
+
     fn bridge(port: u16, token_path: PathBuf, nonce: &str) -> HostBridge {
         HostBridge::from_connection(HostConnection {
             port,
@@ -2516,6 +2576,51 @@ mod tests {
             "GET /v2/agent-sessions/{session_id}/events?event_schema_version=2 HTTP/1.1"
         )));
         assert!(requests[1].contains(&format!("last-event-id: {stream_id}:4")));
+    }
+
+    #[tokio::test]
+    async fn v4_idle_stream_returns_transport_error_without_advancing_durable_cursor() {
+        let token = TestToken::new(0o600);
+        let stream_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let cursor = HostEventCursor::new(stream_id, 10).unwrap();
+        let (port, server) = serve_idle_event_stream(stream_id, 4).await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        let mut stream = bridge
+            .open_event_stream_v4(agent_session_id, Some(cursor))
+            .await
+            .unwrap();
+
+        let error = stream.next_stream_event().await.unwrap_err();
+        assert_eq!(error.kind(), HostBridgeErrorKind::Transport);
+
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "GET /v4/agent-sessions/{agent_session_id}/events?event_schema_version=4 HTTP/1.1"
+        )));
+        assert!(requests[1].contains(&format!("last-event-id: {stream_id}:10")));
+    }
+
+    #[tokio::test]
+    async fn v2_idle_stream_does_not_inherit_feat134_recovery_timeout() {
+        let token = TestToken::new(0o600);
+        let stream_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let (port, server) = serve_idle_event_stream(stream_id, 2).await;
+        let bridge = bridge(port, token.path.clone(), NONCE);
+        let mut stream = bridge
+            .open_event_stream_v2(agent_session_id, None)
+            .await
+            .unwrap();
+
+        let outcome =
+            tokio::time::timeout(EVENT_STREAM_IDLE_TIMEOUT * 2, stream.next_stream_event()).await;
+        assert!(outcome.is_err());
+
+        let requests = server.await.unwrap();
+        assert!(requests[1].starts_with(&format!(
+            "GET /v2/agent-sessions/{agent_session_id}/events?event_schema_version=2 HTTP/1.1"
+        )));
     }
 
     #[tokio::test]

@@ -1,0 +1,74 @@
+[
+  {
+    "schemaVersion": 4,
+    "subscriptionId": "13400000-0000-4000-8000-000000000002",
+    "contextId": "13400000-0000-4000-8000-000000000003",
+    "sessionId": "13400000-0000-4000-8000-000000000004",
+    "turnId": "13400000-0000-4000-8000-000000000005",
+    "projectionSequence": "1",
+    "eventId": "13400000-0000-4000-8000-000000000010",
+    "durableSequence": "1",
+    "kind": "turn_started",
+    "payload": {
+      "sourceEventId": "13400000-0000-4000-8000-000000000010",
+      "sourceSequence": "1",
+      "sourceOccurredAt": "2026-08-28T06:00:00Z"
+    }
+  },
+  {
+    "schemaVersion": 4,
+    "subscriptionId": "13400000-0000-4000-8000-000000000002",
+    "contextId": "13400000-0000-4000-8000-000000000003",
+    "sessionId": "13400000-0000-4000-8000-000000000004",
+    "turnId": "13400000-0000-4000-8000-000000000005",
+    "projectionSequence": "2",
+    "eventId": "13400000-0000-4000-8000-000000000011",
+    "durableSequence": "2",
+    "kind": "plan_updated",
+    "payload": {
+      "sourceEventId": "13400000-0000-4000-8000-000000000011",
+      "sourceSequence": "2",
+      "sourceOccurredAt": "2026-08-28T06:00:01Z",
+      "explanation": null,
+      "steps": []
+    }
+  },
+  {
+    "schemaVersion": 4,
+    "subscriptionId": "13400000-0000-4000-8000-000000000002",
+    "contextId": "13400000-0000-4000-8000-000000000003",
+    "sessionId": "13400000-0000-4000-8000-000000000004",
+    "projectionSequence": "3",
+    "eventId": "13400000-0000-4000-8000-000000000012",
+    "durableSequence": "3",
+    "kind": "notice",
+    "payload": {
+      "sourceEventId": "13400000-0000-4000-8000-000000000012",
+      "sourceSequence": "3",
+      "sourceOccurredAt": "2026-08-28T06:00:02Z",
+      "scope": "session",
+      "severity": "warning",
+      "code": "provider_warning",
+      "willRetry": false
+    }
+  },
+  {
+    "schemaVersion": 4,
+    "subscriptionId": "13400000-0000-4000-8000-000000000002",
+    "contextId": "13400000-0000-4000-8000-000000000003",
+    "sessionId": "13400000-0000-4000-8000-000000000004",
+    "turnId": "13400000-0000-4000-8000-000000000005",
+    "projectionSequence": "4",
+    "eventId": "13400000-0000-4000-8000-000000000013",
+    "durableSequence": "4",
+    "kind": "turn_terminal",
+    "payload": {
+      "sourceEventId": "13400000-0000-4000-8000-000000000013",
+      "sourceSequence": "4",
+      "sourceOccurredAt": "2026-08-28T06:00:03Z",
+      "status": "failed",
+      "code": "runtime_error",
+      "unfinishedReasoningReasonCode": "runtime_error"
+    }
+  }
+]

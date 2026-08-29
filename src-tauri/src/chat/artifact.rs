@@ -8,7 +8,7 @@ use super::host_domain::{
     HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostErrorCode,
 };
 use super::worker::DatabaseWorker;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -1003,6 +1003,110 @@ pub fn decode_artifact_event_envelope_v3(
         }
         _ => Err(ChatError::InvalidInput),
     }
+}
+
+pub(super) fn load_artifacts_for_turns_from_connection(
+    connection: &Connection,
+    scope: &super::database::ChatScope,
+    turn_ids: &[Uuid],
+) -> Result<Vec<ArtifactProjection>, ChatError> {
+    if turn_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if turn_ids.len() > 50 || turn_ids.iter().any(Uuid::is_nil) {
+        return Err(ChatError::InvalidInput);
+    }
+    let placeholders = std::iter::repeat_n("?", turn_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT a.artifact_id, a.turn_id, a.kind, a.provenance, a.state, a.ordinal,
+                a.progress_stage, a.progress_percent,
+                a.display_name, a.media_type, a.byte_size, a.local_committed_at, a.expires_at,
+                a.poster_media_type IS NOT NULL, a.error_code, a.retryable
+         FROM chat_output_artifacts a
+         JOIN chat_sessions s ON s.id=a.session_id
+         WHERE a.turn_id IN ({placeholders})
+           AND a.owner_user_id=? AND a.tenant_id=?
+           AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id
+         ORDER BY a.turn_id, a.ordinal"
+    );
+    let mut values = turn_ids.iter().map(Uuid::to_string).collect::<Vec<_>>();
+    values.push(scope.owner_user_id.clone());
+    values.push(scope.tenant_id.clone());
+    let mut statement = connection.prepare(&sql).map_err(map_sqlite_error)?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<f64>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<i64>>(12)?,
+                row.get::<_, bool>(13)?,
+                row.get::<_, Option<String>>(14)?,
+                row.get::<_, Option<bool>>(15)?,
+            ))
+        })
+        .map_err(map_sqlite_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sqlite_error)?;
+    rows.into_iter()
+        .map(
+            |(
+                artifact_id,
+                turn_id,
+                kind,
+                provenance,
+                state,
+                ordinal,
+                progress_stage,
+                progress_percent,
+                display_name,
+                media_type,
+                size_bytes,
+                local_committed_at,
+                expires_at,
+                has_poster,
+                error_code,
+                retryable,
+            )| {
+                Ok(ArtifactProjection {
+                    artifact_id: parse_uuid(&artifact_id)?,
+                    turn_id: parse_uuid(&turn_id)?,
+                    kind: ArtifactKind::parse(&kind)?,
+                    provenance: ArtifactProvenance::parse(&provenance)?,
+                    state,
+                    ordinal: usize::try_from(ordinal)
+                        .map_err(|_| ChatError::DatabaseUnavailable)?,
+                    progress_stage: progress_stage
+                        .as_deref()
+                        .map(ArtifactProgressStage::parse)
+                        .transpose()?,
+                    progress_percent,
+                    display_name,
+                    media_type,
+                    size_bytes: size_bytes
+                        .map(usize::try_from)
+                        .transpose()
+                        .map_err(|_| ChatError::DatabaseUnavailable)?,
+                    local_committed_at,
+                    expires_at,
+                    has_poster,
+                    error_code,
+                    retryable,
+                })
+            },
+        )
+        .collect()
 }
 
 impl ChatRepository {
@@ -2535,103 +2639,7 @@ impl ChatRepository {
         &self,
         turn_ids: &[Uuid],
     ) -> Result<Vec<ArtifactProjection>, ChatError> {
-        if turn_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        if turn_ids.len() > 50 || turn_ids.iter().any(Uuid::is_nil) {
-            return Err(ChatError::InvalidInput);
-        }
-        let placeholders = std::iter::repeat_n("?", turn_ids.len())
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "SELECT a.artifact_id, a.turn_id, a.kind, a.provenance, a.state, a.ordinal,
-                    a.progress_stage, a.progress_percent,
-                    a.display_name, a.media_type, a.byte_size, a.local_committed_at, a.expires_at,
-                    a.poster_media_type IS NOT NULL, a.error_code, a.retryable
-             FROM chat_output_artifacts a
-             JOIN chat_sessions s ON s.id=a.session_id
-             WHERE a.turn_id IN ({placeholders})
-               AND a.owner_user_id=? AND a.tenant_id=?
-               AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id
-             ORDER BY a.turn_id, a.ordinal"
-        );
-        let mut values = turn_ids.iter().map(Uuid::to_string).collect::<Vec<_>>();
-        values.push(self.scope.owner_user_id.clone());
-        values.push(self.scope.tenant_id.clone());
-        let mut statement = self.connection.prepare(&sql).map_err(map_sqlite_error)?;
-        let rows = statement
-            .query_map(rusqlite::params_from_iter(values.iter()), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<f64>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<i64>>(10)?,
-                    row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, Option<i64>>(12)?,
-                    row.get::<_, bool>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                    row.get::<_, Option<bool>>(15)?,
-                ))
-            })
-            .map_err(map_sqlite_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(map_sqlite_error)?;
-        rows.into_iter()
-            .map(
-                |(
-                    artifact_id,
-                    turn_id,
-                    kind,
-                    provenance,
-                    state,
-                    ordinal,
-                    progress_stage,
-                    progress_percent,
-                    display_name,
-                    media_type,
-                    size_bytes,
-                    local_committed_at,
-                    expires_at,
-                    has_poster,
-                    error_code,
-                    retryable,
-                )| {
-                    Ok(ArtifactProjection {
-                        artifact_id: parse_uuid(&artifact_id)?,
-                        turn_id: parse_uuid(&turn_id)?,
-                        kind: ArtifactKind::parse(&kind)?,
-                        provenance: ArtifactProvenance::parse(&provenance)?,
-                        state,
-                        ordinal: usize::try_from(ordinal)
-                            .map_err(|_| ChatError::DatabaseUnavailable)?,
-                        progress_stage: progress_stage
-                            .as_deref()
-                            .map(ArtifactProgressStage::parse)
-                            .transpose()?,
-                        progress_percent,
-                        display_name,
-                        media_type,
-                        size_bytes: size_bytes
-                            .map(usize::try_from)
-                            .transpose()
-                            .map_err(|_| ChatError::DatabaseUnavailable)?,
-                        local_committed_at,
-                        expires_at,
-                        has_poster,
-                        error_code,
-                        retryable,
-                    })
-                },
-            )
-            .collect()
+        load_artifacts_for_turns_from_connection(&self.connection, &self.scope, turn_ids)
     }
 
     pub fn purge_expired_artifacts(&mut self, now: i64) -> Result<usize, ChatError> {

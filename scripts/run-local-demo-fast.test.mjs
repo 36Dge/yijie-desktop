@@ -21,6 +21,12 @@ describe("local demo launcher profiles", () => {
     expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
       "--config src-tauri/tauri.feat131-stable.conf.json",
     );
+    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
+      "node scripts/check-agent-host-v4-contract.mjs",
+    );
+    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
+      "VITE_YIJIE_FEAT134_STREAMING_ENABLED=true",
+    );
   });
 
   it("maps the exact stable argument to image=false while retaining image=true by default", async () => {
@@ -34,7 +40,27 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('[[ "$1" == "--stable-api-only" ]]');
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
+    expect(argumentBoundary).toContain("feat134_environment=(");
+    expect(argumentBoundary).toContain("YIJIE_FEAT134_STREAMING_ENABLED=true");
+    expect(argumentBoundary).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain('case "$#" in');
+  });
+
+  it("injects both FEAT-134 flags only through the exact stable branch", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const stableBranch = runner.slice(runner.indexOf("  1)"), runner.indexOf("    ;;"));
+    const execBoundary = runner.slice(runner.indexOf("exec env \\"));
+
+    expect(stableBranch).toContain('[[ "$1" == "--stable-api-only" ]]');
+    expect(stableBranch).toContain("YIJIE_FEAT134_STREAMING_ENABLED=true");
+    expect(stableBranch).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
+    expect(runner.match(/^\s+YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
+    expect(runner.match(/^\s+VITE_YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
+    expect(execBoundary).toContain("-u YIJIE_FEAT134_STREAMING_ENABLED \\");
+    expect(execBoundary).toContain("-u VITE_YIJIE_FEAT134_STREAMING_ENABLED \\");
+    expect(execBoundary).toContain('"${feat134_environment[@]}"');
+    expect(execBoundary).toContain("YIJIE_ENV=local \\");
+    expect(execBoundary).toContain("YIJIE_LOCAL_PROFILE=demo_fast \\");
   });
 
   it("builds and launches the registered debug app only for the stable UI entry", async () => {

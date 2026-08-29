@@ -10,6 +10,7 @@ mod database;
 mod error;
 #[cfg(test)]
 mod feat126_eval_tests;
+mod feat134;
 mod host_bridge;
 mod host_domain;
 pub(crate) mod ipc;
@@ -54,13 +55,21 @@ pub use database::{
     TerminalTurnCommit, TurnProgress,
 };
 pub use error::{ChatCommandError, ChatError};
+pub use feat134::{
+    exact_local_enabled as feat134_exact_local_enabled, Feat134HistoryProjection,
+    Feat134HistoryTurn, Feat134Hydration, Feat134Projection, Feat134TurnReducer, SourceIdentity,
+    TimelineDelta, TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope,
+    TimelineNoticeSeverity, TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart,
+    TimelineReasoningStatus, TimelineTerminal, FEAT134_FLAG,
+};
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
 pub(crate) use host_bridge::{HostManagedSkill, HostSkillSnapshot};
 pub use host_domain::{
-    HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
-    HostCleanupReason, HostCleanupSurfaceStatus, HostCleanupSurfaces, HostErrorCode, HostEvent,
-    HostEventCursor, HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus,
-    HostSession, HostSessionFailure, HostSessionState, HostStreamEvent, HostTurnStatus,
+    HostAgentMessagePhase, HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind,
+    HostCleanupOutcome, HostCleanupReason, HostCleanupSurfaceStatus, HostCleanupSurfaces,
+    HostErrorCode, HostEvent, HostEventCursor, HostEventKind, HostPlanStep, HostPlanStepStatus,
+    HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSession, HostSessionFailure,
+    HostSessionState, HostStreamEvent, HostTurnStatus,
 };
 pub use ipc::{
     ChatIpcRuntime, CHAT_ARTIFACT_LIVE_EVENT_CHANNEL, CHAT_EVENT_CHANNEL, CHAT_IPC_SCHEMA_VERSION,
@@ -145,6 +154,7 @@ struct LocalChatConfig {
     secure_storage: Option<Arc<Feat126SecureStorageProfile>>,
     public_tasks: Arc<dyn PublicTaskControlPlane>,
     demo_fast: bool,
+    feat134_streaming_enabled: bool,
 }
 
 enum RuntimeMode {
@@ -231,9 +241,30 @@ impl ChatRuntime {
         local_profile: LocalRuntimeProfile,
         skill_roots: Option<SkillRoots>,
     ) -> Self {
+        let feat134_streaming_enabled = match feat134::exact_local_enabled(
+            std::env::var(feat134::FEAT134_FLAG).ok().as_deref(),
+            std::env::var("YIJIE_ENV").ok().as_deref(),
+            std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
+        ) {
+            Ok(enabled) => enabled,
+            Err(_) => {
+                return Self {
+                    mode: RuntimeMode::Invalid,
+                    authorization: None,
+                    worker: Mutex::new(None),
+                    initialization: Mutex::new(()),
+                    sidecar: None,
+                    host_bridge: Mutex::new(None),
+                };
+            }
+        };
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
-                mode: RuntimeMode::Disabled,
+                mode: if feat134_streaming_enabled {
+                    RuntimeMode::Invalid
+                } else {
+                    RuntimeMode::Disabled
+                },
                 authorization: None,
                 worker: Mutex::new(None),
                 initialization: Mutex::new(()),
@@ -270,6 +301,7 @@ impl ChatRuntime {
                                 tenant_id,
                             )),
                             demo_fast: local_profile.is_demo_fast(),
+                            feat134_streaming_enabled,
                             scope,
                             secure_storage: secure_storage.clone(),
                         }),
@@ -776,6 +808,13 @@ impl ChatRuntime {
         })
     }
 
+    pub(crate) fn feat134_streaming_enabled(&self) -> bool {
+        matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat134_streaming_enabled
+        )
+    }
+
     pub async fn local_conversation_application(
         &self,
     ) -> Result<ConversationApplication, ChatError> {
@@ -786,6 +825,16 @@ impl ChatRuntime {
             RuntimeMode::Disabled => return Err(ChatError::Disabled),
             RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
         };
+        if matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat134_streaming_enabled
+        ) {
+            return Ok(ConversationApplication::new_with_artifacts_v4(
+                database,
+                host,
+                public_tasks,
+            ));
+        }
         let configured = std::env::var(ARTIFACTS_V3_FLAG).ok();
         if artifacts_v3_transfer_enabled(configured.as_deref()) {
             Ok(ConversationApplication::new_with_artifacts_v3(
@@ -858,12 +907,14 @@ fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
         | ChatError::Disabled
         | ChatError::InvalidConfiguration
         | ChatError::InvalidInput
+        | ChatError::ProjectionLimitExceeded
         | ChatError::NotFound
         | ChatError::ScopeDenied
         | ChatError::ProjectUnavailable
         | ChatError::NativePickerUnavailable
         | ChatError::SidecarUnavailable
         | ChatError::ConversationConflict
+        | ChatError::ProjectionReconciliationFailed
         | ChatError::OrchestrationUnavailable
         | ChatError::CleanupIncomplete => ChatStorageReadiness::Unavailable,
     }

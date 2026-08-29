@@ -240,6 +240,109 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("已复制");
   });
 
+  it("publishes a streaming burst and follows new content at most once per frame", async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      const handle = nextHandle++;
+      callbacks.set(handle, callback);
+      return handle;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((handle: number) => {
+      callbacks.delete(handle);
+    }));
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    const scroller = wrapper.get<HTMLElement>(".chat-workspace__conversation").element;
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, "scrollTo", { configurable: true, value: scrollTo });
+
+    store.phase = "streaming";
+    for (let revision = 1; revision <= 100; revision += 1) {
+      store.conversationState = {
+        ...store.conversationState,
+        diagnostics: Object.freeze(Array.from(
+          { length: Math.min(revision, 64) },
+          () => Object.freeze({ code: "unsupported_event" as const }),
+        )),
+      };
+    }
+    await flushPromises();
+
+    expect(callbacks.size).toBe(1);
+    expect(scrollTo).not.toHaveBeenCalled();
+    const frameCallbacks = [...callbacks.values()];
+    callbacks.clear();
+    frameCallbacks.forEach((callback) => callback(16));
+    await flushPromises();
+    await flushPromises();
+
+    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(wrapper.text()).toContain("标题检查完成");
+  });
+
+  it("replaces a queued presentation frame when the selected session changes", async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      const handle = nextHandle++;
+      callbacks.set(handle, callback);
+      return handle;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((handle: number) => {
+      callbacks.delete(handle);
+    }));
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    const secondSessionId = "019c1a00-0000-7000-8000-000000000020";
+    const secondTurnId = "019c1a00-0000-7000-8000-000000000021";
+    store.phase = "streaming";
+    store.conversationState = { ...store.conversationState };
+    expect(callbacks.size).toBe(1);
+
+    store.sessions = [SESSION, {
+      ...SESSION,
+      sessionId: secondSessionId,
+      title: "第二个本地任务",
+    }];
+    store.conversationState = hydrateConversationState({
+      threads: [
+        { threadId: SESSION_ID, status: "ready" },
+        { threadId: secondSessionId, status: "ready" },
+      ],
+      turns: [{
+        threadId: secondSessionId,
+        turnId: secondTurnId,
+        ordinal: 0,
+        status: "completed",
+        terminalStatus: "completed",
+      }],
+      items: [{
+        threadId: secondSessionId,
+        turnId: secondTurnId,
+        itemId: "second-final",
+        ordinal: 1,
+        kind: "assistant_message",
+        status: "completed",
+        agentMessagePhase: "final_answer",
+        contentBlocks: [{ blockIndex: 0, type: "text", text: "第二个会话的回答" }],
+      }],
+    });
+    store.selectedSessionId = secondSessionId;
+    await flushPromises();
+
+    expect(callbacks.size).toBe(0);
+    expect(wrapper.text()).toContain("第二个本地任务");
+    expect(wrapper.text()).toContain("第二个会话的回答");
+    expect(wrapper.text()).not.toContain("标题检查完成");
+  });
+
   it("injects exact fenced-code copy without giving Timeline clipboard authority", async () => {
     const writeText = vi.fn<(_: string) => Promise<void>>().mockResolvedValue();
     vi.stubGlobal("navigator", { clipboard: { writeText } });

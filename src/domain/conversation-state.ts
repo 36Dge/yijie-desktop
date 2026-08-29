@@ -1,4 +1,4 @@
-export const CONVERSATION_STATE_SCHEMA_VERSION = 1 as const;
+export const CONVERSATION_STATE_SCHEMA_VERSION = 2 as const;
 export const MAX_CONVERSATION_EVENT_IDS = 256;
 export const MAX_CONVERSATION_NOTICES = 64;
 export const MAX_CONVERSATION_DIAGNOSTICS = 64;
@@ -29,8 +29,41 @@ export type ConversationTerminalStatus = Extract<
   ConversationTurnStatus,
   "completed" | "failed" | "interrupted"
 >;
-export type ConversationItemStatus = "started" | "streaming" | "completed";
+export type ConversationItemStatus = "started" | "streaming" | "completed" | "incomplete";
 export type ReconciliationStatus = "not_applicable" | "matched" | "mismatch";
+export type ConversationAgentMessagePhase = "commentary" | "final_answer" | "unknown";
+export type ConversationPlanStepStatus = "pending" | "in_progress" | "completed" | "unknown";
+export type ConversationReasoningStatus =
+  | "in_progress"
+  | "complete"
+  | "incomplete"
+  | "unavailable"
+  | "unknown";
+export type ConversationReasoningReasonCode =
+  | "reasoning_not_emitted"
+  | "turn_interrupted"
+  | "stream_gap"
+  | "runtime_error"
+  | "limit_exceeded"
+  | "protocol_error"
+  | "host_shutdown"
+  | "unknown";
+
+export interface ConversationPlanStep {
+  readonly ordinal: number;
+  readonly text: string;
+  readonly status: ConversationPlanStepStatus;
+}
+
+export interface ConversationPlanSnapshot {
+  readonly explanation: string | null;
+  readonly steps: readonly ConversationPlanStep[];
+}
+
+export interface ConversationReasoningState {
+  readonly status: ConversationReasoningStatus;
+  readonly reasonCode: ConversationReasoningReasonCode | null;
+}
 
 export interface TextContentBlock {
   readonly blockIndex: number;
@@ -81,6 +114,7 @@ export interface ConversationThread {
   readonly threadId: string;
   readonly status: ConversationThreadStatus;
   readonly turnKeys: readonly string[];
+  readonly notices: readonly ConversationNotice[];
 }
 
 export interface ConversationNotice {
@@ -94,6 +128,8 @@ export interface ConversationTurn {
   readonly ordinal: number;
   readonly status: ConversationTurnStatus;
   readonly terminalStatus: ConversationTerminalStatus | null;
+  readonly terminalCode: string | null;
+  readonly plan: ConversationPlanSnapshot | null;
   readonly itemKeys: readonly string[];
   readonly notices: readonly ConversationNotice[];
 }
@@ -105,6 +141,8 @@ export interface ConversationItem {
   readonly ordinal: number;
   readonly kind: ConversationItemKind;
   readonly status: ConversationItemStatus;
+  readonly agentMessagePhase: ConversationAgentMessagePhase | null;
+  readonly reasoning: ConversationReasoningState | null;
   readonly contentBlocks: readonly ConversationContentBlock[];
   readonly reconciliation: ReconciliationStatus;
 }
@@ -135,6 +173,7 @@ export interface ConversationState {
 export interface ConversationThreadSnapshot {
   readonly threadId: string;
   readonly status: ConversationThreadStatus;
+  readonly notices?: readonly ConversationNotice[];
 }
 
 export interface ConversationTurnSnapshot {
@@ -143,6 +182,8 @@ export interface ConversationTurnSnapshot {
   readonly ordinal: number;
   readonly status: ConversationTurnStatus;
   readonly terminalStatus: ConversationTerminalStatus | null;
+  readonly terminalCode?: string | null;
+  readonly plan?: ConversationPlanSnapshot | null;
   readonly notices?: readonly ConversationNotice[];
 }
 
@@ -153,6 +194,8 @@ export interface ConversationItemSnapshot {
   readonly ordinal: number;
   readonly kind: ConversationItemKind;
   readonly status: ConversationItemStatus;
+  readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
+  readonly reasoning?: ConversationReasoningState | null;
   readonly contentBlocks: readonly ConversationContentBlock[];
   readonly reconciliation?: ReconciliationStatus;
 }
@@ -190,11 +233,14 @@ export type ConversationEvent =
       readonly kind: "item.started";
       readonly ordinal: number;
       readonly itemKind: ConversationItemKind;
+      readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
+      readonly initialBlocks?: readonly ConversationContentBlock[];
     })
   | (ItemEventCursor & {
       readonly kind: "item.delta";
       readonly ordinal: number;
       readonly itemKind: ConversationItemKind;
+      readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
       readonly blockIndex: number;
       readonly blockType: "text" | "code";
       readonly language?: string | null;
@@ -202,15 +248,37 @@ export type ConversationEvent =
     })
   | (ItemEventCursor & {
       readonly kind: "item.completed";
+      readonly ordinal?: number;
+      readonly itemKind?: ConversationItemKind;
+      readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
       readonly finalBlocks?: readonly ConversationContentBlock[];
+    })
+  | (ItemEventCursor & {
+      readonly kind: "reasoning.finalized";
+      readonly ordinal: number;
+      readonly status: Exclude<ConversationReasoningStatus, "in_progress">;
+      readonly reasonCode: ConversationReasoningReasonCode | null;
+      readonly finalBlocks: readonly ConversationContentBlock[];
+    })
+  | (TurnEventCursor & {
+      readonly kind: "turn.plan.updated";
+      readonly explanation: string | null;
+      readonly steps: readonly Omit<ConversationPlanStep, "ordinal">[];
     })
   | (TurnEventCursor & {
       readonly kind: "turn.completed";
       readonly terminalStatus: ConversationTerminalStatus;
+      readonly terminalCode?: string | null;
+      readonly unfinishedItemStatus?: Extract<ConversationItemStatus, "completed" | "incomplete">;
+      readonly unfinishedReasoningReasonCode?: ConversationReasoningReasonCode | null;
     })
   | (TurnEventCursor & {
       readonly kind: "notice";
       readonly severity: "error" | "warning";
+    })
+  | (EventCursor & {
+      readonly kind: "thread.notice";
+      readonly severity: "warning";
     })
   | (TurnEventCursor & { readonly kind: "unknown" });
 
@@ -226,6 +294,34 @@ const ACTIVE_TURN_STATUS_SET: ReadonlySet<ConversationTurnStatus> = new Set([
   "queued",
   "in_progress",
   "waiting_approval",
+]);
+const AGENT_MESSAGE_PHASE_SET: ReadonlySet<string> = new Set([
+  "commentary",
+  "final_answer",
+  "unknown",
+]);
+const PLAN_STEP_STATUS_SET: ReadonlySet<string> = new Set([
+  "pending",
+  "in_progress",
+  "completed",
+  "unknown",
+]);
+const REASONING_STATUS_SET: ReadonlySet<string> = new Set([
+  "in_progress",
+  "complete",
+  "incomplete",
+  "unavailable",
+  "unknown",
+]);
+const REASONING_REASON_CODE_SET: ReadonlySet<string> = new Set([
+  "reasoning_not_emitted",
+  "turn_interrupted",
+  "stream_gap",
+  "runtime_error",
+  "limit_exceeded",
+  "protocol_error",
+  "host_shutdown",
+  "unknown",
 ]);
 
 export function createConversationState(): ConversationState {
@@ -300,6 +396,83 @@ function sanitizeKind(kind: ConversationItemKind): ConversationItemKind {
   return ITEM_KIND_SET.has(kind) && PROJECTED_ITEM_KIND_SET.has(kind) ? kind : "unknown";
 }
 
+function sanitizeAgentMessagePhase(
+  kind: ConversationItemKind,
+  phase: ConversationAgentMessagePhase | null | undefined,
+): ConversationAgentMessagePhase | null {
+  if (kind !== "assistant_message") return null;
+  return typeof phase === "string" && AGENT_MESSAGE_PHASE_SET.has(phase)
+    ? phase
+    : "unknown";
+}
+
+export function conversationAgentMessagePhase(
+  phase: "commentary" | "final_answer" | null | undefined,
+): ConversationAgentMessagePhase {
+  return phase === "commentary" || phase === "final_answer" ? phase : "unknown";
+}
+
+export function conversationReasoningReasonCode(
+  reasonCode: string | null | undefined,
+): ConversationReasoningReasonCode | null {
+  if (reasonCode === null || reasonCode === undefined) return null;
+  return REASONING_REASON_CODE_SET.has(reasonCode)
+    ? reasonCode as ConversationReasoningReasonCode
+    : "unknown";
+}
+
+function sanitizePlan(
+  explanation: string | null,
+  steps: readonly Omit<ConversationPlanStep, "ordinal">[],
+): ConversationPlanSnapshot {
+  return Object.freeze({
+    explanation: typeof explanation === "string" ? explanation : null,
+    steps: Object.freeze(steps.map((step, ordinal) => Object.freeze({
+      ordinal,
+      text: String(step.text),
+      status: PLAN_STEP_STATUS_SET.has(step.status) ? step.status : "unknown",
+    }))),
+  });
+}
+
+function sanitizePlanOrNull(
+  explanation: string | null,
+  steps: readonly Omit<ConversationPlanStep, "ordinal">[],
+): ConversationPlanSnapshot | null {
+  return steps.length === 0 ? null : sanitizePlan(explanation, steps);
+}
+
+function sanitizePlanSnapshot(
+  plan: ConversationPlanSnapshot | null | undefined,
+): ConversationPlanSnapshot | null {
+  if (plan === null || plan === undefined) return null;
+  return sanitizePlanOrNull(plan.explanation, [...plan.steps]
+    .sort((left, right) => integer(left.ordinal) - integer(right.ordinal))
+    .map((step) => ({ text: step.text, status: step.status })));
+}
+
+function sanitizeReasoning(
+  kind: ConversationItemKind,
+  reasoning: ConversationReasoningState | null | undefined,
+): ConversationReasoningState | null {
+  if (kind !== "reasoning" || reasoning === null || reasoning === undefined) return null;
+  const status = REASONING_STATUS_SET.has(reasoning.status)
+    ? reasoning.status
+    : "unknown";
+  const reasonCode = conversationReasoningReasonCode(reasoning.reasonCode);
+  return Object.freeze({ status, reasonCode });
+}
+
+function sanitizeTerminalCode(code: string | null | undefined): string | null {
+  return typeof code === "string" && code.length > 0 ? code : null;
+}
+
+function sanitizeNotice(notice: ConversationNotice): ConversationNotice {
+  return notice.severity === "error"
+    ? { severity: "error", code: "conversation_error" }
+    : { severity: "warning", code: "conversation_warning" };
+}
+
 function sanitizeBlock(block: ConversationContentBlock): ConversationContentBlock {
   const blockIndex = integer(block.blockIndex);
   switch (block.type) {
@@ -353,7 +526,7 @@ function ensureThread(
     ...state,
     threads: {
       ...state.threads,
-      [threadId]: { threadId, status, turnKeys: [] },
+      [threadId]: { threadId, status, turnKeys: [], notices: [] },
     },
   };
 }
@@ -380,6 +553,8 @@ function ensureTurn(
     ordinal: ordinal === null ? inferredOrdinal : integer(ordinal),
     status: "queued",
     terminalStatus: null,
+    terminalCode: null,
+    plan: null,
     itemKeys: [],
     notices: [],
   };
@@ -399,6 +574,7 @@ function ensureItem(
   event: Pick<ItemEventCursor, "threadId" | "turnId" | "itemId">,
   itemKind: ConversationItemKind = "unknown",
   ordinal = 0,
+  agentMessagePhase?: ConversationAgentMessagePhase | null,
 ): ConversationState {
   let next = ensureTurn(state, event.threadId, event.turnId);
   const key = itemKey(event.threadId, event.turnId, event.itemId);
@@ -413,6 +589,10 @@ function ensureItem(
     ordinal: integer(ordinal),
     kind,
     status: "started",
+    agentMessagePhase: sanitizeAgentMessagePhase(kind, agentMessagePhase),
+    reasoning: kind === "reasoning"
+      ? Object.freeze({ status: "in_progress", reasonCode: null })
+      : null,
     contentBlocks: kind === "unknown"
       ? [{ blockIndex: 0, type: "unknown", code: "unsupported_content" }]
       : [],
@@ -447,15 +627,38 @@ function completeTurnItems(
   state: ConversationState,
   threadId: string,
   turnId: string,
+  unfinishedItemStatus: Extract<ConversationItemStatus, "completed" | "incomplete"> = "completed",
+  unfinishedReasoningReasonCode: ConversationReasoningReasonCode | null = null,
 ): ConversationState {
   const turn = selectConversationTurn(state, threadId, turnId);
   if (turn === null) return state;
   let nextItems: Record<string, ConversationItem> | null = null;
   for (const key of turn.itemKeys) {
     const item = state.items[key];
-    if (item === undefined || item.status === "completed") continue;
+    if (item === undefined) continue;
+    const sealsItem = item.status !== "completed" && item.status !== "incomplete";
+    const sealsReasoningPrefix = item.kind === "reasoning" &&
+      (item.reasoning?.status === "in_progress" || item.reasoning?.status === "unknown") &&
+      item.contentBlocks.length > 0 &&
+      unfinishedReasoningReasonCode !== null;
+    if (!sealsItem && !sealsReasoningPrefix) continue;
     if (nextItems === null) nextItems = { ...state.items };
-    nextItems[key] = { ...item, status: "completed" };
+    nextItems[key] = {
+      ...item,
+      status: sealsItem ? unfinishedItemStatus : item.status,
+      reasoning: item.kind === "reasoning" &&
+        (item.reasoning?.status === "in_progress" || item.reasoning?.status === "unknown")
+        ? sealsReasoningPrefix
+          ? Object.freeze({
+              status: "incomplete" as const,
+              reasonCode: unfinishedReasoningReasonCode,
+            })
+          : sealsItem
+            ? Object.freeze({ status: "unknown" as const, reasonCode: null })
+            : item.reasoning
+        : item.reasoning,
+      reconciliation: sealsReasoningPrefix ? "matched" : item.reconciliation,
+    };
   }
   return nextItems === null ? state : { ...state, items: nextItems };
 }
@@ -476,6 +679,16 @@ function sameBlock(left: ConversationContentBlock, right: ConversationContentBlo
       left.expiresAt === right.expiresAt;
   }
   return left.type === "unknown" && right.type === "unknown" && left.code === right.code;
+}
+
+function sameBlocks(
+  left: readonly ConversationContentBlock[],
+  right: readonly ConversationContentBlock[],
+): boolean {
+  return left.length === right.length && left.every((block, index) => {
+    const candidate = right[index];
+    return candidate !== undefined && sameBlock(block, candidate);
+  });
 }
 
 function extendableBlock(
@@ -581,17 +794,22 @@ function applyDelta(
     return markRecovery(state, event, "invalid_transition");
   }
   const sanitizedKind = sanitizeKind(event.itemKind);
+  const sanitizedPhase = sanitizeAgentMessagePhase(
+    sanitizedKind,
+    event.agentMessagePhase,
+  );
   const existingItem = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
   if (existingItem !== null &&
-      (existingItem.kind !== sanitizedKind || existingItem.ordinal !== integer(event.ordinal))) {
+      (existingItem.kind !== sanitizedKind || existingItem.ordinal !== integer(event.ordinal) ||
+       existingItem.agentMessagePhase !== sanitizedPhase)) {
     return markRecovery(state, event, "invalid_transition");
   }
-  if (existingItem?.status === "completed") {
+  if (existingItem?.status === "completed" || existingItem?.status === "incomplete") {
     return markRecovery(state, event, "invalid_transition");
   }
 
   let next = existingItem === null
-    ? ensureItem(state, event, sanitizedKind, event.ordinal)
+    ? ensureItem(state, event, sanitizedKind, event.ordinal, sanitizedPhase)
     : state;
   const key = itemKey(event.threadId, event.turnId, event.itemId);
   const item = next.items[key]!;
@@ -683,41 +901,146 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
         return markRecovery(state, event, "invalid_transition");
       }
       const kind = sanitizeKind(event.itemKind);
+      const agentMessagePhase = sanitizeAgentMessagePhase(kind, event.agentMessagePhase);
       const existing = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
       if (existing !== null &&
           (existing.kind !== kind || existing.ordinal !== integer(event.ordinal) ||
-           existing.status === "completed")) {
+           existing.agentMessagePhase !== agentMessagePhase ||
+           (existing.status !== "started" && existing.status !== "streaming"))) {
         return markRecovery(state, event, "invalid_transition");
       }
-      const next = existing === null
-        ? ensureItem(state, event, kind, event.ordinal)
+      let next = existing === null
+        ? ensureItem(state, event, kind, event.ordinal, agentMessagePhase)
         : state;
+      const initialBlocks = kind === "unknown"
+        ? [{ blockIndex: 0, type: "unknown", code: "unsupported_content" } as const]
+        : sanitizeBlocks(event.initialBlocks ?? []);
+      const item = selectConversationItem(next, event.threadId, event.turnId, event.itemId)!;
+      if (item.contentBlocks.length === 0 && initialBlocks.length > 0) {
+        next = replaceItem(next, { ...item, contentBlocks: initialBlocks });
+      } else if (initialBlocks.length > 0 && !sameBlocks(item.contentBlocks, initialBlocks)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
       return activateTurn(next, event.threadId, event.turnId, event);
     }
     case "item.delta":
       return applyDelta(state, event);
     case "item.completed": {
-      const item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
-      if (item === null || item.status === "completed") {
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      let nextState = state;
+      let item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      if (item === null) {
+        if (event.ordinal === undefined || event.itemKind === undefined) {
+          return markRecovery(state, event, "invalid_transition");
+        }
+        const kind = sanitizeKind(event.itemKind);
+        nextState = ensureItem(
+          state,
+          event,
+          kind,
+          event.ordinal,
+          sanitizeAgentMessagePhase(kind, event.agentMessagePhase),
+        );
+        item = selectConversationItem(
+          nextState,
+          event.threadId,
+          event.turnId,
+          event.itemId,
+        );
+      }
+      if (item === null || item.status === "completed" || item.status === "incomplete") {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const projectedKind = event.itemKind === undefined
+        ? item.kind
+        : sanitizeKind(event.itemKind);
+      const projectedOrdinal = event.ordinal === undefined
+        ? item.ordinal
+        : integer(event.ordinal);
+      const projectedPhase = event.agentMessagePhase === undefined
+        ? item.agentMessagePhase
+        : sanitizeAgentMessagePhase(projectedKind, event.agentMessagePhase);
+      if (item.kind !== projectedKind || item.ordinal !== projectedOrdinal ||
+          item.agentMessagePhase !== projectedPhase) {
         return markRecovery(state, event, "invalid_transition");
       }
       if (item.kind === "unknown") {
-        return replaceItem(state, { ...item, status: "completed" });
+        return activateTurn(
+          replaceItem(nextState, { ...item, status: "completed" }),
+          event.threadId,
+          event.turnId,
+          event,
+        );
       }
-      const reconciled = reconcileBlocks(item.contentBlocks, event.finalBlocks);
-      const next = replaceItem(state, {
+      const reconciled = event.finalBlocks === undefined
+        ? { blocks: item.contentBlocks, status: item.reconciliation }
+        : reconcileBlocks(item.contentBlocks, event.finalBlocks);
+      const next = replaceItem(nextState, {
         ...item,
         status: "completed",
+        reasoning: item.kind === "reasoning" && item.reasoning?.status === "in_progress"
+          ? Object.freeze({ status: "unknown", reasonCode: null })
+          : item.reasoning,
         contentBlocks: reconciled.blocks,
         reconciliation: reconciled.status,
       });
       return reconciled.status === "mismatch"
         ? markRecovery(next, event, "reconciliation_mismatch")
-        : next;
+        : activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "reasoning.finalized": {
+      const existing = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      if (existing !== null &&
+          (existing.kind !== "reasoning" || existing.ordinal !== integer(event.ordinal))) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      let next = existing === null
+        ? ensureItem(state, event, "reasoning", event.ordinal)
+        : state;
+      const item = selectConversationItem(next, event.threadId, event.turnId, event.itemId)!;
+      const reasoning = sanitizeReasoning("reasoning", {
+        status: event.status,
+        reasonCode: event.reasonCode,
+      })!;
+      if (item.reasoning !== null && item.reasoning.status !== "in_progress") {
+        if (item.reasoning.status === reasoning.status &&
+            item.reasoning.reasonCode === reasoning.reasonCode) return next;
+        return markRecovery(state, event, "invalid_transition");
+      }
+      // The v4 reasoning contract defines finalized contents as an authoritative
+      // replacement for the low-latency delta buffer. This deliberately differs
+      // from AgentMessage completion prefix reconciliation; `unavailable` may
+      // also replace a previously displayed buffer with an empty snapshot.
+      const finalizedBlocks = sanitizeBlocks(event.finalBlocks);
+      next = replaceItem(next, {
+        ...item,
+        status: item.status === "started" ? "streaming" : item.status,
+        reasoning,
+        contentBlocks: finalizedBlocks,
+        reconciliation: "matched",
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "turn.plan.updated": {
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const next = ensureTurn(state, event.threadId, event.turnId);
+      const activated = activateTurn(next, event.threadId, event.turnId, event);
+      if (activated.syncStatus === "recovery_required") return activated;
+      const turn = selectConversationTurn(activated, event.threadId, event.turnId)!;
+      return replaceTurn(activated, {
+        ...turn,
+        plan: sanitizePlanOrNull(event.explanation, event.steps),
+      });
     }
     case "turn.completed": {
       const existing = selectConversationTurn(state, event.threadId, event.turnId);
-      if (existing?.terminalStatus === event.terminalStatus) return state;
+      const projectedTerminalCode = sanitizeTerminalCode(event.terminalCode);
+      if (existing?.terminalStatus === event.terminalStatus &&
+          existing.terminalCode === projectedTerminalCode) return state;
       if (existing !== null && existing.terminalStatus !== null) {
         return markRecovery(state, event, "invalid_transition");
       }
@@ -732,8 +1055,15 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
         ...turn,
         status: event.terminalStatus,
         terminalStatus: event.terminalStatus,
+        terminalCode: projectedTerminalCode,
       });
-      const sealed = completeTurnItems(completed, event.threadId, event.turnId);
+      const sealed = completeTurnItems(
+        completed,
+        event.threadId,
+        event.turnId,
+        event.unfinishedItemStatus,
+        event.unfinishedReasoningReasonCode,
+      );
       const thread = sealed.threads[event.threadId]!;
       const hasRemainingActiveTurn = Object.values(sealed.turns).some((candidate) =>
         candidate.threadId === event.threadId && isActiveTurn(candidate)
@@ -761,6 +1091,24 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
         ...turn,
         notices: appendBounded(turn.notices, notice, MAX_CONVERSATION_NOTICES),
       });
+    }
+    case "thread.notice": {
+      const next = ensureThread(state, event.threadId);
+      const thread = next.threads[event.threadId]!;
+      return {
+        ...next,
+        threads: {
+          ...next.threads,
+          [event.threadId]: {
+            ...thread,
+            notices: appendBounded(
+              thread.notices,
+              { severity: "warning", code: "conversation_warning" },
+              MAX_CONVERSATION_NOTICES,
+            ),
+          },
+        },
+      };
     }
     case "unknown":
       return {
@@ -819,6 +1167,19 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
     left.ordinal - right.ordinal || left.turnId.localeCompare(right.turnId));
   for (const thread of orderedThreads) {
     state = ensureThread(state, thread.threadId, thread.status);
+    const current = state.threads[thread.threadId]!;
+    state = {
+      ...state,
+      threads: {
+        ...state.threads,
+        [thread.threadId]: {
+          ...current,
+          notices: Object.freeze((thread.notices ?? [])
+            .slice(-MAX_CONVERSATION_NOTICES)
+            .map(sanitizeNotice)),
+        },
+      },
+    };
   }
   for (const input of orderedTurns) {
     state = ensureTurn(state, input.threadId, input.turnId, input.ordinal);
@@ -828,11 +1189,11 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
       ordinal: integer(input.ordinal),
       status: input.status,
       terminalStatus: input.terminalStatus,
+      terminalCode: sanitizeTerminalCode(input.terminalCode),
+      plan: sanitizePlanSnapshot(input.plan),
       notices: Object.freeze((input.notices ?? [])
         .slice(-MAX_CONVERSATION_NOTICES)
-        .map<ConversationNotice>((notice) => notice.severity === "error"
-          ? { severity: "error", code: "conversation_error" }
-          : { severity: "warning", code: "conversation_warning" })),
+        .map(sanitizeNotice)),
     });
   }
   for (const input of [...snapshot.items].sort((left, right) =>
@@ -845,6 +1206,8 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
       ordinal: integer(input.ordinal),
       kind,
       status: input.status,
+      agentMessagePhase: sanitizeAgentMessagePhase(kind, input.agentMessagePhase),
+      reasoning: sanitizeReasoning(kind, input.reasoning),
       contentBlocks: kind === "unknown"
         ? [{ blockIndex: 0, type: "unknown", code: "unsupported_content" }]
         : sanitizeBlocks(input.contentBlocks),
@@ -864,7 +1227,13 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
         ...state,
         threads: {
           ...state.threads,
-          [input.threadId]: { ...thread, status: input.status },
+          [input.threadId]: {
+            ...thread,
+            status: input.status,
+            notices: Object.freeze((input.notices ?? [])
+              .slice(-MAX_CONVERSATION_NOTICES)
+              .map(sanitizeNotice)),
+          },
         },
       };
     }
@@ -933,6 +1302,10 @@ function markSnapshotRecovery(
   };
 }
 
+function hasOwn(value: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 export function reconcileConversationSnapshot(
   current: ConversationState,
   snapshot: ConversationSnapshot,
@@ -942,17 +1315,52 @@ export function reconcileConversationSnapshot(
   }
   let next = hydrateConversationState(snapshot);
   if (next.syncStatus === "recovery_required") return next;
+  const threadInputs = new Map(snapshot.threads.map((thread) => [thread.threadId, thread]));
+  const turnInputs = new Map(snapshot.turns.map((turn) => [
+    turnKey(turn.threadId, turn.turnId),
+    turn,
+  ]));
+  const itemInputs = new Map(snapshot.items.map((item) => [
+    itemKey(item.threadId, item.turnId, item.itemId),
+    item,
+  ]));
+  for (const liveThread of Object.values(current.threads)) {
+    const authoritativeThread = next.threads[liveThread.threadId];
+    const input = threadInputs.get(liveThread.threadId);
+    if (authoritativeThread !== undefined && input !== undefined && !hasOwn(input, "notices")) {
+      next = {
+        ...next,
+        threads: {
+          ...next.threads,
+          [liveThread.threadId]: { ...authoritativeThread, notices: liveThread.notices },
+        },
+      };
+    }
+  }
   const lifecycleMismatches = new Map<string, ConversationTurn>();
   for (const liveTurn of Object.values(current.turns)) {
-    if (liveTurn.terminalStatus === null) continue;
     const authoritativeTurn = selectConversationTurn(
       next,
       liveTurn.threadId,
       liveTurn.turnId,
     );
-    if (authoritativeTurn === null ||
-        authoritativeTurn.terminalStatus !== liveTurn.terminalStatus) {
+    const input = turnInputs.get(turnKey(liveTurn.threadId, liveTurn.turnId));
+    if (liveTurn.terminalStatus !== null &&
+        (authoritativeTurn === null ||
+         authoritativeTurn.terminalStatus !== liveTurn.terminalStatus ||
+         (input !== undefined && hasOwn(input, "terminalCode") &&
+          authoritativeTurn.terminalCode !== liveTurn.terminalCode))) {
       lifecycleMismatches.set(turnKey(liveTurn.threadId, liveTurn.turnId), liveTurn);
+      continue;
+    }
+    if (authoritativeTurn !== null && input !== undefined) {
+      next = replaceTurn(next, {
+        ...authoritativeTurn,
+        terminalCode: hasOwn(input, "terminalCode")
+          ? authoritativeTurn.terminalCode
+          : liveTurn.terminalCode,
+        plan: hasOwn(input, "plan") ? authoritativeTurn.plan : liveTurn.plan,
+      });
     }
   }
   const liveItems = Object.values(current.items).sort((left, right) =>
@@ -966,19 +1374,61 @@ export function reconcileConversationSnapshot(
       liveItem.threadId,
       liveItem.turnId,
     );
-    if (liveTurn === null || liveItem.contentBlocks.length === 0) continue;
+    if (liveTurn === null) continue;
 
     const authoritativeTurn = selectConversationTurn(
       next,
       liveItem.threadId,
       liveItem.turnId,
     );
-    const authoritativeItem = selectConversationItem(
+    let authoritativeItem = selectConversationItem(
       next,
       liveItem.threadId,
       liveItem.turnId,
       liveItem.itemId,
     );
+    const itemInput = itemInputs.get(itemKey(
+      liveItem.threadId,
+      liveItem.turnId,
+      liveItem.itemId,
+    ));
+    let metadataMismatch = false;
+    if (authoritativeItem !== null && itemInput !== undefined) {
+      let agentMessagePhase = authoritativeItem.agentMessagePhase;
+      if (!hasOwn(itemInput, "agentMessagePhase")) {
+        agentMessagePhase = liveItem.agentMessagePhase;
+      } else if (liveItem.agentMessagePhase !== null &&
+          liveItem.agentMessagePhase !== authoritativeItem.agentMessagePhase) {
+        if (liveItem.agentMessagePhase === "unknown" &&
+            authoritativeItem.agentMessagePhase !== "unknown") {
+          agentMessagePhase = authoritativeItem.agentMessagePhase;
+        } else {
+          agentMessagePhase = liveItem.agentMessagePhase;
+          metadataMismatch = true;
+        }
+      }
+
+      let reasoning = authoritativeItem.reasoning;
+      if (!hasOwn(itemInput, "reasoning")) {
+        reasoning = liveItem.reasoning;
+      } else if (liveItem.reasoning !== null && authoritativeItem.reasoning !== null &&
+          (liveItem.reasoning.status !== authoritativeItem.reasoning.status ||
+           liveItem.reasoning.reasonCode !== authoritativeItem.reasoning.reasonCode)) {
+        if (liveItem.reasoning.status !== "in_progress") {
+          reasoning = liveItem.reasoning;
+          metadataMismatch = true;
+        }
+      } else if (liveItem.reasoning !== null && authoritativeItem.reasoning === null) {
+        reasoning = liveItem.reasoning;
+        metadataMismatch = true;
+      }
+      authoritativeItem = {
+        ...authoritativeItem,
+        agentMessagePhase,
+        reasoning,
+      };
+      next = replaceItem(next, authoritativeItem);
+    }
     if (lifecycleMismatches.has(turnKey(liveItem.threadId, liveItem.turnId))) {
       next = ensureTurn(next, liveItem.threadId, liveItem.turnId, liveTurn.ordinal);
       next = ensureItem(next, liveItem, liveItem.kind, liveItem.ordinal);
@@ -1006,11 +1456,18 @@ export function reconcileConversationSnapshot(
         contentBlocks: liveItem.contentBlocks,
         reconciliation: "not_applicable",
       });
+      if (metadataMismatch) {
+        next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+      }
       continue;
     }
 
-    if (authoritativeItem.status !== "completed") {
-      next = replaceItem(next, liveItem);
+    if (authoritativeItem.status !== "completed" && authoritativeItem.status !== "incomplete") {
+      next = replaceItem(next, {
+        ...liveItem,
+        agentMessagePhase: authoritativeItem.agentMessagePhase,
+        reasoning: authoritativeItem.reasoning,
+      });
       const nextTurn = selectConversationTurn(next, liveItem.threadId, liveItem.turnId);
       if (nextTurn !== null && liveTurn.status === "in_progress") {
         next = replaceTurn(next, { ...nextTurn, status: "in_progress", terminalStatus: null });
@@ -1023,6 +1480,9 @@ export function reconcileConversationSnapshot(
           },
         };
       }
+      if (metadataMismatch) {
+        next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+      }
       continue;
     }
 
@@ -1034,6 +1494,8 @@ export function reconcileConversationSnapshot(
     });
     if (reconciled.status === "mismatch") {
       next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+    } else if (metadataMismatch) {
+      next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
     }
   }
   for (const liveTurn of lifecycleMismatches.values()) {
@@ -1042,6 +1504,101 @@ export function reconcileConversationSnapshot(
     next = markSnapshotRecovery(next, liveTurn.threadId, liveTurn.turnId);
   }
   return next;
+}
+
+function invalidOlderSnapshot(current: ConversationState): ConversationState {
+  if (current.syncStatus === "recovery_required") return current;
+  return {
+    ...current,
+    syncStatus: "recovery_required",
+    recovery: {
+      code: "invalid_transition",
+      streamId: "snapshot",
+      expectedSequence: null,
+      receivedSequence: "0",
+    },
+  };
+}
+
+/**
+ * Adds an immutable, cursor-paginated history page without treating that older
+ * page as a fresh snapshot of the live thread. Existing state is preserved;
+ * only disjoint terminal Turns and their Items may be prepended.
+ */
+export function appendOlderConversationSnapshot(
+  current: ConversationState,
+  olderSnapshot: ConversationSnapshot,
+): ConversationState {
+  if (current.syncStatus === "recovery_required") return current;
+  const older = hydrateConversationState(olderSnapshot);
+  if (older.syncStatus === "recovery_required") return invalidOlderSnapshot(current);
+
+  const olderTurns = Object.values(older.turns);
+  if (olderTurns.length === 0) return current;
+  const olderThreadIds = new Set(olderTurns.map((turn) => turn.threadId));
+  if (
+    [...olderThreadIds].some((threadId) => current.threads[threadId] === undefined) ||
+    olderTurns.some((turn) =>
+      turn.terminalStatus === null ||
+      turn.status !== turn.terminalStatus ||
+      current.turns[turnKey(turn.threadId, turn.turnId)] !== undefined
+    ) ||
+    Object.values(older.items).some((item) =>
+      current.items[itemKey(item.threadId, item.turnId, item.itemId)] !== undefined
+    )
+  ) {
+    return invalidOlderSnapshot(current);
+  }
+
+  const addedTurnCount = new Map<string, number>();
+  for (const turn of olderTurns) {
+    addedTurnCount.set(turn.threadId, (addedTurnCount.get(turn.threadId) ?? 0) + 1);
+  }
+  if (Object.values(current.turns).some((turn) =>
+    turn.ordinal > Number.MAX_SAFE_INTEGER - (addedTurnCount.get(turn.threadId) ?? 0)
+  )) {
+    return invalidOlderSnapshot(current);
+  }
+
+  const turns: Record<string, ConversationTurn> = {};
+  for (const [key, turn] of Object.entries(current.turns)) {
+    turns[key] = {
+      ...turn,
+      ordinal: turn.ordinal + (addedTurnCount.get(turn.threadId) ?? 0),
+    };
+  }
+  for (const threadId of olderThreadIds) {
+    const ordered = olderTurns
+      .filter((turn) => turn.threadId === threadId)
+      .sort((left, right) => left.ordinal - right.ordinal || left.turnId.localeCompare(right.turnId));
+    ordered.forEach((turn, ordinal) => {
+      turns[turnKey(threadId, turn.turnId)] = { ...turn, ordinal };
+    });
+  }
+
+  const items: Record<string, ConversationItem> = { ...current.items };
+  for (const [key, item] of Object.entries(older.items)) items[key] = item;
+
+  const threads: Record<string, ConversationThread> = { ...current.threads };
+  for (const threadId of olderThreadIds) {
+    const currentThread = current.threads[threadId]!;
+    threads[threadId] = {
+      ...currentThread,
+      turnKeys: Object.entries(turns)
+        .filter(([, turn]) => turn.threadId === threadId)
+        .sort(([, left], [, right]) =>
+          left.ordinal - right.ordinal || left.turnId.localeCompare(right.turnId)
+        )
+        .map(([key]) => key),
+    };
+  }
+
+  return {
+    ...current,
+    threads,
+    turns,
+    items,
+  };
 }
 
 export function selectConversationTurn(
@@ -1068,6 +1625,19 @@ function canonicalTurn(turn: ConversationTurn) {
     ordinal: turn.ordinal,
     status: turn.status,
     terminalStatus: turn.terminalStatus,
+    terminalCode: turn.terminalCode,
+    plan: turn.plan === null
+      ? null
+      : {
+          explanation: turn.plan.explanation,
+          steps: [...turn.plan.steps]
+            .sort((left, right) => left.ordinal - right.ordinal)
+            .map((step) => ({
+              ordinal: step.ordinal,
+              text: step.text,
+              status: step.status,
+            })),
+        },
     notices: [...turn.notices].sort((left, right) =>
       left.severity.localeCompare(right.severity) || left.code.localeCompare(right.code)),
   };
@@ -1081,6 +1651,8 @@ function canonicalItem(item: ConversationItem) {
     ordinal: item.ordinal,
     kind: item.kind,
     status: item.status,
+    agentMessagePhase: item.agentMessagePhase,
+    reasoning: item.reasoning,
     reconciliation: item.reconciliation,
     contentBlocks: [...item.contentBlocks].sort((left, right) => left.blockIndex - right.blockIndex),
   };
@@ -1089,7 +1661,12 @@ function canonicalItem(item: ConversationItem) {
 export function serializeConversationState(state: ConversationState): string {
   const threads = Object.values(state.threads)
     .sort((left, right) => left.threadId.localeCompare(right.threadId))
-    .map((thread) => ({ threadId: thread.threadId, status: thread.status }));
+    .map((thread) => ({
+      threadId: thread.threadId,
+      status: thread.status,
+      notices: [...thread.notices].sort((left, right) =>
+        left.severity.localeCompare(right.severity) || left.code.localeCompare(right.code)),
+    }));
   const turns = Object.values(state.turns)
     .sort((left, right) =>
       left.threadId.localeCompare(right.threadId) ||

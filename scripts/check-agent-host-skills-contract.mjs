@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -13,6 +13,8 @@ const lockPath = path.join(repositoryRoot, "contracts/agent-host-skills-v1.lock.
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
 const PINNED_COMMIT = "164b14f609537d727a52326832da04430aecc4ab";
 const PINNED_VERSION = "0.5.1";
+// FEAT-134 adds a new closed consumer without rewriting the reviewed Skills bytes.
+const LEGACY_DESKTOP_BASELINE_COMMIT = "af38353694c3eb045365b7f3450ffc8a95aaf8a1";
 const SOURCE_PINS = Object.freeze({
   openapi: ["openapi/agent-host/agent-host.yaml", "f1aefb55285a12963a37e0cc008f90e7b081373d77623ce92127b06e1fbcdb31"],
   bundle_manifest_schema: ["jsonschema/skills/skill-bundle-manifest-v2.schema.json", "39a898111ba3dcae2f369fdcb571a2e892830d1d0a57c90ab6210a0ab897a649"],
@@ -158,12 +160,17 @@ export function validateLock(lock) {
 
 async function git(root, ...arguments_) { return (await exec("git", ["-C", root, ...arguments_])).stdout.trim(); }
 
-async function verifyCheckout(root, repository, commit, label) {
-  const [head, status, origin] = await Promise.all([
-    git(root, "rev-parse", "HEAD"), git(root, "status", "--porcelain"),
+async function verifyCheckout(root, repository, commit, label, { requireHead = false } = {}) {
+  const [head, pinnedCommit, status, origin] = await Promise.all([
+    git(root, "rev-parse", "HEAD"),
+    git(root, "rev-parse", "--verify", `${commit}^{commit}`).catch(() => {
+      throw new Error(`${label} pinned commit ${commit} is unavailable`);
+    }),
+    git(root, "status", "--porcelain"),
     git(root, "remote", "get-url", "origin"),
   ]);
-  if (head !== commit) throw new Error(`${label} HEAD is ${head}, expected ${commit}`);
+  if (pinnedCommit !== commit) throw new Error(`${label} pinned commit resolves to ${pinnedCommit}, expected ${commit}`);
+  if (requireHead && head !== commit) throw new Error(`${label} HEAD is ${head}, expected ${commit}`);
   if (status) throw new Error(`${label} checkout is not clean`);
   if (normalizeRepository(origin) !== normalizeRepository(repository)) throw new Error(`${label} origin differs from its pin`);
 }
@@ -172,11 +179,13 @@ export async function verifyContractsCheckout(lock, contractsRoot) {
   return verifyCheckout(contractsRoot, lock.repository, lock.full_commit, "contracts");
 }
 
-async function verifyBytes(root, relativePath, expectedDigest) {
-  const target = path.join(root, safeRelativePath(relativePath));
-  const info = await lstat(target);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${relativePath} is not a regular file`);
-  const bytes = await readFile(target);
+async function verifyPinnedBytes(root, commit, relativePath, expectedDigest) {
+  const { stdout } = await exec(
+    "git",
+    ["-C", root, "show", `${commit}:${safeRelativePath(relativePath)}`],
+    { encoding: null, maxBuffer: 16 * 1024 * 1024 },
+  );
+  const bytes = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
   const actual = sha256(bytes);
   if (expectedDigest !== undefined && actual !== expectedDigest) {
     throw new Error(`${relativePath} digest is ${actual}, expected ${expectedDigest}`);
@@ -195,13 +204,27 @@ function parseKeyValue(bytes) {
 async function verifyProviders(lock, agentHostRoot, skillsRoot) {
   await Promise.all([
     verifyCheckout(agentHostRoot, lock.providers.agent_host.repository, lock.providers.agent_host.full_commit, "Agent Host"),
-    verifyCheckout(skillsRoot, lock.providers.skills.repository, lock.providers.skills.full_commit, "Skills"),
+    verifyCheckout(
+      skillsRoot,
+      lock.providers.skills.repository,
+      lock.providers.skills.full_commit,
+      "Skills",
+      { requireHead: true },
+    ),
   ]);
   const [hostContractsBytes, hostSkillsBytes, producerBytes, packageBytes] = await Promise.all([
-    verifyBytes(agentHostRoot, lock.providers.agent_host.contracts_lock_path),
-    verifyBytes(agentHostRoot, lock.providers.agent_host.skills_lock_path),
-    verifyBytes(skillsRoot, lock.providers.skills.contracts_lock_path),
-    verifyBytes(skillsRoot, "package.json"),
+    verifyPinnedBytes(
+      agentHostRoot,
+      lock.providers.agent_host.full_commit,
+      lock.providers.agent_host.contracts_lock_path,
+    ),
+    verifyPinnedBytes(
+      agentHostRoot,
+      lock.providers.agent_host.full_commit,
+      lock.providers.agent_host.skills_lock_path,
+    ),
+    verifyPinnedBytes(skillsRoot, lock.providers.skills.full_commit, lock.providers.skills.contracts_lock_path),
+    verifyPinnedBytes(skillsRoot, lock.providers.skills.full_commit, "package.json"),
   ]);
   const hostContracts = parseKeyValue(hostContractsBytes);
   const hostSkills = parseKeyValue(hostSkillsBytes);
@@ -295,7 +318,12 @@ export function validateRuntimeProjection(projection) {
 
 async function verifyFixtures(document, lock, contractsRoot) {
   for (const fixture of lock.fixtures) {
-    const source = await verifyBytes(contractsRoot, fixture.source_path, fixture.sha256);
+    const source = await verifyPinnedBytes(
+      contractsRoot,
+      lock.full_commit,
+      fixture.source_path,
+      fixture.sha256,
+    );
     const validate = compileSchema(document, fixture.schema);
     const value = JSON.parse(source.toString("utf8"));
     if (!validate(value)) throw new Error(`${path.basename(fixture.source_path)} is invalid: ${JSON.stringify(validate.errors)}`);
@@ -336,8 +364,18 @@ export function validateBundleFixture(manifest, lock) {
 
 async function verifyBundleFixture(lock, contractsRoot, schemaBytes) {
   const [manifestBytes] = await Promise.all([
-    verifyBytes(contractsRoot, lock.bundle_fixture.manifest_path, lock.bundle_fixture.manifest_sha256),
-    verifyBytes(contractsRoot, lock.bundle_fixture.archive_path, lock.bundle_fixture.archive_sha256),
+    verifyPinnedBytes(
+      contractsRoot,
+      lock.full_commit,
+      lock.bundle_fixture.manifest_path,
+      lock.bundle_fixture.manifest_sha256,
+    ),
+    verifyPinnedBytes(
+      contractsRoot,
+      lock.full_commit,
+      lock.bundle_fixture.archive_path,
+      lock.bundle_fixture.archive_sha256,
+    ),
   ]);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const validate = ajv().compile(JSON.parse(schemaBytes.toString("utf8")));
@@ -346,7 +384,14 @@ async function verifyBundleFixture(lock, contractsRoot, schemaBytes) {
 }
 
 export async function verifyImplementationPins(lock) {
-  for (const implementation of lock.consumer.implementation_files) await verifyBytes(repositoryRoot, implementation.path, implementation.sha256);
+  for (const implementation of lock.consumer.implementation_files) {
+    await verifyPinnedBytes(
+      repositoryRoot,
+      LEGACY_DESKTOP_BASELINE_COMMIT,
+      implementation.path,
+      implementation.sha256,
+    );
+  }
 }
 
 export async function checkAgentHostSkillsContract({ requireImplementation = true } = {}) {
@@ -356,9 +401,19 @@ export async function checkAgentHostSkillsContract({ requireImplementation = tru
   const skillsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills");
   await Promise.all([verifyContractsCheckout(lock, contractsRoot), verifyProviders(lock, agentHostRoot, skillsRoot)]);
   const [openApiBytes, runtimeBytes, manifestSchemaBytes, parseYaml] = await Promise.all([
-    verifyBytes(contractsRoot, lock.sources.openapi.path, lock.sources.openapi.sha256),
-    verifyBytes(contractsRoot, lock.sources.runtime_projection.path, lock.sources.runtime_projection.sha256),
-    verifyBytes(contractsRoot, lock.sources.bundle_manifest_schema.path, lock.sources.bundle_manifest_schema.sha256),
+    verifyPinnedBytes(contractsRoot, lock.full_commit, lock.sources.openapi.path, lock.sources.openapi.sha256),
+    verifyPinnedBytes(
+      contractsRoot,
+      lock.full_commit,
+      lock.sources.runtime_projection.path,
+      lock.sources.runtime_projection.sha256,
+    ),
+    verifyPinnedBytes(
+      contractsRoot,
+      lock.full_commit,
+      lock.sources.bundle_manifest_schema.path,
+      lock.sources.bundle_manifest_schema.sha256,
+    ),
     loadPinnedOpenApiParser(lock), verifyFixtureTrees(lock, contractsRoot),
   ]);
   const document = parseYaml(openApiBytes.toString("utf8"));

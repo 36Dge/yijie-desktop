@@ -17,8 +17,11 @@ import type {
   ChatAttachmentImportEvent,
   ChatControlPlaneEvent,
   ChatHistoryPage,
+  ChatHistoryPageV4,
   ChatProjectionEvent,
+  ChatProjectionEventV4,
   ChatResyncProjection,
+  ChatResyncProjectionV4,
   ChatSession,
 } from "../domain/chat-ipc";
 import {
@@ -104,6 +107,18 @@ function projection(sessionId: string, title?: string): ChatResyncProjection {
   });
 }
 
+function projectionV4(
+  sessionId: string,
+  history: ChatHistoryPageV4 = Object.freeze({
+    turns: Object.freeze([]),
+    nextCursor: null,
+    sessionNotices: Object.freeze([]),
+    durableSequenceCut: "0",
+  }),
+): ChatResyncProjectionV4 {
+  return Object.freeze({ session: session(sessionId), history, cleanup: null });
+}
+
 function artifactHistory(nextCursor: string | null = null): ChatHistoryPage {
   return Object.freeze({
     turns: Object.freeze([Object.freeze({
@@ -156,6 +171,38 @@ function event(
   } as ChatProjectionEvent;
 }
 
+function eventV4(
+  sequence: number,
+  kind: ChatProjectionEventV4["kind"],
+  payload: ChatProjectionEventV4["payload"],
+  turnId: string | null = TURN_A,
+): ChatProjectionEventV4 {
+  const suffix = String(100 + sequence).padStart(12, "0");
+  return {
+    schemaVersion: 4,
+    subscriptionId: "019c1a00-0000-7000-8000-00000000000a",
+    contextId: CONTEXT,
+    sessionId: SESSION_A,
+    ...(turnId === null ? {} : { turnId }),
+    projectionSequence: String(sequence),
+    eventId: `13420000-0000-4000-8000-${suffix}`,
+    ...(kind === "resync_required" || kind === "context_invalidated"
+      ? {}
+      : { durableSequence: String(sequence) }),
+    kind,
+    payload,
+  } as ChatProjectionEventV4;
+}
+
+function sourceV4(sequence: number) {
+  const suffix = String(200 + sequence).padStart(12, "0");
+  return {
+    sourceEventId: `13420000-0000-4000-8000-${suffix}`,
+    sourceSequence: String(sequence),
+    sourceOccurredAt: "2026-08-28T06:00:00Z",
+  } as const;
+}
+
 function attachmentImportEvent(
   stage: ChatAttachmentImportEvent["stage"],
   sequence: string,
@@ -176,11 +223,13 @@ function attachmentImportEvent(
 function fakeClient(overrides: Partial<ChatClient> = {}): {
   client: ChatClient;
   emit: (event: ChatProjectionEvent) => void;
+  emitV4: (event: ChatProjectionEventV4) => void;
   emitControlPlane: (event: ChatControlPlaneEvent) => void;
   emitAttachmentImport: (event: ChatAttachmentImportEvent) => void;
   invalidate: (scope?: ChatInvalidEventScope | null) => void;
 } {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
+  let eventHandlerV4: (event: ChatProjectionEventV4) => void = () => undefined;
   let invalidHandler: (scope?: ChatInvalidEventScope | null) => void = () => undefined;
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
@@ -213,6 +262,12 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     loadHistory: async () => ({ turns: [], nextCursor: null }),
     loadHistoryV2: (...arguments_) => client.loadHistory(...arguments_),
     loadHistoryV3: (...arguments_) => client.loadHistory(...arguments_),
+    loadHistoryV4: async () => Object.freeze({
+      turns: Object.freeze([]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+    }),
     loadReasoning: async () => [],
     renameSession: async (_context, _session, _title, operation) => operation,
     setSessionPinned: async (_context, _session, _pinned, operation) => operation,
@@ -259,12 +314,21 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     subscribeSession: async (_context, sessionId) => sessionId === SESSION_A
       ? "019c1a00-0000-7000-8000-00000000000a"
       : "019c1a00-0000-7000-8000-00000000000b",
+    subscribeSessionV4: async (_context, sessionId) => sessionId === SESSION_A
+      ? "019c1a00-0000-7000-8000-00000000000a"
+      : "019c1a00-0000-7000-8000-00000000000b",
     resyncSession: async (_context, sessionId) => projection(sessionId),
     resyncSessionV2: (...arguments_) => client.resyncSession(...arguments_),
+    resyncSessionV4: async (_context, sessionId) => projectionV4(sessionId),
     unsubscribeSession: async () => true,
     cancelRequest: async () => true,
     onEvent: async (handler, onInvalid) => {
       eventHandler = handler;
+      invalidHandler = onInvalid ?? (() => undefined);
+      return () => undefined;
+    },
+    onEventV4: async (handler, onInvalid) => {
+      eventHandlerV4 = handler;
       invalidHandler = onInvalid ?? (() => undefined);
       return () => undefined;
     },
@@ -281,6 +345,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   return {
     client,
     emit: (value) => eventHandler(value),
+    emitV4: (value) => eventHandlerV4(value),
     emitControlPlane: (value) => controlPlaneHandler(value),
     emitAttachmentImport: (value) => attachmentImportHandler(value),
     invalidate: (scope) => invalidHandler(scope),
@@ -2708,5 +2773,998 @@ describe("chat view-model store", () => {
     expect(store.context?.contextId).toBe(CONTEXT_B);
     expect(store.cleanupStatus).toBeNull();
     expect(store.deleteDisposition).toBeNull();
+  });
+});
+
+describe("FEAT-134 chat store v4 authority", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    vi.stubGlobal("crypto", { randomUUID: () => "019c1a00-0000-7000-8000-00000000000c" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("routes a text-only create through v2 when streaming v4 is enabled", async () => {
+    const createSession = vi.fn<ChatClient["createSession"]>();
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>(
+      async (_context, _project, _blocks, operationId) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const { client } = fakeClient({ createSession, createSessionV2 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-text-create-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await expect(store.createSession(
+      "019c1a00-0000-7000-8000-000000000009",
+      "synthetic text only",
+    )).resolves.toBe(SESSION_A);
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(createSessionV2).toHaveBeenCalledOnce();
+    expect(createSessionV2).toHaveBeenCalledWith(
+      CONTEXT,
+      "019c1a00-0000-7000-8000-000000000009",
+      [{ type: "text", text: "synthetic text only" }],
+      "019c1a00-0000-7000-8000-00000000000c",
+    );
+    expect(await createSessionV2.mock.results[0]!.value).toMatchObject({
+      operationId: createSessionV2.mock.calls[0]![3],
+    });
+  });
+
+  it("routes a text-only submit through v2 when streaming v4 is enabled", async () => {
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>();
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(
+      async (_context, sessionId, _blocks, operationId) => ({
+        sessionId,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const { client } = fakeClient({ submitTurn, submitTurnV2 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-text-submit-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.submitTurn("synthetic text only");
+
+    expect(submitTurn).not.toHaveBeenCalled();
+    expect(submitTurnV2).toHaveBeenCalledOnce();
+    expect(submitTurnV2).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      [{ type: "text", text: "synthetic text only" }],
+      "019c1a00-0000-7000-8000-00000000000c",
+    );
+    expect(await submitTurnV2.mock.results[0]!.value).toMatchObject({
+      operationId: submitTurnV2.mock.calls[0]![3],
+    });
+  });
+
+  it("keeps text-only create and submit on v1 when streaming v4 is disabled", async () => {
+    const createSession = vi.fn<ChatClient["createSession"]>(
+      async (_context, _project, _input, operationId) => ({
+        sessionId: SESSION_A,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const submitTurn = vi.fn<ChatClient["submitTurn"]>(
+      async (_context, sessionId, _input, operationId) => ({
+        sessionId,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>();
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>();
+    const { client } = fakeClient({
+      createSession,
+      submitTurn,
+      createSessionV2,
+      submitTurnV2,
+    });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-text-legacy-${storeSequence++}`,
+      undefined,
+      false,
+    )();
+
+    await store.bind(TENANT);
+    await expect(store.createSession(
+      "019c1a00-0000-7000-8000-000000000009",
+      "synthetic legacy create",
+    )).resolves.toBe(SESSION_A);
+    await store.submitTurn("synthetic legacy submit");
+
+    expect(createSession).toHaveBeenCalledWith(
+      CONTEXT,
+      "019c1a00-0000-7000-8000-000000000009",
+      "synthetic legacy create",
+      "019c1a00-0000-7000-8000-00000000000c",
+    );
+    expect(submitTurn).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      "synthetic legacy submit",
+      "019c1a00-0000-7000-8000-00000000000c",
+    );
+    expect(createSessionV2).not.toHaveBeenCalled();
+    expect(submitTurnV2).not.toHaveBeenCalled();
+  });
+
+  it("resyncs a locally failed queued turn to the authoritative failed state without dispatching", async () => {
+    const turn = (status: "queued" | "failed"): ChatHistoryPageV4 => Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "legacy" as const,
+        status,
+        terminalAt: status === "failed" ? 2 : null,
+        reasoningStatus: status === "failed" ? "unavailable" as const : "pending" as const,
+        reasoningReasonCode: status === "failed" ? "reasoning_not_emitted" : null,
+        messages: Object.freeze([Object.freeze({
+          messageId: "13430000-0000-4000-8000-000000000021",
+          role: "user" as const,
+          content: "safe fixture",
+          contentBlocks: Object.freeze([{ type: "text" as const, text: "safe fixture" }]),
+          status: "committed",
+          ordinal: 0,
+          createdAt: 1,
+        })]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+    });
+    let resyncCount = 0;
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>(async (_context, sessionId) => {
+      resyncCount += 1;
+      const history = turn(resyncCount === 1 ? "queued" : "failed");
+      return Object.freeze({
+        session: Object.freeze({
+          ...session(sessionId),
+          latestTurnStatus: resyncCount === 1 ? "queued" : "failed",
+        }),
+        history,
+        cleanup: null,
+      });
+    });
+    const createSessionV2 = vi.fn<ChatClient["createSessionV2"]>();
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>();
+    const { client, emitV4 } = fakeClient({ resyncSessionV4: resyncV4, createSessionV2, submitTurnV2 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-failed-turn-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)?.status).toBe("queued");
+
+    emitV4(eventV4(1, "resync_required", { reason: "protocol_error" }));
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)).toMatchObject({
+      status: "failed",
+      terminalStatus: "failed",
+    });
+    expect(store.liveTurnStatus).toBe("failed");
+    expect(store.sessions.find((entry) => entry.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("failed");
+    expect(store.canSend).toBe(true);
+    expect(createSessionV2).not.toHaveBeenCalled();
+    expect(submitTurnV2).not.toHaveBeenCalled();
+  });
+
+  it("hydrates only the negotiated v4 semantic history while preserving user ordering", async () => {
+    const page: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "v4" as const,
+        status: "completed",
+        terminalAt: 30,
+        reasoningStatus: "complete",
+        reasoningReasonCode: null,
+        messages: Object.freeze([
+          Object.freeze({
+            messageId: "13430000-0000-4000-8000-000000000001",
+            role: "user" as const,
+            content: "synthetic request",
+            contentBlocks: Object.freeze([{ type: "text" as const, text: "synthetic request" }]),
+            status: "committed",
+            ordinal: 0,
+            createdAt: 1,
+          }),
+          Object.freeze({
+            messageId: "13430000-0000-4000-8000-000000000002",
+            role: "assistant" as const,
+            content: "legacy duplicate",
+            contentBlocks: Object.freeze([{ type: "text" as const, text: "legacy duplicate" }]),
+            status: "committed",
+            ordinal: 1,
+            createdAt: 2,
+          }),
+        ]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([
+          Object.freeze({
+            ...sourceV4(2),
+            itemId: "commentary-real-id",
+            itemOrdinal: 1,
+            itemType: "agentMessage",
+            phase: "commentary" as const,
+            status: "completed" as const,
+            text: "synthetic process",
+            reasoningStatus: null,
+            reasoningReasonCode: null,
+            reasoningParts: Object.freeze([]),
+            startedAtMs: 10,
+            completedAtMs: 11,
+          }),
+          Object.freeze({
+            ...sourceV4(3),
+            itemId: "final-real-id",
+            itemOrdinal: 2,
+            itemType: "agentMessage",
+            phase: "final_answer" as const,
+            status: "completed" as const,
+            text: "synthetic final",
+            reasoningStatus: null,
+            reasoningReasonCode: null,
+            reasoningParts: Object.freeze([]),
+            startedAtMs: 12,
+            completedAtMs: 13,
+          }),
+        ]),
+        plan: Object.freeze({
+          ...sourceV4(1),
+          explanation: null,
+          steps: Object.freeze([{ ordinal: 0, step: "synthetic step", status: "completed" as const }]),
+        }),
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([Object.freeze({
+        ...sourceV4(4),
+        scope: "session" as const,
+        severity: "warning" as const,
+        code: "synthetic_warning",
+        willRetry: false,
+        observedAtMs: 31,
+      })]),
+      durableSequenceCut: "4",
+    });
+    const subscribeV1 = vi.fn<ChatClient["subscribeSession"]>();
+    const resyncV2 = vi.fn<ChatClient["resyncSessionV2"]>();
+    const subscribeV4 = vi.fn<ChatClient["subscribeSessionV4"]>(async () =>
+      "019c1a00-0000-7000-8000-00000000000a"
+    );
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>(async (_context, sessionId) =>
+      projectionV4(sessionId, page)
+    );
+    const { client } = fakeClient({
+      subscribeSession: subscribeV1,
+      resyncSessionV2: resyncV2,
+      subscribeSessionV4: subscribeV4,
+      resyncSessionV4: resyncV4,
+    });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-hydration-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(subscribeV4).toHaveBeenCalledOnce();
+    expect(resyncV4).toHaveBeenCalledOnce();
+    expect(subscribeV1).not.toHaveBeenCalled();
+    expect(resyncV2).not.toHaveBeenCalled();
+    expect(store.history).toBe(page);
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "final-real-id"))
+      .toMatchObject({ ordinal: 2, agentMessagePhase: "final_answer" });
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )).toBeNull();
+    const itemOrdinals = Object.values(store.conversationState.items)
+      .filter((item) => item.turnId === TURN_A)
+      .map((item) => item.ordinal)
+      .sort((left, right) => left - right);
+    expect(itemOrdinals).toEqual([0, 1, 2]);
+    expect(store.conversationState.threads[SESSION_A]?.notices).toHaveLength(1);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)?.plan?.steps)
+      .toEqual([{ ordinal: 0, text: "synthetic step", status: "completed" }]);
+  });
+
+  it("advances over buffered events already included in the durable cut and applies later events once", async () => {
+    const snapshot: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "v4" as const,
+        status: "streaming",
+        terminalAt: null,
+        reasoningStatus: "unknown",
+        reasoningReasonCode: null,
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(3),
+          itemId: "overlap-final",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer" as const,
+          status: "in_progress" as const,
+          text: "A",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 1,
+          completedAtMs: null,
+        })]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "3",
+    });
+    const delayedResync = new Deferred<ChatResyncProjectionV4>();
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>(() => delayedResync.promise);
+    const { client, emitV4 } = fakeClient({ resyncSessionV4: resyncV4 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-overlap-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledOnce());
+    emitV4(eventV4(1, "turn_started", sourceV4(1)));
+    emitV4(eventV4(2, "item_started", {
+      ...sourceV4(2),
+      itemId: "overlap-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }));
+    emitV4(eventV4(3, "agent_message_append", {
+      ...sourceV4(3),
+      itemId: "overlap-final",
+      itemOrdinal: 1,
+      phase: "final_answer",
+      text: "A",
+    }));
+    emitV4(eventV4(4, "plan_updated", {
+      ...sourceV4(4),
+      explanation: null,
+      steps: [{ ordinal: 0, step: "late plan", status: "in_progress" }],
+    }));
+
+    delayedResync.resolve(projectionV4(SESSION_A, snapshot));
+    await selecting;
+
+    expect(store.conversationState.syncStatus).toBe("synchronized");
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "overlap-final"))
+      .toMatchObject({ contentBlocks: [{ text: "A" }] });
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)?.plan?.steps)
+      .toEqual([{ ordinal: 0, text: "late plan", status: "in_progress" }]);
+    expect(store.conversationState.streamPositions[
+      "019c1a00-0000-7000-8000-00000000000a"
+    ]).toBe("4");
+
+    emitV4(eventV4(5, "agent_message_append", {
+      ...sourceV4(5),
+      itemId: "overlap-final",
+      itemOrdinal: 1,
+      phase: "final_answer",
+      text: "B",
+    }));
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "overlap-final"))
+      .toMatchObject({ contentBlocks: [{ text: "AB" }] });
+    expect(resyncV4).toHaveBeenCalledOnce();
+  });
+
+  it("upgrades an active legacy scaffold to v4 facts without inventing a final item", async () => {
+    const userMessage = Object.freeze({
+      messageId: "13430000-0000-4000-8000-000000000011",
+      role: "user" as const,
+      content: "synthetic request",
+      contentBlocks: Object.freeze([{ type: "text" as const, text: "synthetic request" }]),
+      status: "committed",
+      ordinal: 0,
+      createdAt: 1,
+    });
+    const legacyActive: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "legacy" as const,
+        status: "streaming",
+        terminalAt: null,
+        reasoningStatus: "pending",
+        reasoningReasonCode: null,
+        messages: Object.freeze([userMessage, Object.freeze({
+          messageId: "13430000-0000-4000-8000-000000000012",
+          role: "assistant" as const,
+          content: "",
+          contentBlocks: Object.freeze([{ type: "text" as const, text: " " }]),
+          status: "pending",
+          ordinal: 1,
+          createdAt: 2,
+        })]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+    });
+    const terminalV4: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        ...legacyActive.turns[0]!,
+        projectionAuthority: "v4" as const,
+        status: "completed",
+        terminalAt: 5,
+        messages: Object.freeze([userMessage]),
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(4),
+          itemId: "race-final",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          text: "confirmed final",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 2,
+          completedAtMs: 4,
+        })]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "5",
+    });
+    const firstResync = new Deferred<ChatResyncProjectionV4>();
+    let resyncCount = 0;
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>((_context, sessionId) => {
+      resyncCount += 1;
+      return resyncCount === 1
+        ? firstResync.promise
+        : Promise.resolve(projectionV4(sessionId, terminalV4));
+    });
+    const { client, emitV4 } = fakeClient({ resyncSessionV4: resyncV4 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-authority-race-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledOnce());
+    emitV4(eventV4(1, "turn_started", sourceV4(1)));
+    emitV4(eventV4(2, "item_started", {
+      ...sourceV4(2),
+      itemId: "race-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }));
+    emitV4(eventV4(3, "agent_message_append", {
+      ...sourceV4(3),
+      itemId: "race-final",
+      itemOrdinal: 1,
+      phase: "final_answer",
+      text: "confirmed final",
+    }));
+    emitV4(eventV4(4, "item_completed", {
+      ...sourceV4(4),
+      itemId: "race-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "confirmed final",
+    }));
+    emitV4(eventV4(5, "turn_terminal", {
+      ...sourceV4(5),
+      status: "completed",
+      code: null,
+      unfinishedReasoningReasonCode: "protocol_error",
+    }));
+
+    firstResync.resolve(projectionV4(SESSION_A, legacyActive));
+    await selecting;
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+
+    expect(store.conversationState.syncStatus).toBe("synchronized");
+    expect(store.lastErrorCode).toBeNull();
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      conversationMessageItemId(TURN_A, "assistant"),
+    )).toBeNull();
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "race-final"))
+      .toMatchObject({
+        status: "completed",
+        agentMessagePhase: "final_answer",
+        contentBlocks: [{ text: "confirmed final" }],
+      });
+  });
+
+  it("drops an oversized resync event buffer and requests a fresh content-free recovery", async () => {
+    const firstResync = new Deferred<ChatResyncProjectionV4>();
+    const trailingResync = new Deferred<ChatResyncProjectionV4>();
+    let resyncCount = 0;
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>(() => {
+      resyncCount += 1;
+      return resyncCount === 1 ? firstResync.promise : trailingResync.promise;
+    });
+    const { client, emitV4 } = fakeClient({ resyncSessionV4: resyncV4 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-buffer-bound-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledOnce());
+    emitV4(eventV4(1, "turn_started", sourceV4(1)));
+    emitV4(eventV4(2, "item_started", {
+      ...sourceV4(2),
+      itemId: "buffered-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }));
+    const chunk = "x".repeat(80 * 1024);
+    for (let sequence = 3; sequence <= 65; sequence += 1) {
+      emitV4(eventV4(sequence, "agent_message_append", {
+        ...sourceV4(sequence),
+        itemId: "buffered-final",
+        itemOrdinal: 1,
+        phase: "final_answer",
+        text: chunk,
+      }));
+    }
+
+    firstResync.resolve(projectionV4(SESSION_A));
+    await selecting;
+    await vi.waitFor(() => expect(resyncV4).toHaveBeenCalledTimes(2));
+
+    expect(store.phase).toBe("resyncing");
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      "buffered-final",
+    )).toBeNull();
+
+    trailingResync.resolve(projectionV4(SESSION_A));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(resyncV4).toHaveBeenCalledTimes(2);
+  });
+
+  it("derives compatibility status from the latest durable history when the resync summary is stale", async () => {
+    const streamingHistory: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "v4" as const,
+        status: "streaming",
+        terminalAt: null,
+        reasoningStatus: "unknown",
+        reasoningReasonCode: null,
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+    });
+    const terminalHistory: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        ...streamingHistory.turns[0]!,
+        status: "completed",
+        terminalAt: 4,
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(3),
+          itemId: "terminal-final",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          text: "A",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 2,
+          completedAtMs: 4,
+        })]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "4",
+    });
+    const delayedProjection = new Deferred<ChatResyncProjectionV4>();
+    const loadHistoryV4 = vi.fn<ChatClient["loadHistoryV4"]>(async () => terminalHistory);
+    const { client, emitV4 } = fakeClient({
+      resyncSessionV4: () => delayedProjection.promise,
+      loadHistoryV4,
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-feat134-race-${storeSequence++}`)();
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-race-${storeSequence++}`,
+      () => ({
+        liveClient: { listen: async () => () => undefined },
+        store: artifacts,
+        authority: () => ({ authorizationRevision: 1, tenantId: TENANT }),
+      }),
+      true,
+    )();
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    emitV4(eventV4(1, "turn_started", sourceV4(1)));
+    emitV4(eventV4(2, "item_started", {
+      ...sourceV4(2),
+      itemId: "terminal-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }));
+    emitV4(eventV4(3, "agent_message_append", {
+      ...sourceV4(3),
+      itemId: "terminal-final",
+      itemOrdinal: 1,
+      phase: "final_answer",
+      text: "A",
+    }));
+    emitV4(eventV4(4, "turn_terminal", {
+      ...sourceV4(4),
+      status: "completed",
+      code: null,
+      unfinishedReasoningReasonCode: "protocol_error",
+    }));
+    delayedProjection.resolve(Object.freeze({
+      session: Object.freeze({ ...session(SESSION_A), latestTurnStatus: "streaming" }),
+      history: streamingHistory,
+      cleanup: null,
+    }));
+    await selecting;
+
+    expect(loadHistoryV4).toHaveBeenCalledTimes(2);
+    expect(store.conversationState.syncStatus).toBe("synchronized");
+    expect(store.liveTurnStatus).toBe("completed");
+    expect(store.sessions.find((entry) => entry.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("completed");
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "terminal-final"))
+      .toMatchObject({ contentBlocks: [{ text: "A" }], status: "completed" });
+  });
+
+  it("appends an older v4 page without overwriting live content, plan, notices, or the current cut", async () => {
+    const cursor = "abcdefghijklmnop";
+    const currentHistory: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "v4" as const,
+        status: "streaming",
+        terminalAt: null,
+        reasoningStatus: "unknown",
+        reasoningReasonCode: null,
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: cursor,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "10",
+    });
+    const oldTurnId = "019c1a00-0000-7000-8000-000000000001";
+    const olderHistory: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        turnId: oldTurnId,
+        projectionAuthority: "v4" as const,
+        status: "completed",
+        terminalAt: 1,
+        reasoningStatus: "unavailable",
+        reasoningReasonCode: "reasoning_not_emitted",
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(20),
+          itemId: "older-final",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          text: "older text",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 1,
+          completedAtMs: 1,
+        })]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([Object.freeze({
+        ...sourceV4(20),
+        scope: "session" as const,
+        severity: "warning" as const,
+        code: "stale_page_warning",
+        willRetry: false,
+        observedAtMs: 20,
+      })]),
+      durableSequenceCut: "20",
+    });
+    const delayedPage = new Deferred<ChatHistoryPageV4>();
+    const loadHistoryV4 = vi.fn<ChatClient["loadHistoryV4"]>(() => delayedPage.promise);
+    const { client, emitV4 } = fakeClient({
+      resyncSessionV4: async (_context, sessionId) => projectionV4(sessionId, currentHistory),
+      loadHistoryV4,
+    });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-pagination-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    const loading = store.loadOlderHistory();
+    await vi.waitFor(() => expect(loadHistoryV4).toHaveBeenCalledOnce());
+    emitV4(Object.freeze({ ...eventV4(1, "turn_started", sourceV4(11)), durableSequence: "11" }));
+    emitV4(Object.freeze({ ...eventV4(2, "plan_updated", {
+      ...sourceV4(12),
+      explanation: null,
+      steps: [{ ordinal: 0, step: "live plan", status: "in_progress" }],
+    }), durableSequence: "12" }));
+    emitV4(Object.freeze({ ...eventV4(3, "item_started", {
+      ...sourceV4(13),
+      itemId: "live-final",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }), durableSequence: "13" }));
+    emitV4(Object.freeze({ ...eventV4(4, "agent_message_append", {
+      ...sourceV4(14),
+      itemId: "live-final",
+      itemOrdinal: 1,
+      phase: "final_answer",
+      text: "live text",
+    }), durableSequence: "14" }));
+    emitV4(Object.freeze({ ...eventV4(5, "notice", {
+      ...sourceV4(15),
+      scope: "session",
+      severity: "warning",
+      code: "live_warning",
+      willRetry: false,
+    }, null), durableSequence: "15" }));
+    const liveStreamPositions = store.conversationState.streamPositions;
+    const liveProcessedEventIds = store.conversationState.processedEventIds;
+    delayedPage.resolve(olderHistory);
+    await loading;
+
+    expect(store.conversationState.streamPositions).toBe(liveStreamPositions);
+    expect(store.conversationState.processedEventIds).toBe(liveProcessedEventIds);
+    expect(store.conversationState.threads[SESSION_A]?.notices).toHaveLength(1);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A)).toMatchObject({
+      ordinal: 1,
+      status: "in_progress",
+      plan: { steps: [{ ordinal: 0, text: "live plan", status: "in_progress" }] },
+    });
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "live-final"))
+      .toMatchObject({ contentBlocks: [{ text: "live text" }] });
+    expect(selectConversationTurn(store.conversationState, SESSION_A, oldTurnId))
+      .toMatchObject({ ordinal: 0, status: "completed" });
+    expect(store.history).toMatchObject({
+      nextCursor: null,
+      durableSequenceCut: "10",
+      sessionNotices: [],
+    });
+  });
+
+  it("keeps commentary separate, exposes only explicit final to legacy compatibility, and does not end the Turn on item completion", async () => {
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>(async (_context, sessionId) =>
+      projectionV4(sessionId)
+    );
+    const { client, emitV4 } = fakeClient({ resyncSessionV4: resyncV4 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-live-${storeSequence++}`,
+      undefined,
+      true,
+    )();
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emitV4(eventV4(1, "turn_started", sourceV4(1)));
+    emitV4(eventV4(2, "item_started", {
+      ...sourceV4(2),
+      itemId: "commentary-live",
+      itemOrdinal: 1,
+      itemType: "agentMessage",
+      phase: "commentary",
+      text: "",
+    }));
+    emitV4(eventV4(3, "agent_message_append", {
+      ...sourceV4(3),
+      itemId: "commentary-live",
+      itemOrdinal: 1,
+      phase: "commentary",
+      text: "synthetic process",
+    }));
+    expect(store.liveAssistantText).toBe("");
+
+    emitV4(eventV4(4, "item_started", {
+      ...sourceV4(4),
+      itemId: "final-live",
+      itemOrdinal: 2,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "",
+    }));
+    emitV4(eventV4(5, "agent_message_append", {
+      ...sourceV4(5),
+      itemId: "final-live",
+      itemOrdinal: 2,
+      phase: "final_answer",
+      text: "synthetic final",
+    }));
+    emitV4(eventV4(6, "notice", {
+      ...sourceV4(6),
+      scope: "session",
+      severity: "warning",
+      code: null,
+      willRetry: false,
+    }, null));
+    emitV4(eventV4(7, "item_completed", {
+      ...sourceV4(7),
+      itemId: "final-live",
+      itemOrdinal: 2,
+      itemType: "agentMessage",
+      phase: "final_answer",
+      text: "synthetic final",
+    }));
+
+    expect(store.liveAssistantText).toBe("synthetic final");
+    expect(store.phase).toBe("streaming");
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A))
+      .toMatchObject({ status: "in_progress", terminalStatus: null });
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "commentary-live"))
+      .toMatchObject({ agentMessagePhase: "commentary" });
+    expect(selectConversationItem(store.conversationState, SESSION_A, TURN_A, "final-live"))
+      .toMatchObject({ status: "completed", agentMessagePhase: "final_answer" });
+    expect(store.conversationState.threads[SESSION_A]?.notices).toHaveLength(1);
+    expect(resyncV4).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the v4 semantic snapshot while FEAT-128 independently ingests Artifact authority", async () => {
+    const page: ChatHistoryPageV4 = Object.freeze({
+      turns: Object.freeze([Object.freeze({
+        ...artifactHistory().turns[0]!,
+        projectionAuthority: "v4" as const,
+        artifacts: artifactHistory().turns[0]!.artifacts ?? Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(1),
+          itemId: "final-with-artifact",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer" as const,
+          status: "completed" as const,
+          text: "synthetic final with artifact",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 10,
+          completedAtMs: 11,
+        })]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "1",
+    });
+    const loadHistoryV3 = vi.fn<ChatClient["loadHistoryV3"]>();
+    const loadHistoryV4 = vi.fn<ChatClient["loadHistoryV4"]>(async () => page);
+    const { client } = fakeClient({
+      loadHistoryV3,
+      loadHistoryV4,
+      resyncSessionV4: async (_context, sessionId) => projectionV4(sessionId, page),
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-feat134-${storeSequence++}`)();
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-artifact-${storeSequence++}`,
+      () => ({
+        liveClient: { listen: async () => () => undefined },
+        store: artifacts,
+        authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+      }),
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(loadHistoryV4).toHaveBeenCalledTimes(2);
+    expect(loadHistoryV3).not.toHaveBeenCalled();
+    expect(artifacts.artifactsForTurn(SESSION_A, TURN_A)).toMatchObject([
+      { artifactId: ARTIFACT_A, status: "ready" },
+    ]);
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      "final-with-artifact",
+    )).toMatchObject({ agentMessagePhase: "final_answer" });
   });
 });

@@ -17,8 +17,11 @@ function hasConfigOverride(arguments_) {
 }
 
 export function releaseBuildEnvironment(environment = process.env) {
+  const sanitized = { ...environment };
+  delete sanitized.YIJIE_FEAT134_STREAMING_ENABLED;
+  delete sanitized.VITE_YIJIE_FEAT134_STREAMING_ENABLED;
   return {
-    ...environment,
+    ...sanitized,
     VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED: "true",
     VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED: "true",
   };

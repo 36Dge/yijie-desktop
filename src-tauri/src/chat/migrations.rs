@@ -17,6 +17,7 @@ const CHAT_ATTACHMENT_DRAFT_TARGETS_SQL: &str =
     include_str!("../../migrations/chat/0007_chat_attachment_draft_targets.sql");
 const CHAT_OUTPUT_ARTIFACTS_SQL: &str =
     include_str!("../../migrations/chat/0008_chat_output_artifacts.sql");
+const CHAT_TIMELINE_V4_SQL: &str = include_str!("../../migrations/chat/0009_chat_timeline_v4.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -25,7 +26,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 8] = [
+const CATALOG: [CatalogEntry; 9] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -65,6 +66,11 @@ const CATALOG: [CatalogEntry; 8] = [
         version: 8,
         name: "0008_chat_output_artifacts",
         sql: CHAT_OUTPUT_ARTIFACTS_SQL,
+    },
+    CatalogEntry {
+        version: 9,
+        name: "0009_chat_timeline_v4",
+        sql: CHAT_TIMELINE_V4_SQL,
     },
 ];
 
@@ -391,8 +397,8 @@ mod tests {
             )
             .unwrap();
 
-        migrate(&mut connection).expect("expand populated v7 to v8");
-        assert_eq!(user_version(&connection).unwrap(), 8);
+        migrate(&mut connection).expect("expand populated v7 to current");
+        assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
         assert_eq!(
             connection
                 .query_row(

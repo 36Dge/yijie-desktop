@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -13,6 +13,8 @@ const lockPath = path.join(repositoryRoot, "contracts/agent-host-v3-artifacts.lo
 const PINNED_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
 const PINNED_COMMIT = "164b14f609537d727a52326832da04430aecc4ab";
 const PINNED_VERSION = "0.5.1";
+// FEAT-134 adds a new closed consumer without rewriting the reviewed v3 bytes.
+const LEGACY_DESKTOP_BASELINE_COMMIT = "af38353694c3eb045365b7f3450ffc8a95aaf8a1";
 const SOURCE_PINS = Object.freeze({
   openapi: [
     "openapi/agent-host/agent-host.yaml",
@@ -147,20 +149,31 @@ async function git(root, ...arguments_) {
 }
 
 export async function verifyContractsCheckout(lock, contractsRoot) {
-  const [head, status, origin] = await Promise.all([
-    git(contractsRoot, "rev-parse", "HEAD"),
+  const [commit, status, origin] = await Promise.all([
+    git(contractsRoot, "rev-parse", "--verify", `${lock.full_commit}^{commit}`).catch(() => {
+      throw new Error(`contracts pinned commit ${lock.full_commit} is unavailable`);
+    }),
     git(contractsRoot, "status", "--porcelain"),
     git(contractsRoot, "remote", "get-url", "origin"),
   ]);
-  if (head !== lock.full_commit) throw new Error(`contracts HEAD is ${head}, expected ${lock.full_commit}`);
+  if (commit !== lock.full_commit) throw new Error(`contracts pinned commit resolves to ${commit}, expected ${lock.full_commit}`);
   if (status !== "") throw new Error("contracts checkout is not clean");
   if (normalizeRepository(origin) !== normalizeRepository(lock.repository)) {
     throw new Error("contracts origin does not match the pinned repository");
   }
 }
 
-async function verifySource(contractsRoot, source) {
-  const bytes = await readFile(path.join(contractsRoot, safeRelativePath(source.path)));
+async function readPinnedGitFile(root, commit, relativePath) {
+  const { stdout } = await exec(
+    "git",
+    ["-C", root, "show", `${commit}:${safeRelativePath(relativePath)}`],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  return Buffer.from(stdout, "utf8");
+}
+
+async function verifySource(contractsRoot, commit, source) {
+  const bytes = await readPinnedGitFile(contractsRoot, commit, source.path);
   if (sha256(bytes) !== source.sha256) throw new Error(`${source.path} digest differs from its pin`);
   return bytes;
 }
@@ -197,11 +210,18 @@ function validateOpenApi(document) {
 }
 
 async function validateEventFixtures(contractsRoot, validateEvent) {
-  const root = path.join(contractsRoot, "tests/fixtures/agent/session-event-v3");
-  const names = (await readdir(root)).filter((name) => name.endsWith(".json")).sort();
+  const fixtureRoot = "tests/fixtures/agent/session-event-v3";
+  const names = (await git(
+    contractsRoot,
+    "ls-tree",
+    "--name-only",
+    `${PINNED_COMMIT}:${fixtureRoot}`,
+  )).split("\n").filter((name) => name.endsWith(".json")).sort();
   if (names.length !== 16) throw new Error(`expected 16 v3 event fixtures, found ${names.length}`);
   for (const name of names) {
-    const fixture = JSON.parse(await readFile(path.join(root, name), "utf8"));
+    const fixture = JSON.parse(
+      (await readPinnedGitFile(contractsRoot, PINNED_COMMIT, `${fixtureRoot}/${name}`)).toString("utf8"),
+    );
     if (!validateEvent(fixture)) {
       throw new Error(`${name} does not validate: ${JSON.stringify(validateEvent.errors)}`);
     }
@@ -212,13 +232,17 @@ async function validateEventFixtures(contractsRoot, validateEvent) {
 }
 
 async function validateReportFixtures(contractsRoot, validateReport) {
-  const root = path.join(contractsRoot, "tests/fixtures/report/report-document-v1");
+  const fixtureRoot = "tests/fixtures/report/report-document-v1";
   for (const name of ["known-valid.json", "unknown-optional-valid.json"]) {
-    const fixture = JSON.parse(await readFile(path.join(root, name), "utf8"));
+    const fixture = JSON.parse(
+      (await readPinnedGitFile(contractsRoot, PINNED_COMMIT, `${fixtureRoot}/${name}`)).toString("utf8"),
+    );
     if (!validateReport(fixture)) throw new Error(`${name} does not validate`);
   }
   for (const name of ["unknown-required-invalid.json", "injection-invalid.json"]) {
-    const fixture = JSON.parse(await readFile(path.join(root, name), "utf8"));
+    const fixture = JSON.parse(
+      (await readPinnedGitFile(contractsRoot, PINNED_COMMIT, `${fixtureRoot}/${name}`)).toString("utf8"),
+    );
     if (validateReport(fixture)) throw new Error(`${name} unexpectedly validates`);
   }
 }
@@ -232,7 +256,11 @@ async function validateFixtureTrees(lock, contractsRoot) {
 
 async function verifyImplementationPins(lock) {
   for (const implementation of lock.consumer.implementation_files) {
-    const bytes = await readFile(path.join(repositoryRoot, safeRelativePath(implementation.path)));
+    const bytes = await readPinnedGitFile(
+      repositoryRoot,
+      LEGACY_DESKTOP_BASELINE_COMMIT,
+      implementation.path,
+    );
     if (sha256(bytes) !== implementation.sha256) {
       throw new Error(`${implementation.path} digest differs from its implementation pin`);
     }
@@ -247,10 +275,10 @@ export async function checkAgentHostV3Contract() {
   );
   await verifyContractsCheckout(lock, contractsRoot);
   const [openApiBytes, eventBytes, reportBytes, protoBytes, parseYaml] = await Promise.all([
-    verifySource(contractsRoot, lock.sources.openapi),
-    verifySource(contractsRoot, lock.sources.event_schema),
-    verifySource(contractsRoot, lock.sources.report_schema),
-    verifySource(contractsRoot, lock.sources.protobuf),
+    verifySource(contractsRoot, lock.full_commit, lock.sources.openapi),
+    verifySource(contractsRoot, lock.full_commit, lock.sources.event_schema),
+    verifySource(contractsRoot, lock.full_commit, lock.sources.report_schema),
+    verifySource(contractsRoot, lock.full_commit, lock.sources.protobuf),
     loadPinnedOpenApiParser(lock),
     validateFixtureTrees(lock, contractsRoot),
     verifyImplementationPins(lock),

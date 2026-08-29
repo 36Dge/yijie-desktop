@@ -22,6 +22,8 @@ pub enum ChatError {
     SidecarUnavailable,
     ConversationConflict,
     OrchestrationUnavailable,
+    ProjectionLimitExceeded,
+    ProjectionReconciliationFailed,
     CleanupIncomplete,
 }
 
@@ -47,6 +49,8 @@ impl ChatError {
             Self::SidecarUnavailable => "chat_sidecar_unavailable",
             Self::ConversationConflict => "chat_conversation_conflict",
             Self::OrchestrationUnavailable => "chat_orchestration_unavailable",
+            Self::ProjectionLimitExceeded => "chat_limit_exceeded",
+            Self::ProjectionReconciliationFailed => "chat_conversation_conflict",
             Self::CleanupIncomplete => "chat_cleanup_incomplete",
         }
     }

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_SSE_FRAME_BYTES: usize = MAX_EVENT_BYTES + 1024;
 const MAX_CONTEXT_BYTES: usize = 256;
 const MAX_ITEM_ID_BYTES: usize = 255;
 const MAX_REASONING_DELTA_BYTES: usize = 16 * 1024;
@@ -151,6 +152,25 @@ pub enum HostTurnStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostAgentMessagePhase {
+    Commentary,
+    FinalAnswer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostPlanStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostPlanStep {
+    pub step: String,
+    pub status: HostPlanStepStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostReasoningStatus {
     Complete,
     Incomplete,
@@ -241,9 +261,14 @@ pub enum HostEventKind {
         model_provider: String,
     },
     TurnStarted,
+    TurnPlanUpdated {
+        explanation: Option<String>,
+        steps: Vec<HostPlanStep>,
+    },
     ItemStarted {
         item_type: String,
         text: Option<String>,
+        phase: Option<HostAgentMessagePhase>,
     },
     AgentMessageDelta {
         delta: String,
@@ -260,6 +285,7 @@ pub enum HostEventKind {
     ItemCompleted {
         item_type: String,
         text: Option<String>,
+        phase: Option<HostAgentMessagePhase>,
     },
     TurnCompleted {
         status: HostTurnStatus,
@@ -283,6 +309,7 @@ impl HostEventKind {
         match self {
             Self::ThreadStarted { .. } => "thread.started",
             Self::TurnStarted => "turn.started",
+            Self::TurnPlanUpdated { .. } => "turn.plan.updated",
             Self::ItemStarted { .. } => "item.started",
             Self::AgentMessageDelta { .. } => "item.agent_message.delta",
             Self::ReasoningTextDelta { .. } => "item.reasoning_text.delta",
@@ -315,6 +342,9 @@ pub struct HostEvent {
     pub turn_id: Option<Uuid>,
     pub item_id: Option<String>,
     pub occurred_at: String,
+    /// Exact UTF-8 bytes of the validated wire event JSON. This is content-free accounting used
+    /// to bound cumulative per-Turn projection work across restarts and stream changes.
+    pub encoded_bytes: usize,
     pub kind: HostEventKind,
 }
 
@@ -374,6 +404,7 @@ impl Debug for HostEvent {
             .field("turn_id", &self.turn_id)
             .field("item_id", &self.item_id)
             .field("occurred_at", &self.occurred_at)
+            .field("encoded_bytes", &self.encoded_bytes)
             .field("kind", &self.kind)
             .finish()
     }
@@ -442,6 +473,20 @@ struct ItemLifecyclePayload {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TurnPlanUpdatedPayload {
+    explanation: Option<String>,
+    plan: Vec<WirePlanStep>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WirePlanStep {
+    step: String,
+    status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DeltaPayload {
     delta: String,
 }
@@ -506,7 +551,7 @@ impl SseDecoder {
     pub(super) fn push(&mut self, bytes: &[u8]) -> Result<(), HostBridgeError> {
         let mut offset = 0_usize;
         while offset < bytes.len() {
-            let available = (MAX_EVENT_BYTES + 4)
+            let available = (MAX_SSE_FRAME_BYTES + 4)
                 .checked_sub(self.buffer.len())
                 .ok_or_else(protocol_error)?;
             if available == 0 {
@@ -516,7 +561,7 @@ impl SseDecoder {
             self.buffer.extend_from_slice(&bytes[offset..offset + take]);
             offset += take;
             self.parse_complete_frames()?;
-            if self.buffer.len() == MAX_EVENT_BYTES + 4 {
+            if self.buffer.len() == MAX_SSE_FRAME_BYTES + 4 {
                 return Err(protocol_error());
             }
         }
@@ -577,7 +622,7 @@ fn parse_sse_frame(
     schema_version: u8,
     last_sequence: &mut u64,
 ) -> Result<Option<HostStreamEvent>, HostBridgeError> {
-    if frame.len() > MAX_EVENT_BYTES {
+    if frame.len() > MAX_SSE_FRAME_BYTES {
         return Err(protocol_error());
     }
     let text = std::str::from_utf8(frame).map_err(|_| protocol_error())?;
@@ -660,11 +705,11 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let wire: WireEvent = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if !matches!(schema_version, 2 | 3)
+    if !matches!(schema_version, 2..=4)
         || wire.schema_version != schema_version
         || wire.sequence == 0
-        || wire.occurred_at.is_empty()
         || wire.occurred_at.len() > 64
+        || !valid_rfc3339(&wire.occurred_at)
     {
         return Err(protocol_error());
     }
@@ -691,7 +736,7 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let turn_id = wire.turn_id.as_deref().map(parse_uuid).transpose()?;
-    let maximum_item_id_bytes = if schema_version == 3 {
+    let maximum_item_id_bytes = if schema_version >= 3 {
         MAX_CONTEXT_BYTES
     } else {
         MAX_ITEM_ID_BYTES
@@ -712,7 +757,7 @@ fn parse_event_json(
         })
         .transpose()?;
     let event_type = wire.event_type;
-    if schema_version == 3 && is_artifact_event_type(&event_type) {
+    if schema_version >= 3 && is_artifact_event_type(&event_type) {
         let turn_id = turn_id.ok_or_else(protocol_error)?;
         if wire.terminal {
             return Err(protocol_error());
@@ -735,7 +780,11 @@ fn parse_event_json(
     if schema_version == 3 && !is_v3_ordinary_event_type(&event_type) {
         return Err(protocol_error());
     }
+    if schema_version == 4 && !is_v4_ordinary_event_type(&event_type) {
+        return Err(protocol_error());
+    }
     let kind = parse_event_kind(
+        schema_version,
         &event_type,
         wire.terminal,
         turn_id,
@@ -755,6 +804,7 @@ fn parse_event_json(
         turn_id,
         item_id,
         occurred_at: wire.occurred_at,
+        encoded_bytes: data.len(),
         kind,
     }))
 }
@@ -785,7 +835,12 @@ fn is_v3_ordinary_event_type(value: &str) -> bool {
     )
 }
 
+fn is_v4_ordinary_event_type(value: &str) -> bool {
+    is_v3_ordinary_event_type(value) || value == "turn.plan.updated"
+}
+
 fn parse_event_kind(
+    schema_version: u8,
     event_type: &str,
     terminal: bool,
     turn_id: Option<Uuid>,
@@ -809,11 +864,42 @@ fn parse_event_kind(
             }
             Ok(HostEventKind::TurnStarted)
         }
+        "turn.plan.updated"
+            if schema_version == 4 && !terminal && turn_id.is_some() && item_id.is_none() =>
+        {
+            let payload: TurnPlanUpdatedPayload = parse_payload(payload)?;
+            if payload.plan.len() > 128 {
+                return Err(protocol_error());
+            }
+            validate_optional_text(payload.explanation.as_deref(), 64 * 1024)?;
+            let steps = payload
+                .plan
+                .into_iter()
+                .map(|step| {
+                    validate_text(&step.step, 64 * 1024, true)?;
+                    let status = match step.status.as_str() {
+                        "pending" => HostPlanStepStatus::Pending,
+                        "in_progress" => HostPlanStepStatus::InProgress,
+                        "completed" => HostPlanStepStatus::Completed,
+                        _ => return Err(protocol_error()),
+                    };
+                    Ok(HostPlanStep {
+                        step: step.step,
+                        status,
+                    })
+                })
+                .collect::<Result<Vec<_>, HostBridgeError>>()?;
+            Ok(HostEventKind::TurnPlanUpdated {
+                explanation: payload.explanation,
+                steps,
+            })
+        }
         "item.started" if !terminal && turn_id.is_some() && item_id.is_some() => {
-            let payload = parse_item_payload(payload)?;
+            let (payload, phase) = parse_item_payload(payload, schema_version)?;
             Ok(HostEventKind::ItemStarted {
                 item_type: payload.item_type,
                 text: payload.text,
+                phase,
             })
         }
         "item.agent_message.delta" if !terminal && turn_id.is_some() && item_id.is_some() => {
@@ -838,10 +924,11 @@ fn parse_event_kind(
             parse_reasoning_finalized(payload)
         }
         "item.completed" if !terminal && turn_id.is_some() && item_id.is_some() => {
-            let payload = parse_item_payload(payload)?;
+            let (payload, phase) = parse_item_payload(payload, schema_version)?;
             Ok(HostEventKind::ItemCompleted {
                 item_type: payload.item_type,
                 text: payload.text,
+                phase,
             })
         }
         "turn.completed" if terminal && turn_id.is_some() && item_id.is_none() => {
@@ -882,6 +969,7 @@ fn parse_event_kind(
                 message: payload.message,
             })
         }
+        _ if schema_version >= 3 => Err(protocol_error()),
         _ if !terminal && !event_type.is_empty() && event_type.len() <= 128 => {
             Ok(HostEventKind::Unknown)
         }
@@ -889,11 +977,125 @@ fn parse_event_kind(
     }
 }
 
-fn parse_item_payload(payload: Value) -> Result<ItemLifecyclePayload, HostBridgeError> {
-    let payload: ItemLifecyclePayload = parse_payload(payload)?;
+fn valid_rfc3339(value: &str) -> bool {
+    if value.len() < 20
+        || value.as_bytes().get(4) != Some(&b'-')
+        || value.as_bytes().get(7) != Some(&b'-')
+        || value.as_bytes().get(10) != Some(&b'T')
+        || value.as_bytes().get(13) != Some(&b':')
+        || value.as_bytes().get(16) != Some(&b':')
+    {
+        return false;
+    }
+    let digits = |range: std::ops::Range<usize>| {
+        value
+            .as_bytes()
+            .get(range)
+            .is_some_and(|part| part.iter().all(u8::is_ascii_digit))
+    };
+    if !digits(0..4)
+        || !digits(5..7)
+        || !digits(8..10)
+        || !digits(11..13)
+        || !digits(14..16)
+        || !digits(17..19)
+    {
+        return false;
+    }
+    let number =
+        |range: std::ops::Range<usize>| value.get(range).and_then(|part| part.parse::<u32>().ok());
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        number(0..4),
+        number(5..7),
+        number(8..10),
+        number(11..13),
+        number(14..16),
+        number(17..19),
+    ) else {
+        return false;
+    };
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let maximum_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    if year == 0 || day == 0 || day > maximum_day || hour > 23 || minute > 59 || second > 59 {
+        return false;
+    }
+    let zone_start = if value.as_bytes().last() == Some(&b'Z') {
+        value.len() - 1
+    } else {
+        let start = value.len().saturating_sub(6);
+        if !matches!(value.as_bytes().get(start), Some(b'+' | b'-'))
+            || value.as_bytes().get(start + 3) != Some(&b':')
+            || !digits(start + 1..start + 3)
+            || !digits(start + 4..start + 6)
+            || number(start + 1..start + 3).is_none_or(|offset_hour| offset_hour > 23)
+            || number(start + 4..start + 6).is_none_or(|offset_minute| offset_minute > 59)
+        {
+            return false;
+        }
+        start
+    };
+    if zone_start == 19 {
+        return true;
+    }
+    value.as_bytes().get(19) == Some(&b'.')
+        && value
+            .as_bytes()
+            .get(20..zone_start)
+            .is_some_and(|fraction| !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit))
+}
+
+fn parse_item_payload(
+    value: Value,
+    schema_version: u8,
+) -> Result<(ItemLifecyclePayload, Option<HostAgentMessagePhase>), HostBridgeError> {
+    let phase_present = value
+        .as_object()
+        .is_some_and(|object| object.contains_key("phase"));
+    let phase_value = value.get("phase").cloned();
+    let mut projection = value;
+    if let Some(object) = projection.as_object_mut() {
+        object.remove("phase");
+    }
+    let payload: ItemLifecyclePayload = parse_payload(projection)?;
     validate_text(&payload.item_type, 256, false)?;
-    validate_optional_text(payload.text.as_deref(), MAX_EVENT_BYTES)?;
-    Ok(payload)
+    if let Some(text) = payload.text.as_deref() {
+        // Lifecycle text is an authoritative snapshot, and the v3/v4 Contracts explicitly
+        // allow an empty snapshot at item.started before deltas arrive.
+        validate_text(text, MAX_EVENT_BYTES, true)?;
+    }
+    if schema_version != 4 {
+        if phase_present {
+            return Err(protocol_error());
+        }
+        return Ok((payload, None));
+    }
+    let phase = if payload.item_type == "agentMessage" {
+        if payload.text.is_none() || !phase_present {
+            return Err(protocol_error());
+        }
+        match phase_value {
+            Some(Value::String(value)) if value == "commentary" => {
+                Some(HostAgentMessagePhase::Commentary)
+            }
+            Some(Value::String(value)) if value == "final_answer" => {
+                Some(HostAgentMessagePhase::FinalAnswer)
+            }
+            Some(Value::Null) => None,
+            _ => return Err(protocol_error()),
+        }
+    } else {
+        if phase_present {
+            return Err(protocol_error());
+        }
+        None
+    };
+    Ok((payload, phase))
 }
 
 fn parse_reasoning_finalized(payload: Value) -> Result<HostEventKind, HostBridgeError> {
@@ -1198,5 +1400,169 @@ mod tests {
         unknown["event_type"] = serde_json::json!("future.required.variant");
         let frame = format!("id: {stream}:2\nevent: future.required.variant\ndata: {unknown}\n\n");
         assert!(decoder.push(frame.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn lifecycle_decoder_accepts_contract_authorized_empty_start_snapshots() {
+        let stream = Uuid::now_v7();
+        let task_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let codex_thread_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        for (schema_version, sequence, payload) in [
+            (
+                3,
+                1,
+                serde_json::json!({"item_type":"agentMessage","text":""}),
+            ),
+            (
+                4,
+                2,
+                serde_json::json!({"item_type":"agentMessage","text":"","phase":null}),
+            ),
+        ] {
+            let body = serde_json::json!({
+                "schema_version": schema_version,
+                "event_id": Uuid::now_v7(),
+                "stream_id": stream,
+                "sequence": sequence,
+                "occurred_at": "2026-08-28T06:00:00Z",
+                "task_id": task_id,
+                "agent_session_id": agent_session_id,
+                "codex_thread_id": codex_thread_id,
+                "turn_id": turn_id,
+                "item_id": "assistant-1",
+                "event_type": "item.started",
+                "terminal": false,
+                "payload": payload,
+            });
+            let frame = format!("id: {stream}:{sequence}\nevent: item.started\ndata: {body}\n\n");
+            let mut decoder = SseDecoder::new(stream, sequence - 1, schema_version);
+            decoder.push(frame.as_bytes()).unwrap();
+            let HostStreamEvent::Ordinary(event) = decoder.next().expect("lifecycle event") else {
+                panic!("ordinary lifecycle expected");
+            };
+            assert!(matches!(
+                event.kind,
+                HostEventKind::ItemStarted {
+                    item_type,
+                    text: Some(text),
+                    phase: None,
+                } if item_type == "agentMessage" && text.is_empty()
+            ));
+        }
+    }
+
+    #[test]
+    fn v4_replay_chunk_with_empty_agent_start_reaches_terminal() {
+        let stream = Uuid::now_v7();
+        let task_id = Uuid::now_v7();
+        let agent_session_id = Uuid::now_v7();
+        let codex_thread_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let mut chunk = String::new();
+        for (sequence, event_type, terminal, item_id, payload) in [
+            (
+                1,
+                "item.started",
+                false,
+                Some("assistant-1"),
+                serde_json::json!({"item_type":"agentMessage","text":"","phase":null}),
+            ),
+            (
+                2,
+                "item.agent_message.delta",
+                false,
+                Some("assistant-1"),
+                serde_json::json!({"delta":"ok"}),
+            ),
+            (
+                3,
+                "item.completed",
+                false,
+                Some("assistant-1"),
+                serde_json::json!({"item_type":"agentMessage","text":"ok","phase":null}),
+            ),
+            (
+                4,
+                "turn.completed",
+                true,
+                None,
+                serde_json::json!({"status":"completed"}),
+            ),
+        ] {
+            let body = serde_json::json!({
+                "schema_version": 4,
+                "event_id": Uuid::now_v7(),
+                "stream_id": stream,
+                "sequence": sequence,
+                "occurred_at": "2026-08-28T06:00:00Z",
+                "task_id": task_id,
+                "agent_session_id": agent_session_id,
+                "codex_thread_id": codex_thread_id,
+                "turn_id": turn_id,
+                "item_id": item_id,
+                "event_type": event_type,
+                "terminal": terminal,
+                "payload": payload,
+            });
+            chunk.push_str(&format!(
+                "id: {stream}:{sequence}\nevent: {event_type}\ndata: {body}\n\n"
+            ));
+        }
+
+        let mut decoder = SseDecoder::new(stream, 0, 4);
+        decoder.push(chunk.as_bytes()).unwrap();
+        let events = std::iter::from_fn(|| decoder.next()).collect::<Vec<_>>();
+        assert_eq!(events.len(), 4);
+        assert!(matches!(
+            events.last(),
+            Some(HostStreamEvent::Ordinary(HostEvent {
+                kind: HostEventKind::TurnCompleted {
+                    status: HostTurnStatus::Completed,
+                    ..
+                },
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn v4_known_shape_and_rfc3339_failures_do_not_advance_delivery_cursor() {
+        let stream = Uuid::now_v7();
+        let mut body = serde_json::json!({
+            "schema_version": 4,
+            "event_id": Uuid::now_v7(),
+            "stream_id": stream,
+            "sequence": 1,
+            "occurred_at": "2026-08-28T06:00:00Z",
+            "task_id": Uuid::now_v7(),
+            "agent_session_id": Uuid::now_v7(),
+            "codex_thread_id": Uuid::now_v7(),
+            "turn_id": Uuid::now_v7(),
+            "event_type": "item.agent_message.delta",
+            "terminal": false,
+            "payload": {"delta": "bounded"}
+        });
+        let frame =
+            |body: &Value| format!("id: {stream}:1\nevent: item.agent_message.delta\ndata: {body}");
+        let mut last_sequence = 0;
+        assert!(parse_sse_frame(frame(&body).as_bytes(), stream, 4, &mut last_sequence).is_err());
+        assert_eq!(
+            last_sequence, 0,
+            "known v4 shape failure consumed the cursor"
+        );
+
+        body["item_id"] = serde_json::json!("assistant-1");
+        body["occurred_at"] = serde_json::json!("2026-99-99T06:00:00Z");
+        assert!(parse_sse_frame(frame(&body).as_bytes(), stream, 4, &mut last_sequence).is_err());
+        assert_eq!(last_sequence, 0, "invalid RFC3339 consumed the cursor");
+
+        body["occurred_at"] = serde_json::json!("2026-08-28T06:00:00.123+08:00");
+        let parsed = parse_sse_frame(frame(&body).as_bytes(), stream, 4, &mut last_sequence)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(parsed, HostStreamEvent::Ordinary(_)));
+        assert_eq!(last_sequence, 1);
     }
 }

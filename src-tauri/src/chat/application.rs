@@ -7,14 +7,19 @@ use super::artifact::{
 use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
-    ActiveTurnContext, AttachmentSummary, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState,
-    DeletionStatus, DraftContentBlock, DraftTarget, HistoryPage, MessageContentBlockProjection,
-    OutboxKind, PendingConversation, ProjectSummary, PublicTaskBindingState,
-    PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot,
-    SessionPage, SessionPageCursor, SessionSummary, StoredEventCursor, TerminalTurnCommit,
+    feat134_projection_requires_limit_terminal, ActiveTurnContext, AttachmentSummary,
+    ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState, DeletionStatus, DraftContentBlock,
+    DraftTarget, Feat134HistorySnapshot, HistoryPage, MessageContentBlockProjection, OutboxKind,
+    PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
+    ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot, SessionPage,
+    SessionPageCursor, SessionSummary, StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit,
     TurnProgress,
 };
 use super::error::ChatError;
+use super::feat134::{
+    Feat134HistoryProjection, Feat134Projection, Feat134ProjectionFailure,
+    Feat134ProjectionFailureKind, Feat134TurnReducer, TimelineReasoningStatus,
+};
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
     HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
@@ -72,6 +77,7 @@ pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
             turn_id: Some(identity.turn_id),
             item_id: Some("synthetic".to_owned()),
             occurred_at: "2026-08-13T00:00:00Z".to_owned(),
+            encoded_bytes: 1,
             kind: HostEventKind::AgentMessageDelta {
                 delta: "x".to_owned(),
             },
@@ -102,6 +108,7 @@ pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
             turn_id: Some(identity.turn_id),
             item_id: Some("synthetic".to_owned()),
             occurred_at: "2026-08-13T00:00:00Z".to_owned(),
+            encoded_bytes: 1,
             kind: HostEventKind::AgentMessageDelta {
                 delta: "x".to_owned(),
             },
@@ -139,6 +146,7 @@ pub struct ConversationApplication {
     host: Option<Arc<HostBridge>>,
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
     artifact_transfers: Option<ArtifactTransferService>,
+    feat134_streaming_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -344,6 +352,31 @@ impl AuthorizedConversationApplication {
             .await
     }
 
+    pub async fn load_feat134_history_projection(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_feat134_history_projection(session_id, turn_ids)
+            .await
+    }
+
+    pub async fn load_feat134_history_snapshot(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_feat134_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
     pub async fn load_reasoning(
         &self,
         context_id: Uuid,
@@ -472,11 +505,31 @@ impl Debug for ConversationApplication {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DispatchOutcome {
     Idle,
-    SessionBound { session_id: Uuid },
-    TurnAccepted { session_id: Uuid },
-    InterruptAccepted { session_id: Uuid },
-    RetryScheduled { operation_id: Uuid },
-    FailedSafely { operation_id: Uuid },
+    SessionBound {
+        session_id: Uuid,
+    },
+    TurnAccepted {
+        session_id: Uuid,
+    },
+    TurnFailedSafely {
+        operation_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+    },
+    TurnReconciliationRequired {
+        operation_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+    },
+    InterruptAccepted {
+        session_id: Uuid,
+    },
+    RetryScheduled {
+        operation_id: Uuid,
+    },
+    FailedSafely {
+        operation_id: Uuid,
+    },
     ControlPlaneChanged(PublicTaskControlPlaneStatus),
 }
 
@@ -498,12 +551,18 @@ impl Debug for ConversationCoordinator {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ConversationCoordinator")
-            .field("running", &self.task.is_some())
+            .field("running", &!self.is_finished())
             .finish()
     }
 }
 
 impl ConversationCoordinator {
+    pub fn is_finished(&self) -> bool {
+        self.task
+            .as_ref()
+            .is_none_or(tokio::task::JoinHandle::is_finished)
+    }
+
     pub fn start(
         application: ConversationApplication,
         idle_poll_interval: Duration,
@@ -653,6 +712,10 @@ impl Debug for LiveTurnProjection {
 pub trait TurnProjectionSink: Send + Sync {
     fn publish(&self, projection: LiveTurnProjection) -> Result<(), ChatError>;
 
+    fn publish_feat134(&self, _projection: Feat134Projection) -> Result<(), ChatError> {
+        Ok(())
+    }
+
     fn publish_coordinator(&self, _outcome: &CoordinatorOutcome) -> Result<(), ChatError> {
         Ok(())
     }
@@ -733,6 +796,7 @@ impl ConversationApplication {
             host: Some(host),
             public_tasks: Some(public_tasks),
             artifact_transfers: None,
+            feat134_streaming_enabled: false,
         }
     }
 
@@ -743,9 +807,24 @@ impl ConversationApplication {
     ) -> Self {
         Self {
             artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
+            feat134_streaming_enabled: false,
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
+        }
+    }
+
+    pub fn new_with_artifacts_v4(
+        database: DatabaseWorker,
+        host: Arc<HostBridge>,
+        public_tasks: Arc<dyn PublicTaskControlPlane>,
+    ) -> Self {
+        Self {
+            artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
+            database,
+            host: Some(host),
+            public_tasks: Some(public_tasks),
+            feat134_streaming_enabled: true,
         }
     }
 
@@ -755,6 +834,7 @@ impl ConversationApplication {
             host: None,
             public_tasks: None,
             artifact_transfers: None,
+            feat134_streaming_enabled: false,
         }
     }
 
@@ -939,6 +1019,27 @@ impl ConversationApplication {
     ) -> Result<HistoryPage, ChatError> {
         self.database
             .load_history(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn load_feat134_history_projection(
+        &self,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.database
+            .load_feat134_history_projection(session_id, turn_ids)
+            .await
+    }
+
+    pub async fn load_feat134_history_snapshot(
+        &self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.database
+            .load_feat134_history_snapshot(session_id, before_ordinal, limit)
             .await
     }
 
@@ -1280,6 +1381,11 @@ impl ConversationApplication {
                     .await
                 {
                     Ok(dispatch) => dispatch,
+                    Err(ChatError::NotFound) if self.feat134_streaming_enabled => {
+                        return self
+                            .finalize_failed_feat134_turn_dispatch(claimed.operation_id, now)
+                            .await;
+                    }
                     Err(ChatError::NotFound) => {
                         self.database.fail_outbox(claimed.operation_id).await?;
                         return Ok(DispatchOutcome::FailedSafely {
@@ -1301,6 +1407,19 @@ impl ConversationApplication {
                         &trace,
                     )
                     .await;
+                if self.feat134_streaming_enabled
+                    && result.as_ref().is_err_and(|error| {
+                        matches!(
+                            error.kind(),
+                            HostBridgeErrorKind::Transport
+                                | HostBridgeErrorKind::AcceptedResponseInvalid
+                        ) || error.code() == Some(HostErrorCode::SessionNotUsable)
+                    })
+                {
+                    return self
+                        .suspend_uncertain_feat134_turn_dispatch(&dispatch)
+                        .await;
+                }
                 self.finish_turn_dispatch(
                     now,
                     2,
@@ -1346,6 +1465,7 @@ impl ConversationApplication {
             }
             Err(error)
                 if payload_version == 2
+                    && !self.feat134_streaming_enabled
                     && matches!(
                         error.kind(),
                         HostBridgeErrorKind::Transport
@@ -1361,6 +1481,11 @@ impl ConversationApplication {
                     .await?;
                 return Ok(DispatchOutcome::RetryScheduled { operation_id });
             }
+            Err(_) if self.feat134_streaming_enabled && payload_version == 2 => {
+                return self
+                    .finalize_failed_feat134_turn_dispatch(operation_id, now)
+                    .await;
+            }
             Err(error) => {
                 return self.handle_dispatch_error(operation_id, now, error).await;
             }
@@ -1369,6 +1494,36 @@ impl ConversationApplication {
             .suspend_started_turn_retry(operation_id, runtime_turn_id)
             .await?;
         Ok(DispatchOutcome::TurnAccepted { session_id })
+    }
+
+    async fn suspend_uncertain_feat134_turn_dispatch(
+        &self,
+        dispatch: &StartTurnDispatchV2,
+    ) -> Result<DispatchOutcome, ChatError> {
+        self.database
+            .suspend_uncertain_start_turn(dispatch.operation_id)
+            .await?;
+        Ok(DispatchOutcome::TurnReconciliationRequired {
+            operation_id: dispatch.operation_id,
+            session_id: dispatch.session_id,
+            turn_id: dispatch.turn_id,
+        })
+    }
+
+    async fn finalize_failed_feat134_turn_dispatch(
+        &self,
+        operation_id: Uuid,
+        terminal_at: i64,
+    ) -> Result<DispatchOutcome, ChatError> {
+        let projection = self
+            .database
+            .finalize_failed_start_turn_dispatch(operation_id, terminal_at)
+            .await?;
+        Ok(DispatchOutcome::TurnFailedSafely {
+            operation_id: projection.operation_id,
+            session_id: projection.session_id,
+            turn_id: projection.turn_id,
+        })
     }
 
     async fn dispatch_interrupt(
@@ -1454,6 +1609,22 @@ impl ConversationApplication {
             artifact_transfers
                 .recover_pending_acknowledgements()
                 .await?;
+        }
+        if self.feat134_streaming_enabled {
+            let now = unix_seconds()?;
+            if let Some(projection) = self
+                .database
+                .recover_next_failed_start_turn_projection(now)
+                .await?
+            {
+                return Ok(CoordinatorOutcome::Dispatched(
+                    DispatchOutcome::TurnFailedSafely {
+                        operation_id: projection.operation_id,
+                        session_id: projection.session_id,
+                        turn_id: projection.turn_id,
+                    },
+                ));
+            }
         }
         let dispatch = self.dispatch_next().await?;
         if dispatch != DispatchOutcome::Idle {
@@ -1622,6 +1793,15 @@ impl ConversationApplication {
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
     ) -> Result<(), ChatError> {
+        if self.feat134_streaming_enabled {
+            let artifact_transfers = self
+                .artifact_transfers
+                .as_ref()
+                .ok_or(ChatError::InvalidConfiguration)?;
+            return self
+                .stream_active_turn_v4(session_id, sink, artifact_transfers)
+                .await;
+        }
         if let Some(artifact_transfers) = &self.artifact_transfers {
             return self
                 .stream_active_turn_v3(session_id, sink, artifact_transfers)
@@ -1973,6 +2153,347 @@ impl ConversationApplication {
             }
         }
     }
+
+    /// Reduces one ordinary Host v4 event and commits the resulting private projection before it
+    /// can be published. A Desktop projection limit is closed atomically from the confirmed
+    /// durable prefix; the offending text never crosses this application boundary into storage.
+    async fn reduce_and_persist_feat134_event(
+        &self,
+        reducer: &mut Feat134TurnReducer,
+        event: HostEvent,
+        observed_at_ms: i64,
+    ) -> Result<Option<(Feat134Projection, bool)>, ChatError> {
+        let mut failure = Feat134ProjectionFailure {
+            session_id: reducer.session_id(),
+            turn_id: reducer.local_turn_id(),
+            cursor: StoredEventCursor {
+                stream_id: event.cursor.stream_id,
+                sequence: event.cursor.sequence,
+                event_id: event.event_id,
+            },
+            source_event_type: event.event_type.clone(),
+            source_turn_id: event.turn_id,
+            source_occurred_at: event.occurred_at.clone(),
+            source_event_bytes: event.encoded_bytes,
+            observed_at_ms,
+            kind: Feat134ProjectionFailureKind::LimitExceeded,
+        };
+        let projection = match reducer.apply(event, observed_at_ms) {
+            Ok(None) => return Ok(None),
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat134_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(ChatError::ProjectionReconciliationFailed) => {
+                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
+                return self
+                    .database
+                    .commit_feat134_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(error) => return Err(error),
+            Ok(Some(projection)) => projection,
+        };
+        if feat134_projection_requires_limit_terminal(&projection)? {
+            // This is a Desktop-derived terminal, not a Host terminal fact. The DB atomically
+            // consumes the offending cursor while retaining only the confirmed prefix, preventing
+            // an infinite replay of the event.
+            return self
+                .database
+                .commit_feat134_projection_failure(failure)
+                .await
+                .map(|projection| Some((projection, true)));
+        }
+        let mut projection = projection;
+        let persisted = if projection.terminal.is_some() {
+            self.database
+                .commit_feat134_terminal(projection.clone())
+                .await
+        } else {
+            self.database
+                .persist_feat134_projection(projection.clone())
+                .await
+        };
+        let durable_sequence = match persisted {
+            Ok(durable_sequence) => durable_sequence,
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat134_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(error) => return Err(error),
+        };
+        projection.durable_sequence = Some(durable_sequence);
+        Ok(Some((projection, false)))
+    }
+
+    async fn stream_active_turn_v4(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+        artifact_transfers: &ArtifactTransferService,
+    ) -> Result<(), ChatError> {
+        artifact_transfers
+            .recover_pending_acknowledgements()
+            .await?;
+        let mut context = self.database.active_turn_context(session_id).await?;
+        let hydration = self
+            .database
+            .load_feat134_hydration(context.turn_id)
+            .await?;
+        let cursor = context
+            .cursor
+            .as_ref()
+            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
+            .transpose()
+            .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        let agent_session_id = context.agent_session_id;
+        let runtime_turn_id = context.runtime_turn_id;
+        let host = self.host()?;
+        let host_snapshot = host
+            .get_session(context.agent_session_id)
+            .await
+            .map_err(map_host_error)?;
+        if host_snapshot.task_id != context.task_id
+            || host_snapshot.agent_session_id != context.agent_session_id
+            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let replay_must_supply_terminal = matches!(
+            host_snapshot.state,
+            HostSessionState::Idle | HostSessionState::Failed
+        ) && host_snapshot.active_turn_id.is_none();
+        let mut stream = match host
+            .open_event_stream_v4(context.agent_session_id, cursor)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(error)
+                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
+            {
+                let stream = host
+                    .open_event_stream_v4(context.agent_session_id, None)
+                    .await
+                    .map_err(map_host_error)?;
+                let expected = context
+                    .cursor
+                    .take()
+                    .ok_or(ChatError::ConversationConflict)?;
+                self.database
+                    .reset_feat134_after_stream_change(session_id, context.turn_id, expected)
+                    .await?;
+                sink.publish_artifact_resync_required(
+                    session_id,
+                    context.turn_id,
+                    ArtifactResyncReason::SequenceGap,
+                )?;
+                stream
+            }
+            Err(error) => return Err(map_host_error(error)),
+        };
+        let hydration = if context.cursor.is_some() {
+            Some(hydration)
+        } else {
+            None
+        };
+        let mut reducer = Feat134TurnReducer::new(context, hydration)?;
+        loop {
+            let next_event = if replay_must_supply_terminal {
+                match tokio::time::timeout(
+                    ORPHANED_TERMINAL_REPLAY_GRACE,
+                    stream.next_stream_event(),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.database
+                            .finalize_orphaned_turn_without_stream(
+                                reducer.session_id(),
+                                reducer.local_turn_id(),
+                                reducer.runtime_turn_id(),
+                                unix_seconds()?,
+                            )
+                            .await?;
+                        sink.publish_artifact_resync_required(
+                            reducer.session_id(),
+                            reducer.local_turn_id(),
+                            ArtifactResyncReason::ProtocolError,
+                        )?;
+                        return Ok(());
+                    }
+                }
+            } else {
+                stream.next_stream_event().await
+            };
+            let event = next_event.map_err(map_host_error)?.ok_or_else(|| {
+                let _ = sink.publish_artifact_resync_required(
+                    session_id,
+                    reducer.local_turn_id(),
+                    ArtifactResyncReason::ProtocolError,
+                );
+                ChatError::OrchestrationUnavailable
+            })?;
+            match event {
+                HostStreamEvent::Ordinary(event) => {
+                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
+                    let observed_at_ms = unix_millis()?;
+                    let (projection, projection_limit) = match self
+                        .reduce_and_persist_feat134_event(&mut reducer, event, observed_at_ms)
+                        .await
+                    {
+                        Ok(None) => continue,
+                        Ok(Some(result)) => result,
+                        Err(error) => {
+                            let _ = sink.publish_artifact_resync_required(
+                                session_id,
+                                reducer.local_turn_id(),
+                                resync_reason,
+                            );
+                            return Err(error);
+                        }
+                    };
+                    sink.publish_feat134(projection.clone())?;
+                    sink.publish(feat134_legacy_projection(&projection))?;
+                    if projection.terminal.is_some() {
+                        if projection_limit {
+                            // Best-effort normal Host control; local fail-closed state is already
+                            // durable and never depends on this request succeeding.
+                            let _ = host
+                                .interrupt_turn(
+                                    agent_session_id,
+                                    runtime_turn_id,
+                                    &HostTrace {
+                                        request_id: Some(projection.cursor.event_id),
+                                        ..HostTrace::default()
+                                    },
+                                )
+                                .await;
+                        }
+                        return Ok(());
+                    }
+                }
+                HostStreamEvent::Artifact(envelope) => {
+                    let artifact = decode_artifact_event_envelope_v3(
+                        &envelope,
+                        reducer.agent_session_id(),
+                        reducer.runtime_turn_id(),
+                        reducer.session_id(),
+                        reducer.local_turn_id(),
+                    )
+                    .inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id(),
+                            ArtifactResyncReason::ProtocolError,
+                        );
+                    })?;
+                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
+                    if !reducer.observe_artifact(&envelope).inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id(),
+                            resync_reason,
+                        );
+                    })? {
+                        continue;
+                    }
+                    let cursor_progress = reducer.progress()?;
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    let runtime_transition = match &artifact {
+                        ArtifactEventV3::Started(identity) => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Announced,
+                        ),
+                        ArtifactEventV3::Progress { identity, .. } => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Progress,
+                        ),
+                        ArtifactEventV3::Completed(manifest) => (
+                            manifest.artifact_id,
+                            manifest.kind,
+                            manifest.ordinal,
+                            Feat128S10dArtifactStage::Ready,
+                        ),
+                        ArtifactEventV3::Failed { .. } => {
+                            return Err(ChatError::ConversationConflict)
+                        }
+                    };
+                    match artifact {
+                        ArtifactEventV3::Completed(manifest) => {
+                            artifact_transfers
+                                .transfer_completed_with_cursor(manifest, cursor_progress)
+                                .await?;
+                        }
+                        artifact => {
+                            self.database
+                                .commit_artifact_event_progress(cursor_progress, artifact)
+                                .await?;
+                        }
+                    }
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    feat128_s10d_record_native_artifact(
+                        runtime_transition.0,
+                        runtime_transition.1,
+                        runtime_transition.2,
+                        runtime_transition.3,
+                    )
+                    .map_err(|_| ChatError::ConversationConflict)?;
+                    sink.publish_artifact_changed(
+                        session_id,
+                        reducer.local_turn_id(),
+                        envelope.event_id,
+                    )?;
+                }
+            }
+        }
+    }
+}
+
+fn feat134_legacy_projection(projection: &Feat134Projection) -> LiveTurnProjection {
+    let reasoning = projection
+        .items
+        .iter()
+        .filter(|item| item.item_type == "reasoning")
+        .map(|item| LiveReasoningProjection {
+            item_id: item.item_id.clone(),
+            status: item.reasoning_status.map(|status| match status {
+                TimelineReasoningStatus::Complete => ReasoningStatus::Complete,
+                TimelineReasoningStatus::Incomplete => ReasoningStatus::Incomplete,
+                TimelineReasoningStatus::Unavailable => ReasoningStatus::Unavailable,
+            }),
+            parts: item
+                .reasoning_parts
+                .iter()
+                .map(|part| ReasoningPart {
+                    content_index: part.content_index,
+                    text: part.text.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    LiveTurnProjection {
+        session_id: projection.session_id,
+        turn_id: projection.turn_id,
+        assistant_text: projection.assistant_text.clone(),
+        reasoning,
+        terminal: projection.terminal.is_some(),
+        terminal_status: projection
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.status.to_owned()),
+    }
 }
 
 struct ReasoningAccumulator {
@@ -2105,7 +2626,9 @@ impl TurnEventReducer {
                 }
                 self.assistant_text.push_str(&delta);
             }
-            HostEventKind::ItemCompleted { item_type, text } if item_type == "agent_message" => {
+            HostEventKind::ItemCompleted {
+                item_type, text, ..
+            } if item_type == "agent_message" => {
                 self.bind_assistant_item(event.item_id)?;
                 if let Some(text) = text {
                     if text.len() > MAX_ASSISTANT_BYTES || text.contains('\0') {
@@ -2159,6 +2682,7 @@ impl TurnEventReducer {
             }
             HostEventKind::ThreadStarted { .. }
             | HostEventKind::TurnStarted
+            | HostEventKind::TurnPlanUpdated { .. }
             | HostEventKind::ItemStarted { .. }
             | HostEventKind::ItemCompleted { .. }
             | HostEventKind::Error { .. }
@@ -2624,6 +3148,27 @@ mod tests {
     #[cfg(target_os = "macos")]
     use tokio::net::TcpListener;
 
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn finished_coordinator_handle_is_not_reported_as_running() {
+        let (stop, _stop_receiver) = watch::channel(false);
+        let coordinator = ConversationCoordinator {
+            stop,
+            task: Some(tokio::spawn(async {})),
+        };
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !coordinator.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("coordinator task finishes");
+
+        assert!(coordinator.is_finished());
+        assert!(format!("{coordinator:?}").contains("running: false"));
+        coordinator.stop().await.expect("finished task is reaped");
+    }
+
     struct EventIdentity {
         stream_id: Uuid,
         task_id: Uuid,
@@ -2676,6 +3221,7 @@ mod tests {
             },
             item_id: item_id.map(str::to_owned),
             occurred_at: "2026-08-03T00:00:00Z".to_owned(),
+            encoded_bytes: 1,
             kind,
         }
     }
@@ -2723,6 +3269,7 @@ mod tests {
                 HostEventKind::ItemCompleted {
                     item_type: "agent_message".to_owned(),
                     text: Some("完成".to_owned()),
+                    phase: None,
                 },
             ),
         ];
@@ -3200,6 +3747,388 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_background_recovery_terminalizes_preexisting_failed_turn_projection() {
+        let (root, database, pending, turn, _agent_session_id) =
+            prepare_v2_turn_outbox("feat134-failed-turn-recovery").await;
+        database.fail_outbox(turn.operation_id).await.unwrap();
+        let mut application = ConversationApplication::new_offline(database.clone());
+        application.feat134_streaming_enabled = true;
+
+        let outcome = application.run_background_once().await.unwrap();
+        assert_eq!(
+            outcome,
+            CoordinatorOutcome::Dispatched(DispatchOutcome::TurnFailedSafely {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            })
+        );
+        let snapshot = database
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.session.latest_turn_status.as_deref(),
+            Some("failed")
+        );
+        assert_eq!(snapshot.history.turns[0].status, "failed");
+        assert_eq!(snapshot.feat134.turns[0].terminal_code, None);
+        assert!(!snapshot.feat134.turns[0].v4_authority);
+        assert_eq!(
+            application.run_background_once().await.unwrap(),
+            CoordinatorOutcome::Idle
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn legacy_background_does_not_run_feat134_failed_turn_recovery() {
+        let (root, database, pending, turn, _agent_session_id) =
+            prepare_v2_turn_outbox("legacy-no-feat134-failed-turn-recovery").await;
+        database.fail_outbox(turn.operation_id).await.unwrap();
+        let application = ConversationApplication::new_offline(database.clone());
+
+        assert_eq!(
+            application.run_background_once().await.unwrap(),
+            CoordinatorOutcome::Idle
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Failed
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_application_consumes_one_overflow_event_and_reopens_confirmed_prefix() {
+        let (root, database, pending, turn, _agent_session_id) =
+            prepare_v2_turn_outbox("feat134-application-projection-limit").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let identity = EventIdentity {
+            stream_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            thread_id: context.codex_thread_id,
+            turn_id: runtime_turn_id,
+        };
+        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
+        let application = ConversationApplication::new_offline(database.clone());
+        let confirmed_canary = "C".repeat(600 * 1024);
+        let offending_canary = "O".repeat(600 * 1024);
+
+        let mut confirmed = event(
+            &identity,
+            1,
+            Some("answer-confirmed"),
+            HostEventKind::ItemCompleted {
+                item_type: "agentMessage".to_owned(),
+                text: Some(confirmed_canary.clone()),
+                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
+            },
+        );
+        confirmed.event_type = "item.completed".to_owned();
+        let (confirmed_projection, projection_limit) = application
+            .reduce_and_persist_feat134_event(&mut reducer, confirmed, 1_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!projection_limit);
+        assert_eq!(confirmed_projection.durable_sequence, Some(1));
+        assert_eq!(confirmed_projection.items.len(), 1);
+
+        // Two individually legal final-answer items exceed the Desktop's joined-answer boundary.
+        // The second body must never be persisted even though its source cursor is consumed once.
+        let mut overflow = event(
+            &identity,
+            2,
+            Some("answer-overflow"),
+            HostEventKind::ItemCompleted {
+                item_type: "agentMessage".to_owned(),
+                text: Some(offending_canary),
+                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
+            },
+        );
+        overflow.event_type = "item.completed".to_owned();
+        let (failed_projection, projection_limit) = application
+            .reduce_and_persist_feat134_event(&mut reducer, overflow, 2_000)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(projection_limit);
+        assert_eq!(failed_projection.durable_sequence, Some(2));
+        assert_eq!(failed_projection.items.len(), 1);
+        assert_eq!(failed_projection.items[0].text, confirmed_canary);
+        assert_eq!(
+            failed_projection
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.code.as_deref()),
+            Some("projection_limit_exceeded")
+        );
+
+        let snapshot = application
+            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(snapshot.feat134.durable_sequence_cut, 2);
+        assert_eq!(snapshot.history.turns[0].status, "failed");
+        assert_eq!(snapshot.feat134.turns[0].items.len(), 1);
+        assert_eq!(snapshot.feat134.turns[0].items[0].text, confirmed_canary);
+        assert_eq!(
+            snapshot.feat134.turns[0].terminal_code.as_deref(),
+            Some("projection_limit_exceeded")
+        );
+        assert_eq!(
+            database.active_turn_context(pending.session_id).await,
+            Err(ChatError::NotFound)
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_application_terminalizes_snapshot_conflict_from_confirmed_prefix() {
+        let (root, database, pending, turn, _agent_session_id) =
+            prepare_v2_turn_outbox("feat134-application-projection-conflict").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let identity = EventIdentity {
+            stream_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            thread_id: context.codex_thread_id,
+            turn_id: runtime_turn_id,
+        };
+        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
+        let application = ConversationApplication::new_offline(database.clone());
+
+        for (sequence, kind) in [
+            (
+                1,
+                HostEventKind::ItemStarted {
+                    item_type: "agentMessage".to_owned(),
+                    text: Some(String::new()),
+                    phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
+                },
+            ),
+            (
+                2,
+                HostEventKind::AgentMessageDelta {
+                    delta: "confirmed prefix".to_owned(),
+                },
+            ),
+        ] {
+            let mut source = event(&identity, sequence, Some("answer"), kind);
+            source.event_type = if sequence == 1 {
+                "item.started".to_owned()
+            } else {
+                "item.agent_message.delta".to_owned()
+            };
+            let (projection, projection_failure) = application
+                .reduce_and_persist_feat134_event(
+                    &mut reducer,
+                    source,
+                    i64::try_from(sequence).unwrap(),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!projection_failure);
+            assert_eq!(projection.durable_sequence, Some(sequence));
+        }
+
+        let mut conflicting = event(
+            &identity,
+            3,
+            Some("answer"),
+            HostEventKind::ItemCompleted {
+                item_type: "agentMessage".to_owned(),
+                text: Some("divergent body".to_owned()),
+                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
+            },
+        );
+        conflicting.event_type = "item.completed".to_owned();
+        let (failed, projection_failure) = application
+            .reduce_and_persist_feat134_event(&mut reducer, conflicting, 3)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(projection_failure);
+        assert_eq!(failed.durable_sequence, Some(3));
+        assert_eq!(failed.assistant_text, "confirmed prefix");
+        assert_eq!(failed.items[0].text, "confirmed prefix");
+        assert_eq!(failed.items[0].status.as_str(), "incomplete");
+        assert_eq!(
+            failed
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.code.as_deref()),
+            Some("projection_conflict")
+        );
+        assert!(!format!("{failed:?}").contains("divergent body"));
+
+        let snapshot = application
+            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(snapshot.feat134.durable_sequence_cut, 3);
+        assert_eq!(snapshot.feat134.turns[0].items[0].text, "confirmed prefix");
+        assert_eq!(
+            snapshot.feat134.turns[0].terminal_code.as_deref(),
+            Some("projection_conflict")
+        );
+        assert_eq!(
+            snapshot.history.turns[0].reasoning_reason_code.as_deref(),
+            Some("protocol_error")
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_application_bounds_repeated_replacement_event_bytes() {
+        const ONE_MIB: usize = 1024 * 1024;
+        const BYTE_BUDGET_EVENTS: u64 = 16;
+        let (root, database, pending, turn, _agent_session_id) =
+            prepare_v2_turn_outbox("feat134-application-event-byte-budget").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let identity = EventIdentity {
+            stream_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            thread_id: context.codex_thread_id,
+            turn_id: runtime_turn_id,
+        };
+        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
+        let application = ConversationApplication::new_offline(database.clone());
+
+        for sequence in 1..=BYTE_BUDGET_EVENTS {
+            let mut source = event(
+                &identity,
+                sequence,
+                None,
+                HostEventKind::TurnPlanUpdated {
+                    explanation: None,
+                    steps: vec![super::super::host_domain::HostPlanStep {
+                        step: format!("confirmed replacement {sequence}"),
+                        status: super::super::host_domain::HostPlanStepStatus::InProgress,
+                    }],
+                },
+            );
+            source.event_type = "turn.plan.updated".to_owned();
+            source.encoded_bytes = ONE_MIB;
+            let (projection, projection_failure) = application
+                .reduce_and_persist_feat134_event(
+                    &mut reducer,
+                    source,
+                    i64::try_from(sequence).unwrap(),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(!projection_failure);
+            assert_eq!(projection.durable_sequence, Some(sequence));
+        }
+
+        let sequence = BYTE_BUDGET_EVENTS + 1;
+        let mut overflow = event(
+            &identity,
+            sequence,
+            None,
+            HostEventKind::TurnPlanUpdated {
+                explanation: None,
+                steps: vec![super::super::host_domain::HostPlanStep {
+                    step: "offending replacement".to_owned(),
+                    status: super::super::host_domain::HostPlanStepStatus::InProgress,
+                }],
+            },
+        );
+        overflow.event_type = "turn.plan.updated".to_owned();
+        overflow.encoded_bytes = ONE_MIB;
+        let (failed, projection_failure) = application
+            .reduce_and_persist_feat134_event(
+                &mut reducer,
+                overflow,
+                i64::try_from(sequence).unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(projection_failure);
+        assert_eq!(failed.durable_sequence, Some(sequence));
+        assert_eq!(
+            failed.plan.as_ref().unwrap().steps[0].step,
+            "confirmed replacement 16"
+        );
+        assert_eq!(
+            failed
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.code.as_deref()),
+            Some("projection_limit_exceeded")
+        );
+        assert!(!format!("{failed:?}").contains("offending replacement"));
+        let snapshot = application
+            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.feat134.turns[0].plan.as_ref().unwrap().steps[0].step,
+            "confirmed replacement 16"
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
     fn http_response(status: &str, headers: &[(&str, &str)], body: &str) -> String {
         let mut response = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -3244,6 +4173,19 @@ mod tests {
                 ("X-Yijie-Host-Instance-Nonce", nonce),
             ],
             r#"{"status":"ready","runtime_state":"ready"}"#,
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn not_ready_response(nonce: &str) -> String {
+        http_response(
+            "503 Service Unavailable",
+            &[
+                ("Content-Type", "application/json"),
+                ("Cache-Control", "no-store"),
+                ("X-Yijie-Host-Instance-Nonce", nonce),
+            ],
+            r#"{"status":"not_ready","runtime_state":"starting"}"#,
         )
     }
 
@@ -3306,6 +4248,674 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_v2_first_claim_starts_same_operation_once_without_resume() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa1";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-first-claim-direct-start").await;
+        let runtime_turn_id = Uuid::now_v7();
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnAccepted {
+                session_id: pending.session_id
+            }
+        );
+        let active = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        assert_eq!(active.runtime_turn_id, runtime_turn_id);
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /readyz HTTP/1.1"));
+        assert!(requests[1].starts_with(&format!(
+            "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+        )));
+        let turn_request: serde_json::Value =
+            serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            turn_request["operation_id"],
+            pending.turn_operation_id.to_string()
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_first_claim_turn_active_fails_without_binding_or_retry() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa7";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-first-attempt-active-resume").await;
+        assert_eq!(claimed.attempt_count, 1);
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response(
+                "409 Conflict",
+                r#"{"error":{"code":"turn_active","message":"active"}}"#,
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnFailedSafely {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Failed
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with(&format!(
+            "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+        )));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with(&format!(
+                    "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+                )))
+                .count(),
+            1
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_first_claim_session_not_usable_suspends_without_replay() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa8";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-first-claim-session-not-usable").await;
+        assert_eq!(claimed.attempt_count, 1);
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response(
+                "409 Conflict",
+                r#"{"error":{"code":"session_not_usable","message":"pending"}}"#,
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnReconciliationRequired {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with(&format!(
+                    "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+                )))
+                .count(),
+            1
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_reclaimed_v2_turn_replays_same_operation_once_without_resume() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, original_claim, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-reclaimed-active-resume").await;
+        let reclaim_at = unix_seconds().unwrap() + OUTBOX_LEASE_SECONDS + 1;
+        let reclaimed = database
+            .claim_next_conversation_outbox(reclaim_at, OUTBOX_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .expect("expired v2 turn lease is reclaimed");
+        assert_eq!(reclaimed.operation_id, original_claim.operation_id);
+        assert_eq!(reclaimed.attempt_count, original_claim.attempt_count + 1);
+
+        let runtime_turn_id = Uuid::now_v7();
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response(
+                "202 Accepted",
+                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(reclaimed, reclaim_at)
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnAccepted {
+                session_id: pending.session_id
+            }
+        );
+        let active_context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        assert_eq!(active_context.runtime_turn_id, runtime_turn_id);
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /readyz HTTP/1.1"));
+        assert!(requests[1].starts_with(&format!(
+            "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+        )));
+        let replay_request: serde_json::Value =
+            serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            replay_request["operation_id"],
+            pending.turn_operation_id.to_string()
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_invalid_accepted_response_suspends_without_binding_or_replay() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa4";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-reconcile-active-turn").await;
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response("202 Accepted", r#"{"turn_id":"#),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnReconciliationRequired {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with(&format!(
+                    "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+                )))
+                .count(),
+            1
+        );
+        assert!(!requests.iter().any(|request| request.starts_with(&format!(
+            "GET /v1/agent-sessions/{agent_session_id} HTTP/1.1"
+        ))));
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_transport_after_direct_start_suspends_without_replay() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa5";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-reconcile-unresolved-turn").await;
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![ready_response(NONCE), String::new()]).await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnReconciliationRequired {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+        assert_eq!(
+            application.run_background_once().await.unwrap(),
+            CoordinatorOutcome::Idle
+        );
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with(&format!(
+                    "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+                )))
+                .count(),
+            1
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_direct_start_not_ready_fails_once_without_turn_post() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa2";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, claimed, _agent_session_id) =
+            prepare_v2_turn_outbox("feat134-resume-not-ready").await;
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![not_ready_response(NONCE)]).await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnFailedSafely {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Failed
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+        assert_eq!(history.turns[0].reasoning_status, "unavailable");
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::Idle
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].starts_with("GET /readyz HTTP/1.1"));
+        assert!(!requests[0].contains("/turns"));
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_reclaimed_session_not_usable_suspends_without_retry() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa3";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, original_claim, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-reclaimed-session-not-usable").await;
+        let reclaim_at = unix_seconds().unwrap() + OUTBOX_LEASE_SECONDS + 1;
+        let reclaimed = database
+            .claim_next_conversation_outbox(reclaim_at, OUTBOX_LEASE_SECONDS)
+            .await
+            .unwrap()
+            .expect("expired v2 turn lease is reclaimed");
+        assert_eq!(reclaimed.operation_id, original_claim.operation_id);
+        assert_eq!(reclaimed.attempt_count, original_claim.attempt_count + 1);
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response(
+                "409 Conflict",
+                r#"{"error":{"code":"session_not_usable","message":"pending"}}"#,
+            ),
+        ])
+        .await;
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .dispatch_turn(reclaimed, reclaim_at)
+                .await
+                .unwrap(),
+            DispatchOutcome::TurnReconciliationRequired {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
+            }
+        );
+        assert_eq!(
+            database
+                .outbox_state(pending.turn_operation_id)
+                .await
+                .unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert_eq!(history.turns[0].runtime_turn_id, None);
+        assert_eq!(history.turns[0].reasoning_status, "pending");
+        assert_eq!(
+            application.dispatch_next().await.unwrap(),
+            DispatchOutcome::Idle
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /readyz HTTP/1.1"));
+        assert!(requests[1].starts_with(&format!(
+            "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+        )));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with(&format!(
+                    "POST /v2/agent-sessions/{agent_session_id}/turns HTTP/1.1"
+                )))
+                .count(),
+            1
+        );
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn serve_orphaned_v4_session(
+        nonce: &'static str,
+        session_body: String,
+        stream_id: Uuid,
+    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::with_capacity(4);
+            for response in [
+                ready_response(nonce),
+                json_response("200 OK", &session_body),
+                ready_response(nonce),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                requests.push(read_request(&mut stream).await);
+                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+
+            let (mut stream, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut stream).await);
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Cache-Control: no-store\r\n\
+                 X-Accel-Buffering: no\r\n\
+                 X-Yijie-Event-Schema-Version: 4\r\n\
+                 X-Yijie-Event-Stream-ID: {stream_id}\r\n\
+                 Connection: close\r\n\r\n"
+            );
+            stream.write_all(headers.as_bytes()).await.unwrap();
+            for _ in 0..50 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                if stream.write_all(b": heartbeat\n\n").await.is_err() {
+                    break;
+                }
+            }
+            let _ = stream.shutdown().await;
+            requests
+        });
+        (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
     async fn serve_http_bytes(
         responses: Vec<Vec<u8>>,
     ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
@@ -3322,6 +4932,96 @@ mod tests {
             requests
         });
         (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat134_idle_host_without_terminal_replay_closes_orphan_without_duplicate_post() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa4";
+        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        let (root, database, pending, turn, agent_session_id) =
+            prepare_v2_turn_outbox("feat134-orphan-terminal-replay").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let session_body = serde_json::json!({
+            "session": {
+                "task_id": context.task_id,
+                "agent_session_id": agent_session_id,
+                "codex_thread_id": context.codex_thread_id,
+                "active_turn_id": "",
+                "state": "idle",
+                "cwd": root.join("project"),
+                "model": "MiniMax-M3",
+                "model_provider": "minimax",
+                "failure_code": "",
+                "created_at": "2026-08-28T00:00:00Z",
+                "updated_at": "2026-08-28T00:00:01Z"
+            }
+        })
+        .to_string();
+        let (port, server) = serve_orphaned_v4_session(NONCE, session_body, Uuid::now_v7()).await;
+        let bridge = Arc::new(
+            HostBridge::from_connection(HostConnection {
+                port,
+                token_path,
+                instance_nonce: NONCE.to_owned(),
+            })
+            .unwrap(),
+        );
+        let application = ConversationApplication::new_with_artifacts_v4(
+            database.clone(),
+            bridge,
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        application
+            .stream_active_turn(pending.session_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            database.outbox_state(turn.operation_id).await.unwrap(),
+            super::super::database::OutboxState::Done
+        );
+        assert_eq!(
+            database.active_turn_context(pending.session_id).await,
+            Err(ChatError::NotFound)
+        );
+        let history = application
+            .load_history(pending.session_id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(
+            history.turns[0].reasoning_reason_code.as_deref(),
+            Some("host_shutdown")
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].starts_with(&format!(
+            "GET /v1/agent-sessions/{agent_session_id} HTTP/1.1"
+        )));
+        assert!(requests[3].starts_with(&format!(
+            "GET /v4/agent-sessions/{agent_session_id}/events?event_schema_version=4 HTTP/1.1"
+        )));
+        assert!(!requests.iter().any(|request| request.starts_with("POST ")));
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

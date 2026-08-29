@@ -96,13 +96,14 @@ async function git(contractsRoot, ...arguments_) {
 }
 
 async function verifyContractsCheckout(lock, contractsRoot) {
-  const [head, status, origin] = await Promise.all([
-    git(contractsRoot, "rev-parse", "HEAD"),
+  // Multiple immutable contract versions coexist in one clean sibling checkout.
+  const [commit, status, origin] = await Promise.all([
+    git(contractsRoot, "rev-parse", "--verify", `${lock.full_commit}^{commit}`),
     git(contractsRoot, "status", "--porcelain", "--untracked-files=no"),
     git(contractsRoot, "remote", "get-url", "origin"),
   ]);
-  if (head !== lock.full_commit) {
-    throw new Error(`contracts HEAD is ${head}, expected ${lock.full_commit}`);
+  if (commit !== lock.full_commit) {
+    throw new Error(`contracts pinned commit resolves to ${commit}, expected ${lock.full_commit}`);
   }
   if (status !== "") {
     throw new Error("contracts checkout has tracked changes");
@@ -110,6 +111,21 @@ async function verifyContractsCheckout(lock, contractsRoot) {
   if (normalizeRepository(origin) !== normalizeRepository(lock.repository)) {
     throw new Error("contracts origin does not match the pinned repository");
   }
+}
+
+async function verifyPinnedGitFile(root, commit, relativePath, expectedDigest) {
+  const safePath = safeRelativePath(relativePath);
+  const { stdout } = await exec(
+    "git",
+    ["-C", root, "show", `${commit}:${safePath}`],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  const contents = Buffer.from(stdout, "utf8");
+  const actualDigest = sha256(contents);
+  if (actualDigest !== expectedDigest) {
+    throw new Error(`SHA-256 for ${relativePath} is ${actualDigest}, expected ${expectedDigest}`);
+  }
+  return contents;
 }
 
 async function verifyGenerator(lock) {
@@ -130,16 +146,6 @@ async function verifyGenerator(lock) {
   return import(pathToFileURL(require.resolve(lock.generator.package)).href);
 }
 
-async function verifyPinnedFile(root, relativePath, expectedDigest) {
-  const absolutePath = path.join(root, safeRelativePath(relativePath));
-  const contents = await readFile(absolutePath);
-  const actualDigest = sha256(contents);
-  if (actualDigest !== expectedDigest) {
-    throw new Error(`SHA-256 for ${relativePath} is ${actualDigest}, expected ${expectedDigest}`);
-  }
-  return contents;
-}
-
 export async function generatePublicApi() {
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
   const contractsRoot = path.resolve(
@@ -153,10 +159,15 @@ export async function generatePublicApi() {
   if (typeof generateTypes !== "function") {
     throw new Error("pinned OpenAPI generator entrypoint is invalid");
   }
-  const source = await verifyPinnedFile(contractsRoot, lock.source_path, lock.source_sha256);
+  const source = await verifyPinnedGitFile(
+    contractsRoot,
+    lock.full_commit,
+    lock.source_path,
+    lock.source_sha256,
+  );
   await Promise.all(
     lock.fixtures.map((fixture) =>
-      verifyPinnedFile(contractsRoot, fixture.path, fixture.sha256),
+      verifyPinnedGitFile(contractsRoot, lock.full_commit, fixture.path, fixture.sha256),
     ),
   );
 

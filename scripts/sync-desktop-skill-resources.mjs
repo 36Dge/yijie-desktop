@@ -105,12 +105,18 @@ async function git(root, ...arguments_) {
   return (await exec("git", ["-C", root, ...arguments_])).stdout.trim();
 }
 
-async function verifyRepository(root, repository, commit) {
-  const [head, origin, status] = await Promise.all([
-    git(root, "rev-parse", "HEAD"), git(root, "remote", "get-url", "origin"),
+async function verifyRepository(root, repository, commit, { requireHead = false } = {}) {
+  // Contracts/Host may advance while this resource channel keeps its older exact object.
+  const [head, pinnedCommit, origin, status] = await Promise.all([
+    git(root, "rev-parse", "HEAD"),
+    git(root, "rev-parse", "--verify", `${commit}^{commit}`).catch(() => {
+      throw new Error(`${root} pinned commit ${commit} is unavailable`);
+    }),
+    git(root, "remote", "get-url", "origin"),
     git(root, "status", "--porcelain"),
   ]);
-  if (head !== commit) throw new Error(`${root} HEAD is ${head}, expected ${commit}`);
+  if (pinnedCommit !== commit) throw new Error(`${root} pinned commit resolves to ${pinnedCommit}, expected ${commit}`);
+  if (requireHead && head !== commit) throw new Error(`${root} HEAD is ${head}, expected ${commit}`);
   if (normalizeRepository(origin) !== normalizeRepository(repository)) throw new Error(`${root} origin differs from its lock`);
   if (status) throw new Error(`${root} immutable checkout is not clean`);
 }
@@ -119,6 +125,17 @@ async function readRegularFile(filePath, maximum = Number.MAX_SAFE_INTEGER) {
   const info = await lstat(filePath);
   if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) throw new Error(`${filePath} is not an allowed regular file`);
   return readFile(filePath);
+}
+
+async function readPinnedRegularFile(root, commit, relativePath, maximum = Number.MAX_SAFE_INTEGER) {
+  const { stdout } = await exec(
+    "git",
+    ["-C", root, "show", `${commit}:${safeRelativePath(relativePath)}`],
+    { encoding: null, maxBuffer: Math.min(maximum + 1, 64 * 1024 * 1024) },
+  );
+  const bytes = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+  if (bytes.length > maximum) throw new Error(`${relativePath} exceeds its allowed size`);
+  return bytes;
 }
 
 function parseKeyValueFile(bytes) {
@@ -131,10 +148,25 @@ function parseKeyValueFile(bytes) {
 
 async function verifyConsumerLocks(skillsRoot, agentHostRoot, lock) {
   const [packageBytes, producerBytes, hostContractsBytes, hostSkillsBytes] = await Promise.all([
-    readRegularFile(path.join(skillsRoot, "package.json"), 128 * 1024),
-    readRegularFile(path.join(skillsRoot, safeRelativePath(lock.producer.contract_lock_path)), 64 * 1024),
-    readRegularFile(path.join(agentHostRoot, safeRelativePath(lock.agent_host.contracts_lock_path)), 64 * 1024),
-    readRegularFile(path.join(agentHostRoot, safeRelativePath(lock.agent_host.skills_lock_path)), 64 * 1024),
+    readPinnedRegularFile(skillsRoot, lock.producer.full_commit, "package.json", 128 * 1024),
+    readPinnedRegularFile(
+      skillsRoot,
+      lock.producer.full_commit,
+      lock.producer.contract_lock_path,
+      64 * 1024,
+    ),
+    readPinnedRegularFile(
+      agentHostRoot,
+      lock.agent_host.full_commit,
+      lock.agent_host.contracts_lock_path,
+      64 * 1024,
+    ),
+    readPinnedRegularFile(
+      agentHostRoot,
+      lock.agent_host.full_commit,
+      lock.agent_host.skills_lock_path,
+      64 * 1024,
+    ),
   ]);
   const packageJson = JSON.parse(packageBytes.toString("utf8"));
   const producer = JSON.parse(producerBytes.toString("utf8"));
@@ -219,7 +251,12 @@ async function verifyBundleFiles(skillsRoot, manifest, channelLock, lock) {
 
 async function expectedBundles(skillsRoot, contractsRoot, agentHostRoot, lock) {
   await verifySourceChain(skillsRoot, contractsRoot, agentHostRoot, lock);
-  const schemaBytes = await readRegularFile(path.join(contractsRoot, safeRelativePath(lock.contracts.schema_path)), 1024 * 1024);
+  const schemaBytes = await readPinnedRegularFile(
+    contractsRoot,
+    lock.contracts.full_commit,
+    lock.contracts.schema_path,
+    1024 * 1024,
+  );
   if (sha256(schemaBytes) !== lock.contracts.schema_sha256) throw new Error("Bundle Manifest v2 schema differs from its pin");
   const schema = JSON.parse(schemaBytes.toString("utf8"));
   const bundles = {};
@@ -249,7 +286,12 @@ async function expectedBundles(skillsRoot, contractsRoot, agentHostRoot, lock) {
 async function verifySourceChain(skillsRoot, contractsRoot, agentHostRoot, lock) {
   await Promise.all([
     verifyRepository(contractsRoot, lock.contracts.repository, lock.contracts.full_commit),
-    verifyRepository(skillsRoot, lock.producer.repository, lock.producer.full_commit),
+    verifyRepository(
+      skillsRoot,
+      lock.producer.repository,
+      lock.producer.full_commit,
+      { requireHead: true },
+    ),
     verifyRepository(agentHostRoot, lock.agent_host.repository, lock.agent_host.full_commit),
     verifyConsumerLocks(skillsRoot, agentHostRoot, lock),
   ]);

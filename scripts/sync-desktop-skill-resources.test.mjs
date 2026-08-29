@@ -90,6 +90,8 @@ describe("Desktop v2 Skill resources", () => {
     expect(releaseBuildEnvironment({
       VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED: "false",
       VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED: "false",
+      YIJIE_FEAT134_STREAMING_ENABLED: "true",
+      VITE_YIJIE_FEAT134_STREAMING_ENABLED: "true",
     })).toEqual({
       VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED: "true",
       VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED: "true",
@@ -109,6 +111,9 @@ describe("Desktop v2 Skill resources", () => {
     expect(command).toContain("VITE_YIJIE_ENV=local");
     expect(command).toContain("VITE_YIJIE_LOCAL_PROFILE=demo_fast");
     expect(command).toContain("VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false");
+    expect(command).toContain("env -u YIJIE_FEAT134_STREAMING_ENABLED");
+    expect(command).toContain("-u VITE_YIJIE_FEAT134_STREAMING_ENABLED");
+    expect(command).not.toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(command).toContain("--config src-tauri/tauri.demo-fast.conf.json");
     const runner = await readFile(path.join(repositoryRoot, "scripts/run-local-demo-fast.sh"), "utf8");
     expect(runner).toContain(
@@ -120,6 +125,9 @@ describe("Desktop v2 Skill resources", () => {
     );
     expect(runner.indexOf("pnpm skills:sync:local")).toBeLessThan(
       runner.indexOf("go build -trimpath"),
+    );
+    expect(runner.indexOf("node scripts/check-agent-host-v4-contract.mjs")).toBeLessThan(
+      runner.indexOf("pnpm skills:sync:local"),
     );
   });
 });

@@ -1,6 +1,7 @@
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
 export const CHAT_IPC_V2_SCHEMA_VERSION = 2 as const;
 export const CHAT_IPC_V3_SCHEMA_VERSION = 3 as const;
+export const CHAT_IPC_V4_SCHEMA_VERSION = 4 as const;
 export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
 export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
 export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-import:event:v2" as const;
@@ -8,6 +9,10 @@ export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-impor
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 const SEQUENCE_PATTERN = /^(0|[1-9][0-9]*)$/;
+const SAFE_CODE_PATTERN = /^[a-z0-9_]{1,128}$/;
+const RFC3339_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RFC3339_MIN_LENGTH = 20;
+const RFC3339_MAX_LENGTH = 64;
 const MAX_SAFE_EVENT_SEQUENCE = (1n << 64n) - 1n;
 
 export const CHAT_COMMAND_NAMES = Object.freeze([
@@ -122,7 +127,7 @@ export const CHAT_ALLOWED_ACTIONS = Object.freeze([
 export type ChatAllowedAction = (typeof CHAT_ALLOWED_ACTIONS)[number];
 
 export interface ChatIpcErrorShape {
-  readonly schemaVersion: 1 | 2 | 3;
+  readonly schemaVersion: 1 | 2 | 3 | 4;
   readonly requestId?: string;
   readonly code: ChatErrorCode;
   readonly retryable: boolean;
@@ -332,6 +337,106 @@ export interface ChatHistoryPage {
   readonly nextCursor: string | null;
 }
 
+export const CHAT_AGENT_MESSAGE_PHASES_V4 = Object.freeze([
+  "commentary",
+  "final_answer",
+] as const);
+
+export type ChatAgentMessagePhaseV4 =
+  | (typeof CHAT_AGENT_MESSAGE_PHASES_V4)[number]
+  | null;
+
+export const CHAT_PLAN_STEP_STATUSES_V4 = Object.freeze([
+  "pending",
+  "in_progress",
+  "completed",
+] as const);
+
+export interface ChatPlanStepV4 {
+  readonly ordinal: number;
+  readonly step: string;
+  readonly status: (typeof CHAT_PLAN_STEP_STATUSES_V4)[number];
+}
+
+interface ChatSourceFactV4 {
+  readonly sourceEventId: string;
+  readonly sourceSequence: string;
+  readonly sourceOccurredAt: string;
+}
+
+export interface ChatPlanSnapshotV4 extends ChatSourceFactV4 {
+  readonly explanation: string | null;
+  readonly steps: readonly ChatPlanStepV4[];
+}
+
+export const CHAT_REASONING_STATUSES_V4 = Object.freeze([
+  "complete",
+  "incomplete",
+  "unavailable",
+] as const);
+
+export const CHAT_REASONING_REASON_CODES_V4 = Object.freeze([
+  "reasoning_not_emitted",
+  "turn_interrupted",
+  "stream_gap",
+  "runtime_error",
+  "limit_exceeded",
+  "protocol_error",
+  "host_shutdown",
+] as const);
+
+export type ChatReasoningReasonCodeV4 =
+  (typeof CHAT_REASONING_REASON_CODES_V4)[number];
+
+export interface ChatReasoningPartV4 {
+  readonly contentIndex: number;
+  readonly text: string;
+}
+
+export const CHAT_TIMELINE_ITEM_STATUSES_V4 = Object.freeze([
+  "in_progress",
+  "completed",
+  "incomplete",
+] as const);
+
+export interface ChatTimelineItemV4 extends ChatSourceFactV4 {
+  readonly itemId: string;
+  readonly itemOrdinal: number;
+  readonly itemType: string;
+  readonly phase: ChatAgentMessagePhaseV4;
+  readonly status: (typeof CHAT_TIMELINE_ITEM_STATUSES_V4)[number];
+  readonly text: string;
+  readonly reasoningStatus: (typeof CHAT_REASONING_STATUSES_V4)[number] | null;
+  readonly reasoningReasonCode: ChatReasoningReasonCodeV4 | null;
+  readonly reasoningParts: readonly ChatReasoningPartV4[];
+  readonly startedAtMs: number;
+  readonly completedAtMs: number | null;
+}
+
+export interface ChatTimelineNoticeV4 extends ChatSourceFactV4 {
+  readonly scope: "session" | "turn";
+  readonly severity: "warning" | "error";
+  readonly code: string | null;
+  readonly willRetry: boolean;
+  readonly observedAtMs: number;
+}
+
+export interface ChatHistoryTurnV4 extends ChatHistoryTurn {
+  readonly projectionAuthority: "legacy" | "v4";
+  readonly artifacts: readonly ChatArtifact[];
+  readonly terminalCode: string | null;
+  readonly timelineItems: readonly ChatTimelineItemV4[];
+  readonly plan: ChatPlanSnapshotV4 | null;
+  readonly notices: readonly ChatTimelineNoticeV4[];
+}
+
+export interface ChatHistoryPageV4 {
+  readonly turns: readonly ChatHistoryTurnV4[];
+  readonly nextCursor: string | null;
+  readonly sessionNotices: readonly ChatTimelineNoticeV4[];
+  readonly durableSequenceCut: string;
+}
+
 export interface ChatReasoningPart {
   readonly contentIndex: number;
   readonly text: string;
@@ -443,6 +548,12 @@ export interface ChatResyncProjection {
   readonly cleanup: ChatCleanupStatus | null;
 }
 
+export interface ChatResyncProjectionV4 {
+  readonly session: ChatSession;
+  readonly history: ChatHistoryPageV4;
+  readonly cleanup: ChatCleanupStatus | null;
+}
+
 export type ChatEventKind =
   | "assistant_append"
   | "reasoning_append"
@@ -486,6 +597,101 @@ export type ChatProjectionEvent = ChatEventBase &
         readonly payload: { readonly reason: string };
       }
   );
+
+export type ChatEventKindV4 =
+  | "turn_started"
+  | "plan_updated"
+  | "item_started"
+  | "item_completed"
+  | "agent_message_append"
+  | "reasoning_append"
+  | "reasoning_finalized"
+  | "notice"
+  | "turn_terminal"
+  | "resync_required"
+  | "context_invalidated";
+
+interface ChatEventBaseV4 {
+  readonly schemaVersion: 4;
+  readonly subscriptionId: string;
+  readonly contextId: string;
+  readonly sessionId: string;
+  readonly turnId?: string;
+  readonly projectionSequence: string;
+  readonly eventId: string;
+}
+
+interface ChatSemanticEventBaseV4 extends ChatEventBaseV4 {
+  readonly durableSequence: string;
+}
+
+type ChatItemLifecyclePayloadV4 = ChatSourceFactV4 & Readonly<{
+  itemId: string;
+  itemOrdinal: number;
+  itemType: string;
+  phase: ChatAgentMessagePhaseV4;
+  text: string | null;
+}>;
+
+type ChatSemanticProjectionEventV4 = ChatSemanticEventBaseV4 &
+  (
+    | { readonly kind: "turn_started"; readonly payload: ChatSourceFactV4 }
+    | { readonly kind: "plan_updated"; readonly payload: ChatPlanSnapshotV4 }
+    | {
+        readonly kind: "item_started" | "item_completed";
+        readonly payload: ChatItemLifecyclePayloadV4;
+      }
+    | {
+        readonly kind: "agent_message_append";
+        readonly payload: ChatSourceFactV4 & Readonly<{
+          itemId: string;
+          itemOrdinal: number;
+          phase: ChatAgentMessagePhaseV4;
+          text: string;
+        }>;
+      }
+    | {
+        readonly kind: "reasoning_append";
+        readonly payload: ChatSourceFactV4 & Readonly<{
+          itemId: string;
+          itemOrdinal: number;
+          contentIndex: number;
+          text: string;
+        }>;
+      }
+    | {
+        readonly kind: "reasoning_finalized";
+        readonly payload: ChatSourceFactV4 & Readonly<{
+          itemId: string;
+          itemOrdinal: number;
+          status: (typeof CHAT_REASONING_STATUSES_V4)[number];
+          reasonCode: ChatReasoningReasonCodeV4 | null;
+          parts: readonly ChatReasoningPartV4[];
+        }>;
+      }
+    | {
+        readonly kind: "notice";
+        readonly payload: Omit<ChatTimelineNoticeV4, "observedAtMs">;
+      }
+    | {
+        readonly kind: "turn_terminal";
+        readonly payload: ChatSourceFactV4 & Readonly<{
+          status: "completed" | "interrupted" | "failed";
+          code: string | null;
+          unfinishedReasoningReasonCode: ChatReasoningReasonCodeV4 | null;
+        }>;
+      }
+  );
+
+type ChatControlProjectionEventV4 = ChatEventBaseV4 &
+  {
+    readonly kind: "resync_required" | "context_invalidated";
+    readonly payload: { readonly reason: string };
+  };
+
+export type ChatProjectionEventV4 =
+  | ChatSemanticProjectionEventV4
+  | ChatControlProjectionEventV4;
 
 type Parser<T> = (value: unknown) => T;
 
@@ -544,6 +750,40 @@ function cursor(value: unknown): string {
   return value;
 }
 
+function sourceSequence(value: unknown): string {
+  if (typeof value !== "string" || !SEQUENCE_PATTERN.test(value)) throw new ChatContractError();
+  const sequence = BigInt(value);
+  if (sequence === 0n || sequence > MAX_SAFE_EVENT_SEQUENCE) throw new ChatContractError();
+  return value;
+}
+
+function durableSequence(value: unknown, allowZero: boolean): string {
+  if (typeof value !== "string" || !SEQUENCE_PATTERN.test(value)) throw new ChatContractError();
+  const sequence = BigInt(value);
+  if ((!allowZero && sequence === 0n) || sequence > MAX_SAFE_EVENT_SEQUENCE) {
+    throw new ChatContractError();
+  }
+  return value;
+}
+
+function sourceOccurredAt(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length < RFC3339_MIN_LENGTH ||
+    value.length > RFC3339_MAX_LENGTH ||
+    !RFC3339_PATTERN.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
+    throw new ChatContractError();
+  }
+  return value;
+}
+
+function safeCode(value: unknown): string {
+  if (typeof value !== "string" || !SAFE_CODE_PATTERN.test(value)) throw new ChatContractError();
+  return value;
+}
+
 function responseData<T>(value: unknown, parser: Parser<T>): T {
   const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
   if (envelope.schemaVersion !== CHAT_IPC_SCHEMA_VERSION) throw new ChatContractError();
@@ -565,6 +805,13 @@ function responseDataV3<T>(value: unknown, parser: Parser<T>): T {
   return parser(envelope.data);
 }
 
+function responseDataV4<T>(value: unknown, parser: Parser<T>): T {
+  const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
+  if (envelope.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION) throw new ChatContractError();
+  uuid(envelope.requestId);
+  return parser(envelope.data);
+}
+
 export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   const error = exactObject(
     value,
@@ -574,7 +821,8 @@ export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   if (
     (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION &&
-      error.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION) ||
+      error.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION &&
+      error.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION) ||
     typeof error.retryable !== "boolean"
   ) {
     throw new ChatContractError();
@@ -990,6 +1238,218 @@ export function parseHistoryPageResponseV3(value: unknown): ChatHistoryPage {
   return responseDataV3(value, parseHistoryPageV3);
 }
 
+function sourceFactV4(value: Record<string, unknown>): ChatSourceFactV4 {
+  return Object.freeze({
+    sourceEventId: uuid(value.sourceEventId),
+    sourceSequence: sourceSequence(value.sourceSequence),
+    sourceOccurredAt: sourceOccurredAt(value.sourceOccurredAt),
+  });
+}
+
+function parseAgentMessagePhaseV4(value: unknown): ChatAgentMessagePhaseV4 {
+  return nullable(value, (entry) => oneOf(entry, CHAT_AGENT_MESSAGE_PHASES_V4));
+}
+
+function parseReasoningPartV4(value: unknown): ChatReasoningPartV4 {
+  const part = exactObject(value, ["contentIndex", "text"]);
+  return Object.freeze({
+    contentIndex: integer(part.contentIndex, 0, 7),
+    text: plainText(part.text, 64 * 1024),
+  });
+}
+
+function parseReasoningPartsV4(value: unknown): readonly ChatReasoningPartV4[] {
+  if (!Array.isArray(value) || value.length > 8) throw new ChatContractError();
+  let totalBytes = 0;
+  const parts = value.map((entry, index) => {
+    const part = parseReasoningPartV4(entry);
+    if (part.contentIndex !== index) throw new ChatContractError();
+    totalBytes += new TextEncoder().encode(part.text).length;
+    return part;
+  });
+  if (totalBytes > 128 * 1024) throw new ChatContractError();
+  return Object.freeze(parts);
+}
+
+function parsePlanStepsV4(value: unknown, allowEmpty: boolean): readonly ChatPlanStepV4[] {
+  if (!Array.isArray(value) || value.length > 128 || (!allowEmpty && value.length === 0)) {
+    throw new ChatContractError();
+  }
+  return Object.freeze(value.map((entry, index) => {
+    const step = exactObject(entry, ["ordinal", "step", "status"]);
+    const ordinal = integer(step.ordinal, 0, 127);
+    if (ordinal !== index) throw new ChatContractError();
+    return Object.freeze({
+      ordinal,
+      step: plainText(step.step, 64 * 1024, true),
+      status: oneOf(step.status, CHAT_PLAN_STEP_STATUSES_V4),
+    });
+  }));
+}
+
+function parsePlanSnapshotV4(value: unknown, allowEmpty: boolean): ChatPlanSnapshotV4 {
+  const plan = exactObject(value, [
+    "sourceEventId", "sourceSequence", "sourceOccurredAt", "explanation", "steps",
+  ]);
+  return Object.freeze({
+    ...sourceFactV4(plan),
+    explanation: nullable(plan.explanation, (entry) => plainText(entry, 64 * 1024, true)),
+    steps: parsePlanStepsV4(plan.steps, allowEmpty),
+  });
+}
+
+function parseTimelineNoticeV4(value: unknown): ChatTimelineNoticeV4 {
+  const notice = exactObject(value, [
+    "sourceEventId", "sourceSequence", "sourceOccurredAt", "scope", "severity",
+    "code", "willRetry", "observedAtMs",
+  ]);
+  if (typeof notice.willRetry !== "boolean") throw new ChatContractError();
+  const scope = oneOf(notice.scope, ["session", "turn"] as const);
+  const severity = oneOf(notice.severity, ["warning", "error"] as const);
+  if ((scope === "session") !== (severity === "warning")) throw new ChatContractError();
+  return Object.freeze({
+    ...sourceFactV4(notice),
+    scope,
+    severity,
+    code: nullable(notice.code, safeCode),
+    willRetry: notice.willRetry,
+    observedAtMs: integer(notice.observedAtMs),
+  });
+}
+
+function parseTimelineItemV4(value: unknown): ChatTimelineItemV4 {
+  const item = exactObject(value, [
+    "itemId", "itemOrdinal", "itemType", "phase", "status", "text",
+    "reasoningStatus", "reasoningReasonCode", "reasoningParts", "startedAtMs",
+    "completedAtMs", "sourceEventId", "sourceSequence", "sourceOccurredAt",
+  ]);
+  const itemType = plainText(item.itemType, 256);
+  const phase = parseAgentMessagePhaseV4(item.phase);
+  const status = oneOf(item.status, CHAT_TIMELINE_ITEM_STATUSES_V4);
+  const reasoningStatus = nullable(
+    item.reasoningStatus,
+    (entry) => oneOf(entry, CHAT_REASONING_STATUSES_V4),
+  );
+  const reasoningReasonCode = nullable(
+    item.reasoningReasonCode,
+    (entry) => oneOf(entry, CHAT_REASONING_REASON_CODES_V4),
+  );
+  const reasoningParts = parseReasoningPartsV4(item.reasoningParts);
+  const completedAtMs = nullable(item.completedAtMs, (entry) => integer(entry));
+  const isAgentMessage = itemType === "agentMessage";
+  const isReasoning = itemType === "reasoning";
+  const lifecycleConsistent = status === "in_progress"
+    ? completedAtMs === null
+    : completedAtMs !== null;
+  const reasoningConsistent = reasoningStatus === null
+    ? reasoningReasonCode === null
+    : reasoningStatus === "complete"
+      ? reasoningReasonCode === null && reasoningParts.length > 0
+      : reasoningStatus === "incomplete"
+        ? reasoningReasonCode !== null && reasoningParts.length > 0
+        : reasoningReasonCode !== null && reasoningParts.length === 0;
+  const semanticFieldsConsistent = isAgentMessage
+    ? reasoningStatus === null && reasoningReasonCode === null && reasoningParts.length === 0
+    : isReasoning
+      ? phase === null && reasoningConsistent
+      : phase === null && reasoningStatus === null && reasoningReasonCode === null && reasoningParts.length === 0;
+  if (!lifecycleConsistent || !semanticFieldsConsistent) throw new ChatContractError();
+  return Object.freeze({
+    ...sourceFactV4(item),
+    itemId: stringValue(item.itemId, 256),
+    itemOrdinal: integer(item.itemOrdinal, 1, 512),
+    itemType,
+    phase,
+    status,
+    text: plainText(item.text, 1024 * 1024, true),
+    reasoningStatus,
+    reasoningReasonCode,
+    reasoningParts,
+    startedAtMs: integer(item.startedAtMs),
+    completedAtMs,
+  });
+}
+
+function parseHistoryPageV4(value: unknown): ChatHistoryPageV4 {
+  const page = exactObject(value, [
+    "turns", "nextCursor", "sessionNotices", "durableSequenceCut",
+  ]);
+  if (!Array.isArray(page.turns) || page.turns.length > 50 ||
+      !Array.isArray(page.sessionNotices) || page.sessionNotices.length > 64) {
+    throw new ChatContractError();
+  }
+  const turns = page.turns.map((value): ChatHistoryTurnV4 => {
+    const turn = exactObject(value, [
+      "turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode",
+      "messages", "reasoning", "projectionAuthority", "artifacts", "terminalCode",
+      "timelineItems", "plan", "notices",
+    ]);
+    if (!Array.isArray(turn.messages) || !Array.isArray(turn.reasoning) ||
+        !Array.isArray(turn.artifacts) || !Array.isArray(turn.timelineItems) ||
+        !Array.isArray(turn.notices) || turn.reasoning.length > 8 ||
+        turn.artifacts.length > 12 || turn.timelineItems.length > 512 ||
+        turn.notices.length > 64) {
+      throw new ChatContractError();
+    }
+    const artifacts = turn.artifacts.map(parseArtifact);
+    if (artifacts.some((artifact, index) => index > 0 && artifacts[index - 1]!.ordinal >= artifact.ordinal)) {
+      throw new ChatContractError();
+    }
+    const timelineItems = turn.timelineItems.map(parseTimelineItemV4);
+    if (timelineItems.some((item, index) => index > 0 && timelineItems[index - 1]!.itemOrdinal >= item.itemOrdinal)) {
+      throw new ChatContractError();
+    }
+    const notices = turn.notices.map(parseTimelineNoticeV4);
+    if (notices.some((notice) => notice.scope !== "turn" || notice.severity !== "error")) {
+      throw new ChatContractError();
+    }
+    const messages = turn.messages.map(parseMessageV2);
+    const projectionAuthority = oneOf(turn.projectionAuthority, ["legacy", "v4"] as const);
+    const terminalCode = nullable(turn.terminalCode, safeCode);
+    const plan = nullable(turn.plan, (entry) => parsePlanSnapshotV4(entry, false));
+    const invalidLegacyFacts = projectionAuthority === "legacy" && (
+      timelineItems.length > 0 || plan !== null || notices.length > 0 || terminalCode !== null
+    );
+    if (invalidLegacyFacts || (
+      projectionAuthority === "v4" && (
+        messages.some((message) => message.role !== "user") || turn.reasoning.length > 0
+      )
+    )) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      turnId: uuid(turn.turnId),
+      status: stringValue(turn.status, 64),
+      terminalAt: nullable(turn.terminalAt, (entry) => integer(entry)),
+      reasoningStatus: stringValue(turn.reasoningStatus, 64),
+      reasoningReasonCode: nullable(turn.reasoningReasonCode, (entry) => stringValue(entry, 128)),
+      messages: Object.freeze(messages),
+      reasoning: Object.freeze(turn.reasoning.map(parseReasoningMetadata)),
+      projectionAuthority,
+      artifacts: Object.freeze(artifacts),
+      terminalCode,
+      timelineItems: Object.freeze(timelineItems),
+      plan,
+      notices: Object.freeze(notices),
+    });
+  });
+  if (new Set(turns.map((turn) => turn.turnId)).size !== turns.length) throw new ChatContractError();
+  const sessionNotices = page.sessionNotices.map(parseTimelineNoticeV4);
+  if (sessionNotices.some((notice) => notice.scope !== "session" || notice.severity !== "warning")) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    turns: Object.freeze(turns),
+    nextCursor: nullable(page.nextCursor, cursor),
+    sessionNotices: Object.freeze(sessionNotices),
+    durableSequenceCut: durableSequence(page.durableSequenceCut, true),
+  });
+}
+
+export function parseHistoryPageResponseV4(value: unknown): ChatHistoryPageV4 {
+  return responseDataV4(value, parseHistoryPageV4);
+}
+
 export function parseReasoningResponse(value: unknown): readonly ChatReasoningItem[] {
   return responseData(value, (data) => {
     if (!Array.isArray(data) || data.length > 8) throw new ChatContractError();
@@ -1158,6 +1618,10 @@ export function parseSubscriptionResponse(value: unknown): string {
   return responseData(value, (data) => uuid(exactObject(data, ["subscriptionId"]).subscriptionId));
 }
 
+export function parseSubscriptionResponseV4(value: unknown): string {
+  return responseDataV4(value, (data) => uuid(exactObject(data, ["subscriptionId"]).subscriptionId));
+}
+
 export function parseCancelledResponse(value: unknown): boolean {
   return responseData(value, (data) => {
     const body = exactObject(data, ["cancelled"]);
@@ -1183,6 +1647,17 @@ export function parseResyncResponseV2(value: unknown): ChatResyncProjection {
     return Object.freeze({
       session: parseSession(projection.session),
       history: parseHistoryPageV2(projection.history),
+      cleanup: nullable(projection.cleanup, parseCleanup),
+    });
+  });
+}
+
+export function parseResyncResponseV4(value: unknown): ChatResyncProjectionV4 {
+  return responseDataV4(value, (data) => {
+    const projection = exactObject(data, ["session", "history", "cleanup"]);
+    return Object.freeze({
+      session: parseSession(projection.session),
+      history: parseHistoryPageV4(projection.history),
       cleanup: nullable(projection.cleanup, parseCleanup),
     });
   });
@@ -1253,4 +1728,184 @@ export function parseChatProjectionEvent(value: unknown): ChatProjectionEvent {
     kind,
     payload: parseEventPayload(kind, event.payload),
   }) as ChatProjectionEvent;
+}
+
+function parseItemLifecyclePayloadV4(value: unknown): ChatItemLifecyclePayloadV4 {
+  const payload = exactObject(value, [
+    "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+    "itemType", "phase", "text",
+  ]);
+  const itemType = plainText(payload.itemType, 256);
+  const phase = parseAgentMessagePhaseV4(payload.phase);
+  const text = nullable(payload.text, (entry) => plainText(entry, 1024 * 1024, true));
+  if (itemType === "agentMessage" ? text === null : phase !== null || text !== null) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    ...sourceFactV4(payload),
+    itemId: stringValue(payload.itemId, 256),
+    itemOrdinal: integer(payload.itemOrdinal, 1, 512),
+    itemType,
+    phase,
+    text,
+  });
+}
+
+function parseEventPayloadV4(
+  kind: ChatEventKindV4,
+  value: unknown,
+): ChatProjectionEventV4["payload"] {
+  switch (kind) {
+    case "turn_started": {
+      const payload = exactObject(value, ["sourceEventId", "sourceSequence", "sourceOccurredAt"]);
+      return sourceFactV4(payload);
+    }
+    case "plan_updated":
+      return parsePlanSnapshotV4(value, true);
+    case "item_started":
+    case "item_completed":
+      return parseItemLifecyclePayloadV4(value);
+    case "agent_message_append": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "phase", "text",
+      ]);
+      return Object.freeze({
+        ...sourceFactV4(payload),
+        itemId: stringValue(payload.itemId, 256),
+        itemOrdinal: integer(payload.itemOrdinal, 1, 512),
+        phase: parseAgentMessagePhaseV4(payload.phase),
+        text: plainText(payload.text, 1024 * 1024),
+      });
+    }
+    case "reasoning_append": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "contentIndex", "text",
+      ]);
+      return Object.freeze({
+        ...sourceFactV4(payload),
+        itemId: stringValue(payload.itemId, 256),
+        itemOrdinal: integer(payload.itemOrdinal, 1, 512),
+        contentIndex: integer(payload.contentIndex, 0, 7),
+        text: plainText(payload.text, 16 * 1024),
+      });
+    }
+    case "reasoning_finalized": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "reasonCode", "parts",
+      ]);
+      const status = oneOf(payload.status, CHAT_REASONING_STATUSES_V4);
+      const reasonCode = nullable(
+        payload.reasonCode,
+        (entry) => oneOf(entry, CHAT_REASONING_REASON_CODES_V4),
+      );
+      const parts = parseReasoningPartsV4(payload.parts);
+      const consistent =
+        (status === "complete" && reasonCode === null && parts.length > 0) ||
+        (status === "incomplete" && reasonCode !== null && parts.length > 0) ||
+        (status === "unavailable" && reasonCode !== null && parts.length === 0);
+      if (!consistent) throw new ChatContractError();
+      return Object.freeze({
+        ...sourceFactV4(payload),
+        itemId: stringValue(payload.itemId, 256),
+        itemOrdinal: integer(payload.itemOrdinal, 1, 512),
+        status,
+        reasonCode,
+        parts,
+      });
+    }
+    case "notice": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "scope", "severity",
+        "code", "willRetry",
+      ]);
+      if (typeof payload.willRetry !== "boolean") throw new ChatContractError();
+      const scope = oneOf(payload.scope, ["session", "turn"] as const);
+      const severity = oneOf(payload.severity, ["warning", "error"] as const);
+      if ((scope === "session") !== (severity === "warning")) throw new ChatContractError();
+      return Object.freeze({
+        ...sourceFactV4(payload),
+        scope,
+        severity,
+        code: nullable(payload.code, safeCode),
+        willRetry: payload.willRetry,
+      });
+    }
+    case "turn_terminal": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "status", "code",
+        "unfinishedReasoningReasonCode",
+      ]);
+      return Object.freeze({
+        ...sourceFactV4(payload),
+        status: oneOf(payload.status, ["completed", "interrupted", "failed"] as const),
+        code: nullable(payload.code, safeCode),
+        unfinishedReasoningReasonCode: nullable(
+          payload.unfinishedReasoningReasonCode,
+          (entry) => oneOf(entry, CHAT_REASONING_REASON_CODES_V4),
+        ),
+      });
+    }
+    case "resync_required":
+    case "context_invalidated": {
+      const payload = exactObject(value, ["reason"]);
+      const allowed = kind === "context_invalidated"
+        ? ["authority_changed"] as const
+        : ["backpressure", "sequence_gap", "protocol_error"] as const;
+      return Object.freeze({ reason: oneOf(payload.reason, allowed) });
+    }
+  }
+}
+
+export function parseChatProjectionEventV4(value: unknown): ChatProjectionEventV4 {
+  const event = exactObject(
+    value,
+    ["schemaVersion", "subscriptionId", "contextId", "sessionId", "projectionSequence", "eventId", "kind", "payload"],
+    ["turnId", "durableSequence"],
+  );
+  if (event.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION ||
+      typeof event.projectionSequence !== "string" ||
+      !SEQUENCE_PATTERN.test(event.projectionSequence)) {
+    throw new ChatContractError();
+  }
+  const projectionSequence = BigInt(event.projectionSequence);
+  if (projectionSequence > MAX_SAFE_EVENT_SEQUENCE) throw new ChatContractError();
+  const kind = oneOf(event.kind, [
+    "turn_started", "plan_updated", "item_started", "item_completed",
+    "agent_message_append", "reasoning_append", "reasoning_finalized", "notice",
+    "turn_terminal", "resync_required", "context_invalidated",
+  ] as const);
+  const turnId = event.turnId === undefined ? undefined : uuid(event.turnId);
+  const payload = parseEventPayloadV4(kind, event.payload);
+  const noticeScope = kind === "notice"
+    ? (payload as Omit<ChatTimelineNoticeV4, "observedAtMs">).scope
+    : null;
+  const requiresTurn = [
+    "turn_started", "plan_updated", "item_started", "item_completed",
+    "agent_message_append", "reasoning_append", "reasoning_finalized", "turn_terminal",
+  ].includes(kind) || noticeScope === "turn";
+  const forbidsTurn = noticeScope === "session" ||
+    kind === "context_invalidated";
+  const semantic = kind !== "resync_required" && kind !== "context_invalidated";
+  if ((requiresTurn && turnId === undefined) || (forbidsTurn && turnId !== undefined)) {
+    throw new ChatContractError();
+  }
+  if ((semantic && event.durableSequence === undefined) ||
+      (!semantic && event.durableSequence !== undefined)) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    schemaVersion: 4,
+    subscriptionId: uuid(event.subscriptionId),
+    contextId: uuid(event.contextId),
+    sessionId: uuid(event.sessionId),
+    ...(turnId === undefined ? {} : { turnId }),
+    projectionSequence: event.projectionSequence,
+    eventId: uuid(event.eventId),
+    ...(semantic ? { durableSequence: durableSequence(event.durableSequence, false) } : {}),
+    kind,
+    payload,
+  }) as ChatProjectionEventV4;
 }

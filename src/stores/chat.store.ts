@@ -6,6 +6,7 @@ import {
   type ChatClient,
   type ChatInvalidEventScope,
 } from "../api/chat-client";
+import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
 import {
   conversationMessageItemId,
   conversationReasoningItemOrdinal,
@@ -26,11 +27,14 @@ import type {
   ChatControlPlaneEvent,
   ChatDraftTarget,
   ChatHistoryPage,
+  ChatHistoryPageV4,
   ChatLocalReadiness,
   ChatProjectionEvent,
+  ChatProjectionEventV4,
   ChatProject,
   ChatReasoningItem,
   ChatResyncProjection,
+  ChatResyncProjectionV4,
   ChatSession,
   ChatSessionControlPlane,
   ChatTurnContentBlock,
@@ -41,6 +45,7 @@ import {
   chatSessionDraftTarget,
 } from "../domain/chat-ipc";
 import {
+  appendOlderConversationSnapshot,
   createConversationState,
   reconcileConversationSnapshot,
   reduceConversationEvent,
@@ -60,6 +65,9 @@ const STORE_ID = "chat-conversation";
 const MAX_LIVE_ASSISTANT_BYTES = 1024 * 1024;
 const MAX_LIVE_REASONING_BYTES = 256 * 1024;
 const MAX_SEEN_ARTIFACT_EVENT_IDS = 256;
+const MAX_BUFFERED_PROJECTION_EVENTS = 64;
+const MAX_BUFFERED_PROJECTION_BYTES = 4 * 1024 * 1024;
+const MAX_BUFFERED_ARTIFACT_EVENTS = 64;
 const CLEANUP_POLL_INTERVAL_MS = 1_000;
 const CLEANUP_POLL_MAX_ATTEMPTS = 120;
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
@@ -115,6 +123,35 @@ export type ChatViewPhase =
   | "signed-out"
   | "unavailable";
 
+function boundedValueStorageBytes(value: unknown, remaining: number): number {
+  if (remaining <= 0 || value === null || value === undefined) return 0;
+  if (typeof value === "string") return Math.min(remaining, value.length * 2);
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return Math.min(remaining, 16);
+  }
+  if (Array.isArray(value)) {
+    let total = Math.min(remaining, 16);
+    for (const item of value) {
+      const size = boundedValueStorageBytes(item, remaining - total);
+      total += size;
+      if (total >= remaining) break;
+    }
+    return total;
+  }
+  if (typeof value !== "object") return 0;
+  let total = Math.min(remaining, 32);
+  for (const [key, item] of Object.entries(value)) {
+    total += Math.min(remaining - total, key.length * 2 + 8);
+    total += boundedValueStorageBytes(item, remaining - total);
+    if (total >= remaining) break;
+  }
+  return total;
+}
+
+function bufferedProjectionEventBytes(event: ChatProjectionAuthorityEvent): number {
+  return boundedValueStorageBytes(event, MAX_BUFFERED_PROJECTION_BYTES + 1);
+}
+
 export type ChatBindFailureStage =
   | "event_listener"
   | "context"
@@ -155,6 +192,13 @@ export interface ChatArtifactIntegration {
 }
 
 type ArtifactEventDisposition = "ignore" | "refresh" | "resync";
+type ChatHistoryAuthority = ChatHistoryPage | ChatHistoryPageV4;
+type ChatProjectionAuthorityEvent = ChatProjectionEvent | ChatProjectionEventV4;
+type ChatResyncAuthority = ChatResyncProjection | ChatResyncProjectionV4;
+
+function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
+  return "sessionNotices" in history;
+}
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -193,6 +237,7 @@ export function createChatStoreDefinition(
   client: ChatClient,
   storeId = STORE_ID,
   artifactIntegrationFactory?: () => ChatArtifactIntegration,
+  streamingV4Enabled = feat134StreamingUiEnabled,
 ) {
   return defineStore(storeId, () => {
     const artifactIntegration = artifactIntegrationFactory?.() ?? null;
@@ -202,7 +247,7 @@ export function createChatStoreDefinition(
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
-    const history = shallowRef<ChatHistoryPage | null>(null);
+    const history = shallowRef<ChatHistoryAuthority | null>(null);
     const conversationState = shallowRef<ConversationState>(createConversationState());
     const liveAssistantText = ref("");
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
@@ -278,9 +323,12 @@ export function createChatStoreDefinition(
     let activeAttachmentImport: ActiveAttachmentImport | null = null;
     let pendingSubmission: Readonly<{ key: string; operationId: string }> | null = null;
     let bufferingEvents = false;
-    let bufferedEvents: ChatProjectionEvent[] = [];
+    let bufferedEvents: ChatProjectionAuthorityEvent[] = [];
+    let bufferedEventBytes = 0;
+    let bufferedEventsOverflowed = false;
     let bufferingArtifactEvents = false;
     let bufferedArtifactEvents: ChatArtifactLiveEvent[] = [];
+    let bufferedArtifactEventsOverflowed = false;
     let artifactExpectedSequence = 0n;
     let artifactAuthorityToken: ArtifactAuthorityToken | null = null;
     const seenArtifactEventIds = new Set<string>();
@@ -324,6 +372,13 @@ export function createChatStoreDefinition(
       seenArtifactEventIds.clear();
       seenArtifactEventOrder.length = 0;
       bufferedArtifactEvents = [];
+      bufferedArtifactEventsOverflowed = false;
+    }
+
+    function resetProjectionBuffer(): void {
+      bufferedEvents = [];
+      bufferedEventBytes = 0;
+      bufferedEventsOverflowed = false;
     }
 
     function clearExpiryTimer(): void {
@@ -357,7 +412,7 @@ export function createChatStoreDefinition(
       controlPlaneSequence = null;
       deleteDisposition.value = null;
       subscriptionId = null;
-      bufferedEvents = [];
+      resetProjectionBuffer();
       bufferingEvents = false;
       bufferingArtifactEvents = false;
       resetArtifactStream();
@@ -519,7 +574,9 @@ export function createChatStoreDefinition(
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
       const generation = sessionListenerEpoch;
-      const pending = client.onEvent(handleEvent, handleInvalidEvent)
+      const pending = (streamingV4Enabled
+        ? client.onEventV4((event) => handleEvent(event), handleInvalidEvent)
+        : client.onEvent((event) => handleEvent(event), handleInvalidEvent))
         .then((unlisten) => {
           if (generation !== sessionListenerEpoch) {
             unlisten();
@@ -833,16 +890,29 @@ export function createChatStoreDefinition(
       reasoning: readonly LiveReasoningPart[];
       turnStatus: string | null;
     }> {
-      const assistantText = itemText(selectConversationItem(
-        state,
-        threadId,
-        turnId,
-        conversationMessageItemId(turnId, "assistant"),
-      ));
+      const assistantText = streamingV4Enabled
+        ? Object.values(state.items)
+            .filter((item) =>
+              item.threadId === threadId &&
+              item.turnId === turnId &&
+              item.kind === "assistant_message" &&
+              item.agentMessagePhase === "final_answer"
+            )
+            .sort((left, right) => left.ordinal - right.ordinal || left.itemId.localeCompare(right.itemId))
+            .map((item) => itemText(item))
+            .filter((text) => text.length > 0)
+            .join("\n\n")
+        : itemText(selectConversationItem(
+            state,
+            threadId,
+            turnId,
+            conversationMessageItemId(turnId, "assistant"),
+          ));
       const reasoning = Object.values(state.items)
         .filter((item) => item.threadId === threadId && item.turnId === turnId && item.kind === "reasoning")
         .flatMap((item) => {
-          const itemOrdinal = conversationReasoningItemOrdinal(turnId, item.itemId);
+          const itemOrdinal = conversationReasoningItemOrdinal(turnId, item.itemId) ??
+            (streamingV4Enabled ? item.ordinal : null);
           if (itemOrdinal === null) return [];
           return item.contentBlocks
             .filter((block) => block.type === "text" || block.type === "code")
@@ -938,7 +1008,7 @@ export function createChatStoreDefinition(
       requestResync();
     }
 
-    function applyEvent(event: ChatProjectionEvent): void {
+    function applyEvent(event: ChatProjectionAuthorityEvent): void {
       const bound = context.value;
       if (
         bound === null ||
@@ -962,11 +1032,18 @@ export function createChatStoreDefinition(
           requestResync();
           return;
         }
-        void refreshCleanupFromEvent(event);
+        if (event.schemaVersion === 1) void refreshCleanupFromEvent(event);
         return;
       }
       if (adapted.kind === "resync_required") {
         requestResync();
+        return;
+      }
+      if (adapted.event.kind === "thread.notice") {
+        const previous = conversationState.value;
+        const next = reduceConversationEvent(previous, adapted.event);
+        if (next !== previous) conversationState.value = next;
+        if (next.syncStatus === "recovery_required") requestResync();
         return;
       }
       if (event.turnId === undefined) {
@@ -996,14 +1073,63 @@ export function createChatStoreDefinition(
       phase.value = "streaming";
     }
 
-    function handleEvent(event: ChatProjectionEvent): void {
+    function applyBufferedEvents(
+      pending: readonly ChatProjectionAuthorityEvent[],
+      snapshotHistory: ChatHistoryAuthority,
+    ): void {
+      const durableCut = isHistoryV4(snapshotHistory)
+        ? BigInt(snapshotHistory.durableSequenceCut)
+        : null;
+      for (const event of pending) {
+        const matchesAuthority = context.value !== null &&
+          event.contextId === context.value.contextId &&
+          event.subscriptionId === subscriptionId &&
+          event.sessionId === selectedSessionId.value;
+        const includedInSnapshot = matchesAuthority &&
+          durableCut !== null &&
+          event.schemaVersion === 4 &&
+          "durableSequence" in event &&
+          BigInt(event.durableSequence) <= durableCut;
+        if (!includedInSnapshot) {
+          applyEvent(event);
+          continue;
+        }
+
+        const next = reduceConversationEvent(conversationState.value, Object.freeze({
+          eventId: event.eventId,
+          streamId: event.subscriptionId,
+          sequence: event.projectionSequence,
+          threadId: event.sessionId,
+          kind: "auxiliary" as const,
+        }));
+        conversationState.value = next;
+        if (next.syncStatus === "recovery_required") {
+          requestResync();
+          return;
+        }
+      }
+    }
+
+    function handleEvent(event: ChatProjectionAuthorityEvent): void {
       if (bufferingEvents) {
         if (event.kind === "context_invalidated") {
           applyEvent(event);
           return;
         }
+        if (bufferedEventsOverflowed) {
+          resyncTrailingRequested = true;
+          return;
+        }
+        const eventBytes = bufferedProjectionEventBytes(event);
+        if (bufferedEvents.length >= MAX_BUFFERED_PROJECTION_EVENTS ||
+            eventBytes > MAX_BUFFERED_PROJECTION_BYTES - bufferedEventBytes) {
+          resetProjectionBuffer();
+          bufferedEventsOverflowed = true;
+          resyncTrailingRequested = true;
+          return;
+        }
         bufferedEvents.push(event);
-        if (bufferedEvents.length > 64) resyncTrailingRequested = true;
+        bufferedEventBytes += eventBytes;
         return;
       }
       applyEvent(event);
@@ -1090,8 +1216,17 @@ export function createChatStoreDefinition(
         return;
       }
       if (bufferingArtifactEvents) {
+        if (bufferedArtifactEventsOverflowed) {
+          resyncTrailingRequested = true;
+          return;
+        }
+        if (bufferedArtifactEvents.length >= MAX_BUFFERED_ARTIFACT_EVENTS) {
+          bufferedArtifactEvents = [];
+          bufferedArtifactEventsOverflowed = true;
+          resyncTrailingRequested = true;
+          return;
+        }
         bufferedArtifactEvents.push(event);
-        if (bufferedArtifactEvents.length > 64) resyncTrailingRequested = true;
         return;
       }
       const disposition = classifyArtifactEvent(event);
@@ -1228,6 +1363,38 @@ export function createChatStoreDefinition(
       return token;
     }
 
+    function subscribeAuthority(contextId: string, sessionId: string): Promise<string> {
+      return streamingV4Enabled
+        ? client.subscribeSessionV4(contextId, sessionId)
+        : client.subscribeSession(contextId, sessionId);
+    }
+
+    function resyncAuthority(
+      contextId: string,
+      sessionId: string,
+      limit: number,
+      signal: AbortSignal,
+    ): Promise<ChatResyncAuthority> {
+      return streamingV4Enabled
+        ? client.resyncSessionV4(contextId, sessionId, limit, signal)
+        : client.resyncSessionV2(contextId, sessionId, limit, signal);
+    }
+
+    function loadHistoryAuthority(
+      contextId: string,
+      sessionId: string,
+      cursor: string | undefined,
+      limit: number,
+      signal?: AbortSignal,
+    ): Promise<ChatHistoryAuthority> {
+      if (streamingV4Enabled) {
+        return client.loadHistoryV4(contextId, sessionId, cursor, limit, signal);
+      }
+      return artifactIntegration === null
+        ? client.loadHistoryV2(contextId, sessionId, cursor, limit, signal)
+        : client.loadHistoryV3(contextId, sessionId, cursor, limit, signal);
+    }
+
     async function selectSession(sessionId: string): Promise<void> {
       const bound = context.value;
       if (!bound || !hasAction("read_sessions")) {
@@ -1248,6 +1415,7 @@ export function createChatStoreDefinition(
         void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => undefined);
       }
       const { epoch, controller } = startRead();
+      resetProjectionBuffer();
       bufferingEvents = true;
       bufferingArtifactEvents = artifactIntegration !== null;
       try {
@@ -1257,7 +1425,7 @@ export function createChatStoreDefinition(
         ]);
         if (!isCurrent(epoch, controller, sessionId)) return;
         artifactAuthorityToken = establishArtifactAuthority(sessionId);
-        const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
+        const nextSubscription = await subscribeAuthority(bound.contextId, sessionId);
         if (!isCurrent(epoch, controller, sessionId)) {
           void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
           return;
@@ -1265,12 +1433,12 @@ export function createChatStoreDefinition(
         subscriptionId = nextSubscription;
         resetArtifactStream();
         bufferingArtifactEvents = artifactIntegration !== null;
-        const projection = await client.resyncSessionV2(bound.contextId, sessionId, 20, controller.signal);
+        const projection = await resyncAuthority(bound.contextId, sessionId, 20, controller.signal);
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
-        let authoritativeHistory = projection.history;
+        let authoritativeHistory: ChatHistoryAuthority = projection.history;
         let trailingArtifactRefresh = false;
         if (artifactIntegration !== null) {
-          const firstHistory = await client.loadHistoryV3(
+          const firstHistory = await loadHistoryAuthority(
             bound.contextId,
             sessionId,
             undefined,
@@ -1287,7 +1455,7 @@ export function createChatStoreDefinition(
           for (const event of initiallyBuffered) {
             if (classifyArtifactEvent(event) === "resync") resyncTrailingRequested = true;
           }
-          const secondHistory = await client.loadHistoryV3(
+          const secondHistory = await loadHistoryAuthority(
             bound.contextId,
             sessionId,
             undefined,
@@ -1313,10 +1481,10 @@ export function createChatStoreDefinition(
         bufferingEvents = false;
         bufferingArtifactEvents = false;
         const pending = bufferedEvents;
-        bufferedEvents = [];
+        resetProjectionBuffer();
         activeRead = null;
         if (phase.value === "resyncing") phase.value = "ready";
-        for (const event of pending) applyEvent(event);
+        applyBufferedEvents(pending, authoritativeHistory);
         if (resyncTrailingRequested) {
           resyncTrailingRequested = false;
           requestResync();
@@ -1328,7 +1496,7 @@ export function createChatStoreDefinition(
         releaseSessionListeners();
         bufferingEvents = false;
         bufferingArtifactEvents = false;
-        bufferedEvents = [];
+        resetProjectionBuffer();
         bufferedArtifactEvents = [];
         activeRead = null;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
@@ -1405,8 +1573,8 @@ export function createChatStoreDefinition(
     }
 
     function applyResync(
-      projection: ChatResyncProjection,
-      authoritativeHistory: ChatHistoryPage = projection.history,
+      projection: ChatResyncAuthority,
+      authoritativeHistory: ChatHistoryAuthority = projection.history,
     ): void {
       if (projection.session.sessionId !== selectedSessionId.value) {
         throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync" });
@@ -1418,13 +1586,27 @@ export function createChatStoreDefinition(
       const nextConversation = reconcileConversationSnapshot(conversationState.value, snapshot);
       conversationState.value = nextConversation;
       cleanupStatus.value = projection.cleanup;
+      const latestConversationTurn = Object.values(nextConversation.turns)
+        .filter((turn) => turn.threadId === projection.session.sessionId)
+        .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
+      const authoritativeLatestTurnStatus = latestConversationTurn === undefined
+        ? projection.session.latestTurnStatus
+        : compatibilityTurnStatus(
+            nextConversation,
+            projection.session.sessionId,
+            latestConversationTurn.turnId,
+          );
+      const authoritativeSession = Object.freeze({
+        ...projection.session,
+        latestTurnStatus: authoritativeLatestTurnStatus,
+      });
       const projectedSessionIndex = sessions.value.findIndex((session) =>
         session.sessionId === projection.session.sessionId,
       );
       sessions.value = projectedSessionIndex === -1
-        ? Object.freeze([projection.session, ...sessions.value])
+        ? Object.freeze([authoritativeSession, ...sessions.value])
         : Object.freeze(sessions.value.map((session, index) =>
-            index === projectedSessionIndex ? projection.session : session,
+            index === projectedSessionIndex ? authoritativeSession : session,
           ));
       const projectedLiveTurn = Object.values(nextConversation.turns)
         .filter((turn) => turn.threadId === projection.session.sessionId && (
@@ -1449,7 +1631,7 @@ export function createChatStoreDefinition(
       } else {
         liveAssistantText.value = "";
         liveReasoning.value = Object.freeze([]);
-        liveTurnStatus.value = projection.session.latestTurnStatus;
+        liveTurnStatus.value = authoritativeLatestTurnStatus;
       }
       if (nextConversation.syncStatus === "recovery_required") {
         lastErrorCode.value = "chat_protocol_error";
@@ -1469,6 +1651,7 @@ export function createChatStoreDefinition(
       if (!bound || !sessionId || !subscriptionId) return;
       const { epoch, controller } = startRead();
       phase.value = "resyncing";
+      resetProjectionBuffer();
       bufferingEvents = true;
       bufferingArtifactEvents = artifactIntegration !== null;
       const previousSubscription = subscriptionId;
@@ -1476,7 +1659,7 @@ export function createChatStoreDefinition(
         try {
           await ensureSessionEventListeners();
           artifactAuthorityToken = establishArtifactAuthority(sessionId);
-          const nextSubscription = await client.subscribeSession(bound.contextId, sessionId);
+          const nextSubscription = await subscribeAuthority(bound.contextId, sessionId);
           if (!isCurrent(epoch, controller, sessionId)) {
             void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
             throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
@@ -1485,16 +1668,16 @@ export function createChatStoreDefinition(
           resetArtifactStream();
           await client.unsubscribeSession(bound.contextId, previousSubscription).catch(() => false);
           bufferingArtifactEvents = artifactIntegration !== null;
-          const projection = await client.resyncSessionV2(
+          const projection = await resyncAuthority(
             bound.contextId,
             sessionId,
             20,
             controller.signal,
           );
           if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
-          let authoritativeHistory = projection.history;
+          let authoritativeHistory: ChatHistoryAuthority = projection.history;
           if (artifactIntegration !== null) {
-            const page = await client.loadHistoryV3(
+            const page = await loadHistoryAuthority(
               bound.contextId,
               sessionId,
               undefined,
@@ -1519,19 +1702,19 @@ export function createChatStoreDefinition(
             if (disposition === "resync") resyncTrailingRequested = true;
           }
           const pending = bufferedEvents;
-          bufferedEvents = [];
+          resetProjectionBuffer();
           bufferingEvents = false;
           bufferingArtifactEvents = false;
           activeRead = null;
           if (phase.value === "resyncing") phase.value = "ready";
-          for (const event of pending) applyEvent(event);
+          applyBufferedEvents(pending, authoritativeHistory);
           if (needsTrailingArtifactRefresh && !resyncTrailingRequested) requestArtifactRefresh();
         } catch (error: unknown) {
           if (!isCurrent(epoch, controller, sessionId)) return;
           activeRead = null;
           bufferingEvents = false;
           bufferingArtifactEvents = false;
-          bufferedEvents = [];
+          resetProjectionBuffer();
           bufferedArtifactEvents = [];
           lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
           phase.value = phaseForError(error);
@@ -1562,32 +1745,53 @@ export function createChatStoreDefinition(
       const { epoch, controller } = startRead();
       try {
         const token = artifactAuthorityToken;
-        const page = artifactIntegration === null
-          ? await client.loadHistoryV2(bound.contextId, sessionId, cursor, 20, controller.signal)
-          : await client.loadHistoryV3(bound.contextId, sessionId, cursor, 20, controller.signal);
-        if (!isCurrent(epoch, controller, sessionId)) return;
-        if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
-        const known = new Set(history.value?.turns.map((turn) => turn.turnId));
-        const mergedHistory = Object.freeze({
-          turns: Object.freeze([...(history.value?.turns ?? []), ...page.turns.filter((turn) => !known.has(turn.turnId))]),
-          nextCursor: page.nextCursor,
-        });
-        const currentConversation = conversationState.value;
-        const reconciled = reconcileConversationSnapshot(
-          currentConversation,
-          historyPageToConversationSnapshot(sessionId, mergedHistory),
+        const page = await loadHistoryAuthority(
+          bound.contextId,
+          sessionId,
+          cursor,
+          20,
+          controller.signal,
         );
-        conversationState.value = Object.freeze({
-          ...reconciled,
-          streamPositions: currentConversation.streamPositions,
-          processedEventIds: currentConversation.processedEventIds,
+        if (!isCurrent(epoch, controller, sessionId)) return;
+        const currentHistory = history.value;
+        if (currentHistory === null) throw new ChatClientError({
+          schemaVersion: streamingV4Enabled ? 4 : 1,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
         });
-        if (conversationState.value.syncStatus === "recovery_required") {
+        const turns = Object.freeze([
+          ...currentHistory.turns,
+          ...page.turns,
+        ]);
+        const mergedHistory: ChatHistoryAuthority = streamingV4Enabled
+          ? isHistoryV4(currentHistory) && isHistoryV4(page)
+            ? Object.freeze({
+                turns,
+                nextCursor: page.nextCursor,
+                sessionNotices: currentHistory.sessionNotices,
+                durableSequenceCut: currentHistory.durableSequenceCut,
+              })
+            : (() => { throw new ChatClientError({
+                schemaVersion: 4,
+                code: "chat_protocol_error",
+                retryable: false,
+                recovery: "resync",
+              }); })()
+          : Object.freeze({ turns, nextCursor: page.nextCursor });
+        const appended = appendOlderConversationSnapshot(
+          conversationState.value,
+          historyPageToConversationSnapshot(sessionId, page),
+        );
+        if (appended.syncStatus === "recovery_required") {
+          conversationState.value = appended;
           lastErrorCode.value = "chat_protocol_error";
           phase.value = "resync-required";
           activeRead = null;
           return;
         }
+        if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
+        conversationState.value = appended;
         history.value = mergedHistory;
         activeRead = null;
       } catch (error: unknown) {
@@ -1606,12 +1810,9 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !Number.isSafeInteger(limit) || limit <= 0 || limit > 50) return null;
       try {
-        const loadPage = artifactIntegration === null
-          ? client.loadHistoryV2.bind(client)
-          : client.loadHistoryV3.bind(client);
-        const page = await loadPage(bound.contextId, sessionId, undefined, limit);
+        const page = await loadHistoryAuthority(bound.contextId, sessionId, undefined, limit);
         if (!page.nextCursor) return { page, cursorMonotonic: true, pagesDisjoint: true };
-        const next = await loadPage(bound.contextId, sessionId, page.nextCursor, limit);
+        const next = await loadHistoryAuthority(bound.contextId, sessionId, page.nextCursor, limit);
         const firstIds = new Set(page.turns.map((turn) => turn.turnId));
         const pagesDisjoint = next.turns.every((turn) => !firstIds.has(turn.turnId));
         return {
@@ -1885,7 +2086,7 @@ export function createChatStoreDefinition(
         submissionKey("create", projectId, input, currentBlocks) !== attemptKey
       ) return null;
       const attemptOperationId = submissionOperation(attemptKey);
-      const created = draftAttachments.value.length > 0
+      const created = streamingV4Enabled || draftAttachments.value.length > 0
         ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
         : await client.createSession(bound.contextId, projectId, input, attemptOperationId);
       const settledBlocks = turnContentBlocks(input);
@@ -1948,7 +2149,7 @@ export function createChatStoreDefinition(
       );
       const attemptOperationId = submissionOperation(attemptKey);
       let created;
-      if (draftAttachments.value.length > 0) {
+      if (streamingV4Enabled || draftAttachments.value.length > 0) {
         created = await client.submitTurnV2(bound.contextId, sessionId, blocks, attemptOperationId);
       } else {
         created = await client.submitTurn(bound.contextId, sessionId, input, attemptOperationId);

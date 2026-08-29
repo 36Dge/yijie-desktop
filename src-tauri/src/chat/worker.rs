@@ -11,12 +11,16 @@ use super::database::Feat126ResumeCandidate;
 use super::database::{
     ActiveTurnContext, AttachmentSummary, ChatRepository, ChatScope, ClaimedDeletion,
     ClaimedOutbox, CleanupSurfaceState, CreateSessionDispatch, DeletionStatus, DraftContentBlock,
-    DraftTarget, HistoryPage, InterruptTurnDispatch, MessageContentBlockProjection, OutboxState,
-    PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
-    ReasoningItem, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
-    StartTurnDispatch, StartTurnDispatchV2, TerminalTurnCommit, TurnProgress,
+    DraftTarget, Feat134HistorySnapshot, HistoryPage, InterruptTurnDispatch,
+    MessageContentBlockProjection, OutboxState, PendingConversation, ProjectSummary,
+    PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, RecoverySnapshot,
+    SessionPage, SessionPageCursor, SessionSummary, StartTurnDispatch, StartTurnDispatchV2,
+    TerminalTurnCommit, TurnProgress,
 };
 use super::error::ChatError;
+use super::feat134::{
+    Feat134HistoryProjection, Feat134Hydration, Feat134Projection, Feat134ProjectionFailure,
+};
 use super::keychain::{DatabaseKeyStore, ReceiptKeyStore};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -684,6 +688,14 @@ impl DatabaseWorker {
         .await
     }
 
+    pub async fn suspend_uncertain_start_turn(
+        &self,
+        operation_id: uuid::Uuid,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| repository.suspend_uncertain_start_turn(operation_id))
+            .await
+    }
+
     pub async fn reschedule_outbox(
         &self,
         operation_id: uuid::Uuid,
@@ -696,6 +708,27 @@ impl DatabaseWorker {
     pub async fn fail_outbox(&self, operation_id: uuid::Uuid) -> Result<(), ChatError> {
         self.call(move |repository| repository.fail_outbox(operation_id))
             .await
+    }
+
+    pub async fn finalize_failed_start_turn_dispatch(
+        &self,
+        operation_id: uuid::Uuid,
+        terminal_at: i64,
+    ) -> Result<super::database::FailedStartTurnProjection, ChatError> {
+        self.call(move |repository| {
+            repository.finalize_failed_start_turn_dispatch(operation_id, terminal_at)
+        })
+        .await
+    }
+
+    pub async fn recover_next_failed_start_turn_projection(
+        &self,
+        terminal_at: i64,
+    ) -> Result<Option<super::database::FailedStartTurnProjection>, ChatError> {
+        self.call(move |repository| {
+            repository.recover_next_failed_start_turn_projection(terminal_at)
+        })
+        .await
     }
 
     pub async fn active_turn_context(
@@ -713,6 +746,73 @@ impl DatabaseWorker {
     ) -> Result<(), ChatError> {
         self.call(move |repository| {
             repository.clear_event_cursor_after_stream_change(session_id, &expected)
+        })
+        .await
+    }
+
+    pub async fn reset_feat134_after_stream_change(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        expected: super::database::StoredEventCursor,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.reset_feat134_after_stream_change(session_id, turn_id, &expected)
+        })
+        .await
+    }
+
+    pub async fn persist_feat134_projection(
+        &self,
+        projection: Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| repository.persist_feat134_projection(&projection))
+            .await
+    }
+
+    pub async fn commit_feat134_terminal(
+        &self,
+        projection: Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| repository.commit_feat134_terminal(&projection))
+            .await
+    }
+
+    pub async fn commit_feat134_projection_failure(
+        &self,
+        failure: Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        self.call(move |repository| repository.commit_feat134_projection_failure(&failure))
+            .await
+    }
+
+    pub async fn load_feat134_hydration(
+        &self,
+        turn_id: uuid::Uuid,
+    ) -> Result<Feat134Hydration, ChatError> {
+        self.call(move |repository| repository.load_feat134_hydration(turn_id))
+            .await
+    }
+
+    pub async fn load_feat134_history_projection(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.call(move |repository| {
+            repository.load_feat134_history_projection(session_id, &turn_ids)
+        })
+        .await
+    }
+
+    pub async fn load_feat134_history_snapshot(
+        &self,
+        session_id: uuid::Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.call(move |repository| {
+            repository.load_feat134_history_snapshot(session_id, before_ordinal, limit)
         })
         .await
     }
