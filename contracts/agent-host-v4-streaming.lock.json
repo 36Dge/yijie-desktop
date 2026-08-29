@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "contract_version": "0.6.0",
+  "contract_version": "0.7.0",
   "contracts": {
     "repository": "https://github.com/36Dge/yijie-contracts.git",
-    "full_commit": "3832a6c5e99b2a6365f193280fdb887c8fdbc2de",
+    "full_commit": "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
     "sources": {
       "openapi": {
         "path": "openapi/agent-host/agent-host.yaml",
-        "sha256": "49e2171e41e0fc11313a114c82ff09e11a0df396e4b366a03b0d7e3afe1766df"
+        "sha256": "bd53dfd84976c81b5154c587c72547a5b698b72d301a4850fd0b6338022f9c83"
       },
       "event_schema": {
         "path": "jsonschema/agent/session-event-v4.schema.json",
@@ -15,7 +15,7 @@
       },
       "runtime_projection": {
         "path": "compatibility/agent-host-runtime-v1.json",
-        "sha256": "6d28e3ad1bb941561ce08a231abf003dd0e69b5dcafe6376cc5987c3d1f07a00"
+        "sha256": "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc"
       },
       "protobuf": {
         "path": "protobuf/yijie/events/v4/agent_session.proto",
@@ -29,15 +29,15 @@
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "b9358f06f3a15aa17a2471cf0bb8bfd0e2b29bfe",
+    "full_commit": "83d3163e21579042d2cc21f303e943946ff97eb0",
     "contracts_lock": {
       "path": "api/contracts.lock",
-      "sha256": "c1ae8d7d363269c29a1858142c07a1c6041d9fbd394c126539e12dee767934d9"
+      "sha256": "2867f1834a363cd759e80ffede1749c4905ffbc9df64b47bdbdf74ba6e43b28a"
     },
     "sources": {
       "openapi": {
         "path": "api/openapi/agent-host.yaml",
-        "sha256": "49e2171e41e0fc11313a114c82ff09e11a0df396e4b366a03b0d7e3afe1766df"
+        "sha256": "bd53dfd84976c81b5154c587c72547a5b698b72d301a4850fd0b6338022f9c83"
       },
       "event_schema": {
         "path": "api/jsonschema/agent-session-event-v4.schema.json",
@@ -45,11 +45,11 @@
       },
       "runtime_projection": {
         "path": "api/compatibility/agent-host-runtime-v1.json",
-        "sha256": "6d28e3ad1bb941561ce08a231abf003dd0e69b5dcafe6376cc5987c3d1f07a00"
+        "sha256": "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc"
       },
       "generated_openapi": {
         "path": "internal/contracts/agenthost.gen.go",
-        "sha256": "cc6948f3945a953d8c00d602afdf8ba80ccbfaf1e0180fbb7f310fd53bde8b30"
+        "sha256": "2660ac177638421eac24051cf3ec8b268d2cfb18284f75cb4584c7b8549022ea"
       }
     },
     "fixture_tree": {
@@ -78,6 +78,8 @@
     "build_entry": "tauri:build:demo-fast:stable",
     "runtime_flag": "YIJIE_FEAT134_STREAMING_ENABLED",
     "compile_flag": "VITE_YIJIE_FEAT134_STREAMING_ENABLED",
+    "feat136_runtime_flag": "YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED",
+    "feat136_compile_flag": "VITE_YIJIE_FEAT136_EXECUTION_ENABLED",
     "enabled_value": "true"
   }
 }

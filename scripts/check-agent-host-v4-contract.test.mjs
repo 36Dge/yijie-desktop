@@ -7,6 +7,8 @@ import {
   sha256,
   validateHostContractsLock,
   validateLock,
+  validateRuntimeProjection,
+  validateRuntimeProjectionV4Bytes,
   validateStableActivation,
   verifyExactCheckout,
 } from "./check-agent-host-v4-contract.mjs";
@@ -17,6 +19,10 @@ const lock = JSON.parse(
 );
 const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
 const runner = await readFile(path.join(repositoryRoot, lock.activation.launcher_script), "utf8");
+const runtimeProjectionBytes = await readFile(
+  path.resolve(repositoryRoot, "../yijie-contracts", lock.contracts.sources.runtime_projection.path),
+);
+const runtimeProjection = JSON.parse(runtimeProjectionBytes.toString("utf8"));
 
 describe("FEAT-134 Agent Host v4 exact pin", () => {
   it("accepts only the complete immutable Contracts, Host and activation lock", () => {
@@ -58,13 +64,56 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
   it("pins the Host consumption lock bytes and rejects any drift", async () => {
     const bytes = await readFile(path.resolve(repositoryRoot, "../yijie-agent-host/api/contracts.lock"));
     expect(validateHostContractsLock(bytes)).toMatchObject({
-      CONTRACTS_VERSION: "0.6.0",
-      CONTRACTS_COMMIT: "3832a6c5e99b2a6365f193280fdb887c8fdbc2de",
+      CONTRACTS_VERSION: "0.7.0",
+      CONTRACTS_COMMIT: "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+      OPENAPI_SHA256: "bd53dfd84976c81b5154c587c72547a5b698b72d301a4850fd0b6338022f9c83",
+      RUNTIME_COMPATIBILITY_SHA256:
+        "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc",
       AGENT_SESSION_EVENT_V4_SCHEMA_SHA256:
         "d972806e59195c5e1f5fe810db6e1df80be349b77ecc4cf192ed0f391d9ed739",
     });
     expect(() => validateHostContractsLock(Buffer.concat([bytes, Buffer.from("# drift\n")])))
       .toThrow("digest");
+  });
+
+  it("keeps the v4 schema, proto, five fixtures and Runtime policy invariant at v0.7", () => {
+    expect(lock.contract_version).toBe("0.7.0");
+    expect(lock.contracts.sources.event_schema.sha256).toBe(
+      "d972806e59195c5e1f5fe810db6e1df80be349b77ecc4cf192ed0f391d9ed739",
+    );
+    expect(lock.contracts.sources.protobuf.sha256).toBe(
+      "7130ffad6f7d415bbaaf35a10bc380b2b75ecaaa4762dc871ce0a274472ecdea",
+    );
+    expect(lock.contracts.fixture_tree.git_tree_oid).toBe(
+      "34c1d28d00a5693c408803bdf42ed742bbe1448a",
+    );
+    expect(lock.agent_host.fixture_tree.git_tree_oid).toBe(
+      lock.contracts.fixture_tree.git_tree_oid,
+    );
+    expect(() => validateRuntimeProjectionV4Bytes(runtimeProjectionBytes)).not.toThrow();
+    expect(() => validateRuntimeProjection(structuredClone(runtimeProjection))).not.toThrow();
+
+    const changedRuntimeBytes = Buffer.from(
+      runtimeProjectionBytes.toString("utf8").replace('"transport": "stdio"', '"transport": "STDIO"'),
+    );
+    expect(() => validateRuntimeProjectionV4Bytes(changedRuntimeBytes)).toThrow(
+      "Runtime v4 byte baseline drifted",
+    );
+
+    const missingV4Notification = structuredClone(runtimeProjection);
+    missingV4Notification.host_projection.runtime_notifications =
+      missingV4Notification.host_projection.runtime_notifications.filter(
+        (notification) => notification !== "turn/started",
+      );
+    expect(() => validateRuntimeProjection(missingV4Notification)).toThrow(
+      "Runtime compatibility projection drifted",
+    );
+
+    const widenedSandbox = structuredClone(runtimeProjection);
+    widenedSandbox.host_projection.sandbox = "workspace-write";
+    expect(() => validateRuntimeProjection(widenedSandbox)).toThrow(
+      "Runtime compatibility projection drifted",
+    );
   });
 });
 
@@ -76,6 +125,14 @@ describe("FEAT-134 stable-only launcher boundary", () => {
   it.each([
     ["missing runtime flag", runner.replace("      YIJIE_FEAT134_STREAMING_ENABLED=true\n", "")],
     ["missing compile flag", runner.replace("      VITE_YIJIE_FEAT134_STREAMING_ENABLED=true\n", "")],
+    [
+      "missing FEAT-136 runtime flag",
+      runner.replace("      YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true\n", ""),
+    ],
+    [
+      "missing FEAT-136 compile flag",
+      runner.replace("      VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true\n", ""),
+    ],
     ["production runtime", runner.replace("  YIJIE_ENV=local \\", "  YIJIE_ENV=production \\")],
     [
       "public profile",
@@ -98,6 +155,13 @@ describe("FEAT-134 stable-only launcher boundary", () => {
     const production = structuredClone(packageJson);
     production.scripts["tauri:build"] += ' YIJIE_FEAT134_STREAMING_ENABLED="true"';
     expect(() => validateStableActivation(production, runner, lock.activation)).toThrow(
+      "non-stable package entry",
+    );
+
+    const feat136NonStable = structuredClone(packageJson);
+    feat136NonStable.scripts["tauri:build:demo-fast"] +=
+      " VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true";
+    expect(() => validateStableActivation(feat136NonStable, runner, lock.activation)).toThrow(
       "non-stable package entry",
     );
   });

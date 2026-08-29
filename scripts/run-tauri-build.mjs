@@ -20,6 +20,8 @@ export function releaseBuildEnvironment(environment = process.env) {
   const sanitized = { ...environment };
   delete sanitized.YIJIE_FEAT134_STREAMING_ENABLED;
   delete sanitized.VITE_YIJIE_FEAT134_STREAMING_ENABLED;
+  delete sanitized.YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED;
+  delete sanitized.VITE_YIJIE_FEAT136_EXECUTION_ENABLED;
   return {
     ...sanitized,
     VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED: "true",

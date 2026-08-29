@@ -34,6 +34,8 @@ case "$#" in
     feat134_environment=(
       YIJIE_FEAT134_STREAMING_ENABLED=true
       VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
+      YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
+      VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
     )
     ;;
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
@@ -115,6 +117,8 @@ exec env \
   -u YIJIE_AGENT_HOST_V3_ARTIFACTS_ENABLED \
   -u YIJIE_FEAT134_STREAMING_ENABLED \
   -u VITE_YIJIE_FEAT134_STREAMING_ENABLED \
+  -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED \
+  -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED \
   "${feat134_environment[@]}" \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \
