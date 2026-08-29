@@ -14,9 +14,12 @@ const props = withDefaults(defineProps<{
   label: string;
   statusLabel: string;
   icon: YjIconName;
+  statusIcon?: YjIconName;
+  statusTone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
   collapsible?: boolean;
   defaultExpanded?: boolean;
 }>(), {
+  statusTone: "muted",
   collapsible: false,
   defaultExpanded: true,
 });
@@ -77,7 +80,15 @@ function toggle(): void {
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">{{ statusLabel }}</span>
+        <span :id="statusId" class="chat-timeline-item-shell__status">
+          <YjIcon
+            v-if="statusIcon"
+            :name="statusIcon"
+            size="xs"
+            :tone="statusTone"
+          />
+          <span>{{ statusLabel }}</span>
+        </span>
         <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
       </button>
 
@@ -86,7 +97,15 @@ function toggle(): void {
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">{{ statusLabel }}</span>
+        <span :id="statusId" class="chat-timeline-item-shell__status">
+          <YjIcon
+            v-if="statusIcon"
+            :name="statusIcon"
+            size="xs"
+            :tone="statusTone"
+          />
+          <span>{{ statusLabel }}</span>
+        </span>
       </div>
 
       <div
@@ -194,10 +213,17 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell__status {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--yj-space-1);
   color: var(--yj-color-text-tertiary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
+}
+
+.chat-timeline-item-shell__status span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

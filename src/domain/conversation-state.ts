@@ -1,13 +1,16 @@
-export const CONVERSATION_STATE_SCHEMA_VERSION = 2 as const;
+export const CONVERSATION_STATE_SCHEMA_VERSION = 3 as const;
 export const MAX_CONVERSATION_EVENT_IDS = 256;
 export const MAX_CONVERSATION_NOTICES = 64;
 export const MAX_CONVERSATION_DIAGNOSTICS = 64;
+export const MAX_CONVERSATION_COMMAND_OUTPUT_BYTES = 256 * 1024;
+export const MAX_CONVERSATION_TOOL_PROGRESS = 32;
+export const MAX_CONVERSATION_TOOL_PROGRESS_BYTES = 64 * 1024;
 
 export const CONVERSATION_ITEM_KINDS = Object.freeze([
   "user_message",
   "assistant_message",
   "reasoning",
-  // Reserved for later projections; FEAT-132 adapters normalize them to unknown.
+  // FEAT-136 projects command/tool directly; remaining unsupported kinds still fail soft.
   "command",
   "tool",
   "approval",
@@ -48,6 +51,88 @@ export type ConversationReasoningReasonCode =
   | "protocol_error"
   | "host_shutdown"
   | "unknown";
+
+export type ConversationTruncationReason = "utf8_byte_limit" | "upstream_truncated";
+
+export interface ConversationSafeText {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly truncationReason: ConversationTruncationReason | null;
+}
+
+export interface ConversationSourceFact {
+  readonly sourceEventId: string;
+  readonly sourceSequence: string;
+  readonly sourceOccurredAt: string;
+}
+
+export interface ConversationCommandCwd {
+  readonly kind: "workspace_root" | "workspace_relative" | "redacted";
+  readonly segments: readonly string[];
+}
+
+export interface ConversationExecutionError {
+  readonly code:
+    | "command_failed"
+    | "command_declined"
+    | "tool_failed"
+    | "tool_declined"
+    | "unknown_tool"
+    | "projection_limit_exceeded"
+    | "projection_redaction_failed"
+    | "protocol_error";
+  readonly summary: string;
+}
+
+export interface ConversationCommandOutput {
+  readonly retention: "complete" | "head_tail" | "unavailable";
+  readonly text: string | null;
+  readonly head: string | null;
+  readonly tail: string | null;
+  readonly reason: "not_available" | null;
+  readonly truncated: boolean;
+  readonly truncationReason: ConversationTruncationReason | null;
+}
+
+export interface ConversationCommandExecution {
+  readonly kind: "command";
+  readonly status: "running" | "completed" | "failed" | "declined" | "incomplete";
+  readonly startedSource: ConversationSourceFact;
+  readonly lastSource: ConversationSourceFact;
+  readonly commandSummary: ConversationSafeText;
+  readonly cwd: ConversationCommandCwd;
+  readonly liveOutput: ConversationSafeText | null;
+  readonly output: ConversationCommandOutput | null;
+  readonly durationMs: number | null;
+  readonly exitCode: number | null;
+  readonly error: ConversationExecutionError | null;
+}
+
+export interface ConversationToolIdentity {
+  readonly resolution: "known" | "unknown";
+  readonly serverName: string;
+  readonly toolName: string;
+}
+
+export interface ConversationToolProgress extends ConversationSourceFact {
+  readonly progressIndex: number;
+  readonly summary: ConversationSafeText;
+}
+
+export interface ConversationToolExecution {
+  readonly kind: "tool";
+  readonly status: "in_progress" | "completed" | "failed" | "declined" | "incomplete";
+  readonly startedSource: ConversationSourceFact;
+  readonly lastSource: ConversationSourceFact;
+  readonly identity: ConversationToolIdentity;
+  readonly argumentsSummary: ConversationSafeText;
+  readonly progress: readonly ConversationToolProgress[];
+  readonly durationMs: number | null;
+  readonly resultSummary: ConversationSafeText | null;
+  readonly error: ConversationExecutionError | null;
+}
+
+export type ConversationExecution = ConversationCommandExecution | ConversationToolExecution;
 
 export interface ConversationPlanStep {
   readonly ordinal: number;
@@ -143,12 +228,17 @@ export interface ConversationItem {
   readonly status: ConversationItemStatus;
   readonly agentMessagePhase: ConversationAgentMessagePhase | null;
   readonly reasoning: ConversationReasoningState | null;
+  readonly execution: ConversationExecution | null;
   readonly contentBlocks: readonly ConversationContentBlock[];
   readonly reconciliation: ReconciliationStatus;
 }
 
 export interface ConversationRecovery {
-  readonly code: "sequence_gap" | "invalid_transition" | "reconciliation_mismatch";
+  readonly code:
+    | "sequence_gap"
+    | "event_id_conflict"
+    | "invalid_transition"
+    | "reconciliation_mismatch";
   readonly streamId: string;
   readonly expectedSequence: string | null;
   readonly receivedSequence: string;
@@ -166,6 +256,7 @@ export interface ConversationState {
   readonly items: Readonly<Record<string, ConversationItem>>;
   readonly streamPositions: Readonly<Record<string, string>>;
   readonly processedEventIds: Readonly<Record<string, true>>;
+  readonly processedEventFingerprints: Readonly<Record<string, string>>;
   readonly recovery: ConversationRecovery | null;
   readonly diagnostics: readonly ConversationDiagnostic[];
 }
@@ -196,11 +287,13 @@ export interface ConversationItemSnapshot {
   readonly status: ConversationItemStatus;
   readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
   readonly reasoning?: ConversationReasoningState | null;
+  readonly execution?: ConversationExecution | null;
   readonly contentBlocks: readonly ConversationContentBlock[];
   readonly reconciliation?: ReconciliationStatus;
 }
 
 export interface ConversationSnapshot {
+  readonly schemaVersion?: 2 | typeof CONVERSATION_STATE_SCHEMA_VERSION;
   readonly threads: readonly ConversationThreadSnapshot[];
   readonly turns: readonly ConversationTurnSnapshot[];
   readonly items: readonly ConversationItemSnapshot[];
@@ -253,6 +346,53 @@ export type ConversationEvent =
       readonly agentMessagePhase?: ConversationAgentMessagePhase | null;
       readonly finalBlocks?: readonly ConversationContentBlock[];
     })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "command.started";
+      readonly ordinal: number;
+      readonly commandSummary: ConversationSafeText;
+      readonly cwd: ConversationCommandCwd;
+    })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "command.output.delta";
+      readonly ordinal: number;
+      readonly text: string;
+      readonly truncated: boolean;
+      readonly truncationReason: ConversationTruncationReason | null;
+    })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "command.completed";
+      readonly ordinal: number;
+      readonly status: "completed" | "failed" | "declined";
+      readonly commandSummary: ConversationSafeText;
+      readonly cwd: ConversationCommandCwd;
+      readonly durationMs: number | null;
+      readonly exitCode: number | null;
+      readonly output: ConversationCommandOutput;
+      readonly error: ConversationExecutionError | null;
+    })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "tool.started";
+      readonly ordinal: number;
+      readonly identity: ConversationToolIdentity;
+      readonly argumentsSummary: ConversationSafeText;
+    })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "tool.progress";
+      readonly ordinal: number;
+      readonly identity: ConversationToolIdentity;
+      readonly progressIndex: number;
+      readonly summary: ConversationSafeText;
+    })
+  | (ItemEventCursor & ConversationSourceFact & {
+      readonly kind: "tool.completed";
+      readonly ordinal: number;
+      readonly status: "completed" | "failed" | "declined";
+      readonly identity: ConversationToolIdentity;
+      readonly argumentsSummary: ConversationSafeText;
+      readonly durationMs: number | null;
+      readonly resultSummary: ConversationSafeText | null;
+      readonly error: ConversationExecutionError | null;
+    })
   | (ItemEventCursor & {
       readonly kind: "reasoning.finalized";
       readonly ordinal: number;
@@ -287,6 +427,8 @@ const PROJECTED_ITEM_KIND_SET: ReadonlySet<string> = new Set([
   "user_message",
   "assistant_message",
   "reasoning",
+  "command",
+  "tool",
   "artifact",
   "unknown",
 ]);
@@ -333,6 +475,7 @@ export function createConversationState(): ConversationState {
     items: {},
     streamPositions: {},
     processedEventIds: {},
+    processedEventFingerprints: {},
     recovery: null,
     diagnostics: [],
   };
@@ -370,6 +513,42 @@ function rememberEventId(
   const retained = [...Object.keys(processed), eventId]
     .slice(-MAX_CONVERSATION_EVENT_IDS);
   return Object.freeze(Object.fromEntries(retained.map((id) => [id, true as const])));
+}
+
+function canonicalEventValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalEventValue);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, canonicalEventValue(entry)]));
+}
+
+function eventFingerprint(event: ConversationEvent): string {
+  const semantic = Object.fromEntries(Object.entries(event).filter(([key]) =>
+    key !== "eventId" && key !== "streamId" && key !== "sequence"
+  ));
+  const bytes = new TextEncoder().encode(JSON.stringify(canonicalEventValue(semantic)));
+  const mask = (1n << 64n) - 1n;
+  let first = 0xcbf29ce484222325n;
+  let second = 0x84222325cbf29ce4n;
+  for (const byte of bytes) {
+    first = ((first ^ BigInt(byte)) * 0x100000001b3n) & mask;
+    second = ((second ^ BigInt(byte + 1)) * 0x100000001b3n) & mask;
+  }
+  return `${bytes.length}:${first.toString(16).padStart(16, "0")}:${second.toString(16).padStart(16, "0")}`;
+}
+
+function rememberEventFingerprint(
+  fingerprints: Readonly<Record<string, string>>,
+  retainedIds: Readonly<Record<string, true>>,
+  eventId: string,
+  fingerprint: string,
+): Readonly<Record<string, string>> {
+  const retained = new Set(Object.keys(retainedIds));
+  return Object.freeze(Object.fromEntries([
+    ...Object.entries(fingerprints).filter(([id]) => retained.has(id)),
+    [eventId, fingerprint],
+  ].filter(([id]) => retained.has(id))));
 }
 
 function appendBounded<T>(values: readonly T[], value: T, limit: number): readonly T[] {
@@ -461,6 +640,175 @@ function sanitizeReasoning(
     : "unknown";
   const reasonCode = conversationReasoningReasonCode(reasoning.reasonCode);
   return Object.freeze({ status, reasonCode });
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+  const encoded = new TextEncoder().encode(value);
+  if (encoded.length <= maximumBytes) return value;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let end = maximumBytes; end >= Math.max(0, maximumBytes - 4); end -= 1) {
+    try {
+      return decoder.decode(encoded.slice(0, end));
+    } catch {
+      // A UTF-8 scalar spans at most four bytes; move to the preceding boundary.
+    }
+  }
+  return "";
+}
+
+function sanitizeSafeText(
+  value: ConversationSafeText,
+  maximumBytes: number,
+): ConversationSafeText {
+  const text = String(value.text);
+  const locallyTruncated = utf8Bytes(text) > maximumBytes;
+  const truncated = Boolean(value.truncated) || locallyTruncated;
+  const sourceReason = value.truncationReason === "upstream_truncated" ||
+      value.truncationReason === "utf8_byte_limit"
+    ? value.truncationReason
+    : null;
+  return Object.freeze({
+    text: locallyTruncated ? truncateUtf8(text, maximumBytes) : text,
+    truncated,
+    truncationReason: truncated
+      ? locallyTruncated ? "utf8_byte_limit" : sourceReason ?? "upstream_truncated"
+      : null,
+  });
+}
+
+function sanitizeSourceFact(value: ConversationSourceFact): ConversationSourceFact {
+  return Object.freeze({
+    sourceEventId: String(value.sourceEventId),
+    sourceSequence: canonicalSequence(String(value.sourceSequence)),
+    sourceOccurredAt: String(value.sourceOccurredAt),
+  });
+}
+
+function sanitizeCommandCwd(value: ConversationCommandCwd): ConversationCommandCwd {
+  const kind = value.kind === "workspace_root" || value.kind === "workspace_relative"
+    ? value.kind
+    : "redacted";
+  const segments = kind === "workspace_relative"
+    ? value.segments.slice(0, 128).map(String)
+    : [];
+  return Object.freeze({ kind, segments: Object.freeze(segments) });
+}
+
+function sanitizeExecutionError(
+  value: ConversationExecutionError | null,
+): ConversationExecutionError | null {
+  if (value === null) return null;
+  return Object.freeze({
+    code: value.code,
+    summary: truncateUtf8(String(value.summary), 4 * 1024),
+  });
+}
+
+function sanitizeCommandOutput(value: ConversationCommandOutput): ConversationCommandOutput {
+  if (value.retention === "complete") {
+    return Object.freeze({
+      retention: "complete",
+      text: truncateUtf8(String(value.text ?? ""), MAX_CONVERSATION_COMMAND_OUTPUT_BYTES),
+      head: null,
+      tail: null,
+      reason: null,
+      truncated: false,
+      truncationReason: null,
+    });
+  }
+  if (value.retention === "head_tail") {
+    return Object.freeze({
+      retention: "head_tail",
+      text: null,
+      head: truncateUtf8(String(value.head ?? ""), MAX_CONVERSATION_COMMAND_OUTPUT_BYTES / 2),
+      tail: truncateUtf8(String(value.tail ?? ""), MAX_CONVERSATION_COMMAND_OUTPUT_BYTES / 2),
+      reason: null,
+      truncated: true,
+      truncationReason: value.truncationReason === "upstream_truncated"
+        ? "upstream_truncated"
+        : "utf8_byte_limit",
+    });
+  }
+  return Object.freeze({
+    retention: "unavailable",
+    text: null,
+    head: null,
+    tail: null,
+    reason: "not_available",
+    truncated: false,
+    truncationReason: null,
+  });
+}
+
+function sanitizeToolIdentity(value: ConversationToolIdentity): ConversationToolIdentity {
+  if (value.resolution === "unknown") {
+    return Object.freeze({ resolution: "unknown", serverName: "unknown", toolName: "unknown" });
+  }
+  return Object.freeze({
+    resolution: "known",
+    serverName: truncateUtf8(String(value.serverName), 256),
+    toolName: truncateUtf8(String(value.toolName), 256),
+  });
+}
+
+function sanitizeExecution(
+  kind: ConversationItemKind,
+  execution: ConversationExecution | null | undefined,
+): ConversationExecution | null {
+  if (kind === "command" && execution?.kind === "command") {
+    return Object.freeze({
+      kind: "command",
+      status: execution.status,
+      startedSource: sanitizeSourceFact(execution.startedSource),
+      lastSource: sanitizeSourceFact(execution.lastSource),
+      commandSummary: sanitizeSafeText(execution.commandSummary, 4 * 1024),
+      cwd: sanitizeCommandCwd(execution.cwd),
+      liveOutput: execution.liveOutput === null
+        ? null
+        : sanitizeSafeText(execution.liveOutput, MAX_CONVERSATION_COMMAND_OUTPUT_BYTES),
+      output: execution.output === null ? null : sanitizeCommandOutput(execution.output),
+      durationMs: execution.durationMs === null ? null : integer(execution.durationMs),
+      exitCode: execution.exitCode === null ? null : Math.max(
+        -2_147_483_648,
+        Math.min(2_147_483_647, Math.trunc(execution.exitCode)),
+      ),
+      error: sanitizeExecutionError(execution.error),
+    });
+  }
+  if (kind === "tool" && execution?.kind === "tool") {
+    let progressBytes = 0;
+    const progress: ConversationToolProgress[] = [];
+    for (const entry of execution.progress.slice(0, MAX_CONVERSATION_TOOL_PROGRESS)) {
+      const remaining = MAX_CONVERSATION_TOOL_PROGRESS_BYTES - progressBytes;
+      if (remaining <= 0) break;
+      const summary = sanitizeSafeText(entry.summary, Math.min(4 * 1024, remaining));
+      progressBytes += utf8Bytes(summary.text);
+      progress.push(Object.freeze({
+        ...sanitizeSourceFact(entry),
+        progressIndex: integer(entry.progressIndex),
+        summary,
+      }));
+    }
+    return Object.freeze({
+      kind: "tool",
+      status: execution.status,
+      startedSource: sanitizeSourceFact(execution.startedSource),
+      lastSource: sanitizeSourceFact(execution.lastSource),
+      identity: sanitizeToolIdentity(execution.identity),
+      argumentsSummary: sanitizeSafeText(execution.argumentsSummary, 8 * 1024),
+      progress: Object.freeze(progress),
+      durationMs: execution.durationMs === null ? null : integer(execution.durationMs),
+      resultSummary: execution.resultSummary === null
+        ? null
+        : sanitizeSafeText(execution.resultSummary, 64 * 1024),
+      error: sanitizeExecutionError(execution.error),
+    });
+  }
+  return null;
 }
 
 function sanitizeTerminalCode(code: string | null | undefined): string | null {
@@ -593,6 +941,7 @@ function ensureItem(
     reasoning: kind === "reasoning"
       ? Object.freeze({ status: "in_progress", reasonCode: null })
       : null,
+    execution: null,
     contentBlocks: kind === "unknown"
       ? [{ blockIndex: 0, type: "unknown", code: "unsupported_content" }]
       : [],
@@ -643,9 +992,13 @@ function completeTurnItems(
       unfinishedReasoningReasonCode !== null;
     if (!sealsItem && !sealsReasoningPrefix) continue;
     if (nextItems === null) nextItems = { ...state.items };
+    const sealsExecution = sealsItem && (
+      (item.execution?.kind === "command" && item.execution.status === "running") ||
+      (item.execution?.kind === "tool" && item.execution.status === "in_progress")
+    );
     nextItems[key] = {
       ...item,
-      status: sealsItem ? unfinishedItemStatus : item.status,
+      status: sealsExecution ? "incomplete" : sealsItem ? unfinishedItemStatus : item.status,
       reasoning: item.kind === "reasoning" &&
         (item.reasoning?.status === "in_progress" || item.reasoning?.status === "unknown")
         ? sealsReasoningPrefix
@@ -657,6 +1010,9 @@ function completeTurnItems(
             ? Object.freeze({ status: "unknown" as const, reasonCode: null })
             : item.reasoning
         : item.reasoning,
+      execution: sealsExecution && item.execution !== null
+        ? Object.freeze({ ...item.execution, status: "incomplete" as const })
+        : item.execution,
       reconciliation: sealsReasoningPrefix ? "matched" : item.reconciliation,
     };
   }
@@ -794,6 +1150,9 @@ function applyDelta(
     return markRecovery(state, event, "invalid_transition");
   }
   const sanitizedKind = sanitizeKind(event.itemKind);
+  if (sanitizedKind === "command" || sanitizedKind === "tool") {
+    return markRecovery(state, event, "invalid_transition");
+  }
   const sanitizedPhase = sanitizeAgentMessagePhase(
     sanitizedKind,
     event.agentMessagePhase,
@@ -856,6 +1215,43 @@ function applyDelta(
   return activateTurn(next, event.threadId, event.turnId, event);
 }
 
+function executionSource(
+  event: ConversationSourceFact,
+): ConversationSourceFact {
+  return sanitizeSourceFact(event);
+}
+
+function sameToolIdentity(
+  left: ConversationToolIdentity,
+  right: ConversationToolIdentity,
+): boolean {
+  return left.resolution === right.resolution && left.serverName === right.serverName &&
+    left.toolName === right.toolName;
+}
+
+function commandOutcomeConsistent(
+  status: "completed" | "failed" | "declined",
+  error: ConversationExecutionError | null,
+): boolean {
+  return status === "completed"
+    ? error === null
+    : status === "declined"
+      ? error?.code === "command_declined"
+      : error !== null && error.code !== "command_declined";
+}
+
+function toolOutcomeConsistent(
+  status: "completed" | "failed" | "declined",
+  resultSummary: ConversationSafeText | null,
+  error: ConversationExecutionError | null,
+): boolean {
+  return status === "completed"
+    ? resultSummary !== null && error === null
+    : status === "declined"
+      ? resultSummary === null && error?.code === "tool_declined"
+      : error !== null && error.code !== "tool_declined";
+}
+
 function applyDomainEvent(state: ConversationState, event: ConversationEvent): ConversationState {
   if ("turnId" in event && event.kind !== "unknown") {
     const existingTurn = selectConversationTurn(state, event.threadId, event.turnId);
@@ -901,6 +1297,9 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
         return markRecovery(state, event, "invalid_transition");
       }
       const kind = sanitizeKind(event.itemKind);
+      if (kind === "command" || kind === "tool") {
+        return markRecovery(state, event, "invalid_transition");
+      }
       const agentMessagePhase = sanitizeAgentMessagePhase(kind, event.agentMessagePhase);
       const existing = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
       if (existing !== null &&
@@ -956,6 +1355,9 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
       const projectedKind = event.itemKind === undefined
         ? item.kind
         : sanitizeKind(event.itemKind);
+      if (projectedKind === "command" || projectedKind === "tool") {
+        return markRecovery(state, event, "invalid_transition");
+      }
       const projectedOrdinal = event.ordinal === undefined
         ? item.ordinal
         : integer(event.ordinal);
@@ -989,6 +1391,254 @@ function applyDomainEvent(state: ConversationState, event: ConversationEvent): C
       return reconciled.status === "mismatch"
         ? markRecovery(next, event, "reconciliation_mismatch")
         : activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "command.started": {
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId) ||
+          selectConversationItem(state, event.threadId, event.turnId, event.itemId) !== null) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      let next = ensureItem(state, event, "command", event.ordinal);
+      const item = selectConversationItem(next, event.threadId, event.turnId, event.itemId)!;
+      next = replaceItem(next, {
+        ...item,
+        status: "started",
+        execution: Object.freeze({
+          kind: "command",
+          status: "running",
+          startedSource: executionSource(event),
+          lastSource: executionSource(event),
+          commandSummary: sanitizeSafeText(event.commandSummary, 4 * 1024),
+          cwd: sanitizeCommandCwd(event.cwd),
+          liveOutput: null,
+          output: null,
+          durationMs: null,
+          exitCode: null,
+          error: null,
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "command.output.delta": {
+      const item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      if (item?.kind !== "command" || item.ordinal !== integer(event.ordinal) ||
+          item.execution?.kind !== "command" || item.execution.status !== "running" ||
+          item.status === "completed" || item.status === "incomplete") {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const previous = item.execution.liveOutput;
+      const combined = `${previous?.text ?? ""}${event.text}`;
+      const locallyTruncated = utf8Bytes(combined) > MAX_CONVERSATION_COMMAND_OUTPUT_BYTES;
+      const truncated = previous?.truncated === true || event.truncated || locallyTruncated;
+      const truncationReason = locallyTruncated
+        ? "utf8_byte_limit" as const
+        : event.truncationReason ?? previous?.truncationReason ?? null;
+      if (truncated !== (truncationReason !== null)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const liveOutput = Object.freeze({
+        text: locallyTruncated
+          ? truncateUtf8(combined, MAX_CONVERSATION_COMMAND_OUTPUT_BYTES)
+          : combined,
+        truncated,
+        truncationReason,
+      });
+      const next = replaceItem(state, {
+        ...item,
+        status: "streaming",
+        execution: Object.freeze({
+          ...item.execution,
+          lastSource: executionSource(event),
+          liveOutput,
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "command.completed": {
+      const item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      const source = executionSource(event);
+      const commandSummary = sanitizeSafeText(event.commandSummary, 4 * 1024);
+      const cwd = sanitizeCommandCwd(event.cwd);
+      const output = sanitizeCommandOutput(event.output);
+      const durationMs = event.durationMs === null ? null : integer(event.durationMs);
+      const exitCode = event.exitCode === null
+        ? null
+        : Math.max(-2_147_483_648, Math.min(2_147_483_647, Math.trunc(event.exitCode)));
+      const error = sanitizeExecutionError(event.error);
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId) ||
+          !commandOutcomeConsistent(event.status, error)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      if (item === null) {
+        let next = ensureItem(state, event, "command", event.ordinal);
+        const created = selectConversationItem(
+          next,
+          event.threadId,
+          event.turnId,
+          event.itemId,
+        )!;
+        next = replaceItem(next, {
+          ...created,
+          status: "completed",
+          reconciliation: "matched",
+          execution: Object.freeze({
+            kind: "command",
+            status: event.status,
+            startedSource: source,
+            lastSource: source,
+            commandSummary,
+            cwd,
+            liveOutput: null,
+            output,
+            durationMs,
+            exitCode,
+            error,
+          }),
+        });
+        return activateTurn(next, event.threadId, event.turnId, event);
+      }
+      if (item.kind !== "command" || item.ordinal !== integer(event.ordinal) ||
+          item.execution?.kind !== "command" || item.execution.status !== "running") {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const next = replaceItem(state, {
+        ...item,
+        status: "completed",
+        reconciliation: "matched",
+        execution: Object.freeze({
+          ...item.execution,
+          status: event.status,
+          lastSource: source,
+          commandSummary,
+          cwd,
+          output,
+          durationMs,
+          exitCode,
+          error,
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "tool.started": {
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId) ||
+          selectConversationItem(state, event.threadId, event.turnId, event.itemId) !== null) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      let next = ensureItem(state, event, "tool", event.ordinal);
+      const item = selectConversationItem(next, event.threadId, event.turnId, event.itemId)!;
+      next = replaceItem(next, {
+        ...item,
+        status: "started",
+        execution: Object.freeze({
+          kind: "tool",
+          status: "in_progress",
+          startedSource: executionSource(event),
+          lastSource: executionSource(event),
+          identity: sanitizeToolIdentity(event.identity),
+          argumentsSummary: sanitizeSafeText(event.argumentsSummary, 8 * 1024),
+          progress: Object.freeze([]),
+          durationMs: null,
+          resultSummary: null,
+          error: null,
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "tool.progress": {
+      const item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      const identity = sanitizeToolIdentity(event.identity);
+      if (item?.kind !== "tool" || item.ordinal !== integer(event.ordinal) ||
+          item.execution?.kind !== "tool" || item.execution.status !== "in_progress" ||
+          item.status === "completed" || item.status === "incomplete" ||
+          !sameToolIdentity(item.execution.identity, identity) ||
+          event.progressIndex !== item.execution.progress.length ||
+          item.execution.progress.length >= MAX_CONVERSATION_TOOL_PROGRESS) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const summary = sanitizeSafeText(event.summary, 4 * 1024);
+      const totalBytes = item.execution.progress.reduce(
+        (total, progress) => total + utf8Bytes(progress.summary.text),
+        0,
+      ) + utf8Bytes(summary.text);
+      if (totalBytes > MAX_CONVERSATION_TOOL_PROGRESS_BYTES) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const progress = Object.freeze({
+        ...executionSource(event),
+        progressIndex: integer(event.progressIndex),
+        summary,
+      });
+      const next = replaceItem(state, {
+        ...item,
+        status: "streaming",
+        execution: Object.freeze({
+          ...item.execution,
+          lastSource: executionSource(event),
+          progress: Object.freeze([...item.execution.progress, progress]),
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
+    }
+    case "tool.completed": {
+      const item = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
+      const source = executionSource(event);
+      const identity = sanitizeToolIdentity(event.identity);
+      const argumentsSummary = sanitizeSafeText(event.argumentsSummary, 8 * 1024);
+      const durationMs = event.durationMs === null ? null : integer(event.durationMs);
+      const resultSummary = event.resultSummary === null
+        ? null
+        : sanitizeSafeText(event.resultSummary, 64 * 1024);
+      const error = sanitizeExecutionError(event.error);
+      if (hasActiveTurnConflict(state, event.threadId, event.turnId) ||
+          !toolOutcomeConsistent(event.status, resultSummary, error)) {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      if (item === null) {
+        let next = ensureItem(state, event, "tool", event.ordinal);
+        const created = selectConversationItem(
+          next,
+          event.threadId,
+          event.turnId,
+          event.itemId,
+        )!;
+        next = replaceItem(next, {
+          ...created,
+          status: "completed",
+          reconciliation: "matched",
+          execution: Object.freeze({
+            kind: "tool",
+            status: event.status,
+            startedSource: source,
+            lastSource: source,
+            identity,
+            argumentsSummary,
+            progress: Object.freeze([]),
+            durationMs,
+            resultSummary,
+            error,
+          }),
+        });
+        return activateTurn(next, event.threadId, event.turnId, event);
+      }
+      if (item.kind !== "tool" || item.ordinal !== integer(event.ordinal) ||
+          item.execution?.kind !== "tool" || item.execution.status !== "in_progress") {
+        return markRecovery(state, event, "invalid_transition");
+      }
+      const next = replaceItem(state, {
+        ...item,
+        status: "completed",
+        reconciliation: "matched",
+        execution: Object.freeze({
+          ...item.execution,
+          status: event.status,
+          lastSource: source,
+          identity,
+          argumentsSummary,
+          durationMs,
+          resultSummary,
+          error,
+        }),
+      });
+      return activateTurn(next, event.threadId, event.turnId, event);
     }
     case "reasoning.finalized": {
       const existing = selectConversationItem(state, event.threadId, event.turnId, event.itemId);
@@ -1135,7 +1785,12 @@ export function reduceConversationEvent(
   state: ConversationState,
   event: ConversationEvent,
 ): ConversationState {
-  if (state.processedEventIds[event.eventId]) return state;
+  const fingerprint = eventFingerprint(event);
+  if (state.processedEventIds[event.eventId]) {
+    return state.processedEventFingerprints[event.eventId] === fingerprint
+      ? state
+      : markRecovery(state, event, "event_id_conflict");
+  }
   if (state.recovery !== null) return state;
 
   const received = canonicalSequence(event.sequence);
@@ -1144,10 +1799,17 @@ export function reduceConversationEvent(
     return markRecovery(state, event, "sequence_gap", expected);
   }
 
+  const processedEventIds = rememberEventId(state.processedEventIds, event.eventId);
   const tracked: ConversationState = {
     ...state,
     streamPositions: { ...state.streamPositions, [event.streamId]: received },
-    processedEventIds: rememberEventId(state.processedEventIds, event.eventId),
+    processedEventIds,
+    processedEventFingerprints: rememberEventFingerprint(
+      state.processedEventFingerprints,
+      processedEventIds,
+      event.eventId,
+      fingerprint,
+    ),
   };
   return applyDomainEvent(tracked, event);
 }
@@ -1160,6 +1822,19 @@ export function reduceConversationEvents(
 }
 
 export function hydrateConversationState(snapshot: ConversationSnapshot): ConversationState {
+  if (snapshot.schemaVersion !== undefined && snapshot.schemaVersion !== 2 &&
+      snapshot.schemaVersion !== CONVERSATION_STATE_SCHEMA_VERSION) {
+    return {
+      ...createConversationState(),
+      syncStatus: "recovery_required",
+      recovery: {
+        code: "invalid_transition",
+        streamId: "snapshot",
+        expectedSequence: null,
+        receivedSequence: "0",
+      },
+    };
+  }
   let state = createConversationState();
   const orderedThreads = [...snapshot.threads]
     .sort((left, right) => left.threadId.localeCompare(right.threadId));
@@ -1196,11 +1871,25 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
         .map(sanitizeNotice)),
     });
   }
+  const invalidExecutionTurnKeys = new Set<string>();
   for (const input of [...snapshot.items].sort((left, right) =>
     left.ordinal - right.ordinal || left.itemId.localeCompare(right.itemId))) {
     state = ensureItem(state, input, input.kind, input.ordinal);
     const current = selectConversationItem(state, input.threadId, input.turnId, input.itemId)!;
     const kind = sanitizeKind(input.kind);
+    const execution = sanitizeExecution(kind, input.execution);
+    const executionLifecycleValid = kind === "command" || kind === "tool"
+      ? execution !== null && (
+          execution.status === "running" || execution.status === "in_progress"
+            ? input.status === "started" || input.status === "streaming"
+            : execution.status === "incomplete"
+              ? input.status === "incomplete"
+              : input.status === "completed"
+        )
+      : input.execution === undefined || input.execution === null;
+    if (!executionLifecycleValid) {
+      invalidExecutionTurnKeys.add(turnKey(input.threadId, input.turnId));
+    }
     state = replaceItem(state, {
       ...current,
       ordinal: integer(input.ordinal),
@@ -1208,8 +1897,11 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
       status: input.status,
       agentMessagePhase: sanitizeAgentMessagePhase(kind, input.agentMessagePhase),
       reasoning: sanitizeReasoning(kind, input.reasoning),
+      execution,
       contentBlocks: kind === "unknown"
         ? [{ blockIndex: 0, type: "unknown", code: "unsupported_content" }]
+        : kind === "command" || kind === "tool"
+          ? []
         : sanitizeBlocks(input.contentBlocks),
       reconciliation: input.reconciliation ?? "not_applicable",
     });
@@ -1240,14 +1932,17 @@ export function hydrateConversationState(snapshot: ConversationSnapshot): Conver
   }
 
   const hydrated = { ...state, streamPositions };
-  const invalidSnapshotKeys = new Set(orderedTurns
+  const invalidSnapshotKeys = new Set([
+    ...orderedTurns
     .filter((turn) => {
       const terminal = turn.status === "completed" ||
         turn.status === "interrupted" || turn.status === "failed";
       return turn.status === "recovery_required" ||
         (terminal ? turn.terminalStatus !== turn.status : turn.terminalStatus !== null);
     })
-    .map((turn) => turnKey(turn.threadId, turn.turnId)));
+    .map((turn) => turnKey(turn.threadId, turn.turnId)),
+    ...invalidExecutionTurnKeys,
+  ]);
   const activeTurnsByThread = new Map<string, ConversationTurn[]>();
   for (const turn of Object.values(hydrated.turns)) {
     if (!isActiveTurn(turn)) continue;
@@ -1304,6 +1999,21 @@ function markSnapshotRecovery(
 
 function hasOwn(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function executionSealed(execution: ConversationExecution): boolean {
+  return execution.status !== "running" && execution.status !== "in_progress";
+}
+
+function sameExecution(left: ConversationExecution, right: ConversationExecution): boolean {
+  return JSON.stringify(canonicalEventValue(left)) === JSON.stringify(canonicalEventValue(right));
+}
+
+function sameExecutionIdentity(left: ConversationExecution, right: ConversationExecution): boolean {
+  // The item key, kind, and ordinal are the stable execution identity. A sealed
+  // history snapshot is authoritative for every safe Command/Tool projection
+  // field, including summaries, cwd, and Tool resolution.
+  return left.kind === right.kind;
 }
 
 export function reconcileConversationSnapshot(
@@ -1447,6 +2157,40 @@ export function reconcileConversationSnapshot(
       next = ensureItem(next, liveItem, liveItem.kind, liveItem.ordinal);
       next = replaceItem(next, { ...liveItem, reconciliation: "mismatch" });
       next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+      continue;
+    }
+
+    if (liveItem.kind === "command" || liveItem.kind === "tool") {
+      if (itemInput !== undefined && !hasOwn(itemInput, "execution")) {
+        next = replaceItem(next, liveItem);
+        continue;
+      }
+      const liveExecution = liveItem.execution;
+      const authoritativeExecution = authoritativeItem.execution;
+      if (liveExecution === null || authoritativeExecution === null ||
+          liveExecution.kind !== authoritativeExecution.kind ||
+          !sameExecutionIdentity(liveExecution, authoritativeExecution)) {
+        next = replaceItem(next, { ...liveItem, reconciliation: "mismatch" });
+        next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+        continue;
+      }
+      const liveSealed = executionSealed(liveExecution);
+      const authoritativeSealed = executionSealed(authoritativeExecution);
+      if (liveSealed && !authoritativeSealed) {
+        next = replaceItem(next, liveItem);
+        continue;
+      }
+      if (authoritativeSealed) {
+        next = replaceItem(next, {
+          ...authoritativeItem,
+          reconciliation: "matched",
+        });
+        if (liveSealed && !sameExecution(liveExecution, authoritativeExecution)) {
+          next = markSnapshotRecovery(next, liveItem.threadId, liveItem.turnId);
+        }
+        continue;
+      }
+      next = replaceItem(next, liveItem);
       continue;
     }
 
@@ -1653,6 +2397,7 @@ function canonicalItem(item: ConversationItem) {
     status: item.status,
     agentMessagePhase: item.agentMessagePhase,
     reasoning: item.reasoning,
+    execution: item.execution,
     reconciliation: item.reconciliation,
     contentBlocks: [...item.contentBlocks].sort((left, right) => left.blockIndex - right.blockIndex),
   };
@@ -1690,6 +2435,8 @@ export function serializeConversationState(state: ConversationState): string {
     recovery: state.recovery,
     streamPositions,
     processedEventIds: Object.keys(state.processedEventIds).sort(),
+    processedEventFingerprints: Object.entries(state.processedEventFingerprints)
+      .sort(([left], [right]) => left.localeCompare(right)),
     diagnostics: [...state.diagnostics].sort((left, right) => left.code.localeCompare(right.code)),
     threads,
     turns,

@@ -11,6 +11,7 @@ mod error;
 #[cfg(test)]
 mod feat126_eval_tests;
 mod feat134;
+mod feat136;
 mod host_bridge;
 mod host_domain;
 pub(crate) mod ipc;
@@ -61,6 +62,12 @@ pub use feat134::{
     TimelineDelta, TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope,
     TimelineNoticeSeverity, TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart,
     TimelineReasoningStatus, TimelineTerminal, FEAT134_FLAG,
+};
+pub use feat136::{
+    CommandCwdProjection, CommandOutputProjection, CommandProjection, CommandStatus,
+    ExecutionProjection, Feat136TurnReducer, ProjectionError, ProjectionErrorCode,
+    SafeTextProjection, ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus,
+    TruncationReason, FEAT136_FLAG,
 };
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
 pub(crate) use host_bridge::{HostManagedSkill, HostSkillSnapshot};
@@ -139,7 +146,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "164b14f609537d727a52326832da04430aecc4ab";
+const CONTRACT_COMMIT: &str = "3c3000a6fbe2f08ab2131a463a1691e867d661b1";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
@@ -155,6 +162,7 @@ struct LocalChatConfig {
     public_tasks: Arc<dyn PublicTaskControlPlane>,
     demo_fast: bool,
     feat134_streaming_enabled: bool,
+    feat136_streaming_enabled: bool,
 }
 
 enum RuntimeMode {
@@ -258,9 +266,26 @@ impl ChatRuntime {
                 };
             }
         };
+        let feat136_streaming_enabled = match feat134::exact_local_enabled(
+            std::env::var(feat136::FEAT136_FLAG).ok().as_deref(),
+            std::env::var("YIJIE_ENV").ok().as_deref(),
+            std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
+        ) {
+            Ok(enabled) if !enabled || feat134_streaming_enabled => enabled,
+            Ok(_) | Err(_) => {
+                return Self {
+                    mode: RuntimeMode::Invalid,
+                    authorization: None,
+                    worker: Mutex::new(None),
+                    initialization: Mutex::new(()),
+                    sidecar: None,
+                    host_bridge: Mutex::new(None),
+                };
+            }
+        };
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
-                mode: if feat134_streaming_enabled {
+                mode: if feat134_streaming_enabled || feat136_streaming_enabled {
                     RuntimeMode::Invalid
                 } else {
                     RuntimeMode::Disabled
@@ -302,6 +327,7 @@ impl ChatRuntime {
                             )),
                             demo_fast: local_profile.is_demo_fast(),
                             feat134_streaming_enabled,
+                            feat136_streaming_enabled,
                             scope,
                             secure_storage: secure_storage.clone(),
                         }),
@@ -815,6 +841,13 @@ impl ChatRuntime {
         )
     }
 
+    pub(crate) fn feat136_streaming_enabled(&self) -> bool {
+        matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat136_streaming_enabled
+        )
+    }
+
     pub async fn local_conversation_application(
         &self,
     ) -> Result<ConversationApplication, ChatError> {
@@ -825,6 +858,16 @@ impl ChatRuntime {
             RuntimeMode::Disabled => return Err(ChatError::Disabled),
             RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
         };
+        if matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat136_streaming_enabled
+        ) {
+            return Ok(ConversationApplication::new_with_artifacts_v5(
+                database,
+                host,
+                public_tasks,
+            ));
+        }
         if matches!(
             &self.mode,
             RuntimeMode::Local(config) if config.feat134_streaming_enabled
@@ -996,6 +1039,8 @@ mod tests {
                 secure_storage: Some(profile),
                 public_tasks: Arc::new(public_tasks::FixedPublicTaskControlPlane::new([])),
                 demo_fast: false,
+                feat134_streaming_enabled: false,
+                feat136_streaming_enabled: false,
             }),
             authorization,
             worker: Mutex::new(None),

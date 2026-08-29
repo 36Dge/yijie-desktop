@@ -9,17 +9,18 @@ use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
     feat134_projection_requires_limit_terminal, ActiveTurnContext, AttachmentSummary,
     ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState, DeletionStatus, DraftContentBlock,
-    DraftTarget, Feat134HistorySnapshot, HistoryPage, MessageContentBlockProjection, OutboxKind,
-    PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
-    ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot, SessionPage,
-    SessionPageCursor, SessionSummary, StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit,
-    TurnProgress,
+    DraftTarget, Feat134HistorySnapshot, Feat136ObservedEventDisposition, HistoryPage,
+    MessageContentBlockProjection, OutboxKind, PendingConversation, ProjectSummary,
+    PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart,
+    ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
+    StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit, TurnProgress,
 };
 use super::error::ChatError;
 use super::feat134::{
     Feat134HistoryProjection, Feat134Projection, Feat134ProjectionFailure,
     Feat134ProjectionFailureKind, Feat134TurnReducer, TimelineReasoningStatus,
 };
+use super::feat136::Feat136TurnReducer;
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
     HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
@@ -41,6 +42,16 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 const ORPHANED_TERMINAL_REPLAY_GRACE: Duration = Duration::from_secs(2);
+
+fn feat136_active_turn_stream_schema(
+    persisted_schema_version: Option<u8>,
+) -> Result<u8, ChatError> {
+    match persisted_schema_version {
+        Some(4) => Ok(4),
+        None | Some(5) => Ok(5),
+        Some(_) => Err(ChatError::DatabaseUnavailable),
+    }
+}
 
 #[cfg(feature = "feat126-s10-driver")]
 pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
@@ -147,6 +158,7 @@ pub struct ConversationApplication {
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
     artifact_transfers: Option<ArtifactTransferService>,
     feat134_streaming_enabled: bool,
+    feat136_streaming_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -364,6 +376,18 @@ impl AuthorizedConversationApplication {
             .await
     }
 
+    pub async fn load_feat136_history_projection(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_feat136_history_projection(session_id, turn_ids)
+            .await
+    }
+
     pub async fn load_feat134_history_snapshot(
         &self,
         context_id: Uuid,
@@ -374,6 +398,19 @@ impl AuthorizedConversationApplication {
         self.authorize(context_id, ChatAction::ReadSessions)?;
         self.application
             .load_feat134_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn load_feat136_history_snapshot(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_feat136_history_snapshot(session_id, before_ordinal, limit)
             .await
     }
 
@@ -716,6 +753,10 @@ pub trait TurnProjectionSink: Send + Sync {
         Ok(())
     }
 
+    fn publish_feat136(&self, _projection: Feat134Projection) -> Result<(), ChatError> {
+        Ok(())
+    }
+
     fn publish_coordinator(&self, _outcome: &CoordinatorOutcome) -> Result<(), ChatError> {
         Ok(())
     }
@@ -797,6 +838,7 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
             artifact_transfers: None,
             feat134_streaming_enabled: false,
+            feat136_streaming_enabled: false,
         }
     }
 
@@ -808,6 +850,7 @@ impl ConversationApplication {
         Self {
             artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
             feat134_streaming_enabled: false,
+            feat136_streaming_enabled: false,
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
@@ -825,6 +868,22 @@ impl ConversationApplication {
             host: Some(host),
             public_tasks: Some(public_tasks),
             feat134_streaming_enabled: true,
+            feat136_streaming_enabled: false,
+        }
+    }
+
+    pub fn new_with_artifacts_v5(
+        database: DatabaseWorker,
+        host: Arc<HostBridge>,
+        public_tasks: Arc<dyn PublicTaskControlPlane>,
+    ) -> Self {
+        Self {
+            artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
+            database,
+            host: Some(host),
+            public_tasks: Some(public_tasks),
+            feat134_streaming_enabled: true,
+            feat136_streaming_enabled: true,
         }
     }
 
@@ -835,6 +894,7 @@ impl ConversationApplication {
             public_tasks: None,
             artifact_transfers: None,
             feat134_streaming_enabled: false,
+            feat136_streaming_enabled: false,
         }
     }
 
@@ -1032,6 +1092,16 @@ impl ConversationApplication {
             .await
     }
 
+    pub async fn load_feat136_history_projection(
+        &self,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.database
+            .load_feat136_history_projection(session_id, turn_ids)
+            .await
+    }
+
     pub async fn load_feat134_history_snapshot(
         &self,
         session_id: Uuid,
@@ -1040,6 +1110,17 @@ impl ConversationApplication {
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.database
             .load_feat134_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn load_feat136_history_snapshot(
+        &self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.database
+            .load_feat136_history_snapshot(session_id, before_ordinal, limit)
             .await
     }
 
@@ -1798,9 +1879,27 @@ impl ConversationApplication {
                 .artifact_transfers
                 .as_ref()
                 .ok_or(ChatError::InvalidConfiguration)?;
-            return self
-                .stream_active_turn_v4(session_id, sink, artifact_transfers)
-                .await;
+            return if self.feat136_streaming_enabled {
+                let turn_id = self.database.active_turn_context(session_id).await?.turn_id;
+                match feat136_active_turn_stream_schema(
+                    self.database
+                        .turn_projection_schema_version(turn_id)
+                        .await?,
+                )? {
+                    4 => {
+                        self.stream_active_turn_v4(session_id, sink, artifact_transfers)
+                            .await
+                    }
+                    5 => {
+                        self.stream_active_turn_v5(session_id, sink, artifact_transfers)
+                            .await
+                    }
+                    _ => Err(ChatError::DatabaseUnavailable),
+                }
+            } else {
+                self.stream_active_turn_v4(session_id, sink, artifact_transfers)
+                    .await
+            };
         }
         if let Some(artifact_transfers) = &self.artifact_transfers {
             return self
@@ -2233,6 +2332,79 @@ impl ConversationApplication {
         Ok(Some((projection, false)))
     }
 
+    async fn reduce_and_persist_feat136_event(
+        &self,
+        reducer: &mut Feat136TurnReducer,
+        event: HostEvent,
+        observed_at_ms: i64,
+    ) -> Result<Option<(Feat134Projection, bool)>, ChatError> {
+        let mut failure = Feat134ProjectionFailure {
+            session_id: reducer.session_id(),
+            turn_id: reducer.local_turn_id(),
+            cursor: StoredEventCursor {
+                stream_id: event.cursor.stream_id,
+                sequence: event.cursor.sequence,
+                event_id: event.event_id,
+            },
+            source_event_type: event.event_type.clone(),
+            source_turn_id: event.turn_id,
+            source_occurred_at: event.occurred_at.clone(),
+            source_event_bytes: event.encoded_bytes,
+            observed_at_ms,
+            kind: Feat134ProjectionFailureKind::LimitExceeded,
+        };
+        let projection = match reducer.apply(event, observed_at_ms) {
+            Ok(None) => return Ok(None),
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat136_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(ChatError::ProjectionReconciliationFailed) => {
+                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
+                return self
+                    .database
+                    .commit_feat136_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(error) => return Err(error),
+            Ok(Some(projection)) => projection,
+        };
+        if feat134_projection_requires_limit_terminal(&projection)? {
+            return self
+                .database
+                .commit_feat136_projection_failure(failure)
+                .await
+                .map(|projection| Some((projection, true)));
+        }
+        let mut projection = projection;
+        let persisted = if projection.terminal.is_some() {
+            self.database
+                .commit_feat136_terminal(projection.clone())
+                .await
+        } else {
+            self.database
+                .persist_feat136_projection(projection.clone())
+                .await
+        };
+        let durable_sequence = match persisted {
+            Ok(durable_sequence) => durable_sequence,
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat136_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, true)));
+            }
+            Err(error) => return Err(error),
+        };
+        projection.durable_sequence = Some(durable_sequence);
+        Ok(Some((projection, false)))
+    }
+
     async fn stream_active_turn_v4(
         &self,
         session_id: Uuid,
@@ -2361,6 +2533,258 @@ impl ConversationApplication {
                         }
                     };
                     sink.publish_feat134(projection.clone())?;
+                    sink.publish(feat134_legacy_projection(&projection))?;
+                    if projection.terminal.is_some() {
+                        if projection_limit {
+                            // Best-effort normal Host control; local fail-closed state is already
+                            // durable and never depends on this request succeeding.
+                            let _ = host
+                                .interrupt_turn(
+                                    agent_session_id,
+                                    runtime_turn_id,
+                                    &HostTrace {
+                                        request_id: Some(projection.cursor.event_id),
+                                        ..HostTrace::default()
+                                    },
+                                )
+                                .await;
+                        }
+                        return Ok(());
+                    }
+                }
+                HostStreamEvent::Artifact(envelope) => {
+                    let artifact = decode_artifact_event_envelope_v3(
+                        &envelope,
+                        reducer.agent_session_id(),
+                        reducer.runtime_turn_id(),
+                        reducer.session_id(),
+                        reducer.local_turn_id(),
+                    )
+                    .inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id(),
+                            ArtifactResyncReason::ProtocolError,
+                        );
+                    })?;
+                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
+                    if !reducer.observe_artifact(&envelope).inspect_err(|_| {
+                        let _ = sink.publish_artifact_resync_required(
+                            session_id,
+                            reducer.local_turn_id(),
+                            resync_reason,
+                        );
+                    })? {
+                        continue;
+                    }
+                    let cursor_progress = reducer.progress()?;
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    let runtime_transition = match &artifact {
+                        ArtifactEventV3::Started(identity) => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Announced,
+                        ),
+                        ArtifactEventV3::Progress { identity, .. } => (
+                            identity.artifact_id,
+                            identity.kind,
+                            identity.ordinal,
+                            Feat128S10dArtifactStage::Progress,
+                        ),
+                        ArtifactEventV3::Completed(manifest) => (
+                            manifest.artifact_id,
+                            manifest.kind,
+                            manifest.ordinal,
+                            Feat128S10dArtifactStage::Ready,
+                        ),
+                        ArtifactEventV3::Failed { .. } => {
+                            return Err(ChatError::ConversationConflict)
+                        }
+                    };
+                    match artifact {
+                        ArtifactEventV3::Completed(manifest) => {
+                            artifact_transfers
+                                .transfer_completed_with_cursor(manifest, cursor_progress)
+                                .await?;
+                        }
+                        artifact => {
+                            self.database
+                                .commit_artifact_event_progress(cursor_progress, artifact)
+                                .await?;
+                        }
+                    }
+                    #[cfg(feature = "feat128-s10-runtime")]
+                    feat128_s10d_record_native_artifact(
+                        runtime_transition.0,
+                        runtime_transition.1,
+                        runtime_transition.2,
+                        runtime_transition.3,
+                    )
+                    .map_err(|_| ChatError::ConversationConflict)?;
+                    sink.publish_artifact_changed(
+                        session_id,
+                        reducer.local_turn_id(),
+                        envelope.event_id,
+                    )?;
+                }
+            }
+        }
+    }
+
+    async fn stream_active_turn_v5(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+        artifact_transfers: &ArtifactTransferService,
+    ) -> Result<(), ChatError> {
+        artifact_transfers
+            .recover_pending_acknowledgements()
+            .await?;
+        let mut context = self.database.active_turn_context(session_id).await?;
+        let hydration = self
+            .database
+            .load_feat136_hydration(context.turn_id)
+            .await?;
+        let cursor = context
+            .cursor
+            .as_ref()
+            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
+            .transpose()
+            .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        let agent_session_id = context.agent_session_id;
+        let runtime_turn_id = context.runtime_turn_id;
+        let host = self.host()?;
+        let host_snapshot = host
+            .get_session(context.agent_session_id)
+            .await
+            .map_err(map_host_error)?;
+        if host_snapshot.task_id != context.task_id
+            || host_snapshot.agent_session_id != context.agent_session_id
+            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let replay_must_supply_terminal = matches!(
+            host_snapshot.state,
+            HostSessionState::Idle | HostSessionState::Failed
+        ) && host_snapshot.active_turn_id.is_none();
+        let mut stream = match host
+            .open_event_stream_v5(context.agent_session_id, cursor)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(error)
+                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
+            {
+                let stream = host
+                    .open_event_stream_v5(context.agent_session_id, None)
+                    .await
+                    .map_err(map_host_error)?;
+                let expected = context
+                    .cursor
+                    .take()
+                    .ok_or(ChatError::ConversationConflict)?;
+                self.database
+                    .reset_feat134_after_stream_change(session_id, context.turn_id, expected)
+                    .await?;
+                sink.publish_artifact_resync_required(
+                    session_id,
+                    context.turn_id,
+                    ArtifactResyncReason::SequenceGap,
+                )?;
+                stream
+            }
+            Err(error) => return Err(map_host_error(error)),
+        };
+        let hydration = if context.cursor.is_some() {
+            Some(hydration)
+        } else {
+            None
+        };
+        let mut reducer = Feat136TurnReducer::new(context, hydration)?;
+        loop {
+            let next_event = if replay_must_supply_terminal {
+                match tokio::time::timeout(
+                    ORPHANED_TERMINAL_REPLAY_GRACE,
+                    stream.next_stream_event(),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.database
+                            .finalize_orphaned_turn_without_stream(
+                                reducer.session_id(),
+                                reducer.local_turn_id(),
+                                reducer.runtime_turn_id(),
+                                unix_seconds()?,
+                            )
+                            .await?;
+                        sink.publish_artifact_resync_required(
+                            reducer.session_id(),
+                            reducer.local_turn_id(),
+                            ArtifactResyncReason::ProtocolError,
+                        )?;
+                        return Ok(());
+                    }
+                }
+            } else {
+                stream.next_stream_event().await
+            };
+            let event = feat136_stream_event_or_resync(
+                next_event,
+                sink,
+                session_id,
+                reducer.local_turn_id(),
+            )?;
+            match event {
+                HostStreamEvent::Ordinary(event) => {
+                    let observed_cursor = StoredEventCursor {
+                        stream_id: event.cursor.stream_id,
+                        sequence: event.cursor.sequence,
+                        event_id: event.event_id,
+                    };
+                    match self
+                        .database
+                        .classify_feat136_observed_event(
+                            session_id,
+                            reducer.local_turn_id(),
+                            observed_cursor,
+                            event.event_type.clone(),
+                            event.turn_id.is_some(),
+                        )
+                        .await?
+                    {
+                        Feat136ObservedEventDisposition::Duplicate => continue,
+                        Feat136ObservedEventDisposition::Conflict => {
+                            sink.publish_artifact_resync_required(
+                                session_id,
+                                reducer.local_turn_id(),
+                                ArtifactResyncReason::ProtocolError,
+                            )?;
+                            return Err(ChatError::OrchestrationUnavailable);
+                        }
+                        Feat136ObservedEventDisposition::New => {}
+                    }
+                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
+                    let observed_at_ms = unix_millis()?;
+                    let (projection, projection_limit) = match self
+                        .reduce_and_persist_feat136_event(&mut reducer, event, observed_at_ms)
+                        .await
+                    {
+                        Ok(None) => continue,
+                        Ok(Some(result)) => result,
+                        Err(error) => {
+                            let _ = sink.publish_artifact_resync_required(
+                                session_id,
+                                reducer.local_turn_id(),
+                                resync_reason,
+                            );
+                            return Err(error);
+                        }
+                    };
+                    sink.publish_feat136(projection.clone())?;
                     sink.publish(feat134_legacy_projection(&projection))?;
                     if projection.terminal.is_some() {
                         if projection_limit {
@@ -2685,6 +3109,12 @@ impl TurnEventReducer {
             | HostEventKind::TurnPlanUpdated { .. }
             | HostEventKind::ItemStarted { .. }
             | HostEventKind::ItemCompleted { .. }
+            | HostEventKind::CommandStarted { .. }
+            | HostEventKind::CommandOutputDelta { .. }
+            | HostEventKind::CommandCompleted { .. }
+            | HostEventKind::ToolStarted { .. }
+            | HostEventKind::ToolProgress { .. }
+            | HostEventKind::ToolCompleted { .. }
             | HostEventKind::Error { .. }
             | HostEventKind::Warning { .. }
             | HostEventKind::Unknown => {}
@@ -3073,6 +3503,33 @@ fn map_host_error(_error: HostBridgeError) -> ChatError {
     ChatError::OrchestrationUnavailable
 }
 
+fn feat136_stream_event_or_resync(
+    next_event: Result<Option<HostStreamEvent>, HostBridgeError>,
+    sink: &dyn TurnProjectionSink,
+    session_id: Uuid,
+    turn_id: Uuid,
+) -> Result<HostStreamEvent, ChatError> {
+    match next_event {
+        Ok(Some(event)) => Ok(event),
+        Ok(None) => {
+            sink.publish_artifact_resync_required(
+                session_id,
+                turn_id,
+                ArtifactResyncReason::ProtocolError,
+            )?;
+            Err(ChatError::OrchestrationUnavailable)
+        }
+        Err(error) => {
+            sink.publish_artifact_resync_required(
+                session_id,
+                turn_id,
+                ArtifactResyncReason::ProtocolError,
+            )?;
+            Err(map_host_error(error))
+        }
+    }
+}
+
 fn map_cleanup_surface(status: HostCleanupSurfaceStatus) -> CleanupSurfaceState {
     match status {
         HostCleanupSurfaceStatus::Complete => CleanupSurfaceState::Complete,
@@ -3143,6 +3600,7 @@ mod tests {
     use std::fs;
     #[cfg(target_os = "macos")]
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     #[cfg(target_os = "macos")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     #[cfg(target_os = "macos")]
@@ -3199,6 +3657,49 @@ mod tests {
             },
             identity,
         )
+    }
+
+    struct Feat136ResyncSink(AtomicUsize);
+
+    impl TurnProjectionSink for Feat136ResyncSink {
+        fn publish(&self, _projection: LiveTurnProjection) -> Result<(), ChatError> {
+            Ok(())
+        }
+
+        fn publish_artifact_resync_required(
+            &self,
+            _session_id: Uuid,
+            _turn_id: Uuid,
+            reason: ArtifactResyncReason,
+        ) -> Result<(), ChatError> {
+            assert_eq!(reason, ArtifactResyncReason::ProtocolError);
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn feat136_protocol_decoder_failure_requests_conservative_resync() {
+        let sink = Feat136ResyncSink(AtomicUsize::new(0));
+        let result = feat136_stream_event_or_resync(
+            Err(HostBridgeError::new(HostBridgeErrorKind::Protocol)),
+            &sink,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        );
+        assert!(matches!(result, Err(ChatError::OrchestrationUnavailable)));
+        assert_eq!(sink.0.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn feat136_active_turn_stream_version_is_sticky_at_the_turn_boundary() {
+        assert_eq!(feat136_active_turn_stream_schema(None), Ok(5));
+        assert_eq!(feat136_active_turn_stream_schema(Some(4)), Ok(4));
+        assert_eq!(feat136_active_turn_stream_schema(Some(5)), Ok(5));
+        assert_eq!(
+            feat136_active_turn_stream_schema(Some(6)),
+            Err(ChatError::DatabaseUnavailable)
+        );
     }
 
     fn event(
@@ -3360,6 +3861,7 @@ mod tests {
             )
             .unwrap();
         let artifact = HostArtifactEventV3 {
+            schema_version: 3,
             cursor: HostEventCursor::new(identity.stream_id, 2).unwrap(),
             event_type: "item.artifact.started".to_owned(),
             event_id: Uuid::now_v7(),

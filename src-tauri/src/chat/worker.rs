@@ -770,11 +770,27 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn persist_feat136_projection(
+        &self,
+        projection: Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| repository.persist_feat136_projection(&projection))
+            .await
+    }
+
     pub async fn commit_feat134_terminal(
         &self,
         projection: Feat134Projection,
     ) -> Result<u64, ChatError> {
         self.call(move |repository| repository.commit_feat134_terminal(&projection))
+            .await
+    }
+
+    pub async fn commit_feat136_terminal(
+        &self,
+        projection: Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| repository.commit_feat136_terminal(&projection))
             .await
     }
 
@@ -786,12 +802,56 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn commit_feat136_projection_failure(
+        &self,
+        failure: Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        self.call(move |repository| repository.commit_feat136_projection_failure(&failure))
+            .await
+    }
+
     pub async fn load_feat134_hydration(
         &self,
         turn_id: uuid::Uuid,
     ) -> Result<Feat134Hydration, ChatError> {
         self.call(move |repository| repository.load_feat134_hydration(turn_id))
             .await
+    }
+
+    pub async fn turn_projection_schema_version(
+        &self,
+        turn_id: uuid::Uuid,
+    ) -> Result<Option<u8>, ChatError> {
+        self.call(move |repository| repository.turn_projection_schema_version(turn_id))
+            .await
+    }
+
+    pub async fn load_feat136_hydration(
+        &self,
+        turn_id: uuid::Uuid,
+    ) -> Result<Feat134Hydration, ChatError> {
+        self.call(move |repository| repository.load_feat136_hydration(turn_id))
+            .await
+    }
+
+    pub async fn classify_feat136_observed_event(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        cursor: super::database::StoredEventCursor,
+        event_type: String,
+        source_turn_scoped: bool,
+    ) -> Result<super::database::Feat136ObservedEventDisposition, ChatError> {
+        self.call(move |repository| {
+            repository.classify_feat136_observed_event(
+                session_id,
+                turn_id,
+                &cursor,
+                &event_type,
+                source_turn_scoped,
+            )
+        })
+        .await
     }
 
     pub async fn load_feat134_history_projection(
@@ -805,6 +865,17 @@ impl DatabaseWorker {
         .await
     }
 
+    pub async fn load_feat136_history_projection(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        self.call(move |repository| {
+            repository.load_feat136_history_projection(session_id, &turn_ids)
+        })
+        .await
+    }
+
     pub async fn load_feat134_history_snapshot(
         &self,
         session_id: uuid::Uuid,
@@ -813,6 +884,18 @@ impl DatabaseWorker {
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.call(move |repository| {
             repository.load_feat134_history_snapshot(session_id, before_ordinal, limit)
+        })
+        .await
+    }
+
+    pub async fn load_feat136_history_snapshot(
+        &self,
+        session_id: uuid::Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.call(move |repository| {
+            repository.load_feat136_history_snapshot(session_id, before_ordinal, limit)
         })
         .await
     }

@@ -1,6 +1,7 @@
 import type {
   ConversationAgentMessagePhase,
   ConversationContentBlock,
+  ConversationExecution,
   ConversationItem,
   ConversationItemKind,
   ConversationItemStatus,
@@ -36,6 +37,8 @@ export type ConversationTimelineItemKind =
   | "user_message"
   | "assistant_message"
   | "reasoning"
+  | "command"
+  | "tool"
   | "artifact"
   | "unknown";
 export type ConversationTimelineItemPresentation =
@@ -44,6 +47,8 @@ export type ConversationTimelineItemPresentation =
   | "final_answer"
   | "assistant_unclassified"
   | "reasoning"
+  | "command"
+  | "tool"
   | "artifact"
   | "unknown";
 export type ConversationTimelineContentMode = "rich" | "plain";
@@ -144,6 +149,7 @@ export type ConversationTimelineItemViewModel = Readonly<{
   phase: ConversationTimelineItemPhase;
   assistantPhase: ConversationAgentMessagePhase | null;
   reasoning: ConversationReasoningState | null;
+  execution: ConversationExecution | null;
   contentMode: ConversationTimelineContentMode;
   collapsible: boolean;
   defaultExpanded: boolean;
@@ -215,8 +221,8 @@ const ITEM_KINDS: Readonly<Record<ConversationItemKind, ConversationTimelineItem
     user_message: "user_message",
     assistant_message: "assistant_message",
     reasoning: "reasoning",
-    command: "unknown",
-    tool: "unknown",
+    command: "command",
+    tool: "tool",
     approval: "unknown",
     artifact: "artifact",
     unknown: "unknown",
@@ -362,6 +368,10 @@ function itemPresentation(item: ConversationItem): ConversationTimelineItemPrese
       return "assistant_unclassified";
     case "reasoning":
       return "reasoning";
+    case "command":
+      return "command";
+    case "tool":
+      return "tool";
     case "artifact":
       return "artifact";
     default:
@@ -381,6 +391,8 @@ function presentationRole(
     case "commentary":
     case "assistant_unclassified":
     case "reasoning":
+    case "command":
+    case "tool":
       return "process";
     case "unknown":
     default:
@@ -427,10 +439,14 @@ function projectItem(
     phase: ITEM_PHASES[item.status],
     assistantPhase: item.agentMessagePhase,
     reasoning: item.reasoning === null ? null : Object.freeze({ ...item.reasoning }),
-    contentMode: presentation === "reasoning" ? "plain" as const : "rich" as const,
+    execution: item.execution,
+    contentMode: presentation === "reasoning" || presentation === "command" || presentation === "tool"
+      ? "plain" as const
+      : "rich" as const,
     collapsible,
     defaultExpanded: collapsible ? activeTurn(turn) : true,
-    copyPolicy: presentation === "reasoning" || presentation === "unknown"
+    copyPolicy: presentation === "reasoning" || presentation === "command" ||
+        presentation === "tool" || presentation === "unknown"
       ? "none" as const
       : "text_and_code" as const,
     reconciliation: item.reconciliation,

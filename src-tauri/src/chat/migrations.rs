@@ -18,6 +18,8 @@ const CHAT_ATTACHMENT_DRAFT_TARGETS_SQL: &str =
 const CHAT_OUTPUT_ARTIFACTS_SQL: &str =
     include_str!("../../migrations/chat/0008_chat_output_artifacts.sql");
 const CHAT_TIMELINE_V4_SQL: &str = include_str!("../../migrations/chat/0009_chat_timeline_v4.sql");
+const CHAT_COMMAND_TOOL_V5_SQL: &str =
+    include_str!("../../migrations/chat/0010_chat_command_tool_v5.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -26,7 +28,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 9] = [
+const CATALOG: [CatalogEntry; 10] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -71,6 +73,11 @@ const CATALOG: [CatalogEntry; 9] = [
         version: 9,
         name: "0009_chat_timeline_v4",
         sql: CHAT_TIMELINE_V4_SQL,
+    },
+    CatalogEntry {
+        version: 10,
+        name: "0010_chat_command_tool_v5",
+        sql: CHAT_COMMAND_TOOL_V5_SQL,
     },
 ];
 
@@ -717,6 +724,297 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn feat136_v9_rows_remain_schema4_after_additive_v10() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrations()
+            .to_version(&mut connection, 9)
+            .expect("migrate populated database to v9");
+
+        let project_id = Uuid::now_v7().to_string();
+        let session_id = Uuid::now_v7().to_string();
+        let turn_id = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        let event_id = Uuid::now_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'Synthetic', ?4, X'01', 1)",
+                params![project_id, owner, tenant, "a".repeat(64)],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'Existing', 'fallback', 'not_started', 1, 2)",
+                params![session_id, owner, tenant, project_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'queued')",
+                params![turn_id, session_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_observed_events_v4(
+                   event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
+                   event_type, source_occurred_at, observed_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, 1, 1, 'item.started',
+                           '2026-08-29T00:00:00Z', 1)",
+                params![event_id, session_id, turn_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_timeline_items_v4(
+                   turn_id, item_id, item_ordinal, item_type, status, text,
+                   started_at_ms, source_event_id, source_sequence, source_occurred_at
+                 ) VALUES (?1, 'legacy-v4', 1, 'agentMessage', 'in_progress', '', 1,
+                           ?2, 1, '2026-08-29T00:00:00Z')",
+                params![turn_id, event_id],
+            )
+            .unwrap();
+
+        migrate(&mut connection).expect("migrate populated v9 database to v10");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_schema_version FROM chat_observed_events_v4 WHERE event_id=?1",
+                    [event_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_schema_version FROM chat_timeline_items_v4
+                     WHERE turn_id=?1 AND item_id='legacy-v4'",
+                    [turn_id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT (SELECT count(*) FROM chat_command_items_v5)
+                            + (SELECT count(*) FROM chat_tool_items_v5)",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn feat136_v10_failed_terminal_codes_match_contract() {
+        let mut connection = Connection::open_in_memory().expect("open database");
+        connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        migrate(&mut connection).expect("migrate database");
+
+        let project_id = Uuid::now_v7().to_string();
+        let session_id = Uuid::now_v7().to_string();
+        let turn_id = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        connection
+            .execute(
+                "INSERT INTO chat_projects(
+                   id, owner_user_id, tenant_id, safe_name, canonical_hash, bookmark_ref, last_used_at
+                 ) VALUES (?1, ?2, ?3, 'Synthetic', ?4, X'01', 1)",
+                params![project_id, owner, tenant, "a".repeat(64)],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_sessions(
+                   id, owner_user_id, tenant_id, project_id, title, title_source,
+                   title_job_status, created_at, last_activity_at
+                 ) VALUES (?1, ?2, ?3, ?4, 'Existing', 'fallback', 'not_started', 1, 2)",
+                params![session_id, owner, tenant, project_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                 VALUES (?1, ?2, ?3, 'queued')",
+                params![turn_id, session_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+
+        for (ordinal, item_id, item_type) in [
+            (1_i64, "tool-protocol", "tool"),
+            (2, "tool-unknown", "tool"),
+            (3, "command-protocol", "command"),
+            (4, "command-declined", "command"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO chat_timeline_items_v4(
+                       turn_id, item_id, item_ordinal, item_type, status, text,
+                       started_at_ms, completed_at_ms, source_event_id, source_sequence,
+                       source_occurred_at, source_schema_version
+                     ) VALUES (?1, ?2, ?3, ?4, 'completed', '', 1, 2, ?5, ?3,
+                               '2026-08-29T00:00:00Z', 5)",
+                    params![
+                        turn_id,
+                        item_id,
+                        ordinal,
+                        item_type,
+                        Uuid::now_v7().to_string()
+                    ],
+                )
+                .unwrap();
+        }
+
+        for (item_id, code, result) in [
+            ("tool-protocol", "protocol_error", Some("bounded result")),
+            ("tool-unknown", "unknown_tool", None),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO chat_tool_items_v5(
+                       turn_id, item_id, status,
+                       started_source_event_id, started_source_sequence, started_source_occurred_at,
+                       last_source_event_id, last_source_sequence, last_source_occurred_at,
+                       identity_resolution, server_name, tool_name,
+                       arguments_summary, arguments_summary_bytes, arguments_summary_truncated,
+                       duration_ms, result_summary, result_summary_bytes, result_summary_truncated,
+                       error_code, error_summary
+                     ) VALUES (?1, ?2, 'failed', ?3, 1, '2026-08-29T00:00:00Z',
+                               ?4, 2, '2026-08-29T00:00:01Z', 'unknown', 'unknown', 'unknown',
+                               '', 0, 0, 1, ?5, ?6, ?7, ?8, 'bounded error')",
+                    params![
+                        turn_id,
+                        item_id,
+                        Uuid::now_v7().to_string(),
+                        Uuid::now_v7().to_string(),
+                        result,
+                        result.map(|value| i64::try_from(value.len()).unwrap()),
+                        result.map(|_| 0_i64),
+                        code,
+                    ],
+                )
+                .unwrap();
+        }
+
+        for (item_id, status, code) in [
+            ("command-protocol", "failed", "protocol_error"),
+            ("command-declined", "declined", "command_declined"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO chat_command_items_v5(
+                       turn_id, item_id, status,
+                       started_source_event_id, started_source_sequence, started_source_occurred_at,
+                       last_source_event_id, last_source_sequence, last_source_occurred_at,
+                       command_summary, command_summary_bytes, command_summary_truncated, cwd_kind,
+                       output_retention, output_reason, output_truncated,
+                       error_code, error_summary
+                     ) VALUES (?1, ?2, ?3, ?4, 1, '2026-08-29T00:00:00Z',
+                               ?5, 2, '2026-08-29T00:00:01Z', '', 0, 0, 'redacted',
+                               'unavailable', 'not_available', 0, ?6, 'bounded error')",
+                    params![
+                        turn_id,
+                        item_id,
+                        status,
+                        Uuid::now_v7().to_string(),
+                        Uuid::now_v7().to_string(),
+                        code,
+                    ],
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM chat_tool_items_v5", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM chat_command_items_v5", [], |row| row
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            2
+        );
+
+        connection
+            .execute(
+                "UPDATE chat_tool_items_v5 SET identity_resolution='known'
+                 WHERE turn_id=?1 AND item_id='tool-protocol'",
+                [turn_id.as_str()],
+            )
+            .expect("known Tool identity may use the literal unknown display names");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT identity_resolution, server_name, tool_name
+                     FROM chat_tool_items_v5
+                     WHERE turn_id=?1 AND item_id='tool-protocol'",
+                    [turn_id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "known".to_owned(),
+                "unknown".to_owned(),
+                "unknown".to_owned()
+            )
+        );
+
+        connection
+            .execute(
+                "INSERT INTO chat_timeline_items_v4(
+                   turn_id, item_id, item_ordinal, item_type, status, text,
+                   started_at_ms, completed_at_ms, source_event_id, source_sequence,
+                   source_occurred_at, source_schema_version
+                 ) VALUES (?1, 'invalid-complete', 5, 'command', 'completed', '', 1, 2,
+                           ?2, 5, '2026-08-29T00:00:00Z', 5)",
+                params![turn_id, Uuid::now_v7().to_string()],
+            )
+            .unwrap();
+        let invalid_complete = connection.execute(
+            "INSERT INTO chat_command_items_v5(
+               turn_id, item_id, status,
+               started_source_event_id, started_source_sequence, started_source_occurred_at,
+               last_source_event_id, last_source_sequence, last_source_occurred_at,
+               command_summary, command_summary_bytes, command_summary_truncated, cwd_kind,
+               output_retention, output_text, output_truncated, output_truncation_reason
+             ) VALUES (?1, 'invalid-complete', 'completed', ?2, 1, '2026-08-29T00:00:00Z',
+                       ?3, 2, '2026-08-29T00:00:01Z', '', 0, 0, 'redacted',
+                       'complete', 'bounded', 1, 'upstream_truncated')",
+            params![
+                turn_id,
+                Uuid::now_v7().to_string(),
+                Uuid::now_v7().to_string(),
+            ],
+        );
+        assert!(invalid_complete.is_err());
     }
 
     #[test]

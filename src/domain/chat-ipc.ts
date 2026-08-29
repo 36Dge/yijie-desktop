@@ -2,6 +2,7 @@ export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
 export const CHAT_IPC_V2_SCHEMA_VERSION = 2 as const;
 export const CHAT_IPC_V3_SCHEMA_VERSION = 3 as const;
 export const CHAT_IPC_V4_SCHEMA_VERSION = 4 as const;
+export const CHAT_IPC_V5_SCHEMA_VERSION = 5 as const;
 export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
 export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
 export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-import:event:v2" as const;
@@ -14,6 +15,7 @@ const RFC3339_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]
 const RFC3339_MIN_LENGTH = 20;
 const RFC3339_MAX_LENGTH = 64;
 const MAX_SAFE_EVENT_SEQUENCE = (1n << 64n) - 1n;
+const SAFE_CWD_SEGMENT_PATTERN = /^(?!\.{1,2}$)(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$)(?!.*[ .]$)[^/\\:]+$/i;
 
 export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_bind_context_v1",
@@ -127,7 +129,7 @@ export const CHAT_ALLOWED_ACTIONS = Object.freeze([
 export type ChatAllowedAction = (typeof CHAT_ALLOWED_ACTIONS)[number];
 
 export interface ChatIpcErrorShape {
-  readonly schemaVersion: 1 | 2 | 3 | 4;
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5;
   readonly requestId?: string;
   readonly code: ChatErrorCode;
   readonly retryable: boolean;
@@ -437,6 +439,152 @@ export interface ChatHistoryPageV4 {
   readonly durableSequenceCut: string;
 }
 
+export const CHAT_TRUNCATION_REASONS_V5 = Object.freeze([
+  "utf8_byte_limit",
+  "upstream_truncated",
+] as const);
+
+export type ChatTruncationReasonV5 =
+  (typeof CHAT_TRUNCATION_REASONS_V5)[number];
+
+export interface ChatSafeTextV5 {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly truncationReason: ChatTruncationReasonV5 | null;
+}
+
+export interface ChatSourceFactV5 {
+  readonly sourceEventId: string;
+  readonly sourceSequence: string;
+  readonly sourceOccurredAt: string;
+}
+
+export type ChatCommandCwdV5 = Readonly<{
+  kind: "workspace_root" | "workspace_relative" | "redacted";
+  segments: readonly string[];
+}>;
+
+export const CHAT_COMMAND_ERROR_CODES_V5 = Object.freeze([
+  "command_failed",
+  "command_declined",
+  "projection_limit_exceeded",
+  "projection_redaction_failed",
+  "protocol_error",
+] as const);
+
+export const CHAT_TOOL_ERROR_CODES_V5 = Object.freeze([
+  "tool_failed",
+  "tool_declined",
+  "unknown_tool",
+  "projection_limit_exceeded",
+  "projection_redaction_failed",
+  "protocol_error",
+] as const);
+
+export interface ChatExecutionErrorV5 {
+  readonly code:
+    | (typeof CHAT_COMMAND_ERROR_CODES_V5)[number]
+    | (typeof CHAT_TOOL_ERROR_CODES_V5)[number];
+  readonly summary: string;
+}
+
+export interface ChatCommandOutputV5 {
+  readonly retention: "complete" | "head_tail" | "unavailable";
+  readonly text: string | null;
+  readonly head: string | null;
+  readonly tail: string | null;
+  readonly reason: "not_available" | null;
+  readonly truncated: boolean;
+  readonly truncationReason: ChatTruncationReasonV5 | null;
+}
+
+export interface ChatToolIdentityV5 {
+  readonly resolution: "known" | "unknown";
+  readonly serverName: string;
+  readonly toolName: string;
+}
+
+export interface ChatCommandExecutionV5 {
+  readonly kind: "command";
+  readonly status: "running" | "completed" | "failed" | "declined" | "incomplete";
+  readonly startedSource: ChatSourceFactV5;
+  readonly lastSource: ChatSourceFactV5;
+  readonly commandSummary: ChatSafeTextV5;
+  readonly cwd: ChatCommandCwdV5;
+  readonly liveOutput: ChatSafeTextV5 | null;
+  readonly output: ChatCommandOutputV5 | null;
+  readonly durationMs: number | null;
+  readonly exitCode: number | null;
+  readonly error: ChatExecutionErrorV5 | null;
+}
+
+export interface ChatToolProgressV5 extends ChatSourceFactV5 {
+  readonly progressIndex: number;
+  readonly summary: ChatSafeTextV5;
+}
+
+export interface ChatToolExecutionV5 {
+  readonly kind: "tool";
+  readonly status: "in_progress" | "completed" | "failed" | "declined" | "incomplete";
+  readonly startedSource: ChatSourceFactV5;
+  readonly lastSource: ChatSourceFactV5;
+  readonly identity: ChatToolIdentityV5;
+  readonly argumentsSummary: ChatSafeTextV5;
+  readonly progress: readonly ChatToolProgressV5[];
+  readonly durationMs: number | null;
+  readonly resultSummary: ChatSafeTextV5 | null;
+  readonly error: ChatExecutionErrorV5 | null;
+}
+
+export type ChatExecutionV5 = ChatCommandExecutionV5 | ChatToolExecutionV5;
+
+export interface ChatTimelineItemV5 extends ChatSourceFactV5 {
+  readonly itemId: string;
+  readonly itemOrdinal: number;
+  readonly itemType:
+    | "agentMessage"
+    | "reasoning"
+    | "command"
+    | "tool"
+    | "userMessage"
+    | "hookPrompt"
+    | "collabAgentToolCall"
+    | "subAgentActivity"
+    | "webSearch"
+    | "imageView"
+    | "sleep"
+    | "imageGeneration"
+    | "enteredReviewMode"
+    | "exitedReviewMode"
+    | "contextCompaction";
+  readonly phase: ChatAgentMessagePhaseV4;
+  readonly status: (typeof CHAT_TIMELINE_ITEM_STATUSES_V4)[number];
+  readonly text: string;
+  readonly reasoningStatus: (typeof CHAT_REASONING_STATUSES_V4)[number] | null;
+  readonly reasoningReasonCode: ChatReasoningReasonCodeV4 | null;
+  readonly reasoningParts: readonly ChatReasoningPartV4[];
+  readonly startedAtMs: number;
+  readonly completedAtMs: number | null;
+  readonly execution: ChatExecutionV5 | null;
+}
+
+export interface ChatHistoryTurnV5 extends Omit<
+  ChatHistoryTurnV4,
+  "projectionAuthority" | "timelineItems"
+> {
+  readonly projectionAuthority: "v5";
+  readonly timelineItems: readonly ChatTimelineItemV5[];
+}
+
+export interface ChatHistoryPageV5 {
+  /** Decoder-added authority marker; it is not accepted as a nested wire field. */
+  readonly schemaVersion: typeof CHAT_IPC_V5_SCHEMA_VERSION;
+  readonly turns: readonly (ChatHistoryTurnV4 | ChatHistoryTurnV5)[];
+  readonly nextCursor: string | null;
+  readonly sessionNotices: readonly ChatTimelineNoticeV4[];
+  readonly durableSequenceCut: string;
+}
+
 export interface ChatReasoningPart {
   readonly contentIndex: number;
   readonly text: string;
@@ -551,6 +699,12 @@ export interface ChatResyncProjection {
 export interface ChatResyncProjectionV4 {
   readonly session: ChatSession;
   readonly history: ChatHistoryPageV4;
+  readonly cleanup: ChatCleanupStatus | null;
+}
+
+export interface ChatResyncProjectionV5 {
+  readonly session: ChatSession;
+  readonly history: ChatHistoryPageV5;
   readonly cleanup: ChatCleanupStatus | null;
 }
 
@@ -693,6 +847,102 @@ export type ChatProjectionEventV4 =
   | ChatSemanticProjectionEventV4
   | ChatControlProjectionEventV4;
 
+export type ChatEventKindV5 =
+  | ChatEventKindV4
+  | "command_started"
+  | "command_output_append"
+  | "command_completed"
+  | "tool_started"
+  | "tool_progress"
+  | "tool_completed";
+
+type ChatExecutionItemPayloadV5 = ChatSourceFactV5 & Readonly<{
+  itemId: string;
+  itemOrdinal: number;
+}>;
+
+export type ChatCommandStartedPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  status: "running";
+  commandSummary: ChatSafeTextV5;
+  cwd: ChatCommandCwdV5;
+}>;
+
+export type ChatCommandOutputAppendPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  text: string;
+  truncated: boolean;
+  truncationReason: ChatTruncationReasonV5 | null;
+}>;
+
+export type ChatCommandCompletedPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  status: "completed" | "failed" | "declined";
+  commandSummary: ChatSafeTextV5;
+  cwd: ChatCommandCwdV5;
+  durationMs: number | null;
+  exitCode: number | null;
+  output: ChatCommandOutputV5;
+  error: ChatExecutionErrorV5 | null;
+}>;
+
+export type ChatToolStartedPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  status: "in_progress";
+  identity: ChatToolIdentityV5;
+  argumentsSummary: ChatSafeTextV5;
+}>;
+
+export type ChatToolProgressPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  status: "in_progress";
+  identity: ChatToolIdentityV5;
+  progressIndex: number;
+  summary: ChatSafeTextV5;
+}>;
+
+export type ChatToolCompletedPayloadV5 = ChatExecutionItemPayloadV5 & Readonly<{
+  status: "completed" | "failed" | "declined";
+  identity: ChatToolIdentityV5;
+  argumentsSummary: ChatSafeTextV5;
+  durationMs: number | null;
+  resultSummary: ChatSafeTextV5 | null;
+  error: ChatExecutionErrorV5 | null;
+}>;
+
+interface ChatSemanticEventBaseV5 {
+  readonly schemaVersion: 5;
+  readonly subscriptionId: string;
+  readonly contextId: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly projectionSequence: string;
+  readonly eventId: string;
+  readonly durableSequence: string;
+}
+
+type ChatExecutionProjectionEventV5 = ChatSemanticEventBaseV5 &
+  (
+    | { readonly kind: "command_started"; readonly payload: ChatCommandStartedPayloadV5 }
+    | { readonly kind: "command_output_append"; readonly payload: ChatCommandOutputAppendPayloadV5 }
+    | { readonly kind: "command_completed"; readonly payload: ChatCommandCompletedPayloadV5 }
+    | { readonly kind: "tool_started"; readonly payload: ChatToolStartedPayloadV5 }
+    | { readonly kind: "tool_progress"; readonly payload: ChatToolProgressPayloadV5 }
+    | { readonly kind: "tool_completed"; readonly payload: ChatToolCompletedPayloadV5 }
+  );
+
+type WithV5Schema<T> = T extends unknown
+  ? Omit<T, "schemaVersion"> & Readonly<{ schemaVersion: 5 }>
+  : never;
+
+type ChatNativeInheritedProjectionEventV5 =
+  WithV5Schema<ChatProjectionEventV4> &
+  Readonly<{ sourceSchemaVersion?: never }>;
+
+type ChatStickyV4ProjectionEventV5 =
+  WithV5Schema<ChatSemanticProjectionEventV4> &
+  Readonly<{ sourceSchemaVersion: 4 }>;
+
+export type ChatProjectionEventV5 =
+  | ChatNativeInheritedProjectionEventV5
+  | ChatStickyV4ProjectionEventV5
+  | ChatExecutionProjectionEventV5;
+
 type Parser<T> = (value: unknown) => T;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -726,6 +976,27 @@ function stringValue(value: unknown, maximum: number, allowEmpty = false): strin
     throw new ChatContractError();
   }
   return value;
+}
+
+function codePointStringValue(
+  value: unknown,
+  maximumCodePoints: number,
+  maximumBytes: number,
+  allowEmpty = false,
+): string {
+  if (
+    typeof value !== "string" || value.includes("\0") ||
+    [...value].length > maximumCodePoints ||
+    new TextEncoder().encode(value).length > maximumBytes ||
+    (!allowEmpty && value.length === 0)
+  ) {
+    throw new ChatContractError();
+  }
+  return value;
+}
+
+function itemIdV5(value: unknown): string {
+  return codePointStringValue(value, 256, 1024);
 }
 
 function plainText(value: unknown, maximumBytes: number, allowEmpty = false): string {
@@ -812,6 +1083,13 @@ function responseDataV4<T>(value: unknown, parser: Parser<T>): T {
   return parser(envelope.data);
 }
 
+function responseDataV5<T>(value: unknown, parser: Parser<T>): T {
+  const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
+  if (envelope.schemaVersion !== CHAT_IPC_V5_SCHEMA_VERSION) throw new ChatContractError();
+  uuid(envelope.requestId);
+  return parser(envelope.data);
+}
+
 export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   const error = exactObject(
     value,
@@ -822,7 +1100,8 @@ export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
     (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION &&
-      error.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION) ||
+      error.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION &&
+      error.schemaVersion !== CHAT_IPC_V5_SCHEMA_VERSION) ||
     typeof error.retryable !== "boolean"
   ) {
     throw new ChatContractError();
@@ -917,12 +1196,19 @@ function parseSession(value: unknown): ChatSession {
   });
 }
 
-function attachmentName(value: unknown): string {
-  const name = stringValue(value, 255);
+function validateAttachmentName(name: string): string {
   if (name.trim() !== name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
     throw new ChatContractError();
   }
   return name;
+}
+
+function attachmentName(value: unknown): string {
+  return validateAttachmentName(stringValue(value, 255));
+}
+
+function artifactDisplayNameV5(value: unknown): string {
+  return validateAttachmentName(codePointStringValue(value, 255, 1020));
 }
 
 function parseAttachment(value: unknown, history = false): ChatAttachment {
@@ -1125,6 +1411,14 @@ const CHAT_ARTIFACT_FILE_MEDIA_TYPES = [
 ] as const;
 
 function parseArtifact(value: unknown): ChatArtifact {
+  return parseArtifactWithLengths(value, false);
+}
+
+function parseArtifactV5(value: unknown): ChatArtifact {
+  return parseArtifactWithLengths(value, true);
+}
+
+function parseArtifactWithLengths(value: unknown, v5Lengths: boolean): ChatArtifact {
   const artifact = exactObject(value, [
     "artifactId", "kind", "provenance", "status", "ordinal", "progressStage", "progressPercent",
     "displayName", "mediaType",
@@ -1133,7 +1427,10 @@ function parseArtifact(value: unknown): ChatArtifact {
   if (typeof artifact.hasPoster !== "boolean") throw new ChatContractError();
   const kind = oneOf(artifact.kind, CHAT_ARTIFACT_KINDS);
   const status = oneOf(artifact.status, CHAT_ARTIFACT_STATUSES);
-  const displayName = nullable(artifact.displayName, attachmentName);
+  const displayName = nullable(
+    artifact.displayName,
+    v5Lengths ? artifactDisplayNameV5 : attachmentName,
+  );
   const progressStage = nullable(artifact.progressStage, (entry) => oneOf(
     entry,
     ["generating", "processing", "finalizing"] as const,
@@ -1450,6 +1747,406 @@ export function parseHistoryPageResponseV4(value: unknown): ChatHistoryPageV4 {
   return responseDataV4(value, parseHistoryPageV4);
 }
 
+function parseSafeTextV5(value: unknown, maximumBytes: number): ChatSafeTextV5 {
+  const summary = exactObject(value, ["text", "truncated", "truncationReason"]);
+  if (typeof summary.truncated !== "boolean") throw new ChatContractError();
+  const truncationReason = nullable(
+    summary.truncationReason,
+    (entry) => oneOf(entry, CHAT_TRUNCATION_REASONS_V5),
+  );
+  if (summary.truncated !== (truncationReason !== null)) throw new ChatContractError();
+  return Object.freeze({
+    text: plainText(summary.text, maximumBytes, true),
+    truncated: summary.truncated,
+    truncationReason,
+  });
+}
+
+function parseSourceFactObjectV5(value: unknown): ChatSourceFactV5 {
+  const source = exactObject(value, ["sourceEventId", "sourceSequence", "sourceOccurredAt"]);
+  return sourceFactV4(source);
+}
+
+function parseCommandCwdV5(value: unknown): ChatCommandCwdV5 {
+  const cwd = exactObject(value, ["kind", "segments"]);
+  const kind = oneOf(cwd.kind, ["workspace_root", "workspace_relative", "redacted"] as const);
+  if (!Array.isArray(cwd.segments) || cwd.segments.length > 128) {
+    throw new ChatContractError();
+  }
+  const segments = cwd.segments.map((entry) => {
+    const segment = plainText(entry, 255);
+    const hasUnsafeControl = [...segment].some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 0x1f ||
+        (codePoint >= 0x7f && codePoint <= 0x9f) ||
+        codePoint === 0x061c || codePoint === 0x200e || codePoint === 0x200f ||
+        (codePoint >= 0x202a && codePoint <= 0x202e) ||
+        (codePoint >= 0x2066 && codePoint <= 0x2069);
+    });
+    if (hasUnsafeControl || !SAFE_CWD_SEGMENT_PATTERN.test(segment)) {
+      throw new ChatContractError();
+    }
+    return segment;
+  });
+  const totalBytes = segments.reduce(
+    (total, segment, index) => total + new TextEncoder().encode(segment).length + (index === 0 ? 0 : 1),
+    0,
+  );
+  if (
+    totalBytes > 1024 ||
+    (kind === "workspace_relative" ? segments.length === 0 : segments.length !== 0)
+  ) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({ kind, segments: Object.freeze(segments) });
+}
+
+function parseExecutionErrorV5(
+  value: unknown,
+  allowedCodes: readonly string[],
+): ChatExecutionErrorV5 {
+  const error = exactObject(value, ["code", "summary"]);
+  if (typeof error.code !== "string" || !allowedCodes.includes(error.code)) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    code: error.code as ChatExecutionErrorV5["code"],
+    summary: plainText(error.summary, 4 * 1024, true),
+  });
+}
+
+function parseCommandOutputV5(value: unknown): ChatCommandOutputV5 {
+  const output = exactObject(value, [
+    "retention", "text", "head", "tail", "reason", "truncated", "truncationReason",
+  ]);
+  const retention = oneOf(output.retention, ["complete", "head_tail", "unavailable"] as const);
+  if (typeof output.truncated !== "boolean") throw new ChatContractError();
+  const text = nullable(output.text, (entry) => plainText(entry, 256 * 1024, true));
+  const head = nullable(output.head, (entry) => plainText(entry, 128 * 1024, true));
+  const tail = nullable(output.tail, (entry) => plainText(entry, 128 * 1024, true));
+  const reason = nullable(output.reason, (entry) => oneOf(entry, ["not_available"] as const));
+  const truncationReason = nullable(
+    output.truncationReason,
+    (entry) => oneOf(entry, CHAT_TRUNCATION_REASONS_V5),
+  );
+  const headTailBytes = head === null || tail === null
+    ? 0
+    : new TextEncoder().encode(head).length + new TextEncoder().encode(tail).length;
+  const consistent =
+    (retention === "complete" && text !== null && head === null && tail === null &&
+      reason === null && output.truncated === false && truncationReason === null) ||
+    (retention === "head_tail" && text === null && head !== null && tail !== null &&
+      reason === null && output.truncated === true && truncationReason !== null &&
+      headTailBytes <= 256 * 1024) ||
+    (retention === "unavailable" && text === null && head === null && tail === null &&
+      reason === "not_available" && output.truncated === false && truncationReason === null);
+  if (!consistent) throw new ChatContractError();
+  return Object.freeze({
+    retention,
+    text,
+    head,
+    tail,
+    reason,
+    truncated: output.truncated,
+    truncationReason,
+  });
+}
+
+function parseToolIdentityV5(value: unknown): ChatToolIdentityV5 {
+  const identity = exactObject(value, ["resolution", "serverName", "toolName"]);
+  const resolution = oneOf(identity.resolution, ["known", "unknown"] as const);
+  const serverName = plainText(identity.serverName, 256);
+  const toolName = plainText(identity.toolName, 256);
+  if (resolution === "unknown" && (serverName !== "unknown" || toolName !== "unknown")) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({ resolution, serverName, toolName });
+}
+
+function parseCommandExecutionV5(value: unknown): ChatCommandExecutionV5 {
+  const execution = exactObject(value, [
+    "kind", "status", "startedSource", "lastSource", "commandSummary", "cwd",
+    "liveOutput", "output", "durationMs", "exitCode", "error",
+  ]);
+  if (execution.kind !== "command") throw new ChatContractError();
+  const status = oneOf(
+    execution.status,
+    ["running", "completed", "failed", "declined", "incomplete"] as const,
+  );
+  const liveOutput = nullable(
+    execution.liveOutput,
+    (entry) => parseSafeTextV5(entry, 256 * 1024),
+  );
+  const output = nullable(execution.output, parseCommandOutputV5);
+  const durationMs = nullable(execution.durationMs, (entry) => integer(entry));
+  const exitCode = nullable(
+    execution.exitCode,
+    (entry) => integer(entry, -2_147_483_648, 2_147_483_647),
+  );
+  const error = nullable(
+    execution.error,
+    (entry) => parseExecutionErrorV5(entry, CHAT_COMMAND_ERROR_CODES_V5),
+  );
+  const terminalConsistent = status === "completed"
+    ? output !== null && error === null
+    : status === "failed"
+      ? output !== null && error !== null && error.code !== "command_declined"
+      : status === "declined"
+        ? output !== null && error?.code === "command_declined"
+        : output === null && durationMs === null && exitCode === null && error === null;
+  if (!terminalConsistent) throw new ChatContractError();
+  return Object.freeze({
+    kind: "command",
+    status,
+    startedSource: parseSourceFactObjectV5(execution.startedSource),
+    lastSource: parseSourceFactObjectV5(execution.lastSource),
+    commandSummary: parseSafeTextV5(execution.commandSummary, 4 * 1024),
+    cwd: parseCommandCwdV5(execution.cwd),
+    liveOutput,
+    output,
+    durationMs,
+    exitCode,
+    error,
+  });
+}
+
+function parseToolProgressHistoryV5(value: unknown): ChatToolProgressV5 {
+  const progress = exactObject(value, [
+    "sourceEventId", "sourceSequence", "sourceOccurredAt", "progressIndex", "summary",
+  ]);
+  return Object.freeze({
+    ...sourceFactV4(progress),
+    progressIndex: integer(progress.progressIndex, 0, 31),
+    summary: parseSafeTextV5(progress.summary, 4 * 1024),
+  });
+}
+
+function parseToolExecutionV5(value: unknown): ChatToolExecutionV5 {
+  const execution = exactObject(value, [
+    "kind", "status", "startedSource", "lastSource", "identity", "argumentsSummary",
+    "progress", "durationMs", "resultSummary", "error",
+  ]);
+  if (execution.kind !== "tool" || !Array.isArray(execution.progress) || execution.progress.length > 32) {
+    throw new ChatContractError();
+  }
+  const status = oneOf(
+    execution.status,
+    ["in_progress", "completed", "failed", "declined", "incomplete"] as const,
+  );
+  let progressBytes = 0;
+  const progress = execution.progress.map((entry, index) => {
+    const parsed = parseToolProgressHistoryV5(entry);
+    if (parsed.progressIndex !== index) throw new ChatContractError();
+    progressBytes += new TextEncoder().encode(parsed.summary.text).length;
+    return parsed;
+  });
+  if (progressBytes > 64 * 1024) throw new ChatContractError();
+  const durationMs = nullable(execution.durationMs, (entry) => integer(entry));
+  const resultSummary = nullable(
+    execution.resultSummary,
+    (entry) => parseSafeTextV5(entry, 64 * 1024),
+  );
+  const error = nullable(
+    execution.error,
+    (entry) => parseExecutionErrorV5(entry, CHAT_TOOL_ERROR_CODES_V5),
+  );
+  const terminalConsistent = status === "completed"
+    ? resultSummary !== null && error === null
+    : status === "failed"
+      ? error !== null && error.code !== "tool_declined"
+      : status === "declined"
+        ? resultSummary === null && error?.code === "tool_declined"
+        : durationMs === null && resultSummary === null && error === null;
+  if (!terminalConsistent) throw new ChatContractError();
+  return Object.freeze({
+    kind: "tool",
+    status,
+    startedSource: parseSourceFactObjectV5(execution.startedSource),
+    lastSource: parseSourceFactObjectV5(execution.lastSource),
+    identity: parseToolIdentityV5(execution.identity),
+    argumentsSummary: parseSafeTextV5(execution.argumentsSummary, 8 * 1024),
+    progress: Object.freeze(progress),
+    durationMs,
+    resultSummary,
+    error,
+  });
+}
+
+function parseExecutionV5(value: unknown): ChatExecutionV5 | null {
+  if (value === null) return null;
+  if (!isRecord(value)) throw new ChatContractError();
+  return value.kind === "command"
+    ? parseCommandExecutionV5(value)
+    : value.kind === "tool"
+      ? parseToolExecutionV5(value)
+      : (() => { throw new ChatContractError(); })();
+}
+
+const CHAT_TIMELINE_ITEM_TYPES_V5 = Object.freeze([
+  "agentMessage", "reasoning", "command", "tool", "userMessage", "hookPrompt",
+  "collabAgentToolCall", "subAgentActivity", "webSearch", "imageView", "sleep",
+  "imageGeneration", "enteredReviewMode", "exitedReviewMode", "contextCompaction",
+] as const);
+
+const CHAT_GENERIC_LIFECYCLE_ITEM_TYPES_V5: ReadonlySet<string> = new Set([
+  "agentMessage", "reasoning", "userMessage", "hookPrompt", "collabAgentToolCall",
+  "subAgentActivity", "webSearch", "imageView", "sleep", "imageGeneration",
+  "enteredReviewMode", "exitedReviewMode", "contextCompaction",
+]);
+
+function parseTimelineItemV5(value: unknown): ChatTimelineItemV5 {
+  const item = exactObject(value, [
+    "itemId", "itemOrdinal", "itemType", "phase", "status", "text",
+    "reasoningStatus", "reasoningReasonCode", "reasoningParts", "startedAtMs",
+    "completedAtMs", "sourceEventId", "sourceSequence", "sourceOccurredAt", "execution",
+  ]);
+  const itemType = oneOf(item.itemType, CHAT_TIMELINE_ITEM_TYPES_V5);
+  const phase = parseAgentMessagePhaseV4(item.phase);
+  const status = oneOf(item.status, CHAT_TIMELINE_ITEM_STATUSES_V4);
+  const reasoningStatus = nullable(
+    item.reasoningStatus,
+    (entry) => oneOf(entry, CHAT_REASONING_STATUSES_V4),
+  );
+  const reasoningReasonCode = nullable(
+    item.reasoningReasonCode,
+    (entry) => oneOf(entry, CHAT_REASONING_REASON_CODES_V4),
+  );
+  const reasoningParts = parseReasoningPartsV4(item.reasoningParts);
+  const completedAtMs = nullable(item.completedAtMs, (entry) => integer(entry));
+  const execution = parseExecutionV5(item.execution);
+  const lifecycleConsistent = status === "in_progress"
+    ? completedAtMs === null
+    : completedAtMs !== null;
+  const reasoningConsistent = reasoningStatus === null
+    ? reasoningReasonCode === null
+    : reasoningStatus === "complete"
+      ? reasoningReasonCode === null && reasoningParts.length > 0
+      : reasoningStatus === "incomplete"
+        ? reasoningReasonCode !== null && reasoningParts.length > 0
+        : reasoningReasonCode !== null && reasoningParts.length === 0;
+  const executionLifecycleConsistent = execution === null || (
+    execution.status === "running" || execution.status === "in_progress"
+      ? status === "in_progress"
+      : execution.status === "incomplete"
+        ? status === "incomplete"
+        : status === "completed"
+  );
+  const semanticFieldsConsistent = itemType === "agentMessage"
+    ? phase !== undefined && reasoningStatus === null && reasoningReasonCode === null &&
+      reasoningParts.length === 0 && execution === null
+    : itemType === "reasoning"
+      ? phase === null && reasoningConsistent && execution === null
+      : itemType === "command"
+        ? phase === null && reasoningStatus === null && reasoningReasonCode === null &&
+          reasoningParts.length === 0 && execution?.kind === "command" && item.text === ""
+        : itemType === "tool"
+          ? phase === null && reasoningStatus === null && reasoningReasonCode === null &&
+            reasoningParts.length === 0 && execution?.kind === "tool" && item.text === ""
+          : phase === null && reasoningStatus === null && reasoningReasonCode === null &&
+            reasoningParts.length === 0 && execution === null && item.text === "";
+  if (!lifecycleConsistent || !executionLifecycleConsistent || !semanticFieldsConsistent) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    ...sourceFactV4(item),
+    itemId: itemIdV5(item.itemId),
+    itemOrdinal: integer(item.itemOrdinal, 1, 512),
+    itemType,
+    phase,
+    status,
+    text: plainText(item.text, 1024 * 1024, true),
+    reasoningStatus,
+    reasoningReasonCode,
+    reasoningParts,
+    startedAtMs: integer(item.startedAtMs),
+    completedAtMs,
+    execution,
+  });
+}
+
+function parseHistoryPageV5(value: unknown): ChatHistoryPageV5 {
+  const page = exactObject(value, [
+    "turns", "nextCursor", "sessionNotices", "durableSequenceCut",
+  ]);
+  if (!Array.isArray(page.turns) || page.turns.length > 50 ||
+      !Array.isArray(page.sessionNotices) || page.sessionNotices.length > 64) {
+    throw new ChatContractError();
+  }
+  const turns = page.turns.map((value): ChatHistoryTurnV4 | ChatHistoryTurnV5 => {
+    if (isRecord(value) &&
+        (value.projectionAuthority === "legacy" || value.projectionAuthority === "v4")) {
+      // A v5 response can page across pre-v5 Turns. Keep those Turns on the
+      // existing closed v4 decoder; in particular, execution remains forbidden.
+      return parseHistoryPageV4({
+        turns: [value],
+        nextCursor: null,
+        sessionNotices: [],
+        durableSequenceCut: "0",
+      }).turns[0]!;
+    }
+    const turn = exactObject(value, [
+      "turnId", "status", "terminalAt", "reasoningStatus", "reasoningReasonCode",
+      "messages", "reasoning", "projectionAuthority", "artifacts", "terminalCode",
+      "timelineItems", "plan", "notices",
+    ]);
+    if (!Array.isArray(turn.messages) || !Array.isArray(turn.reasoning) ||
+        !Array.isArray(turn.artifacts) || !Array.isArray(turn.timelineItems) ||
+        !Array.isArray(turn.notices) || turn.reasoning.length > 8 ||
+        turn.artifacts.length > 12 || turn.timelineItems.length > 512 ||
+        turn.notices.length > 64) {
+      throw new ChatContractError();
+    }
+    const artifacts = turn.artifacts.map(parseArtifactV5);
+    if (artifacts.some((artifact, index) => index > 0 && artifacts[index - 1]!.ordinal >= artifact.ordinal)) {
+      throw new ChatContractError();
+    }
+    const timelineItems = turn.timelineItems.map(parseTimelineItemV5);
+    if (timelineItems.some((item, index) => index > 0 && timelineItems[index - 1]!.itemOrdinal >= item.itemOrdinal)) {
+      throw new ChatContractError();
+    }
+    const notices = turn.notices.map(parseTimelineNoticeV4);
+    if (notices.some((notice) => notice.scope !== "turn" || notice.severity !== "error")) {
+      throw new ChatContractError();
+    }
+    const messages = turn.messages.map(parseMessageV2);
+    if (turn.projectionAuthority !== "v5" || messages.some((message) => message.role !== "user") ||
+        turn.reasoning.length !== 0) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      turnId: uuid(turn.turnId),
+      status: stringValue(turn.status, 64),
+      terminalAt: nullable(turn.terminalAt, (entry) => integer(entry)),
+      reasoningStatus: stringValue(turn.reasoningStatus, 64),
+      reasoningReasonCode: nullable(turn.reasoningReasonCode, (entry) => stringValue(entry, 128)),
+      messages: Object.freeze(messages),
+      reasoning: Object.freeze([]),
+      projectionAuthority: "v5",
+      artifacts: Object.freeze(artifacts),
+      terminalCode: nullable(turn.terminalCode, safeCode),
+      timelineItems: Object.freeze(timelineItems),
+      plan: nullable(turn.plan, (entry) => parsePlanSnapshotV4(entry, false)),
+      notices: Object.freeze(notices),
+    });
+  });
+  if (new Set(turns.map((turn) => turn.turnId)).size !== turns.length) throw new ChatContractError();
+  const sessionNotices = page.sessionNotices.map(parseTimelineNoticeV4);
+  if (sessionNotices.some((notice) => notice.scope !== "session" || notice.severity !== "warning")) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    schemaVersion: CHAT_IPC_V5_SCHEMA_VERSION,
+    turns: Object.freeze(turns),
+    nextCursor: nullable(page.nextCursor, cursor),
+    sessionNotices: Object.freeze(sessionNotices),
+    durableSequenceCut: durableSequence(page.durableSequenceCut, true),
+  });
+}
+
+export function parseHistoryPageResponseV5(value: unknown): ChatHistoryPageV5 {
+  return responseDataV5(value, parseHistoryPageV5);
+}
+
 export function parseReasoningResponse(value: unknown): readonly ChatReasoningItem[] {
   return responseData(value, (data) => {
     if (!Array.isArray(data) || data.length > 8) throw new ChatContractError();
@@ -1622,6 +2319,10 @@ export function parseSubscriptionResponseV4(value: unknown): string {
   return responseDataV4(value, (data) => uuid(exactObject(data, ["subscriptionId"]).subscriptionId));
 }
 
+export function parseSubscriptionResponseV5(value: unknown): string {
+  return responseDataV5(value, (data) => uuid(exactObject(data, ["subscriptionId"]).subscriptionId));
+}
+
 export function parseCancelledResponse(value: unknown): boolean {
   return responseData(value, (data) => {
     const body = exactObject(data, ["cancelled"]);
@@ -1658,6 +2359,17 @@ export function parseResyncResponseV4(value: unknown): ChatResyncProjectionV4 {
     return Object.freeze({
       session: parseSession(projection.session),
       history: parseHistoryPageV4(projection.history),
+      cleanup: nullable(projection.cleanup, parseCleanup),
+    });
+  });
+}
+
+export function parseResyncResponseV5(value: unknown): ChatResyncProjectionV5 {
+  return responseDataV5(value, (data) => {
+    const projection = exactObject(data, ["session", "history", "cleanup"]);
+    return Object.freeze({
+      session: parseSession(projection.session),
+      history: parseHistoryPageV5(projection.history),
       cleanup: nullable(projection.cleanup, parseCleanup),
     });
   });
@@ -1730,7 +2442,14 @@ export function parseChatProjectionEvent(value: unknown): ChatProjectionEvent {
   }) as ChatProjectionEvent;
 }
 
-function parseItemLifecyclePayloadV4(value: unknown): ChatItemLifecyclePayloadV4 {
+function itemIdForEvent(value: unknown, v5Lengths: boolean): string {
+  return v5Lengths ? itemIdV5(value) : stringValue(value, 256);
+}
+
+function parseItemLifecyclePayloadV4(
+  value: unknown,
+  v5Lengths = false,
+): ChatItemLifecyclePayloadV4 {
   const payload = exactObject(value, [
     "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
     "itemType", "phase", "text",
@@ -1743,7 +2462,7 @@ function parseItemLifecyclePayloadV4(value: unknown): ChatItemLifecyclePayloadV4
   }
   return Object.freeze({
     ...sourceFactV4(payload),
-    itemId: stringValue(payload.itemId, 256),
+    itemId: itemIdForEvent(payload.itemId, v5Lengths),
     itemOrdinal: integer(payload.itemOrdinal, 1, 512),
     itemType,
     phase,
@@ -1754,6 +2473,7 @@ function parseItemLifecyclePayloadV4(value: unknown): ChatItemLifecyclePayloadV4
 function parseEventPayloadV4(
   kind: ChatEventKindV4,
   value: unknown,
+  v5Lengths = false,
 ): ChatProjectionEventV4["payload"] {
   switch (kind) {
     case "turn_started": {
@@ -1764,7 +2484,7 @@ function parseEventPayloadV4(
       return parsePlanSnapshotV4(value, true);
     case "item_started":
     case "item_completed":
-      return parseItemLifecyclePayloadV4(value);
+      return parseItemLifecyclePayloadV4(value, v5Lengths);
     case "agent_message_append": {
       const payload = exactObject(value, [
         "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
@@ -1772,7 +2492,7 @@ function parseEventPayloadV4(
       ]);
       return Object.freeze({
         ...sourceFactV4(payload),
-        itemId: stringValue(payload.itemId, 256),
+        itemId: itemIdForEvent(payload.itemId, v5Lengths),
         itemOrdinal: integer(payload.itemOrdinal, 1, 512),
         phase: parseAgentMessagePhaseV4(payload.phase),
         text: plainText(payload.text, 1024 * 1024),
@@ -1785,7 +2505,7 @@ function parseEventPayloadV4(
       ]);
       return Object.freeze({
         ...sourceFactV4(payload),
-        itemId: stringValue(payload.itemId, 256),
+        itemId: itemIdForEvent(payload.itemId, v5Lengths),
         itemOrdinal: integer(payload.itemOrdinal, 1, 512),
         contentIndex: integer(payload.contentIndex, 0, 7),
         text: plainText(payload.text, 16 * 1024),
@@ -1809,7 +2529,7 @@ function parseEventPayloadV4(
       if (!consistent) throw new ChatContractError();
       return Object.freeze({
         ...sourceFactV4(payload),
-        itemId: stringValue(payload.itemId, 256),
+        itemId: itemIdForEvent(payload.itemId, v5Lengths),
         itemOrdinal: integer(payload.itemOrdinal, 1, 512),
         status,
         reasonCode,
@@ -1859,7 +2579,10 @@ function parseEventPayloadV4(
   }
 }
 
-export function parseChatProjectionEventV4(value: unknown): ChatProjectionEventV4 {
+function parseChatProjectionEventV4Internal(
+  value: unknown,
+  v5Lengths: boolean,
+): ChatProjectionEventV4 {
   const event = exactObject(
     value,
     ["schemaVersion", "subscriptionId", "contextId", "sessionId", "projectionSequence", "eventId", "kind", "payload"],
@@ -1878,7 +2601,7 @@ export function parseChatProjectionEventV4(value: unknown): ChatProjectionEventV
     "turn_terminal", "resync_required", "context_invalidated",
   ] as const);
   const turnId = event.turnId === undefined ? undefined : uuid(event.turnId);
-  const payload = parseEventPayloadV4(kind, event.payload);
+  const payload = parseEventPayloadV4(kind, event.payload, v5Lengths);
   const noticeScope = kind === "notice"
     ? (payload as Omit<ChatTimelineNoticeV4, "observedAtMs">).scope
     : null;
@@ -1908,4 +2631,214 @@ export function parseChatProjectionEventV4(value: unknown): ChatProjectionEventV
     kind,
     payload,
   }) as ChatProjectionEventV4;
+}
+
+export function parseChatProjectionEventV4(value: unknown): ChatProjectionEventV4 {
+  return parseChatProjectionEventV4Internal(value, false);
+}
+
+function executionItemFieldsV5(value: Record<string, unknown>) {
+  return {
+    ...sourceFactV4(value),
+    itemId: itemIdV5(value.itemId),
+    itemOrdinal: integer(value.itemOrdinal, 1, 512),
+  } as const;
+}
+
+function parseExecutionEventPayloadV5(
+  kind: Exclude<ChatEventKindV5, ChatEventKindV4>,
+  value: unknown,
+): ChatExecutionProjectionEventV5["payload"] {
+  switch (kind) {
+    case "command_started": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "commandSummary", "cwd",
+      ]);
+      if (payload.status !== "running") throw new ChatContractError();
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        status: "running",
+        commandSummary: parseSafeTextV5(payload.commandSummary, 4 * 1024),
+        cwd: parseCommandCwdV5(payload.cwd),
+      });
+    }
+    case "command_output_append": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "text", "truncated", "truncationReason",
+      ]);
+      if (typeof payload.truncated !== "boolean") throw new ChatContractError();
+      const truncationReason = nullable(
+        payload.truncationReason,
+        (entry) => oneOf(entry, CHAT_TRUNCATION_REASONS_V5),
+      );
+      if (payload.truncated !== (truncationReason !== null)) throw new ChatContractError();
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        text: plainText(payload.text, 16 * 1024),
+        truncated: payload.truncated,
+        truncationReason,
+      });
+    }
+    case "command_completed": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "commandSummary", "cwd", "durationMs", "exitCode", "output", "error",
+      ]);
+      const status = oneOf(payload.status, ["completed", "failed", "declined"] as const);
+      const error = nullable(
+        payload.error,
+        (entry) => parseExecutionErrorV5(entry, CHAT_COMMAND_ERROR_CODES_V5),
+      );
+      if (
+        (status === "completed" && error !== null) ||
+        (status === "failed" && (error === null || error.code === "command_declined")) ||
+        (status === "declined" && error?.code !== "command_declined")
+      ) {
+        throw new ChatContractError();
+      }
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        status,
+        commandSummary: parseSafeTextV5(payload.commandSummary, 4 * 1024),
+        cwd: parseCommandCwdV5(payload.cwd),
+        durationMs: nullable(payload.durationMs, (entry) => integer(entry)),
+        exitCode: nullable(
+          payload.exitCode,
+          (entry) => integer(entry, -2_147_483_648, 2_147_483_647),
+        ),
+        output: parseCommandOutputV5(payload.output),
+        error,
+      });
+    }
+    case "tool_started": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "identity", "argumentsSummary",
+      ]);
+      if (payload.status !== "in_progress") throw new ChatContractError();
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        status: "in_progress",
+        identity: parseToolIdentityV5(payload.identity),
+        argumentsSummary: parseSafeTextV5(payload.argumentsSummary, 8 * 1024),
+      });
+    }
+    case "tool_progress": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "identity", "progressIndex", "summary",
+      ]);
+      if (payload.status !== "in_progress") throw new ChatContractError();
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        status: "in_progress",
+        identity: parseToolIdentityV5(payload.identity),
+        progressIndex: integer(payload.progressIndex, 0, 31),
+        summary: parseSafeTextV5(payload.summary, 4 * 1024),
+      });
+    }
+    case "tool_completed": {
+      const payload = exactObject(value, [
+        "sourceEventId", "sourceSequence", "sourceOccurredAt", "itemId", "itemOrdinal",
+        "status", "identity", "argumentsSummary", "durationMs", "resultSummary", "error",
+      ]);
+      const status = oneOf(payload.status, ["completed", "failed", "declined"] as const);
+      const resultSummary = nullable(
+        payload.resultSummary,
+        (entry) => parseSafeTextV5(entry, 64 * 1024),
+      );
+      const error = nullable(
+        payload.error,
+        (entry) => parseExecutionErrorV5(entry, CHAT_TOOL_ERROR_CODES_V5),
+      );
+      if (
+        (status === "completed" && (resultSummary === null || error !== null)) ||
+        (status === "failed" && (error === null || error.code === "tool_declined")) ||
+        (status === "declined" && (resultSummary !== null || error?.code !== "tool_declined"))
+      ) {
+        throw new ChatContractError();
+      }
+      return Object.freeze({
+        ...executionItemFieldsV5(payload),
+        status,
+        identity: parseToolIdentityV5(payload.identity),
+        argumentsSummary: parseSafeTextV5(payload.argumentsSummary, 8 * 1024),
+        durationMs: nullable(payload.durationMs, (entry) => integer(entry)),
+        resultSummary,
+        error,
+      });
+    }
+  }
+}
+
+export function parseChatProjectionEventV5(value: unknown): ChatProjectionEventV5 {
+  if (!isRecord(value) || value.schemaVersion !== CHAT_IPC_V5_SCHEMA_VERSION) {
+    throw new ChatContractError();
+  }
+  const hasSourceSchemaVersion = Object.prototype.hasOwnProperty.call(
+    value,
+    "sourceSchemaVersion",
+  );
+  if (hasSourceSchemaVersion && value.sourceSchemaVersion !== 4) {
+    throw new ChatContractError();
+  }
+  const kind = value.kind;
+  const executionKinds = [
+    "command_started", "command_output_append", "command_completed",
+    "tool_started", "tool_progress", "tool_completed",
+  ] as const;
+  if (typeof kind !== "string" || !executionKinds.includes(kind as typeof executionKinds[number])) {
+    const inheritedWire = Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== "sourceSchemaVersion"),
+    );
+    const inherited = parseChatProjectionEventV4Internal(
+      { ...inheritedWire, schemaVersion: 4 },
+      !hasSourceSchemaVersion,
+    );
+    const controlEvent = inherited.kind === "resync_required" ||
+      inherited.kind === "context_invalidated";
+    if (hasSourceSchemaVersion && controlEvent) {
+      throw new ChatContractError();
+    }
+    if (!hasSourceSchemaVersion &&
+        (inherited.kind === "item_started" || inherited.kind === "item_completed") &&
+        !CHAT_GENERIC_LIFECYCLE_ITEM_TYPES_V5.has(inherited.payload.itemType)) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      ...inherited,
+      schemaVersion: 5,
+      ...(hasSourceSchemaVersion ? { sourceSchemaVersion: 4 as const } : {}),
+    }) as ChatProjectionEventV5;
+  }
+
+  if (hasSourceSchemaVersion) throw new ChatContractError();
+
+  const event = exactObject(
+    value,
+    [
+      "schemaVersion", "subscriptionId", "contextId", "sessionId", "turnId",
+      "projectionSequence", "eventId", "durableSequence", "kind", "payload",
+    ],
+  );
+  if (typeof event.projectionSequence !== "string" ||
+      !SEQUENCE_PATTERN.test(event.projectionSequence) ||
+      BigInt(event.projectionSequence) > MAX_SAFE_EVENT_SEQUENCE) {
+    throw new ChatContractError();
+  }
+  const executionKind = oneOf(event.kind, executionKinds);
+  return Object.freeze({
+    schemaVersion: 5,
+    subscriptionId: uuid(event.subscriptionId),
+    contextId: uuid(event.contextId),
+    sessionId: uuid(event.sessionId),
+    turnId: uuid(event.turnId),
+    projectionSequence: event.projectionSequence,
+    eventId: uuid(event.eventId),
+    durableSequence: durableSequence(event.durableSequence, false),
+    kind: executionKind,
+    payload: parseExecutionEventPayloadV5(executionKind, event.payload),
+  }) as ChatProjectionEventV5;
 }

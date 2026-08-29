@@ -30,6 +30,7 @@ function item(
     phase: "complete",
     assistantPhase: "final_answer",
     reasoning: null,
+    execution: null,
     contentMode: "rich",
     collapsible: false,
     defaultExpanded: true,
@@ -48,6 +49,8 @@ describe("ChatTimelineItemShell", () => {
         label: "模型回答",
         statusLabel: "已完成",
         icon: "assistant",
+        statusIcon: "check",
+        statusTone: "success",
       },
       slots: {
         default: () => h("p", { class: "fixture-body" }, "最终回答"),
@@ -63,6 +66,8 @@ describe("ChatTimelineItemShell", () => {
     expect(article.attributes("aria-busy")).toBe("false");
     expect(wrapper.get(`#${article.attributes("aria-labelledby")}`).text()).toBe("模型回答");
     expect(wrapper.get(`#${article.attributes("aria-describedby")}`).text()).toBe("已完成");
+    expect(wrapper.get(".chat-timeline-item-shell__status svg").attributes("aria-hidden"))
+      .toBe("true");
     expect(wrapper.get("[role='group']").attributes("aria-label")).toBe("模型回答操作");
     expect(wrapper.emitted("disclosure-change")).toBeUndefined();
   });

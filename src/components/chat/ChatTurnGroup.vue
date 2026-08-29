@@ -10,7 +10,9 @@ import type {
 } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatCommandItem from "./ChatCommandItem.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatToolItem from "./ChatToolItem.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
@@ -59,6 +61,10 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
       return "生成内容";
     case "reasoning":
       return "过程记录";
+    case "command":
+      return "命令执行";
+    case "tool":
+      return "工具调用";
     case "unknown":
     default:
       return "未知内容";
@@ -79,6 +85,10 @@ function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
       return "file";
     case "reasoning":
       return "pending";
+    case "command":
+      return "workspace";
+    case "tool":
+      return "skillOperations";
     case "unknown":
     default:
       return "warning";
@@ -274,7 +284,22 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
         class="chat-turn-group__item"
         :class="`chat-turn-group__item--${item.presentation}`"
       >
+        <ChatCommandItem
+          v-if="item.presentation === 'command' && item.execution?.kind === 'command'"
+          :item="item"
+          :execution="item.execution"
+          @disclosure-change="forwardDisclosure"
+        />
+
+        <ChatToolItem
+          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool'"
+          :item="item"
+          :execution="item.execution"
+          @disclosure-change="forwardDisclosure"
+        />
+
         <ChatTimelineItemShell
+          v-else
           :item="item"
           :label="itemLabel(item)"
           :status-label="itemStatusLabel(item)"
@@ -283,9 +308,13 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
           :default-expanded="item.defaultExpanded"
           @disclosure-change="forwardDisclosure"
         >
-          <div v-if="item.presentation === 'unknown'" class="chat-turn-group__unknown" role="note">
-            <strong>此内容类型暂不支持</strong>
-            <code>unsupported_content</code>
+          <div
+            v-if="item.presentation === 'unknown' || item.presentation === 'command' || item.presentation === 'tool'"
+            class="chat-turn-group__unknown"
+            role="note"
+          >
+            <strong>{{ item.presentation === "unknown" ? "此内容类型暂不支持" : "此执行状态暂不可用" }}</strong>
+            <code>{{ item.presentation === "unknown" ? "unsupported_content" : "unsupported_execution" }}</code>
           </div>
 
           <p
@@ -305,7 +334,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
           </p>
 
           <ChatSafeContent
-            v-if="item.presentation !== 'unknown' && item.contentBlocks.length > 0"
+            v-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
             :blocks="item.contentBlocks"
             :mode="item.contentMode"
           >
@@ -335,7 +364,10 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
             </template>
           </ChatSafeContent>
 
-          <template v-if="item.copyPolicy === 'text_and_code' && slots['item-actions']" #actions>
+          <template
+            v-if="item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
+            #actions
+          >
             <slot name="item-actions" :item="item" />
           </template>
         </ChatTimelineItemShell>

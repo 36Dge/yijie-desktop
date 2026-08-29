@@ -848,6 +848,7 @@ pub fn decode_artifact_event_v3(
     }
     decode_artifact_event_envelope_v3(
         &HostArtifactEventV3 {
+            schema_version: 3,
             cursor: super::host_domain::HostEventCursor {
                 stream_id: wire.stream_id,
                 sequence: wire.sequence,
@@ -875,7 +876,8 @@ pub fn decode_artifact_event_envelope_v3(
     local_session_id: Uuid,
     local_turn_id: Uuid,
 ) -> Result<ArtifactEventV3, ChatError> {
-    if wire.event_id.is_nil()
+    if !matches!(wire.schema_version, 3..=5)
+        || wire.event_id.is_nil()
         || wire.cursor.stream_id.is_nil()
         || wire.cursor.sequence == 0
         || wire.task_id.is_nil()
@@ -899,6 +901,13 @@ pub fn decode_artifact_event_envelope_v3(
             let payload: WireArtifactStarted = serde_json::from_value(wire.payload.clone())
                 .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "in_progress" {
+                return Err(ChatError::InvalidInput);
+            }
+            if payload
+                .display_name
+                .as_deref()
+                .is_some_and(|value| !valid_wire_safe_name(value, wire.schema_version))
+            {
                 return Err(ChatError::InvalidInput);
             }
             let identity = ArtifactIdentity {
@@ -956,6 +965,13 @@ pub fn decode_artifact_event_envelope_v3(
             if payload.status != "ready" {
                 return Err(ChatError::InvalidInput);
             }
+            if payload
+                .display_name
+                .as_deref()
+                .is_some_and(|value| !valid_wire_safe_name(value, wire.schema_version))
+            {
+                return Err(ChatError::InvalidInput);
+            }
             let manifest = ArtifactManifest {
                 artifact_id: payload.artifact_id,
                 agent_session_id: wire.agent_session_id,
@@ -978,10 +994,13 @@ pub fn decode_artifact_event_envelope_v3(
             let payload: WireArtifactFailed = serde_json::from_value(wire.payload.clone())
                 .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "failed"
-                || payload
-                    .message
-                    .as_deref()
-                    .is_some_and(|value| !safe_wire_context(value, 512))
+                || payload.message.as_deref().is_some_and(|value| {
+                    if wire.schema_version == 5 {
+                        !safe_wire_context_chars_bytes(value, 512, 2_048)
+                    } else {
+                        !safe_wire_context(value, 512)
+                    }
+                })
             {
                 return Err(ChatError::InvalidInput);
             }
@@ -3199,7 +3218,8 @@ fn media_type_matches(kind: ArtifactKind, value: &str) -> bool {
 
 fn valid_safe_name(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 255
+        && value.chars().count() <= 255
+        && value.len() <= 1_020
         && value.trim() == value
         && value != "."
         && value != ".."
@@ -3207,6 +3227,15 @@ fn valid_safe_name(value: &str) -> bool {
             .chars()
             .any(|character| character.is_control() || matches!(character, '/' | '\\'))
         && value.nfc().collect::<String>() == value
+}
+
+fn valid_wire_safe_name(value: &str, schema_version: u8) -> bool {
+    valid_safe_name(value)
+        && if schema_version == 5 {
+            value.chars().count() <= 255 && value.len() <= 1_020
+        } else {
+            value.len() <= 255
+        }
 }
 
 fn decode_sha256(value: &str) -> Option<[u8; 32]> {
@@ -3240,6 +3269,10 @@ fn safe_wire_context(value: &str, maximum: usize) -> bool {
         && !value.contains('\0')
         && !value.contains('\r')
         && !value.contains('\n')
+}
+
+fn safe_wire_context_chars_bytes(value: &str, max_chars: usize, max_bytes: usize) -> bool {
+    value.chars().count() <= max_chars && safe_wire_context(value, max_bytes)
 }
 
 pub(crate) fn valid_sha256(value: &str) -> bool {
@@ -3715,6 +3748,110 @@ mod tests {
             ),
             Err(ChatError::InvalidInput)
         );
+    }
+
+    #[test]
+    fn feat136_v5_artifact_text_limits_count_chars_and_keep_v4_wire_bounds() {
+        let agent_session_id = Uuid::now_v7();
+        let runtime_turn_id = Uuid::now_v7();
+        let local_session_id = Uuid::now_v7();
+        let local_turn_id = Uuid::now_v7();
+        let artifact_id = Uuid::now_v7();
+        let mut wire = HostArtifactEventV3 {
+            schema_version: 5,
+            cursor: super::super::host_domain::HostEventCursor::new(Uuid::now_v7(), 1).unwrap(),
+            event_type: "item.artifact.started".to_owned(),
+            event_id: Uuid::now_v7(),
+            task_id: Uuid::now_v7(),
+            agent_session_id,
+            codex_thread_id: Uuid::now_v7(),
+            turn_id: runtime_turn_id,
+            occurred_at: "2026-08-29T00:00:00Z".to_owned(),
+            payload: serde_json::json!({
+                "artifact_id": artifact_id,
+                "kind": "image",
+                "provenance": "synthetic",
+                "status": "in_progress",
+                "ordinal": 0,
+                "display_name": "图".repeat(255)
+            }),
+        };
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_ok());
+
+        wire.schema_version = 4;
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_err());
+        wire.schema_version = 5;
+        wire.payload["display_name"] = serde_json::json!("图".repeat(256));
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_err());
+        wire.payload["display_name"] = serde_json::json!(".");
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_err());
+
+        wire.event_type = "item.artifact.failed".to_owned();
+        wire.payload = serde_json::json!({
+            "artifact_id": artifact_id,
+            "kind": "image",
+            "provenance": "synthetic",
+            "status": "failed",
+            "ordinal": 0,
+            "error_code": "generation_failed",
+            "retryable": false,
+            "message": "错".repeat(512)
+        });
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_ok());
+        wire.schema_version = 4;
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_err());
+        wire.schema_version = 5;
+        wire.payload["message"] = serde_json::json!("错".repeat(513));
+        assert!(decode_artifact_event_envelope_v3(
+            &wire,
+            agent_session_id,
+            runtime_turn_id,
+            local_session_id,
+            local_turn_id,
+        )
+        .is_err());
     }
 
     #[test]

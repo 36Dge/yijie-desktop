@@ -3,17 +3,22 @@ import type {
   ChatAttachment,
   ChatHistoryPage,
   ChatHistoryPageV4,
+  ChatHistoryPageV5,
   ChatHistoryTurn,
   ChatHistoryTurnV4,
+  ChatHistoryTurnV5,
   ChatMessage,
   ChatMessageContentBlock,
   ChatProjectionEvent,
   ChatProjectionEventV4,
+  ChatProjectionEventV5,
   ChatTimelineItemV4,
+  ChatTimelineItemV5,
 } from "../domain/chat-ipc";
 import type {
   ConversationAgentMessagePhase,
   ConversationContentBlock,
+  ConversationExecution,
   ConversationEvent,
   ConversationItemSnapshot,
   ConversationSnapshot,
@@ -336,6 +341,7 @@ export function historyPageV4ToConversationSnapshot(
     turn.status === "queued" || turn.status === "in_progress" || turn.status === "waiting_approval"
   );
   return Object.freeze({
+    schemaVersion: 3,
     threads: Object.freeze([Object.freeze({
       threadId,
       status: hasActiveTurn ? "active" : "ready",
@@ -349,11 +355,155 @@ export function historyPageV4ToConversationSnapshot(
   });
 }
 
+function itemKindV5(itemType: ChatTimelineItemV5["itemType"]): ConversationItemSnapshot["kind"] {
+  if (itemType === "agentMessage") return "assistant_message";
+  if (itemType === "reasoning") return "reasoning";
+  if (itemType === "command") return "command";
+  if (itemType === "tool") return "tool";
+  return "unknown";
+}
+
+function executionV5(item: ChatTimelineItemV5): ConversationExecution | null {
+  const execution = item.execution;
+  if (execution === null) return null;
+  if (execution.kind === "command") {
+    return Object.freeze({
+      ...execution,
+      startedSource: Object.freeze({ ...execution.startedSource }),
+      lastSource: Object.freeze({ ...execution.lastSource }),
+      commandSummary: Object.freeze({ ...execution.commandSummary }),
+      cwd: Object.freeze({
+        ...execution.cwd,
+        segments: Object.freeze([...execution.cwd.segments]),
+      }),
+      liveOutput: execution.liveOutput === null
+        ? null
+        : Object.freeze({ ...execution.liveOutput }),
+      output: execution.output === null ? null : Object.freeze({ ...execution.output }),
+      error: execution.error === null ? null : Object.freeze({ ...execution.error }),
+    });
+  }
+  return Object.freeze({
+    ...execution,
+    startedSource: Object.freeze({ ...execution.startedSource }),
+    lastSource: Object.freeze({ ...execution.lastSource }),
+    identity: Object.freeze({ ...execution.identity }),
+    argumentsSummary: Object.freeze({ ...execution.argumentsSummary }),
+    progress: Object.freeze(execution.progress.map((progress) => Object.freeze({
+      ...progress,
+      summary: Object.freeze({ ...progress.summary }),
+    }))),
+    resultSummary: execution.resultSummary === null
+      ? null
+      : Object.freeze({ ...execution.resultSummary }),
+    error: execution.error === null ? null : Object.freeze({ ...execution.error }),
+  });
+}
+
+function timelineItemV5(
+  threadId: string,
+  turnId: string,
+  item: ChatTimelineItemV5,
+): ConversationItemSnapshot {
+  const kind = itemKindV5(item.itemType);
+  const contentBlocks = item.itemType === "agentMessage" || item.itemType === "reasoning"
+    ? timelineItemBlocksV4(item)
+    : kind === "unknown"
+      ? Object.freeze([{ blockIndex: 0, type: "unknown" as const, code: "unsupported_content" as const }])
+      : Object.freeze([]);
+  return Object.freeze({
+    threadId,
+    turnId,
+    itemId: item.itemId,
+    ordinal: item.itemOrdinal,
+    kind,
+    status: itemStatusV4(item.status),
+    agentMessagePhase: assistantPhaseV4(item.itemType, item.phase),
+    reasoning: kind === "reasoning"
+      ? Object.freeze({
+          status: item.reasoningStatus ?? (
+            item.status === "in_progress" ? "in_progress" : "unknown"
+          ),
+          reasonCode: conversationReasoningReasonCode(item.reasoningReasonCode),
+        })
+      : null,
+    execution: executionV5(item),
+    contentBlocks,
+    reconciliation: item.status === "completed" || item.status === "incomplete"
+      ? "matched"
+      : "not_applicable",
+  });
+}
+
+function historyItemsV5(
+  threadId: string,
+  turn: ChatHistoryTurnV4 | ChatHistoryTurnV5,
+): readonly ConversationItemSnapshot[] {
+  if (turn.projectionAuthority !== "v5") return historyItemsV4(threadId, turn);
+  const items = [
+    ...messageItems(turn, "user"),
+    ...turn.timelineItems.map((item) => timelineItemV5(threadId, turn.turnId, item)),
+    ...turn.artifacts.map((artifact) => artifactItem(turn, artifact)),
+  ];
+  return Object.freeze(items.map((item) => Object.freeze({ ...item, threadId })));
+}
+
+export function historyPageV5ToConversationSnapshot(
+  threadId: string,
+  page: ChatHistoryPageV5,
+): ConversationSnapshot {
+  const orderedTurns = [...page.turns]
+    .sort((left, right) => left.turnId.localeCompare(right.turnId));
+  const turns: ConversationTurnSnapshot[] = orderedTurns.map((turn, ordinal) => Object.freeze({
+    threadId,
+    turnId: turn.turnId,
+    ordinal,
+    status: turnStatus(turn.status),
+    terminalStatus: terminalStatus(turn.status),
+    terminalCode: turn.terminalCode,
+    plan: turn.plan === null || turn.plan.steps.length === 0
+      ? null
+      : Object.freeze({
+          explanation: turn.plan.explanation,
+          steps: Object.freeze(turn.plan.steps.map((step) => Object.freeze({
+            ordinal: step.ordinal,
+            text: step.step,
+            status: step.status,
+          }))),
+        }),
+    notices: Object.freeze(turn.notices.map((notice) => Object.freeze({
+      severity: notice.severity,
+      code: notice.severity === "error" ? "conversation_error" : "conversation_warning",
+    }))),
+  }));
+  const hasActiveTurn = turns.some((turn) =>
+    turn.status === "queued" || turn.status === "in_progress" || turn.status === "waiting_approval"
+  );
+  return Object.freeze({
+    schemaVersion: 3,
+    threads: Object.freeze([Object.freeze({
+      threadId,
+      status: hasActiveTurn ? "active" : "ready",
+      notices: Object.freeze(page.sessionNotices.map(() => Object.freeze({
+        severity: "warning" as const,
+        code: "conversation_warning" as const,
+      }))),
+    })]),
+    turns: Object.freeze(turns),
+    items: Object.freeze(orderedTurns.flatMap((turn) => historyItemsV5(threadId, turn))),
+  });
+}
+
 export function historyPageToConversationSnapshot(
   threadId: string,
-  page: ChatHistoryPage | ChatHistoryPageV4,
+  page: ChatHistoryPage | ChatHistoryPageV4 | ChatHistoryPageV5,
 ): ConversationSnapshot {
-  if ("sessionNotices" in page) return historyPageV4ToConversationSnapshot(threadId, page);
+  if ("sessionNotices" in page) {
+    if ("schemaVersion" in page && page.schemaVersion === 5) {
+      return historyPageV5ToConversationSnapshot(threadId, page as ChatHistoryPageV5);
+    }
+    return historyPageV4ToConversationSnapshot(threadId, page as ChatHistoryPageV4);
+  }
   const orderedTurns = [...page.turns].sort((left, right) => left.turnId.localeCompare(right.turnId));
   const turns: ConversationTurnSnapshot[] = orderedTurns.map((turn, ordinal) => Object.freeze({
     threadId,
@@ -366,6 +516,7 @@ export function historyPageToConversationSnapshot(
     turn.status === "queued" || turn.status === "in_progress" || turn.status === "waiting_approval"
   );
   return Object.freeze({
+    schemaVersion: 3,
     threads: Object.freeze([Object.freeze({
       threadId,
       status: hasActiveTurn ? "active" : "ready",
@@ -375,7 +526,7 @@ export function historyPageToConversationSnapshot(
   });
 }
 
-function eventCursor(event: ChatProjectionEvent | ChatProjectionEventV4) {
+function eventCursor(event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5) {
   return {
     eventId: event.eventId,
     streamId: event.subscriptionId,
@@ -384,7 +535,10 @@ function eventCursor(event: ChatProjectionEvent | ChatProjectionEventV4) {
   } as const;
 }
 
-function domainCursor(event: ChatProjectionEvent | ChatProjectionEventV4, turnId: string) {
+function domainCursor(
+  event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5,
+  turnId: string,
+) {
   return {
     ...eventCursor(event),
     turnId,
@@ -550,9 +704,83 @@ function projectionEventV4ToConversation(
   }
 }
 
-export function projectionEventToConversation(
-  event: ChatProjectionEvent | ChatProjectionEventV4,
+function projectionEventV5ToConversation(
+  event: ChatProjectionEventV5,
 ): ConversationProjectionAdaptation {
+  const cursor = domainCursor(event, event.turnId ?? "");
+  switch (event.kind) {
+    case "command_started":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "command.started",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    case "command_output_append":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "command.output.delta",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    case "command_completed":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "command.completed",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    case "tool_started":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "tool.started",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    case "tool_progress":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "tool.progress",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    case "tool_completed":
+      return Object.freeze({
+        kind: "domain_event",
+        event: Object.freeze({
+          ...cursor,
+          ...event.payload,
+          kind: "tool.completed",
+          ordinal: event.payload.itemOrdinal,
+        }),
+      });
+    default:
+      return projectionEventV4ToConversation(Object.freeze({
+        ...event,
+        schemaVersion: 4,
+      }) as ChatProjectionEventV4);
+  }
+}
+
+export function projectionEventToConversation(
+  event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5,
+): ConversationProjectionAdaptation {
+  if (event.schemaVersion === 5) return projectionEventV5ToConversation(event);
   if (event.schemaVersion === 4) return projectionEventV4ToConversation(event);
   if (event.kind === "context_invalidated") return Object.freeze({ kind: "context_invalidated" });
   if (event.kind === "cleanup_state") {

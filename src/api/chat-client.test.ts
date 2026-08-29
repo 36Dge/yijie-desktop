@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createChatClient, type ChatClientTransport } from "./chat-client";
 import {
   CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
+  CHAT_EVENT_CHANNEL,
   CHAT_NEW_DRAFT_TARGET,
   ChatClientError,
 } from "../domain/chat-ipc";
@@ -17,6 +18,82 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it("negotiates v5 through the existing private commands without widening the envelope", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 5,
+      requestId: REQUEST_ID,
+      data: {
+        turns: [],
+        nextCursor: null,
+        sessionNotices: [],
+        durableSequenceCut: "0",
+      },
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    await client.loadHistoryV5(CONTEXT_ID, SESSION_ID, undefined, 20);
+
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_load_history_v3", {
+      request: {
+        schemaVersion: 5,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { sessionId: SESSION_ID, limit: 20 },
+      },
+    });
+  });
+
+  it("delivers only parsed v5 events and requests scoped recovery for an unknown wire kind", async () => {
+    let listener!: (payload: unknown) => void;
+    const handler = vi.fn();
+    const invalid = vi.fn();
+    const listen = vi.fn(async (_channel: string, callback: (payload: unknown) => void) => {
+      listener = callback;
+      return () => undefined;
+    });
+    const client = createChatClient({ invoke: async () => undefined, listen });
+    await client.onEventV5(handler, invalid);
+
+    const base = {
+      schemaVersion: 5,
+      subscriptionId: SUBSCRIPTION_ID,
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      turnId: "019c1a00-0000-7000-8000-000000000006",
+      projectionSequence: "1",
+      eventId: "019c1a00-0000-7000-8000-000000000007",
+      durableSequence: "1",
+    };
+    listener({
+      ...base,
+      kind: "command_started",
+      payload: {
+        sourceEventId: "019c1a00-0000-7000-8000-000000000008",
+        sourceSequence: "1",
+        sourceOccurredAt: "2026-08-29T08:00:00Z",
+        itemId: "command-1",
+        itemOrdinal: 1,
+        status: "running",
+        commandSummary: { text: "Inspect repository status", truncated: false, truncationReason: null },
+        cwd: { kind: "workspace_root", segments: [] },
+      },
+    });
+    listener({ ...base, kind: "future.execution", payload: {} });
+
+    expect(listen).toHaveBeenCalledWith(CHAT_EVENT_CHANNEL, expect.any(Function));
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+      schemaVersion: 5,
+      kind: "command_started",
+    }));
+    expect(invalid).toHaveBeenCalledWith({
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+    });
+  });
+
   it("loads Artifact history through only the closed v3 command and envelope", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
     const nativeInvoke = vi.fn(async () => ({

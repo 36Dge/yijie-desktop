@@ -18,6 +18,7 @@ function item(
     phase: "complete",
     assistantPhase: "final_answer",
     reasoning: null,
+    execution: null,
     contentMode: "rich",
     collapsible: false,
     defaultExpanded: true,

@@ -304,8 +304,8 @@ describe("selectConversationTimeline", () => {
       ["assistant_message", "process"],
       ["reasoning", "process"],
       ["artifact", "assistant"],
-      ["unknown", "system"],
-      ["unknown", "system"],
+      ["command", "process"],
+      ["tool", "process"],
       ["unknown", "system"],
       ["unknown", "system"],
     ];
@@ -338,7 +338,7 @@ describe("selectConversationTimeline", () => {
     const items = selectConversationTimeline(withKinds, THREAD_ID)!.turns[0]!.items;
 
     expect(items.map((item) => [item.kind, item.role])).toEqual(expected);
-    expect(items.slice(4).every((item) =>
+    expect(items.slice(6).every((item) =>
       item.contentBlocks.length === 1 && item.contentBlocks[0]?.type === "unknown"
     )).toBe(true);
 

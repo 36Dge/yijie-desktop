@@ -1,0 +1,9 @@
+{
+  "contractCommit": "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+  "contractVersion": "v0.7.0",
+  "schemaVersion": 5,
+  "schemaSha256": "2f773dd6dc60bc7dc01bcdb434447e945e0a98317534498f54325fcdabb27008",
+  "ordinaryFixtureCount": 11,
+  "ordinaryFixtureTreeObjectId": "b69a2d9d1f7a8b175c818282ae0c6c9c5ace1bec",
+  "ordinaryFixtureSnapshotSha256": "9ffb4ae88c8a585d6de33b6f93342f0f95f83f9cec9852a212e0b8b47d13804d"
+}

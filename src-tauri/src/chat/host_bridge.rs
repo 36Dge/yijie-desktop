@@ -621,7 +621,7 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=4) {
+        if !matches!(schema_version, 2..=5) {
             return Err(protocol_error());
         }
         let mut request = self
@@ -661,7 +661,7 @@ impl HostBridge {
         Ok(HostEventStream {
             response,
             decoder: SseDecoder::new(stream_id, last_sequence, schema_version),
-            idle_timeout: (schema_version == 4).then_some(EVENT_STREAM_IDLE_TIMEOUT),
+            idle_timeout: (schema_version >= 4).then_some(EVENT_STREAM_IDLE_TIMEOUT),
             finished: false,
         })
     }
@@ -688,6 +688,14 @@ impl HostBridge {
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
         self.open_event_stream(session_id, cursor, 4).await
+    }
+
+    pub async fn open_event_stream_v5(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 5).await
     }
 
     pub(crate) async fn list_managed_skills(&self) -> Result<HostSkillSnapshot, HostBridgeError> {

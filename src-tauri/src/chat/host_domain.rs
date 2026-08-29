@@ -8,11 +8,21 @@ use uuid::Uuid;
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
 const MAX_SSE_FRAME_BYTES: usize = MAX_EVENT_BYTES + 1024;
 const MAX_CONTEXT_BYTES: usize = 256;
+const MAX_V5_CONTEXT_UTF8_BYTES: usize = 1024;
 const MAX_ITEM_ID_BYTES: usize = 255;
 const MAX_REASONING_DELTA_BYTES: usize = 16 * 1024;
 const MAX_REASONING_PART_BYTES: usize = 64 * 1024;
 const MAX_REASONING_ITEM_BYTES: usize = 128 * 1024;
 const MAX_REASONING_PARTS: usize = 8;
+const MAX_COMMAND_SUMMARY_BYTES: usize = 4 * 1024;
+const MAX_COMMAND_DELTA_BYTES: usize = 16 * 1024;
+const MAX_COMMAND_OUTPUT_BYTES: usize = 256 * 1024;
+const MAX_COMMAND_OUTPUT_PART_BYTES: usize = 128 * 1024;
+const MAX_COMMAND_CWD_BYTES: usize = 1024;
+const MAX_TOOL_ARGUMENTS_BYTES: usize = 8 * 1024;
+const MAX_TOOL_PROGRESS_BYTES: usize = 4 * 1024;
+const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
+const MAX_EXECUTION_ERROR_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostBridgeErrorKind {
@@ -189,6 +199,155 @@ pub enum HostReasoningReason {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostTruncationReason {
+    Utf8ByteLimit,
+    UpstreamTruncated,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HostSafeText {
+    pub text: String,
+    pub truncated: bool,
+    pub truncation_reason: Option<HostTruncationReason>,
+}
+
+impl Debug for HostSafeText {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostSafeText")
+            .field("utf8_bytes", &self.text.len())
+            .field("truncated", &self.truncated)
+            .field("truncation_reason", &self.truncation_reason)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum HostCommandCwd {
+    WorkspaceRoot,
+    WorkspaceRelative(Vec<String>),
+    Redacted,
+}
+
+impl Debug for HostCommandCwd {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceRoot => formatter.write_str("WorkspaceRoot"),
+            Self::WorkspaceRelative(segments) => formatter
+                .debug_struct("WorkspaceRelative")
+                .field("segment_count", &segments.len())
+                .finish(),
+            Self::Redacted => formatter.write_str("Redacted"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum HostCommandOutput {
+    Complete {
+        text: String,
+    },
+    HeadTail {
+        head: String,
+        tail: String,
+        reason: HostTruncationReason,
+    },
+    Unavailable,
+}
+
+impl Debug for HostCommandOutput {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Complete { text } => formatter
+                .debug_struct("Complete")
+                .field("utf8_bytes", &text.len())
+                .finish(),
+            Self::HeadTail { head, tail, reason } => formatter
+                .debug_struct("HeadTail")
+                .field("head_utf8_bytes", &head.len())
+                .field("tail_utf8_bytes", &tail.len())
+                .field("reason", reason)
+                .finish(),
+            Self::Unavailable => formatter.write_str("Unavailable"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostCommandStatus {
+    Completed,
+    Failed,
+    Declined,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostCommandErrorCode {
+    CommandFailed,
+    CommandDeclined,
+    ProjectionLimitExceeded,
+    ProjectionRedactionFailed,
+    ProtocolError,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostToolErrorCode {
+    ToolFailed,
+    ToolDeclined,
+    UnknownTool,
+    ProjectionLimitExceeded,
+    ProjectionRedactionFailed,
+    ProtocolError,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HostProjectionError<C> {
+    pub code: C,
+    pub summary: String,
+}
+
+impl<C: Debug> Debug for HostProjectionError<C> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostProjectionError")
+            .field("code", &self.code)
+            .field("summary_utf8_bytes", &self.summary.len())
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum HostToolIdentity {
+    Known {
+        server_name: String,
+        tool_name: String,
+    },
+    Unknown,
+}
+
+impl Debug for HostToolIdentity {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Known {
+                server_name,
+                tool_name,
+            } => formatter
+                .debug_struct("Known")
+                .field("server_name_utf8_bytes", &server_name.len())
+                .field("tool_name_utf8_bytes", &tool_name.len())
+                .finish(),
+            Self::Unknown => formatter.write_str("Unknown"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostToolStatus {
+    Completed,
+    Failed,
+    Declined,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostCleanupSurfaceStatus {
     Complete,
     Incomplete,
@@ -287,6 +446,39 @@ pub enum HostEventKind {
         text: Option<String>,
         phase: Option<HostAgentMessagePhase>,
     },
+    CommandStarted {
+        command_summary: HostSafeText,
+        cwd: HostCommandCwd,
+    },
+    CommandOutputDelta {
+        delta: HostSafeText,
+    },
+    CommandCompleted {
+        status: HostCommandStatus,
+        command_summary: HostSafeText,
+        cwd: HostCommandCwd,
+        duration_ms: Option<u64>,
+        exit_code: Option<i32>,
+        output: HostCommandOutput,
+        error: Option<HostProjectionError<HostCommandErrorCode>>,
+    },
+    ToolStarted {
+        identity: HostToolIdentity,
+        arguments_summary: HostSafeText,
+    },
+    ToolProgress {
+        identity: HostToolIdentity,
+        progress_index: usize,
+        summary: HostSafeText,
+    },
+    ToolCompleted {
+        status: HostToolStatus,
+        identity: HostToolIdentity,
+        arguments_summary: HostSafeText,
+        duration_ms: Option<u64>,
+        result_summary: Option<HostSafeText>,
+        error: Option<HostProjectionError<HostToolErrorCode>>,
+    },
     TurnCompleted {
         status: HostTurnStatus,
         code: Option<String>,
@@ -315,6 +507,12 @@ impl HostEventKind {
             Self::ReasoningTextDelta { .. } => "item.reasoning_text.delta",
             Self::ReasoningTextFinalized { .. } => "item.reasoning_text.finalized",
             Self::ItemCompleted { .. } => "item.completed",
+            Self::CommandStarted { .. } => "item.started/commandExecution",
+            Self::CommandOutputDelta { .. } => "item.command_output.delta",
+            Self::CommandCompleted { .. } => "item.completed/commandExecution",
+            Self::ToolStarted { .. } => "item.started/mcpToolCall",
+            Self::ToolProgress { .. } => "item.tool.progress",
+            Self::ToolCompleted { .. } => "item.completed/mcpToolCall",
             Self::TurnCompleted { .. } => "turn.completed",
             Self::Error { .. } => "error",
             Self::Warning { .. } => "warning",
@@ -349,6 +547,7 @@ pub struct HostEvent {
 }
 
 pub struct HostArtifactEventV3 {
+    pub schema_version: u8,
     pub cursor: HostEventCursor,
     pub event_type: String,
     pub event_id: Uuid,
@@ -364,6 +563,7 @@ impl Debug for HostArtifactEventV3 {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("HostArtifactEventV3")
+            .field("schema_version", &self.schema_version)
             .field("cursor", &self.cursor)
             .field("event_type", &self.event_type)
             .field("event_id", &self.event_id)
@@ -529,6 +729,109 @@ struct ProblemPayload {
     will_retry: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireSafeText {
+    text: String,
+    truncated: bool,
+    truncation_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireCommandCwd {
+    kind: String,
+    segments: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandStartedPayloadV5 {
+    item_type: String,
+    status: String,
+    command_summary: WireSafeText,
+    cwd: WireCommandCwd,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandOutputDeltaPayloadV5 {
+    delta: String,
+    truncated: bool,
+    truncation_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireCommandOutput {
+    retention: String,
+    text: Option<String>,
+    head: Option<String>,
+    tail: Option<String>,
+    reason: Option<String>,
+    truncated: bool,
+    truncation_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireProjectionError {
+    code: String,
+    summary: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandCompletedPayloadV5 {
+    item_type: String,
+    status: String,
+    command_summary: WireSafeText,
+    cwd: WireCommandCwd,
+    duration_ms: Option<u64>,
+    exit_code: Option<i32>,
+    output: WireCommandOutput,
+    error: Option<WireProjectionError>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireToolIdentity {
+    resolution: String,
+    server_name: String,
+    tool_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolStartedPayloadV5 {
+    item_type: String,
+    status: String,
+    identity: WireToolIdentity,
+    arguments_summary: WireSafeText,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolProgressPayloadV5 {
+    item_type: String,
+    status: String,
+    identity: WireToolIdentity,
+    progress_index: usize,
+    summary: WireSafeText,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ToolCompletedPayloadV5 {
+    item_type: String,
+    status: String,
+    identity: WireToolIdentity,
+    arguments_summary: WireSafeText,
+    duration_ms: Option<u64>,
+    result_summary: Option<WireSafeText>,
+    error: Option<WireProjectionError>,
+}
+
 pub(super) struct SseDecoder {
     schema_version: u8,
     expected_stream: Uuid,
@@ -661,7 +964,7 @@ fn parse_sse_frame(
     }
     let (id_stream, id_sequence) = parse_cursor_text(id)?;
     if id_stream != expected_stream
-        || id_sequence < *last_sequence
+        || (schema_version < 5 && id_sequence < *last_sequence)
         || schema_version == 2 && id_sequence == *last_sequence
     {
         return Err(protocol_error());
@@ -674,7 +977,7 @@ fn parse_sse_frame(
     if parsed_cursor.sequence != id_sequence || parsed_event_type != event_type {
         return Err(protocol_error());
     }
-    *last_sequence = id_sequence;
+    *last_sequence = (*last_sequence).max(id_sequence);
     Ok(Some(parsed))
 }
 
@@ -704,8 +1007,12 @@ fn parse_event_json(
     {
         return Err(protocol_error());
     }
-    let wire: WireEvent = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if !matches!(schema_version, 2..=4)
+    let raw: Value = serde_json::from_str(data).map_err(|_| protocol_error())?;
+    if schema_version == 5 {
+        validate_v5_explicit_nulls(&raw)?;
+    }
+    let wire: WireEvent = serde_json::from_value(raw).map_err(|_| protocol_error())?;
+    if !matches!(schema_version, 2..=5)
         || wire.schema_version != schema_version
         || wire.sequence == 0
         || wire.occurred_at.len() > 64
@@ -722,8 +1029,13 @@ fn parse_event_json(
     .into_iter()
     .flatten()
     {
+        let over_limit = if schema_version == 5 {
+            value.chars().count() > MAX_CONTEXT_BYTES || value.len() > MAX_V5_CONTEXT_UTF8_BYTES
+        } else {
+            value.len() > MAX_CONTEXT_BYTES
+        };
         if value.is_empty()
-            || value.len() > MAX_CONTEXT_BYTES
+            || over_limit
             || value.contains('\r')
             || value.contains('\n')
             || value.contains('\0')
@@ -744,8 +1056,13 @@ fn parse_event_json(
     let item_id = wire
         .item_id
         .map(|value| {
+            let over_limit = if schema_version == 5 {
+                value.chars().count() > MAX_CONTEXT_BYTES || value.len() > MAX_V5_CONTEXT_UTF8_BYTES
+            } else {
+                value.len() > maximum_item_id_bytes
+            };
             if value.is_empty()
-                || value.len() > maximum_item_id_bytes
+                || over_limit
                 || value.contains('\r')
                 || value.contains('\n')
                 || value.contains('\0')
@@ -763,6 +1080,7 @@ fn parse_event_json(
             return Err(protocol_error());
         }
         return Ok(HostStreamEvent::Artifact(HostArtifactEventV3 {
+            schema_version,
             cursor: HostEventCursor {
                 stream_id,
                 sequence: wire.sequence,
@@ -781,6 +1099,9 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     if schema_version == 4 && !is_v4_ordinary_event_type(&event_type) {
+        return Err(protocol_error());
+    }
+    if schema_version == 5 && !is_v5_ordinary_event_type(&event_type) {
         return Err(protocol_error());
     }
     let kind = parse_event_kind(
@@ -807,6 +1128,47 @@ fn parse_event_json(
         encoded_bytes: data.len(),
         kind,
     }))
+}
+
+fn validate_v5_explicit_nulls(value: &Value) -> Result<(), HostBridgeError> {
+    let event = value.as_object().ok_or_else(protocol_error)?;
+    let event_type = event
+        .get("event_type")
+        .and_then(Value::as_str)
+        .ok_or_else(protocol_error)?;
+    for (key, value) in event {
+        if value.is_null() || (key != "payload" && contains_json_null(value)) {
+            return Err(protocol_error());
+        }
+    }
+    let payload = event
+        .get("payload")
+        .and_then(Value::as_object)
+        .ok_or_else(protocol_error)?;
+    let allows_explanation_null = event_type == "turn.plan.updated";
+    let allows_phase_null = matches!(event_type, "item.started" | "item.completed")
+        && payload.get("item_type").and_then(Value::as_str) == Some("agentMessage");
+    for (key, value) in payload {
+        if value.is_null()
+            && !((allows_explanation_null && key == "explanation")
+                || (allows_phase_null && key == "phase"))
+        {
+            return Err(protocol_error());
+        }
+        if !value.is_null() && contains_json_null(value) {
+            return Err(protocol_error());
+        }
+    }
+    Ok(())
+}
+
+fn contains_json_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(values) => values.iter().any(contains_json_null),
+        Value::Object(values) => values.values().any(contains_json_null),
+        _ => false,
+    }
 }
 
 fn is_artifact_event_type(value: &str) -> bool {
@@ -839,6 +1201,11 @@ fn is_v4_ordinary_event_type(value: &str) -> bool {
     is_v3_ordinary_event_type(value) || value == "turn.plan.updated"
 }
 
+fn is_v5_ordinary_event_type(value: &str) -> bool {
+    is_v4_ordinary_event_type(value)
+        || matches!(value, "item.command_output.delta" | "item.tool.progress")
+}
+
 fn parse_event_kind(
     schema_version: u8,
     event_type: &str,
@@ -850,8 +1217,13 @@ fn parse_event_kind(
     match event_type {
         "thread.started" if !terminal && turn_id.is_none() && item_id.is_none() => {
             let payload: ThreadStartedPayload = parse_payload(payload)?;
-            validate_text(&payload.model, 256, false)?;
-            validate_text(&payload.model_provider, 256, false)?;
+            if schema_version == 5 {
+                validate_text_chars_bytes(&payload.model, 256, 1024, false)?;
+                validate_text_chars_bytes(&payload.model_provider, 256, 1024, false)?;
+            } else {
+                validate_text(&payload.model, 256, false)?;
+                validate_text(&payload.model_provider, 256, false)?;
+            }
             Ok(HostEventKind::ThreadStarted {
                 model: payload.model,
                 model_provider: payload.model_provider,
@@ -865,18 +1237,30 @@ fn parse_event_kind(
             Ok(HostEventKind::TurnStarted)
         }
         "turn.plan.updated"
-            if schema_version == 4 && !terminal && turn_id.is_some() && item_id.is_none() =>
+            if schema_version >= 4 && !terminal && turn_id.is_some() && item_id.is_none() =>
         {
             let payload: TurnPlanUpdatedPayload = parse_payload(payload)?;
             if payload.plan.len() > 128 {
                 return Err(protocol_error());
             }
-            validate_optional_text(payload.explanation.as_deref(), 64 * 1024)?;
+            if schema_version == 5 {
+                validate_optional_text_chars_bytes(
+                    payload.explanation.as_deref(),
+                    16_384,
+                    64 * 1024,
+                )?;
+            } else {
+                validate_optional_text(payload.explanation.as_deref(), 64 * 1024)?;
+            }
             let steps = payload
                 .plan
                 .into_iter()
                 .map(|step| {
-                    validate_text(&step.step, 64 * 1024, true)?;
+                    if schema_version == 5 {
+                        validate_text_chars_bytes(&step.step, 16_384, 64 * 1024, true)?;
+                    } else {
+                        validate_text(&step.step, 64 * 1024, true)?;
+                    }
                     let status = match step.status.as_str() {
                         "pending" => HostPlanStepStatus::Pending,
                         "in_progress" => HostPlanStepStatus::InProgress,
@@ -895,6 +1279,9 @@ fn parse_event_kind(
             })
         }
         "item.started" if !terminal && turn_id.is_some() && item_id.is_some() => {
+            if schema_version == 5 {
+                return parse_item_started_v5(payload);
+            }
             let (payload, phase) = parse_item_payload(payload, schema_version)?;
             Ok(HostEventKind::ItemStarted {
                 item_type: payload.item_type,
@@ -923,7 +1310,20 @@ fn parse_event_kind(
         "item.reasoning_text.finalized" if !terminal && turn_id.is_some() && item_id.is_some() => {
             parse_reasoning_finalized(payload)
         }
+        "item.command_output.delta"
+            if schema_version == 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
+        {
+            parse_command_output_delta_v5(payload)
+        }
+        "item.tool.progress"
+            if schema_version == 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
+        {
+            parse_tool_progress_v5(payload)
+        }
         "item.completed" if !terminal && turn_id.is_some() && item_id.is_some() => {
+            if schema_version == 5 {
+                return parse_item_completed_v5(payload);
+            }
             let (payload, phase) = parse_item_payload(payload, schema_version)?;
             Ok(HostEventKind::ItemCompleted {
                 item_type: payload.item_type,
@@ -939,8 +1339,13 @@ fn parse_event_kind(
                 "failed" => HostTurnStatus::Failed,
                 _ => return Err(protocol_error()),
             };
-            validate_optional_text(payload.code.as_deref(), 256)?;
-            validate_optional_text(payload.message.as_deref(), 8 * 1024)?;
+            if schema_version == 5 {
+                validate_optional_text_allow_empty(payload.code.as_deref(), MAX_EVENT_BYTES)?;
+                validate_optional_text_allow_empty(payload.message.as_deref(), MAX_EVENT_BYTES)?;
+            } else {
+                validate_optional_text(payload.code.as_deref(), 256)?;
+                validate_optional_text(payload.message.as_deref(), 8 * 1024)?;
+            }
             Ok(HostEventKind::TurnCompleted {
                 status,
                 code: payload.code,
@@ -949,8 +1354,13 @@ fn parse_event_kind(
         }
         "error" if !terminal && turn_id.is_some() && item_id.is_none() => {
             let payload: ProblemPayload = parse_payload(payload)?;
-            validate_optional_text(payload.code.as_deref(), 256)?;
-            validate_text(&payload.message, 8 * 1024, false)?;
+            if schema_version == 5 {
+                validate_optional_text_allow_empty(payload.code.as_deref(), MAX_EVENT_BYTES)?;
+                validate_text(&payload.message, MAX_EVENT_BYTES, true)?;
+            } else {
+                validate_optional_text(payload.code.as_deref(), 256)?;
+                validate_text(&payload.message, 8 * 1024, false)?;
+            }
             Ok(HostEventKind::Error {
                 code: payload.code,
                 message: payload.message,
@@ -962,8 +1372,17 @@ fn parse_event_kind(
             if payload.will_retry {
                 return Err(protocol_error());
             }
-            validate_optional_text(payload.code.as_deref(), 256)?;
-            validate_text(&payload.message, 8 * 1024, false)?;
+            if schema_version == 5 {
+                validate_optional_text_chars_bytes(
+                    payload.code.as_deref(),
+                    256,
+                    MAX_V5_CONTEXT_UTF8_BYTES,
+                )?;
+                validate_text_chars_bytes(&payload.message, 16_384, 64 * 1024, true)?;
+            } else {
+                validate_optional_text(payload.code.as_deref(), 256)?;
+                validate_text(&payload.message, 8 * 1024, false)?;
+            }
             Ok(HostEventKind::Warning {
                 code: payload.code,
                 message: payload.message,
@@ -1069,7 +1488,7 @@ fn parse_item_payload(
         // allow an empty snapshot at item.started before deltas arrive.
         validate_text(text, MAX_EVENT_BYTES, true)?;
     }
-    if schema_version != 4 {
+    if schema_version < 4 {
         if phase_present {
             return Err(protocol_error());
         }
@@ -1096,6 +1515,395 @@ fn parse_item_payload(
         None
     };
     Ok((payload, phase))
+}
+
+fn parse_item_started_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    match payload.get("item_type").and_then(Value::as_str) {
+        Some("agentMessage") => {
+            let (payload, phase) = parse_item_payload(payload, 5)?;
+            Ok(HostEventKind::ItemStarted {
+                item_type: payload.item_type,
+                text: payload.text,
+                phase,
+            })
+        }
+        Some("commandExecution") => {
+            let payload: CommandStartedPayloadV5 = parse_payload(payload)?;
+            if payload.item_type != "commandExecution" || payload.status != "running" {
+                return Err(protocol_error());
+            }
+            Ok(HostEventKind::CommandStarted {
+                command_summary: parse_safe_text(
+                    payload.command_summary,
+                    MAX_COMMAND_SUMMARY_BYTES,
+                )?,
+                cwd: parse_command_cwd(payload.cwd)?,
+            })
+        }
+        Some("mcpToolCall") => {
+            let payload: ToolStartedPayloadV5 = parse_payload(payload)?;
+            if payload.item_type != "mcpToolCall" || payload.status != "in_progress" {
+                return Err(protocol_error());
+            }
+            Ok(HostEventKind::ToolStarted {
+                identity: parse_tool_identity(payload.identity)?,
+                arguments_summary: parse_safe_text(
+                    payload.arguments_summary,
+                    MAX_TOOL_ARGUMENTS_BYTES,
+                )?,
+            })
+        }
+        Some(item_type) if is_v5_generic_item_type(item_type) => {
+            let payload: ItemLifecyclePayload = parse_payload(payload)?;
+            if payload.text.is_some() {
+                return Err(protocol_error());
+            }
+            Ok(HostEventKind::ItemStarted {
+                item_type: payload.item_type,
+                text: None,
+                phase: None,
+            })
+        }
+        _ => Err(protocol_error()),
+    }
+}
+
+fn parse_item_completed_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    match payload.get("item_type").and_then(Value::as_str) {
+        Some("agentMessage") => {
+            let (payload, phase) = parse_item_payload(payload, 5)?;
+            Ok(HostEventKind::ItemCompleted {
+                item_type: payload.item_type,
+                text: payload.text,
+                phase,
+            })
+        }
+        Some("commandExecution") => parse_command_completed_v5(payload),
+        Some("mcpToolCall") => parse_tool_completed_v5(payload),
+        Some(item_type) if is_v5_generic_item_type(item_type) => {
+            let payload: ItemLifecyclePayload = parse_payload(payload)?;
+            if payload.text.is_some() {
+                return Err(protocol_error());
+            }
+            Ok(HostEventKind::ItemCompleted {
+                item_type: payload.item_type,
+                text: None,
+                phase: None,
+            })
+        }
+        _ => Err(protocol_error()),
+    }
+}
+
+fn is_v5_generic_item_type(item_type: &str) -> bool {
+    matches!(
+        item_type,
+        "userMessage"
+            | "hookPrompt"
+            | "reasoning"
+            | "collabAgentToolCall"
+            | "subAgentActivity"
+            | "webSearch"
+            | "imageView"
+            | "sleep"
+            | "imageGeneration"
+            | "enteredReviewMode"
+            | "exitedReviewMode"
+            | "contextCompaction"
+    )
+}
+
+fn parse_command_output_delta_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: CommandOutputDeltaPayloadV5 = parse_payload(payload)?;
+    validate_bounded_text(&payload.delta, MAX_COMMAND_DELTA_BYTES, false)?;
+    let reason = parse_truncation(payload.truncated, payload.truncation_reason.as_deref())?;
+    Ok(HostEventKind::CommandOutputDelta {
+        delta: HostSafeText {
+            text: payload.delta,
+            truncated: payload.truncated,
+            truncation_reason: reason,
+        },
+    })
+}
+
+fn parse_tool_progress_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: ToolProgressPayloadV5 = parse_payload(payload)?;
+    if payload.item_type != "mcpToolCall"
+        || payload.status != "in_progress"
+        || payload.progress_index >= 32
+    {
+        return Err(protocol_error());
+    }
+    Ok(HostEventKind::ToolProgress {
+        identity: parse_tool_identity(payload.identity)?,
+        progress_index: payload.progress_index,
+        summary: parse_safe_text(payload.summary, MAX_TOOL_PROGRESS_BYTES)?,
+    })
+}
+
+fn parse_command_completed_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: CommandCompletedPayloadV5 = parse_payload(payload)?;
+    if payload.item_type != "commandExecution"
+        || payload
+            .duration_ms
+            .is_some_and(|value| value > 9_007_199_254_740_991)
+    {
+        return Err(protocol_error());
+    }
+    let status = match payload.status.as_str() {
+        "completed" => HostCommandStatus::Completed,
+        "failed" => HostCommandStatus::Failed,
+        "declined" => HostCommandStatus::Declined,
+        _ => return Err(protocol_error()),
+    };
+    let error = payload.error.map(parse_command_error).transpose()?;
+    match (status, error.as_ref().map(|value| value.code)) {
+        (HostCommandStatus::Completed, None) => {}
+        (HostCommandStatus::Failed, Some(HostCommandErrorCode::CommandFailed))
+        | (HostCommandStatus::Failed, Some(HostCommandErrorCode::ProjectionLimitExceeded))
+        | (HostCommandStatus::Failed, Some(HostCommandErrorCode::ProjectionRedactionFailed))
+        | (HostCommandStatus::Failed, Some(HostCommandErrorCode::ProtocolError)) => {}
+        (HostCommandStatus::Declined, Some(HostCommandErrorCode::CommandDeclined)) => {}
+        _ => return Err(protocol_error()),
+    }
+    Ok(HostEventKind::CommandCompleted {
+        status,
+        command_summary: parse_safe_text(payload.command_summary, MAX_COMMAND_SUMMARY_BYTES)?,
+        cwd: parse_command_cwd(payload.cwd)?,
+        duration_ms: payload.duration_ms,
+        exit_code: payload.exit_code,
+        output: parse_command_output(payload.output)?,
+        error,
+    })
+}
+
+fn parse_tool_completed_v5(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: ToolCompletedPayloadV5 = parse_payload(payload)?;
+    if payload.item_type != "mcpToolCall"
+        || payload
+            .duration_ms
+            .is_some_and(|value| value > 9_007_199_254_740_991)
+    {
+        return Err(protocol_error());
+    }
+    let status = match payload.status.as_str() {
+        "completed" => HostToolStatus::Completed,
+        "failed" => HostToolStatus::Failed,
+        "declined" => HostToolStatus::Declined,
+        _ => return Err(protocol_error()),
+    };
+    let result_summary = payload
+        .result_summary
+        .map(|value| parse_safe_text(value, MAX_TOOL_RESULT_BYTES))
+        .transpose()?;
+    let error = payload.error.map(parse_tool_error).transpose()?;
+    match (
+        status,
+        result_summary.is_some(),
+        error.as_ref().map(|value| value.code),
+    ) {
+        (HostToolStatus::Completed, true, None) => {}
+        (HostToolStatus::Failed, _, Some(HostToolErrorCode::ToolFailed))
+        | (HostToolStatus::Failed, _, Some(HostToolErrorCode::UnknownTool))
+        | (HostToolStatus::Failed, _, Some(HostToolErrorCode::ProjectionLimitExceeded))
+        | (HostToolStatus::Failed, _, Some(HostToolErrorCode::ProjectionRedactionFailed))
+        | (HostToolStatus::Failed, _, Some(HostToolErrorCode::ProtocolError)) => {}
+        (HostToolStatus::Declined, false, Some(HostToolErrorCode::ToolDeclined)) => {}
+        _ => return Err(protocol_error()),
+    }
+    Ok(HostEventKind::ToolCompleted {
+        status,
+        identity: parse_tool_identity(payload.identity)?,
+        arguments_summary: parse_safe_text(payload.arguments_summary, MAX_TOOL_ARGUMENTS_BYTES)?,
+        duration_ms: payload.duration_ms,
+        result_summary,
+        error,
+    })
+}
+
+fn parse_safe_text(value: WireSafeText, max_bytes: usize) -> Result<HostSafeText, HostBridgeError> {
+    validate_bounded_text(&value.text, max_bytes, true)?;
+    let truncation_reason = parse_truncation(value.truncated, value.truncation_reason.as_deref())?;
+    Ok(HostSafeText {
+        text: value.text,
+        truncated: value.truncated,
+        truncation_reason,
+    })
+}
+
+fn parse_truncation(
+    truncated: bool,
+    value: Option<&str>,
+) -> Result<Option<HostTruncationReason>, HostBridgeError> {
+    match (truncated, value) {
+        (false, None) => Ok(None),
+        (true, Some("utf8_byte_limit")) => Ok(Some(HostTruncationReason::Utf8ByteLimit)),
+        (true, Some("upstream_truncated")) => Ok(Some(HostTruncationReason::UpstreamTruncated)),
+        _ => Err(protocol_error()),
+    }
+}
+
+fn parse_command_cwd(value: WireCommandCwd) -> Result<HostCommandCwd, HostBridgeError> {
+    match (value.kind.as_str(), value.segments) {
+        ("workspace_root", None) => Ok(HostCommandCwd::WorkspaceRoot),
+        ("redacted", None) => Ok(HostCommandCwd::Redacted),
+        ("workspace_relative", Some(segments)) if (1..=128).contains(&segments.len()) => {
+            let mut total = segments.len() - 1;
+            for segment in &segments {
+                validate_cwd_segment(segment)?;
+                total = total
+                    .checked_add(segment.len())
+                    .ok_or_else(protocol_error)?;
+            }
+            if total > MAX_COMMAND_CWD_BYTES {
+                return Err(protocol_error());
+            }
+            Ok(HostCommandCwd::WorkspaceRelative(segments))
+        }
+        _ => Err(protocol_error()),
+    }
+}
+
+fn validate_cwd_segment(value: &str) -> Result<(), HostBridgeError> {
+    if value.is_empty()
+        || value.chars().count() > 255
+        || value.len() > 255
+        || matches!(value, "." | "..")
+        || value.ends_with([' ', '.'])
+        || value.contains(['/', '\\', ':'])
+        || value.chars().any(|character| {
+            character == '\0'
+                || character.is_control()
+                || matches!(
+                    character,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        })
+        || is_windows_reserved_segment(value)
+    {
+        return Err(protocol_error());
+    }
+    Ok(())
+}
+
+fn is_windows_reserved_segment(value: &str) -> bool {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || stem
+            .strip_prefix("com")
+            .or_else(|| stem.strip_prefix("lpt"))
+            .is_some_and(|suffix| {
+                matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+            })
+}
+
+fn parse_command_output(value: WireCommandOutput) -> Result<HostCommandOutput, HostBridgeError> {
+    match (
+        value.retention.as_str(),
+        value.text,
+        value.head,
+        value.tail,
+        value.reason.as_deref(),
+        value.truncated,
+        value.truncation_reason.as_deref(),
+    ) {
+        ("complete", Some(text), None, None, None, false, None) => {
+            validate_bounded_text(&text, MAX_COMMAND_OUTPUT_BYTES, true)?;
+            Ok(HostCommandOutput::Complete { text })
+        }
+        ("head_tail", None, Some(head), Some(tail), None, true, reason) => {
+            validate_bounded_text(&head, MAX_COMMAND_OUTPUT_PART_BYTES, true)?;
+            validate_bounded_text(&tail, MAX_COMMAND_OUTPUT_PART_BYTES, true)?;
+            if head.len().saturating_add(tail.len()) > MAX_COMMAND_OUTPUT_BYTES {
+                return Err(protocol_error());
+            }
+            let Some(reason) = parse_truncation(true, reason)? else {
+                return Err(protocol_error());
+            };
+            Ok(HostCommandOutput::HeadTail { head, tail, reason })
+        }
+        ("unavailable", None, None, None, Some("not_available"), false, None) => {
+            Ok(HostCommandOutput::Unavailable)
+        }
+        _ => Err(protocol_error()),
+    }
+}
+
+fn parse_tool_identity(value: WireToolIdentity) -> Result<HostToolIdentity, HostBridgeError> {
+    match value.resolution.as_str() {
+        "known" => {
+            validate_bounded_text(&value.server_name, 256, false)?;
+            validate_bounded_text(&value.tool_name, 256, false)?;
+            Ok(HostToolIdentity::Known {
+                server_name: value.server_name,
+                tool_name: value.tool_name,
+            })
+        }
+        "unknown" if value.server_name == "unknown" && value.tool_name == "unknown" => {
+            Ok(HostToolIdentity::Unknown)
+        }
+        _ => Err(protocol_error()),
+    }
+}
+
+fn parse_command_error(
+    value: WireProjectionError,
+) -> Result<HostProjectionError<HostCommandErrorCode>, HostBridgeError> {
+    validate_bounded_text(&value.summary, MAX_EXECUTION_ERROR_BYTES, true)?;
+    let code = match value.code.as_str() {
+        "command_failed" => HostCommandErrorCode::CommandFailed,
+        "command_declined" => HostCommandErrorCode::CommandDeclined,
+        "projection_limit_exceeded" => HostCommandErrorCode::ProjectionLimitExceeded,
+        "projection_redaction_failed" => HostCommandErrorCode::ProjectionRedactionFailed,
+        "protocol_error" => HostCommandErrorCode::ProtocolError,
+        _ => return Err(protocol_error()),
+    };
+    Ok(HostProjectionError {
+        code,
+        summary: value.summary,
+    })
+}
+
+fn parse_tool_error(
+    value: WireProjectionError,
+) -> Result<HostProjectionError<HostToolErrorCode>, HostBridgeError> {
+    validate_bounded_text(&value.summary, MAX_EXECUTION_ERROR_BYTES, true)?;
+    let code = match value.code.as_str() {
+        "tool_failed" => HostToolErrorCode::ToolFailed,
+        "tool_declined" => HostToolErrorCode::ToolDeclined,
+        "unknown_tool" => HostToolErrorCode::UnknownTool,
+        "projection_limit_exceeded" => HostToolErrorCode::ProjectionLimitExceeded,
+        "projection_redaction_failed" => HostToolErrorCode::ProjectionRedactionFailed,
+        "protocol_error" => HostToolErrorCode::ProtocolError,
+        _ => return Err(protocol_error()),
+    };
+    Ok(HostProjectionError {
+        code,
+        summary: value.summary,
+    })
+}
+
+fn validate_bounded_text(
+    value: &str,
+    max_bytes: usize,
+    allow_empty: bool,
+) -> Result<(), HostBridgeError> {
+    if (!allow_empty && value.is_empty())
+        || value.len() > max_bytes
+        || value.chars().count() > max_bytes
+        || value.contains('\0')
+    {
+        return Err(protocol_error());
+    }
+    Ok(())
 }
 
 fn parse_reasoning_finalized(payload: Value) -> Result<HostEventKind, HostBridgeError> {
@@ -1184,6 +1992,39 @@ fn validate_optional_text(value: Option<&str>, max_bytes: usize) -> Result<(), H
     Ok(())
 }
 
+fn validate_optional_text_allow_empty(
+    value: Option<&str>,
+    max_bytes: usize,
+) -> Result<(), HostBridgeError> {
+    if let Some(value) = value {
+        validate_text(value, max_bytes, true)?;
+    }
+    Ok(())
+}
+
+fn validate_text_chars_bytes(
+    value: &str,
+    max_chars: usize,
+    max_bytes: usize,
+    allow_empty: bool,
+) -> Result<(), HostBridgeError> {
+    if value.chars().count() > max_chars {
+        return Err(protocol_error());
+    }
+    validate_text(value, max_bytes, allow_empty)
+}
+
+fn validate_optional_text_chars_bytes(
+    value: Option<&str>,
+    max_chars: usize,
+    max_bytes: usize,
+) -> Result<(), HostBridgeError> {
+    if let Some(value) = value {
+        validate_text_chars_bytes(value, max_chars, max_bytes, true)?;
+    }
+    Ok(())
+}
+
 pub(super) const fn protocol_error() -> HostBridgeError {
     HostBridgeError::new(HostBridgeErrorKind::Protocol)
 }
@@ -1254,6 +2095,7 @@ pub(super) fn parse_cleanup_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
     use std::fs;
     use std::path::PathBuf;
 
@@ -1262,6 +2104,33 @@ mod tests {
             .join("../../yijie-contracts/tests/fixtures/agent/session-event-v2")
             .join(name);
         fs::read_to_string(path).expect("read canonical contracts fixture")
+    }
+
+    fn feat136_fixture(name: &str) -> Value {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("contracts/fixtures/session-event-v5")
+            .join(name);
+        serde_json::from_str(&fs::read_to_string(path).expect("read vendored v5 fixture"))
+            .expect("parse vendored v5 fixture")
+    }
+
+    fn feat136_decode(value: &Value) -> Result<HostStreamEvent, HostBridgeError> {
+        decode_for_schema(value, 5)
+    }
+
+    fn decode_for_schema(
+        value: &Value,
+        schema_version: u8,
+    ) -> Result<HostStreamEvent, HostBridgeError> {
+        let stream = Uuid::parse_str(value["stream_id"].as_str().expect("fixture stream"))
+            .expect("fixture stream UUID");
+        let sequence = value["sequence"].as_u64().expect("fixture sequence");
+        let event_type = value["event_type"].as_str().expect("fixture event type");
+        let data = serde_json::to_string(value).expect("encode fixture");
+        let frame = format!("id: {stream}:{sequence}\nevent: {event_type}\ndata: {data}\n\n");
+        let mut decoder = SseDecoder::new(stream, sequence.saturating_sub(1), schema_version);
+        decoder.push(frame.as_bytes())?;
+        decoder.next().ok_or_else(protocol_error)
     }
 
     #[test]
@@ -1564,5 +2433,284 @@ mod tests {
             .unwrap();
         assert!(matches!(parsed, HostStreamEvent::Ordinary(_)));
         assert_eq!(last_sequence, 1);
+    }
+
+    #[test]
+    fn feat136_v5_contract_fixtures_decode_to_closed_command_tool_variants() {
+        for name in [
+            "command-completed.json",
+            "command-declined.json",
+            "command-failed-head-tail.json",
+            "command-output-delta.json",
+            "command-started.json",
+            "tool-completed-known.json",
+            "tool-declined-reserved-fixture-only.json",
+            "tool-failed-result.json",
+            "tool-progress.json",
+            "tool-started-known.json",
+            "tool-unknown-failed.json",
+        ] {
+            assert!(
+                matches!(
+                    feat136_decode(&feat136_fixture(name)),
+                    Ok(HostStreamEvent::Ordinary(_))
+                ),
+                "v5 fixture did not decode: {name}"
+            );
+        }
+        let HostStreamEvent::Ordinary(unknown_tool) =
+            feat136_decode(&feat136_fixture("tool-unknown-failed.json")).unwrap()
+        else {
+            panic!("ordinary unknown-tool fixture expected");
+        };
+        assert!(matches!(
+            unknown_tool.kind,
+            HostEventKind::ToolCompleted {
+                identity: HostToolIdentity::Unknown,
+                status: HostToolStatus::Failed,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn feat136_contract_pin_schema_and_ordinary_fixture_set_are_exact() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("contracts");
+        let lock: Value = serde_json::from_str(
+            &fs::read_to_string(root.join("feat136.lock.json")).expect("read v5 contract lock"),
+        )
+        .expect("parse v5 contract lock");
+        assert_eq!(
+            lock,
+            serde_json::json!({
+                "contractCommit": "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+                "contractVersion": "v0.7.0",
+                "schemaVersion": 5,
+                "schemaSha256": "2f773dd6dc60bc7dc01bcdb434447e945e0a98317534498f54325fcdabb27008",
+                "ordinaryFixtureCount": 11,
+                "ordinaryFixtureTreeObjectId": "b69a2d9d1f7a8b175c818282ae0c6c9c5ace1bec",
+                "ordinaryFixtureSnapshotSha256": "9ffb4ae88c8a585d6de33b6f93342f0f95f83f9cec9852a212e0b8b47d13804d"
+            })
+        );
+
+        let schema_bytes = fs::read(root.join("agent/session-event-v5.schema.json"))
+            .expect("read vendored v5 schema");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&schema_bytes)),
+            lock["schemaSha256"].as_str().unwrap()
+        );
+        let schema: Value =
+            serde_json::from_slice(&schema_bytes).expect("parse vendored v5 schema");
+        assert_eq!(schema["properties"]["schema_version"]["const"], 5);
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["oneOf"].as_array().map(Vec::len), Some(17));
+
+        let fixture_root = root.join("fixtures/session-event-v5");
+        let mut names = fs::read_dir(&fixture_root)
+            .expect("read ordinary fixture directory")
+            .map(|entry| {
+                entry
+                    .expect("read ordinary fixture entry")
+                    .file_name()
+                    .into_string()
+                    .expect("fixture name is UTF-8")
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "command-completed.json",
+                "command-declined.json",
+                "command-failed-head-tail.json",
+                "command-output-delta.json",
+                "command-started.json",
+                "tool-completed-known.json",
+                "tool-declined-reserved-fixture-only.json",
+                "tool-failed-result.json",
+                "tool-progress.json",
+                "tool-started-known.json",
+                "tool-unknown-failed.json",
+            ]
+        );
+        let mut snapshot = Sha256::new();
+        for name in &names {
+            let fixture_digest = format!(
+                "{:x}",
+                Sha256::digest(fs::read(fixture_root.join(name)).expect("read ordinary fixture"))
+            );
+            snapshot.update(name.as_bytes());
+            snapshot.update([0]);
+            snapshot.update(fixture_digest.as_bytes());
+            snapshot.update(b"\n");
+        }
+        assert_eq!(
+            format!("{:x}", snapshot.finalize()),
+            lock["ordinaryFixtureSnapshotSha256"].as_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn feat136_v5_unknown_event_and_explicit_nulls_fail_closed() {
+        let base = feat136_fixture("command-completed.json");
+        let mut unknown = base.clone();
+        unknown["event_type"] = serde_json::json!("future.required.variant");
+        assert!(feat136_decode(&unknown).is_err());
+
+        for key in [
+            "trace_id",
+            "request_id",
+            "tenant_id",
+            "user_id",
+            "turn_id",
+            "item_id",
+        ] {
+            let mut invalid = base.clone();
+            invalid[key] = Value::Null;
+            assert!(feat136_decode(&invalid).is_err());
+        }
+
+        let mut null_duration = feat136_fixture("command-completed.json");
+        null_duration["payload"]["duration_ms"] = Value::Null;
+        assert!(feat136_decode(&null_duration).is_err());
+
+        let mut null_reason = feat136_fixture("command-started.json");
+        null_reason["payload"]["command_summary"]["truncation_reason"] = Value::Null;
+        assert!(feat136_decode(&null_reason).is_err());
+    }
+
+    #[test]
+    fn feat136_v5_allows_only_contract_nullable_phase_and_explanation() {
+        let mut agent = feat136_fixture("command-started.json");
+        agent["payload"] = serde_json::json!({
+            "item_type": "agentMessage",
+            "text": "",
+            "phase": null
+        });
+        assert!(feat136_decode(&agent).is_ok());
+
+        let mut plan = agent;
+        plan["event_type"] = serde_json::json!("turn.plan.updated");
+        plan["item_id"] = serde_json::json!(null);
+        plan.as_object_mut().unwrap().remove("item_id");
+        plan["payload"] = serde_json::json!({"explanation": null, "plan": []});
+        assert!(feat136_decode(&plan).is_ok());
+    }
+
+    #[test]
+    fn feat136_command_cwd_limit_counts_path_separators() {
+        let segments = vec![
+            "a".repeat(255),
+            "b".repeat(255),
+            "c".repeat(255),
+            "d".repeat(255),
+            "tail".to_owned(),
+        ];
+        assert_eq!(segments.iter().map(String::len).sum::<usize>(), 1024);
+        assert!(parse_command_cwd(WireCommandCwd {
+            kind: "workspace_relative".to_owned(),
+            segments: Some(segments),
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn feat136_v5_inherited_text_limits_count_chars_and_utf8_bytes() {
+        let mut common = feat136_fixture("command-started.json");
+        common["trace_id"] = serde_json::json!("界".repeat(256));
+        common["request_id"] = serde_json::json!("请".repeat(256));
+        common["tenant_id"] = serde_json::json!("租".repeat(256));
+        common["user_id"] = serde_json::json!("户".repeat(256));
+        common["item_id"] = serde_json::json!("项".repeat(256));
+        assert!(feat136_decode(&common).is_ok());
+        common["item_id"] = serde_json::json!("项".repeat(257));
+        assert!(feat136_decode(&common).is_err());
+
+        let mut thread = feat136_fixture("command-started.json");
+        thread.as_object_mut().unwrap().remove("turn_id");
+        thread.as_object_mut().unwrap().remove("item_id");
+        thread["event_type"] = serde_json::json!("thread.started");
+        thread["payload"] = serde_json::json!({
+            "model": "模".repeat(256),
+            "model_provider": "供".repeat(256)
+        });
+        assert!(feat136_decode(&thread).is_ok());
+        thread["payload"]["model"] = serde_json::json!("m".repeat(257));
+        assert!(feat136_decode(&thread).is_err());
+
+        let mut plan = feat136_fixture("command-started.json");
+        plan.as_object_mut().unwrap().remove("item_id");
+        plan["event_type"] = serde_json::json!("turn.plan.updated");
+        plan["payload"] = serde_json::json!({
+            "explanation": "e".repeat(16_384),
+            "plan": [{"step": "s".repeat(16_384), "status": "pending"}]
+        });
+        assert!(feat136_decode(&plan).is_ok());
+        plan["payload"]["plan"][0]["step"] = serde_json::json!("s".repeat(16_385));
+        assert!(feat136_decode(&plan).is_err());
+
+        let mut warning = feat136_fixture("command-started.json");
+        warning.as_object_mut().unwrap().remove("turn_id");
+        warning.as_object_mut().unwrap().remove("item_id");
+        warning["event_type"] = serde_json::json!("warning");
+        warning["payload"] = serde_json::json!({
+            "code": "警".repeat(256),
+            "message": "w".repeat(16_384),
+            "will_retry": false
+        });
+        assert!(feat136_decode(&warning).is_ok());
+        warning["payload"]["code"] = serde_json::json!("警".repeat(257));
+        assert!(feat136_decode(&warning).is_err());
+        warning["payload"]["code"] = serde_json::json!("警".repeat(256));
+        warning["payload"]["message"] = serde_json::json!("w".repeat(16_385));
+        assert!(feat136_decode(&warning).is_err());
+    }
+
+    #[test]
+    fn feat136_v5_unbounded_problem_text_uses_event_cap_while_v4_stays_bounded() {
+        let mut completed = feat136_fixture("command-started.json");
+        completed.as_object_mut().unwrap().remove("item_id");
+        completed["event_type"] = serde_json::json!("turn.completed");
+        completed["terminal"] = serde_json::json!(true);
+        completed["payload"] = serde_json::json!({
+            "status": "failed",
+            "code": "c".repeat(9 * 1024),
+            "message": "m".repeat(9 * 1024)
+        });
+        assert!(feat136_decode(&completed).is_ok());
+
+        let mut completed_v4 = completed;
+        completed_v4["schema_version"] = serde_json::json!(4);
+        assert!(decode_for_schema(&completed_v4, 4).is_err());
+
+        let mut problem = feat136_fixture("command-started.json");
+        problem.as_object_mut().unwrap().remove("item_id");
+        problem["event_type"] = serde_json::json!("error");
+        problem["payload"] = serde_json::json!({
+            "code": "",
+            "message": "e".repeat(9 * 1024),
+            "will_retry": false
+        });
+        assert!(feat136_decode(&problem).is_ok());
+
+        let mut problem_v4 = problem;
+        problem_v4["schema_version"] = serde_json::json!(4);
+        assert!(decode_for_schema(&problem_v4, 4).is_err());
+    }
+
+    #[test]
+    fn feat136_v5_accepts_contract_optional_empty_plan_and_warning_text() {
+        let mut plan = feat136_fixture("command-started.json");
+        plan.as_object_mut().unwrap().remove("item_id");
+        plan["event_type"] = serde_json::json!("turn.plan.updated");
+        plan["payload"] = serde_json::json!({"explanation": "", "plan": []});
+        assert!(feat136_decode(&plan).is_ok());
+
+        let mut warning = feat136_fixture("command-started.json");
+        warning.as_object_mut().unwrap().remove("turn_id");
+        warning.as_object_mut().unwrap().remove("item_id");
+        warning["event_type"] = serde_json::json!("warning");
+        warning["payload"] = serde_json::json!({"code": "", "message": "", "will_retry": false});
+        assert!(feat136_decode(&warning).is_ok());
     }
 }

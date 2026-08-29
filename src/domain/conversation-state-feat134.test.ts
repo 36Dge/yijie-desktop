@@ -454,7 +454,7 @@ describe("FEAT-134 ConversationState semantics", () => {
     const second = hydrateConversationState(snapshot);
 
     expect(serializeConversationState(first)).toBe(serializeConversationState(second));
-    expect(serializeConversationState(first)).toContain('"schemaVersion":2');
+    expect(serializeConversationState(first)).toContain('"schemaVersion":3');
     expect(selectConversationItem(first, THREAD_ID, TURN_ID, "final-item")?.agentMessagePhase)
       .toBe("final_answer");
     expect(selectConversationItem(first, THREAD_ID, TURN_ID, "reasoning-item")?.reasoning)

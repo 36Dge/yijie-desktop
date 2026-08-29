@@ -3,6 +3,7 @@ use super::database::{
     TurnProgress,
 };
 use super::error::ChatError;
+use super::feat136::{self, ExecutionProjection, SafeTextProjection, ToolProgressProjection};
 use super::host_domain::{
     HostAgentMessagePhase, HostArtifactEventV3, HostEvent, HostEventCursor, HostEventKind,
     HostPlanStep, HostPlanStepStatus, HostReasoningPart, HostReasoningReason, HostReasoningStatus,
@@ -122,6 +123,7 @@ pub struct TimelineItem {
     /// Native-only durable fact. WebView v4 deliberately exposes lifecycle completion and
     /// reasoning finalization as separate events, so this is not serialized as completedAtMs.
     pub reasoning_finalized_at_ms: Option<i64>,
+    pub execution: Option<ExecutionProjection>,
     pub started_at_ms: i64,
     pub completed_at_ms: Option<i64>,
     pub source_event_id: Uuid,
@@ -227,6 +229,21 @@ pub enum TimelineDelta {
         parts: Vec<TimelineReasoningPart>,
     },
     ItemCompleted(TimelineItem),
+    CommandStarted(TimelineItem),
+    CommandOutputAppend {
+        source: SourceIdentity,
+        item_id: String,
+        item_ordinal: usize,
+        delta: SafeTextProjection,
+    },
+    CommandCompleted(TimelineItem),
+    ToolStarted(TimelineItem),
+    ToolProgress {
+        item_id: String,
+        item_ordinal: usize,
+        progress: ToolProgressProjection,
+    },
+    ToolCompleted(TimelineItem),
     Notice(TimelineNotice),
     TurnTerminal(TimelineTerminal),
     Ignored,
@@ -376,6 +393,12 @@ impl Debug for TimelineDelta {
             Self::ReasoningAppend { .. } => "reasoning_append",
             Self::ReasoningFinalized { .. } => "reasoning_finalized",
             Self::ItemCompleted(_) => "item_completed",
+            Self::CommandStarted(_) => "command_started",
+            Self::CommandOutputAppend { .. } => "command_output_append",
+            Self::CommandCompleted(_) => "command_completed",
+            Self::ToolStarted(_) => "tool_started",
+            Self::ToolProgress { .. } => "tool_progress",
+            Self::ToolCompleted(_) => "tool_completed",
             Self::Notice(_) => "notice",
             Self::TurnTerminal(_) => "turn_terminal",
             Self::Ignored => "ignored",
@@ -446,6 +469,7 @@ pub struct Feat134TurnReducer {
     plan: Option<TimelinePlan>,
     turn_notices: Vec<TimelineNotice>,
     terminal: Option<TimelineTerminal>,
+    feat136_enabled: bool,
 }
 
 impl Debug for Feat134TurnReducer {
@@ -467,6 +491,21 @@ impl Feat134TurnReducer {
         context: ActiveTurnContext,
         hydration: Option<Feat134Hydration>,
     ) -> Result<Self, ChatError> {
+        Self::new_inner(context, hydration, false)
+    }
+
+    pub(crate) fn new_v5(
+        context: ActiveTurnContext,
+        hydration: Option<Feat134Hydration>,
+    ) -> Result<Self, ChatError> {
+        Self::new_inner(context, hydration, true)
+    }
+
+    fn new_inner(
+        context: ActiveTurnContext,
+        hydration: Option<Feat134Hydration>,
+        feat136_enabled: bool,
+    ) -> Result<Self, ChatError> {
         let (expected_stream, last_sequence, last_event_id) = match &context.cursor {
             Some(cursor) => (
                 Some(cursor.stream_id),
@@ -476,7 +515,7 @@ impl Feat134TurnReducer {
             None => (None, 0, None),
         };
         let hydration = hydration.unwrap_or_default();
-        validate_hydration(&hydration)?;
+        validate_hydration(&hydration, feat136_enabled)?;
         if final_answer_text(&hydration.items)? != context.assistant_text {
             return Err(ChatError::DatabaseUnavailable);
         }
@@ -489,6 +528,7 @@ impl Feat134TurnReducer {
             plan: hydration.plan,
             turn_notices: hydration.turn_notices,
             terminal: None,
+            feat136_enabled,
         })
     }
 
@@ -690,6 +730,102 @@ impl Feat134TurnReducer {
                     }
                 }
             }
+            HostEventKind::CommandStarted {
+                command_summary,
+                cwd,
+            } if self.feat136_enabled => feat136::command_started(
+                &mut self.items,
+                event.item_id.ok_or(ChatError::OrchestrationUnavailable)?,
+                &source,
+                command_summary,
+                cwd,
+                observed_at_ms,
+            )?,
+            HostEventKind::CommandOutputDelta { delta } if self.feat136_enabled => {
+                feat136::command_output_delta(
+                    &mut self.items,
+                    event
+                        .item_id
+                        .as_deref()
+                        .ok_or(ChatError::OrchestrationUnavailable)?,
+                    &source,
+                    delta,
+                )?
+            }
+            HostEventKind::CommandCompleted {
+                status,
+                command_summary,
+                cwd,
+                duration_ms,
+                exit_code,
+                output,
+                error,
+            } if self.feat136_enabled => feat136::command_completed(
+                &mut self.items,
+                event.item_id.ok_or(ChatError::OrchestrationUnavailable)?,
+                &source,
+                status,
+                command_summary,
+                cwd,
+                duration_ms,
+                exit_code,
+                output,
+                error,
+                observed_at_ms,
+            )?,
+            HostEventKind::ToolStarted {
+                identity,
+                arguments_summary,
+            } if self.feat136_enabled => feat136::tool_started(
+                &mut self.items,
+                event.item_id.ok_or(ChatError::OrchestrationUnavailable)?,
+                &source,
+                identity,
+                arguments_summary,
+                observed_at_ms,
+            )?,
+            HostEventKind::ToolProgress {
+                identity,
+                progress_index,
+                summary,
+            } if self.feat136_enabled => feat136::tool_progress(
+                &mut self.items,
+                event
+                    .item_id
+                    .as_deref()
+                    .ok_or(ChatError::OrchestrationUnavailable)?,
+                &source,
+                identity,
+                progress_index,
+                summary,
+            )?,
+            HostEventKind::ToolCompleted {
+                status,
+                identity,
+                arguments_summary,
+                duration_ms,
+                result_summary,
+                error,
+            } if self.feat136_enabled => feat136::tool_completed(
+                &mut self.items,
+                event.item_id.ok_or(ChatError::OrchestrationUnavailable)?,
+                &source,
+                status,
+                identity,
+                arguments_summary,
+                duration_ms,
+                result_summary,
+                error,
+                observed_at_ms,
+            )?,
+            HostEventKind::CommandStarted { .. }
+            | HostEventKind::CommandOutputDelta { .. }
+            | HostEventKind::CommandCompleted { .. }
+            | HostEventKind::ToolStarted { .. }
+            | HostEventKind::ToolProgress { .. }
+            | HostEventKind::ToolCompleted { .. } => {
+                return Err(ChatError::OrchestrationUnavailable);
+            }
             HostEventKind::Error {
                 code,
                 message: _,
@@ -754,6 +890,7 @@ impl Feat134TurnReducer {
                     if item.status == TimelineItemStatus::InProgress {
                         item.status = TimelineItemStatus::Incomplete;
                         item.completed_at_ms = Some(observed_at_ms);
+                        feat136::mark_incomplete(item);
                     }
                     if item.item_type == "reasoning"
                         && item.reasoning_status.is_none()
@@ -974,6 +1111,7 @@ impl Feat134TurnReducer {
             reasoning_reason_code: None,
             reasoning_parts: Vec::new(),
             reasoning_finalized_at_ms: None,
+            execution: None,
             started_at_ms: observed_at_ms,
             completed_at_ms: completed.then_some(observed_at_ms),
             source_event_id: source.event_id,
@@ -1023,6 +1161,7 @@ impl Feat134TurnReducer {
             reasoning_reason_code: None,
             reasoning_parts: Vec::new(),
             reasoning_finalized_at_ms: None,
+            execution: None,
             started_at_ms: observed_at_ms,
             completed_at_ms: None,
             source_event_id: source.event_id,
@@ -1044,6 +1183,7 @@ pub struct Feat134Hydration {
 pub struct Feat134HistoryTurn {
     pub turn_id: Uuid,
     pub v4_authority: bool,
+    pub source_schema_version: Option<u8>,
     pub terminal_code: Option<String>,
     pub items: Vec<TimelineItem>,
     pub plan: Option<TimelinePlan>,
@@ -1057,7 +1197,10 @@ pub struct Feat134HistoryProjection {
     pub durable_sequence_cut: u64,
 }
 
-fn validate_hydration(hydration: &Feat134Hydration) -> Result<(), ChatError> {
+fn validate_hydration(
+    hydration: &Feat134Hydration,
+    feat136_enabled: bool,
+) -> Result<(), ChatError> {
     if hydration.items.len() > MAX_TIMELINE_ITEMS {
         return Err(ChatError::DatabaseUnavailable);
     }
@@ -1067,6 +1210,11 @@ fn validate_hydration(hydration: &Feat134Hydration) -> Result<(), ChatError> {
         }
         validate_item_identity(&item.item_id, &item.item_type)
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if item.execution.is_some() != matches!(item.item_type.as_str(), "command" | "tool")
+            || (!feat136_enabled && item.execution.is_some())
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
         if item
             .reasoning_finalized_at_ms
             .is_some_and(|value| value < item.started_at_ms)
@@ -1653,6 +1801,7 @@ mod tests {
                 source_event_id: Uuid::from_u128(107),
                 source_sequence: 7,
                 source_occurred_at,
+                execution: None,
             }],
             plan: None,
             turn_notices: Vec::new(),
@@ -1908,6 +2057,7 @@ mod tests {
                 source_event_id,
                 source_sequence: 1,
                 source_occurred_at: source_occurred_at.clone(),
+                execution: None,
             })
             .collect();
         let mut item_limit = Feat134TurnReducer::new(
@@ -2000,6 +2150,7 @@ mod tests {
             source_event_id: source.event_id,
             source_sequence: source.sequence,
             source_occurred_at: source.occurred_at.clone(),
+            execution: None,
         };
         let step = TimelinePlanStep {
             ordinal: 0,

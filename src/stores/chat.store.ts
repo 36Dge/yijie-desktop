@@ -7,10 +7,12 @@ import {
   type ChatInvalidEventScope,
 } from "../api/chat-client";
 import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
+import { feat136ExecutionUiEnabled } from "../authorization/feat136-execution-ui-config";
 import {
   conversationMessageItemId,
   conversationReasoningItemOrdinal,
   historyPageToConversationSnapshot,
+  historyPageV5ToConversationSnapshot,
   projectionEventToConversation,
 } from "../api/chat-conversation-adapter";
 import {
@@ -30,14 +32,17 @@ import type {
   ChatHistoryTurn,
   ChatHistoryTurnV4,
   ChatHistoryPageV4,
+  ChatHistoryPageV5,
   ChatLocalReadiness,
   ChatMessageContentBlock,
   ChatProjectionEvent,
   ChatProjectionEventV4,
+  ChatProjectionEventV5,
   ChatProject,
   ChatReasoningItem,
   ChatResyncProjection,
   ChatResyncProjectionV4,
+  ChatResyncProjectionV5,
   ChatSession,
   ChatSessionControlPlane,
   ChatTurnContentBlock,
@@ -211,12 +216,17 @@ export interface ChatArtifactIntegration {
 }
 
 type ArtifactEventDisposition = "ignore" | "refresh" | "resync";
-type ChatHistoryAuthority = ChatHistoryPage | ChatHistoryPageV4;
-type ChatProjectionAuthorityEvent = ChatProjectionEvent | ChatProjectionEventV4;
-type ChatResyncAuthority = ChatResyncProjection | ChatResyncProjectionV4;
+type ChatHistoryAuthority = ChatHistoryPage | ChatHistoryPageV4 | ChatHistoryPageV5;
+type ChatProjectionAuthorityEvent = ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5;
+type ChatResyncAuthority = ChatResyncProjection | ChatResyncProjectionV4 | ChatResyncProjectionV5;
 
 function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
-  return "sessionNotices" in history;
+  return "sessionNotices" in history && !("schemaVersion" in history);
+}
+
+function isHistoryV5(history: ChatHistoryAuthority): history is ChatHistoryPageV5 {
+  return "sessionNotices" in history && "schemaVersion" in history &&
+    history.schemaVersion === 5;
 }
 
 function utf8Bytes(value: string): number {
@@ -257,7 +267,9 @@ export function createChatStoreDefinition(
   storeId = STORE_ID,
   artifactIntegrationFactory?: () => ChatArtifactIntegration,
   streamingV4Enabled = feat134StreamingUiEnabled,
+  executionV5Enabled = feat136ExecutionUiEnabled,
 ) {
+  const streamingV5Enabled = streamingV4Enabled && executionV5Enabled;
   return defineStore(storeId, () => {
     const artifactIntegration = artifactIntegrationFactory?.() ?? null;
     const phase = ref<ChatViewPhase>("idle");
@@ -621,9 +633,11 @@ export function createChatStoreDefinition(
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
       const generation = sessionListenerEpoch;
-      const pending = (streamingV4Enabled
-        ? client.onEventV4((event) => handleEvent(event), handleInvalidEvent)
-        : client.onEvent((event) => handleEvent(event), handleInvalidEvent))
+      const pending = (streamingV5Enabled
+        ? client.onEventV5((event) => handleEvent(event), handleInvalidEvent)
+        : streamingV4Enabled
+          ? client.onEventV4((event) => handleEvent(event), handleInvalidEvent)
+          : client.onEvent((event) => handleEvent(event), handleInvalidEvent))
         .then((unlisten) => {
           if (generation !== sessionListenerEpoch) {
             unlisten();
@@ -1124,7 +1138,7 @@ export function createChatStoreDefinition(
       pending: readonly ChatProjectionAuthorityEvent[],
       snapshotHistory: ChatHistoryAuthority,
     ): void {
-      const durableCut = isHistoryV4(snapshotHistory)
+      const durableCut = "sessionNotices" in snapshotHistory
         ? BigInt(snapshotHistory.durableSequenceCut)
         : null;
       for (const event of pending) {
@@ -1134,7 +1148,7 @@ export function createChatStoreDefinition(
           event.sessionId === selectedSessionId.value;
         const includedInSnapshot = matchesAuthority &&
           durableCut !== null &&
-          event.schemaVersion === 4 &&
+          (event.schemaVersion === 4 || event.schemaVersion === 5) &&
           "durableSequence" in event &&
           BigInt(event.durableSequence) <= durableCut;
         if (!includedInSnapshot) {
@@ -1411,9 +1425,11 @@ export function createChatStoreDefinition(
     }
 
     function subscribeAuthority(contextId: string, sessionId: string): Promise<string> {
-      return streamingV4Enabled
-        ? client.subscribeSessionV4(contextId, sessionId)
-        : client.subscribeSession(contextId, sessionId);
+      return streamingV5Enabled
+        ? client.subscribeSessionV5(contextId, sessionId)
+        : streamingV4Enabled
+          ? client.subscribeSessionV4(contextId, sessionId)
+          : client.subscribeSession(contextId, sessionId);
     }
 
     function resyncAuthority(
@@ -1422,9 +1438,11 @@ export function createChatStoreDefinition(
       limit: number,
       signal: AbortSignal,
     ): Promise<ChatResyncAuthority> {
-      return streamingV4Enabled
-        ? client.resyncSessionV4(contextId, sessionId, limit, signal)
-        : client.resyncSessionV2(contextId, sessionId, limit, signal);
+      return streamingV5Enabled
+        ? client.resyncSessionV5(contextId, sessionId, limit, signal)
+        : streamingV4Enabled
+          ? client.resyncSessionV4(contextId, sessionId, limit, signal)
+          : client.resyncSessionV2(contextId, sessionId, limit, signal);
     }
 
     function loadHistoryAuthority(
@@ -1434,6 +1452,9 @@ export function createChatStoreDefinition(
       limit: number,
       signal?: AbortSignal,
     ): Promise<ChatHistoryAuthority> {
+      if (streamingV5Enabled) {
+        return client.loadHistoryV5(contextId, sessionId, cursor, limit, signal);
+      }
       if (streamingV4Enabled) {
         return client.loadHistoryV4(contextId, sessionId, cursor, limit, signal);
       }
@@ -1619,6 +1640,24 @@ export function createChatStoreDefinition(
       }
     }
 
+    function conversationSnapshotFromHistory(
+      sessionId: string,
+      authority: ChatHistoryAuthority,
+    ) {
+      if (!streamingV5Enabled) {
+        return historyPageToConversationSnapshot(sessionId, authority);
+      }
+      if (!isHistoryV5(authority)) {
+        throw new ChatClientError({
+          schemaVersion: 5,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      return historyPageV5ToConversationSnapshot(sessionId, authority);
+    }
+
     function applyResync(
       projection: ChatResyncAuthority,
       authoritativeHistory: ChatHistoryAuthority = projection.history,
@@ -1626,7 +1665,7 @@ export function createChatStoreDefinition(
       if (projection.session.sessionId !== selectedSessionId.value) {
         throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync" });
       }
-      const snapshot = historyPageToConversationSnapshot(
+      const snapshot = conversationSnapshotFromHistory(
         projection.session.sessionId,
         authoritativeHistory,
       );
@@ -1802,33 +1841,47 @@ export function createChatStoreDefinition(
         if (!isCurrent(epoch, controller, sessionId)) return;
         const currentHistory = history.value;
         if (currentHistory === null) throw new ChatClientError({
-          schemaVersion: streamingV4Enabled ? 4 : 1,
+          schemaVersion: streamingV5Enabled ? 5 : streamingV4Enabled ? 4 : 1,
           code: "chat_protocol_error",
           retryable: false,
           recovery: "resync",
         });
-        const turns = Object.freeze([
-          ...currentHistory.turns,
-          ...page.turns,
-        ]);
-        const mergedHistory: ChatHistoryAuthority = streamingV4Enabled
-          ? isHistoryV4(currentHistory) && isHistoryV4(page)
+        const mergedHistory: ChatHistoryAuthority = streamingV5Enabled
+          ? isHistoryV5(currentHistory) && isHistoryV5(page)
             ? Object.freeze({
-                turns,
+                schemaVersion: 5 as const,
+                turns: Object.freeze([...currentHistory.turns, ...page.turns]),
                 nextCursor: page.nextCursor,
                 sessionNotices: currentHistory.sessionNotices,
                 durableSequenceCut: currentHistory.durableSequenceCut,
               })
             : (() => { throw new ChatClientError({
-                schemaVersion: 4,
+                schemaVersion: 5,
                 code: "chat_protocol_error",
                 retryable: false,
                 recovery: "resync",
               }); })()
-          : Object.freeze({ turns, nextCursor: page.nextCursor });
+          : streamingV4Enabled
+            ? isHistoryV4(currentHistory) && isHistoryV4(page)
+              ? Object.freeze({
+                  turns: Object.freeze([...currentHistory.turns, ...page.turns]),
+                  nextCursor: page.nextCursor,
+                  sessionNotices: currentHistory.sessionNotices,
+                  durableSequenceCut: currentHistory.durableSequenceCut,
+                })
+              : (() => { throw new ChatClientError({
+                  schemaVersion: 4,
+                  code: "chat_protocol_error",
+                  retryable: false,
+                  recovery: "resync",
+                }); })()
+          : Object.freeze({
+              turns: Object.freeze([...currentHistory.turns, ...page.turns]),
+              nextCursor: page.nextCursor,
+            });
         const appended = appendOlderConversationSnapshot(
           conversationState.value,
-          historyPageToConversationSnapshot(sessionId, page),
+          conversationSnapshotFromHistory(sessionId, page),
         );
         if (appended.syncStatus === "recovery_required") {
           conversationState.value = appended;
@@ -2142,7 +2195,30 @@ export function createChatStoreDefinition(
         artifacts: Object.freeze([]),
       });
       let nextHistory: ChatHistoryAuthority;
-      if (streamingV4Enabled) {
+      if (streamingV5Enabled) {
+        const currentV5 = currentHistory !== null && isHistoryV5(currentHistory)
+          ? currentHistory
+          : null;
+        // A locally queued Turn has no durable v5 projection facts yet. Keep it
+        // legacy inside the v5 response container until native resync assigns
+        // an authoritative v4/v5 projection.
+        const queuedTurnV5: ChatHistoryTurnV4 = Object.freeze({
+          ...queuedTurn,
+          projectionAuthority: "legacy",
+          artifacts: Object.freeze([]),
+          terminalCode: null,
+          timelineItems: Object.freeze([]),
+          plan: null,
+          notices: Object.freeze([]),
+        });
+        nextHistory = Object.freeze({
+          schemaVersion: 5 as const,
+          turns: Object.freeze([...(currentV5?.turns ?? []), queuedTurnV5]),
+          nextCursor: currentV5?.nextCursor ?? null,
+          sessionNotices: currentV5?.sessionNotices ?? Object.freeze([]),
+          durableSequenceCut: currentV5?.durableSequenceCut ?? "0",
+        });
+      } else if (streamingV4Enabled) {
         const currentV4 = currentHistory !== null && isHistoryV4(currentHistory)
           ? currentHistory
           : null;
@@ -2173,7 +2249,7 @@ export function createChatStoreDefinition(
       history.value = nextHistory;
       conversationState.value = reconcileConversationSnapshot(
         conversationState.value,
-        historyPageToConversationSnapshot(sessionId, nextHistory),
+        conversationSnapshotFromHistory(sessionId, nextHistory),
       );
       liveTurnStatus.value = "queued";
       sessions.value = Object.freeze(sessions.value.map((session) =>

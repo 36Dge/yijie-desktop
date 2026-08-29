@@ -20,10 +20,13 @@ import type {
   ChatControlPlaneEvent,
   ChatHistoryPage,
   ChatHistoryPageV4,
+  ChatHistoryPageV5,
+  ChatProjectionEventV5,
   ChatProjectionEvent,
   ChatProjectionEventV4,
   ChatResyncProjection,
   ChatResyncProjectionV4,
+  ChatResyncProjectionV5,
   ChatSession,
 } from "../domain/chat-ipc";
 import {
@@ -227,12 +230,14 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   client: ChatClient;
   emit: (event: ChatProjectionEvent) => void;
   emitV4: (event: ChatProjectionEventV4) => void;
+  emitV5: (event: ChatProjectionEventV5) => void;
   emitControlPlane: (event: ChatControlPlaneEvent) => void;
   emitAttachmentImport: (event: ChatAttachmentImportEvent) => void;
   invalidate: (scope?: ChatInvalidEventScope | null) => void;
 } {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
   let eventHandlerV4: (event: ChatProjectionEventV4) => void = () => undefined;
+  let eventHandlerV5: (event: ChatProjectionEventV5) => void = () => undefined;
   let invalidHandler: (scope?: ChatInvalidEventScope | null) => void = () => undefined;
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
@@ -266,6 +271,13 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     loadHistoryV2: (...arguments_) => client.loadHistory(...arguments_),
     loadHistoryV3: (...arguments_) => client.loadHistory(...arguments_),
     loadHistoryV4: async () => Object.freeze({
+      turns: Object.freeze([]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+    }),
+    loadHistoryV5: async () => Object.freeze({
+      schemaVersion: 5 as const,
       turns: Object.freeze([]),
       nextCursor: null,
       sessionNotices: Object.freeze([]),
@@ -320,9 +332,22 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     subscribeSessionV4: async (_context, sessionId) => sessionId === SESSION_A
       ? "019c1a00-0000-7000-8000-00000000000a"
       : "019c1a00-0000-7000-8000-00000000000b",
+    subscribeSessionV5: async (_context, sessionId) => sessionId === SESSION_A
+      ? "019c1a00-0000-7000-8000-00000000000a"
+      : "019c1a00-0000-7000-8000-00000000000b",
     resyncSession: async (_context, sessionId) => projection(sessionId),
     resyncSessionV2: (...arguments_) => client.resyncSession(...arguments_),
     resyncSessionV4: async (_context, sessionId) => projectionV4(sessionId),
+    resyncSessionV5: async (_context, sessionId) => Object.freeze({
+      ...projectionV4(sessionId),
+      history: Object.freeze({
+        schemaVersion: 5 as const,
+        turns: Object.freeze([]),
+        nextCursor: null,
+        sessionNotices: Object.freeze([]),
+        durableSequenceCut: "0",
+      }),
+    }),
     unsubscribeSession: async () => true,
     cancelRequest: async () => true,
     onEvent: async (handler, onInvalid) => {
@@ -332,6 +357,11 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     },
     onEventV4: async (handler, onInvalid) => {
       eventHandlerV4 = handler;
+      invalidHandler = onInvalid ?? (() => undefined);
+      return () => undefined;
+    },
+    onEventV5: async (handler, onInvalid) => {
+      eventHandlerV5 = handler;
       invalidHandler = onInvalid ?? (() => undefined);
       return () => undefined;
     },
@@ -349,6 +379,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     client,
     emit: (value) => eventHandler(value),
     emitV4: (value) => eventHandlerV4(value),
+    emitV5: (value) => eventHandlerV5(value),
     emitControlPlane: (value) => controlPlaneHandler(value),
     emitAttachmentImport: (value) => attachmentImportHandler(value),
     invalidate: (scope) => invalidHandler(scope),
@@ -4202,5 +4233,250 @@ describe("FEAT-134 chat store v4 authority", () => {
       TURN_A,
       "final-with-artifact",
     )).toMatchObject({ agentMessagePhase: "final_answer" });
+  });
+
+  it("resyncs a mixed legacy/v4/v5 page and hydrates typed Command authority", async () => {
+    const executionSource = Object.freeze({
+      sourceEventId: "019fbf59-4000-7000-8000-000000000001",
+      sourceSequence: "1",
+      sourceOccurredAt: "2026-08-29T08:00:00Z",
+    });
+    const page: ChatHistoryPageV5 = Object.freeze({
+      schemaVersion: 5,
+      turns: Object.freeze([Object.freeze({
+        turnId: "019c1a00-0000-7000-8000-000000000021",
+        projectionAuthority: "legacy",
+        status: "queued",
+        terminalAt: null,
+        reasoningStatus: "pending",
+        reasoningReasonCode: null,
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      }), Object.freeze({
+        turnId: "019c1a00-0000-7000-8000-000000000022",
+        projectionAuthority: "v4",
+        status: "completed",
+        terminalAt: 2,
+        reasoningStatus: "unavailable",
+        reasoningReasonCode: "reasoning_not_emitted",
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([Object.freeze({
+          ...sourceV4(1),
+          itemId: "v4-final-in-v5-page",
+          itemOrdinal: 1,
+          itemType: "agentMessage",
+          phase: "final_answer",
+          status: "completed",
+          text: "older v4 final",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 1,
+          completedAtMs: 2,
+        })]),
+        plan: null,
+        notices: Object.freeze([]),
+      }), Object.freeze({
+        turnId: TURN_A,
+        projectionAuthority: "v5",
+        status: "completed",
+        terminalAt: 3,
+        reasoningStatus: "unavailable",
+        reasoningReasonCode: "reasoning_not_emitted",
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([Object.freeze({
+          ...executionSource,
+          itemId: "command-v5-history",
+          itemOrdinal: 1,
+          itemType: "command",
+          phase: null,
+          status: "completed",
+          text: "",
+          reasoningStatus: null,
+          reasoningReasonCode: null,
+          reasoningParts: Object.freeze([]),
+          startedAtMs: 1,
+          completedAtMs: 2,
+          execution: Object.freeze({
+            kind: "command",
+            status: "completed",
+            startedSource: executionSource,
+            lastSource: executionSource,
+            commandSummary: Object.freeze({
+              text: "Inspect repository status",
+              truncated: false,
+              truncationReason: null,
+            }),
+            cwd: Object.freeze({ kind: "workspace_root", segments: Object.freeze([]) }),
+            liveOutput: Object.freeze({
+              text: "working tree clean\n",
+              truncated: false,
+              truncationReason: null,
+            }),
+            output: Object.freeze({
+              retention: "complete",
+              text: "working tree clean\n",
+              head: null,
+              tail: null,
+              reason: null,
+              truncated: false,
+              truncationReason: null,
+            }),
+            durationMs: 7,
+            exitCode: 0,
+            error: null,
+          }),
+        })]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: "abcdefghijklmnop",
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "1",
+    });
+    const olderPage: ChatHistoryPageV5 = Object.freeze({
+      schemaVersion: 5,
+      turns: Object.freeze([Object.freeze({
+        turnId: "019c1a00-0000-7000-8000-000000000023",
+        projectionAuthority: "legacy",
+        status: "completed",
+        terminalAt: 1,
+        reasoningStatus: "complete",
+        reasoningReasonCode: null,
+        messages: Object.freeze([]),
+        reasoning: Object.freeze([]),
+        artifacts: Object.freeze([]),
+        terminalCode: null,
+        timelineItems: Object.freeze([]),
+        plan: null,
+        notices: Object.freeze([]),
+      })]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "99",
+    });
+    const subscribeV1 = vi.fn<ChatClient["subscribeSession"]>();
+    const subscribeV4 = vi.fn<ChatClient["subscribeSessionV4"]>();
+    const subscribeV5 = vi.fn<ChatClient["subscribeSessionV5"]>(async () =>
+      "019c1a00-0000-7000-8000-00000000000a"
+    );
+    const resyncV4 = vi.fn<ChatClient["resyncSessionV4"]>();
+    const loadHistoryV5 = vi.fn<ChatClient["loadHistoryV5"]>(async () => olderPage);
+    const resyncV5 = vi.fn<ChatClient["resyncSessionV5"]>(async (_context, sessionId) =>
+      Object.freeze({
+        session: session(sessionId),
+        history: page,
+        cleanup: null,
+      }) satisfies ChatResyncProjectionV5
+    );
+    const { client, emitV5 } = fakeClient({
+      subscribeSession: subscribeV1,
+      subscribeSessionV4: subscribeV4,
+      subscribeSessionV5: subscribeV5,
+      resyncSessionV4: resyncV4,
+      resyncSessionV5: resyncV5,
+      loadHistoryV5,
+    });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat136-v5-${storeSequence++}`,
+      undefined,
+      true,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(subscribeV5).toHaveBeenCalledOnce();
+    expect(resyncV5).toHaveBeenCalledOnce();
+    expect(subscribeV4).not.toHaveBeenCalled();
+    expect(subscribeV1).not.toHaveBeenCalled();
+    expect(resyncV4).not.toHaveBeenCalled();
+    expect(store.conversationState.schemaVersion).toBe(3);
+    expect(selectConversationTurn(
+      store.conversationState,
+      SESSION_A,
+      "019c1a00-0000-7000-8000-000000000021",
+    )).toMatchObject({ status: "queued" });
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      "019c1a00-0000-7000-8000-000000000022",
+      "v4-final-in-v5-page",
+    )).toMatchObject({
+      kind: "assistant_message",
+      execution: null,
+      contentBlocks: [{ text: "older v4 final" }],
+    });
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      "command-v5-history",
+    )).toMatchObject({
+      kind: "command",
+      execution: {
+        kind: "command",
+        output: { retention: "complete", text: "working tree clean\n" },
+      },
+    });
+
+    emitV5(Object.freeze({
+      schemaVersion: 5,
+      sourceSchemaVersion: 4,
+      subscriptionId: "019c1a00-0000-7000-8000-00000000000a",
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: "019c1a00-0000-7000-8000-000000000021",
+      projectionSequence: "1",
+      eventId: "019fbf59-4000-7000-8000-000000000010",
+      durableSequence: "2",
+      kind: "item_started",
+      payload: Object.freeze({
+        ...sourceV4(2),
+        itemId: "sticky-command-unknown",
+        itemOrdinal: 1,
+        itemType: "commandExecution",
+        phase: null,
+        text: null,
+      }),
+    }));
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      "019c1a00-0000-7000-8000-000000000021",
+      "sticky-command-unknown",
+    )).toMatchObject({ kind: "unknown", execution: null });
+
+    await store.loadOlderHistory();
+    expect(loadHistoryV5).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      "abcdefghijklmnop",
+      20,
+      expect.any(AbortSignal),
+    );
+    expect(selectConversationTurn(
+      store.conversationState,
+      SESSION_A,
+      "019c1a00-0000-7000-8000-000000000023",
+    )).toMatchObject({ status: "completed" });
+    expect(store.history).toMatchObject({
+      schemaVersion: 5,
+      nextCursor: null,
+      durableSequenceCut: "1",
+    });
   });
 });

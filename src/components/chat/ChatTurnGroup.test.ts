@@ -86,7 +86,7 @@ describe("ChatTurnGroup", () => {
       notices: [{ severity: "warning", code: "conversation_warning" }],
       items: [
         message("assistant", 2, "assistant_message", "回答内容"),
-        message("unknown", 3, "tool", "普通的未来类型占位内容"),
+        message("unknown", 3, "unknown", "普通的未来类型占位内容"),
         message("user", 0, "user_message", "用户内容"),
         message("reasoning", 1, "reasoning", "过程内容"),
       ],

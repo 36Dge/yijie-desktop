@@ -3,10 +3,16 @@ use super::attachment::{PreparedAttachment, MAX_ATTACHMENTS_PER_MESSAGE, MAX_FIL
 use super::error::{map_sqlite_error, ChatError};
 use super::feat134::{
     Feat134HistoryProjection, Feat134HistoryTurn, Feat134Hydration, Feat134Projection,
-    Feat134ProjectionFailure, Feat134ProjectionFailureKind, TimelineDelta, TimelineItem,
-    TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity, TimelinePhase,
-    TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
+    Feat134ProjectionFailure, Feat134ProjectionFailureKind, SourceIdentity, TimelineDelta,
+    TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity,
+    TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
     TimelineTerminal, PROJECTION_CONFLICT_CODE, PROJECTION_LIMIT_EXCEEDED_CODE,
+};
+use super::feat136::{
+    CommandCwdProjection, CommandOutputProjection, CommandProjection, CommandStatus,
+    ExecutionProjection, ProjectionError, ProjectionErrorCode, SafeTextProjection,
+    ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus, TruncationReason,
+    SOURCE_SCHEMA_VERSION as FEAT136_SOURCE_SCHEMA_VERSION,
 };
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
@@ -41,6 +47,7 @@ const MAX_FEAT134_OBSERVED_EVENTS_PER_TURN: usize = 10_000;
 const MAX_FEAT134_OBSERVED_EVENT_BYTES: usize = 1024 * 1024;
 const MAX_FEAT134_OBSERVED_BYTES_PER_TURN: usize = 16 * 1024 * 1024;
 const FEAT134_LIMIT_REASON_CODE: &str = "limit_exceeded";
+const FEAT134_SOURCE_SCHEMA_VERSION: u8 = 4;
 const DEFAULT_PAGE_SIZE: usize = 20;
 const MAX_PAGE_SIZE: usize = 50;
 const OUTBOX_MAX_ATTEMPTS: i64 = 16;
@@ -63,6 +70,13 @@ const R8_IDEMPOTENCY_RETRY_DELAY: Duration = Duration::from_micros(100);
 pub struct ChatScope {
     pub(super) owner_user_id: String,
     pub(super) tenant_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Feat136ObservedEventDisposition {
+    New,
+    Duplicate,
+    Conflict,
 }
 
 impl ChatScope {
@@ -4171,13 +4185,43 @@ impl ChatRepository {
         if projection.terminal.is_some() {
             return Err(ChatError::InvalidInput);
         }
-        validate_feat134_projection(projection)?;
+        validate_projection_for_schema(projection, FEAT134_SOURCE_SCHEMA_VERSION)?;
         let transaction = self
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let durable_sequence =
-            persist_feat134_projection_transaction(&transaction, &self.scope, projection, true)?;
+        let durable_sequence = persist_feat134_projection_transaction(
+            &transaction,
+            &self.scope,
+            projection,
+            true,
+            FEAT134_SOURCE_SCHEMA_VERSION,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(durable_sequence)
+    }
+
+    pub fn persist_feat136_projection(
+        &mut self,
+        projection: &Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        if projection.terminal.is_some() {
+            return Err(ChatError::InvalidInput);
+        }
+        validate_projection_for_schema(projection, FEAT136_SOURCE_SCHEMA_VERSION)?;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let durable_sequence = persist_feat134_projection_transaction(
+            &transaction,
+            &self.scope,
+            projection,
+            true,
+            FEAT136_SOURCE_SCHEMA_VERSION,
+        )?;
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -4188,7 +4232,22 @@ impl ChatRepository {
         &mut self,
         projection: &Feat134Projection,
     ) -> Result<u64, ChatError> {
-        validate_feat134_projection(projection)?;
+        self.commit_projection_terminal(projection, FEAT134_SOURCE_SCHEMA_VERSION)
+    }
+
+    pub fn commit_feat136_terminal(
+        &mut self,
+        projection: &Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION)
+    }
+
+    fn commit_projection_terminal(
+        &mut self,
+        projection: &Feat134Projection,
+        source_schema_version: u8,
+    ) -> Result<u64, ChatError> {
+        validate_projection_for_schema(projection, source_schema_version)?;
         let terminal = projection
             .terminal
             .as_ref()
@@ -4224,8 +4283,13 @@ impl ChatRepository {
         if !matches!(current_status.as_str(), "streaming" | "stopping") {
             return Err(ChatError::ConversationConflict);
         }
-        let durable_sequence =
-            persist_feat134_projection_transaction(&transaction, &self.scope, projection, false)?;
+        let durable_sequence = persist_feat134_projection_transaction(
+            &transaction,
+            &self.scope,
+            projection,
+            false,
+            source_schema_version,
+        )?;
         let message_status = if terminal.status == "failed" {
             "failed"
         } else {
@@ -4297,6 +4361,24 @@ impl ChatRepository {
         &mut self,
         failure: &Feat134ProjectionFailure,
     ) -> Result<Feat134Projection, ChatError> {
+        self.commit_projection_failure(failure, FEAT134_SOURCE_SCHEMA_VERSION)
+    }
+
+    pub fn commit_feat136_projection_failure(
+        &mut self,
+        failure: &Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION)
+    }
+
+    fn commit_projection_failure(
+        &mut self,
+        failure: &Feat134ProjectionFailure,
+        source_schema_version: u8,
+    ) -> Result<Feat134Projection, ChatError> {
+        if !matches!(source_schema_version, 4 | 5) {
+            return Err(ChatError::InvalidInput);
+        }
         validate_non_nil(failure.session_id)?;
         validate_non_nil(failure.turn_id)?;
         validate_cursor(&failure.cursor)?;
@@ -4358,8 +4440,8 @@ impl ChatRepository {
             .execute(
                 "INSERT INTO chat_observed_events_v4(
                    event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
-                   event_type, source_occurred_at, observed_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                   event_type, source_occurred_at, observed_at_ms, source_schema_version
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     failure.cursor.event_id.to_string(),
                     session_id,
@@ -4370,6 +4452,7 @@ impl ChatRepository {
                     failure.source_event_type,
                     failure.source_occurred_at,
                     failure.observed_at_ms,
+                    i64::from(source_schema_version),
                 ],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -4384,6 +4467,22 @@ impl ChatRepository {
                 params![failure.observed_at_ms, failure.turn_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if source_schema_version == FEAT136_SOURCE_SCHEMA_VERSION {
+            transaction
+                .execute(
+                    "UPDATE chat_command_items_v5 SET status='incomplete'
+                     WHERE turn_id=?1 AND status='running'",
+                    [failure.turn_id.to_string()],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            transaction
+                .execute(
+                    "UPDATE chat_tool_items_v5 SET status='incomplete'
+                     WHERE turn_id=?1 AND status='in_progress'",
+                    [failure.turn_id.to_string()],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
         let unfinished_reasoning_count = transaction
             .execute(
                 "UPDATE chat_timeline_items_v4
@@ -4491,7 +4590,7 @@ impl ChatRepository {
                 |row| row.get(0),
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let items = load_feat134_items(&transaction, failure.turn_id)?;
+        let items = load_timeline_items(&transaction, failure.turn_id, source_schema_version)?;
         let plan = load_feat134_plan(&transaction, failure.turn_id)?;
         let turn_notices = load_feat134_notices(
             &transaction,
@@ -4776,11 +4875,46 @@ impl ChatRepository {
         )
     }
 
+    pub fn load_feat136_history_snapshot(
+        &mut self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        requested_limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.load_history_snapshot_for_schema_with_hook(
+            session_id,
+            before_ordinal,
+            requested_limit,
+            FEAT136_SOURCE_SCHEMA_VERSION,
+            || Ok(()),
+        )
+    }
+
     fn load_feat134_history_snapshot_with_hook<F>(
         &mut self,
         session_id: Uuid,
         before_ordinal: Option<u64>,
         requested_limit: Option<usize>,
+        after_base_read: F,
+    ) -> Result<Feat134HistorySnapshot, ChatError>
+    where
+        F: FnOnce() -> Result<(), ChatError>,
+    {
+        self.load_history_snapshot_for_schema_with_hook(
+            session_id,
+            before_ordinal,
+            requested_limit,
+            FEAT134_SOURCE_SCHEMA_VERSION,
+            after_base_read,
+        )
+    }
+
+    fn load_history_snapshot_for_schema_with_hook<F>(
+        &mut self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        requested_limit: Option<usize>,
+        source_schema_version: u8,
         after_base_read: F,
     ) -> Result<Feat134HistorySnapshot, ChatError>
     where
@@ -4820,11 +4954,12 @@ impl ChatRepository {
         )?;
         let artifacts =
             load_artifacts_for_turns_from_connection(&transaction, &self.scope, &turn_ids)?;
-        let feat134 = load_feat134_history_projection_from_connection(
+        let feat134 = load_history_projection_for_schema(
             &transaction,
             &self.scope,
             session_id,
             &turn_ids,
+            source_schema_version,
         )?;
         transaction
             .commit()
@@ -4870,6 +5005,145 @@ impl ChatRepository {
         })
     }
 
+    pub fn turn_projection_schema_version(&self, turn_id: Uuid) -> Result<Option<u8>, ChatError> {
+        validate_non_nil(turn_id)?;
+        let authority = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(
+                           SELECT 1 FROM chat_observed_events_v4 e
+                           WHERE e.turn_id=t.id AND e.source_schema_version=4
+                         ),
+                        EXISTS(
+                           SELECT 1 FROM chat_observed_events_v4 e
+                           WHERE e.turn_id=t.id AND e.source_schema_version=5
+                         )
+                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        match authority {
+            (false, false) => Ok(None),
+            (true, false) => Ok(Some(FEAT134_SOURCE_SCHEMA_VERSION)),
+            (false, true) => Ok(Some(FEAT136_SOURCE_SCHEMA_VERSION)),
+            (true, true) => Err(ChatError::DatabaseUnavailable),
+        }
+    }
+
+    pub fn load_feat136_hydration(&self, turn_id: Uuid) -> Result<Feat134Hydration, ChatError> {
+        validate_non_nil(turn_id)?;
+        let owned: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                   WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
+                 )",
+                params![
+                    turn_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if !owned {
+            return Err(ChatError::NotFound);
+        }
+        Ok(Feat134Hydration {
+            items: load_feat136_items(&self.connection, turn_id)?,
+            plan: load_feat134_plan(&self.connection, turn_id)?,
+            turn_notices: load_feat134_notices(
+                &self.connection,
+                None,
+                Some(turn_id),
+                TimelineNoticeScope::Turn,
+            )?,
+        })
+    }
+
+    pub fn classify_feat136_observed_event(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        cursor: &StoredEventCursor,
+        event_type: &str,
+        source_turn_scoped: bool,
+    ) -> Result<Feat136ObservedEventDisposition, ChatError> {
+        validate_non_nil(session_id)?;
+        validate_non_nil(turn_id)?;
+        validate_cursor(cursor)?;
+        if event_type.is_empty() || event_type.len() > 128 {
+            return Err(ChatError::InvalidInput);
+        }
+        let owned: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
+                   WHERE t.id=?1 AND t.session_id=?2
+                     AND s.owner_user_id=?3 AND s.tenant_id=?4
+                 )",
+                params![
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if !owned {
+            return Err(ChatError::NotFound);
+        }
+        let observed = self
+            .connection
+            .query_row(
+                "SELECT session_id, turn_id, stream_id, sequence, event_type,
+                        source_schema_version
+                 FROM chat_observed_events_v4 WHERE event_id=?1",
+                [cursor.event_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let Some((stored_session, stored_turn, stream, sequence, stored_type, schema)) = observed
+        else {
+            return Ok(Feat136ObservedEventDisposition::New);
+        };
+        let expected_session = session_id.to_string();
+        let expected_turn = turn_id.to_string();
+        let expected_stored_turn = source_turn_scoped.then_some(expected_turn.as_str());
+        let exact = stored_session == expected_session
+            && stored_turn.as_deref() == expected_stored_turn
+            && stream == cursor.stream_id.to_string()
+            && u64::try_from(sequence).ok() == Some(cursor.sequence)
+            && stored_type == event_type
+            && schema == i64::from(FEAT136_SOURCE_SCHEMA_VERSION);
+        Ok(if exact {
+            Feat136ObservedEventDisposition::Duplicate
+        } else {
+            Feat136ObservedEventDisposition::Conflict
+        })
+    }
+
     pub fn load_feat134_history_projection(
         &self,
         session_id: Uuid,
@@ -4885,6 +5159,29 @@ impl ChatRepository {
             &self.scope,
             session_id,
             turn_ids,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(projection)
+    }
+
+    pub fn load_feat136_history_projection(
+        &self,
+        session_id: Uuid,
+        turn_ids: &[Uuid],
+    ) -> Result<Feat134HistoryProjection, ChatError> {
+        validate_non_nil(session_id)?;
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let projection = load_history_projection_for_schema(
+            &transaction,
+            &self.scope,
+            session_id,
+            turn_ids,
+            FEAT136_SOURCE_SCHEMA_VERSION,
         )?;
         transaction
             .commit()
@@ -7063,6 +7360,24 @@ fn load_feat134_items(
     connection: &Connection,
     turn_id: Uuid,
 ) -> Result<Vec<TimelineItem>, ChatError> {
+    load_timeline_items(connection, turn_id, FEAT134_SOURCE_SCHEMA_VERSION)
+}
+
+fn load_feat136_items(
+    connection: &Connection,
+    turn_id: Uuid,
+) -> Result<Vec<TimelineItem>, ChatError> {
+    load_timeline_items(connection, turn_id, FEAT136_SOURCE_SCHEMA_VERSION)
+}
+
+fn load_timeline_items(
+    connection: &Connection,
+    turn_id: Uuid,
+    source_schema_version: u8,
+) -> Result<Vec<TimelineItem>, ChatError> {
+    if !matches!(source_schema_version, 4 | 5) {
+        return Err(ChatError::InvalidInput);
+    }
     type ItemRow = (
         String,
         i64,
@@ -7085,29 +7400,33 @@ fn load_feat134_items(
                     reasoning_status, reasoning_reason_code, reasoning_finalized_at_ms,
                     started_at_ms, completed_at_ms,
                     source_event_id, source_sequence, source_occurred_at
-             FROM chat_timeline_items_v4 WHERE turn_id=?1
+             FROM chat_timeline_items_v4
+             WHERE turn_id=?1 AND source_schema_version=?2
              ORDER BY item_ordinal ASC",
         )
         .map_err(|_| ChatError::DatabaseUnavailable)?;
     let rows = statement
-        .query_map([turn_id.to_string()], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-                row.get(9)?,
-                row.get(10)?,
-                row.get(11)?,
-                row.get(12)?,
-                row.get(13)?,
-            ))
-        })
+        .query_map(
+            params![turn_id.to_string(), i64::from(source_schema_version)],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
+                ))
+            },
+        )
         .map_err(|_| ChatError::DatabaseUnavailable)?
         .collect::<rusqlite::Result<Vec<ItemRow>>>()
         .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -7118,6 +7437,11 @@ fn load_feat134_items(
             return Err(ChatError::DatabaseUnavailable);
         }
         let reasoning_parts = load_feat134_reasoning_parts(connection, turn_id, &row.0)?;
+        let execution = if source_schema_version == FEAT136_SOURCE_SCHEMA_VERSION {
+            load_feat136_execution(connection, turn_id, &row.0)?
+        } else {
+            None
+        };
         items.push(TimelineItem {
             item_id: row.0,
             item_ordinal: ordinal,
@@ -7133,6 +7457,7 @@ fn load_feat134_items(
             reasoning_reason_code: row.7,
             reasoning_finalized_at_ms: row.8,
             reasoning_parts,
+            execution,
             started_at_ms: row.9,
             completed_at_ms: row.10,
             source_event_id: parse_uuid_value(&row.11)?,
@@ -7141,6 +7466,425 @@ fn load_feat134_items(
         });
     }
     Ok(items)
+}
+
+fn load_feat136_execution(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<Option<ExecutionProjection>, ChatError> {
+    let command_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_command_items_v5 WHERE turn_id=?1 AND item_id=?2)",
+            params![turn_id.to_string(), item_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let tool_exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_tool_items_v5 WHERE turn_id=?1 AND item_id=?2)",
+            params![turn_id.to_string(), item_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    match (command_exists, tool_exists) {
+        (true, false) => load_feat136_command(connection, turn_id, item_id)
+            .map(ExecutionProjection::Command)
+            .map(Some),
+        (false, true) => load_feat136_tool(connection, turn_id, item_id)
+            .map(ExecutionProjection::Tool)
+            .map(Some),
+        (false, false) => Ok(None),
+        (true, true) => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn load_feat136_command(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<CommandProjection, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT status,
+                    started_source_event_id, started_source_sequence, started_source_occurred_at,
+                    last_source_event_id, last_source_sequence, last_source_occurred_at,
+                    command_summary, command_summary_bytes, command_summary_truncated,
+                    command_summary_truncation_reason, cwd_kind,
+                    live_output, live_output_bytes, live_output_truncated,
+                    live_output_truncation_reason, output_retention, output_text, output_head,
+                    output_tail, output_reason, output_truncated, output_truncation_reason,
+                    duration_ms, exit_code, error_code, error_summary
+             FROM chat_command_items_v5 WHERE turn_id=?1 AND item_id=?2",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut rows = statement
+        .query(params![turn_id.to_string(), item_id])
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let row = rows
+        .next()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    let status = parse_command_status(
+        &row.get::<_, String>(0)
+            .map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let started_source = source_identity_from_columns(
+        row.get(1).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(2).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(3).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let last_source = source_identity_from_columns(
+        row.get(4).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(5).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(6).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let command_summary = safe_text_from_columns(
+        row.get(7).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(8).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(9).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(10).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let cwd_kind: String = row.get(11).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let live_output = optional_safe_text_from_columns(
+        row.get(12).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(13).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(14).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(15).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let output_retention: Option<String> =
+        row.get(16).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_text: Option<String> = row.get(17).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_head: Option<String> = row.get(18).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_tail: Option<String> = row.get(19).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_reason: Option<String> = row.get(20).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_truncated: Option<bool> = row.get(21).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let output_truncation_reason: Option<String> =
+        row.get(22).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let duration_ms = row
+        .get::<_, Option<i64>>(23)
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let exit_code = row.get(24).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let error_code: Option<String> = row.get(25).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let error_summary: Option<String> = row.get(26).map_err(|_| ChatError::DatabaseUnavailable)?;
+    drop(rows);
+    drop(statement);
+
+    let segments = load_feat136_cwd_segments(connection, turn_id, item_id)?;
+    let cwd = match (cwd_kind.as_str(), segments.is_empty()) {
+        ("workspace_root", true) => CommandCwdProjection::WorkspaceRoot,
+        ("redacted", true) => CommandCwdProjection::Redacted,
+        ("workspace_relative", false) => CommandCwdProjection::WorkspaceRelative(segments),
+        _ => return Err(ChatError::DatabaseUnavailable),
+    };
+    let output = match (
+        output_retention.as_deref(),
+        output_text,
+        output_head,
+        output_tail,
+        output_reason.as_deref(),
+        output_truncated,
+        output_truncation_reason.as_deref(),
+    ) {
+        (None, None, None, None, None, None, None) => None,
+        (Some("complete"), Some(text), None, None, None, Some(false), None) => {
+            Some(CommandOutputProjection::Complete { text })
+        }
+        (Some("head_tail"), None, Some(head), Some(tail), None, Some(true), reason) => {
+            Some(CommandOutputProjection::HeadTail {
+                head,
+                tail,
+                reason: parse_truncation_reason(reason.ok_or(ChatError::DatabaseUnavailable)?)?,
+            })
+        }
+        (Some("unavailable"), None, None, None, Some("not_available"), Some(false), None) => {
+            Some(CommandOutputProjection::Unavailable)
+        }
+        _ => return Err(ChatError::DatabaseUnavailable),
+    };
+    let error = projection_error_from_columns(error_code, error_summary)?;
+    Ok(CommandProjection {
+        status,
+        started_source,
+        last_source,
+        command_summary,
+        cwd,
+        live_output,
+        output,
+        duration_ms,
+        exit_code,
+        error,
+    })
+}
+
+fn load_feat136_cwd_segments(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<Vec<String>, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT ordinal, segment, byte_count FROM chat_command_cwd_segments_v5
+             WHERE turn_id=?1 AND item_id=?2 ORDER BY ordinal ASC",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map(params![turn_id.to_string(), item_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut segments = Vec::with_capacity(rows.len());
+    for (ordinal, segment, byte_count) in rows {
+        if usize::try_from(ordinal).ok() != Some(segments.len())
+            || usize::try_from(byte_count).ok() != Some(segment.len())
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        segments.push(segment);
+    }
+    Ok(segments)
+}
+
+fn load_feat136_tool(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<ToolProjection, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT status,
+                    started_source_event_id, started_source_sequence, started_source_occurred_at,
+                    last_source_event_id, last_source_sequence, last_source_occurred_at,
+                    identity_resolution, server_name, tool_name,
+                    arguments_summary, arguments_summary_bytes, arguments_summary_truncated,
+                    arguments_summary_truncation_reason, duration_ms,
+                    result_summary, result_summary_bytes, result_summary_truncated,
+                    result_summary_truncation_reason, error_code, error_summary
+             FROM chat_tool_items_v5 WHERE turn_id=?1 AND item_id=?2",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut rows = statement
+        .query(params![turn_id.to_string(), item_id])
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let row = rows
+        .next()
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    let status = parse_tool_status(
+        &row.get::<_, String>(0)
+            .map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let started_source = source_identity_from_columns(
+        row.get(1).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(2).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(3).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let last_source = source_identity_from_columns(
+        row.get(4).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(5).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(6).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let resolution: String = row.get(7).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let server_name: String = row.get(8).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let tool_name: String = row.get(9).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let arguments_summary = safe_text_from_columns(
+        row.get(10).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(11).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(12).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(13).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let duration_ms = row
+        .get::<_, Option<i64>>(14)
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let result_summary = optional_safe_text_from_columns(
+        row.get(15).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(16).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(17).map_err(|_| ChatError::DatabaseUnavailable)?,
+        row.get(18).map_err(|_| ChatError::DatabaseUnavailable)?,
+    )?;
+    let error_code: Option<String> = row.get(19).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let error_summary: Option<String> = row.get(20).map_err(|_| ChatError::DatabaseUnavailable)?;
+    drop(rows);
+    drop(statement);
+    let identity = match resolution.as_str() {
+        "known" => ToolIdentityProjection::Known {
+            server_name,
+            tool_name,
+        },
+        "unknown" if server_name == "unknown" && tool_name == "unknown" => {
+            ToolIdentityProjection::Unknown
+        }
+        _ => return Err(ChatError::DatabaseUnavailable),
+    };
+    Ok(ToolProjection {
+        status,
+        started_source,
+        last_source,
+        identity,
+        arguments_summary,
+        progress: load_feat136_tool_progress(connection, turn_id, item_id)?,
+        duration_ms,
+        result_summary,
+        error: projection_error_from_columns(error_code, error_summary)?,
+    })
+}
+
+fn load_feat136_tool_progress(
+    connection: &Connection,
+    turn_id: Uuid,
+    item_id: &str,
+) -> Result<Vec<ToolProgressProjection>, ChatError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT progress_index, source_event_id, source_sequence, source_occurred_at,
+                    summary, summary_bytes, summary_truncated, summary_truncation_reason
+             FROM chat_tool_progress_v5 WHERE turn_id=?1 AND item_id=?2
+             ORDER BY progress_index ASC",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map(params![turn_id.to_string(), item_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, bool>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let mut progress = Vec::with_capacity(rows.len());
+    for row in rows {
+        let progress_index = usize::try_from(row.0).map_err(|_| ChatError::DatabaseUnavailable)?;
+        if progress_index != progress.len() {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        progress.push(ToolProgressProjection {
+            source: source_identity_from_columns(row.1, row.2, row.3)?,
+            progress_index,
+            summary: safe_text_from_columns(row.4, row.5, row.6, row.7)?,
+        });
+    }
+    Ok(progress)
+}
+
+fn source_identity_from_columns(
+    event_id: String,
+    sequence: i64,
+    occurred_at: String,
+) -> Result<SourceIdentity, ChatError> {
+    Ok(SourceIdentity {
+        event_id: parse_uuid_value(&event_id)?,
+        sequence: u64::try_from(sequence).map_err(|_| ChatError::DatabaseUnavailable)?,
+        occurred_at,
+    })
+}
+
+fn safe_text_from_columns(
+    text: String,
+    byte_count: i64,
+    truncated: bool,
+    reason: Option<String>,
+) -> Result<SafeTextProjection, ChatError> {
+    if usize::try_from(byte_count).ok() != Some(text.len()) {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    let truncation_reason = match (truncated, reason.as_deref()) {
+        (false, None) => None,
+        (true, Some(value)) => Some(parse_truncation_reason(value)?),
+        _ => return Err(ChatError::DatabaseUnavailable),
+    };
+    Ok(SafeTextProjection {
+        text,
+        truncated,
+        truncation_reason,
+    })
+}
+
+fn optional_safe_text_from_columns(
+    text: Option<String>,
+    byte_count: Option<i64>,
+    truncated: Option<bool>,
+    reason: Option<String>,
+) -> Result<Option<SafeTextProjection>, ChatError> {
+    match (text, byte_count, truncated, reason) {
+        (None, None, None, None) => Ok(None),
+        (Some(text), Some(byte_count), Some(truncated), reason) => {
+            safe_text_from_columns(text, byte_count, truncated, reason).map(Some)
+        }
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_truncation_reason(value: &str) -> Result<TruncationReason, ChatError> {
+    match value {
+        "utf8_byte_limit" => Ok(TruncationReason::Utf8ByteLimit),
+        "upstream_truncated" => Ok(TruncationReason::UpstreamTruncated),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_command_status(value: &str) -> Result<CommandStatus, ChatError> {
+    match value {
+        "running" => Ok(CommandStatus::Running),
+        "completed" => Ok(CommandStatus::Completed),
+        "failed" => Ok(CommandStatus::Failed),
+        "declined" => Ok(CommandStatus::Declined),
+        "incomplete" => Ok(CommandStatus::Incomplete),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn parse_tool_status(value: &str) -> Result<ToolStatus, ChatError> {
+    match value {
+        "in_progress" => Ok(ToolStatus::InProgress),
+        "completed" => Ok(ToolStatus::Completed),
+        "failed" => Ok(ToolStatus::Failed),
+        "declined" => Ok(ToolStatus::Declined),
+        "incomplete" => Ok(ToolStatus::Incomplete),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn projection_error_from_columns(
+    code: Option<String>,
+    summary: Option<String>,
+) -> Result<Option<ProjectionError>, ChatError> {
+    match (code.as_deref(), summary) {
+        (None, None) => Ok(None),
+        (Some(code), Some(summary)) => Ok(Some(ProjectionError {
+            code: match code {
+                "command_failed" => ProjectionErrorCode::CommandFailed,
+                "command_declined" => ProjectionErrorCode::CommandDeclined,
+                "tool_failed" => ProjectionErrorCode::ToolFailed,
+                "tool_declined" => ProjectionErrorCode::ToolDeclined,
+                "unknown_tool" => ProjectionErrorCode::UnknownTool,
+                "projection_limit_exceeded" => ProjectionErrorCode::ProjectionLimitExceeded,
+                "projection_redaction_failed" => ProjectionErrorCode::ProjectionRedactionFailed,
+                "protocol_error" => ProjectionErrorCode::ProtocolError,
+                _ => return Err(ChatError::DatabaseUnavailable),
+            },
+            summary,
+        })),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
 }
 
 fn load_feat134_reasoning_parts(
@@ -7330,6 +8074,25 @@ fn load_feat134_history_projection_from_connection(
     session_id: Uuid,
     turn_ids: &[Uuid],
 ) -> Result<Feat134HistoryProjection, ChatError> {
+    load_history_projection_for_schema(
+        connection,
+        scope,
+        session_id,
+        turn_ids,
+        FEAT134_SOURCE_SCHEMA_VERSION,
+    )
+}
+
+fn load_history_projection_for_schema(
+    connection: &Connection,
+    scope: &ChatScope,
+    session_id: Uuid,
+    turn_ids: &[Uuid],
+    source_schema_version: u8,
+) -> Result<Feat134HistoryProjection, ChatError> {
+    if !matches!(source_schema_version, 4 | 5) {
+        return Err(ChatError::InvalidInput);
+    }
     if turn_ids.len() > MAX_PAGE_SIZE || turn_ids.iter().any(Uuid::is_nil) {
         return Err(ChatError::InvalidInput);
     }
@@ -7360,10 +8123,13 @@ fn load_feat134_history_projection_from_connection(
         .unwrap_or(0);
     let mut turns = Vec::with_capacity(turn_ids.len());
     for turn_id in turn_ids {
-        let (terminal_code, v4_authority) = connection
+        let (terminal_code, requested_authority, v4_authority) = connection
             .query_row(
                 "SELECT t.terminal_code,
-                        EXISTS(SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id)
+                        EXISTS(SELECT 1 FROM chat_observed_events_v4 e
+                               WHERE e.turn_id=t.id AND e.source_schema_version=?5),
+                        EXISTS(SELECT 1 FROM chat_observed_events_v4 e
+                               WHERE e.turn_id=t.id AND e.source_schema_version=4)
                  FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
                  WHERE t.id=?1 AND t.session_id=?2
                    AND s.owner_user_id=?3 AND s.tenant_id=?4",
@@ -7371,29 +8137,52 @@ fn load_feat134_history_projection_from_connection(
                     turn_id.to_string(),
                     session_id.to_string(),
                     scope.owner_user_id,
-                    scope.tenant_id
+                    scope.tenant_id,
+                    i64::from(source_schema_version),
                 ],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .ok_or(ChatError::NotFound)?;
-        let items = load_feat134_items(connection, *turn_id)?;
-        let plan = load_feat134_plan(connection, *turn_id)?;
-        let notices =
-            load_feat134_notices(connection, None, Some(*turn_id), TimelineNoticeScope::Turn)?;
-        if !v4_authority
-            && (terminal_code.is_some()
-                || !items.is_empty()
-                || plan.is_some()
-                || !notices.is_empty())
+        if source_schema_version == FEAT136_SOURCE_SCHEMA_VERSION
+            && requested_authority
+            && v4_authority
         {
             return Err(ChatError::DatabaseUnavailable);
         }
+        let effective_schema_version = if requested_authority {
+            Some(source_schema_version)
+        } else if source_schema_version == FEAT136_SOURCE_SCHEMA_VERSION && v4_authority {
+            Some(FEAT134_SOURCE_SCHEMA_VERSION)
+        } else {
+            None
+        };
+        let items = effective_schema_version
+            .map(|schema| load_timeline_items(connection, *turn_id, schema))
+            .transpose()?
+            .unwrap_or_default();
+        let plan = effective_schema_version
+            .map(|_| load_feat134_plan(connection, *turn_id))
+            .transpose()?
+            .flatten();
+        let notices = effective_schema_version
+            .map(|_| {
+                load_feat134_notices(connection, None, Some(*turn_id), TimelineNoticeScope::Turn)
+            })
+            .transpose()?
+            .unwrap_or_default();
         turns.push(Feat134HistoryTurn {
             turn_id: *turn_id,
-            v4_authority,
-            terminal_code,
+            v4_authority: effective_schema_version.is_some(),
+            source_schema_version: effective_schema_version,
+            terminal_code: effective_schema_version.and(terminal_code),
             items,
             plan,
             notices,
@@ -7437,12 +8226,227 @@ fn parse_timeline_reasoning_status(value: &str) -> Result<TimelineReasoningStatu
     }
 }
 
-fn validate_feat134_projection(projection: &Feat134Projection) -> Result<(), ChatError> {
+fn validate_projection_for_schema(
+    projection: &Feat134Projection,
+    source_schema_version: u8,
+) -> Result<(), ChatError> {
+    if !matches!(source_schema_version, 4 | 5) {
+        return Err(ChatError::InvalidInput);
+    }
     match validate_feat134_projection_shape(projection) {
         Err(ChatError::ProjectionLimitExceeded) => return Err(ChatError::InvalidInput),
         result => result?,
     }
     if feat134_projection_requires_limit_terminal(projection)? {
+        return Err(ChatError::InvalidInput);
+    }
+    for item in &projection.items {
+        match (
+            source_schema_version,
+            item.item_type.as_str(),
+            item.execution.as_ref(),
+        ) {
+            (4, _, None) => {}
+            (5, "command", Some(ExecutionProjection::Command(command))) => {
+                validate_command_projection(item, command)?;
+            }
+            (5, "tool", Some(ExecutionProjection::Tool(tool))) => {
+                validate_tool_projection(item, tool)?;
+            }
+            (5, item_type, None) if !matches!(item_type, "command" | "tool") => {}
+            _ => return Err(ChatError::InvalidInput),
+        }
+    }
+    Ok(())
+}
+
+fn validate_command_projection(
+    item: &TimelineItem,
+    command: &CommandProjection,
+) -> Result<(), ChatError> {
+    validate_safe_text_projection(&command.command_summary, 4096)?;
+    if command.started_source.sequence > command.last_source.sequence
+        || command.last_source.event_id != item.source_event_id
+        || command.last_source.sequence != item.source_sequence
+        || command.last_source.occurred_at != item.source_occurred_at
+        || command.cwd.segments().len() > 128
+        || command
+            .cwd
+            .segments()
+            .iter()
+            .try_fold(
+                command.cwd.segments().len().saturating_sub(1),
+                |total, segment| total.checked_add(segment.len()),
+            )
+            .is_none_or(|total| total > 1024)
+        || command
+            .cwd
+            .segments()
+            .iter()
+            .any(|segment| segment.is_empty() || segment.len() > 255)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    if let Some(live) = command.live_output.as_ref() {
+        validate_safe_text_projection(live, 256 * 1024)?;
+    }
+    if let Some(output) = command.output.as_ref() {
+        match output {
+            CommandOutputProjection::Complete { text } if text.len() <= 256 * 1024 => {}
+            CommandOutputProjection::HeadTail { head, tail, .. }
+                if head.len() <= 128 * 1024
+                    && tail.len() <= 128 * 1024
+                    && head.len().saturating_add(tail.len()) <= 256 * 1024 => {}
+            CommandOutputProjection::Unavailable => {}
+            _ => return Err(ChatError::InvalidInput),
+        }
+    }
+    if command
+        .error
+        .as_ref()
+        .is_some_and(|error| error.summary.len() > 4096)
+        || command
+            .duration_ms
+            .is_some_and(|value| value > 9_007_199_254_740_991)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    let expected_item_status = match command.status {
+        CommandStatus::Running => TimelineItemStatus::InProgress,
+        CommandStatus::Completed | CommandStatus::Failed | CommandStatus::Declined => {
+            TimelineItemStatus::Completed
+        }
+        CommandStatus::Incomplete => TimelineItemStatus::Incomplete,
+    };
+    if item.status != expected_item_status {
+        return Err(ChatError::InvalidInput);
+    }
+    match command.status {
+        CommandStatus::Running
+            if command.output.is_none()
+                && command.duration_ms.is_none()
+                && command.exit_code.is_none()
+                && command.error.is_none() => {}
+        CommandStatus::Completed if command.output.is_some() && command.error.is_none() => {}
+        CommandStatus::Failed
+            if command.output.is_some()
+                && command.error.as_ref().is_some_and(|error| {
+                    matches!(
+                        error.code,
+                        ProjectionErrorCode::CommandFailed
+                            | ProjectionErrorCode::ProjectionLimitExceeded
+                            | ProjectionErrorCode::ProjectionRedactionFailed
+                            | ProjectionErrorCode::ProtocolError
+                    )
+                }) => {}
+        CommandStatus::Declined
+            if command.output.is_some()
+                && command
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == ProjectionErrorCode::CommandDeclined) => {}
+        CommandStatus::Incomplete => {}
+        _ => return Err(ChatError::InvalidInput),
+    }
+    Ok(())
+}
+
+fn validate_tool_projection(item: &TimelineItem, tool: &ToolProjection) -> Result<(), ChatError> {
+    validate_safe_text_projection(&tool.arguments_summary, 8192)?;
+    if tool.started_source.sequence > tool.last_source.sequence
+        || tool.last_source.event_id != item.source_event_id
+        || tool.last_source.sequence != item.source_sequence
+        || tool.last_source.occurred_at != item.source_occurred_at
+        || tool.progress.len() > 32
+        || tool
+            .progress
+            .iter()
+            .enumerate()
+            .any(|(index, progress)| progress.progress_index != index)
+        || tool
+            .progress
+            .iter()
+            .try_fold(0_usize, |total, progress| {
+                total.checked_add(progress.summary.text.len())
+            })
+            .is_none_or(|total| total > 64 * 1024)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    for progress in &tool.progress {
+        validate_safe_text_projection(&progress.summary, 4096)?;
+    }
+    if let Some(result) = tool.result_summary.as_ref() {
+        validate_safe_text_projection(result, 64 * 1024)?;
+    }
+    if tool
+        .error
+        .as_ref()
+        .is_some_and(|error| error.summary.len() > 4096)
+        || tool
+            .duration_ms
+            .is_some_and(|value| value > 9_007_199_254_740_991)
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    match &tool.identity {
+        ToolIdentityProjection::Known {
+            server_name,
+            tool_name,
+        } if !server_name.is_empty()
+            && server_name.len() <= 256
+            && !tool_name.is_empty()
+            && tool_name.len() <= 256 => {}
+        ToolIdentityProjection::Unknown => {}
+        _ => return Err(ChatError::InvalidInput),
+    }
+    let expected_item_status = match tool.status {
+        ToolStatus::InProgress => TimelineItemStatus::InProgress,
+        ToolStatus::Completed | ToolStatus::Failed | ToolStatus::Declined => {
+            TimelineItemStatus::Completed
+        }
+        ToolStatus::Incomplete => TimelineItemStatus::Incomplete,
+    };
+    if item.status != expected_item_status {
+        return Err(ChatError::InvalidInput);
+    }
+    match tool.status {
+        ToolStatus::InProgress
+            if tool.duration_ms.is_none()
+                && tool.result_summary.is_none()
+                && tool.error.is_none() => {}
+        ToolStatus::Completed if tool.result_summary.is_some() && tool.error.is_none() => {}
+        ToolStatus::Failed
+            if tool.error.as_ref().is_some_and(|error| {
+                matches!(
+                    error.code,
+                    ProjectionErrorCode::ToolFailed
+                        | ProjectionErrorCode::UnknownTool
+                        | ProjectionErrorCode::ProjectionLimitExceeded
+                        | ProjectionErrorCode::ProjectionRedactionFailed
+                        | ProjectionErrorCode::ProtocolError
+                )
+            }) => {}
+        ToolStatus::Declined
+            if tool.result_summary.is_none()
+                && tool
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.code == ProjectionErrorCode::ToolDeclined) => {}
+        ToolStatus::Incomplete => {}
+        _ => return Err(ChatError::InvalidInput),
+    }
+    Ok(())
+}
+
+fn validate_safe_text_projection(
+    value: &SafeTextProjection,
+    max_bytes: usize,
+) -> Result<(), ChatError> {
+    if value.text.len() > max_bytes
+        || value.text.contains('\0')
+        || (value.truncated != value.truncation_reason.is_some())
+    {
         return Err(ChatError::InvalidInput);
     }
     Ok(())
@@ -7594,7 +8598,11 @@ fn persist_feat134_projection_transaction(
     scope: &ChatScope,
     projection: &Feat134Projection,
     update_assistant: bool,
+    source_schema_version: u8,
 ) -> Result<u64, ChatError> {
+    if !matches!(source_schema_version, 4 | 5) {
+        return Err(ChatError::InvalidInput);
+    }
     let session_id: String = transaction
         .query_row(
             "SELECT t.session_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
@@ -7623,8 +8631,8 @@ fn persist_feat134_projection_transaction(
         .execute(
             "INSERT INTO chat_observed_events_v4(
                event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
-               event_type, source_occurred_at, observed_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               event_type, source_occurred_at, observed_at_ms, source_schema_version
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 projection.cursor.event_id.to_string(),
                 session_id,
@@ -7637,6 +8645,7 @@ fn persist_feat134_projection_transaction(
                 projection.source_event_type,
                 projection.source_occurred_at,
                 projection.observed_at_ms,
+                i64::from(source_schema_version),
             ],
         )
         .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -7659,8 +8668,8 @@ fn persist_feat134_projection_transaction(
                    turn_id, item_id, item_ordinal, item_type, phase, status, text,
                    reasoning_status, reasoning_reason_code, reasoning_finalized_at_ms,
                    started_at_ms, completed_at_ms, source_event_id, source_sequence,
-                   source_occurred_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                   source_occurred_at, source_schema_version
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT(turn_id, item_id) DO UPDATE SET
                    item_ordinal=excluded.item_ordinal, item_type=excluded.item_type,
                    phase=excluded.phase, status=excluded.status, text=excluded.text,
@@ -7671,7 +8680,8 @@ fn persist_feat134_projection_transaction(
                    completed_at_ms=excluded.completed_at_ms,
                    source_event_id=excluded.source_event_id,
                    source_sequence=excluded.source_sequence,
-                   source_occurred_at=excluded.source_occurred_at",
+                   source_occurred_at=excluded.source_occurred_at,
+                   source_schema_version=excluded.source_schema_version",
                 params![
                     projection.turn_id.to_string(),
                     item.item_id,
@@ -7688,6 +8698,7 @@ fn persist_feat134_projection_transaction(
                     item.source_event_id.to_string(),
                     i64::try_from(item.source_sequence).map_err(|_| ChatError::InvalidInput)?,
                     item.source_occurred_at,
+                    i64::from(source_schema_version),
                 ],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -7712,6 +8723,24 @@ fn persist_feat134_projection_transaction(
                     ],
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        transaction
+            .execute(
+                "DELETE FROM chat_command_items_v5 WHERE turn_id=?1 AND item_id=?2",
+                params![projection.turn_id.to_string(), item.item_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_tool_items_v5 WHERE turn_id=?1 AND item_id=?2",
+                params![projection.turn_id.to_string(), item.item_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if let Some(execution) = &item.execution {
+            if source_schema_version != FEAT136_SOURCE_SCHEMA_VERSION {
+                return Err(ChatError::InvalidInput);
+            }
+            persist_feat136_execution(transaction, projection.turn_id, &item.item_id, execution)?;
         }
     }
     transaction
@@ -7780,6 +8809,246 @@ fn persist_feat134_projection_transaction(
     }
     advance_cursor(transaction, &session_id, &projection.cursor)?;
     Ok(durable_sequence)
+}
+
+fn persist_feat136_execution(
+    transaction: &Transaction<'_>,
+    turn_id: Uuid,
+    item_id: &str,
+    execution: &ExecutionProjection,
+) -> Result<(), ChatError> {
+    match execution {
+        ExecutionProjection::Command(command) => {
+            let (
+                output_retention,
+                output_text,
+                output_head,
+                output_tail,
+                output_reason,
+                output_truncated,
+                output_truncation_reason,
+            ) = match command.output.as_ref() {
+                None => (None, None, None, None, None, None, None),
+                Some(CommandOutputProjection::Complete { text }) => (
+                    Some("complete"),
+                    Some(text.as_str()),
+                    None,
+                    None,
+                    None,
+                    Some(false),
+                    None,
+                ),
+                Some(CommandOutputProjection::HeadTail { head, tail, reason }) => (
+                    Some("head_tail"),
+                    None,
+                    Some(head.as_str()),
+                    Some(tail.as_str()),
+                    None,
+                    Some(true),
+                    Some(reason.as_str()),
+                ),
+                Some(CommandOutputProjection::Unavailable) => (
+                    Some("unavailable"),
+                    None,
+                    None,
+                    None,
+                    Some("not_available"),
+                    Some(false),
+                    None,
+                ),
+            };
+            let (
+                live_output,
+                live_output_bytes,
+                live_output_truncated,
+                live_output_truncation_reason,
+            ) = safe_text_columns(command.live_output.as_ref())?;
+            transaction
+                .execute(
+                    "INSERT INTO chat_command_items_v5(
+                       turn_id, item_id, status,
+                       started_source_event_id, started_source_sequence, started_source_occurred_at,
+                       last_source_event_id, last_source_sequence, last_source_occurred_at,
+                       command_summary, command_summary_bytes, command_summary_truncated,
+                       command_summary_truncation_reason, cwd_kind,
+                       live_output, live_output_bytes, live_output_truncated,
+                       live_output_truncation_reason, output_retention, output_text, output_head,
+                       output_tail, output_reason, output_truncated, output_truncation_reason,
+                       duration_ms, exit_code, error_code, error_summary
+                     ) VALUES (
+                       ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                       ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26,
+                       ?27, ?28, ?29
+                     )",
+                    params![
+                        turn_id.to_string(),
+                        item_id,
+                        command.status.as_str(),
+                        command.started_source.event_id.to_string(),
+                        i64::try_from(command.started_source.sequence)
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        command.started_source.occurred_at,
+                        command.last_source.event_id.to_string(),
+                        i64::try_from(command.last_source.sequence)
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        command.last_source.occurred_at,
+                        command.command_summary.text,
+                        i64::try_from(command.command_summary.text.len())
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        command.command_summary.truncated,
+                        command
+                            .command_summary
+                            .truncation_reason
+                            .map(TruncationReason::as_str),
+                        command.cwd.kind(),
+                        live_output,
+                        live_output_bytes,
+                        live_output_truncated,
+                        live_output_truncation_reason,
+                        output_retention,
+                        output_text,
+                        output_head,
+                        output_tail,
+                        output_reason,
+                        output_truncated,
+                        output_truncation_reason,
+                        command
+                            .duration_ms
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        command.exit_code,
+                        command.error.as_ref().map(|error| error.code.as_str()),
+                        command.error.as_ref().map(|error| error.summary.as_str()),
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            for (ordinal, segment) in command.cwd.segments().iter().enumerate() {
+                transaction
+                    .execute(
+                        "INSERT INTO chat_command_cwd_segments_v5(
+                           turn_id, item_id, ordinal, segment, byte_count
+                         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            turn_id.to_string(),
+                            item_id,
+                            i64::try_from(ordinal).map_err(|_| ChatError::InvalidInput)?,
+                            segment,
+                            i64::try_from(segment.len()).map_err(|_| ChatError::InvalidInput)?,
+                        ],
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+            }
+        }
+        ExecutionProjection::Tool(tool) => {
+            let (server_name, tool_name) = tool.identity.names();
+            let (
+                result_summary,
+                result_summary_bytes,
+                result_summary_truncated,
+                result_summary_truncation_reason,
+            ) = safe_text_columns(tool.result_summary.as_ref())?;
+            transaction
+                .execute(
+                    "INSERT INTO chat_tool_items_v5(
+                       turn_id, item_id, status,
+                       started_source_event_id, started_source_sequence, started_source_occurred_at,
+                       last_source_event_id, last_source_sequence, last_source_occurred_at,
+                       identity_resolution, server_name, tool_name,
+                       arguments_summary, arguments_summary_bytes, arguments_summary_truncated,
+                       arguments_summary_truncation_reason, duration_ms,
+                       result_summary, result_summary_bytes, result_summary_truncated,
+                       result_summary_truncation_reason, error_code, error_summary
+                     ) VALUES (
+                       ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                       ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+                     )",
+                    params![
+                        turn_id.to_string(),
+                        item_id,
+                        tool.status.as_str(),
+                        tool.started_source.event_id.to_string(),
+                        i64::try_from(tool.started_source.sequence)
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        tool.started_source.occurred_at,
+                        tool.last_source.event_id.to_string(),
+                        i64::try_from(tool.last_source.sequence)
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        tool.last_source.occurred_at,
+                        tool.identity.resolution(),
+                        server_name,
+                        tool_name,
+                        tool.arguments_summary.text,
+                        i64::try_from(tool.arguments_summary.text.len())
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        tool.arguments_summary.truncated,
+                        tool.arguments_summary
+                            .truncation_reason
+                            .map(TruncationReason::as_str),
+                        tool.duration_ms
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| ChatError::InvalidInput)?,
+                        result_summary,
+                        result_summary_bytes,
+                        result_summary_truncated,
+                        result_summary_truncation_reason,
+                        tool.error.as_ref().map(|error| error.code.as_str()),
+                        tool.error.as_ref().map(|error| error.summary.as_str()),
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            for progress in &tool.progress {
+                transaction
+                    .execute(
+                        "INSERT INTO chat_tool_progress_v5(
+                           turn_id, item_id, progress_index, source_event_id, source_sequence,
+                           source_occurred_at, summary, summary_bytes, summary_truncated,
+                           summary_truncation_reason
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            turn_id.to_string(),
+                            item_id,
+                            i64::try_from(progress.progress_index)
+                                .map_err(|_| ChatError::InvalidInput)?,
+                            progress.source.event_id.to_string(),
+                            i64::try_from(progress.source.sequence)
+                                .map_err(|_| ChatError::InvalidInput)?,
+                            progress.source.occurred_at,
+                            progress.summary.text,
+                            i64::try_from(progress.summary.text.len())
+                                .map_err(|_| ChatError::InvalidInput)?,
+                            progress.summary.truncated,
+                            progress
+                                .summary
+                                .truncation_reason
+                                .map(TruncationReason::as_str),
+                        ],
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+type SafeTextColumns<'a> = (
+    Option<&'a str>,
+    Option<i64>,
+    Option<bool>,
+    Option<&'static str>,
+);
+
+fn safe_text_columns(value: Option<&SafeTextProjection>) -> Result<SafeTextColumns<'_>, ChatError> {
+    match value {
+        None => Ok((None, None, None, None)),
+        Some(value) => Ok((
+            Some(value.text.as_str()),
+            Some(i64::try_from(value.text.len()).map_err(|_| ChatError::InvalidInput)?),
+            Some(value.truncated),
+            value.truncation_reason.map(TruncationReason::as_str),
+        )),
+    }
 }
 
 fn reserve_feat134_turn_event(
@@ -11386,6 +12655,141 @@ mod tests {
     }
 
     #[test]
+    fn feat136_v5_history_loader_supports_mixed_session_and_rejects_mixed_turn() {
+        let root = std::env::temp_dir().join(format!("yijie-feat136-history-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 136);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "safe input", Uuid::now_v7())
+            .unwrap();
+        let legacy_turn_id = pending.turn_id;
+        let v4_turn_id = Uuid::now_v7();
+        let v5_turn_id = Uuid::now_v7();
+        for turn_id in [v4_turn_id, v5_turn_id] {
+            repository
+                .connection
+                .execute(
+                    "INSERT INTO chat_turns(id, session_id, operation_id, status)
+                     VALUES (?1, ?2, ?3, 'completed')",
+                    params![
+                        turn_id.to_string(),
+                        pending.session_id.to_string(),
+                        Uuid::now_v7().to_string()
+                    ],
+                )
+                .unwrap();
+        }
+        let stream_id = Uuid::now_v7();
+        for (turn_id, schema_version, sequence, item_id) in [
+            (v4_turn_id, 4_i64, 1_i64, "v4-item"),
+            (v5_turn_id, 5_i64, 2_i64, "v5-item"),
+        ] {
+            let event_id = Uuid::now_v7();
+            repository
+                .connection
+                .execute(
+                    "INSERT INTO chat_observed_events_v4(
+                       event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
+                       event_type, source_occurred_at, observed_at_ms, source_schema_version
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'item.completed',
+                               '2026-08-29T00:00:00Z', ?5, ?6)",
+                    params![
+                        event_id.to_string(),
+                        pending.session_id.to_string(),
+                        turn_id.to_string(),
+                        stream_id.to_string(),
+                        sequence,
+                        schema_version
+                    ],
+                )
+                .unwrap();
+            repository
+                .connection
+                .execute(
+                    "INSERT INTO chat_timeline_items_v4(
+                       turn_id, item_id, item_ordinal, item_type, status, text,
+                       started_at_ms, completed_at_ms, source_event_id, source_sequence,
+                       source_occurred_at, source_schema_version
+                     ) VALUES (?1, ?2, 1, 'agentMessage', 'completed', 'safe', 1, 2,
+                               ?3, ?4, '2026-08-29T00:00:00Z', ?5)",
+                    params![
+                        turn_id.to_string(),
+                        item_id,
+                        event_id.to_string(),
+                        sequence,
+                        schema_version
+                    ],
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            repository
+                .turn_projection_schema_version(legacy_turn_id)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            repository
+                .turn_projection_schema_version(v4_turn_id)
+                .unwrap(),
+            Some(4)
+        );
+        assert_eq!(
+            repository
+                .turn_projection_schema_version(v5_turn_id)
+                .unwrap(),
+            Some(5)
+        );
+
+        let mixed_session = load_history_projection_for_schema(
+            &repository.connection,
+            &repository.scope,
+            pending.session_id,
+            &[legacy_turn_id, v4_turn_id, v5_turn_id],
+            FEAT136_SOURCE_SCHEMA_VERSION,
+        )
+        .unwrap();
+        assert_eq!(mixed_session.turns[0].source_schema_version, None);
+        assert_eq!(mixed_session.turns[1].source_schema_version, Some(4));
+        assert_eq!(mixed_session.turns[2].source_schema_version, Some(5));
+
+        repository
+            .connection
+            .execute(
+                "INSERT INTO chat_observed_events_v4(
+                   event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
+                   event_type, source_occurred_at, observed_at_ms, source_schema_version
+                 ) VALUES (?1, ?2, ?3, ?4, 3, 3, 'turn.started',
+                           '2026-08-29T00:00:01Z', 3, 4)",
+                params![
+                    Uuid::now_v7().to_string(),
+                    pending.session_id.to_string(),
+                    v5_turn_id.to_string(),
+                    stream_id.to_string()
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            repository.turn_projection_schema_version(v5_turn_id),
+            Err(ChatError::DatabaseUnavailable)
+        );
+        assert_eq!(
+            load_history_projection_for_schema(
+                &repository.connection,
+                &repository.scope,
+                pending.session_id,
+                &[v5_turn_id],
+                FEAT136_SOURCE_SCHEMA_VERSION,
+            ),
+            Err(ChatError::DatabaseUnavailable)
+        );
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn feat134_history_snapshot_cannot_straddle_terminal_commit_and_durable_cut() {
         let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -11663,6 +13067,7 @@ mod tests {
                 source_event_id: event_id,
                 source_sequence: 1,
                 source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
+                execution: None,
             })
             .collect::<Vec<_>>();
         let rejected = Feat134Projection {
@@ -11770,6 +13175,7 @@ mod tests {
                 source_event_id: accepted_event_id,
                 source_sequence: 1,
                 source_occurred_at: source_occurred_at.clone(),
+                execution: None,
             },
             TimelineItem {
                 item_id: "confirmed-streaming".to_owned(),
@@ -11787,6 +13193,7 @@ mod tests {
                 source_event_id: accepted_event_id,
                 source_sequence: 1,
                 source_occurred_at: source_occurred_at.clone(),
+                execution: None,
             },
             TimelineItem {
                 item_id: "confirmed-reasoning".to_owned(),
@@ -11809,6 +13216,7 @@ mod tests {
                 source_event_id: accepted_event_id,
                 source_sequence: 1,
                 source_occurred_at: source_occurred_at.clone(),
+                execution: None,
             },
         ];
         let confirmed = Feat134Projection {
@@ -11867,6 +13275,7 @@ mod tests {
             source_event_id: overflow_event_id,
             source_sequence: 2,
             source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
+            execution: None,
         });
         let overflow = Feat134Projection {
             cursor: StoredEventCursor {

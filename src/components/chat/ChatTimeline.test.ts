@@ -104,6 +104,99 @@ describe("ChatTimeline", () => {
     expect(wrapper.get("section.chat-timeline").attributes("aria-busy")).toBe("false");
   });
 
+  it("integrates projected Command and Tool Items and relays their disclosures", async () => {
+    const source = (sequence: string) => ({
+      sourceEventId: `execution-event-${sequence}`,
+      sourceSequence: sequence,
+      sourceOccurredAt: "2026-08-29T09:00:00.000Z",
+    });
+    const safeText = (text: string) => ({
+      text,
+      truncated: false,
+      truncationReason: null,
+    } as const);
+    const timeline = projectedTimeline({
+      turns: [completedTurn("turn-main", 0)],
+      items: [{
+        threadId: THREAD_ID,
+        turnId: "turn-main",
+        itemId: "command-main",
+        ordinal: 0,
+        kind: "command",
+        status: "completed",
+        execution: {
+          kind: "command",
+          status: "completed",
+          startedSource: source("1"),
+          lastSource: source("2"),
+          commandSummary: safeText("检查仓库状态"),
+          cwd: { kind: "workspace_root", segments: [] },
+          liveOutput: null,
+          output: {
+            retention: "complete",
+            text: "工作区干净",
+            head: null,
+            tail: null,
+            reason: null,
+            truncated: false,
+            truncationReason: null,
+          },
+          durationMs: 120,
+          exitCode: 0,
+          error: null,
+        },
+        contentBlocks: [],
+      }, {
+        threadId: THREAD_ID,
+        turnId: "turn-main",
+        itemId: "tool-main",
+        ordinal: 1,
+        kind: "tool",
+        status: "completed",
+        execution: {
+          kind: "tool",
+          status: "completed",
+          startedSource: source("3"),
+          lastSource: source("4"),
+          identity: { resolution: "unknown", serverName: "unknown", toolName: "unknown" },
+          argumentsSummary: safeText("只读参数摘要"),
+          progress: [],
+          durationMs: 240,
+          resultSummary: safeText("只读结果摘要"),
+          error: null,
+        },
+        contentBlocks: [],
+      }],
+    });
+    const commandItem = timeline.turns[0]!.items[0]!;
+    const toolItem = timeline.turns[0]!.items[1]!;
+    const wrapper = mount(ChatTimeline, { props: { timeline } });
+    const items = wrapper.findAll(".chat-turn-group__item");
+
+    expect(items.map((entry) => entry.classes().find((name) =>
+      name.startsWith("chat-turn-group__item--"))))
+      .toEqual(["chat-turn-group__item--command", "chat-turn-group__item--tool"]);
+    expect(wrapper.findAll(".chat-command-item__details")).toHaveLength(0);
+    expect(wrapper.findAll(".chat-tool-item__details")).toHaveLength(0);
+
+    await items[0]!.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    expect(items[0]!.text()).toContain("检查仓库状态");
+    expect(items[0]!.text()).toContain("工作区干净");
+    expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
+      itemIdentity: commandItem.identity,
+      expanded: true,
+    });
+
+    await items[1]!.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    expect(items[1]!.text()).toContain("未知工具");
+    expect(items[1]!.text()).toContain("只读结果摘要");
+    expect(items[1]!.text()).not.toContain("unsupported_execution");
+    expect(wrapper.emitted("disclosure-change")?.[1]?.[0]).toEqual({
+      itemIdentity: toolItem.identity,
+      expanded: true,
+    });
+  });
+
   it("renders closed empty, loading, recovery, unavailable, and archived states", () => {
     const readyEmpty = mount(ChatTimeline, {
       props: { timeline: projectedTimeline() },

@@ -21,6 +21,10 @@ use super::feat134::{
     Feat134HistoryProjection, Feat134Projection, SourceIdentity, TimelineDelta, TimelineItem,
     TimelineNotice, TimelineNoticeScope, TimelinePlan, TimelineReasoningPart,
 };
+use super::feat136::{
+    CommandCwdProjection, CommandOutputProjection, ExecutionProjection, SafeTextProjection,
+    ToolIdentityProjection,
+};
 use super::{ChatError, ChatRuntime};
 use crate::native_auth::{NativeAuthRuntime, NativeProjectionError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -39,6 +43,7 @@ pub const CHAT_IPC_SCHEMA_VERSION: u8 = 1;
 pub const CHAT_IPC_V2_SCHEMA_VERSION: u8 = 2;
 pub const CHAT_IPC_V3_SCHEMA_VERSION: u8 = 3;
 pub const CHAT_IPC_V4_SCHEMA_VERSION: u8 = 4;
+pub const CHAT_IPC_V5_SCHEMA_VERSION: u8 = 5;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
@@ -499,7 +504,7 @@ impl ChatEventBridge {
     ) -> Result<Uuid, ChatIpcError> {
         if !matches!(
             schema_version,
-            CHAT_IPC_SCHEMA_VERSION | CHAT_IPC_V4_SCHEMA_VERSION
+            CHAT_IPC_SCHEMA_VERSION | CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
         ) {
             return Err(ChatIpcError::request_invalid(None));
         }
@@ -853,7 +858,105 @@ impl TurnProjectionSink for ChatEventBridge {
                 .subscriptions
                 .iter()
                 .filter_map(|(id, record)| {
-                    (record.schema_version == CHAT_IPC_V4_SCHEMA_VERSION
+                    feat134_subscription_matches(record, projection.session_id).then_some(*id)
+                })
+                .collect::<Vec<_>>();
+            let mut events = Vec::new();
+            for subscription_id in subscription_ids {
+                let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
+                    continue;
+                };
+                record.artifact_turn_id = Some(projection.turn_id);
+                if authorization
+                    .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
+                    .is_err()
+                {
+                    record.projection_sequence = record
+                        .projection_sequence
+                        .checked_add(1)
+                        .ok_or(ChatError::OrchestrationUnavailable)?;
+                    events.push(event_envelope(
+                        subscription_id,
+                        record,
+                        None,
+                        "context_invalidated",
+                        json!({"reason":"authority_changed"}),
+                    ));
+                    record.blocked = true;
+                    continue;
+                }
+                if record.blocked || record.terminal {
+                    continue;
+                }
+                let Some((turn_id, kind, payload, event_id)) = feat134_event_payload(&projection)?
+                else {
+                    continue;
+                };
+                record.projection_sequence = record
+                    .projection_sequence
+                    .checked_add(1)
+                    .ok_or(ChatError::OrchestrationUnavailable)?;
+                let event = feat134_source_event_envelope(
+                    subscription_id,
+                    record,
+                    turn_id,
+                    event_id,
+                    durable_sequence,
+                    kind,
+                    payload,
+                );
+                let event_bytes = serde_json::to_vec(&event)
+                    .map(|encoded| encoded.len())
+                    .unwrap_or(usize::MAX);
+                if event_bytes > MAX_V4_EVENT_BYTES {
+                    record.blocked = true;
+                    events.push(event_envelope(
+                        subscription_id,
+                        record,
+                        Some(projection.turn_id),
+                        "resync_required",
+                        json!({"reason":"backpressure"}),
+                    ));
+                } else {
+                    if matches!(projection.delta, TimelineDelta::TurnTerminal(_)) {
+                        record.terminal = true;
+                    }
+                    events.push(event);
+                }
+            }
+            (app, events)
+        };
+        for event in events {
+            app.emit(CHAT_EVENT_CHANNEL, event)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        }
+        Ok(())
+    }
+
+    fn publish_feat136(&self, projection: Feat134Projection) -> Result<(), ChatError> {
+        let durable_sequence = projection
+            .durable_sequence
+            .filter(|sequence| *sequence > 0)
+            .ok_or(ChatError::DatabaseUnavailable)?;
+        let now = unix_seconds()?;
+        let (app, events) = {
+            let mut state = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let app = state
+                .app
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorization = state
+                .authorization
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let subscription_ids = state
+                .subscriptions
+                .iter()
+                .filter_map(|(id, record)| {
+                    (record.schema_version == CHAT_IPC_V5_SCHEMA_VERSION
                         && record.session_id == projection.session_id)
                         .then_some(*id)
                 })
@@ -885,7 +988,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 if record.blocked || record.terminal {
                     continue;
                 }
-                let Some((turn_id, kind, payload, event_id)) = feat134_event_payload(&projection)?
+                let Some((turn_id, kind, payload, event_id)) = feat136_event_payload(&projection)?
                 else {
                     continue;
                 };
@@ -1118,8 +1221,10 @@ where
     let mut plan = subscriptions
         .iter()
         .filter_map(|(subscription_id, record)| {
-            if record.schema_version != CHAT_IPC_V4_SCHEMA_VERSION
-                || record.session_id != session_id
+            if !matches!(
+                record.schema_version,
+                CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
+            ) || record.session_id != session_id
                 || record.blocked
                 || record.terminal
             {
@@ -1169,6 +1274,8 @@ fn turn_resync_control_event(
 #[serde(rename_all = "camelCase")]
 struct ChatEventEnvelope {
     schema_version: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_schema_version: Option<u8>,
     subscription_id: String,
     context_id: String,
     session_id: String,
@@ -1191,6 +1298,7 @@ fn event_envelope(
 ) -> ChatEventEnvelope {
     ChatEventEnvelope {
         schema_version: record.schema_version,
+        source_schema_version: None,
         subscription_id: subscription_id.to_string(),
         context_id: record.context_id.to_string(),
         session_id: record.session_id.to_string(),
@@ -1201,6 +1309,13 @@ fn event_envelope(
         kind,
         payload,
     }
+}
+
+fn feat134_subscription_matches(record: &SubscriptionRecord, session_id: Uuid) -> bool {
+    matches!(
+        record.schema_version,
+        CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
+    ) && record.session_id == session_id
 }
 
 fn source_event_envelope(
@@ -1214,6 +1329,7 @@ fn source_event_envelope(
 ) -> ChatEventEnvelope {
     ChatEventEnvelope {
         schema_version: record.schema_version,
+        source_schema_version: None,
         subscription_id: subscription_id.to_string(),
         context_id: record.context_id.to_string(),
         session_id: record.session_id.to_string(),
@@ -1224,6 +1340,30 @@ fn source_event_envelope(
         kind,
         payload,
     }
+}
+
+fn feat134_source_event_envelope(
+    subscription_id: Uuid,
+    record: &SubscriptionRecord,
+    turn_id: Option<Uuid>,
+    event_id: Uuid,
+    durable_sequence: u64,
+    kind: &'static str,
+    payload: Value,
+) -> ChatEventEnvelope {
+    let mut envelope = source_event_envelope(
+        subscription_id,
+        record,
+        turn_id,
+        event_id,
+        durable_sequence,
+        kind,
+        payload,
+    );
+    if record.schema_version == CHAT_IPC_V5_SCHEMA_VERSION {
+        envelope.source_schema_version = Some(CHAT_IPC_V4_SCHEMA_VERSION);
+    }
+    envelope
 }
 
 fn source_fact(source: &SourceIdentity) -> Value {
@@ -1383,6 +1523,12 @@ fn feat134_event_payload(
             }),
             source.event_id,
         ),
+        TimelineDelta::CommandStarted(_)
+        | TimelineDelta::CommandOutputAppend { .. }
+        | TimelineDelta::CommandCompleted(_)
+        | TimelineDelta::ToolStarted(_)
+        | TimelineDelta::ToolProgress { .. }
+        | TimelineDelta::ToolCompleted(_) => return Err(ChatError::OrchestrationUnavailable),
         TimelineDelta::Notice(notice) => (
             (notice.scope == TimelineNoticeScope::Turn).then_some(projection.turn_id),
             "notice",
@@ -1409,6 +1555,272 @@ fn feat134_event_payload(
         return Err(ChatError::OrchestrationUnavailable);
     }
     Ok(Some(event))
+}
+
+fn feat136_event_payload(
+    projection: &Feat134Projection,
+) -> Result<Option<Feat134EventPayload>, ChatError> {
+    let turn_id = Some(projection.turn_id);
+    let event = match &projection.delta {
+        TimelineDelta::CommandStarted(item) => {
+            let ExecutionProjection::Command(command) = item
+                .execution
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?
+            else {
+                return Err(ChatError::DatabaseUnavailable);
+            };
+            (
+                turn_id,
+                "command_started",
+                execution_item_source_payload(
+                    item,
+                    json!({
+                        "status": command.status.as_str(),
+                        "commandSummary": safe_text_payload(&command.command_summary),
+                        "cwd": cwd_payload(&command.cwd),
+                    }),
+                ),
+                item.source_event_id,
+            )
+        }
+        TimelineDelta::CommandOutputAppend {
+            source,
+            item_id,
+            item_ordinal,
+            delta,
+        } => (
+            turn_id,
+            "command_output_append",
+            json!({
+                "sourceEventId": source.event_id.to_string(),
+                "sourceSequence": source.sequence.to_string(),
+                "sourceOccurredAt": source.occurred_at,
+                "itemId": item_id,
+                "itemOrdinal": item_ordinal,
+                "text": delta.text,
+                "truncated": delta.truncated,
+                "truncationReason": delta.truncation_reason.map(|reason| reason.as_str()),
+            }),
+            source.event_id,
+        ),
+        TimelineDelta::CommandCompleted(item) => {
+            let ExecutionProjection::Command(command) = item
+                .execution
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?
+            else {
+                return Err(ChatError::DatabaseUnavailable);
+            };
+            let output = command
+                .output
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?;
+            (
+                turn_id,
+                "command_completed",
+                execution_item_source_payload(
+                    item,
+                    json!({
+                        "status": command.status.as_str(),
+                        "commandSummary": safe_text_payload(&command.command_summary),
+                        "cwd": cwd_payload(&command.cwd),
+                        "durationMs": command.duration_ms,
+                        "exitCode": command.exit_code,
+                        "output": command_output_payload(output),
+                        "error": command.error.as_ref().map(execution_error_payload),
+                    }),
+                ),
+                item.source_event_id,
+            )
+        }
+        TimelineDelta::ToolStarted(item) => {
+            let ExecutionProjection::Tool(tool) = item
+                .execution
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?
+            else {
+                return Err(ChatError::DatabaseUnavailable);
+            };
+            (
+                turn_id,
+                "tool_started",
+                execution_item_source_payload(
+                    item,
+                    json!({
+                        "status": tool.status.as_str(),
+                        "identity": tool_identity_payload(&tool.identity),
+                        "argumentsSummary": safe_text_payload(&tool.arguments_summary),
+                    }),
+                ),
+                item.source_event_id,
+            )
+        }
+        TimelineDelta::ToolProgress {
+            item_id,
+            item_ordinal,
+            progress,
+        } => {
+            let item = projection
+                .items
+                .iter()
+                .find(|item| item.item_id == *item_id)
+                .ok_or(ChatError::DatabaseUnavailable)?;
+            let ExecutionProjection::Tool(tool) = item
+                .execution
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?
+            else {
+                return Err(ChatError::DatabaseUnavailable);
+            };
+            (
+                turn_id,
+                "tool_progress",
+                json!({
+                    "sourceEventId": progress.source.event_id.to_string(),
+                    "sourceSequence": progress.source.sequence.to_string(),
+                    "sourceOccurredAt": progress.source.occurred_at,
+                    "itemId": item_id,
+                    "itemOrdinal": item_ordinal,
+                    "status": tool.status.as_str(),
+                    "identity": tool_identity_payload(&tool.identity),
+                    "progressIndex": progress.progress_index,
+                    "summary": safe_text_payload(&progress.summary),
+                }),
+                progress.source.event_id,
+            )
+        }
+        TimelineDelta::ToolCompleted(item) => {
+            let ExecutionProjection::Tool(tool) = item
+                .execution
+                .as_ref()
+                .ok_or(ChatError::DatabaseUnavailable)?
+            else {
+                return Err(ChatError::DatabaseUnavailable);
+            };
+            (
+                turn_id,
+                "tool_completed",
+                execution_item_source_payload(
+                    item,
+                    json!({
+                        "status": tool.status.as_str(),
+                        "identity": tool_identity_payload(&tool.identity),
+                        "argumentsSummary": safe_text_payload(&tool.arguments_summary),
+                        "durationMs": tool.duration_ms,
+                        "resultSummary": tool.result_summary.as_ref().map(safe_text_payload),
+                        "error": tool.error.as_ref().map(execution_error_payload),
+                    }),
+                ),
+                item.source_event_id,
+            )
+        }
+        _ => return feat134_event_payload(projection),
+    };
+    Ok(Some(event))
+}
+
+fn execution_item_source_payload(item: &TimelineItem, fields: Value) -> Value {
+    let mut value = json!({
+        "sourceEventId": item.source_event_id.to_string(),
+        "sourceSequence": item.source_sequence.to_string(),
+        "sourceOccurredAt": item.source_occurred_at,
+        "itemId": item.item_id,
+        "itemOrdinal": item.item_ordinal,
+    });
+    if let (Some(target), Some(fields)) = (value.as_object_mut(), fields.as_object()) {
+        target.extend(fields.clone());
+    }
+    value
+}
+
+fn source_identity_payload(source: &SourceIdentity) -> Value {
+    json!({
+        "sourceEventId": source.event_id.to_string(),
+        "sourceSequence": source.sequence.to_string(),
+        "sourceOccurredAt": source.occurred_at,
+    })
+}
+
+fn safe_text_payload(value: &SafeTextProjection) -> Value {
+    json!({
+        "text": value.text,
+        "truncated": value.truncated,
+        "truncationReason": value.truncation_reason.map(|reason| reason.as_str()),
+    })
+}
+
+fn cwd_payload(value: &CommandCwdProjection) -> Value {
+    json!({
+        "kind": value.kind(),
+        "segments": value.segments(),
+    })
+}
+
+fn command_output_payload(value: &CommandOutputProjection) -> Value {
+    match value {
+        CommandOutputProjection::Complete { text } => json!({
+            "retention": "complete", "text": text, "head": null, "tail": null,
+            "reason": null, "truncated": false, "truncationReason": null,
+        }),
+        CommandOutputProjection::HeadTail { head, tail, reason } => json!({
+            "retention": "head_tail", "text": null, "head": head, "tail": tail,
+            "reason": null, "truncated": true, "truncationReason": reason.as_str(),
+        }),
+        CommandOutputProjection::Unavailable => json!({
+            "retention": "unavailable", "text": null, "head": null, "tail": null,
+            "reason": "not_available", "truncated": false, "truncationReason": null,
+        }),
+    }
+}
+
+fn tool_identity_payload(value: &ToolIdentityProjection) -> Value {
+    let (server_name, tool_name) = value.names();
+    json!({
+        "resolution": value.resolution(),
+        "serverName": server_name,
+        "toolName": tool_name,
+    })
+}
+
+fn execution_error_payload(value: &super::feat136::ProjectionError) -> Value {
+    json!({"code": value.code.as_str(), "summary": value.summary})
+}
+
+fn execution_payload(value: &ExecutionProjection) -> Value {
+    match value {
+        ExecutionProjection::Command(command) => json!({
+            "kind": "command",
+            "status": command.status.as_str(),
+            "startedSource": source_identity_payload(&command.started_source),
+            "lastSource": source_identity_payload(&command.last_source),
+            "commandSummary": safe_text_payload(&command.command_summary),
+            "cwd": cwd_payload(&command.cwd),
+            "liveOutput": command.live_output.as_ref().map(safe_text_payload),
+            "output": command.output.as_ref().map(command_output_payload),
+            "durationMs": command.duration_ms,
+            "exitCode": command.exit_code,
+            "error": command.error.as_ref().map(execution_error_payload),
+        }),
+        ExecutionProjection::Tool(tool) => json!({
+            "kind": "tool",
+            "status": tool.status.as_str(),
+            "startedSource": source_identity_payload(&tool.started_source),
+            "lastSource": source_identity_payload(&tool.last_source),
+            "identity": tool_identity_payload(&tool.identity),
+            "argumentsSummary": safe_text_payload(&tool.arguments_summary),
+            "progress": tool.progress.iter().map(|progress| json!({
+                "sourceEventId": progress.source.event_id.to_string(),
+                "sourceSequence": progress.source.sequence.to_string(),
+                "sourceOccurredAt": progress.source.occurred_at,
+                "progressIndex": progress.progress_index,
+                "summary": safe_text_payload(&progress.summary),
+            })).collect::<Vec<_>>(),
+            "durationMs": tool.duration_ms,
+            "resultSummary": tool.result_summary.as_ref().map(safe_text_payload),
+            "error": tool.error.as_ref().map(execution_error_payload),
+        }),
+    }
 }
 
 fn projection_events(
@@ -1613,6 +2025,11 @@ impl ChatIpcError {
         self
     }
 
+    fn v5(mut self) -> Self {
+        self.schema_version = CHAT_IPC_V5_SCHEMA_VERSION;
+        self
+    }
+
     fn with_attachment_issue(mut self, issue: &'static str) -> Self {
         self.attachment_issue = Some(issue);
         self
@@ -1685,6 +2102,14 @@ impl<T> CommandResponse<T> {
     fn new_v4(request_id: Uuid, data: T) -> Self {
         Self {
             schema_version: CHAT_IPC_V4_SCHEMA_VERSION,
+            request_id: request_id.to_string(),
+            data,
+        }
+    }
+
+    fn new_v5(request_id: Uuid, data: T) -> Self {
+        Self {
+            schema_version: CHAT_IPC_V5_SCHEMA_VERSION,
             request_id: request_id.to_string(),
             data,
         }
@@ -2147,6 +2572,8 @@ struct TimelineItemDtoV4 {
     reasoning_parts: Vec<TimelineReasoningPartDtoV4>,
     started_at_ms: i64,
     completed_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -2751,6 +3178,7 @@ fn timeline_plan_dto_v4(plan: TimelinePlan) -> Result<TimelinePlanDtoV4, ChatErr
 }
 
 fn timeline_item_dto_v4(item: TimelineItem) -> TimelineItemDtoV4 {
+    let execution = item.execution.as_ref().map(execution_payload);
     TimelineItemDtoV4 {
         source_event_id: item.source_event_id.to_string(),
         source_sequence: item.source_sequence.to_string(),
@@ -2773,6 +3201,7 @@ fn timeline_item_dto_v4(item: TimelineItem) -> TimelineItemDtoV4 {
             .collect(),
         started_at_ms: item.started_at_ms,
         completed_at_ms: item.completed_at_ms,
+        execution,
     }
 }
 
@@ -2795,6 +3224,17 @@ fn history_dto_v4(
     projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
     artifacts: Vec<ArtifactProjection>,
     feat134: Feat134HistoryProjection,
+) -> Result<HistoryPageDtoV4, ChatError> {
+    history_dto_projected(page, next_cursor, projections, artifacts, feat134, "v4")
+}
+
+fn history_dto_projected(
+    page: HistoryPage,
+    next_cursor: Option<String>,
+    projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+    artifacts: Vec<ArtifactProjection>,
+    feat134: Feat134HistoryProjection,
+    authority: &'static str,
 ) -> Result<HistoryPageDtoV4, ChatError> {
     let v3 = history_dto_v3(page, next_cursor, projections, artifacts)?;
     let mut feat_turns = feat134
@@ -2822,10 +3262,16 @@ fn history_dto_v4(
                     || !facts.items.is_empty()
                     || facts.plan.is_some()
                     || !facts.notices.is_empty()))
+            || facts.v4_authority != facts.source_schema_version.is_some()
         {
             return Err(ChatError::DatabaseUnavailable);
         }
-        let projection_authority = if facts.v4_authority { "v4" } else { "legacy" };
+        let projection_authority = match facts.source_schema_version {
+            Some(4) => "v4",
+            Some(5) if authority == "v5" => "v5",
+            Some(_) => return Err(ChatError::DatabaseUnavailable),
+            None => "legacy",
+        };
         let messages = turn
             .messages
             .into_iter()
@@ -2878,6 +3324,40 @@ fn history_dto_v4(
     })
 }
 
+fn history_dto_v5(
+    page: HistoryPage,
+    next_cursor: Option<String>,
+    projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+    artifacts: Vec<ArtifactProjection>,
+    feat136: Feat134HistoryProjection,
+) -> Result<Value, ChatError> {
+    let dto = history_dto_projected(page, next_cursor, projections, artifacts, feat136, "v5")?;
+    let mut value = serde_json::to_value(dto).map_err(|_| ChatError::DatabaseUnavailable)?;
+    let turns = value
+        .get_mut("turns")
+        .and_then(Value::as_array_mut)
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    for turn in turns {
+        if !matches!(
+            turn.get("projectionAuthority").and_then(Value::as_str),
+            Some("legacy" | "v4" | "v5")
+        ) {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        if turn.get("projectionAuthority").and_then(Value::as_str) == Some("v5") {
+            let items = turn
+                .get_mut("timelineItems")
+                .and_then(Value::as_array_mut)
+                .ok_or(ChatError::DatabaseUnavailable)?;
+            for item in items {
+                let object = item.as_object_mut().ok_or(ChatError::DatabaseUnavailable)?;
+                object.entry("execution").or_insert(Value::Null);
+            }
+        }
+    }
+    Ok(value)
+}
+
 async fn load_bounded_feat134_history_snapshot(
     authorized: &AuthorizedConversationApplication,
     context_id: Uuid,
@@ -2916,6 +3396,49 @@ async fn load_bounded_feat134_history_snapshot(
             Ok(Some(next_limit)) => limit = next_limit,
             Err(()) => {
                 return Err(ChatIpcError::limit_exceeded(Some(request_id)).v4());
+            }
+        }
+    }
+}
+
+async fn load_bounded_feat136_history_snapshot(
+    authorized: &AuthorizedConversationApplication,
+    context_id: Uuid,
+    session_id: Uuid,
+    before_ordinal: Option<u64>,
+    requested_limit: Option<usize>,
+    response_limit: usize,
+    request_id: Uuid,
+) -> Result<Feat134HistorySnapshot, ChatIpcError> {
+    let byte_budget = response_limit
+        .checked_sub(V4_RESPONSE_STRUCTURAL_HEADROOM)
+        .ok_or_else(|| ChatIpcError::limit_exceeded(Some(request_id)).v5())?;
+    let mut limit = requested_limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
+    loop {
+        let snapshot = authorized
+            .load_feat136_history_snapshot(context_id, session_id, before_ordinal, Some(limit))
+            .await
+            .map_err(|error| map_chat_error(error, Some(request_id)).v5())?;
+        let probe = history_dto_v5(
+            snapshot.history.clone(),
+            None,
+            snapshot.message_content_blocks.clone(),
+            snapshot.artifacts.clone(),
+            snapshot.feat134.clone(),
+        )
+        .map_err(|error| map_chat_error(error, Some(request_id)).v5())?;
+        let encoded_bytes = serde_json::to_vec(&probe)
+            .map(|encoded| encoded.len())
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request_id)).v5())?;
+        match next_feat134_history_page_limit(
+            snapshot.history.turns.len(),
+            encoded_bytes,
+            byte_budget,
+        ) {
+            Ok(None) => return Ok(snapshot),
+            Ok(Some(next_limit)) => limit = next_limit,
+            Err(()) => {
+                return Err(ChatIpcError::limit_exceeded(Some(request_id)).v5());
             }
         }
     }
@@ -3057,6 +3580,25 @@ fn decode_request_v4<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T
         || request.context_id.is_nil()
     {
         return Err(ChatIpcError::request_invalid(Some(request.request_id)).v4());
+    }
+    Ok(request)
+}
+
+fn decode_request_v5<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T>, ChatIpcError> {
+    let request_id = extract_request_id(&raw);
+    if serde_json::to_vec(&raw)
+        .map(|encoded| encoded.len() > MAX_REQUEST_BYTES)
+        .unwrap_or(true)
+    {
+        return Err(ChatIpcError::limit_exceeded(request_id).v5());
+    }
+    let request: CommandRequest<T> =
+        serde_json::from_value(raw).map_err(|_| ChatIpcError::request_invalid(request_id).v5())?;
+    if request.schema_version != CHAT_IPC_V5_SCHEMA_VERSION
+        || request.request_id.is_nil()
+        || request.context_id.is_nil()
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v5());
     }
     Ok(request)
 }
@@ -4390,6 +4932,148 @@ mod tests {
     }
 
     #[test]
+    fn feat136_v5_subscription_receives_marked_inherited_v4_items_without_execution() {
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let runtime_turn_id = Uuid::now_v7();
+        let source_event_id = Uuid::now_v7();
+        let item = TimelineItem {
+            item_id: "assistant-v4".to_owned(),
+            item_ordinal: 1,
+            item_type: "agentMessage".to_owned(),
+            phase: Some(crate::chat::TimelinePhase::FinalAnswer),
+            status: crate::chat::TimelineItemStatus::InProgress,
+            text: String::new(),
+            reasoning_status: None,
+            reasoning_reason_code: None,
+            reasoning_parts: Vec::new(),
+            reasoning_finalized_at_ms: None,
+            execution: None,
+            started_at_ms: 1,
+            completed_at_ms: None,
+            source_event_id,
+            source_sequence: 1,
+            source_occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+        };
+        let projection = Feat134Projection {
+            durable_sequence: Some(1),
+            session_id,
+            turn_id,
+            cursor: crate::chat::StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: 1,
+                event_id: source_event_id,
+            },
+            source_event_type: "item.started".to_owned(),
+            source_turn_id: Some(runtime_turn_id),
+            source_occurred_at: item.source_occurred_at.clone(),
+            source_event_bytes: 1,
+            observed_at_ms: 1,
+            assistant_text: String::new(),
+            items: vec![item.clone()],
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::ItemStarted(item),
+        };
+        let record = SubscriptionRecord {
+            schema_version: CHAT_IPC_V5_SCHEMA_VERSION,
+            context_id: Uuid::now_v7(),
+            session_id,
+            projection_sequence: 1,
+            assistant_text: String::new(),
+            reasoning: HashMap::new(),
+            terminal: false,
+            blocked: false,
+            artifact_turn_id: None,
+            artifact_notifications: ArtifactNotificationQueue::default(),
+        };
+        assert!(feat134_subscription_matches(&record, session_id));
+        assert!(!feat134_subscription_matches(&record, Uuid::now_v7()));
+
+        let (event_turn_id, kind, payload, event_id) =
+            feat134_event_payload(&projection).unwrap().unwrap();
+        assert_eq!(kind, "item_started");
+        assert!(payload.get("execution").is_none());
+        let encoded = serde_json::to_value(feat134_source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            event_turn_id,
+            event_id,
+            1,
+            kind,
+            payload,
+        ))
+        .unwrap();
+        assert_eq!(encoded["schemaVersion"], CHAT_IPC_V5_SCHEMA_VERSION);
+        assert_eq!(encoded["sourceSchemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
+        assert_eq!(encoded["kind"], "item_started");
+        assert_eq!(encoded["turnId"], turn_id.to_string());
+        assert_eq!(encoded["eventId"], source_event_id.to_string());
+        assert_eq!(encoded["durableSequence"], "1");
+        assert!(encoded["payload"].get("execution").is_none());
+
+        let generic_event_id = Uuid::now_v7();
+        let mut generic_item = projection.items[0].clone();
+        generic_item.item_id = "command-v4".to_owned();
+        generic_item.item_type = "commandExecution".to_owned();
+        generic_item.phase = None;
+        generic_item.source_event_id = generic_event_id;
+        generic_item.source_sequence = 2;
+        let mut generic_projection = projection.clone();
+        generic_projection.cursor.sequence = 2;
+        generic_projection.cursor.event_id = generic_event_id;
+        generic_projection.items = vec![generic_item.clone()];
+        generic_projection.delta = TimelineDelta::ItemStarted(generic_item);
+        generic_projection.durable_sequence = Some(2);
+        let (generic_turn_id, generic_kind, generic_payload, generic_id) =
+            feat134_event_payload(&generic_projection).unwrap().unwrap();
+        let generic = serde_json::to_value(feat134_source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            generic_turn_id,
+            generic_id,
+            2,
+            generic_kind,
+            generic_payload,
+        ))
+        .unwrap();
+        assert_eq!(generic["schemaVersion"], CHAT_IPC_V5_SCHEMA_VERSION);
+        assert_eq!(generic["sourceSchemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
+        assert_eq!(generic["payload"]["itemType"], "commandExecution");
+        assert!(generic["payload"].get("execution").is_none());
+
+        let native_v5 = serde_json::to_value(source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            generic_turn_id,
+            generic_id,
+            2,
+            generic_kind,
+            generic["payload"].clone(),
+        ))
+        .unwrap();
+        assert!(native_v5.get("sourceSchemaVersion").is_none());
+
+        let mut v4_record = record;
+        v4_record.schema_version = CHAT_IPC_V4_SCHEMA_VERSION;
+        assert!(feat134_subscription_matches(&v4_record, session_id));
+        let inherited_v4 = serde_json::to_value(feat134_source_event_envelope(
+            Uuid::now_v7(),
+            &v4_record,
+            event_turn_id,
+            event_id,
+            1,
+            kind,
+            encoded["payload"].clone(),
+        ))
+        .unwrap();
+        assert_eq!(inherited_v4["schemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
+        assert!(inherited_v4.get("sourceSchemaVersion").is_none());
+    }
+
+    #[test]
     fn feat134_live_warning_is_thread_scoped_and_provider_message_cannot_cross_ipc() {
         let source_event_id = Uuid::now_v7();
         let stream_id = Uuid::now_v7();
@@ -4524,6 +5208,7 @@ mod tests {
             turns: vec![crate::chat::Feat134HistoryTurn {
                 turn_id,
                 v4_authority: true,
+                source_schema_version: Some(4),
                 terminal_code: Some("runtime_error".to_owned()),
                 items: Vec::new(),
                 plan: None,
@@ -4848,6 +5533,7 @@ mod tests {
                 crate::chat::Feat134HistoryTurn {
                     turn_id: legacy_turn_id,
                     v4_authority: false,
+                    source_schema_version: None,
                     terminal_code: None,
                     items: Vec::new(),
                     plan: None,
@@ -4856,6 +5542,7 @@ mod tests {
                 crate::chat::Feat134HistoryTurn {
                     turn_id: v4_turn_id,
                     v4_authority: true,
+                    source_schema_version: Some(4),
                     terminal_code: None,
                     items: Vec::new(),
                     plan: None,
@@ -4882,6 +5569,108 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn feat136_v5_history_and_resync_preserve_mixed_projection_authority() {
+        let legacy_turn_id = Uuid::now_v7();
+        let v4_turn_id = Uuid::now_v7();
+        let v5_turn_id = Uuid::now_v7();
+        let history_turn = |turn_id| crate::chat::HistoryTurn {
+            turn_id,
+            runtime_turn_id: Some(Uuid::now_v7()),
+            status: "completed".to_owned(),
+            terminal_at: Some(10),
+            reasoning_status: "unavailable".to_owned(),
+            reasoning_reason_code: Some("reasoning_not_emitted".to_owned()),
+            messages: Vec::new(),
+            reasoning: Vec::new(),
+        };
+        let timeline_item = |item_id: &str, sequence: u64| crate::chat::TimelineItem {
+            item_id: item_id.to_owned(),
+            item_ordinal: 1,
+            item_type: "agent_message".to_owned(),
+            phase: None,
+            status: crate::chat::TimelineItemStatus::Completed,
+            text: "safe projection".to_owned(),
+            reasoning_status: None,
+            reasoning_reason_code: None,
+            reasoning_parts: Vec::new(),
+            reasoning_finalized_at_ms: None,
+            execution: None,
+            started_at_ms: 1,
+            completed_at_ms: Some(2),
+            source_event_id: Uuid::now_v7(),
+            source_sequence: sequence,
+            source_occurred_at: "2026-08-29T00:00:00Z".to_owned(),
+        };
+        let page = HistoryPage {
+            turns: vec![
+                history_turn(legacy_turn_id),
+                history_turn(v4_turn_id),
+                history_turn(v5_turn_id),
+            ],
+            next_before_ordinal: None,
+        };
+        let projection = Feat134HistoryProjection {
+            turns: vec![
+                crate::chat::Feat134HistoryTurn {
+                    turn_id: legacy_turn_id,
+                    v4_authority: false,
+                    source_schema_version: None,
+                    terminal_code: None,
+                    items: Vec::new(),
+                    plan: None,
+                    notices: Vec::new(),
+                },
+                crate::chat::Feat134HistoryTurn {
+                    turn_id: v4_turn_id,
+                    v4_authority: true,
+                    source_schema_version: Some(4),
+                    terminal_code: None,
+                    items: vec![timeline_item("v4-item", 1)],
+                    plan: None,
+                    notices: Vec::new(),
+                },
+                crate::chat::Feat134HistoryTurn {
+                    turn_id: v5_turn_id,
+                    v4_authority: true,
+                    source_schema_version: Some(5),
+                    terminal_code: None,
+                    items: vec![timeline_item("v5-item", 2)],
+                    plan: None,
+                    notices: Vec::new(),
+                },
+            ],
+            session_notices: Vec::new(),
+            durable_sequence_cut: 2,
+        };
+        let history = history_dto_v5(page, None, Vec::new(), Vec::new(), projection).unwrap();
+        assert_eq!(history["turns"][0]["projectionAuthority"], "legacy");
+        assert_eq!(history["turns"][1]["projectionAuthority"], "v4");
+        assert!(history["turns"][1]["timelineItems"][0]
+            .get("execution")
+            .is_none());
+        assert_eq!(history["turns"][2]["projectionAuthority"], "v5");
+        assert!(history["turns"][2]["timelineItems"][0]["execution"].is_null());
+
+        let resync = serde_json::to_value(ResyncDtoV5 {
+            session: SessionSummary {
+                session_id: Uuid::now_v7(),
+                project_id: Uuid::now_v7(),
+                title: "mixed".to_owned(),
+                title_source: SessionTitleSource::Fallback,
+                pinned_at: None,
+                last_activity_at: 10,
+                latest_turn_status: Some("completed".to_owned()),
+                project_available: true,
+            }
+            .into(),
+            history: history.clone(),
+            cleanup: None,
+        })
+        .unwrap();
+        assert_eq!(resync["history"], history);
     }
 
     #[test]
@@ -4927,6 +5716,7 @@ mod tests {
             turns: vec![crate::chat::Feat134HistoryTurn {
                 turn_id,
                 v4_authority: true,
+                source_schema_version: Some(4),
                 terminal_code: None,
                 items: vec![
                     crate::chat::TimelineItem {
@@ -4945,6 +5735,7 @@ mod tests {
                         source_event_id,
                         source_sequence: 1,
                         source_occurred_at: source_occurred_at.clone(),
+                        execution: None,
                     },
                     crate::chat::TimelineItem {
                         item_id: "commentary-2".to_owned(),
@@ -4962,6 +5753,7 @@ mod tests {
                         source_event_id,
                         source_sequence: 2,
                         source_occurred_at: source_occurred_at.clone(),
+                        execution: None,
                     },
                     crate::chat::TimelineItem {
                         item_id: "final".to_owned(),
@@ -4979,6 +5771,7 @@ mod tests {
                         source_event_id,
                         source_sequence: 3,
                         source_occurred_at: source_occurred_at.clone(),
+                        execution: None,
                     },
                     crate::chat::TimelineItem {
                         item_id: "reasoning".to_owned(),
@@ -5001,6 +5794,7 @@ mod tests {
                         source_event_id,
                         source_sequence: 4,
                         source_occurred_at,
+                        execution: None,
                     },
                 ],
                 plan: None,
@@ -5071,6 +5865,7 @@ mod tests {
                     reasoning_parts: Vec::new(),
                     started_at_ms: 1,
                     completed_at_ms: Some(2),
+                    execution: None,
                 })
                 .collect(),
             plan: None,
@@ -5304,6 +6099,14 @@ pub(crate) struct ResyncDtoV2 {
 pub(crate) struct ResyncDtoV4 {
     session: SessionDto,
     history: HistoryPageDtoV4,
+    cleanup: Option<CleanupStatusDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResyncDtoV5 {
+    session: SessionDto,
+    history: Value,
     cleanup: Option<CleanupStatusDto>,
 }
 
@@ -6057,6 +6860,76 @@ pub async fn chat_load_history_v3(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
+        let request: CommandRequest<SessionReadPayload> = decode_request_v5(request)?;
+        if !chat_runtime.feat136_streaming_enabled() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v5());
+        }
+        let now =
+            unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        let before = ipc_runtime
+            .resolve_history_cursor(
+                request.context_id,
+                request.payload.session_id,
+                request.payload.cursor.as_deref(),
+                now,
+                request.request_id,
+            )
+            .map_err(ChatIpcError::v5)?;
+        let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v5)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v5)?;
+        ipc_runtime
+            .begin_read(request.request_id)
+            .map_err(ChatIpcError::v5)?;
+        let result = load_bounded_feat136_history_snapshot(
+            &authorized,
+            request.context_id,
+            request.payload.session_id,
+            before,
+            request.payload.limit,
+            MAX_HISTORY_PAGE_BYTES,
+            request.request_id,
+        )
+        .await;
+        let finished = ipc_runtime.finish_read(request.request_id);
+        let snapshot = result?;
+        finished.map_err(ChatIpcError::v5)?;
+        let next_cursor = snapshot
+            .history
+            .next_before_ordinal
+            .map(|before| {
+                ipc_runtime.issue_cursor(
+                    request.context_id,
+                    CursorValue::History {
+                        session_id: request.payload.session_id,
+                        before,
+                    },
+                    now,
+                )
+            })
+            .transpose()
+            .map_err(ChatIpcError::v5)?;
+        let data = history_dto_v5(
+            snapshot.history,
+            next_cursor,
+            snapshot.message_content_blocks,
+            snapshot.artifacts,
+            snapshot.feat134,
+        )
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)
+            .map_err(ChatIpcError::v5)?;
+        return serde_json::to_value(CommandResponse::new_v5(request.request_id, data))
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v5());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V4_SCHEMA_VERSION) {
         let request: CommandRequest<SessionReadPayload> = decode_request_v4(request)?;
         if !chat_runtime.feat134_streaming_enabled() {
@@ -6477,6 +7350,75 @@ pub async fn chat_resync_session_v2(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
+        let request: CommandRequest<SessionReadPayload> = decode_request_v5(request)?;
+        if !chat_runtime.feat136_streaming_enabled() || request.payload.cursor.is_some() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v5());
+        }
+        let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v5)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v5)?;
+        ipc_runtime
+            .begin_read(request.request_id)
+            .map_err(ChatIpcError::v5)?;
+        let result = load_bounded_feat136_history_snapshot(
+            &authorized,
+            request.context_id,
+            request.payload.session_id,
+            None,
+            request.payload.limit,
+            MAX_V4_RESYNC_BYTES,
+            request.request_id,
+        )
+        .await;
+        let finished = ipc_runtime.finish_read(request.request_id);
+        let snapshot = result?;
+        finished.map_err(ChatIpcError::v5)?;
+        let next_cursor = snapshot
+            .history
+            .next_before_ordinal
+            .map(|before| {
+                ipc_runtime.issue_cursor(
+                    request.context_id,
+                    CursorValue::History {
+                        session_id: request.payload.session_id,
+                        before,
+                    },
+                    unix_seconds()
+                        .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?,
+                )
+            })
+            .transpose()
+            .map_err(ChatIpcError::v5)?;
+        let history = history_dto_v5(
+            snapshot.history,
+            next_cursor,
+            snapshot.message_content_blocks,
+            snapshot.artifacts,
+            snapshot.feat134,
+        )
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        let cleanup = authorized
+            .deletion_status_for_session(request.context_id, request.payload.session_id)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        let data = ResyncDtoV5 {
+            session: snapshot.session.into(),
+            history,
+            cleanup: cleanup.map(cleanup_dto),
+        };
+        enforce_response_limit(&data, MAX_V4_RESYNC_BYTES, request.request_id)
+            .map_err(ChatIpcError::v5)?;
+        return serde_json::to_value(CommandResponse::new_v5(request.request_id, data))
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v5());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V4_SCHEMA_VERSION) {
         let request: CommandRequest<SessionReadPayload> = decode_request_v4(request)?;
         if !chat_runtime.feat134_streaming_enabled() || request.payload.cursor.is_some() {
@@ -6620,6 +7562,51 @@ pub async fn chat_subscribe_session_v1(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
+        let request: CommandRequest<SubscribePayload> = decode_request_v5(request)?;
+        if !chat_runtime.feat136_streaming_enabled() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v5());
+        }
+        let (application, authorized, manager) = applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v5)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v5)?;
+        authorized
+            .resync_session(
+                request.context_id,
+                request.payload.session_id,
+                None,
+                Some(1),
+            )
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        ipc_runtime
+            .ensure_coordinator(app, application, manager)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v5())?;
+        let subscription_id = ipc_runtime
+            .inner
+            .event_bridge
+            .subscribe(
+                request.context_id,
+                request.payload.session_id,
+                CHAT_IPC_V5_SCHEMA_VERSION,
+            )
+            .map_err(ChatIpcError::v5)?;
+        return serde_json::to_value(CommandResponse::new_v5(
+            request.request_id,
+            SubscriptionDto {
+                subscription_id: subscription_id.to_string(),
+            },
+        ))
+        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v5());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V4_SCHEMA_VERSION) {
         let request: CommandRequest<SubscribePayload> = decode_request_v4(request)?;
         if !chat_runtime.feat134_streaming_enabled() {
