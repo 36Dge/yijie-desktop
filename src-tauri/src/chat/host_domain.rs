@@ -2474,6 +2474,51 @@ mod tests {
     }
 
     #[test]
+    fn feat136_v5_failed_command_fixture_preserves_nonzero_terminal_fields() {
+        let HostStreamEvent::Ordinary(event) =
+            feat136_decode(&feat136_fixture("command-failed-head-tail.json")).unwrap()
+        else {
+            panic!("ordinary failed Command fixture expected");
+        };
+        assert_eq!(event.item_id.as_deref(), Some("command-failed-1"));
+        let HostEventKind::CommandCompleted {
+            status,
+            command_summary,
+            cwd,
+            duration_ms,
+            exit_code,
+            output,
+            error,
+        } = event.kind
+        else {
+            panic!("failed Command completion expected");
+        };
+        assert_eq!(status, HostCommandStatus::Failed);
+        assert_eq!(command_summary.text, "Run local JavaScript validation");
+        assert_eq!(
+            cwd,
+            HostCommandCwd::WorkspaceRelative(vec!["examples".to_owned()])
+        );
+        assert_eq!(duration_ms, Some(14));
+        assert_eq!(exit_code, Some(9));
+        assert_eq!(
+            output,
+            HostCommandOutput::HeadTail {
+                head: "unknown option\n".to_owned(),
+                tail: "usage information omitted\n".to_owned(),
+                reason: HostTruncationReason::Utf8ByteLimit,
+            }
+        );
+        assert_eq!(
+            error,
+            Some(HostProjectionError {
+                code: HostCommandErrorCode::CommandFailed,
+                summary: "command exited with a non-zero status".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn feat136_contract_pin_schema_and_ordinary_fixture_set_are_exact() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("contracts");
         let lock: Value = serde_json::from_str(
@@ -2483,7 +2528,7 @@ mod tests {
         assert_eq!(
             lock,
             serde_json::json!({
-                "contractCommit": "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+                "contractCommit": "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb",
                 "contractVersion": "v0.7.0",
                 "schemaVersion": 5,
                 "schemaSha256": "2f773dd6dc60bc7dc01bcdb434447e945e0a98317534498f54325fcdabb27008",

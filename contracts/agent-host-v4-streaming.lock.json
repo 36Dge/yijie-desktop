@@ -3,7 +3,7 @@
   "contract_version": "0.7.0",
   "contracts": {
     "repository": "https://github.com/36Dge/yijie-contracts.git",
-    "full_commit": "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+    "full_commit": "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb",
     "sources": {
       "openapi": {
         "path": "openapi/agent-host/agent-host.yaml",
@@ -15,7 +15,7 @@
       },
       "runtime_projection": {
         "path": "compatibility/agent-host-runtime-v1.json",
-        "sha256": "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc"
+        "sha256": "6cef3f4ac60ec91b9f7f05b188dc677169fc11e0bedf34350f6342a6f50981bb"
       },
       "protobuf": {
         "path": "protobuf/yijie/events/v4/agent_session.proto",
@@ -29,10 +29,10 @@
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "83d3163e21579042d2cc21f303e943946ff97eb0",
+    "full_commit": "96b1fa19783694aef583b614c492fd2b6b5c15cc",
     "contracts_lock": {
       "path": "api/contracts.lock",
-      "sha256": "2867f1834a363cd759e80ffede1749c4905ffbc9df64b47bdbdf74ba6e43b28a"
+      "sha256": "1c837e6e1536e2bb1497688631a9893f47a9958fc610865d04b072a56e67cfd1"
     },
     "sources": {
       "openapi": {
@@ -45,7 +45,7 @@
       },
       "runtime_projection": {
         "path": "api/compatibility/agent-host-runtime-v1.json",
-        "sha256": "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc"
+        "sha256": "6cef3f4ac60ec91b9f7f05b188dc677169fc11e0bedf34350f6342a6f50981bb"
       },
       "generated_openapi": {
         "path": "internal/contracts/agenthost.gen.go",

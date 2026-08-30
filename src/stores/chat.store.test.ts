@@ -4479,4 +4479,115 @@ describe("FEAT-134 chat store v4 authority", () => {
       durableSequenceCut: "1",
     });
   });
+
+  it("routes a zero-delta failed nonzero v5 Command through the live Pinia subscription", async () => {
+    const subscriptionId = "019c1a00-0000-7000-8000-00000000000a";
+    const startedEventId = "019fbf59-4000-7000-8000-000000000030";
+    const completedEventId = "019fbf59-4000-7000-8000-000000000031";
+    const commandSummary = Object.freeze({
+      text: "Inspect a missing reference",
+      truncated: false,
+      truncationReason: null,
+    });
+    const cwd = Object.freeze({ kind: "workspace_root" as const, segments: Object.freeze([]) });
+    const subscribeV5 = vi.fn<ChatClient["subscribeSessionV5"]>(async () => subscriptionId);
+    const { client, emitV5 } = fakeClient({ subscribeSessionV5: subscribeV5 });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat136-live-failed-${storeSequence++}`,
+      undefined,
+      true,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(subscribeV5).toHaveBeenCalledOnce();
+    expect(subscribeV5).toHaveBeenCalledWith(CONTEXT, SESSION_A);
+
+    emitV5(Object.freeze({
+      schemaVersion: 5,
+      subscriptionId,
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      projectionSequence: "1",
+      eventId: startedEventId,
+      durableSequence: "1",
+      kind: "command_started",
+      payload: Object.freeze({
+        sourceEventId: startedEventId,
+        sourceSequence: "1",
+        sourceOccurredAt: "2026-08-30T00:00:00Z",
+        itemId: "command-failed",
+        itemOrdinal: 1,
+        status: "running",
+        commandSummary,
+        cwd,
+      }),
+    }));
+    emitV5(Object.freeze({
+      schemaVersion: 5,
+      subscriptionId,
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      turnId: TURN_A,
+      projectionSequence: "2",
+      eventId: completedEventId,
+      durableSequence: "2",
+      kind: "command_completed",
+      payload: Object.freeze({
+        sourceEventId: completedEventId,
+        sourceSequence: "2",
+        sourceOccurredAt: "2026-08-30T00:00:00.014Z",
+        itemId: "command-failed",
+        itemOrdinal: 1,
+        status: "failed",
+        commandSummary,
+        cwd,
+        durationMs: 14,
+        exitCode: 9,
+        output: Object.freeze({
+          retention: "complete",
+          text: "reference unavailable\n",
+          head: null,
+          tail: null,
+          reason: null,
+          truncated: false,
+          truncationReason: null,
+        }),
+        error: Object.freeze({
+          code: "command_failed",
+          summary: "command exited with a non-zero status",
+        }),
+      }),
+    }));
+
+    const turn = selectConversationTimeline(store.conversationState, SESSION_A)?.turns
+      .find((candidate) => candidate.turnId === TURN_A);
+    expect(turn?.items.filter((item) => item.kind === "command")).toHaveLength(1);
+    expect(selectConversationItem(
+      store.conversationState,
+      SESSION_A,
+      TURN_A,
+      "command-failed",
+    )).toMatchObject({
+      kind: "command",
+      status: "completed",
+      execution: {
+        kind: "command",
+        status: "failed",
+        liveOutput: null,
+        output: { retention: "complete", text: "reference unavailable\n" },
+        durationMs: 14,
+        exitCode: 9,
+        error: {
+          code: "command_failed",
+          summary: "command exited with a non-zero status",
+        },
+      },
+    });
+    expect(store.conversationState.streamPositions[subscriptionId]).toBe("2");
+    expect(store.conversationState.recovery).toBeNull();
+  });
 });

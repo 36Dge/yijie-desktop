@@ -65,10 +65,10 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
     const bytes = await readFile(path.resolve(repositoryRoot, "../yijie-agent-host/api/contracts.lock"));
     expect(validateHostContractsLock(bytes)).toMatchObject({
       CONTRACTS_VERSION: "0.7.0",
-      CONTRACTS_COMMIT: "3c3000a6fbe2f08ab2131a463a1691e867d661b1",
+      CONTRACTS_COMMIT: "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb",
       OPENAPI_SHA256: "bd53dfd84976c81b5154c587c72547a5b698b72d301a4850fd0b6338022f9c83",
       RUNTIME_COMPATIBILITY_SHA256:
-        "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc",
+        "6cef3f4ac60ec91b9f7f05b188dc677169fc11e0bedf34350f6342a6f50981bb",
       AGENT_SESSION_EVENT_V4_SCHEMA_SHA256:
         "d972806e59195c5e1f5fe810db6e1df80be349b77ecc4cf192ed0f391d9ed739",
     });
@@ -92,6 +92,13 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
     );
     expect(() => validateRuntimeProjectionV4Bytes(runtimeProjectionBytes)).not.toThrow();
     expect(() => validateRuntimeProjection(structuredClone(runtimeProjection))).not.toThrow();
+
+    const oldRuntimeProvenance = structuredClone(runtimeProjection);
+    oldRuntimeProvenance.runtime.repository_commit =
+      "0ce5902ed400866be0196886bb78f693a004d68d";
+    expect(() => validateRuntimeProjection(oldRuntimeProvenance)).toThrow(
+      "Runtime compatibility projection drifted",
+    );
 
     const changedRuntimeBytes = Buffer.from(
       runtimeProjectionBytes.toString("utf8").replace('"transport": "stdio"', '"transport": "STDIO"'),

@@ -3964,7 +3964,10 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::{LiveReasoningProjection, ReasoningPart};
+    use crate::chat::{
+        CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
+        ProjectionErrorCode, ReasoningPart, TimelineItemStatus,
+    };
 
     #[test]
     fn artifact_live_schema_and_queue_are_closed_bounded_monotonic_and_content_free() {
@@ -5071,6 +5074,120 @@ mod tests {
         .unwrap();
         assert_eq!(inherited_v4["schemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
         assert!(inherited_v4.get("sourceSchemaVersion").is_none());
+    }
+
+    #[test]
+    fn feat136_failed_nonzero_command_ipc_payload_keeps_authoritative_terminal_fields() {
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let started_source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 1,
+            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+        };
+        let completed_source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 2,
+            occurred_at: "2026-08-30T00:00:00.014Z".to_owned(),
+        };
+        let item = TimelineItem {
+            item_id: "command-failed".to_owned(),
+            item_ordinal: 1,
+            item_type: "command".to_owned(),
+            phase: None,
+            status: TimelineItemStatus::Completed,
+            text: String::new(),
+            reasoning_status: None,
+            reasoning_reason_code: None,
+            reasoning_parts: Vec::new(),
+            reasoning_finalized_at_ms: None,
+            execution: Some(ExecutionProjection::Command(CommandProjection {
+                status: CommandStatus::Failed,
+                started_source,
+                last_source: completed_source.clone(),
+                command_summary: SafeTextProjection {
+                    text: "Inspect a missing reference".to_owned(),
+                    truncated: false,
+                    truncation_reason: None,
+                },
+                cwd: CommandCwdProjection::WorkspaceRoot,
+                live_output: None,
+                output: Some(CommandOutputProjection::Complete {
+                    text: "reference unavailable\n".to_owned(),
+                }),
+                duration_ms: Some(14),
+                exit_code: Some(9),
+                error: Some(ProjectionError {
+                    code: ProjectionErrorCode::CommandFailed,
+                    summary: "command exited with a non-zero status".to_owned(),
+                }),
+            })),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(1_014),
+            source_event_id: completed_source.event_id,
+            source_sequence: completed_source.sequence,
+            source_occurred_at: completed_source.occurred_at.clone(),
+        };
+        let projection = Feat134Projection {
+            session_id,
+            turn_id,
+            cursor: crate::chat::StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: completed_source.sequence,
+                event_id: completed_source.event_id,
+            },
+            source_event_type: "item.completed".to_owned(),
+            source_turn_id: Some(Uuid::now_v7()),
+            source_occurred_at: completed_source.occurred_at.clone(),
+            source_event_bytes: 1,
+            observed_at_ms: 1_014,
+            durable_sequence: Some(2),
+            assistant_text: String::new(),
+            items: vec![item.clone()],
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::CommandCompleted(item),
+        };
+
+        let (payload_turn_id, kind, payload, event_id) =
+            feat136_event_payload(&projection).unwrap().unwrap();
+        assert_eq!(payload_turn_id, Some(turn_id));
+        assert_eq!(kind, "command_completed");
+        assert_eq!(event_id, completed_source.event_id);
+        assert_eq!(
+            payload,
+            json!({
+                "sourceEventId": completed_source.event_id.to_string(),
+                "sourceSequence": "2",
+                "sourceOccurredAt": "2026-08-30T00:00:00.014Z",
+                "itemId": "command-failed",
+                "itemOrdinal": 1,
+                "status": "failed",
+                "commandSummary": {
+                    "text": "Inspect a missing reference",
+                    "truncated": false,
+                    "truncationReason": null,
+                },
+                "cwd": { "kind": "workspace_root", "segments": [] },
+                "durationMs": 14,
+                "exitCode": 9,
+                "output": {
+                    "retention": "complete",
+                    "text": "reference unavailable\n",
+                    "head": null,
+                    "tail": null,
+                    "reason": null,
+                    "truncated": false,
+                    "truncationReason": null,
+                },
+                "error": {
+                    "code": "command_failed",
+                    "summary": "command exited with a non-zero status",
+                },
+            })
+        );
     }
 
     #[test]

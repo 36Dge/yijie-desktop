@@ -12,9 +12,9 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const lockPath = path.join(repositoryRoot, "contracts/agent-host-v4-streaming.lock.json");
 
 const CONTRACTS_REPOSITORY = "https://github.com/36Dge/yijie-contracts.git";
-const CONTRACTS_COMMIT = "3c3000a6fbe2f08ab2131a463a1691e867d661b1";
+const CONTRACTS_COMMIT = "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb";
 const HOST_REPOSITORY = "https://github.com/36Dge/yijie-agent-host.git";
-const HOST_COMMIT = "83d3163e21579042d2cc21f303e943946ff97eb0";
+const HOST_COMMIT = "96b1fa19783694aef583b614c492fd2b6b5c15cc";
 const SOURCE_PINS = Object.freeze({
   openapi: [
     "openapi/agent-host/agent-host.yaml",
@@ -26,7 +26,7 @@ const SOURCE_PINS = Object.freeze({
   ],
   runtime_projection: [
     "compatibility/agent-host-runtime-v1.json",
-    "6a81fbb1390af99c0f1f6d6b53a872b3b8bfa0447d0dd03cb02f5169208e85dc",
+    "6cef3f4ac60ec91b9f7f05b188dc677169fc11e0bedf34350f6342a6f50981bb",
   ],
   protobuf: [
     "protobuf/yijie/events/v4/agent_session.proto",
@@ -55,7 +55,7 @@ const HOST_FIXTURE_TREE = Object.freeze([
 ]);
 const HOST_LOCK_PIN = Object.freeze([
   "api/contracts.lock",
-  "2867f1834a363cd759e80ffede1749c4905ffbc9df64b47bdbdf74ba6e43b28a",
+  "1c837e6e1536e2bb1497688631a9893f47a9958fc610865d04b072a56e67cfd1",
 ]);
 const LEGACY_V4_RUNTIME_SHA256 =
   "6d28e3ad1bb941561ce08a231abf003dd0e69b5dcafe6376cc5987c3d1f07a00";
@@ -261,7 +261,7 @@ export function validateOpenApi(document) {
 export function validateRuntimeProjection(projection) {
   if (
     projection?.contracts_version !== "0.7.0" ||
-    projection?.runtime?.repository_commit !== "0ce5902ed400866be0196886bb78f693a004d68d" ||
+    projection?.runtime?.repository_commit !== "b2b20e2fc4a0c94834f34d8cc459e488a1b56277" ||
     projection?.runtime?.upstream_tag !== "rust-v0.144.6" ||
     projection?.runtime?.upstream_commit !== "5d1fbf26c43abc65a203928b2e31561cb039e06d" ||
     projection?.runtime?.version !== "0.144.6" ||
@@ -286,6 +286,10 @@ export function validateRuntimeProjectionV4Bytes(bytes) {
   let legacyV4 = Buffer.from(bytes).toString("utf8");
   for (const [addition, previous] of [
     ['  "contracts_version": "0.7.0",\n', '  "contracts_version": "0.6.0",\n'],
+    [
+      '    "repository_commit": "b2b20e2fc4a0c94834f34d8cc459e488a1b56277",\n',
+      '    "repository_commit": "0ce5902ed400866be0196886bb78f693a004d68d",\n',
+    ],
     ['      "item/commandExecution/outputDelta",\n', ""],
     ['      "item/mcpToolCall/progress",\n', ""],
   ]) {

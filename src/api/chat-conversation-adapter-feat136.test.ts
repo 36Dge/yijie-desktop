@@ -120,6 +120,62 @@ describe("FEAT-136 v5 conversation adapter", () => {
       });
   });
 
+  it("keeps a live failed nonzero Command through the closed parser, adapter, and store", () => {
+    const parsed = [
+      event(1, "command_started", {
+        ...source(1),
+        itemId: "command-failed",
+        itemOrdinal: 1,
+        status: "running",
+        commandSummary,
+        cwd,
+      }),
+      event(2, "command_completed", {
+        ...source(2),
+        itemId: "command-failed",
+        itemOrdinal: 1,
+        status: "failed",
+        commandSummary,
+        cwd,
+        durationMs: 14,
+        exitCode: 9,
+        output: {
+          retention: "complete",
+          text: "reference unavailable\n",
+          head: null,
+          tail: null,
+          reason: null,
+          truncated: false,
+          truncationReason: null,
+        },
+        error: {
+          code: "command_failed",
+          summary: "command exited with a non-zero status",
+        },
+      }),
+    ].map((input) => parseChatProjectionEventV5(input));
+    const state = reduceV5(parsed);
+
+    expect(selectConversationItem(state, SESSION_ID, TURN_ID, "command-failed"))
+      .toMatchObject({
+        kind: "command",
+        status: "completed",
+        execution: {
+          kind: "command",
+          status: "failed",
+          liveOutput: null,
+          output: { retention: "complete", text: "reference unavailable\n" },
+          durationMs: 14,
+          exitCode: 9,
+          error: {
+            code: "command_failed",
+            summary: "command exited with a non-zero status",
+          },
+        },
+      });
+    expect(state.recovery).toBeNull();
+  });
+
   it("keeps an unknown Tool as a Tool card model", () => {
     const identity = Object.freeze({
       resolution: "unknown" as const,

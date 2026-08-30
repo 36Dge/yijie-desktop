@@ -146,7 +146,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "3c3000a6fbe2f08ab2131a463a1691e867d661b1";
+const CONTRACT_COMMIT: &str = "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {

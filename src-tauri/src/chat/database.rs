@@ -9873,7 +9873,11 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::{SourceIdentity, TimelineDelta, TimelineTerminal};
+    use crate::chat::host_domain::{
+        HostCommandCwd, HostCommandErrorCode, HostCommandOutput, HostCommandStatus, HostEvent,
+        HostEventCursor, HostEventKind, HostProjectionError, HostSafeText,
+    };
+    use crate::chat::{Feat134TurnReducer, SourceIdentity, TimelineDelta, TimelineTerminal};
     use std::os::unix::fs::symlink;
 
     fn scope() -> ChatScope {
@@ -12652,6 +12656,167 @@ mod tests {
         );
         assert_eq!(result, Err(ChatError::DatabaseBusy));
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn feat136_failed_nonzero_command_survives_native_reducer_and_sqlcipher_reopen() {
+        let root = std::env::temp_dir().join(format!("yijie-feat136-failed-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 136);
+        let repository_scope = repository.scope.clone();
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let (agent_session_id, codex_thread_id) =
+            bind_and_accept_first_turn(&mut repository, &pending, now);
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        assert_eq!(context.agent_session_id, agent_session_id);
+        assert_eq!(context.codex_thread_id, codex_thread_id);
+
+        let stream_id = Uuid::now_v7();
+        let started_event_id = Uuid::now_v7();
+        let completed_event_id = Uuid::now_v7();
+        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
+        let started = reducer
+            .apply(
+                HostEvent {
+                    cursor: HostEventCursor::new(stream_id, 1).unwrap(),
+                    event_type: "item.started".to_owned(),
+                    event_id: started_event_id,
+                    task_id: context.task_id,
+                    agent_session_id: context.agent_session_id,
+                    codex_thread_id: context.codex_thread_id,
+                    turn_id: Some(context.runtime_turn_id),
+                    item_id: Some("command-failed".to_owned()),
+                    occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+                    encoded_bytes: 1,
+                    kind: HostEventKind::CommandStarted {
+                        command_summary: HostSafeText {
+                            text: "Inspect a missing reference".to_owned(),
+                            truncated: false,
+                            truncation_reason: None,
+                        },
+                        cwd: HostCommandCwd::WorkspaceRoot,
+                    },
+                },
+                1_000,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matches!(started.delta, TimelineDelta::CommandStarted(_)));
+        let Some(ExecutionProjection::Command(command)) = started.items[0].execution.as_ref()
+        else {
+            panic!("started Command projection expected");
+        };
+        assert_eq!(command.started_source.event_id, started_event_id);
+        assert_eq!(command.last_source.event_id, started_event_id);
+        assert_eq!(command.live_output, None);
+        repository.persist_feat136_projection(&started).unwrap();
+
+        let completed = reducer
+            .apply(
+                HostEvent {
+                    cursor: HostEventCursor::new(stream_id, 2).unwrap(),
+                    event_type: "item.completed".to_owned(),
+                    event_id: completed_event_id,
+                    task_id: context.task_id,
+                    agent_session_id: context.agent_session_id,
+                    codex_thread_id: context.codex_thread_id,
+                    turn_id: Some(context.runtime_turn_id),
+                    item_id: Some("command-failed".to_owned()),
+                    occurred_at: "2026-08-30T00:00:00.014Z".to_owned(),
+                    encoded_bytes: 1,
+                    kind: HostEventKind::CommandCompleted {
+                        status: HostCommandStatus::Failed,
+                        command_summary: HostSafeText {
+                            text: "Inspect a missing reference".to_owned(),
+                            truncated: false,
+                            truncation_reason: None,
+                        },
+                        cwd: HostCommandCwd::WorkspaceRoot,
+                        duration_ms: Some(14),
+                        exit_code: Some(9),
+                        output: HostCommandOutput::Complete {
+                            text: "reference unavailable\n".to_owned(),
+                        },
+                        error: Some(HostProjectionError {
+                            code: HostCommandErrorCode::CommandFailed,
+                            summary: "command exited with a non-zero status".to_owned(),
+                        }),
+                    },
+                },
+                1_014,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            completed.delta,
+            TimelineDelta::CommandCompleted(_)
+        ));
+        let Some(ExecutionProjection::Command(command)) = completed.items[0].execution.as_ref()
+        else {
+            panic!("failed Command projection expected");
+        };
+        assert_eq!(command.status, CommandStatus::Failed);
+        assert_eq!(command.started_source.event_id, started_event_id);
+        assert_eq!(command.last_source.event_id, completed_event_id);
+        assert_eq!(command.duration_ms, Some(14));
+        assert_eq!(command.exit_code, Some(9));
+        assert_eq!(
+            command.error.as_ref().map(|error| error.code),
+            Some(ProjectionErrorCode::CommandFailed)
+        );
+        repository.persist_feat136_projection(&completed).unwrap();
+
+        drop(repository);
+        let repository = open_repository_for_scope(&root, 136, repository_scope);
+        let reopened_context = repository.active_turn_context(pending.session_id).unwrap();
+        assert_eq!(
+            reopened_context.cursor.as_ref().map(|cursor| (
+                cursor.stream_id,
+                cursor.sequence,
+                cursor.event_id,
+            )),
+            Some((stream_id, 2, completed_event_id))
+        );
+        let hydration = repository
+            .load_feat136_hydration(reopened_context.turn_id)
+            .unwrap();
+        assert_eq!(hydration.items.len(), 1);
+        assert_eq!(hydration.items[0].item_id, "command-failed");
+        assert_eq!(hydration.items[0].status, TimelineItemStatus::Completed);
+        let Some(ExecutionProjection::Command(command)) = hydration.items[0].execution.as_ref()
+        else {
+            panic!("hydrated failed Command expected");
+        };
+        assert_eq!(command.status, CommandStatus::Failed);
+        assert_eq!(command.started_source.event_id, started_event_id);
+        assert_eq!(command.last_source.event_id, completed_event_id);
+        assert_eq!(command.live_output, None);
+        assert_eq!(command.duration_ms, Some(14));
+        assert_eq!(command.exit_code, Some(9));
+        assert_eq!(
+            command.output,
+            Some(CommandOutputProjection::Complete {
+                text: "reference unavailable\n".to_owned(),
+            })
+        );
+        assert_eq!(
+            command
+                .error
+                .as_ref()
+                .map(|error| (error.code, error.summary.as_str(),)),
+            Some((
+                ProjectionErrorCode::CommandFailed,
+                "command exited with a non-zero status",
+            ))
+        );
+        Feat134TurnReducer::new_v5(reopened_context, Some(hydration))
+            .expect("reopened failed Command hydration must remain valid");
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
