@@ -34,21 +34,47 @@ describe("local demo launcher profiles", () => {
 
   it("maps the exact stable argument to image=false while retaining image=true by default", async () => {
     const runner = await readFile(runnerPath, "utf8");
-    const argumentBoundary = runner.slice(
-      runner.indexOf('image_generation_enabled="true"'),
-      runner.indexOf('[[ -x "$codex_binary" ]]'),
+    const argumentStart = runner.indexOf('image_generation_enabled="true"');
+    const argumentEnd = runner.indexOf(
+      '[[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]]',
     );
+    expect(argumentStart).toBeGreaterThanOrEqual(0);
+    expect(argumentEnd).toBeGreaterThan(argumentStart);
+    const argumentBoundary = runner.slice(argumentStart, argumentEnd);
 
     expect(argumentBoundary).toContain('image_generation_enabled="true"');
     expect(argumentBoundary).toContain('[[ "$1" == "--stable-api-only" ]]');
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
+    expect(argumentBoundary).toContain(
+      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"',
+    );
+    expect(argumentBoundary).toContain('codex_binary="$codex_runtime_root/codex"');
+    expect(argumentBoundary).toContain('codex_manifest="$codex_runtime_root/runtime-manifest.json"');
     expect(argumentBoundary).toContain("feat134_environment=(");
     expect(argumentBoundary).toContain("YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain("YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true");
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true");
     expect(argumentBoundary).toContain('case "$#" in');
+  });
+
+  it("pins the stable entry to the reviewed FEAT-136 Runtime artifact pair", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+
+    expect(runner).toContain(
+      'feat136_runtime_binary_sha256="4efe16d2848680752cf9aacf4c17741ab2eeb7415894a66c2bb03652b00a322d"',
+    );
+    expect(runner).toContain(
+      'feat136_runtime_manifest_sha256="1cfa2e0a139b2213f4d29b1efeed71d4810110ac865f0bcbd931ff33b0062c1b"',
+    );
+    expect(runner).toContain('if [[ "$stable_api_only" == "true" ]]; then');
+    expect(runner).toContain(
+      '[[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]]',
+    );
+    expect(runner).toContain('[[ "$(sha256_file "$codex_binary")" == "$feat136_runtime_binary_sha256" ]]');
+    expect(runner).toContain('[[ "$(sha256_file "$codex_manifest")" == "$feat136_runtime_manifest_sha256" ]]');
+    expect(runner.match(/\.local\/runtime-artifacts\/feat-136-b2b20e2fc4a0/g)).toHaveLength(1);
   });
 
   it("injects the dependent FEAT-134 and FEAT-136 flags only through the exact stable branch", async () => {
