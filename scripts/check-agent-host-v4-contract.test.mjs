@@ -10,7 +10,8 @@ import {
   validateRuntimeProjection,
   validateRuntimeProjectionV4Bytes,
   validateStableActivation,
-  verifyExactCheckout,
+  readPinnedGitFile,
+  verifyImmutableGitObject,
 } from "./check-agent-host-v4-contract.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
@@ -19,8 +20,12 @@ const lock = JSON.parse(
 );
 const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
 const runner = await readFile(path.join(repositoryRoot, lock.activation.launcher_script), "utf8");
-const runtimeProjectionBytes = await readFile(
-  path.resolve(repositoryRoot, "../yijie-contracts", lock.contracts.sources.runtime_projection.path),
+const contractsRoot = path.resolve(repositoryRoot, "../yijie-contracts");
+const agentHostRoot = path.resolve(repositoryRoot, "../yijie-agent-host");
+const runtimeProjectionBytes = await readPinnedGitFile(
+  contractsRoot,
+  lock.contracts.full_commit,
+  lock.contracts.sources.runtime_projection,
 );
 const runtimeProjection = JSON.parse(runtimeProjectionBytes.toString("utf8"));
 
@@ -45,24 +50,43 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
     })).toThrow();
   });
 
-  it("verifies both exact clean sibling commits and their synchronized v4 sources", async () => {
+  it("verifies immutable v4 objects while current clean siblings provide v6 execution", async () => {
     await expect(checkAgentHostV4Contract()).resolves.toBeUndefined();
-    await expect(verifyExactCheckout(
-      path.resolve(repositoryRoot, "../yijie-contracts"),
+    await expect(verifyImmutableGitObject(
+      contractsRoot,
       lock.contracts.repository,
       "0".repeat(40),
       "Contracts",
-    )).rejects.toThrow("HEAD");
-    await expect(verifyExactCheckout(
-      path.resolve(repositoryRoot, "../yijie-agent-host"),
+    )).rejects.toThrow("immutable commit");
+    await expect(verifyImmutableGitObject(
+      agentHostRoot,
       "https://example.invalid/wrong-host.git",
       lock.agent_host.full_commit,
       "Agent Host",
     )).rejects.toThrow("origin");
+
+    await expect(
+      import("node:child_process").then(({ execFileSync }) =>
+        execFileSync("git", ["-C", contractsRoot, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim(),
+      ),
+    ).resolves.toBe("2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6");
+    await expect(
+      import("node:child_process").then(({ execFileSync }) =>
+        execFileSync("git", ["-C", agentHostRoot, "rev-parse", "HEAD"], {
+          encoding: "utf8",
+        }).trim(),
+      ),
+    ).resolves.toBe("118651804b7f5a7849bc68cdf29d88c74a21f8a1");
   });
 
   it("pins the Host consumption lock bytes and rejects any drift", async () => {
-    const bytes = await readFile(path.resolve(repositoryRoot, "../yijie-agent-host/api/contracts.lock"));
+    const bytes = await readPinnedGitFile(
+      agentHostRoot,
+      lock.agent_host.full_commit,
+      lock.agent_host.contracts_lock,
+    );
     expect(validateHostContractsLock(bytes)).toMatchObject({
       CONTRACTS_VERSION: "0.7.0",
       CONTRACTS_COMMIT: "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb",

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -174,26 +174,50 @@ async function git(root, ...arguments_) {
   return (await exec("git", ["-C", root, ...arguments_])).stdout.trim();
 }
 
-export async function verifyExactCheckout(root, repository, commit, label) {
-  const [head, status, origin] = await Promise.all([
-    git(root, "rev-parse", "HEAD"),
+async function gitBytes(root, maximum, ...arguments_) {
+  const { stdout } = await exec("git", ["-C", root, ...arguments_], {
+    encoding: "buffer",
+    maxBuffer: maximum,
+  });
+  return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+}
+
+export async function verifyImmutableGitObject(root, repository, commit, label) {
+  const [status, origin, resolvedCommit] = await Promise.all([
     git(root, "status", "--porcelain"),
     git(root, "remote", "get-url", "origin"),
+    git(root, "rev-parse", "--verify", `${commit}^{commit}`).catch(() => ""),
   ]);
-  if (head !== commit) throw new Error(`${label} HEAD is ${head}, expected ${commit}`);
   if (status !== "") throw new Error(`${label} checkout is not clean`);
   if (normalizeRepository(origin) !== normalizeRepository(repository)) {
     throw new Error(`${label} origin differs from its exact pin`);
   }
+  if (resolvedCommit !== commit) {
+    throw new Error(`${label} immutable commit ${commit} is unavailable`);
+  }
 }
 
-async function readRegularPinnedFile(root, source, maximum = 4 * 1024 * 1024) {
-  const target = path.join(root, safeRelativePath(source.path));
-  const info = await lstat(target);
-  if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) {
-    throw new Error(`${source.path} is not an allowed regular file`);
+async function readImmutableGitBlob(root, commit, sourcePath, maximum = 4 * 1024 * 1024) {
+  const relativePath = safeRelativePath(sourcePath);
+  const object = `${commit}:${relativePath}`;
+  const [type, sizeText] = await Promise.all([
+    git(root, "cat-file", "-t", object),
+    git(root, "cat-file", "-s", object),
+  ]);
+  const size = Number.parseInt(sizeText, 10);
+  if (type !== "blob" || !Number.isSafeInteger(size) || size < 0 || size > maximum) {
+    throw new Error(`${sourcePath} is not an allowed immutable Git blob`);
   }
-  const bytes = await readFile(target);
+  return gitBytes(root, maximum + 1, "cat-file", "blob", object);
+}
+
+export async function readPinnedGitFile(
+  root,
+  commit,
+  source,
+  maximum = 4 * 1024 * 1024,
+) {
+  const bytes = await readImmutableGitBlob(root, commit, source.path, maximum);
   const actual = sha256(bytes);
   if (actual !== source.sha256) {
     throw new Error(`${source.path} digest is ${actual}, expected ${source.sha256}`);
@@ -317,15 +341,33 @@ async function verifyFixtureTree(root, commit, fixture) {
   }
 }
 
-async function validateFixtures(contractsRoot, fixtureRoot, schemaBytes) {
-  const root = path.join(contractsRoot, safeRelativePath(fixtureRoot));
-  const names = (await readdir(root)).filter((name) => name.endsWith(".json")).sort();
+async function validateFixtures(contractsRoot, commit, fixtureRoot, schemaBytes) {
+  const relativeRoot = safeRelativePath(fixtureRoot);
+  const prefix = `${relativeRoot}/`;
+  const fixturePaths = (await git(
+    contractsRoot,
+    "ls-tree",
+    "-r",
+    "--name-only",
+    commit,
+    "--",
+    relativeRoot,
+  )).split("\n").filter(Boolean);
+  if (fixturePaths.some((fixturePath) =>
+    !fixturePath.startsWith(prefix) || fixturePath.slice(prefix.length).includes("/"))) {
+    throw new Error("FEAT-134 v4 fixture tree contains an unexpected nested path");
+  }
+  const names = fixturePaths.map((fixturePath) => fixturePath.slice(prefix.length)).sort();
   if (JSON.stringify(names) !== JSON.stringify(FIXTURE_NAMES)) {
     throw new Error("FEAT-134 v4 fixture set differs from the exact five synthetic fixtures");
   }
   const validate = compileEventSchema(JSON.parse(schemaBytes.toString("utf8")));
   for (const name of names) {
-    const fixture = JSON.parse(await readFile(path.join(root, name), "utf8"));
+    const fixture = JSON.parse(
+      (await readImmutableGitBlob(contractsRoot, commit, `${relativeRoot}/${name}`)).toString(
+        "utf8",
+      ),
+    );
     if (!validate(fixture)) {
       throw new Error(`${name} does not validate: ${JSON.stringify(validate.errors)}`);
     }
@@ -459,13 +501,13 @@ export async function checkAgentHostV4Contract({
 } = {}) {
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
   await Promise.all([
-    verifyExactCheckout(
+    verifyImmutableGitObject(
       contractsRoot,
       lock.contracts.repository,
       lock.contracts.full_commit,
       "Contracts",
     ),
-    verifyExactCheckout(
+    verifyImmutableGitObject(
       agentHostRoot,
       lock.agent_host.repository,
       lock.agent_host.full_commit,
@@ -478,16 +520,20 @@ export async function checkAgentHostV4Contract({
       Promise.all(
         Object.entries(lock.contracts.sources).map(async ([name, source]) => [
           name,
-          await readRegularPinnedFile(contractsRoot, source),
+          await readPinnedGitFile(contractsRoot, lock.contracts.full_commit, source),
         ]),
       ).then(Object.fromEntries),
       Promise.all(
         Object.entries(lock.agent_host.sources).map(async ([name, source]) => [
           name,
-          await readRegularPinnedFile(agentHostRoot, source),
+          await readPinnedGitFile(agentHostRoot, lock.agent_host.full_commit, source),
         ]),
       ).then(Object.fromEntries),
-      readRegularPinnedFile(agentHostRoot, lock.agent_host.contracts_lock),
+      readPinnedGitFile(
+        agentHostRoot,
+        lock.agent_host.full_commit,
+        lock.agent_host.contracts_lock,
+      ),
       loadPinnedOpenApiParser(lock.toolchain),
       readFile(path.join(repositoryRoot, "package.json"), "utf8").then(JSON.parse),
       readFile(path.join(repositoryRoot, safeRelativePath(lock.activation.launcher_script)), "utf8"),
@@ -512,12 +558,18 @@ export async function checkAgentHostV4Contract({
   validateOpenApi(parseYaml(contractOpenApi.toString("utf8")));
   validateRuntimeProjectionV4Bytes(contractRuntime);
   validateRuntimeProjection(JSON.parse(contractRuntime.toString("utf8")));
-  await validateFixtures(contractsRoot, lock.contracts.fixture_tree.path, contractSchema);
+  await validateFixtures(
+    contractsRoot,
+    lock.contracts.full_commit,
+    lock.contracts.fixture_tree.path,
+    contractSchema,
+  );
   validateStableActivation(packageJson, runnerSource, lock.activation);
 
   process.stdout.write(
-    `FEAT-134 v4 verified at Contracts ${lock.contracts.full_commit} and Agent Host ` +
-      `${lock.agent_host.full_commit}; activation is exact local/demo_fast/stable only.\n`,
+    `FEAT-134 v4 immutable objects verified at Contracts ${lock.contracts.full_commit} and ` +
+      `Agent Host ${lock.agent_host.full_commit}; activation is exact ` +
+      `local/demo_fast/stable only.\n`,
   );
 }
 
