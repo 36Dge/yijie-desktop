@@ -68,8 +68,8 @@ for (const [relativeTree, expected] of Object.entries(lock.fixtureTrees)) {
 }
 
 const host = lock.hostAuthority;
-if (host?.commit !== "01c4a406dec5e582d208113e1a1669d031023556" ||
-    host?.tree !== "8c26b907f12d4adcd68678da145ae6d774a30b40") {
+if (host?.commit !== "118651804b7f5a7849bc68cdf29d88c74a21f8a1" ||
+    host?.tree !== "9ae73d7b6f024bda241071371487a627810c1058") {
   fail("Host identity is not the reviewed immutable v6 authority");
 }
 if (git(hostRoot, "rev-parse", "HEAD") !== host.commit ||
