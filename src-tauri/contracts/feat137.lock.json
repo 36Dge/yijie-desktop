@@ -1,0 +1,32 @@
+{
+  "contractCommit": "2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6",
+  "contractVersion": "v0.7.0",
+  "schemaVersion": 6,
+  "sources": {
+    "openapi/agent-host/agent-host.yaml": "8716d11ebae140d7c2cec72f6528bbd39ac5976c898c28e0044bec71fb004083",
+    "jsonschema/agent/session-event-v6.schema.json": "2ca5f830a5962fb3be628e7992cb86c69d5d202bc48100fd8e5f83e9e5c17773",
+    "jsonschema/compatibility/agent-host-runtime-approval-v6.schema.json": "b7e8c2ef294adf7c7066f23d06cb24192d62d8d2b1c6d9c8134875a88a715e80",
+    "compatibility/agent-host-runtime-approval-v6.json": "992d939b7cb7959591c9c74f706ada5224a8b63d8cfa0c88f4aeb28f72639a57",
+    "protobuf/yijie/events/v6/agent_session.proto": "d8abdc1f523b2931d5be984b9a0d27af0724dad88e350ad6cb41b0734e075c5d"
+  },
+  "fixtureTrees": {
+    "tests/fixtures/agent/session-event-v6": "6ba088590b385082167797190e3e536fca9edc17",
+    "tests/fixtures/agent/host-v6": "38b70fd668c2d01d6660083fd0784327aa653228"
+  },
+  "desktopBaseCommit": "7026b47828961e58854b06c822c9c9e11252260d",
+  "hostAuthority": {
+    "commit": "01c4a406dec5e582d208113e1a1669d031023556",
+    "tree": "8c26b907f12d4adcd68678da145ae6d774a30b40"
+  },
+  "activation": {
+    "environment": "local",
+    "localProfile": "demo_fast",
+    "nativeFlag": "YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED",
+    "webFlag": "VITE_YIJIE_FEAT137_APPROVAL_ENABLED",
+    "requires": [
+      "YIJIE_FEAT134_STREAMING_ENABLED",
+      "YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED"
+    ],
+    "stableEntry": "tauri:build:demo-fast:stable"
+  }
+}

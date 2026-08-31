@@ -25,6 +25,10 @@ use super::feat136::{
     CommandCwdProjection, CommandOutputProjection, ExecutionProjection, SafeTextProjection,
     ToolIdentityProjection,
 };
+use super::feat137::{
+    ApprovalIssue, ApprovalProjection, ApprovalProjectionStatus, PendingApprovalSnapshot,
+};
+use super::host_domain::HostApprovalDecision;
 use super::{ChatError, ChatRuntime};
 use crate::native_auth::{NativeAuthRuntime, NativeProjectionError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -44,6 +48,7 @@ pub const CHAT_IPC_V2_SCHEMA_VERSION: u8 = 2;
 pub const CHAT_IPC_V3_SCHEMA_VERSION: u8 = 3;
 pub const CHAT_IPC_V4_SCHEMA_VERSION: u8 = 4;
 pub const CHAT_IPC_V5_SCHEMA_VERSION: u8 = 5;
+pub const CHAT_IPC_V6_SCHEMA_VERSION: u8 = 6;
 pub const CHAT_EVENT_CHANNEL: &str = "yijie:chat:event:v1";
 pub const CHAT_CONTROL_PLANE_EVENT_CHANNEL: &str = "yijie:chat:control-plane:event:v1";
 pub const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL: &str = "yijie:chat:attachment-import:event:v2";
@@ -504,7 +509,10 @@ impl ChatEventBridge {
     ) -> Result<Uuid, ChatIpcError> {
         if !matches!(
             schema_version,
-            CHAT_IPC_SCHEMA_VERSION | CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
+            CHAT_IPC_SCHEMA_VERSION
+                | CHAT_IPC_V4_SCHEMA_VERSION
+                | CHAT_IPC_V5_SCHEMA_VERSION
+                | CHAT_IPC_V6_SCHEMA_VERSION
         ) {
             return Err(ChatIpcError::request_invalid(None));
         }
@@ -956,8 +964,10 @@ impl TurnProjectionSink for ChatEventBridge {
                 .subscriptions
                 .iter()
                 .filter_map(|(id, record)| {
-                    (record.schema_version == CHAT_IPC_V5_SCHEMA_VERSION
-                        && record.session_id == projection.session_id)
+                    (matches!(
+                        record.schema_version,
+                        CHAT_IPC_V5_SCHEMA_VERSION | CHAT_IPC_V6_SCHEMA_VERSION
+                    ) && record.session_id == projection.session_id)
                         .then_some(*id)
                 })
                 .collect::<Vec<_>>();
@@ -996,7 +1006,7 @@ impl TurnProjectionSink for ChatEventBridge {
                     .projection_sequence
                     .checked_add(1)
                     .ok_or(ChatError::OrchestrationUnavailable)?;
-                let event = source_event_envelope(
+                let event = feat136_source_event_envelope(
                     subscription_id,
                     record,
                     turn_id,
@@ -1005,6 +1015,139 @@ impl TurnProjectionSink for ChatEventBridge {
                     kind,
                     payload,
                 );
+                let event_bytes = serde_json::to_vec(&event)
+                    .map(|encoded| encoded.len())
+                    .unwrap_or(usize::MAX);
+                if event_bytes > MAX_V4_EVENT_BYTES {
+                    record.blocked = true;
+                    events.push(event_envelope(
+                        subscription_id,
+                        record,
+                        Some(projection.turn_id),
+                        "resync_required",
+                        json!({"reason":"backpressure"}),
+                    ));
+                } else {
+                    if matches!(projection.delta, TimelineDelta::TurnTerminal(_)) {
+                        record.terminal = true;
+                    }
+                    events.push(event);
+                }
+            }
+            (app, events)
+        };
+        for event in events {
+            app.emit(CHAT_EVENT_CHANNEL, event)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        }
+        Ok(())
+    }
+
+    fn publish_feat137(
+        &self,
+        projection: Feat134Projection,
+        approval: Option<ApprovalProjection>,
+    ) -> Result<(), ChatError> {
+        let durable_sequence = projection
+            .durable_sequence
+            .filter(|sequence| *sequence > 0)
+            .ok_or(ChatError::DatabaseUnavailable)?;
+        if approval.as_ref().is_some_and(|approval| {
+            approval.session_id != projection.session_id
+                || approval.turn_id != projection.turn_id
+                || approval.durable_sequence != Some(durable_sequence)
+                || approval.source_event_id != projection.cursor.event_id
+        }) {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let now = unix_seconds()?;
+        let (app, events) = {
+            let mut state = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let app = state
+                .app
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorization = state
+                .authorization
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let subscription_ids = state
+                .subscriptions
+                .iter()
+                .filter_map(|(id, record)| {
+                    (record.schema_version == CHAT_IPC_V6_SCHEMA_VERSION
+                        && record.session_id == projection.session_id)
+                        .then_some(*id)
+                })
+                .collect::<Vec<_>>();
+            let mut events = Vec::new();
+            for subscription_id in subscription_ids {
+                let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
+                    continue;
+                };
+                record.artifact_turn_id = Some(projection.turn_id);
+                if authorization
+                    .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
+                    .is_err()
+                {
+                    record.projection_sequence = record
+                        .projection_sequence
+                        .checked_add(1)
+                        .ok_or(ChatError::OrchestrationUnavailable)?;
+                    events.push(event_envelope(
+                        subscription_id,
+                        record,
+                        None,
+                        "context_invalidated",
+                        json!({"reason":"authority_changed"}),
+                    ));
+                    record.blocked = true;
+                    continue;
+                }
+                if record.blocked || record.terminal {
+                    continue;
+                }
+                let event = if let Some(approval) = approval.as_ref() {
+                    Some((
+                        Some(approval.turn_id),
+                        "approval_changed",
+                        approval_projection_payload(approval)?,
+                        approval.source_event_id,
+                    ))
+                } else {
+                    feat136_event_payload(&projection)?
+                };
+                let Some((turn_id, kind, payload, event_id)) = event else {
+                    continue;
+                };
+                record.projection_sequence = record
+                    .projection_sequence
+                    .checked_add(1)
+                    .ok_or(ChatError::OrchestrationUnavailable)?;
+                let event = if approval.is_some() {
+                    source_event_envelope(
+                        subscription_id,
+                        record,
+                        turn_id,
+                        event_id,
+                        durable_sequence,
+                        kind,
+                        payload,
+                    )
+                } else {
+                    feat136_source_event_envelope(
+                        subscription_id,
+                        record,
+                        turn_id,
+                        event_id,
+                        durable_sequence,
+                        kind,
+                        payload,
+                    )
+                };
                 let event_bytes = serde_json::to_vec(&event)
                     .map(|encoded| encoded.len())
                     .unwrap_or(usize::MAX);
@@ -1223,7 +1366,9 @@ where
         .filter_map(|(subscription_id, record)| {
             if !matches!(
                 record.schema_version,
-                CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
+                CHAT_IPC_V4_SCHEMA_VERSION
+                    | CHAT_IPC_V5_SCHEMA_VERSION
+                    | CHAT_IPC_V6_SCHEMA_VERSION
             ) || record.session_id != session_id
                 || record.blocked
                 || record.terminal
@@ -1314,7 +1459,7 @@ fn event_envelope(
 fn feat134_subscription_matches(record: &SubscriptionRecord, session_id: Uuid) -> bool {
     matches!(
         record.schema_version,
-        CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION
+        CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION | CHAT_IPC_V6_SCHEMA_VERSION
     ) && record.session_id == session_id
 }
 
@@ -1360,8 +1505,32 @@ fn feat134_source_event_envelope(
         kind,
         payload,
     );
-    if record.schema_version == CHAT_IPC_V5_SCHEMA_VERSION {
+    if record.schema_version >= CHAT_IPC_V5_SCHEMA_VERSION {
         envelope.source_schema_version = Some(CHAT_IPC_V4_SCHEMA_VERSION);
+    }
+    envelope
+}
+
+fn feat136_source_event_envelope(
+    subscription_id: Uuid,
+    record: &SubscriptionRecord,
+    turn_id: Option<Uuid>,
+    event_id: Uuid,
+    durable_sequence: u64,
+    kind: &'static str,
+    payload: Value,
+) -> ChatEventEnvelope {
+    let mut envelope = source_event_envelope(
+        subscription_id,
+        record,
+        turn_id,
+        event_id,
+        durable_sequence,
+        kind,
+        payload,
+    );
+    if record.schema_version == CHAT_IPC_V6_SCHEMA_VERSION {
+        envelope.source_schema_version = Some(CHAT_IPC_V5_SCHEMA_VERSION);
     }
     envelope
 }
@@ -1787,6 +1956,68 @@ fn execution_error_payload(value: &super::feat136::ProjectionError) -> Value {
     json!({"code": value.code.as_str(), "summary": value.summary})
 }
 
+fn approval_projection_payload(approval: &ApprovalProjection) -> Result<Value, ChatError> {
+    let durable_sequence = approval
+        .durable_sequence
+        .filter(|sequence| *sequence > 0)
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    let mut value = json!({
+        "sourceEventId": approval.source_event_id.to_string(),
+        "sourceSequence": approval.source_sequence.to_string(),
+        "sourceOccurredAt": approval.source_occurred_at,
+        "turnId": approval.turn_id.to_string(),
+        "itemId": approval.item_id,
+        "approvalRequestId": approval.approval_request_id.to_string(),
+        "status": approval.status.as_str(),
+        "revision": approval.revision,
+        "actionId": super::feat137::ACTION_ID,
+        "workspaceScope": super::feat137::WORKSPACE_SCOPE,
+        "requestedAt": approval.requested_at,
+        "expiresAt": approval.expires_at,
+    });
+    let object = value
+        .as_object_mut()
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    match approval.status {
+        ApprovalProjectionStatus::Pending => {
+            object.insert(
+                "decisions".to_owned(),
+                json!({
+                    "primary": super::feat137::PRIMARY_DECISION,
+                    "secondary": super::feat137::SECONDARY_DECISION,
+                }),
+            );
+            object.insert("ttlSeconds".to_owned(), json!(super::feat137::TTL_SECONDS));
+        }
+        ApprovalProjectionStatus::Resolved => {
+            object.insert(
+                "outcome".to_owned(),
+                json!(approval
+                    .outcome
+                    .ok_or(ChatError::DatabaseUnavailable)?
+                    .as_str()),
+            );
+            object.insert(
+                "resolvedAt".to_owned(),
+                json!(approval
+                    .resolved_at
+                    .as_deref()
+                    .ok_or(ChatError::DatabaseUnavailable)?),
+            );
+            match (approval.decision_id, approval.decision) {
+                (Some(decision_id), Some(decision)) => {
+                    object.insert("decisionId".to_owned(), json!(decision_id.to_string()));
+                    object.insert("decision".to_owned(), json!(decision.as_str()));
+                }
+                (None, None) => {}
+                _ => return Err(ChatError::DatabaseUnavailable),
+            }
+        }
+    }
+    let _ = durable_sequence;
+    Ok(value)
+}
+
 fn execution_payload(value: &ExecutionProjection) -> Value {
     match value {
         ExecutionProjection::Command(command) => json!({
@@ -1934,6 +2165,8 @@ pub struct ChatIpcError {
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment_item_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    approval_issue: Option<ApprovalIssue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     retry_after_ms: Option<u64>,
 }
 
@@ -1948,6 +2181,7 @@ impl Debug for ChatIpcError {
             .field("recovery", &self.recovery)
             .field("attachment_issue", &self.attachment_issue)
             .field("attachment_item_count", &self.attachment_item_count)
+            .field("approval_issue", &self.approval_issue)
             .finish()
     }
 }
@@ -1967,6 +2201,7 @@ impl ChatIpcError {
             recovery,
             attachment_issue: None,
             attachment_item_count: None,
+            approval_issue: None,
             retry_after_ms: None,
         }
     }
@@ -2010,6 +2245,12 @@ impl ChatIpcError {
         error
     }
 
+    fn approval_reconciliation_required(request_id: Uuid, issue: ApprovalIssue) -> Self {
+        let mut error = Self::conflict(Some(request_id));
+        error.approval_issue = Some(issue);
+        error
+    }
+
     fn v2(mut self) -> Self {
         self.schema_version = CHAT_IPC_V2_SCHEMA_VERSION;
         self
@@ -2027,6 +2268,11 @@ impl ChatIpcError {
 
     fn v5(mut self) -> Self {
         self.schema_version = CHAT_IPC_V5_SCHEMA_VERSION;
+        self
+    }
+
+    fn v6(mut self) -> Self {
+        self.schema_version = CHAT_IPC_V6_SCHEMA_VERSION;
         self
     }
 
@@ -2110,6 +2356,14 @@ impl<T> CommandResponse<T> {
     fn new_v5(request_id: Uuid, data: T) -> Self {
         Self {
             schema_version: CHAT_IPC_V5_SCHEMA_VERSION,
+            request_id: request_id.to_string(),
+            data,
+        }
+    }
+
+    fn new_v6(request_id: Uuid, data: T) -> Self {
+        Self {
+            schema_version: CHAT_IPC_V6_SCHEMA_VERSION,
             request_id: request_id.to_string(),
             data,
         }
@@ -2256,6 +2510,16 @@ struct SessionReadPayload {
     session_id: Uuid,
     cursor: Option<String>,
     limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DecideApprovalV6Payload {
+    session_id: Uuid,
+    turn_id: Uuid,
+    item_id: String,
+    approval_request_id: Uuid,
+    decision: HostApprovalDecision,
 }
 
 #[derive(Deserialize)]
@@ -2886,6 +3150,13 @@ pub(crate) struct SubscriptionDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct SubscriptionDtoV6 {
+    subscription_id: String,
+    pending_approval_snapshot: Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CancelledDto {
     cancelled: bool,
 }
@@ -3358,6 +3629,53 @@ fn history_dto_v5(
     Ok(value)
 }
 
+fn history_dto_v6(
+    page: HistoryPage,
+    next_cursor: Option<String>,
+    projections: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
+    artifacts: Vec<ArtifactProjection>,
+    feat136: Feat134HistoryProjection,
+    approvals: Vec<ApprovalProjection>,
+) -> Result<Value, ChatError> {
+    let mut value = history_dto_v5(page, next_cursor, projections, artifacts, feat136)?;
+    let object = value
+        .as_object_mut()
+        .ok_or(ChatError::DatabaseUnavailable)?;
+    object.insert(
+        "approvals".to_owned(),
+        Value::Array(
+            approvals
+                .iter()
+                .map(approval_projection_payload)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    );
+    Ok(value)
+}
+
+fn pending_approval_snapshot_dto(snapshot: &PendingApprovalSnapshot) -> Value {
+    json!({
+        "schemaVersion": CHAT_IPC_V6_SCHEMA_VERSION,
+        "streamId": snapshot.stream_id.to_string(),
+        "snapshotAt": snapshot.snapshot_at,
+        "pending": snapshot.pending.iter().map(|approval| json!({
+            "approvalRequestId": approval.approval_request_id.to_string(),
+            "revision": 1,
+            "turnId": approval.turn_id.to_string(),
+            "itemId": approval.item_id,
+            "actionId": super::feat137::ACTION_ID,
+            "workspaceScope": super::feat137::WORKSPACE_SCOPE,
+            "decisions": {
+                "primary": super::feat137::PRIMARY_DECISION,
+                "secondary": super::feat137::SECONDARY_DECISION,
+            },
+            "requestedAt": approval.requested_at,
+            "expiresAt": approval.expires_at,
+            "ttlSeconds": super::feat137::TTL_SECONDS,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 async fn load_bounded_feat134_history_snapshot(
     authorized: &AuthorizedConversationApplication,
     context_id: Uuid,
@@ -3440,6 +3758,48 @@ async fn load_bounded_feat136_history_snapshot(
             Err(()) => {
                 return Err(ChatIpcError::limit_exceeded(Some(request_id)).v5());
             }
+        }
+    }
+}
+
+async fn load_bounded_feat137_history_snapshot(
+    authorized: &AuthorizedConversationApplication,
+    context_id: Uuid,
+    session_id: Uuid,
+    before_ordinal: Option<u64>,
+    requested_limit: Option<usize>,
+    response_limit: usize,
+    request_id: Uuid,
+) -> Result<Feat134HistorySnapshot, ChatIpcError> {
+    let byte_budget = response_limit
+        .checked_sub(V4_RESPONSE_STRUCTURAL_HEADROOM)
+        .ok_or_else(|| ChatIpcError::limit_exceeded(Some(request_id)).v6())?;
+    let mut limit = requested_limit.unwrap_or(DEFAULT_HISTORY_PAGE_LIMIT);
+    loop {
+        let snapshot = authorized
+            .load_feat137_history_snapshot(context_id, session_id, before_ordinal, Some(limit))
+            .await
+            .map_err(|error| map_chat_error(error, Some(request_id)).v6())?;
+        let probe = history_dto_v6(
+            snapshot.history.clone(),
+            None,
+            snapshot.message_content_blocks.clone(),
+            snapshot.artifacts.clone(),
+            snapshot.feat134.clone(),
+            snapshot.approvals.clone(),
+        )
+        .map_err(|error| map_chat_error(error, Some(request_id)).v6())?;
+        let encoded_bytes = serde_json::to_vec(&probe)
+            .map(|encoded| encoded.len())
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request_id)).v6())?;
+        match next_feat134_history_page_limit(
+            snapshot.history.turns.len(),
+            encoded_bytes,
+            byte_budget,
+        ) {
+            Ok(None) => return Ok(snapshot),
+            Ok(Some(next_limit)) => limit = next_limit,
+            Err(()) => return Err(ChatIpcError::limit_exceeded(Some(request_id)).v6()),
         }
     }
 }
@@ -3599,6 +3959,25 @@ fn decode_request_v5<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T
         || request.context_id.is_nil()
     {
         return Err(ChatIpcError::request_invalid(Some(request.request_id)).v5());
+    }
+    Ok(request)
+}
+
+fn decode_request_v6<T: DeserializeOwned>(raw: Value) -> Result<CommandRequest<T>, ChatIpcError> {
+    let request_id = extract_request_id(&raw);
+    if serde_json::to_vec(&raw)
+        .map(|encoded| encoded.len() > MAX_REQUEST_BYTES)
+        .unwrap_or(true)
+    {
+        return Err(ChatIpcError::limit_exceeded(request_id).v6());
+    }
+    let request: CommandRequest<T> =
+        serde_json::from_value(raw).map_err(|_| ChatIpcError::request_invalid(request_id).v6())?;
+    if request.schema_version != CHAT_IPC_V6_SCHEMA_VERSION
+        || request.request_id.is_nil()
+        || request.context_id.is_nil()
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
     }
     Ok(request)
 }
@@ -3968,6 +4347,73 @@ mod tests {
         CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
         ProjectionErrorCode, ReasoningPart, TimelineItemStatus,
     };
+
+    #[test]
+    fn feat137_decision_ipc_accepts_only_local_identity_and_closed_decision() {
+        let request_id = Uuid::now_v7();
+        let context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let approval_request_id = Uuid::now_v7();
+        let request = json!({
+            "schemaVersion": 6,
+            "requestId": request_id,
+            "contextId": context_id,
+            "payload": {
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "itemId": "command-approval",
+                "approvalRequestId": approval_request_id,
+                "decision": "accept_once",
+            }
+        });
+        let decoded: CommandRequest<DecideApprovalV6Payload> =
+            decode_request_v6(request.clone()).unwrap();
+        assert_eq!(decoded.payload.session_id, session_id);
+        assert_eq!(decoded.payload.turn_id, turn_id);
+        assert_eq!(decoded.payload.approval_request_id, approval_request_id);
+        assert_eq!(decoded.payload.decision, HostApprovalDecision::AcceptOnce);
+
+        for forbidden in [
+            "decisionId",
+            "expectedStreamId",
+            "agentSessionId",
+            "runtimeTurnId",
+            "rawCommand",
+            "cwd",
+        ] {
+            let mut widened = request.clone();
+            widened["payload"][forbidden] = json!(Uuid::now_v7().to_string());
+            assert!(decode_request_v6::<DecideApprovalV6Payload>(widened).is_err());
+        }
+        let mut unknown_decision = request;
+        unknown_decision["payload"]["decision"] = json!("always_allow");
+        assert!(decode_request_v6::<DecideApprovalV6Payload>(unknown_decision).is_err());
+    }
+
+    #[test]
+    fn feat137_decision_failure_is_non_retryable_and_requires_resync() {
+        let request_id = Uuid::now_v7();
+        let value = serde_json::to_value(
+            ChatIpcError::approval_reconciliation_required(
+                request_id,
+                ApprovalIssue::ApprovalUnavailable,
+            )
+            .v6(),
+        )
+        .unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "schemaVersion": 6,
+                "requestId": request_id.to_string(),
+                "code": "chat_conflict",
+                "retryable": false,
+                "recovery": "resync",
+                "approvalIssue": "approval_unavailable",
+            })
+        );
+    }
 
     #[test]
     fn artifact_live_schema_and_queue_are_closed_bounded_monotonic_and_content_free() {
@@ -4980,7 +5426,7 @@ mod tests {
             terminal: None,
             delta: TimelineDelta::ItemStarted(item),
         };
-        let record = SubscriptionRecord {
+        let mut record = SubscriptionRecord {
             schema_version: CHAT_IPC_V5_SCHEMA_VERSION,
             context_id: Uuid::now_v7(),
             session_id,
@@ -5059,12 +5505,54 @@ mod tests {
         .unwrap();
         assert!(native_v5.get("sourceSchemaVersion").is_none());
 
-        let mut v4_record = record;
-        v4_record.schema_version = CHAT_IPC_V4_SCHEMA_VERSION;
-        assert!(feat134_subscription_matches(&v4_record, session_id));
+        record.schema_version = CHAT_IPC_V6_SCHEMA_VERSION;
+        assert!(feat134_subscription_matches(&record, session_id));
+        let sticky_v5_in_v6 = serde_json::to_value(feat136_source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            generic_turn_id,
+            generic_id,
+            2,
+            generic_kind,
+            generic["payload"].clone(),
+        ))
+        .unwrap();
+        assert_eq!(sticky_v5_in_v6["schemaVersion"], CHAT_IPC_V6_SCHEMA_VERSION);
+        assert_eq!(
+            sticky_v5_in_v6["sourceSchemaVersion"],
+            CHAT_IPC_V5_SCHEMA_VERSION
+        );
+        let sticky_v4_in_v6 = serde_json::to_value(feat134_source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            event_turn_id,
+            event_id,
+            1,
+            kind,
+            encoded["payload"].clone(),
+        ))
+        .unwrap();
+        assert_eq!(
+            sticky_v4_in_v6["sourceSchemaVersion"],
+            CHAT_IPC_V4_SCHEMA_VERSION
+        );
+        let native_v6 = serde_json::to_value(source_event_envelope(
+            Uuid::now_v7(),
+            &record,
+            generic_turn_id,
+            generic_id,
+            2,
+            generic_kind,
+            generic["payload"].clone(),
+        ))
+        .unwrap();
+        assert!(native_v6.get("sourceSchemaVersion").is_none());
+
+        record.schema_version = CHAT_IPC_V4_SCHEMA_VERSION;
+        assert!(feat134_subscription_matches(&record, session_id));
         let inherited_v4 = serde_json::to_value(feat134_source_event_envelope(
             Uuid::now_v7(),
-            &v4_record,
+            &record,
             event_turn_id,
             event_id,
             1,
@@ -5188,6 +5676,38 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn feat137_pending_private_projection_keeps_host_stream_but_redacts_host_identity() {
+        let host_stream_id = Uuid::now_v7();
+        let desktop_turn_id = Uuid::now_v7();
+        let snapshot = PendingApprovalSnapshot {
+            stream_id: host_stream_id,
+            snapshot_at: "2026-08-30T12:00:30Z".to_owned(),
+            pending: vec![crate::chat::PendingApproval {
+                approval_request_id: Uuid::now_v7(),
+                turn_id: desktop_turn_id,
+                item_id: "command-1".to_owned(),
+                requested_at: "2026-08-30T12:00:00Z".to_owned(),
+                expires_at: "2026-08-30T12:02:00Z".to_owned(),
+            }],
+        };
+        let encoded = pending_approval_snapshot_dto(&snapshot);
+        assert_eq!(encoded["streamId"], host_stream_id.to_string());
+        assert_eq!(encoded["pending"][0]["turnId"], desktop_turn_id.to_string());
+        for forbidden in [
+            "taskId",
+            "agentSessionId",
+            "codexThreadId",
+            "runtimeTurnId",
+            "actionable",
+            "command",
+            "cwd",
+            "runtimeWire",
+        ] {
+            assert!(encoded["pending"][0].get(forbidden).is_none());
+        }
     }
 
     #[test]
@@ -5436,6 +5956,49 @@ mod tests {
         assert!(encoded.get("status").is_none());
         assert!(!encoded.to_string().contains("failed"));
         assert!(!encoded.to_string().contains(&operation_id.to_string()));
+    }
+
+    #[test]
+    fn feat137_failed_turn_subscription_plan_blocks_v6_until_authoritative_resync() {
+        let session_id = Uuid::from_u128(0x600);
+        let authorized_context_id = Uuid::from_u128(0x601);
+        let denied_context_id = Uuid::from_u128(0x602);
+        let authorized_subscription_id = Uuid::from_u128(0x603);
+        let denied_subscription_id = Uuid::from_u128(0x604);
+        let record = |context_id| SubscriptionRecord {
+            schema_version: CHAT_IPC_V6_SCHEMA_VERSION,
+            context_id,
+            session_id,
+            projection_sequence: 0,
+            assistant_text: String::new(),
+            reasoning: HashMap::new(),
+            terminal: false,
+            blocked: false,
+            artifact_turn_id: None,
+            artifact_notifications: ArtifactNotificationQueue::default(),
+        };
+        let subscriptions = HashMap::from([
+            (authorized_subscription_id, record(authorized_context_id)),
+            (denied_subscription_id, record(denied_context_id)),
+        ]);
+
+        let plan = turn_resync_subscription_plan(&subscriptions, session_id, |context_id| {
+            context_id == authorized_context_id
+        });
+
+        assert_eq!(
+            plan,
+            vec![
+                (
+                    authorized_subscription_id,
+                    TurnResyncSubscriptionAction::ResyncRequired,
+                ),
+                (
+                    denied_subscription_id,
+                    TurnResyncSubscriptionAction::ContextInvalidated,
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -6227,6 +6790,15 @@ pub(crate) struct ResyncDtoV5 {
     cleanup: Option<CleanupStatusDto>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResyncDtoV6 {
+    session: SessionDto,
+    history: Value,
+    cleanup: Option<CleanupStatusDto>,
+    pending_approval_snapshot: Value,
+}
+
 #[tauri::command]
 pub async fn chat_bind_context_v1(
     request: Value,
@@ -6977,6 +7549,77 @@ pub async fn chat_load_history_v3(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V6_SCHEMA_VERSION) {
+        let request: CommandRequest<SessionReadPayload> = decode_request_v6(request)?;
+        if !chat_runtime.feat137_streaming_enabled() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
+        }
+        let now =
+            unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let before = ipc_runtime
+            .resolve_history_cursor(
+                request.context_id,
+                request.payload.session_id,
+                request.payload.cursor.as_deref(),
+                now,
+                request.request_id,
+            )
+            .map_err(ChatIpcError::v6)?;
+        let (_, authorized, manager) = offline_applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v6)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v6)?;
+        ipc_runtime
+            .begin_read(request.request_id)
+            .map_err(ChatIpcError::v6)?;
+        let result = load_bounded_feat137_history_snapshot(
+            &authorized,
+            request.context_id,
+            request.payload.session_id,
+            before,
+            request.payload.limit,
+            MAX_HISTORY_PAGE_BYTES,
+            request.request_id,
+        )
+        .await;
+        let finished = ipc_runtime.finish_read(request.request_id);
+        let snapshot = result?;
+        finished.map_err(ChatIpcError::v6)?;
+        let next_cursor = snapshot
+            .history
+            .next_before_ordinal
+            .map(|before| {
+                ipc_runtime.issue_cursor(
+                    request.context_id,
+                    CursorValue::History {
+                        session_id: request.payload.session_id,
+                        before,
+                    },
+                    now,
+                )
+            })
+            .transpose()
+            .map_err(ChatIpcError::v6)?;
+        let data = history_dto_v6(
+            snapshot.history,
+            next_cursor,
+            snapshot.message_content_blocks,
+            snapshot.artifacts,
+            snapshot.feat134,
+            snapshot.approvals,
+        )
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        enforce_response_limit(&data, MAX_HISTORY_PAGE_BYTES, request.request_id)
+            .map_err(ChatIpcError::v6)?;
+        return serde_json::to_value(CommandResponse::new_v6(request.request_id, data))
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v6());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
         let request: CommandRequest<SessionReadPayload> = decode_request_v5(request)?;
         if !chat_runtime.feat136_streaming_enabled() {
@@ -7467,6 +8110,81 @@ pub async fn chat_resync_session_v2(
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V6_SCHEMA_VERSION) {
+        let request: CommandRequest<SessionReadPayload> = decode_request_v6(request)?;
+        if !chat_runtime.feat137_streaming_enabled() || request.payload.cursor.is_some() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
+        }
+        let (_, authorized, manager) = applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v6)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v6)?;
+        ipc_runtime
+            .begin_read(request.request_id)
+            .map_err(ChatIpcError::v6)?;
+        let result = load_bounded_feat137_history_snapshot(
+            &authorized,
+            request.context_id,
+            request.payload.session_id,
+            None,
+            request.payload.limit,
+            MAX_V4_RESYNC_BYTES,
+            request.request_id,
+        )
+        .await;
+        let finished = ipc_runtime.finish_read(request.request_id);
+        let snapshot = result?;
+        finished.map_err(ChatIpcError::v6)?;
+        let pending = authorized
+            .pending_approvals_v6(request.context_id, request.payload.session_id)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let next_cursor = snapshot
+            .history
+            .next_before_ordinal
+            .map(|before| {
+                ipc_runtime.issue_cursor(
+                    request.context_id,
+                    CursorValue::History {
+                        session_id: request.payload.session_id,
+                        before,
+                    },
+                    unix_seconds()
+                        .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?,
+                )
+            })
+            .transpose()
+            .map_err(ChatIpcError::v6)?;
+        let history = history_dto_v6(
+            snapshot.history,
+            next_cursor,
+            snapshot.message_content_blocks,
+            snapshot.artifacts,
+            snapshot.feat134,
+            snapshot.approvals,
+        )
+        .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let cleanup = authorized
+            .deletion_status_for_session(request.context_id, request.payload.session_id)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let data = ResyncDtoV6 {
+            session: snapshot.session.into(),
+            history,
+            cleanup: cleanup.map(cleanup_dto),
+            pending_approval_snapshot: pending_approval_snapshot_dto(&pending),
+        };
+        enforce_response_limit(&data, MAX_V4_RESYNC_BYTES, request.request_id)
+            .map_err(ChatIpcError::v6)?;
+        return serde_json::to_value(CommandResponse::new_v6(request.request_id, data))
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v6());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
         let request: CommandRequest<SessionReadPayload> = decode_request_v5(request)?;
         if !chat_runtime.feat136_streaming_enabled() || request.payload.cursor.is_some() {
@@ -7673,12 +8391,132 @@ pub async fn chat_resync_session_v2(
 }
 
 #[tauri::command]
+pub async fn chat_decide_approval_v6(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let request: CommandRequest<DecideApprovalV6Payload> = decode_request_v6(request)?;
+    if !chat_runtime.feat134_streaming_enabled()
+        || !chat_runtime.feat136_streaming_enabled()
+        || !chat_runtime.feat137_streaming_enabled()
+        || request.payload.session_id.is_nil()
+        || request.payload.turn_id.is_nil()
+        || request.payload.approval_request_id.is_nil()
+        || request.payload.item_id.is_empty()
+        || request.payload.item_id.chars().count() > 256
+        || request.payload.item_id.len() > 1024
+        || request.payload.item_id.contains(['\r', '\n', '\0'])
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
+    }
+    let (_, authorized, manager) = applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v6)?;
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::SubmitTurn,
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v6)?;
+    let result = authorized
+        .decide_approval_v6(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.turn_id,
+            &request.payload.item_id,
+            request.payload.approval_request_id,
+            request.payload.decision,
+        )
+        .await
+        .map_err(|failure| {
+            ChatIpcError::approval_reconciliation_required(request.request_id, failure.issue()).v6()
+        })?;
+    let data = json!({
+        "schemaVersion": CHAT_IPC_V6_SCHEMA_VERSION,
+        "approvalRequestId": result.approval_request_id.to_string(),
+        "decisionId": result.decision_id.to_string(),
+        "streamId": result.stream_id.to_string(),
+        "revision": 2,
+        "decision": result.decision.as_str(),
+        "outcome": result.outcome.as_str(),
+        "resolvedAt": result.resolved_at,
+    });
+    serde_json::to_value(CommandResponse::new_v6(request.request_id, data)).map_err(|_| {
+        ChatIpcError::approval_reconciliation_required(
+            request.request_id,
+            ApprovalIssue::InternalError,
+        )
+        .v6()
+    })
+}
+
+#[tauri::command]
 pub async fn chat_subscribe_session_v1(
     request: Value,
     app: AppHandle,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
+    if request_schema_version(&request) == Some(CHAT_IPC_V6_SCHEMA_VERSION) {
+        let request: CommandRequest<SubscribePayload> = decode_request_v6(request)?;
+        if !chat_runtime.feat137_streaming_enabled() {
+            return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
+        }
+        let (application, authorized, manager) = applications(&chat_runtime, request.request_id)
+            .await
+            .map_err(ChatIpcError::v6)?;
+        authorize(
+            &manager,
+            request.context_id,
+            ChatAction::ReadSessions,
+            request.request_id,
+        )
+        .map_err(ChatIpcError::v6)?;
+        authorized
+            .resync_session(
+                request.context_id,
+                request.payload.session_id,
+                None,
+                Some(1),
+            )
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        ipc_runtime
+            .ensure_coordinator(app, application, manager)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let subscription_id = ipc_runtime
+            .inner
+            .event_bridge
+            .subscribe(
+                request.context_id,
+                request.payload.session_id,
+                CHAT_IPC_V6_SCHEMA_VERSION,
+            )
+            .map_err(ChatIpcError::v6)?;
+        let pending = match authorized
+            .pending_approvals_v6(request.context_id, request.payload.session_id)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                ipc_runtime
+                    .inner
+                    .event_bridge
+                    .unsubscribe(request.context_id, subscription_id);
+                return Err(map_chat_error(error, Some(request.request_id)).v6());
+            }
+        };
+        return serde_json::to_value(CommandResponse::new_v6(
+            request.request_id,
+            SubscriptionDtoV6 {
+                subscription_id: subscription_id.to_string(),
+                pending_approval_snapshot: pending_approval_snapshot_dto(&pending),
+            },
+        ))
+        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v6());
+    }
     if request_schema_version(&request) == Some(CHAT_IPC_V5_SCHEMA_VERSION) {
         let request: CommandRequest<SubscribePayload> = decode_request_v5(request)?;
         if !chat_runtime.feat136_streaming_enabled() {

@@ -4,11 +4,15 @@ use super::artifact::{
 };
 use super::attachment::validate_image_content;
 use super::database::HostTurnInputBlock;
+use super::feat137::{
+    decode_approval_decision_response_v6, decode_pending_approval_snapshot_v6,
+    ApprovalDecisionResult, HostPendingApprovalSnapshot, SOURCE_SCHEMA_VERSION,
+};
 use super::host_domain::{
     parse_cleanup_reason, parse_cleanup_surface, parse_host_error_code, protocol_error,
-    HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome, HostCleanupSurfaces, HostErrorCode,
-    HostEvent, HostEventCursor, HostSession, HostSessionFailure, HostSessionState, HostStreamEvent,
-    SseDecoder,
+    HostApprovalDecision, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
+    HostCleanupSurfaces, HostErrorCode, HostEvent, HostEventCursor, HostSession,
+    HostSessionFailure, HostSessionState, HostStreamEvent, SseDecoder,
 };
 use super::sidecar::HostConnection;
 use base64::Engine;
@@ -185,6 +189,15 @@ struct ArtifactAcknowledgementRequest<'a> {
     size_bytes: usize,
     sha256: &'a str,
     local_committed_at: &'a str,
+}
+
+#[derive(Serialize)]
+struct ApprovalDecisionRequest {
+    schema_version: u8,
+    decision_id: Uuid,
+    expected_stream_id: Uuid,
+    expected_revision: u8,
+    decision: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -621,7 +634,7 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=5) {
+        if !matches!(schema_version, 2..=6) {
             return Err(protocol_error());
         }
         let mut request = self
@@ -696,6 +709,73 @@ impl HostBridge {
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
         self.open_event_stream(session_id, cursor, 5).await
+    }
+
+    pub async fn open_event_stream_v6(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 6).await
+    }
+
+    pub async fn pending_approvals_v6(
+        &self,
+        session_id: Uuid,
+    ) -> Result<HostPendingApprovalSnapshot, HostBridgeError> {
+        require_non_nil(session_id)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v6/agent-sessions/{session_id}/approvals/pending"),
+            )
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        let body = expect_json_status(response, StatusCode::OK).await?;
+        decode_pending_approval_snapshot_v6(&body, session_id)
+    }
+
+    pub async fn decide_approval_v6(
+        &self,
+        session_id: Uuid,
+        approval_request_id: Uuid,
+        decision_id: Uuid,
+        expected_stream_id: Uuid,
+        decision: HostApprovalDecision,
+    ) -> Result<ApprovalDecisionResult, HostBridgeError> {
+        require_non_nil(session_id)?;
+        require_non_nil(approval_request_id)?;
+        require_non_nil(decision_id)?;
+        require_non_nil(expected_stream_id)?;
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!(
+                    "/v6/agent-sessions/{session_id}/approvals/{approval_request_id}/decision"
+                ),
+                &ApprovalDecisionRequest {
+                    schema_version: SOURCE_SCHEMA_VERSION,
+                    decision_id,
+                    expected_stream_id,
+                    expected_revision: 1,
+                    decision: decision.as_str(),
+                },
+            )
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_approval_rejection_v6(response).await);
+        }
+        let body = read_json_body(response).await?;
+        decode_approval_decision_response_v6(
+            &body,
+            approval_request_id,
+            decision_id,
+            expected_stream_id,
+            decision,
+        )
     }
 
     pub(crate) async fn list_managed_skills(&self) -> Result<HostSkillSnapshot, HostBridgeError> {
@@ -1418,6 +1498,60 @@ async fn parse_skill_rejection(response: Response) -> HostBridgeError {
     }
 }
 
+async fn parse_approval_rejection_v6(response: Response) -> HostBridgeError {
+    let status = response.status();
+    let body = match read_json_body(response).await {
+        Ok(body) => body,
+        Err(error) => return error,
+    };
+    let Ok(wire) = serde_json::from_slice::<ErrorEnvelope>(&body) else {
+        return protocol_error();
+    };
+    let code = parse_host_error_code(&wire.error.code);
+    let expected_message = match code {
+        HostErrorCode::Unauthorized => "valid Agent Host bearer token required",
+        HostErrorCode::InvalidApprovalRequest => "approval request is invalid",
+        HostErrorCode::ApprovalVersionMismatch => "approval schema version does not match",
+        HostErrorCode::SessionNotFound => "agent session was not found",
+        HostErrorCode::ApprovalNotFound => "approval request was not found",
+        HostErrorCode::ApprovalStale => "approval request is stale",
+        HostErrorCode::ApprovalExpired => "approval request expired",
+        HostErrorCode::ApprovalAlreadyResolved => "approval request was already resolved",
+        HostErrorCode::ApprovalDecisionConflict => {
+            "approval decision conflicts with the existing decision"
+        }
+        HostErrorCode::ApprovalUnavailable => "approval authority is unavailable",
+        HostErrorCode::InternalError => "approval processing failed",
+        _ => return protocol_error(),
+    };
+    let status_matches = match status {
+        StatusCode::BAD_REQUEST => matches!(
+            code,
+            HostErrorCode::InvalidApprovalRequest | HostErrorCode::ApprovalVersionMismatch
+        ),
+        StatusCode::UNAUTHORIZED => code == HostErrorCode::Unauthorized,
+        StatusCode::NOT_FOUND => matches!(
+            code,
+            HostErrorCode::SessionNotFound | HostErrorCode::ApprovalNotFound
+        ),
+        StatusCode::CONFLICT => matches!(
+            code,
+            HostErrorCode::ApprovalStale
+                | HostErrorCode::ApprovalExpired
+                | HostErrorCode::ApprovalAlreadyResolved
+                | HostErrorCode::ApprovalDecisionConflict
+        ),
+        StatusCode::INTERNAL_SERVER_ERROR => code == HostErrorCode::InternalError,
+        StatusCode::SERVICE_UNAVAILABLE => code == HostErrorCode::ApprovalUnavailable,
+        _ => false,
+    };
+    if status_matches && wire.error.message == expected_message {
+        HostBridgeError::rejected(code)
+    } else {
+        protocol_error()
+    }
+}
+
 fn parse_rejection_body(status: StatusCode, body: &[u8]) -> HostBridgeError {
     let Ok(wire) = serde_json::from_slice::<ErrorEnvelope>(body) else {
         return protocol_error();
@@ -1898,6 +2032,164 @@ mod tests {
             instance_nonce: nonce.to_owned(),
         })
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn feat137_decision_uses_one_closed_post_and_correlates_response() {
+        for (decision, outcome) in [
+            (HostApprovalDecision::AcceptOnce, "accepted_once"),
+            (
+                HostApprovalDecision::CancelCurrentTurn,
+                "cancelled_current_turn",
+            ),
+        ] {
+            let token = TestToken::new(0o600);
+            let session_id = Uuid::now_v7();
+            let approval_request_id = Uuid::now_v7();
+            let decision_id = Uuid::now_v7();
+            let stream_id = Uuid::now_v7();
+            let body = serde_json::json!({
+                "schema_version": 6,
+                "approval_request_id": approval_request_id,
+                "decision_id": decision_id,
+                "stream_id": stream_id,
+                "revision": 2,
+                "decision": decision.as_str(),
+                "outcome": outcome,
+                "resolved_at": "2026-08-30T12:00:30Z",
+            })
+            .to_string();
+            let (port, server) =
+                serve(vec![ready_response(NONCE), json_response("200 OK", &body)]).await;
+            let result = bridge(port, token.path.clone(), NONCE)
+                .decide_approval_v6(
+                    session_id,
+                    approval_request_id,
+                    decision_id,
+                    stream_id,
+                    decision,
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.approval_request_id, approval_request_id);
+            assert_eq!(result.decision_id, decision_id);
+            assert_eq!(result.stream_id, stream_id);
+            assert_eq!(result.decision, decision);
+
+            let requests = server.await.unwrap();
+            assert_eq!(requests.len(), 2);
+            let decision_posts = requests
+                .iter()
+                .filter(|request| request.starts_with("POST "))
+                .collect::<Vec<_>>();
+            assert_eq!(decision_posts.len(), 1);
+            assert!(decision_posts[0].starts_with(&format!(
+                "POST /v6/agent-sessions/{session_id}/approvals/{approval_request_id}/decision HTTP/1.1"
+            )));
+            let encoded = decision_posts[0]
+                .split_once("\r\n\r\n")
+                .map(|(_, body)| body)
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(encoded).unwrap();
+            assert_eq!(
+                request,
+                serde_json::json!({
+                    "schema_version": 6,
+                    "decision_id": decision_id,
+                    "expected_stream_id": stream_id,
+                    "expected_revision": 1,
+                    "decision": decision.as_str(),
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn feat137_ambiguous_response_is_protocol_failure_without_post_retry() {
+        let token = TestToken::new(0o600);
+        let session_id = Uuid::now_v7();
+        let approval_request_id = Uuid::now_v7();
+        let decision_id = Uuid::now_v7();
+        let stream_id = Uuid::now_v7();
+        let mismatched = serde_json::json!({
+            "schema_version": 6,
+            "approval_request_id": approval_request_id,
+            "decision_id": Uuid::now_v7(),
+            "stream_id": stream_id,
+            "revision": 2,
+            "decision": "accept_once",
+            "outcome": "accepted_once",
+            "resolved_at": "2026-08-30T12:00:30Z",
+        })
+        .to_string();
+        let (port, server) = serve(vec![
+            ready_response(NONCE),
+            json_response("200 OK", &mismatched),
+        ])
+        .await;
+        let error = bridge(port, token.path.clone(), NONCE)
+            .decide_approval_v6(
+                session_id,
+                approval_request_id,
+                decision_id,
+                stream_id,
+                HostApprovalDecision::AcceptOnce,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), HostBridgeErrorKind::Protocol);
+        let requests = server.await.unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with("POST "))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn feat137_rejection_requires_exact_closed_code_status_and_message() {
+        for (status, body, expected_kind, expected_code) in [
+            (
+                "409 Conflict",
+                r#"{"error":{"code":"approval_stale","message":"approval request is stale"}}"#,
+                HostBridgeErrorKind::Rejected,
+                Some(HostErrorCode::ApprovalStale),
+            ),
+            (
+                "409 Conflict",
+                r#"{"error":{"code":"approval_stale","message":"RAW_ERROR_CANARY"}}"#,
+                HostBridgeErrorKind::Protocol,
+                None,
+            ),
+        ] {
+            let token = TestToken::new(0o600);
+            let (port, server) =
+                serve(vec![ready_response(NONCE), json_response(status, body)]).await;
+            let error = bridge(port, token.path.clone(), NONCE)
+                .decide_approval_v6(
+                    Uuid::now_v7(),
+                    Uuid::now_v7(),
+                    Uuid::now_v7(),
+                    Uuid::now_v7(),
+                    HostApprovalDecision::AcceptOnce,
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), expected_kind);
+            assert_eq!(error.code(), expected_code);
+            assert!(!format!("{error:?}").contains("RAW_ERROR_CANARY"));
+            assert_eq!(
+                server
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|request| request.starts_with("POST "))
+                    .count(),
+                1
+            );
+        }
     }
 
     #[tokio::test]

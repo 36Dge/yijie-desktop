@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
+import type { ConversationApproval } from "../../domain/conversation-approval";
 import type {
   ConversationCommandExecution,
   ConversationCommandOutput,
@@ -10,6 +11,11 @@ import type {
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatApprovalCard, {
+  type ChatApprovalErrorCode,
+  type ChatApprovalCardStatus,
+  type ChatApprovalDecisionRequest,
+} from "./ChatApprovalCard.vue";
 import ChatCopyAction from "./ChatCopyAction.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
@@ -23,13 +29,37 @@ type OutputSection = Readonly<{
   text: string;
 }>;
 
-const props = defineProps<{
+export type ChatApprovalTransientState = Readonly<{
+  phase: "idle" | "submitting" | "reconciling" | "error";
+  errorCode: ChatApprovalErrorCode | null;
+}>;
+
+export type ChatApprovalDecisionChange = Readonly<{
+  itemIdentity: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  approvalRequestId: string;
+  decision: "accept_once" | "cancel_current_turn";
+}>;
+
+const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
   execution: ConversationCommandExecution;
-}>();
+  approval?: ConversationApproval | null;
+  approvalTransient?: ChatApprovalTransientState | null;
+  canDecideApproval?: boolean;
+  approvalAuthorityRevision?: number;
+}>(), {
+  approval: null,
+  approvalTransient: null,
+  canDecideApproval: false,
+  approvalAuthorityRevision: 0,
+});
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
+  "approval-decision": [change: ChatApprovalDecisionChange];
 }>();
 
 const statusPresentation = computed<Readonly<{
@@ -53,7 +83,52 @@ const statusPresentation = computed<Readonly<{
   }
 });
 
-const defaultExpanded = computed(() => props.execution.status === "running");
+const defaultExpanded = computed(() =>
+  props.execution.status === "running" || props.approval?.status === "pending");
+
+const approvalCardStatus = computed<ChatApprovalCardStatus | null>(() => {
+  const approval = props.approval;
+  if (approval === null) return null;
+  if (approval.status === "resolved") {
+    switch (approval.outcome) {
+      case "accepted_once":
+        return "accepted";
+      case "cancelled_current_turn":
+        return "cancelled";
+      case "expired":
+        return "expired";
+      case "resolved_elsewhere":
+        return "resolved_elsewhere";
+      case null:
+      default:
+        return "error";
+    }
+  }
+  switch (props.approvalTransient?.phase) {
+    case "submitting":
+      return "submitting";
+    case "reconciling":
+      return "reconciling";
+    case "error":
+      return "error";
+    case "idle":
+    case undefined:
+    default:
+      break;
+  }
+  if (approval.authority !== "actionable") return "disconnected";
+  return props.canDecideApproval ? "pending" : "error";
+});
+
+const approvalErrorCode = computed<ChatApprovalErrorCode | null>(() => {
+  if (approvalCardStatus.value !== "error") return null;
+  return props.approvalTransient?.errorCode ?? "approval_unavailable";
+});
+
+const approvalActionable = computed(() =>
+  props.approval !== null && props.approval.status === "pending" &&
+  props.approval.authority === "actionable" &&
+  props.canDecideApproval && approvalCardStatus.value === "pending");
 
 const cwdLabel = computed(() => {
   switch (props.execution.cwd.kind) {
@@ -164,6 +239,19 @@ function formatDuration(durationMs: number): string {
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   emit("disclosure-change", change);
 }
+
+function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
+  const approval = props.approval;
+  if (approval === null || request.approvalRequestId !== approval.approvalRequestId) return;
+  emit("approval-decision", Object.freeze({
+    itemIdentity: props.item.identity,
+    threadId: props.item.threadId,
+    turnId: props.item.turnId,
+    itemId: props.item.itemId,
+    approvalRequestId: request.approvalRequestId,
+    decision: request.decision,
+  }));
+}
 </script>
 
 <template>
@@ -186,6 +274,17 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
     >{{ statusPresentation.summary }}</span>
 
     <div class="chat-command-item__details">
+      <ChatApprovalCard
+        v-if="approval && approvalCardStatus"
+        :approval-request-id="approval.approvalRequestId"
+        :status="approvalCardStatus"
+        :expires-at="approval.expiresAt"
+        :actionable="approvalActionable"
+        :authority-revision="approvalAuthorityRevision"
+        :error-code="approvalErrorCode"
+        @decision="forwardApprovalDecision"
+      />
+
       <dl class="chat-command-item__facts">
         <div>
           <dt>安全摘要</dt>

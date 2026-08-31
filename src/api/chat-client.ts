@@ -9,16 +9,19 @@ import {
   CHAT_IPC_V3_SCHEMA_VERSION,
   CHAT_IPC_V4_SCHEMA_VERSION,
   CHAT_IPC_V5_SCHEMA_VERSION,
+  CHAT_IPC_V6_SCHEMA_VERSION,
   ChatClientError,
   ChatContractError,
   parseBoundContextResponse,
   parseAttachmentListResponse,
   parseAttachmentImportEvent,
+  parseApprovalDecisionResponseV6,
   parseCancelledResponse,
   parseChatIpcError,
   parseChatProjectionEvent,
   parseChatProjectionEventV4,
   parseChatProjectionEventV5,
+  parseChatProjectionEventV6,
   parseCleanupResponse,
   parseControlPlaneEvent,
   parseCreatedTurnResponse,
@@ -28,6 +31,7 @@ import {
   parseHistoryPageResponseV3,
   parseHistoryPageResponseV4,
   parseHistoryPageResponseV5,
+  parseHistoryPageResponseV6,
   parseLocalReadinessResponse,
   parseOperationResponse,
   parseOperationResponseV2,
@@ -40,14 +44,18 @@ import {
   parseResyncResponseV2,
   parseResyncResponseV4,
   parseResyncResponseV5,
+  parseResyncResponseV6,
   parseSessionPageResponse,
   parseSessionControlPlaneResponse,
   parseSubscriptionResponse,
   parseSubscriptionResponseV4,
   parseSubscriptionResponseV5,
+  parseSubscriptionResponseV6,
   type BoundChatContext,
   type ChatAttachment,
   type ChatAttachmentImportEvent,
+  type ChatApprovalDecisionResultV6,
+  type ChatApprovalDecisionV6,
   type ChatCleanupStatus,
   type ChatControlPlaneEvent,
   type ChatCreatedTurn,
@@ -55,17 +63,21 @@ import {
   type ChatHistoryPage,
   type ChatHistoryPageV4,
   type ChatHistoryPageV5,
+  type ChatHistoryPageV6,
   type ChatLocalReadiness,
   type ChatProjectionEvent,
   type ChatProjectionEventV4,
   type ChatProjectionEventV5,
+  type ChatProjectionEventV6,
   type ChatProject,
   type ChatReasoningItem,
   type ChatResyncProjection,
   type ChatResyncProjectionV4,
   type ChatResyncProjectionV5,
+  type ChatResyncProjectionV6,
   type ChatSessionPage,
   type ChatSessionControlPlane,
+  type ChatSubscriptionV6,
   type ChatTurnContentBlock,
 } from "../domain/chat-ipc";
 
@@ -117,6 +129,7 @@ export interface ChatClient {
   loadHistoryV3(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadHistoryV4(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPageV4>;
   loadHistoryV5(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPageV5>;
+  loadHistoryV6(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPageV6>;
   loadReasoning(contextId: string, turnId: string, signal?: AbortSignal): Promise<readonly ChatReasoningItem[]>;
   renameSession(contextId: string, sessionId: string, title: string, operationId: string): Promise<string>;
   setSessionPinned(contextId: string, sessionId: string, pinned: boolean, operationId: string): Promise<string>;
@@ -129,10 +142,20 @@ export interface ChatClient {
   subscribeSession(contextId: string, sessionId: string): Promise<string>;
   subscribeSessionV4(contextId: string, sessionId: string): Promise<string>;
   subscribeSessionV5(contextId: string, sessionId: string): Promise<string>;
+  subscribeSessionV6(contextId: string, sessionId: string): Promise<ChatSubscriptionV6>;
+  decideApprovalV6(
+    contextId: string,
+    sessionId: string,
+    turnId: string,
+    itemId: string,
+    approvalRequestId: string,
+    decision: ChatApprovalDecisionV6,
+  ): Promise<ChatApprovalDecisionResultV6>;
   resyncSession(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
   resyncSessionV2(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
   resyncSessionV4(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV4>;
   resyncSessionV5(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV5>;
+  resyncSessionV6(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV6>;
   unsubscribeSession(contextId: string, subscriptionId: string): Promise<boolean>;
   cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
   onEvent(
@@ -145,6 +168,10 @@ export interface ChatClient {
   ): Promise<UnlistenFn>;
   onEventV5(
     handler: (event: ChatProjectionEventV5) => void,
+    onInvalid?: (scope?: ChatInvalidEventScope | null) => void,
+  ): Promise<UnlistenFn>;
+  onEventV6(
+    handler: (event: ChatProjectionEventV6) => void,
     onInvalid?: (scope?: ChatInvalidEventScope | null) => void,
   ): Promise<UnlistenFn>;
   onControlPlaneEvent(
@@ -257,6 +284,21 @@ function operationEnvelopeV5(contextId: string, payload: Record<string, unknown>
     id,
     request: {
       schemaVersion: CHAT_IPC_V5_SCHEMA_VERSION,
+      requestId: id,
+      contextId,
+      payload: compactPayload,
+    },
+  };
+}
+
+function operationEnvelopeV6(contextId: string, payload: Record<string, unknown>, id = requestId()) {
+  const compactPayload = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
+  return {
+    id,
+    request: {
+      schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
       requestId: id,
       contextId,
       payload: compactPayload,
@@ -438,6 +480,36 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     }
   }
 
+  async function runReadV6<T>(
+    command: string,
+    contextId: string,
+    payload: Record<string, unknown>,
+    parse: (value: unknown) => T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const envelope = operationEnvelopeV6(contextId, payload);
+    if (signal?.aborted) {
+      throw new ChatClientError({ schemaVersion: 6, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+    }
+    let abortHandler: (() => void) | undefined;
+    if (signal) {
+      abortHandler = () => {
+        const cancellation = operationEnvelope(contextId, { targetRequestId: envelope.id });
+        void transport.invoke("chat_cancel_request_v1", { request: cancellation.request });
+      };
+      signal.addEventListener("abort", abortHandler, { once: true });
+    }
+    try {
+      const value = await run(command, envelope.request, parse);
+      if (signal?.aborted) {
+        throw new ChatClientError({ schemaVersion: 6, code: "chat_request_cancelled", retryable: false, recovery: "none" });
+      }
+      return value;
+    } finally {
+      if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+    }
+  }
+
   return {
     bindContext(tenantSelector) {
       const id = requestId();
@@ -512,6 +584,8 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       runReadV4("chat_load_history_v3", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV4, signal),
     loadHistoryV5: (contextId, sessionId, cursor, limit, signal) =>
       runReadV5("chat_load_history_v3", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV5, signal),
+    loadHistoryV6: (contextId, sessionId, cursor, limit, signal) =>
+      runReadV6("chat_load_history_v3", contextId, { sessionId, cursor, limit }, parseHistoryPageResponseV6, signal),
     loadReasoning: (contextId, turnId, signal) =>
       runRead("chat_load_reasoning_v1", contextId, { turnId }, parseReasoningResponse, signal),
     renameSession(contextId, sessionId, title, operationId) {
@@ -558,6 +632,30 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       const envelope = operationEnvelopeV5(contextId, { sessionId });
       return run("chat_subscribe_session_v1", envelope.request, parseSubscriptionResponseV5);
     },
+    subscribeSessionV6(contextId, sessionId) {
+      const envelope = operationEnvelopeV6(contextId, { sessionId });
+      return run("chat_subscribe_session_v1", envelope.request, parseSubscriptionResponseV6);
+    },
+    decideApprovalV6(contextId, sessionId, turnId, itemId, approvalRequestId, decision) {
+      const envelope = operationEnvelopeV6(contextId, {
+        sessionId,
+        turnId,
+        itemId,
+        approvalRequestId,
+        decision,
+      });
+      return run(
+        "chat_decide_approval_v6",
+        envelope.request,
+        (value) => {
+          if (typeof value !== "object" || value === null || Array.isArray(value) ||
+              (value as Record<string, unknown>).requestId !== envelope.id) {
+            throw new ChatContractError();
+          }
+          return parseApprovalDecisionResponseV6(value);
+        },
+      );
+    },
     resyncSession: (contextId, sessionId, limit, signal) =>
       runRead("chat_resync_session_v1", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponse, signal),
     resyncSessionV2: (contextId, sessionId, limit, signal) =>
@@ -566,6 +664,8 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       runReadV4("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV4, signal),
     resyncSessionV5: (contextId, sessionId, limit, signal) =>
       runReadV5("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV5, signal),
+    resyncSessionV6: (contextId, sessionId, limit, signal) =>
+      runReadV6("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV6, signal),
     unsubscribeSession(contextId, subscriptionId) {
       const envelope = operationEnvelope(contextId, { subscriptionId });
       return run("chat_unsubscribe_session_v1", envelope.request, parseCancelledResponse);
@@ -598,6 +698,16 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {
         try {
           handler(parseChatProjectionEventV5(payload));
+        } catch (error: unknown) {
+          if (!(error instanceof ChatContractError)) throw error;
+          onInvalid?.(invalidEventScope(payload));
+        }
+      });
+    },
+    async onEventV6(handler, onInvalid) {
+      return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {
+        try {
+          handler(parseChatProjectionEventV6(payload));
         } catch (error: unknown) {
           if (!(error instanceof ChatContractError)) throw error;
           onInvalid?.(invalidEventScope(payload));

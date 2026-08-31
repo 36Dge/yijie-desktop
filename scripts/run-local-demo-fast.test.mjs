@@ -30,6 +30,12 @@ describe("local demo launcher profiles", () => {
     expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
       "VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true",
     );
+    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
+      "node scripts/check-agent-host-v6-contract.mjs",
+    );
+    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
+      "VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true",
+    );
   });
 
   it("maps the exact stable argument to image=false while retaining image=true by default", async () => {
@@ -56,6 +62,8 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain("YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true");
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true");
+    expect(argumentBoundary).toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
+    expect(argumentBoundary).toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
     expect(argumentBoundary).toContain('case "$#" in');
   });
 
@@ -77,7 +85,7 @@ describe("local demo launcher profiles", () => {
     expect(runner.match(/\.local\/runtime-artifacts\/feat-136-b2b20e2fc4a0/g)).toHaveLength(1);
   });
 
-  it("injects the dependent FEAT-134 and FEAT-136 flags only through the exact stable branch", async () => {
+  it("injects the dependent FEAT-134, FEAT-136 and FEAT-137 flags only through the exact stable branch", async () => {
     const runner = await readFile(runnerPath, "utf8");
     const stableBranch = runner.slice(runner.indexOf("  1)"), runner.indexOf("    ;;"));
     const execBoundary = runner.slice(runner.indexOf("exec env \\"));
@@ -87,23 +95,66 @@ describe("local demo launcher profiles", () => {
     expect(stableBranch).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(stableBranch).toContain("YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true");
     expect(stableBranch).toContain("VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true");
+    expect(stableBranch).toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
+    expect(stableBranch).toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
     expect(runner.match(/^\s+YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+VITE_YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true$/gm)).toHaveLength(1);
+    expect(runner.match(/^\s+YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true$/gm)).toHaveLength(1);
+    expect(runner.match(/^\s+VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true$/gm)).toHaveLength(1);
     expect(execBoundary).toContain("-u YIJIE_FEAT134_STREAMING_ENABLED \\");
     expect(execBoundary).toContain("-u VITE_YIJIE_FEAT134_STREAMING_ENABLED \\");
     expect(execBoundary).toContain("-u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED \\");
     expect(execBoundary).toContain("-u VITE_YIJIE_FEAT136_EXECUTION_ENABLED \\");
+    expect(execBoundary).toContain("-u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED \\");
+    expect(execBoundary).toContain("-u VITE_YIJIE_FEAT137_APPROVAL_ENABLED \\");
     expect(execBoundary).toContain('"${feat134_environment[@]}"');
     expect(execBoundary).toContain("YIJIE_ENV=local \\");
     expect(execBoundary).toContain("YIJIE_LOCAL_PROFILE=demo_fast \\");
+  });
+
+  it("checks the reviewed v6 candidate only at the stable runner boundary", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const check = "node scripts/check-agent-host-v6-contract.mjs";
+    const stableGuardStart = runner.indexOf(
+      'if [[ "$stable_api_only" == "true" ]]; then',
+      runner.indexOf('cd "$desktop_root"'),
+    );
+    const stableGuard = runner.slice(stableGuardStart, runner.indexOf("\nfi", stableGuardStart));
+    const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
+
+    expect(stableGuardStart).toBeGreaterThanOrEqual(0);
+    expect(stableGuard).toContain(check);
+    expect(runner.match(/node scripts\/check-agent-host-v6-contract\.mjs/g)).toHaveLength(1);
+    expect(packageJson.scripts.generate).not.toContain(check);
+    expect(packageJson.scripts["generate:check"]).not.toContain(check);
   });
 
   it("clears ambient FEAT-136 activation from every non-stable package entry", async () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
     const nativeFlag = "YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED";
     const webFlag = "VITE_YIJIE_FEAT136_EXECUTION_ENABLED";
+
+    for (const name of ["tauri:dev:raw", "tauri:build", "tauri:build:demo-fast"]) {
+      const command = packageJson.scripts[name];
+      expect(command).toContain(`-u ${nativeFlag}`);
+      expect(command).toContain(`-u ${webFlag}`);
+      expect(command).not.toContain(`${nativeFlag}=true`);
+      expect(command).not.toContain(`${webFlag}=true`);
+    }
+
+    const stableBuild = packageJson.scripts["tauri:build:demo-fast:stable"];
+    expect(stableBuild).toContain(`-u ${nativeFlag}`);
+    expect(stableBuild).toContain(`-u ${webFlag}`);
+    expect(stableBuild).not.toContain(`${nativeFlag}=true`);
+    expect(stableBuild.match(new RegExp(`${webFlag}=true`, "g"))).toHaveLength(1);
+  });
+
+  it("clears ambient FEAT-137 activation from every non-stable package entry", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
+    const nativeFlag = "YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED";
+    const webFlag = "VITE_YIJIE_FEAT137_APPROVAL_ENABLED";
 
     for (const name of ["tauri:dev:raw", "tauri:build", "tauri:build:demo-fast"]) {
       const command = packageJson.scripts[name];

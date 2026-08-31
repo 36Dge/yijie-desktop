@@ -16,6 +16,11 @@ import type {
   ConversationTurnStatus,
   ReconciliationStatus,
 } from "./conversation-state";
+import {
+  selectConversationApprovalForCommand,
+  type ConversationApproval,
+  type ConversationApprovalState,
+} from "./conversation-approval";
 
 export type ConversationTimelineRole = "user" | "assistant" | "process" | "system";
 export type ConversationTimelineThreadPhase =
@@ -150,6 +155,7 @@ export type ConversationTimelineItemViewModel = Readonly<{
   assistantPhase: ConversationAgentMessagePhase | null;
   reasoning: ConversationReasoningState | null;
   execution: ConversationExecution | null;
+  readonly approval?: ConversationApproval | null;
   contentMode: ConversationTimelineContentMode;
   collapsible: boolean;
   defaultExpanded: boolean;
@@ -409,6 +415,7 @@ function activeTurn(turn: ConversationTurn): boolean {
 function projectItem(
   item: ConversationItem,
   turn: ConversationTurn,
+  approvalState?: ConversationApprovalState,
 ): ConversationTimelineItemViewModel {
   const identity = stableIdentity("timeline-item", item.threadId, item.turnId, item.itemId);
   const kind = ITEM_KINDS[item.kind] ?? "unknown";
@@ -440,6 +447,16 @@ function projectItem(
     assistantPhase: item.agentMessagePhase,
     reasoning: item.reasoning === null ? null : Object.freeze({ ...item.reasoning }),
     execution: item.execution,
+    ...(kind === "command" ? {
+      approval: approvalState === undefined
+        ? null
+        : selectConversationApprovalForCommand(
+            approvalState,
+            item.threadId,
+            item.turnId,
+            item.itemId,
+          ),
+    } : {}),
     contentMode: presentation === "reasoning" || presentation === "command" || presentation === "tool"
       ? "plain" as const
       : "rich" as const,
@@ -575,6 +592,7 @@ function projectThreadNotices(
 function projectTurn(
   state: ConversationState,
   turn: ConversationTurn,
+  approvalState?: ConversationApprovalState,
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
@@ -588,18 +606,20 @@ function projectTurn(
     plan: projectPlan(turn),
     progress: projectProgress(turn),
     notices: projectNotices(turn),
-    items: Object.freeze(relatedItems(state, turn).map((item) => projectItem(item, turn))),
+    items: Object.freeze(relatedItems(state, turn)
+      .map((item) => projectItem(item, turn, approvalState))),
   });
 }
 
 export function selectConversationTimeline(
   state: ConversationState,
   threadId: string,
+  approvalState?: ConversationApprovalState,
 ): ConversationTimelineViewModel | null {
   const thread = state.threads[threadId];
   if (thread === undefined || thread.threadId !== threadId) return null;
   const turns = Object.freeze(relatedTurns(state, thread)
-    .map((turn) => projectTurn(state, turn)));
+    .map((turn) => projectTurn(state, turn, approvalState)));
   return Object.freeze({
     identity: stableIdentity("conversation-timeline", thread.threadId),
     threadId: thread.threadId,

@@ -1,8 +1,11 @@
+import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
+
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
 export const CHAT_IPC_V2_SCHEMA_VERSION = 2 as const;
 export const CHAT_IPC_V3_SCHEMA_VERSION = 3 as const;
 export const CHAT_IPC_V4_SCHEMA_VERSION = 4 as const;
 export const CHAT_IPC_V5_SCHEMA_VERSION = 5 as const;
+export const CHAT_IPC_V6_SCHEMA_VERSION = 6 as const;
 export const CHAT_EVENT_CHANNEL = "yijie:chat:event:v1" as const;
 export const CHAT_CONTROL_PLANE_EVENT_CHANNEL = "yijie:chat:control-plane:event:v1" as const;
 export const CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL = "yijie:chat:attachment-import:event:v2" as const;
@@ -129,13 +132,14 @@ export const CHAT_ALLOWED_ACTIONS = Object.freeze([
 export type ChatAllowedAction = (typeof CHAT_ALLOWED_ACTIONS)[number];
 
 export interface ChatIpcErrorShape {
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5;
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
   readonly requestId?: string;
   readonly code: ChatErrorCode;
   readonly retryable: boolean;
   readonly recovery: ChatRecovery;
   readonly attachmentIssue?: ChatAttachmentIssue;
   readonly attachmentItemCount?: number;
+  readonly approvalIssue?: ChatApprovalErrorCodeV6;
   readonly retryAfterMs?: number;
 }
 
@@ -943,6 +947,191 @@ export type ChatProjectionEventV5 =
   | ChatStickyV4ProjectionEventV5
   | ChatExecutionProjectionEventV5;
 
+export const CHAT_APPROVAL_DECISIONS_V6 = Object.freeze([
+  "accept_once",
+  "cancel_current_turn",
+] as const);
+
+export type ChatApprovalDecisionV6 =
+  (typeof CHAT_APPROVAL_DECISIONS_V6)[number];
+
+export const CHAT_APPROVAL_OUTCOMES_V6 = Object.freeze([
+  "accepted_once",
+  "cancelled_current_turn",
+  "expired",
+  "resolved_elsewhere",
+] as const);
+
+export type ChatApprovalOutcomeV6 =
+  (typeof CHAT_APPROVAL_OUTCOMES_V6)[number];
+
+export interface ChatApprovalDecisionSetV6 {
+  readonly primary: "accept_once";
+  readonly secondary: "cancel_current_turn";
+}
+
+interface ChatApprovalProjectionBaseV6 extends ChatSourceFactV5 {
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly approvalRequestId: string;
+  readonly actionId: "git_repository_check";
+  readonly workspaceScope: "current_workspace";
+  readonly requestedAt: string;
+  readonly expiresAt: string;
+}
+
+export interface ChatApprovalRequestedPayloadV6
+  extends ChatApprovalProjectionBaseV6 {
+  readonly status: "pending";
+  readonly revision: 1;
+  readonly decisions: ChatApprovalDecisionSetV6;
+  readonly ttlSeconds: 120;
+}
+
+type ChatApprovalResolvedWithoutDecisionV6 =
+  ChatApprovalProjectionBaseV6 & Readonly<{
+    status: "resolved";
+    revision: 2;
+    outcome: "expired" | "resolved_elsewhere";
+    resolvedAt: string;
+  }>;
+
+type ChatApprovalResolvedWithDecisionV6 =
+  ChatApprovalProjectionBaseV6 & Readonly<{
+    status: "resolved";
+    revision: 2;
+    outcome: "accepted_once" | "cancelled_current_turn";
+    decisionId: string;
+    decision: ChatApprovalDecisionV6;
+    resolvedAt: string;
+  }>;
+
+export type ChatApprovalResolvedPayloadV6 =
+  | ChatApprovalResolvedWithoutDecisionV6
+  | ChatApprovalResolvedWithDecisionV6;
+
+export type ChatApprovalProjectionV6 =
+  | ChatApprovalRequestedPayloadV6
+  | ChatApprovalResolvedPayloadV6;
+
+interface ChatApprovalProjectionEventV6 {
+  readonly schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+  readonly sourceSchemaVersion?: never;
+  readonly subscriptionId: string;
+  readonly contextId: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly projectionSequence: string;
+  readonly eventId: string;
+  readonly durableSequence: string;
+  readonly kind: "approval_changed";
+  readonly payload: ChatApprovalProjectionV6;
+}
+
+type WithV6Schema<T> = T extends unknown
+  ? Omit<T, "schemaVersion" | "sourceSchemaVersion"> & Readonly<{
+      schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+      sourceSchemaVersion?: 4 | 5;
+    }>
+  : never;
+
+export type ChatProjectionEventV6 =
+  | WithV6Schema<ChatProjectionEventV5>
+  | ChatApprovalProjectionEventV6;
+
+export interface ChatPendingApprovalV6 {
+  readonly approvalRequestId: string;
+  readonly revision: 1;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly actionId: "git_repository_check";
+  readonly workspaceScope: "current_workspace";
+  readonly decisions: ChatApprovalDecisionSetV6;
+  readonly requestedAt: string;
+  readonly expiresAt: string;
+  readonly ttlSeconds: 120;
+}
+
+export interface ChatPendingApprovalSnapshotV6 {
+  readonly schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+  readonly streamId: string;
+  readonly snapshotAt: string;
+  readonly pending: readonly ChatPendingApprovalV6[];
+}
+
+export interface ChatHistoryPageV6 extends Omit<ChatHistoryPageV5, "schemaVersion"> {
+  readonly schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+  readonly approvals: readonly ChatApprovalProjectionV6[];
+}
+
+export interface ChatSubscriptionV6 {
+  readonly subscriptionId: string;
+  readonly pendingApprovalSnapshot: ChatPendingApprovalSnapshotV6;
+}
+
+export interface ChatResyncProjectionV6 {
+  readonly session: ChatSession;
+  readonly history: ChatHistoryPageV6;
+  readonly cleanup: ChatCleanupStatus | null;
+  readonly pendingApprovalSnapshot: ChatPendingApprovalSnapshotV6;
+}
+
+export interface ChatApprovalDecisionRequestV6 {
+  readonly schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+  readonly decisionId: string;
+  readonly expectedStreamId: string;
+  readonly expectedRevision: 1;
+  readonly decision: ChatApprovalDecisionV6;
+}
+
+export type ChatApprovalDecisionResultV6 = Readonly<{
+  schemaVersion: typeof CHAT_IPC_V6_SCHEMA_VERSION;
+  approvalRequestId: string;
+  decisionId: string;
+  streamId: string;
+  revision: 2;
+  resolvedAt: string;
+}> & (
+  | Readonly<{ decision: "accept_once"; outcome: "accepted_once" }>
+  | Readonly<{
+      decision: "cancel_current_turn";
+      outcome: "cancelled_current_turn";
+    }>
+);
+
+export const CHAT_APPROVAL_ERROR_CODES_V6 = Object.freeze([
+  "unauthorized",
+  "invalid_approval_request",
+  "approval_version_mismatch",
+  "session_not_found",
+  "approval_not_found",
+  "approval_stale",
+  "approval_expired",
+  "approval_already_resolved",
+  "approval_decision_conflict",
+  "approval_unavailable",
+  "internal_error",
+] as const);
+
+export type ChatApprovalErrorCodeV6 =
+  (typeof CHAT_APPROVAL_ERROR_CODES_V6)[number];
+
+export interface ChatApprovalErrorV6 {
+  readonly code: ChatApprovalErrorCodeV6;
+  readonly message:
+    | "valid Agent Host bearer token required"
+    | "approval request is invalid"
+    | "approval schema version does not match"
+    | "agent session was not found"
+    | "approval request was not found"
+    | "approval request is stale"
+    | "approval request expired"
+    | "approval request was already resolved"
+    | "approval decision conflicts with the existing decision"
+    | "approval authority is unavailable"
+    | "approval processing failed";
+}
+
 type Parser<T> = (value: unknown) => T;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1090,18 +1279,29 @@ function responseDataV5<T>(value: unknown, parser: Parser<T>): T {
   return parser(envelope.data);
 }
 
+function responseDataV6<T>(value: unknown, parser: Parser<T>): T {
+  const envelope = exactObject(value, ["schemaVersion", "requestId", "data"]);
+  if (envelope.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION) throw new ChatContractError();
+  uuid(envelope.requestId);
+  return parser(envelope.data);
+}
+
 export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   const error = exactObject(
     value,
     ["schemaVersion", "code", "retryable", "recovery"],
-    ["requestId", "attachmentIssue", "attachmentItemCount", "retryAfterMs"],
+    [
+      "requestId", "attachmentIssue", "attachmentItemCount", "approvalIssue",
+      "retryAfterMs",
+    ],
   );
   if (
     (error.schemaVersion !== CHAT_IPC_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V3_SCHEMA_VERSION &&
       error.schemaVersion !== CHAT_IPC_V4_SCHEMA_VERSION &&
-      error.schemaVersion !== CHAT_IPC_V5_SCHEMA_VERSION) ||
+      error.schemaVersion !== CHAT_IPC_V5_SCHEMA_VERSION &&
+      error.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION) ||
     typeof error.retryable !== "boolean"
   ) {
     throw new ChatContractError();
@@ -1123,14 +1323,25 @@ export function parseChatIpcError(value: unknown): ChatIpcErrorShape {
   if (attachmentItemCount !== undefined && error.schemaVersion !== CHAT_IPC_V2_SCHEMA_VERSION) {
     throw new ChatContractError();
   }
+  const recovery = oneOf(error.recovery, CHAT_RECOVERIES);
+  const approvalIssue = error.approvalIssue === undefined
+    ? undefined
+    : oneOf(error.approvalIssue, CHAT_APPROVAL_ERROR_CODES_V6);
+  if (approvalIssue !== undefined && (
+    error.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION ||
+    code !== "chat_conflict" || error.retryable || recovery !== "resync"
+  )) {
+    throw new ChatContractError();
+  }
   return Object.freeze({
     schemaVersion: error.schemaVersion,
     ...(error.requestId === undefined ? {} : { requestId: uuid(error.requestId) }),
     code,
     retryable: error.retryable,
-    recovery: oneOf(error.recovery, CHAT_RECOVERIES),
+    recovery,
     ...(attachmentIssue === undefined ? {} : { attachmentIssue }),
     ...(attachmentItemCount === undefined ? {} : { attachmentItemCount }),
+    ...(approvalIssue === undefined ? {} : { approvalIssue }),
     ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: integer(error.retryAfterMs, 0, 60_000) }),
   });
 }
@@ -2841,4 +3052,409 @@ export function parseChatProjectionEventV5(value: unknown): ChatProjectionEventV
     kind: executionKind,
     payload: parseExecutionEventPayloadV5(executionKind, event.payload),
   }) as ChatProjectionEventV5;
+}
+
+function approvalTimestampV6(value: unknown): string {
+  if (typeof value !== "string" || parseStrictRfc3339EpochNanoseconds(value) === null) {
+    throw new ChatContractError();
+  }
+  return value;
+}
+
+function approvalSourceFactV6(value: Record<string, unknown>) {
+  const source = sourceFactV4(value);
+  approvalTimestampV6(source.sourceOccurredAt);
+  return source;
+}
+
+function approvalWindowV6(requestedAt: unknown, expiresAt: unknown) {
+  const requested = approvalTimestampV6(requestedAt);
+  const expires = approvalTimestampV6(expiresAt);
+  const requestedNanoseconds = parseStrictRfc3339EpochNanoseconds(requested)!;
+  const expiresNanoseconds = parseStrictRfc3339EpochNanoseconds(expires)!;
+  if (expiresNanoseconds - requestedNanoseconds !== 120_000_000_000n) {
+    throw new ChatContractError();
+  }
+  return { requestedAt: requested, expiresAt: expires } as const;
+}
+
+function parseApprovalDecisionSetV6(value: unknown): ChatApprovalDecisionSetV6 {
+  const decisions = exactObject(value, ["primary", "secondary"]);
+  if (decisions.primary !== "accept_once" ||
+      decisions.secondary !== "cancel_current_turn") {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    primary: "accept_once" as const,
+    secondary: "cancel_current_turn" as const,
+  });
+}
+
+function parseApprovalProjectionV6(value: unknown): ChatApprovalProjectionV6 {
+  if (!isRecord(value)) throw new ChatContractError();
+  const commonRequired = [
+    "sourceEventId", "sourceSequence", "sourceOccurredAt", "turnId", "itemId",
+    "approvalRequestId", "status", "revision", "actionId", "workspaceScope",
+    "requestedAt", "expiresAt",
+  ] as const;
+  const status = value.status;
+  if (status === "pending") {
+    const pending = exactObject(value, [
+      ...commonRequired,
+      "decisions",
+      "ttlSeconds",
+    ]);
+    if (pending.revision !== 1 || pending.actionId !== "git_repository_check" ||
+        pending.workspaceScope !== "current_workspace" || pending.ttlSeconds !== 120) {
+      throw new ChatContractError();
+    }
+    const window = approvalWindowV6(pending.requestedAt, pending.expiresAt);
+    return Object.freeze({
+      ...approvalSourceFactV6(pending),
+      turnId: uuid(pending.turnId),
+      itemId: itemIdV5(pending.itemId),
+      approvalRequestId: uuid(pending.approvalRequestId),
+      status: "pending",
+      revision: 1,
+      actionId: "git_repository_check",
+      workspaceScope: "current_workspace",
+      decisions: parseApprovalDecisionSetV6(pending.decisions),
+      ...window,
+      ttlSeconds: 120,
+    });
+  }
+  if (status !== "resolved") throw new ChatContractError();
+  const outcome = value.outcome;
+  const withDecision = outcome === "accepted_once" ||
+    outcome === "cancelled_current_turn";
+  const resolved = exactObject(value, [
+    ...commonRequired,
+    "outcome",
+    ...(withDecision ? ["decisionId", "decision"] : []),
+    "resolvedAt",
+  ]);
+  if (resolved.revision !== 2 || resolved.actionId !== "git_repository_check" ||
+      resolved.workspaceScope !== "current_workspace") {
+    throw new ChatContractError();
+  }
+  const parsedOutcome = oneOf(resolved.outcome, CHAT_APPROVAL_OUTCOMES_V6);
+  const window = approvalWindowV6(resolved.requestedAt, resolved.expiresAt);
+  const resolvedAt = approvalTimestampV6(resolved.resolvedAt);
+  const resolvedAtNanoseconds = parseStrictRfc3339EpochNanoseconds(resolvedAt)!;
+  const requestedAtNanoseconds = parseStrictRfc3339EpochNanoseconds(window.requestedAt)!;
+  const expiresAtNanoseconds = parseStrictRfc3339EpochNanoseconds(window.expiresAt)!;
+  if (resolvedAtNanoseconds < requestedAtNanoseconds ||
+      (parsedOutcome === "expired"
+        ? resolvedAtNanoseconds < expiresAtNanoseconds
+        : resolvedAtNanoseconds >= expiresAtNanoseconds)) {
+    throw new ChatContractError();
+  }
+  const base = {
+    ...approvalSourceFactV6(resolved),
+    turnId: uuid(resolved.turnId),
+    itemId: itemIdV5(resolved.itemId),
+    approvalRequestId: uuid(resolved.approvalRequestId),
+    status: "resolved" as const,
+    revision: 2 as const,
+    actionId: "git_repository_check" as const,
+    workspaceScope: "current_workspace" as const,
+    ...window,
+    resolvedAt,
+  };
+  if (parsedOutcome === "accepted_once" || parsedOutcome === "cancelled_current_turn") {
+    const decision = oneOf(resolved.decision, CHAT_APPROVAL_DECISIONS_V6);
+    if ((decision === "accept_once") !== (parsedOutcome === "accepted_once")) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      ...base,
+      outcome: parsedOutcome,
+      decisionId: uuid(resolved.decisionId),
+      decision,
+    });
+  }
+  return Object.freeze({ ...base, outcome: parsedOutcome });
+}
+
+function parsePendingApprovalV6(value: unknown): ChatPendingApprovalV6 {
+  const pending = exactObject(value, [
+    "approvalRequestId", "revision", "turnId", "itemId", "actionId",
+    "workspaceScope", "decisions",
+    "requestedAt", "expiresAt", "ttlSeconds",
+  ]);
+  if (pending.revision !== 1 || pending.actionId !== "git_repository_check" ||
+      pending.workspaceScope !== "current_workspace" || pending.ttlSeconds !== 120) {
+    throw new ChatContractError();
+  }
+  const window = approvalWindowV6(pending.requestedAt, pending.expiresAt);
+  return Object.freeze({
+    approvalRequestId: uuid(pending.approvalRequestId),
+    revision: 1,
+    turnId: uuid(pending.turnId),
+    itemId: itemIdV5(pending.itemId),
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    decisions: parseApprovalDecisionSetV6(pending.decisions),
+    ...window,
+    ttlSeconds: 120,
+  });
+}
+
+export function parsePendingApprovalSnapshotV6(
+  value: unknown,
+): ChatPendingApprovalSnapshotV6 {
+  const snapshot = exactObject(value, [
+    "schemaVersion", "streamId", "snapshotAt", "pending",
+  ]);
+  if (snapshot.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION ||
+      !Array.isArray(snapshot.pending) || snapshot.pending.length > 1) {
+    throw new ChatContractError();
+  }
+  const snapshotAt = approvalTimestampV6(snapshot.snapshotAt);
+  const pending = Object.freeze(snapshot.pending.map(parsePendingApprovalV6));
+  if (pending.some((approval) => {
+    const observed = parseStrictRfc3339EpochNanoseconds(snapshotAt)!;
+    return observed < parseStrictRfc3339EpochNanoseconds(approval.requestedAt)! ||
+      observed >= parseStrictRfc3339EpochNanoseconds(approval.expiresAt)!;
+  })) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+    streamId: uuid(snapshot.streamId),
+    snapshotAt,
+    pending,
+  });
+}
+
+export function parsePendingApprovalSnapshotResponseV6(
+  value: unknown,
+): ChatPendingApprovalSnapshotV6 {
+  return responseDataV6(value, parsePendingApprovalSnapshotV6);
+}
+
+function historyHasCommandV6(
+  history: Pick<ChatHistoryPageV6, "turns">,
+  turnId: string,
+  itemId: string,
+): boolean {
+  const turn = history.turns.find((candidate) => candidate.turnId === turnId);
+  return turn?.projectionAuthority === "v5" && turn.timelineItems.some((item) =>
+    item.itemId === itemId && item.itemType === "command" &&
+    item.execution?.kind === "command");
+}
+
+function parseHistoryPageV6(value: unknown): ChatHistoryPageV6 {
+  const page = exactObject(value, [
+    "turns", "nextCursor", "sessionNotices", "durableSequenceCut", "approvals",
+  ]);
+  if (!Array.isArray(page.approvals) || page.approvals.length > 128) {
+    throw new ChatContractError();
+  }
+  const historyV5 = parseHistoryPageV5({
+    turns: page.turns,
+    nextCursor: page.nextCursor,
+    sessionNotices: page.sessionNotices,
+    durableSequenceCut: page.durableSequenceCut,
+  });
+  const approvals = Object.freeze(page.approvals.map(parseApprovalProjectionV6));
+  if (new Set(approvals.map((approval) => approval.sourceEventId)).size !== approvals.length ||
+      approvals.some((approval) =>
+        !historyHasCommandV6(historyV5, approval.turnId, approval.itemId))) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+    turns: historyV5.turns,
+    nextCursor: historyV5.nextCursor,
+    sessionNotices: historyV5.sessionNotices,
+    durableSequenceCut: historyV5.durableSequenceCut,
+    approvals,
+  });
+}
+
+export function parseHistoryPageResponseV6(value: unknown): ChatHistoryPageV6 {
+  return responseDataV6(value, parseHistoryPageV6);
+}
+
+export function parseSubscriptionResponseV6(value: unknown): ChatSubscriptionV6 {
+  return responseDataV6(value, (data) => {
+    const subscription = exactObject(data, [
+      "subscriptionId", "pendingApprovalSnapshot",
+    ]);
+    const subscriptionId = uuid(subscription.subscriptionId);
+    const pendingApprovalSnapshot = parsePendingApprovalSnapshotV6(
+      subscription.pendingApprovalSnapshot,
+    );
+    return Object.freeze({
+      subscriptionId,
+      pendingApprovalSnapshot,
+    });
+  });
+}
+
+export function parseResyncResponseV6(value: unknown): ChatResyncProjectionV6 {
+  return responseDataV6(value, (data) => {
+    const projection = exactObject(data, [
+      "session", "history", "cleanup", "pendingApprovalSnapshot",
+    ]);
+    const session = parseSession(projection.session);
+    const history = parseHistoryPageV6(projection.history);
+    const pendingApprovalSnapshot = parsePendingApprovalSnapshotV6(
+      projection.pendingApprovalSnapshot,
+    );
+    if (pendingApprovalSnapshot.pending.some((approval) =>
+      !historyHasCommandV6(history, approval.turnId, approval.itemId))) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      session,
+      history,
+      cleanup: nullable(projection.cleanup, parseCleanup),
+      pendingApprovalSnapshot,
+    });
+  });
+}
+
+export function parseApprovalDecisionRequestV6(
+  value: unknown,
+): ChatApprovalDecisionRequestV6 {
+  const request = exactObject(value, [
+    "schemaVersion", "decisionId", "expectedStreamId", "expectedRevision", "decision",
+  ]);
+  if (request.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION ||
+      request.expectedRevision !== 1) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+    decisionId: uuid(request.decisionId),
+    expectedStreamId: uuid(request.expectedStreamId),
+    expectedRevision: 1,
+    decision: oneOf(request.decision, CHAT_APPROVAL_DECISIONS_V6),
+  });
+}
+
+export function createApprovalDecisionRequestV6(
+  decisionId: string,
+  expectedStreamId: string,
+  decision: ChatApprovalDecisionV6,
+): ChatApprovalDecisionRequestV6 {
+  return parseApprovalDecisionRequestV6({
+    schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+    decisionId,
+    expectedStreamId,
+    expectedRevision: 1,
+    decision,
+  });
+}
+
+export function parseApprovalDecisionResponseV6(
+  value: unknown,
+): ChatApprovalDecisionResultV6 {
+  return responseDataV6(value, (data) => {
+    const result = exactObject(data, [
+      "schemaVersion", "approvalRequestId", "decisionId", "streamId", "revision",
+      "decision", "outcome", "resolvedAt",
+    ]);
+    if (result.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION || result.revision !== 2) {
+      throw new ChatContractError();
+    }
+    const decision = oneOf(result.decision, CHAT_APPROVAL_DECISIONS_V6);
+    const outcome = oneOf(
+      result.outcome,
+      ["accepted_once", "cancelled_current_turn"] as const,
+    );
+    if ((decision === "accept_once") !== (outcome === "accepted_once")) {
+      throw new ChatContractError();
+    }
+    return Object.freeze({
+      schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+      approvalRequestId: uuid(result.approvalRequestId),
+      decisionId: uuid(result.decisionId),
+      streamId: uuid(result.streamId),
+      revision: 2,
+      decision,
+      outcome,
+      resolvedAt: approvalTimestampV6(result.resolvedAt),
+    }) as ChatApprovalDecisionResultV6;
+  });
+}
+
+const CHAT_APPROVAL_ERROR_MESSAGES_V6 = Object.freeze({
+  unauthorized: "valid Agent Host bearer token required",
+  invalid_approval_request: "approval request is invalid",
+  approval_version_mismatch: "approval schema version does not match",
+  session_not_found: "agent session was not found",
+  approval_not_found: "approval request was not found",
+  approval_stale: "approval request is stale",
+  approval_expired: "approval request expired",
+  approval_already_resolved: "approval request was already resolved",
+  approval_decision_conflict: "approval decision conflicts with the existing decision",
+  approval_unavailable: "approval authority is unavailable",
+  internal_error: "approval processing failed",
+} satisfies Readonly<Record<ChatApprovalErrorCodeV6, ChatApprovalErrorV6["message"]>>);
+
+export function parseApprovalErrorV6(value: unknown): ChatApprovalErrorV6 {
+  const envelope = exactObject(value, ["error"]);
+  const error = exactObject(envelope.error, ["code", "message"]);
+  const code = oneOf(error.code, CHAT_APPROVAL_ERROR_CODES_V6);
+  if (error.message !== CHAT_APPROVAL_ERROR_MESSAGES_V6[code]) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({ code, message: CHAT_APPROVAL_ERROR_MESSAGES_V6[code] });
+}
+
+export function parseChatProjectionEventV6(value: unknown): ChatProjectionEventV6 {
+  if (!isRecord(value) || value.schemaVersion !== CHAT_IPC_V6_SCHEMA_VERSION) {
+    throw new ChatContractError();
+  }
+  if (value.kind === "approval_changed") {
+    const event = exactObject(value, [
+      "schemaVersion", "subscriptionId", "contextId", "sessionId", "turnId",
+      "projectionSequence", "eventId", "durableSequence", "kind", "payload",
+    ]);
+    if (typeof event.projectionSequence !== "string" ||
+        !SEQUENCE_PATTERN.test(event.projectionSequence) ||
+        BigInt(event.projectionSequence) > MAX_SAFE_EVENT_SEQUENCE) {
+      throw new ChatContractError();
+    }
+    const payload = parseApprovalProjectionV6(event.payload);
+    const turnId = uuid(event.turnId);
+    if (payload.turnId !== turnId) throw new ChatContractError();
+    return Object.freeze({
+      schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+      subscriptionId: uuid(event.subscriptionId),
+      contextId: uuid(event.contextId),
+      sessionId: uuid(event.sessionId),
+      turnId,
+      projectionSequence: event.projectionSequence,
+      eventId: uuid(event.eventId),
+      durableSequence: durableSequence(event.durableSequence, false),
+      kind: "approval_changed",
+      payload,
+    });
+  }
+
+  const marker = value.sourceSchemaVersion;
+  if (marker !== undefined && marker !== 4 && marker !== 5) {
+    throw new ChatContractError();
+  }
+  const inheritedWire = Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "sourceSchemaVersion"));
+  const inherited = parseChatProjectionEventV5({
+    ...inheritedWire,
+    schemaVersion: CHAT_IPC_V5_SCHEMA_VERSION,
+    ...(marker === 4 ? { sourceSchemaVersion: 4 } : {}),
+  });
+  if (marker !== undefined && (
+    inherited.kind === "resync_required" || inherited.kind === "context_invalidated"
+  )) {
+    throw new ChatContractError();
+  }
+  return Object.freeze({
+    ...inherited,
+    schemaVersion: CHAT_IPC_V6_SCHEMA_VERSION,
+    ...(marker === undefined ? {} : { sourceSchemaVersion: marker }),
+  }) as ChatProjectionEventV6;
 }

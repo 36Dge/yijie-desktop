@@ -14,6 +14,8 @@ use super::feat136::{
     ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus, TruncationReason,
     SOURCE_SCHEMA_VERSION as FEAT136_SOURCE_SCHEMA_VERSION,
 };
+use super::feat137::{ApprovalProjection, ApprovalProjectionStatus};
+use super::host_domain::{HostApprovalDecision, HostApprovalOutcome};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
 use base64::Engine;
@@ -46,6 +48,7 @@ const MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE: usize = 64;
 const MAX_FEAT134_OBSERVED_EVENTS_PER_TURN: usize = 10_000;
 const MAX_FEAT134_OBSERVED_EVENT_BYTES: usize = 1024 * 1024;
 const MAX_FEAT134_OBSERVED_BYTES_PER_TURN: usize = 16 * 1024 * 1024;
+const MAX_FEAT137_APPROVALS_PER_SESSION: usize = 128;
 const FEAT134_LIMIT_REASON_CODE: &str = "limit_exceeded";
 const FEAT134_SOURCE_SCHEMA_VERSION: u8 = 4;
 const DEFAULT_PAGE_SIZE: usize = 20;
@@ -585,6 +588,7 @@ pub struct Feat134HistorySnapshot {
     pub message_content_blocks: Vec<(Uuid, Vec<MessageContentBlockProjection>)>,
     pub artifacts: Vec<ArtifactProjection>,
     pub feat134: Feat134HistoryProjection,
+    pub approvals: Vec<ApprovalProjection>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -4000,6 +4004,27 @@ impl ChatRepository {
         })
     }
 
+    pub fn agent_session_id_for_session(&self, session_id: Uuid) -> Result<Uuid, ChatError> {
+        validate_non_nil(session_id)?;
+        let agent_session_id: String = self
+            .connection
+            .query_row(
+                "SELECT agent_session_id FROM chat_sessions
+                 WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+                   AND agent_session_id IS NOT NULL",
+                params![
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::NotFound)?;
+        parse_uuid_value(&agent_session_id)
+    }
+
     pub fn clear_event_cursor_after_stream_change(
         &mut self,
         session_id: Uuid,
@@ -4083,6 +4108,12 @@ impl ChatRepository {
         transaction
             .execute(
                 "DELETE FROM chat_observed_events_v4 WHERE turn_id=?1",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
+                "DELETE FROM chat_turn_stream_versions_v6 WHERE turn_id=?1",
                 [turn_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -4228,24 +4259,63 @@ impl ChatRepository {
         Ok(durable_sequence)
     }
 
+    pub fn persist_feat137_projection(
+        &mut self,
+        projection: &Feat134Projection,
+        approval: Option<&ApprovalProjection>,
+    ) -> Result<u64, ChatError> {
+        if projection.terminal.is_some() {
+            return Err(ChatError::InvalidInput);
+        }
+        validate_projection_for_schema(projection, FEAT136_SOURCE_SCHEMA_VERSION)?;
+        validate_feat137_projection_pair(projection, approval)?;
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        mark_feat137_turn_stream(&transaction, projection.turn_id)?;
+        let durable_sequence = persist_feat134_projection_transaction(
+            &transaction,
+            &self.scope,
+            projection,
+            true,
+            FEAT136_SOURCE_SCHEMA_VERSION,
+        )?;
+        if let Some(approval) = approval {
+            persist_feat137_approval(&transaction, approval, durable_sequence)?;
+        }
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(durable_sequence)
+    }
+
     pub fn commit_feat134_terminal(
         &mut self,
         projection: &Feat134Projection,
     ) -> Result<u64, ChatError> {
-        self.commit_projection_terminal(projection, FEAT134_SOURCE_SCHEMA_VERSION)
+        self.commit_projection_terminal(projection, FEAT134_SOURCE_SCHEMA_VERSION, false)
     }
 
     pub fn commit_feat136_terminal(
         &mut self,
         projection: &Feat134Projection,
     ) -> Result<u64, ChatError> {
-        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION)
+        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION, false)
+    }
+
+    pub fn commit_feat137_terminal(
+        &mut self,
+        projection: &Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION, true)
     }
 
     fn commit_projection_terminal(
         &mut self,
         projection: &Feat134Projection,
         source_schema_version: u8,
+        feat137_stream: bool,
     ) -> Result<u64, ChatError> {
         validate_projection_for_schema(projection, source_schema_version)?;
         let terminal = projection
@@ -4265,6 +4335,9 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if feat137_stream {
+            mark_feat137_turn_stream(&transaction, projection.turn_id)?;
+        }
         let (session_id, operation_id, current_status): (String, String, String) = transaction
             .query_row(
                 "SELECT t.session_id, t.operation_id, t.status
@@ -4361,20 +4434,28 @@ impl ChatRepository {
         &mut self,
         failure: &Feat134ProjectionFailure,
     ) -> Result<Feat134Projection, ChatError> {
-        self.commit_projection_failure(failure, FEAT134_SOURCE_SCHEMA_VERSION)
+        self.commit_projection_failure(failure, FEAT134_SOURCE_SCHEMA_VERSION, false)
     }
 
     pub fn commit_feat136_projection_failure(
         &mut self,
         failure: &Feat134ProjectionFailure,
     ) -> Result<Feat134Projection, ChatError> {
-        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION)
+        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION, false)
+    }
+
+    pub fn commit_feat137_projection_failure(
+        &mut self,
+        failure: &Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION, true)
     }
 
     fn commit_projection_failure(
         &mut self,
         failure: &Feat134ProjectionFailure,
         source_schema_version: u8,
+        feat137_stream: bool,
     ) -> Result<Feat134Projection, ChatError> {
         if !matches!(source_schema_version, 4 | 5) {
             return Err(ChatError::InvalidInput);
@@ -4409,6 +4490,9 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if feat137_stream {
+            mark_feat137_turn_stream(&transaction, failure.turn_id)?;
+        }
         let (session_id, operation_id, current_status, runtime_turn_id): (
             String,
             String,
@@ -4886,6 +4970,23 @@ impl ChatRepository {
             before_ordinal,
             requested_limit,
             FEAT136_SOURCE_SCHEMA_VERSION,
+            false,
+            || Ok(()),
+        )
+    }
+
+    pub fn load_feat137_history_snapshot(
+        &mut self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        requested_limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.load_history_snapshot_for_schema_with_hook(
+            session_id,
+            before_ordinal,
+            requested_limit,
+            FEAT136_SOURCE_SCHEMA_VERSION,
+            true,
             || Ok(()),
         )
     }
@@ -4905,6 +5006,7 @@ impl ChatRepository {
             before_ordinal,
             requested_limit,
             FEAT134_SOURCE_SCHEMA_VERSION,
+            false,
             after_base_read,
         )
     }
@@ -4915,6 +5017,7 @@ impl ChatRepository {
         before_ordinal: Option<u64>,
         requested_limit: Option<usize>,
         source_schema_version: u8,
+        include_approvals: bool,
         after_base_read: F,
     ) -> Result<Feat134HistorySnapshot, ChatError>
     where
@@ -4961,6 +5064,11 @@ impl ChatRepository {
             &turn_ids,
             source_schema_version,
         )?;
+        let approvals = if include_approvals {
+            load_feat137_approvals(&transaction, &self.scope, session_id, &turn_ids)?
+        } else {
+            Vec::new()
+        };
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -4970,6 +5078,7 @@ impl ChatRepository {
             message_content_blocks,
             artifacts,
             feat134,
+            approvals,
         })
     }
 
@@ -5017,6 +5126,10 @@ impl ChatRepository {
                         EXISTS(
                            SELECT 1 FROM chat_observed_events_v4 e
                            WHERE e.turn_id=t.id AND e.source_schema_version=5
+                         ),
+                        EXISTS(
+                           SELECT 1 FROM chat_turn_stream_versions_v6 v
+                           WHERE v.turn_id=t.id AND v.schema_version=6
                          )
                  FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
                  WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
@@ -5025,16 +5138,23 @@ impl ChatRepository {
                     self.scope.owner_user_id,
                     self.scope.tenant_id
                 ],
-                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, bool>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .ok_or(ChatError::NotFound)?;
         match authority {
-            (false, false) => Ok(None),
-            (true, false) => Ok(Some(FEAT134_SOURCE_SCHEMA_VERSION)),
-            (false, true) => Ok(Some(FEAT136_SOURCE_SCHEMA_VERSION)),
-            (true, true) => Err(ChatError::DatabaseUnavailable),
+            (false, false, false) => Ok(None),
+            (true, false, false) => Ok(Some(FEAT134_SOURCE_SCHEMA_VERSION)),
+            (false, true, false) => Ok(Some(FEAT136_SOURCE_SCHEMA_VERSION)),
+            (false, true, true) => Ok(Some(super::feat137::SOURCE_SCHEMA_VERSION)),
+            _ => Err(ChatError::DatabaseUnavailable),
         }
     }
 
@@ -5068,6 +5188,10 @@ impl ChatRepository {
                 TimelineNoticeScope::Turn,
             )?,
         })
+    }
+
+    pub fn load_feat137_hydration(&self, turn_id: Uuid) -> Result<Feat134Hydration, ChatError> {
+        self.load_feat136_hydration(turn_id)
     }
 
     pub fn classify_feat136_observed_event(
@@ -6323,6 +6447,7 @@ impl ChatRepository {
             ("chat_outbox", "session_id"),
             ("chat_public_task_bindings", "session_id"),
             ("chat_output_artifacts", "session_id"),
+            ("chat_approval_items_v6", "session_id"),
         ] {
             let query = format!("SELECT count(*) FROM {table} WHERE {column}=?1");
             let count: i64 = transaction
@@ -6347,7 +6472,12 @@ impl ChatRepository {
             }
         }
         for turn_id in turn_ids {
-            for table in ["chat_reasoning_items", "chat_reasoning_parts"] {
+            for table in [
+                "chat_reasoning_items",
+                "chat_reasoning_parts",
+                "chat_turn_stream_versions_v6",
+                "chat_approval_items_v6",
+            ] {
                 let query = format!("SELECT count(*) FROM {table} WHERE turn_id=?1");
                 let count: i64 = transaction
                     .query_row(&query, [turn_id.as_str()], |row| row.get(0))
@@ -6471,6 +6601,35 @@ impl ChatRepository {
             )
             .unwrap();
     }
+}
+
+fn mark_feat137_turn_stream(transaction: &Transaction<'_>, turn_id: Uuid) -> Result<(), ChatError> {
+    let marked: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_turn_stream_versions_v6 WHERE turn_id=?1)",
+            [turn_id.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if !marked {
+        let observed: bool = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_observed_events_v4 WHERE turn_id=?1)",
+                [turn_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if observed {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "INSERT INTO chat_turn_stream_versions_v6(turn_id, schema_version) VALUES (?1, 6)",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+    }
+    Ok(())
 }
 
 fn validate_reasoning(
@@ -8068,6 +8227,132 @@ fn load_feat134_notices(
         .collect()
 }
 
+fn load_feat137_approvals(
+    connection: &Connection,
+    scope: &ChatScope,
+    session_id: Uuid,
+    turn_ids: &[Uuid],
+) -> Result<Vec<ApprovalProjection>, ChatError> {
+    if turn_ids.len() > MAX_PAGE_SIZE || turn_ids.iter().any(Uuid::is_nil) {
+        return Err(ChatError::InvalidInput);
+    }
+    let owned: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM chat_sessions
+               WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3
+             )",
+            params![session_id.to_string(), scope.owner_user_id, scope.tenant_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if !owned {
+        return Err(ChatError::NotFound);
+    }
+    let selected = turn_ids.iter().copied().collect::<HashSet<_>>();
+    let mut statement = connection
+        .prepare(
+            "SELECT a.approval_request_id, a.turn_id, a.item_id, a.status, a.revision,
+                    a.requested_at, a.expires_at, a.outcome, a.decision_id, a.decision,
+                    a.resolved_at, a.source_event_id, a.source_sequence,
+                    a.source_occurred_at, a.durable_sequence
+             FROM chat_approval_items_v6 a
+             JOIN chat_command_items_v5 c ON c.turn_id=a.turn_id AND c.item_id=a.item_id
+             WHERE a.session_id=?1
+             ORDER BY a.durable_sequence, a.approval_request_id",
+        )
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    let rows = statement
+        .query_map([session_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, String>(11)?,
+                row.get::<_, i64>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, i64>(14)?,
+            ))
+        })
+        .map_err(|_| ChatError::DatabaseUnavailable)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ChatError::DatabaseUnavailable)?;
+    if rows.len() > MAX_FEAT137_APPROVALS_PER_SESSION {
+        return Err(ChatError::DatabaseUnavailable);
+    }
+    let mut approvals = Vec::new();
+    for row in rows {
+        let turn_id = parse_uuid_value(&row.1)?;
+        if !selected.contains(&turn_id) {
+            continue;
+        }
+        let (status, outcome, decision) =
+            match (row.3.as_str(), row.4, row.7.as_deref(), row.9.as_deref()) {
+                ("pending", 1, None, None) => (ApprovalProjectionStatus::Pending, None, None),
+                ("resolved", 2, Some("accepted_once"), Some("accept_once")) => (
+                    ApprovalProjectionStatus::Resolved,
+                    Some(HostApprovalOutcome::AcceptedOnce),
+                    Some(HostApprovalDecision::AcceptOnce),
+                ),
+                ("resolved", 2, Some("cancelled_current_turn"), Some("cancel_current_turn")) => (
+                    ApprovalProjectionStatus::Resolved,
+                    Some(HostApprovalOutcome::CancelledCurrentTurn),
+                    Some(HostApprovalDecision::CancelCurrentTurn),
+                ),
+                ("resolved", 2, Some("expired"), None) => (
+                    ApprovalProjectionStatus::Resolved,
+                    Some(HostApprovalOutcome::Expired),
+                    None,
+                ),
+                ("resolved", 2, Some("resolved_elsewhere"), None) => (
+                    ApprovalProjectionStatus::Resolved,
+                    Some(HostApprovalOutcome::ResolvedElsewhere),
+                    None,
+                ),
+                _ => return Err(ChatError::DatabaseUnavailable),
+            };
+        let decision_id = row.8.as_deref().map(parse_uuid_value).transpose()?;
+        if (decision.is_some() != decision_id.is_some())
+            || (status == ApprovalProjectionStatus::Resolved) != row.10.is_some()
+            || row.2.is_empty()
+            || row.2.len() > 1024
+        {
+            return Err(ChatError::DatabaseUnavailable);
+        }
+        let approval = ApprovalProjection {
+            session_id,
+            turn_id,
+            item_id: row.2,
+            approval_request_id: parse_uuid_value(&row.0)?,
+            status,
+            revision: u8::try_from(row.4).map_err(|_| ChatError::DatabaseUnavailable)?,
+            requested_at: row.5,
+            expires_at: row.6,
+            outcome,
+            decision_id,
+            decision,
+            resolved_at: row.10,
+            source_event_id: parse_uuid_value(&row.11)?,
+            source_sequence: u64::try_from(row.12).map_err(|_| ChatError::DatabaseUnavailable)?,
+            source_occurred_at: row.13,
+            durable_sequence: Some(
+                u64::try_from(row.14).map_err(|_| ChatError::DatabaseUnavailable)?,
+            ),
+        };
+        approval.validate_durable()?;
+        approvals.push(approval);
+    }
+    Ok(approvals)
+}
+
 fn load_feat134_history_projection_from_connection(
     connection: &Connection,
     scope: &ChatScope,
@@ -8591,6 +8876,173 @@ fn feat134_history_turn_json_bytes(projection: &Feat134Projection) -> Result<usi
     }))
     .map(|encoded| encoded.len())
     .map_err(|_| ChatError::InvalidInput)
+}
+
+fn validate_feat137_projection_pair(
+    projection: &Feat134Projection,
+    approval: Option<&ApprovalProjection>,
+) -> Result<(), ChatError> {
+    let approval_event = matches!(
+        projection.source_event_type.as_str(),
+        "approval.requested" | "approval.resolved"
+    );
+    if approval_event != approval.is_some() {
+        return Err(ChatError::InvalidInput);
+    }
+    let Some(approval) = approval else {
+        return Ok(());
+    };
+    if approval.session_id != projection.session_id
+        || approval.turn_id != projection.turn_id
+        || approval.source_event_id != projection.cursor.event_id
+        || approval.source_sequence != projection.cursor.sequence
+        || approval.source_occurred_at != projection.source_occurred_at
+        || approval.durable_sequence.is_some()
+        || approval.item_id.is_empty()
+        || approval.item_id.len() > 1024
+        || !projection.items.iter().any(|item| {
+            item.item_id == approval.item_id
+                && item.item_type == "command"
+                && matches!(item.execution, Some(ExecutionProjection::Command(_)))
+        })
+        || approval.requested_at.len() > 64
+        || approval.expires_at.len() > 64
+    {
+        return Err(ChatError::InvalidInput);
+    }
+    match (
+        projection.source_event_type.as_str(),
+        approval.status,
+        approval.revision,
+        approval.outcome,
+        approval.decision_id,
+        approval.decision,
+        approval.resolved_at.as_deref(),
+    ) {
+        ("approval.requested", ApprovalProjectionStatus::Pending, 1, None, None, None, None) => {}
+        (
+            "approval.resolved",
+            ApprovalProjectionStatus::Resolved,
+            2,
+            Some(HostApprovalOutcome::AcceptedOnce),
+            Some(_),
+            Some(HostApprovalDecision::AcceptOnce),
+            Some(_),
+        )
+        | (
+            "approval.resolved",
+            ApprovalProjectionStatus::Resolved,
+            2,
+            Some(HostApprovalOutcome::CancelledCurrentTurn),
+            Some(_),
+            Some(HostApprovalDecision::CancelCurrentTurn),
+            Some(_),
+        )
+        | (
+            "approval.resolved",
+            ApprovalProjectionStatus::Resolved,
+            2,
+            Some(HostApprovalOutcome::Expired | HostApprovalOutcome::ResolvedElsewhere),
+            None,
+            None,
+            Some(_),
+        ) => {}
+        _ => return Err(ChatError::InvalidInput),
+    }
+    Ok(())
+}
+
+fn persist_feat137_approval(
+    transaction: &Transaction<'_>,
+    approval: &ApprovalProjection,
+    durable_sequence: u64,
+) -> Result<(), ChatError> {
+    let durable_sequence = i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?;
+    let source_sequence =
+        i64::try_from(approval.source_sequence).map_err(|_| ChatError::InvalidInput)?;
+    match approval.status {
+        ApprovalProjectionStatus::Pending => {
+            let count: i64 = transaction
+                .query_row(
+                    "SELECT count(*) FROM chat_approval_items_v6 WHERE session_id=?1",
+                    [approval.session_id.to_string()],
+                    |row| row.get(0),
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            if count >= MAX_FEAT137_APPROVALS_PER_SESSION as i64 {
+                let remove = count - MAX_FEAT137_APPROVALS_PER_SESSION as i64 + 1;
+                let deleted = transaction
+                    .execute(
+                        "DELETE FROM chat_approval_items_v6
+                         WHERE approval_request_id IN (
+                           SELECT approval_request_id FROM chat_approval_items_v6
+                           WHERE session_id=?1 AND status='resolved'
+                           ORDER BY durable_sequence, approval_request_id LIMIT ?2
+                         )",
+                        params![approval.session_id.to_string(), remove],
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if i64::try_from(deleted).ok() != Some(remove) {
+                    return Err(ChatError::DatabaseUnavailable);
+                }
+            }
+            transaction
+                .execute(
+                    "INSERT INTO chat_approval_items_v6(
+                       approval_request_id, session_id, turn_id, item_id, status, revision,
+                       requested_at, expires_at, outcome, decision_id, decision, resolved_at,
+                       source_event_id, source_sequence, source_occurred_at, durable_sequence
+                     ) VALUES (?1, ?2, ?3, ?4, 'pending', 1, ?5, ?6, NULL, NULL, NULL, NULL,
+                               ?7, ?8, ?9, ?10)",
+                    params![
+                        approval.approval_request_id.to_string(),
+                        approval.session_id.to_string(),
+                        approval.turn_id.to_string(),
+                        approval.item_id,
+                        approval.requested_at,
+                        approval.expires_at,
+                        approval.source_event_id.to_string(),
+                        source_sequence,
+                        approval.source_occurred_at,
+                        durable_sequence,
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+        }
+        ApprovalProjectionStatus::Resolved => {
+            let outcome = approval.outcome.ok_or(ChatError::InvalidInput)?.as_str();
+            let changed = transaction
+                .execute(
+                    "UPDATE chat_approval_items_v6
+                     SET status='resolved', revision=2, outcome=?1, decision_id=?2, decision=?3,
+                         resolved_at=?4, source_event_id=?5, source_sequence=?6,
+                         source_occurred_at=?7, durable_sequence=?8
+                     WHERE approval_request_id=?9 AND session_id=?10 AND turn_id=?11 AND item_id=?12
+                       AND status='pending' AND revision=1 AND requested_at=?13 AND expires_at=?14",
+                    params![
+                        outcome,
+                        approval.decision_id.map(|value| value.to_string()),
+                        approval.decision.map(HostApprovalDecision::as_str),
+                        approval.resolved_at,
+                        approval.source_event_id.to_string(),
+                        source_sequence,
+                        approval.source_occurred_at,
+                        durable_sequence,
+                        approval.approval_request_id.to_string(),
+                        approval.session_id.to_string(),
+                        approval.turn_id.to_string(),
+                        approval.item_id,
+                        approval.requested_at,
+                        approval.expires_at,
+                    ],
+                )
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            if changed != 1 {
+                return Err(ChatError::ConversationConflict);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn persist_feat134_projection_transaction(
@@ -9874,8 +10326,9 @@ fn unix_seconds() -> Result<i64, ChatError> {
 mod tests {
     use super::*;
     use crate::chat::host_domain::{
-        HostCommandCwd, HostCommandErrorCode, HostCommandOutput, HostCommandStatus, HostEvent,
-        HostEventCursor, HostEventKind, HostProjectionError, HostSafeText,
+        HostApprovalRequested, HostCommandCwd, HostCommandErrorCode, HostCommandOutput,
+        HostCommandStatus, HostEvent, HostEventCursor, HostEventKind, HostProjectionError,
+        HostSafeText,
     };
     use crate::chat::{Feat134TurnReducer, SourceIdentity, TimelineDelta, TimelineTerminal};
     use std::os::unix::fs::symlink;
@@ -12815,6 +13268,114 @@ mod tests {
         );
         Feat134TurnReducer::new_v5(reopened_context, Some(hydration))
             .expect("reopened failed Command hydration must remain valid");
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat137_safe_approval_survives_sqlcipher_reopen_and_tampered_time_fails_closed() {
+        let root = std::env::temp_dir().join(format!("yijie-feat137-safe-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 137);
+        let repository_scope = repository.scope.clone();
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let stream_id = Uuid::now_v7();
+        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
+        let started_event = HostEvent {
+            cursor: HostEventCursor::new(stream_id, 1).unwrap(),
+            event_type: "item.started".to_owned(),
+            event_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            codex_thread_id: context.codex_thread_id,
+            turn_id: Some(context.runtime_turn_id),
+            item_id: Some("command-approval".to_owned()),
+            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+            encoded_bytes: 1,
+            kind: HostEventKind::CommandStarted {
+                command_summary: HostSafeText {
+                    text: "Inspect repository state".to_owned(),
+                    truncated: false,
+                    truncation_reason: None,
+                },
+                cwd: HostCommandCwd::WorkspaceRoot,
+            },
+        };
+        let started = reducer.apply(started_event, 1_000).unwrap().unwrap();
+        assert_eq!(
+            repository
+                .persist_feat137_projection(&started, None)
+                .unwrap(),
+            1
+        );
+
+        let approval_request_id = Uuid::now_v7();
+        let approval_event = HostEvent {
+            cursor: HostEventCursor::new(stream_id, 2).unwrap(),
+            event_type: "approval.requested".to_owned(),
+            event_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            codex_thread_id: context.codex_thread_id,
+            turn_id: Some(context.runtime_turn_id),
+            item_id: Some("command-approval".to_owned()),
+            occurred_at: "2026-08-30T00:00:01Z".to_owned(),
+            encoded_bytes: 1,
+            kind: HostEventKind::ApprovalRequested(HostApprovalRequested {
+                approval_request_id,
+                requested_at: "2026-08-30T00:00:01Z".to_owned(),
+                expires_at: "2026-08-30T00:02:01Z".to_owned(),
+            }),
+        };
+        let approval = ApprovalProjection::from_event(
+            &approval_event,
+            pending.session_id,
+            context.turn_id,
+            context.runtime_turn_id,
+        )
+        .unwrap()
+        .unwrap();
+        let projection = reducer.apply(approval_event, 1_001).unwrap().unwrap();
+        assert_eq!(
+            repository
+                .persist_feat137_projection(&projection, Some(&approval))
+                .unwrap(),
+            2
+        );
+
+        drop(repository);
+        let mut repository = open_repository_for_scope(&root, 137, repository_scope);
+        let snapshot = repository
+            .load_feat137_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(snapshot.approvals.len(), 1);
+        assert_eq!(snapshot.approvals[0].turn_id, context.turn_id);
+        assert_eq!(
+            snapshot.approvals[0].approval_request_id,
+            approval_request_id
+        );
+        assert_eq!(
+            snapshot.approvals[0].status,
+            ApprovalProjectionStatus::Pending
+        );
+
+        repository
+            .connection
+            .execute(
+                "UPDATE chat_approval_items_v6 SET expires_at='2026-08-30T00:02:00Z'
+                 WHERE approval_request_id=?1",
+                [approval_request_id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            repository.load_feat137_history_snapshot(pending.session_id, None, Some(20)),
+            Err(ChatError::DatabaseUnavailable)
+        );
         drop(repository);
         fs::remove_dir_all(root).unwrap();
     }

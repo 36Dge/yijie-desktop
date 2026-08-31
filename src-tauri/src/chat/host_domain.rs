@@ -23,6 +23,7 @@ const MAX_TOOL_ARGUMENTS_BYTES: usize = 8 * 1024;
 const MAX_TOOL_PROGRESS_BYTES: usize = 4 * 1024;
 const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
 const MAX_EXECUTION_ERROR_BYTES: usize = 4 * 1024;
+const APPROVAL_TTL_SECONDS: i128 = 120;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostBridgeErrorKind {
@@ -42,6 +43,14 @@ pub enum HostErrorCode {
     Unauthorized,
     CapabilityDenied,
     InvalidRequest,
+    InvalidApprovalRequest,
+    ApprovalVersionMismatch,
+    ApprovalNotFound,
+    ApprovalStale,
+    ApprovalExpired,
+    ApprovalAlreadyResolved,
+    ApprovalDecisionConflict,
+    ApprovalUnavailable,
     SkillNotFound,
     SkillNotInstallable,
     SkillOperationConflict,
@@ -347,6 +356,81 @@ pub enum HostToolStatus {
     Declined,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostApprovalDecision {
+    AcceptOnce,
+    CancelCurrentTurn,
+}
+
+impl HostApprovalDecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptOnce => "accept_once",
+            Self::CancelCurrentTurn => "cancel_current_turn",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostApprovalOutcome {
+    AcceptedOnce,
+    CancelledCurrentTurn,
+    Expired,
+    ResolvedElsewhere,
+}
+
+impl HostApprovalOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedOnce => "accepted_once",
+            Self::CancelledCurrentTurn => "cancelled_current_turn",
+            Self::Expired => "expired",
+            Self::ResolvedElsewhere => "resolved_elsewhere",
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HostApprovalRequested {
+    pub approval_request_id: Uuid,
+    pub requested_at: String,
+    pub expires_at: String,
+}
+
+impl Debug for HostApprovalRequested {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostApprovalRequested")
+            .field("revision", &1)
+            .field("action_id", &"git_repository_check")
+            .field("workspace_scope", &"current_workspace")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct HostApprovalResolved {
+    pub approval_request_id: Uuid,
+    pub outcome: HostApprovalOutcome,
+    pub decision_id: Option<Uuid>,
+    pub decision: Option<HostApprovalDecision>,
+    pub requested_at: String,
+    pub expires_at: String,
+    pub resolved_at: String,
+}
+
+impl Debug for HostApprovalResolved {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostApprovalResolved")
+            .field("revision", &2)
+            .field("outcome", &self.outcome)
+            .field("decision_present", &self.decision.is_some())
+            .finish()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostCleanupSurfaceStatus {
     Complete,
@@ -414,6 +498,7 @@ impl Debug for HostReasoningPart {
     }
 }
 
+#[derive(Clone)]
 pub enum HostEventKind {
     ThreadStarted {
         model: String,
@@ -479,6 +564,8 @@ pub enum HostEventKind {
         result_summary: Option<HostSafeText>,
         error: Option<HostProjectionError<HostToolErrorCode>>,
     },
+    ApprovalRequested(HostApprovalRequested),
+    ApprovalResolved(HostApprovalResolved),
     TurnCompleted {
         status: HostTurnStatus,
         code: Option<String>,
@@ -513,6 +600,8 @@ impl HostEventKind {
             Self::ToolStarted { .. } => "item.started/mcpToolCall",
             Self::ToolProgress { .. } => "item.tool.progress",
             Self::ToolCompleted { .. } => "item.completed/mcpToolCall",
+            Self::ApprovalRequested(_) => "approval.requested",
+            Self::ApprovalResolved(_) => "approval.resolved",
             Self::TurnCompleted { .. } => "turn.completed",
             Self::Error { .. } => "error",
             Self::Warning { .. } => "warning",
@@ -530,6 +619,7 @@ impl Debug for HostEventKind {
     }
 }
 
+#[derive(Clone)]
 pub struct HostEvent {
     pub cursor: HostEventCursor,
     pub event_type: String,
@@ -832,6 +922,43 @@ struct ToolCompletedPayloadV5 {
     error: Option<WireProjectionError>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireApprovalDecisionSetV6 {
+    primary: String,
+    secondary: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalRequestedPayloadV6 {
+    item_type: String,
+    approval_request_id: String,
+    revision: u8,
+    action_id: String,
+    workspace_scope: String,
+    decisions: WireApprovalDecisionSetV6,
+    requested_at: String,
+    expires_at: String,
+    ttl_seconds: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalResolvedPayloadV6 {
+    item_type: String,
+    approval_request_id: String,
+    revision: u8,
+    action_id: String,
+    workspace_scope: String,
+    outcome: String,
+    decision_id: Option<String>,
+    decision: Option<String>,
+    requested_at: String,
+    expires_at: String,
+    resolved_at: String,
+}
+
 pub(super) struct SseDecoder {
     schema_version: u8,
     expected_stream: Uuid,
@@ -1008,11 +1135,11 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let raw: Value = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if schema_version == 5 {
+    if schema_version >= 5 {
         validate_v5_explicit_nulls(&raw)?;
     }
     let wire: WireEvent = serde_json::from_value(raw).map_err(|_| protocol_error())?;
-    if !matches!(schema_version, 2..=5)
+    if !matches!(schema_version, 2..=6)
         || wire.schema_version != schema_version
         || wire.sequence == 0
         || wire.occurred_at.len() > 64
@@ -1029,7 +1156,7 @@ fn parse_event_json(
     .into_iter()
     .flatten()
     {
-        let over_limit = if schema_version == 5 {
+        let over_limit = if schema_version >= 5 {
             value.chars().count() > MAX_CONTEXT_BYTES || value.len() > MAX_V5_CONTEXT_UTF8_BYTES
         } else {
             value.len() > MAX_CONTEXT_BYTES
@@ -1056,7 +1183,7 @@ fn parse_event_json(
     let item_id = wire
         .item_id
         .map(|value| {
-            let over_limit = if schema_version == 5 {
+            let over_limit = if schema_version >= 5 {
                 value.chars().count() > MAX_CONTEXT_BYTES || value.len() > MAX_V5_CONTEXT_UTF8_BYTES
             } else {
                 value.len() > maximum_item_id_bytes
@@ -1102,6 +1229,18 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     if schema_version == 5 && !is_v5_ordinary_event_type(&event_type) {
+        return Err(protocol_error());
+    }
+    if schema_version == 6 && !is_v6_ordinary_event_type(&event_type) {
+        return Err(protocol_error());
+    }
+    if schema_version == 6
+        && matches!(
+            event_type.as_str(),
+            "approval.requested" | "approval.resolved"
+        )
+        && wire.request_id.is_some()
+    {
         return Err(protocol_error());
     }
     let kind = parse_event_kind(
@@ -1206,6 +1345,10 @@ fn is_v5_ordinary_event_type(value: &str) -> bool {
         || matches!(value, "item.command_output.delta" | "item.tool.progress")
 }
 
+fn is_v6_ordinary_event_type(value: &str) -> bool {
+    is_v5_ordinary_event_type(value) || matches!(value, "approval.requested" | "approval.resolved")
+}
+
 fn parse_event_kind(
     schema_version: u8,
     event_type: &str,
@@ -1217,7 +1360,7 @@ fn parse_event_kind(
     match event_type {
         "thread.started" if !terminal && turn_id.is_none() && item_id.is_none() => {
             let payload: ThreadStartedPayload = parse_payload(payload)?;
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 validate_text_chars_bytes(&payload.model, 256, 1024, false)?;
                 validate_text_chars_bytes(&payload.model_provider, 256, 1024, false)?;
             } else {
@@ -1243,7 +1386,7 @@ fn parse_event_kind(
             if payload.plan.len() > 128 {
                 return Err(protocol_error());
             }
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 validate_optional_text_chars_bytes(
                     payload.explanation.as_deref(),
                     16_384,
@@ -1256,7 +1399,7 @@ fn parse_event_kind(
                 .plan
                 .into_iter()
                 .map(|step| {
-                    if schema_version == 5 {
+                    if schema_version >= 5 {
                         validate_text_chars_bytes(&step.step, 16_384, 64 * 1024, true)?;
                     } else {
                         validate_text(&step.step, 64 * 1024, true)?;
@@ -1279,7 +1422,7 @@ fn parse_event_kind(
             })
         }
         "item.started" if !terminal && turn_id.is_some() && item_id.is_some() => {
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 return parse_item_started_v5(payload);
             }
             let (payload, phase) = parse_item_payload(payload, schema_version)?;
@@ -1311,17 +1454,27 @@ fn parse_event_kind(
             parse_reasoning_finalized(payload)
         }
         "item.command_output.delta"
-            if schema_version == 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
+            if schema_version >= 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
         {
             parse_command_output_delta_v5(payload)
         }
         "item.tool.progress"
-            if schema_version == 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
+            if schema_version >= 5 && !terminal && turn_id.is_some() && item_id.is_some() =>
         {
             parse_tool_progress_v5(payload)
         }
+        "approval.requested"
+            if schema_version == 6 && !terminal && turn_id.is_some() && item_id.is_some() =>
+        {
+            parse_approval_requested_v6(payload)
+        }
+        "approval.resolved"
+            if schema_version == 6 && !terminal && turn_id.is_some() && item_id.is_some() =>
+        {
+            parse_approval_resolved_v6(payload)
+        }
         "item.completed" if !terminal && turn_id.is_some() && item_id.is_some() => {
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 return parse_item_completed_v5(payload);
             }
             let (payload, phase) = parse_item_payload(payload, schema_version)?;
@@ -1339,7 +1492,7 @@ fn parse_event_kind(
                 "failed" => HostTurnStatus::Failed,
                 _ => return Err(protocol_error()),
             };
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 validate_optional_text_allow_empty(payload.code.as_deref(), MAX_EVENT_BYTES)?;
                 validate_optional_text_allow_empty(payload.message.as_deref(), MAX_EVENT_BYTES)?;
             } else {
@@ -1354,7 +1507,7 @@ fn parse_event_kind(
         }
         "error" if !terminal && turn_id.is_some() && item_id.is_none() => {
             let payload: ProblemPayload = parse_payload(payload)?;
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 validate_optional_text_allow_empty(payload.code.as_deref(), MAX_EVENT_BYTES)?;
                 validate_text(&payload.message, MAX_EVENT_BYTES, true)?;
             } else {
@@ -1372,7 +1525,7 @@ fn parse_event_kind(
             if payload.will_retry {
                 return Err(protocol_error());
             }
-            if schema_version == 5 {
+            if schema_version >= 5 {
                 validate_optional_text_chars_bytes(
                     payload.code.as_deref(),
                     256,
@@ -1394,6 +1547,103 @@ fn parse_event_kind(
         }
         _ => Err(protocol_error()),
     }
+}
+
+fn parse_approval_requested_v6(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: ApprovalRequestedPayloadV6 = parse_payload(payload)?;
+    if payload.item_type != "commandExecution"
+        || payload.revision != 1
+        || payload.action_id != "git_repository_check"
+        || payload.workspace_scope != "current_workspace"
+        || payload.decisions.primary != "accept_once"
+        || payload.decisions.secondary != "cancel_current_turn"
+        || payload.ttl_seconds != APPROVAL_TTL_SECONDS as u16
+        || !valid_approval_window(&payload.requested_at, &payload.expires_at)
+    {
+        return Err(protocol_error());
+    }
+    Ok(HostEventKind::ApprovalRequested(HostApprovalRequested {
+        approval_request_id: parse_uuid(&payload.approval_request_id)?,
+        requested_at: payload.requested_at,
+        expires_at: payload.expires_at,
+    }))
+}
+
+fn parse_approval_resolved_v6(payload: Value) -> Result<HostEventKind, HostBridgeError> {
+    let payload: ApprovalResolvedPayloadV6 = parse_payload(payload)?;
+    if payload.item_type != "commandExecution"
+        || payload.revision != 2
+        || payload.action_id != "git_repository_check"
+        || payload.workspace_scope != "current_workspace"
+        || !valid_approval_window(&payload.requested_at, &payload.expires_at)
+    {
+        return Err(protocol_error());
+    }
+    let requested_at =
+        parse_rfc3339_epoch_nanos(&payload.requested_at).ok_or_else(protocol_error)?;
+    let expires_at = parse_rfc3339_epoch_nanos(&payload.expires_at).ok_or_else(protocol_error)?;
+    let resolved_at = parse_rfc3339_epoch_nanos(&payload.resolved_at).ok_or_else(protocol_error)?;
+    let (outcome, decision_id, decision) = match payload.outcome.as_str() {
+        "accepted_once"
+            if payload.decision.as_deref() == Some("accept_once")
+                && payload.decision_id.is_some()
+                && resolved_at >= requested_at
+                && resolved_at < expires_at =>
+        {
+            (
+                HostApprovalOutcome::AcceptedOnce,
+                payload.decision_id.as_deref().map(parse_uuid).transpose()?,
+                Some(HostApprovalDecision::AcceptOnce),
+            )
+        }
+        "cancelled_current_turn"
+            if payload.decision.as_deref() == Some("cancel_current_turn")
+                && payload.decision_id.is_some()
+                && resolved_at >= requested_at
+                && resolved_at < expires_at =>
+        {
+            (
+                HostApprovalOutcome::CancelledCurrentTurn,
+                payload.decision_id.as_deref().map(parse_uuid).transpose()?,
+                Some(HostApprovalDecision::CancelCurrentTurn),
+            )
+        }
+        "expired"
+            if payload.decision_id.is_none()
+                && payload.decision.is_none()
+                && resolved_at >= expires_at =>
+        {
+            (HostApprovalOutcome::Expired, None, None)
+        }
+        "resolved_elsewhere"
+            if payload.decision_id.is_none()
+                && payload.decision.is_none()
+                && resolved_at >= requested_at
+                && resolved_at < expires_at =>
+        {
+            (HostApprovalOutcome::ResolvedElsewhere, None, None)
+        }
+        _ => return Err(protocol_error()),
+    };
+    Ok(HostEventKind::ApprovalResolved(HostApprovalResolved {
+        approval_request_id: parse_uuid(&payload.approval_request_id)?,
+        outcome,
+        decision_id,
+        decision,
+        requested_at: payload.requested_at,
+        expires_at: payload.expires_at,
+        resolved_at: payload.resolved_at,
+    }))
+}
+
+fn valid_approval_window(requested_at: &str, expires_at: &str) -> bool {
+    let Some(requested_at) = parse_rfc3339_epoch_nanos(requested_at) else {
+        return false;
+    };
+    let Some(expires_at) = parse_rfc3339_epoch_nanos(expires_at) else {
+        return false;
+    };
+    expires_at.checked_sub(requested_at) == Some(APPROVAL_TTL_SECONDS * 1_000_000_000)
 }
 
 fn valid_rfc3339(value: &str) -> bool {
@@ -1467,6 +1717,112 @@ fn valid_rfc3339(value: &str) -> bool {
             .as_bytes()
             .get(20..zone_start)
             .is_some_and(|fraction| !fraction.is_empty() && fraction.iter().all(u8::is_ascii_digit))
+}
+
+fn parse_rfc3339_epoch_nanos(value: &str) -> Option<i128> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
+        return None;
+    }
+    let year = parse_decimal(bytes.get(0..4)?)?;
+    let month = parse_decimal(bytes.get(5..7)?)?;
+    let day = parse_decimal(bytes.get(8..10)?)?;
+    let hour = parse_decimal(bytes.get(11..13)?)?;
+    let minute = parse_decimal(bytes.get(14..16)?)?;
+    let second = parse_decimal(bytes.get(17..19)?)?;
+    if year == 0
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year, month)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let mut index = 19_usize;
+    let mut fraction_nanos = 0_i128;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) && index - start < 9 {
+            fraction_nanos = fraction_nanos
+                .checked_mul(10)?
+                .checked_add(i128::from(bytes[index] - b'0'))?;
+            index += 1;
+        }
+        if index == start || bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            return None;
+        }
+        for _ in index - start..9 {
+            fraction_nanos = fraction_nanos.checked_mul(10)?;
+        }
+    }
+    let offset_seconds = if bytes.get(index) == Some(&b'Z') && index + 1 == bytes.len() {
+        0_i64
+    } else {
+        let sign = match bytes.get(index) {
+            Some(b'+') => 1_i64,
+            Some(b'-') => -1_i64,
+            _ => return None,
+        };
+        if index + 6 != bytes.len() || bytes.get(index + 3) != Some(&b':') {
+            return None;
+        }
+        let offset_hour = parse_decimal(bytes.get(index + 1..index + 3)?)?;
+        let offset_minute = parse_decimal(bytes.get(index + 4..index + 6)?)?;
+        if offset_hour > 23 || offset_minute > 59 {
+            return None;
+        }
+        sign * i64::from(offset_hour * 3600 + offset_minute * 60)
+    };
+    let days = days_from_civil(year, month, day)?;
+    let seconds = days
+        .checked_mul(86_400)?
+        .checked_add(i64::from(hour * 3600 + minute * 60 + second))?
+        .checked_sub(offset_seconds)?;
+    i128::from(seconds)
+        .checked_mul(1_000_000_000)?
+        .checked_add(fraction_nanos)
+}
+
+fn parse_decimal(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    bytes.iter().try_fold(0_u32, |value, digit| {
+        value.checked_mul(10)?.checked_add(u32::from(*digit - b'0'))
+    })
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100)) => {
+            29
+        }
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn days_from_civil(year: u32, month: u32, day: u32) -> Option<i64> {
+    let year = i64::from(year) - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era.checked_mul(146_097)?
+        .checked_add(day_of_era)?
+        .checked_sub(719_468)
 }
 
 fn parse_item_payload(
@@ -2034,6 +2390,14 @@ pub(super) fn parse_host_error_code(value: &str) -> HostErrorCode {
         "unauthorized" => HostErrorCode::Unauthorized,
         "capability_denied" => HostErrorCode::CapabilityDenied,
         "invalid_request" => HostErrorCode::InvalidRequest,
+        "invalid_approval_request" => HostErrorCode::InvalidApprovalRequest,
+        "approval_version_mismatch" => HostErrorCode::ApprovalVersionMismatch,
+        "approval_not_found" => HostErrorCode::ApprovalNotFound,
+        "approval_stale" => HostErrorCode::ApprovalStale,
+        "approval_expired" => HostErrorCode::ApprovalExpired,
+        "approval_already_resolved" => HostErrorCode::ApprovalAlreadyResolved,
+        "approval_decision_conflict" => HostErrorCode::ApprovalDecisionConflict,
+        "approval_unavailable" => HostErrorCode::ApprovalUnavailable,
         "skill_not_found" => HostErrorCode::SkillNotFound,
         "skill_not_installable" => HostErrorCode::SkillNotInstallable,
         "skill_operation_conflict" => HostErrorCode::SkillOperationConflict,
@@ -2116,6 +2480,18 @@ mod tests {
 
     fn feat136_decode(value: &Value) -> Result<HostStreamEvent, HostBridgeError> {
         decode_for_schema(value, 5)
+    }
+
+    fn feat137_fixture(name: &str) -> Value {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../yijie-contracts/tests/fixtures/agent/session-event-v6")
+            .join(name);
+        serde_json::from_str(&fs::read_to_string(path).expect("read frozen v6 fixture"))
+            .expect("parse frozen v6 fixture")
+    }
+
+    fn feat137_decode(value: &Value) -> Result<HostStreamEvent, HostBridgeError> {
+        decode_for_schema(value, 6)
     }
 
     fn decode_for_schema(
@@ -2470,6 +2846,93 @@ mod tests {
                 status: HostToolStatus::Failed,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn feat137_v6_contract_fixtures_decode_to_closed_approval_variants() {
+        for name in [
+            "approval-requested.json",
+            "approval-resolved-accepted.json",
+            "approval-resolved-cancelled.json",
+            "approval-resolved-elsewhere.json",
+            "approval-resolved-expired.json",
+        ] {
+            assert!(
+                matches!(
+                    feat137_decode(&feat137_fixture(name)),
+                    Ok(HostStreamEvent::Ordinary(_))
+                ),
+                "v6 fixture did not decode: {name}"
+            );
+        }
+        let HostStreamEvent::Ordinary(requested) =
+            feat137_decode(&feat137_fixture("approval-requested.json")).unwrap()
+        else {
+            panic!("ordinary approval request expected");
+        };
+        assert_eq!(requested.item_id.as_deref(), Some("cmd-feat-137-1"));
+        let HostEventKind::ApprovalRequested(approval) = requested.kind else {
+            panic!("typed approval request expected");
+        };
+        assert_eq!(
+            approval.approval_request_id,
+            Uuid::parse_str("66666666-6666-4666-8666-666666666666").unwrap()
+        );
+        assert_eq!(approval.requested_at, "2026-08-30T12:00:00Z");
+        assert_eq!(approval.expires_at, "2026-08-30T12:02:00Z");
+
+        let HostStreamEvent::Ordinary(accepted) =
+            feat137_decode(&feat137_fixture("approval-resolved-accepted.json")).unwrap()
+        else {
+            panic!("ordinary approval resolution expected");
+        };
+        assert!(matches!(
+            accepted.kind,
+            HostEventKind::ApprovalResolved(HostApprovalResolved {
+                outcome: HostApprovalOutcome::AcceptedOnce,
+                decision: Some(HostApprovalDecision::AcceptOnce),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn feat137_v6_approval_decoder_rejects_unknown_fields_and_accepts_inherited_v5() {
+        let base = feat137_fixture("approval-requested.json");
+        for invalid in [
+            {
+                let mut value = base.clone();
+                value["raw_command"] = serde_json::json!("PRIVATE_COMMAND_CANARY");
+                value
+            },
+            {
+                let mut value = base.clone();
+                value["payload"]["reason"] = serde_json::json!("PRIVATE_REASON_CANARY");
+                value
+            },
+            {
+                let mut value = base.clone();
+                value["event_type"] = serde_json::json!("approval.future_required");
+                value
+            },
+            {
+                let mut value = base.clone();
+                value["payload"]["expires_at"] = serde_json::json!("2026-08-30T12:01:59Z");
+                value
+            },
+        ] {
+            assert!(feat137_decode(&invalid).is_err());
+        }
+
+        let mut inherited_command = feat136_fixture("command-started.json");
+        inherited_command["schema_version"] = serde_json::json!(6);
+        assert!(matches!(
+            feat137_decode(&inherited_command),
+            Ok(HostStreamEvent::Ordinary(HostEvent {
+                kind: HostEventKind::CommandStarted { .. },
+                ..
+            }))
         ));
     }
 

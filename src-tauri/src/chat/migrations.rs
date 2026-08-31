@@ -20,6 +20,7 @@ const CHAT_OUTPUT_ARTIFACTS_SQL: &str =
 const CHAT_TIMELINE_V4_SQL: &str = include_str!("../../migrations/chat/0009_chat_timeline_v4.sql");
 const CHAT_COMMAND_TOOL_V5_SQL: &str =
     include_str!("../../migrations/chat/0010_chat_command_tool_v5.sql");
+const CHAT_APPROVAL_V6_SQL: &str = include_str!("../../migrations/chat/0011_chat_approval_v6.sql");
 
 #[derive(Clone, Copy)]
 struct CatalogEntry {
@@ -28,7 +29,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 10] = [
+const CATALOG: [CatalogEntry; 11] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -78,6 +79,11 @@ const CATALOG: [CatalogEntry; 10] = [
         version: 10,
         name: "0010_chat_command_tool_v5",
         sql: CHAT_COMMAND_TOOL_V5_SQL,
+    },
+    CatalogEntry {
+        version: 11,
+        name: "0011_chat_approval_v6",
+        sql: CHAT_APPROVAL_V6_SQL,
     },
 ];
 

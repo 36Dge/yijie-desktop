@@ -12,6 +12,7 @@ mod error;
 mod feat126_eval_tests;
 mod feat134;
 mod feat136;
+mod feat137;
 mod host_bridge;
 mod host_domain;
 pub(crate) mod ipc;
@@ -69,10 +70,15 @@ pub use feat136::{
     SafeTextProjection, ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus,
     TruncationReason, FEAT136_FLAG,
 };
+pub use feat137::{
+    ApprovalProjection, ApprovalProjectionStatus, PendingApproval, PendingApprovalSnapshot,
+    FEAT137_FLAG,
+};
 pub use host_bridge::{HostBridge, HostEventStream, HostTrace};
 pub(crate) use host_bridge::{HostManagedSkill, HostSkillSnapshot};
 pub use host_domain::{
-    HostAgentMessagePhase, HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind,
+    HostAgentMessagePhase, HostApprovalDecision, HostApprovalOutcome, HostApprovalRequested,
+    HostApprovalResolved, HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind,
     HostCleanupOutcome, HostCleanupReason, HostCleanupSurfaceStatus, HostCleanupSurfaces,
     HostErrorCode, HostEvent, HostEventCursor, HostEventKind, HostPlanStep, HostPlanStepStatus,
     HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSession, HostSessionFailure,
@@ -119,6 +125,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_load_history_v2;
     let _ = ipc::chat_load_history_v3;
     let _ = ipc::chat_resync_session_v2;
+    let _ = ipc::chat_decide_approval_v6;
     let _ = ipc::chat_list_sessions_v1;
     let _ = ipc::chat_load_history_v1;
     let _ = ipc::chat_load_reasoning_v1;
@@ -146,7 +153,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "87f94c9aa6d4848cb67aa8a1265bd21474edb0bb";
+const CONTRACT_COMMIT: &str = "2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
@@ -163,6 +170,7 @@ struct LocalChatConfig {
     demo_fast: bool,
     feat134_streaming_enabled: bool,
     feat136_streaming_enabled: bool,
+    feat137_streaming_enabled: bool,
 }
 
 enum RuntimeMode {
@@ -283,9 +291,31 @@ impl ChatRuntime {
                 };
             }
         };
+        let feat137_streaming_enabled = match feat134::exact_local_enabled(
+            std::env::var(feat137::FEAT137_FLAG).ok().as_deref(),
+            std::env::var("YIJIE_ENV").ok().as_deref(),
+            std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
+        ) {
+            Ok(enabled) if !enabled || (feat134_streaming_enabled && feat136_streaming_enabled) => {
+                enabled
+            }
+            Ok(_) | Err(_) => {
+                return Self {
+                    mode: RuntimeMode::Invalid,
+                    authorization: None,
+                    worker: Mutex::new(None),
+                    initialization: Mutex::new(()),
+                    sidecar: None,
+                    host_bridge: Mutex::new(None),
+                };
+            }
+        };
         if std::env::var("YIJIE_CHAT_LOCAL_ENABLED").as_deref() != Ok("true") {
             return Self {
-                mode: if feat134_streaming_enabled || feat136_streaming_enabled {
+                mode: if feat134_streaming_enabled
+                    || feat136_streaming_enabled
+                    || feat137_streaming_enabled
+                {
                     RuntimeMode::Invalid
                 } else {
                     RuntimeMode::Disabled
@@ -328,6 +358,7 @@ impl ChatRuntime {
                             demo_fast: local_profile.is_demo_fast(),
                             feat134_streaming_enabled,
                             feat136_streaming_enabled,
+                            feat137_streaming_enabled,
                             scope,
                             secure_storage: secure_storage.clone(),
                         }),
@@ -848,6 +879,13 @@ impl ChatRuntime {
         )
     }
 
+    pub(crate) fn feat137_streaming_enabled(&self) -> bool {
+        matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat137_streaming_enabled
+        )
+    }
+
     pub async fn local_conversation_application(
         &self,
     ) -> Result<ConversationApplication, ChatError> {
@@ -858,6 +896,16 @@ impl ChatRuntime {
             RuntimeMode::Disabled => return Err(ChatError::Disabled),
             RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
         };
+        if matches!(
+            &self.mode,
+            RuntimeMode::Local(config) if config.feat137_streaming_enabled
+        ) {
+            return Ok(ConversationApplication::new_with_artifacts_v6(
+                database,
+                host,
+                public_tasks,
+            ));
+        }
         if matches!(
             &self.mode,
             RuntimeMode::Local(config) if config.feat136_streaming_enabled
@@ -1041,6 +1089,7 @@ mod tests {
                 demo_fast: false,
                 feat134_streaming_enabled: false,
                 feat136_streaming_enabled: false,
+                feat137_streaming_enabled: false,
             }),
             authorization,
             worker: Mutex::new(None),

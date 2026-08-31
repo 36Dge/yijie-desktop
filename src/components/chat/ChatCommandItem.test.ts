@@ -4,6 +4,7 @@ import axe from "axe-core";
 import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConversationApproval } from "../../domain/conversation-approval";
 import type {
   ConversationCommandExecution,
   ConversationCommandOutput,
@@ -71,6 +72,36 @@ function execution(
   });
 }
 
+function approval(
+  overrides: Partial<ConversationApproval> = {},
+): ConversationApproval {
+  return deepFreeze({
+    approvalRequestId: "66666666-6666-4666-8666-666666666666",
+    threadId: "thread-demo",
+    turnId: "turn-demo",
+    itemId: "command-demo",
+    revision: 1,
+    status: "pending",
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+    requestedAt: "2026-08-30T14:28:00.000Z",
+    expiresAt: "2026-08-30T14:30:00.000Z",
+    resolvedAt: null,
+    decisionId: null,
+    decision: null,
+    outcome: null,
+    authority: "actionable",
+    authorityStreamId: "55555555-5555-4555-8555-555555555555",
+    source: {
+      sourceEventId: "44444444-4444-4444-8444-444444444444",
+      sourceSequence: "3",
+      sourceOccurredAt: "2026-08-30T14:28:00.000Z",
+    },
+    ...overrides,
+  });
+}
+
 function item(command: ConversationCommandExecution): ConversationTimelineItemViewModel {
   const active = command.status === "running";
   const incomplete = command.status === "incomplete";
@@ -98,6 +129,7 @@ function item(command: ConversationCommandExecution): ConversationTimelineItemVi
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = "";
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -134,6 +166,94 @@ describe("ChatCommandItem", () => {
     expect(visibleStatus.text()).toBe(label);
     expect(visibleStatus.find("svg").exists()).toBe(true);
     expect(wrapper.find(".chat-command-item__details").exists()).toBe(expanded);
+  });
+
+  it("keeps actionable authority disabled until a decision bridge is explicit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-30T14:29:00.000Z"));
+    const command = execution({ status: "running", output: null, durationMs: null, exitCode: null });
+    const pending = approval();
+    const wrapper = mount(ChatCommandItem, {
+      props: { item: item(command), execution: command, approval: pending },
+    });
+
+    expect(wrapper.get(".chat-approval-card__status").text()).toContain("暂时无法确认");
+    const buttons = wrapper.findAll(".chat-approval-card__button");
+    expect(buttons.every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+    expect(wrapper.text()).not.toContain(pending.approvalRequestId);
+    expect(wrapper.text()).not.toContain(pending.authorityStreamId);
+
+    await wrapper.setProps({ canDecideApproval: true });
+    expect(wrapper.get(".chat-approval-card__status").text()).toContain("等待确认");
+    expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
+    await buttons[0]!.trigger("click");
+    await buttons[0]!.trigger("click");
+    expect(wrapper.emitted("approval-decision")).toEqual([[{
+      itemIdentity: "timeline-command-demo",
+      threadId: "thread-demo",
+      turnId: "turn-demo",
+      itemId: "command-demo",
+      approvalRequestId: pending.approvalRequestId,
+      decision: "accept_once",
+    }]]);
+  });
+
+  it.each([
+    [approval({ authority: "historical", authorityStreamId: null }), null, "连接已中断"],
+    [approval(), { phase: "submitting" as const, errorCode: null }, "正在提交"],
+    [approval(), { phase: "reconciling" as const, errorCode: null }, "正在核对"],
+    [approval(), { phase: "error" as const, errorCode: "approval_stale" as const }, "暂时无法确认"],
+  ])("maps pending authority and transient state without fail-open", (
+    pending,
+    approvalTransient,
+    label,
+  ) => {
+    const command = execution({ status: "running", output: null, durationMs: null, exitCode: null });
+    const wrapper = mount(ChatCommandItem, {
+      props: {
+        item: item(command),
+        execution: command,
+        approval: pending,
+        approvalTransient,
+        canDecideApproval: true,
+      },
+    });
+    expect(wrapper.get(".chat-approval-card__status").text()).toContain(label);
+    expect(wrapper.findAll(".chat-approval-card__button")
+      .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+  });
+
+  it.each([
+    ["accepted_once" as const, "accept_once" as const, "已允许一次"],
+    ["cancelled_current_turn" as const, "cancel_current_turn" as const, "已取消本轮"],
+    ["expired" as const, null, "确认已过期"],
+    ["resolved_elsewhere" as const, null, "已由运行状态解决"],
+  ])("renders resolved outcome %s as read-only", (outcome, decision, label) => {
+    const command = execution();
+    const resolved = approval({
+      revision: 2,
+      status: "resolved",
+      resolvedAt: "2026-08-30T14:29:00.000Z",
+      decisionId: decision === null ? null : "77777777-7777-4777-8777-777777777777",
+      decision,
+      outcome,
+      authority: "historical",
+      authorityStreamId: null,
+    });
+    const wrapper = mount(ChatCommandItem, {
+      props: {
+        item: item(command),
+        execution: command,
+        approval: resolved,
+        canDecideApproval: true,
+      },
+    });
+    expect(wrapper.find(".chat-approval-card").exists()).toBe(false);
+    return wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click").then(() => {
+      expect(wrapper.get(".chat-approval-card__status").text()).toContain(label);
+      expect(wrapper.findAll(".chat-approval-card__button")
+        .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+    });
   });
 
   it("shows only the safe summary, safe cwd, terminal facts and safe copy payload", async () => {

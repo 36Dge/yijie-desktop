@@ -356,6 +356,7 @@ pub fn run() {
         chat::ipc::chat_subscribe_session_v1,
         chat::ipc::chat_resync_session_v1,
         chat::ipc::chat_resync_session_v2,
+        chat::ipc::chat_decide_approval_v6,
         chat::ipc::chat_cancel_request_v1,
         chat::ipc::chat_unsubscribe_session_v1,
         #[cfg(feature = "feat128-s7b-runtime")]

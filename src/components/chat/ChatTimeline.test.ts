@@ -4,7 +4,8 @@ import axe from "axe-core";
 import { mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { h } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConversationApproval } from "../../domain/conversation-approval";
 import {
   hydrateConversationState,
   type ConversationItemSnapshot,
@@ -23,6 +24,10 @@ import ChatTimeline from "./ChatTimeline.vue";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -81,6 +86,89 @@ function message(
   };
 }
 
+function command(turnId: string): ConversationItemSnapshot {
+  const source = (sequence: string) => ({
+    sourceEventId: `command-event-${sequence}`,
+    sourceSequence: sequence,
+    sourceOccurredAt: "2026-08-30T14:28:00.000Z",
+  });
+  return {
+    threadId: THREAD_ID,
+    turnId,
+    itemId: "command-demo",
+    ordinal: 0,
+    kind: "command",
+    status: "streaming",
+    execution: {
+      kind: "command",
+      status: "running",
+      startedSource: source("1"),
+      lastSource: source("2"),
+      commandSummary: {
+        text: "检查工作区状态",
+        truncated: false,
+        truncationReason: null,
+      },
+      cwd: { kind: "workspace_root", segments: [] },
+      liveOutput: null,
+      output: null,
+      durationMs: null,
+      exitCode: null,
+      error: null,
+    },
+    contentBlocks: [],
+  };
+}
+
+function pendingApproval(turnId: string): ConversationApproval {
+  return deepFreeze({
+    approvalRequestId: "66666666-6666-4666-8666-666666666666",
+    threadId: THREAD_ID,
+    turnId,
+    itemId: "command-demo",
+    revision: 1,
+    status: "pending",
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+    requestedAt: "2026-08-30T14:28:00.000Z",
+    expiresAt: "2026-08-30T14:30:00.000Z",
+    resolvedAt: null,
+    decisionId: null,
+    decision: null,
+    outcome: null,
+    authority: "actionable",
+    authorityStreamId: "55555555-5555-4555-8555-555555555555",
+    source: {
+      sourceEventId: "44444444-4444-4444-8444-444444444444",
+      sourceSequence: "3",
+      sourceOccurredAt: "2026-08-30T14:28:00.000Z",
+    },
+  });
+}
+
+function timelineWithApproval(): ConversationTimelineViewModel {
+  const turnId = "turn-approval";
+  const timeline = projectedTimeline({
+    threadStatus: "active",
+    turns: [{
+      threadId: THREAD_ID,
+      turnId,
+      ordinal: 0,
+      status: "waiting_approval",
+      terminalStatus: null,
+    }],
+    items: [command(turnId)],
+  });
+  return deepFreeze({
+    ...timeline,
+    turns: timeline.turns.map((turn) => ({
+      ...turn,
+      items: turn.items.map((item) => ({ ...item, approval: pendingApproval(turnId) })),
+    })),
+  });
+}
+
 describe("ChatTimeline", () => {
   it("renders the selector-provided Turn and Item order without a second sort", () => {
     const timeline = projectedTimeline({
@@ -102,6 +190,49 @@ describe("ChatTimeline", () => {
     expect(turns[1]?.text()).toContain("第二轮回答");
     expect(wrapper.get("section.chat-timeline").attributes("aria-label")).toBe("对话内容");
     expect(wrapper.get("section.chat-timeline").attributes("aria-busy")).toBe("false");
+  });
+
+  it("keeps the Timeline approval bridge fail-closed and relays transient state plus typed decisions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-30T14:29:00.000Z"));
+    const timeline = timelineWithApproval();
+    const approvalRequestId = pendingApproval("turn-approval").approvalRequestId;
+    const closed = mount(ChatTimeline, { props: { timeline } });
+
+    expect(closed.findAll(".chat-approval-card__button")
+      .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+    closed.unmount();
+
+    const wrapper = mount(ChatTimeline, {
+      props: {
+        timeline,
+        canDecideApprovals: true,
+        approvalTransients: {
+          [approvalRequestId]: { phase: "submitting", errorCode: null },
+        },
+      },
+    });
+    expect(wrapper.get(".chat-approval-card__status").text()).toContain("正在提交");
+    expect(wrapper.findAll(".chat-approval-card__button")
+      .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+
+    await wrapper.setProps({
+      approvalTransients: {
+        [approvalRequestId]: { phase: "idle", errorCode: null },
+      },
+    });
+    const buttons = wrapper.findAll(".chat-approval-card__button");
+    expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
+    await buttons[0]!.trigger("click");
+
+    expect(wrapper.emitted("approval-decision")).toEqual([[{
+      itemIdentity: timeline.turns[0]!.items[0]!.identity,
+      threadId: THREAD_ID,
+      turnId: "turn-approval",
+      itemId: "command-demo",
+      approvalRequestId,
+      decision: "accept_once",
+    }]]);
   });
 
   it("integrates projected Command and Tool Items and relays their disclosures", async () => {

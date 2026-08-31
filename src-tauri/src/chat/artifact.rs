@@ -876,7 +876,7 @@ pub fn decode_artifact_event_envelope_v3(
     local_session_id: Uuid,
     local_turn_id: Uuid,
 ) -> Result<ArtifactEventV3, ChatError> {
-    if !matches!(wire.schema_version, 3..=5)
+    if !matches!(wire.schema_version, 3..=6)
         || wire.event_id.is_nil()
         || wire.cursor.stream_id.is_nil()
         || wire.cursor.sequence == 0
@@ -995,7 +995,7 @@ pub fn decode_artifact_event_envelope_v3(
                 .map_err(|_| ChatError::InvalidInput)?;
             if payload.status != "failed"
                 || payload.message.as_deref().is_some_and(|value| {
-                    if wire.schema_version == 5 {
+                    if wire.schema_version >= 5 {
                         !safe_wire_context_chars_bytes(value, 512, 2_048)
                     } else {
                         !safe_wire_context(value, 512)
@@ -3231,7 +3231,7 @@ fn valid_safe_name(value: &str) -> bool {
 
 fn valid_wire_safe_name(value: &str, schema_version: u8) -> bool {
     valid_safe_name(value)
-        && if schema_version == 5 {
+        && if schema_version >= 5 {
             value.chars().count() <= 255 && value.len() <= 1_020
         } else {
             value.len() <= 255

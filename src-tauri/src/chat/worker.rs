@@ -21,6 +21,7 @@ use super::error::ChatError;
 use super::feat134::{
     Feat134HistoryProjection, Feat134Hydration, Feat134Projection, Feat134ProjectionFailure,
 };
+use super::feat137::ApprovalProjection;
 use super::keychain::{DatabaseKeyStore, ReceiptKeyStore};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -739,6 +740,14 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn agent_session_id_for_session(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<uuid::Uuid, ChatError> {
+        self.call(move |repository| repository.agent_session_id_for_session(session_id))
+            .await
+    }
+
     pub async fn clear_event_cursor_after_stream_change(
         &self,
         session_id: uuid::Uuid,
@@ -778,6 +787,17 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn persist_feat137_projection(
+        &self,
+        projection: Feat134Projection,
+        approval: Option<ApprovalProjection>,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| {
+            repository.persist_feat137_projection(&projection, approval.as_ref())
+        })
+        .await
+    }
+
     pub async fn commit_feat134_terminal(
         &self,
         projection: Feat134Projection,
@@ -794,6 +814,14 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn commit_feat137_terminal(
+        &self,
+        projection: Feat134Projection,
+    ) -> Result<u64, ChatError> {
+        self.call(move |repository| repository.commit_feat137_terminal(&projection))
+            .await
+    }
+
     pub async fn commit_feat134_projection_failure(
         &self,
         failure: Feat134ProjectionFailure,
@@ -807,6 +835,14 @@ impl DatabaseWorker {
         failure: Feat134ProjectionFailure,
     ) -> Result<Feat134Projection, ChatError> {
         self.call(move |repository| repository.commit_feat136_projection_failure(&failure))
+            .await
+    }
+
+    pub async fn commit_feat137_projection_failure(
+        &self,
+        failure: Feat134ProjectionFailure,
+    ) -> Result<Feat134Projection, ChatError> {
+        self.call(move |repository| repository.commit_feat137_projection_failure(&failure))
             .await
     }
 
@@ -831,6 +867,14 @@ impl DatabaseWorker {
         turn_id: uuid::Uuid,
     ) -> Result<Feat134Hydration, ChatError> {
         self.call(move |repository| repository.load_feat136_hydration(turn_id))
+            .await
+    }
+
+    pub async fn load_feat137_hydration(
+        &self,
+        turn_id: uuid::Uuid,
+    ) -> Result<Feat134Hydration, ChatError> {
+        self.call(move |repository| repository.load_feat137_hydration(turn_id))
             .await
     }
 
@@ -896,6 +940,18 @@ impl DatabaseWorker {
     ) -> Result<Feat134HistorySnapshot, ChatError> {
         self.call(move |repository| {
             repository.load_feat136_history_snapshot(session_id, before_ordinal, limit)
+        })
+        .await
+    }
+
+    pub async fn load_feat137_history_snapshot(
+        &self,
+        session_id: uuid::Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.call(move |repository| {
+            repository.load_feat137_history_snapshot(session_id, before_ordinal, limit)
         })
         .await
     }

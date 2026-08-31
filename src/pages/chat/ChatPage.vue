@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
 import { useRoute, useRouter } from "vue-router";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
@@ -137,7 +138,11 @@ const conversationTimeline = computed(() => {
   const sessionId = chatStore.selectedSessionId;
   return sessionId === null
     ? null
-    : selectConversationTimeline(renderedConversationState.value, sessionId);
+    : selectConversationTimeline(
+        renderedConversationState.value,
+        sessionId,
+        chatStore.conversationApprovalState,
+      );
 });
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
@@ -236,7 +241,7 @@ const presentedConversationChange = computed(() => legacyChatTimelineRollbackEna
       chatStore.liveReasoning.length,
       chatStore.liveTurnStatus,
     ]
-  : renderedConversationState.value,
+  : [renderedConversationState.value, chatStore.conversationApprovalState],
 );
 
 watch(
@@ -249,6 +254,10 @@ function captureError(error: unknown): void {
   actionErrorCode.value = error instanceof ChatClientError
     ? error.shape.code
     : "chat_temporarily_unavailable";
+}
+
+function decideApproval(change: ChatApprovalDecisionChange): void {
+  void chatStore.decideApproval(change);
 }
 
 async function pickAttachments(): Promise<void> {
@@ -639,6 +648,10 @@ onBeforeUnmount(() => {
           <ChatTimeline
             v-if="!legacyChatTimelineRollbackEnabled && conversationTimeline"
             :timeline="conversationTimeline"
+            :can-decide-approvals="chatStore.canDecideApprovals"
+            :approval-authority-revision="chatStore.approvalAuthorityRevision"
+            :approval-transients="chatStore.approvalTransients"
+            @approval-decision="decideApproval"
           >
             <template #item-actions="{ item }">
               <ChatCopyAction

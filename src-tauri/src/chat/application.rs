@@ -20,13 +20,17 @@ use super::feat134::{
     Feat134HistoryProjection, Feat134Projection, Feat134ProjectionFailure,
     Feat134ProjectionFailureKind, Feat134TurnReducer, TimelineReasoningStatus,
 };
-use super::feat136::Feat136TurnReducer;
+use super::feat136::{ExecutionProjection, Feat136TurnReducer};
+use super::feat137::{
+    require_pending_decision_authority, ApprovalDecisionFailure, ApprovalDecisionIdentity,
+    ApprovalDecisionResult, ApprovalProjection, PendingApproval, PendingApprovalSnapshot,
+};
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
-    HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
-    HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEvent, HostEventCursor,
-    HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus, HostSessionState,
-    HostStreamEvent, HostTurnStatus,
+    HostApprovalDecision, HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind,
+    HostCleanupOutcome, HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEvent,
+    HostEventCursor, HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus,
+    HostSessionState, HostStreamEvent, HostTurnStatus,
 };
 use super::native_project;
 use super::public_tasks::{
@@ -49,6 +53,17 @@ fn feat136_active_turn_stream_schema(
     match persisted_schema_version {
         Some(4) => Ok(4),
         None | Some(5) => Ok(5),
+        Some(_) => Err(ChatError::DatabaseUnavailable),
+    }
+}
+
+fn feat137_active_turn_stream_schema(
+    persisted_schema_version: Option<u8>,
+) -> Result<u8, ChatError> {
+    match persisted_schema_version {
+        Some(4) => Ok(4),
+        Some(5) => Ok(5),
+        None | Some(6) => Ok(6),
         Some(_) => Err(ChatError::DatabaseUnavailable),
     }
 }
@@ -159,6 +174,7 @@ pub struct ConversationApplication {
     artifact_transfers: Option<ArtifactTransferService>,
     feat134_streaming_enabled: bool,
     feat136_streaming_enabled: bool,
+    feat137_streaming_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -411,6 +427,50 @@ impl AuthorizedConversationApplication {
         self.authorize(context_id, ChatAction::ReadSessions)?;
         self.application
             .load_feat136_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn load_feat137_history_snapshot(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .load_feat137_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn pending_approvals_v6(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<PendingApprovalSnapshot, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application.pending_approvals_v6(session_id).await
+    }
+
+    pub async fn decide_approval_v6(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        desktop_turn_id: Uuid,
+        item_id: &str,
+        approval_request_id: Uuid,
+        decision: HostApprovalDecision,
+    ) -> Result<ApprovalDecisionResult, ApprovalDecisionFailure> {
+        self.authorize(context_id, ChatAction::SubmitTurn)
+            .map_err(|_| ApprovalDecisionFailure::unavailable())?;
+        self.application
+            .decide_approval_v6(
+                session_id,
+                desktop_turn_id,
+                item_id,
+                approval_request_id,
+                decision,
+            )
             .await
     }
 
@@ -757,6 +817,14 @@ pub trait TurnProjectionSink: Send + Sync {
         Ok(())
     }
 
+    fn publish_feat137(
+        &self,
+        _projection: Feat134Projection,
+        _approval: Option<ApprovalProjection>,
+    ) -> Result<(), ChatError> {
+        Ok(())
+    }
+
     fn publish_coordinator(&self, _outcome: &CoordinatorOutcome) -> Result<(), ChatError> {
         Ok(())
     }
@@ -839,6 +907,7 @@ impl ConversationApplication {
             artifact_transfers: None,
             feat134_streaming_enabled: false,
             feat136_streaming_enabled: false,
+            feat137_streaming_enabled: false,
         }
     }
 
@@ -851,6 +920,7 @@ impl ConversationApplication {
             artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
             feat134_streaming_enabled: false,
             feat136_streaming_enabled: false,
+            feat137_streaming_enabled: false,
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
@@ -869,6 +939,7 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
             feat134_streaming_enabled: true,
             feat136_streaming_enabled: false,
+            feat137_streaming_enabled: false,
         }
     }
 
@@ -884,6 +955,23 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
             feat134_streaming_enabled: true,
             feat136_streaming_enabled: true,
+            feat137_streaming_enabled: false,
+        }
+    }
+
+    pub fn new_with_artifacts_v6(
+        database: DatabaseWorker,
+        host: Arc<HostBridge>,
+        public_tasks: Arc<dyn PublicTaskControlPlane>,
+    ) -> Self {
+        Self {
+            artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
+            database,
+            host: Some(host),
+            public_tasks: Some(public_tasks),
+            feat134_streaming_enabled: true,
+            feat136_streaming_enabled: true,
+            feat137_streaming_enabled: true,
         }
     }
 
@@ -895,6 +983,7 @@ impl ConversationApplication {
             artifact_transfers: None,
             feat134_streaming_enabled: false,
             feat136_streaming_enabled: false,
+            feat137_streaming_enabled: false,
         }
     }
 
@@ -1122,6 +1211,166 @@ impl ConversationApplication {
         self.database
             .load_feat136_history_snapshot(session_id, before_ordinal, limit)
             .await
+    }
+
+    pub async fn load_feat137_history_snapshot(
+        &self,
+        session_id: Uuid,
+        before_ordinal: Option<u64>,
+        limit: Option<usize>,
+    ) -> Result<Feat134HistorySnapshot, ChatError> {
+        self.database
+            .load_feat137_history_snapshot(session_id, before_ordinal, limit)
+            .await
+    }
+
+    pub async fn pending_approvals_v6(
+        &self,
+        session_id: Uuid,
+    ) -> Result<PendingApprovalSnapshot, ChatError> {
+        let agent_session_id = self
+            .database
+            .agent_session_id_for_session(session_id)
+            .await?;
+        let snapshot = self
+            .host()?
+            .pending_approvals_v6(agent_session_id)
+            .await
+            .map_err(map_host_error)?;
+        let desktop_turn_id = match self.database.active_turn_context(session_id).await {
+            Ok(context) => {
+                if context.agent_session_id != agent_session_id
+                    || context
+                        .cursor
+                        .as_ref()
+                        .is_some_and(|cursor| cursor.stream_id != snapshot.stream_id)
+                {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+                let hydration = self
+                    .database
+                    .load_feat137_hydration(context.turn_id)
+                    .await?;
+                if snapshot.pending.iter().any(|approval| {
+                    approval.task_id != context.task_id
+                        || approval.agent_session_id != context.agent_session_id
+                        || approval.codex_thread_id != context.codex_thread_id
+                        || approval.turn_id != context.runtime_turn_id
+                        || !hydration.items.iter().any(|item| {
+                            item.item_id == approval.item_id
+                                && item.item_type == "command"
+                                && matches!(
+                                    item.execution.as_ref(),
+                                    Some(ExecutionProjection::Command(_))
+                                )
+                        })
+                }) {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+                Some(context.turn_id)
+            }
+            Err(ChatError::NotFound) if snapshot.pending.is_empty() => None,
+            Err(ChatError::NotFound) => return Err(ChatError::OrchestrationUnavailable),
+            Err(error) => return Err(error),
+        };
+        Ok(PendingApprovalSnapshot {
+            stream_id: snapshot.stream_id,
+            snapshot_at: snapshot.snapshot_at,
+            pending: snapshot
+                .pending
+                .into_iter()
+                .map(|approval| {
+                    Ok(PendingApproval {
+                        approval_request_id: approval.approval_request_id,
+                        turn_id: desktop_turn_id.ok_or(ChatError::OrchestrationUnavailable)?,
+                        item_id: approval.item_id,
+                        requested_at: approval.requested_at,
+                        expires_at: approval.expires_at,
+                    })
+                })
+                .collect::<Result<Vec<_>, ChatError>>()?,
+        })
+    }
+
+    pub async fn decide_approval_v6(
+        &self,
+        session_id: Uuid,
+        desktop_turn_id: Uuid,
+        item_id: &str,
+        approval_request_id: Uuid,
+        decision: HostApprovalDecision,
+    ) -> Result<ApprovalDecisionResult, ApprovalDecisionFailure> {
+        if !self.feat137_streaming_enabled
+            || session_id.is_nil()
+            || desktop_turn_id.is_nil()
+            || approval_request_id.is_nil()
+            || item_id.is_empty()
+            || item_id.chars().count() > 256
+            || item_id.len() > 1024
+            || item_id.contains(['\r', '\n', '\0'])
+        {
+            return Err(ApprovalDecisionFailure::stale());
+        }
+        let context = self
+            .database
+            .active_turn_context(session_id)
+            .await
+            .map_err(|error| match error {
+                ChatError::NotFound => ApprovalDecisionFailure::not_found(),
+                _ => ApprovalDecisionFailure::reconciliation_required(),
+            })?;
+        if context.session_id != session_id || context.turn_id != desktop_turn_id {
+            return Err(ApprovalDecisionFailure::stale());
+        }
+        let hydration = self
+            .database
+            .load_feat137_hydration(desktop_turn_id)
+            .await
+            .map_err(|_| ApprovalDecisionFailure::reconciliation_required())?;
+        if !hydration.items.iter().any(|item| {
+            item.item_id == item_id
+                && item.item_type == "command"
+                && matches!(
+                    item.execution.as_ref(),
+                    Some(ExecutionProjection::Command(_))
+                )
+        }) {
+            return Err(ApprovalDecisionFailure::stale());
+        }
+        let host = self
+            .host()
+            .map_err(|_| ApprovalDecisionFailure::unavailable())?;
+        let snapshot = host
+            .pending_approvals_v6(context.agent_session_id)
+            .await
+            .map_err(|error| ApprovalDecisionFailure::from_host(&error))?;
+        let pending = require_pending_decision_authority(
+            &snapshot,
+            &ApprovalDecisionIdentity {
+                desktop_session_id: session_id,
+                desktop_turn_id,
+                item_id,
+                approval_request_id,
+                task_id: context.task_id,
+                agent_session_id: context.agent_session_id,
+                codex_thread_id: context.codex_thread_id,
+                runtime_turn_id: context.runtime_turn_id,
+                persisted_stream_id: context.cursor.as_ref().map(|cursor| cursor.stream_id),
+            },
+        )?;
+        let decision_id = Uuid::now_v7();
+        let result = host
+            .decide_approval_v6(
+                context.agent_session_id,
+                approval_request_id,
+                decision_id,
+                snapshot.stream_id,
+                decision,
+            )
+            .await
+            .map_err(|error| ApprovalDecisionFailure::from_host(&error))?;
+        result.validate_window(&pending.requested_at, &pending.expires_at)?;
+        Ok(result)
     }
 
     pub async fn load_reasoning(&self, turn_id: Uuid) -> Result<Vec<ReasoningItem>, ChatError> {
@@ -1879,7 +2128,28 @@ impl ConversationApplication {
                 .artifact_transfers
                 .as_ref()
                 .ok_or(ChatError::InvalidConfiguration)?;
-            return if self.feat136_streaming_enabled {
+            return if self.feat137_streaming_enabled {
+                let turn_id = self.database.active_turn_context(session_id).await?.turn_id;
+                match feat137_active_turn_stream_schema(
+                    self.database
+                        .turn_projection_schema_version(turn_id)
+                        .await?,
+                )? {
+                    4 => {
+                        self.stream_active_turn_v4(session_id, sink, artifact_transfers)
+                            .await
+                    }
+                    5 => {
+                        self.stream_active_turn_v5(session_id, sink, artifact_transfers)
+                            .await
+                    }
+                    6 => {
+                        self.stream_active_turn_v6(session_id, sink, artifact_transfers)
+                            .await
+                    }
+                    _ => Err(ChatError::DatabaseUnavailable),
+                }
+            } else if self.feat136_streaming_enabled {
                 let turn_id = self.database.active_turn_context(session_id).await?.turn_id;
                 match feat136_active_turn_stream_schema(
                     self.database
@@ -2405,6 +2675,86 @@ impl ConversationApplication {
         Ok(Some((projection, false)))
     }
 
+    async fn reduce_and_persist_feat137_event(
+        &self,
+        reducer: &mut Feat136TurnReducer,
+        event: HostEvent,
+        approval: Option<ApprovalProjection>,
+        observed_at_ms: i64,
+    ) -> Result<Option<(Feat134Projection, Option<ApprovalProjection>, bool)>, ChatError> {
+        let mut failure = Feat134ProjectionFailure {
+            session_id: reducer.session_id(),
+            turn_id: reducer.local_turn_id(),
+            cursor: StoredEventCursor {
+                stream_id: event.cursor.stream_id,
+                sequence: event.cursor.sequence,
+                event_id: event.event_id,
+            },
+            source_event_type: event.event_type.clone(),
+            source_turn_id: event.turn_id,
+            source_occurred_at: event.occurred_at.clone(),
+            source_event_bytes: event.encoded_bytes,
+            observed_at_ms,
+            kind: Feat134ProjectionFailureKind::LimitExceeded,
+        };
+        let projection = match reducer.apply(event, observed_at_ms) {
+            Ok(None) => return Ok(None),
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat137_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, None, true)));
+            }
+            Err(ChatError::ProjectionReconciliationFailed) => {
+                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
+                return self
+                    .database
+                    .commit_feat137_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, None, true)));
+            }
+            Err(error) => return Err(error),
+            Ok(Some(projection)) => projection,
+        };
+        if feat134_projection_requires_limit_terminal(&projection)? {
+            return self
+                .database
+                .commit_feat137_projection_failure(failure)
+                .await
+                .map(|projection| Some((projection, None, true)));
+        }
+        let mut projection = projection;
+        let persisted = if projection.terminal.is_some() {
+            if approval.is_some() {
+                return Err(ChatError::OrchestrationUnavailable);
+            }
+            self.database
+                .commit_feat137_terminal(projection.clone())
+                .await
+        } else {
+            self.database
+                .persist_feat137_projection(projection.clone(), approval.clone())
+                .await
+        };
+        let durable_sequence = match persisted {
+            Ok(durable_sequence) => durable_sequence,
+            Err(ChatError::ProjectionLimitExceeded) => {
+                return self
+                    .database
+                    .commit_feat137_projection_failure(failure)
+                    .await
+                    .map(|projection| Some((projection, None, true)));
+            }
+            Err(error) => return Err(error),
+        };
+        projection.durable_sequence = Some(durable_sequence);
+        let approval = approval
+            .map(|approval| approval.with_durable_sequence(durable_sequence))
+            .transpose()?;
+        Ok(Some((projection, approval, false)))
+    }
+
     async fn stream_active_turn_v4(
         &self,
         session_id: Uuid,
@@ -2638,14 +2988,43 @@ impl ConversationApplication {
         sink: &dyn TurnProjectionSink,
         artifact_transfers: &ArtifactTransferService,
     ) -> Result<(), ChatError> {
+        self.stream_active_turn_v5_or_v6(session_id, sink, artifact_transfers, 5)
+            .await
+    }
+
+    async fn stream_active_turn_v6(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+        artifact_transfers: &ArtifactTransferService,
+    ) -> Result<(), ChatError> {
+        self.stream_active_turn_v5_or_v6(session_id, sink, artifact_transfers, 6)
+            .await
+    }
+
+    async fn stream_active_turn_v5_or_v6(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+        artifact_transfers: &ArtifactTransferService,
+        schema_version: u8,
+    ) -> Result<(), ChatError> {
+        if !matches!(schema_version, 5 | 6) {
+            return Err(ChatError::InvalidConfiguration);
+        }
         artifact_transfers
             .recover_pending_acknowledgements()
             .await?;
         let mut context = self.database.active_turn_context(session_id).await?;
-        let hydration = self
-            .database
-            .load_feat136_hydration(context.turn_id)
-            .await?;
+        let hydration = if schema_version == 6 {
+            self.database
+                .load_feat137_hydration(context.turn_id)
+                .await?
+        } else {
+            self.database
+                .load_feat136_hydration(context.turn_id)
+                .await?
+        };
         let cursor = context
             .cursor
             .as_ref()
@@ -2669,18 +3048,28 @@ impl ConversationApplication {
             host_snapshot.state,
             HostSessionState::Idle | HostSessionState::Failed
         ) && host_snapshot.active_turn_id.is_none();
-        let mut stream = match host
-            .open_event_stream_v5(context.agent_session_id, cursor)
-            .await
-        {
+        let open_stream = async {
+            if schema_version == 6 {
+                host.open_event_stream_v6(context.agent_session_id, cursor)
+                    .await
+            } else {
+                host.open_event_stream_v5(context.agent_session_id, cursor)
+                    .await
+            }
+        };
+        let mut stream = match open_stream.await {
             Ok(stream) => stream,
             Err(error)
                 if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
             {
-                let stream = host
-                    .open_event_stream_v5(context.agent_session_id, None)
-                    .await
-                    .map_err(map_host_error)?;
+                let stream = if schema_version == 6 {
+                    host.open_event_stream_v6(context.agent_session_id, None)
+                        .await
+                } else {
+                    host.open_event_stream_v5(context.agent_session_id, None)
+                        .await
+                }
+                .map_err(map_host_error)?;
                 let expected = context
                     .cursor
                     .take()
@@ -2769,22 +3158,61 @@ impl ConversationApplication {
                     }
                     let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
                     let observed_at_ms = unix_millis()?;
-                    let (projection, projection_limit) = match self
-                        .reduce_and_persist_feat136_event(&mut reducer, event, observed_at_ms)
-                        .await
-                    {
-                        Ok(None) => continue,
-                        Ok(Some(result)) => result,
-                        Err(error) => {
-                            let _ = sink.publish_artifact_resync_required(
-                                session_id,
-                                reducer.local_turn_id(),
-                                resync_reason,
-                            );
-                            return Err(error);
+                    let approval = if schema_version == 6 {
+                        ApprovalProjection::from_event(
+                            &event,
+                            session_id,
+                            reducer.local_turn_id(),
+                            reducer.runtime_turn_id(),
+                        )?
+                    } else {
+                        None
+                    };
+                    let (projection, approval, projection_limit) = if schema_version == 6 {
+                        match self
+                            .reduce_and_persist_feat137_event(
+                                &mut reducer,
+                                event,
+                                approval,
+                                observed_at_ms,
+                            )
+                            .await
+                        {
+                            Ok(None) => continue,
+                            Ok(Some(result)) => result,
+                            Err(error) => {
+                                let _ = sink.publish_artifact_resync_required(
+                                    session_id,
+                                    reducer.local_turn_id(),
+                                    resync_reason,
+                                );
+                                return Err(error);
+                            }
+                        }
+                    } else {
+                        match self
+                            .reduce_and_persist_feat136_event(&mut reducer, event, observed_at_ms)
+                            .await
+                        {
+                            Ok(None) => continue,
+                            Ok(Some((projection, projection_limit))) => {
+                                (projection, None, projection_limit)
+                            }
+                            Err(error) => {
+                                let _ = sink.publish_artifact_resync_required(
+                                    session_id,
+                                    reducer.local_turn_id(),
+                                    resync_reason,
+                                );
+                                return Err(error);
+                            }
                         }
                     };
-                    sink.publish_feat136(projection.clone())?;
+                    if schema_version == 6 {
+                        sink.publish_feat137(projection.clone(), approval)?;
+                    } else {
+                        sink.publish_feat136(projection.clone())?;
+                    }
                     sink.publish(feat134_legacy_projection(&projection))?;
                     if projection.terminal.is_some() {
                         if projection_limit {
@@ -3115,6 +3543,8 @@ impl TurnEventReducer {
             | HostEventKind::ToolStarted { .. }
             | HostEventKind::ToolProgress { .. }
             | HostEventKind::ToolCompleted { .. }
+            | HostEventKind::ApprovalRequested(_)
+            | HostEventKind::ApprovalResolved(_)
             | HostEventKind::Error { .. }
             | HostEventKind::Warning { .. }
             | HostEventKind::Unknown => {}
@@ -3474,6 +3904,8 @@ fn requires_current_turn(kind: &HostEventKind) -> bool {
             | HostEventKind::ReasoningTextDelta { .. }
             | HostEventKind::ReasoningTextFinalized { .. }
             | HostEventKind::ItemCompleted { .. }
+            | HostEventKind::ApprovalRequested(_)
+            | HostEventKind::ApprovalResolved(_)
             | HostEventKind::TurnCompleted { .. }
             | HostEventKind::Error { .. }
     )
@@ -3698,6 +4130,18 @@ mod tests {
         assert_eq!(feat136_active_turn_stream_schema(Some(5)), Ok(5));
         assert_eq!(
             feat136_active_turn_stream_schema(Some(6)),
+            Err(ChatError::DatabaseUnavailable)
+        );
+    }
+
+    #[test]
+    fn feat137_active_turn_stream_version_is_sticky_at_the_turn_boundary() {
+        assert_eq!(feat137_active_turn_stream_schema(None), Ok(6));
+        assert_eq!(feat137_active_turn_stream_schema(Some(4)), Ok(4));
+        assert_eq!(feat137_active_turn_stream_schema(Some(5)), Ok(5));
+        assert_eq!(feat137_active_turn_stream_schema(Some(6)), Ok(6));
+        assert_eq!(
+            feat137_active_turn_stream_schema(Some(7)),
             Err(ChatError::DatabaseUnavailable)
         );
     }
@@ -4246,6 +4690,196 @@ mod tests {
             Ok(2)
         );
         (root, database, pending, turn, agent_session_id)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat137_decision_rebinds_local_identity_then_posts_once() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f72";
+        const TOKEN: &str = "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG";
+        let (root, database, pending_conversation, turn, agent_session_id) =
+            prepare_v2_turn_outbox("feat137-decision-binding").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending_conversation.session_id)
+            .await
+            .unwrap();
+        let stream_id = Uuid::now_v7();
+        let item_id = "command-approval";
+        let mut reducer = Feat136TurnReducer::new(context.clone(), None).unwrap();
+        let projection = reducer
+            .apply(
+                HostEvent {
+                    cursor: HostEventCursor::new(stream_id, 1).unwrap(),
+                    event_type: "item.started".to_owned(),
+                    event_id: Uuid::now_v7(),
+                    task_id: context.task_id,
+                    agent_session_id,
+                    codex_thread_id: context.codex_thread_id,
+                    turn_id: Some(runtime_turn_id),
+                    item_id: Some(item_id.to_owned()),
+                    occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+                    encoded_bytes: 1,
+                    kind: HostEventKind::CommandStarted {
+                        command_summary: crate::chat::host_domain::HostSafeText {
+                            text: "Inspect repository state".to_owned(),
+                            truncated: false,
+                            truncation_reason: None,
+                        },
+                        cwd: crate::chat::host_domain::HostCommandCwd::WorkspaceRoot,
+                    },
+                },
+                1,
+            )
+            .unwrap()
+            .unwrap();
+        database
+            .persist_feat137_projection(projection, None)
+            .await
+            .unwrap();
+
+        let approval_request_id = Uuid::now_v7();
+        let pending_body = serde_json::json!({
+            "schema_version": 6,
+            "stream_id": stream_id,
+            "snapshot_at": "2026-08-30T12:00:10Z",
+            "pending": [{
+                "approval_request_id": approval_request_id,
+                "revision": 1,
+                "task_id": context.task_id,
+                "agent_session_id": agent_session_id,
+                "codex_thread_id": context.codex_thread_id,
+                "turn_id": runtime_turn_id,
+                "item_id": item_id,
+                "action_id": "git_repository_check",
+                "workspace_scope": "current_workspace",
+                "decisions": {
+                    "primary": "accept_once",
+                    "secondary": "cancel_current_turn"
+                },
+                "requested_at": "2026-08-30T12:00:00Z",
+                "expires_at": "2026-08-30T12:02:00Z",
+                "ttl_seconds": 120
+            }]
+        })
+        .to_string();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::with_capacity(4);
+            for response in [
+                ready_response(NONCE),
+                json_response("200 OK", &pending_body),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                requests.push(read_request(&mut stream).await);
+                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+            let (mut ready, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut ready).await);
+            ready
+                .write_all(ready_response(NONCE).as_bytes())
+                .await
+                .unwrap();
+            ready.shutdown().await.unwrap();
+
+            let (mut decision_stream, _) = listener.accept().await.unwrap();
+            let decision_request = read_request(&mut decision_stream).await;
+            let encoded = decision_request
+                .split_once("\r\n\r\n")
+                .map(|(_, body)| body)
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(encoded).unwrap();
+            let decision_id = request["decision_id"].as_str().unwrap();
+            let response = serde_json::json!({
+                "schema_version": 6,
+                "approval_request_id": approval_request_id,
+                "decision_id": decision_id,
+                "stream_id": stream_id,
+                "revision": 2,
+                "decision": "accept_once",
+                "outcome": "accepted_once",
+                "resolved_at": "2026-08-30T12:00:30Z",
+            })
+            .to_string();
+            requests.push(decision_request);
+            decision_stream
+                .write_all(json_response("200 OK", &response).as_bytes())
+                .await
+                .unwrap();
+            decision_stream.shutdown().await.unwrap();
+            requests
+        });
+
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let application = ConversationApplication::new_with_artifacts_v6(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.to_owned(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+
+        assert_eq!(
+            application
+                .decide_approval_v6(
+                    pending_conversation.session_id,
+                    context.turn_id,
+                    "different-command",
+                    approval_request_id,
+                    HostApprovalDecision::AcceptOnce,
+                )
+                .await
+                .unwrap_err()
+                .issue(),
+            super::super::feat137::ApprovalIssue::ApprovalStale
+        );
+        let result = application
+            .decide_approval_v6(
+                pending_conversation.session_id,
+                context.turn_id,
+                item_id,
+                approval_request_id,
+                HostApprovalDecision::AcceptOnce,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.approval_request_id, approval_request_id);
+        assert_eq!(result.stream_id, stream_id);
+
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].starts_with(&format!(
+            "GET /v6/agent-sessions/{agent_session_id}/approvals/pending HTTP/1.1"
+        )));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.starts_with("POST "))
+                .count(),
+            1
+        );
+        assert!(!requests[3].contains(&context.turn_id.to_string()));
+        assert!(!requests[3].contains(item_id));
+
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]

@@ -22,6 +22,7 @@ const CHAT_ARTIFACTS_V3_ENV: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 const FEAT128_IMAGE_GENERATION_ENV: &str = "YIJIE_FEAT128_IMAGE_GENERATION_ENABLED";
 const FEAT134_STREAMING_ENV: &str = "YIJIE_FEAT134_STREAMING_ENABLED";
 const FEAT136_COMMAND_TOOL_ITEMS_ENV: &str = "YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED";
+const FEAT137_COMMAND_APPROVAL_ENV: &str = "YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED";
 const MODEL_PROVIDER_ENV: &str = "YIJIE_MODEL_PROVIDER";
 const MINIMAX_PROVIDER_ID: &str = "minimax";
 const MINIMAX_API_KEY_FILE_ENV: &str = "YIJIE_MINIMAX_API_KEY_FILE";
@@ -53,6 +54,7 @@ pub struct SidecarConfig {
     image_generation_enabled: bool,
     feat134_streaming_enabled: bool,
     feat136_command_tool_items_enabled: bool,
+    feat137_command_approval_enabled: bool,
     minimax_api_key_file: Option<PathBuf>,
 }
 
@@ -69,6 +71,7 @@ impl SidecarConfig {
                 || std::env::var_os(FEAT128_IMAGE_GENERATION_ENV).is_some()
                 || std::env::var_os(FEAT134_STREAMING_ENV).is_some()
                 || std::env::var_os(FEAT136_COMMAND_TOOL_ITEMS_ENV).is_some()
+                || std::env::var_os(FEAT137_COMMAND_APPROVAL_ENV).is_some()
                 || feat128_provider_environment_is_present()
                 || feat128_child_profile_is_present()
             {
@@ -123,6 +126,13 @@ impl SidecarConfig {
             std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
             feat134_streaming_enabled,
         )?;
+        let feat137_command_approval_enabled = feat137_exact_local_enabled(
+            std::env::var(FEAT137_COMMAND_APPROVAL_ENV).ok().as_deref(),
+            std::env::var("YIJIE_ENV").ok().as_deref(),
+            std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
+            feat134_streaming_enabled,
+            feat136_command_tool_items_enabled,
+        )?;
         let minimax_provider_enabled =
             parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
         let minimax_api_key_file = optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?;
@@ -175,6 +185,7 @@ impl SidecarConfig {
             image_generation_enabled,
             feat134_streaming_enabled,
             feat136_command_tool_items_enabled,
+            feat137_command_approval_enabled,
             minimax_api_key_file,
         }))
     }
@@ -220,6 +231,9 @@ impl SidecarConfig {
             values.push((FEAT134_STREAMING_ENV, "true".to_owned()));
             if self.feat136_command_tool_items_enabled {
                 values.push((FEAT136_COMMAND_TOOL_ITEMS_ENV, "true".to_owned()));
+                if self.feat137_command_approval_enabled {
+                    values.push((FEAT137_COMMAND_APPROVAL_ENV, "true".to_owned()));
+                }
             }
         }
         if let Some(roots) = skill_roots {
@@ -331,6 +345,20 @@ fn feat136_exact_local_enabled(
 ) -> Result<bool, ChatError> {
     let enabled = super::feat134::exact_local_enabled(flag, environment, profile)?;
     if enabled && !feat134_streaming_enabled {
+        return Err(ChatError::InvalidConfiguration);
+    }
+    Ok(enabled)
+}
+
+fn feat137_exact_local_enabled(
+    flag: Option<&str>,
+    environment: Option<&str>,
+    profile: Option<&str>,
+    feat134_streaming_enabled: bool,
+    feat136_command_tool_items_enabled: bool,
+) -> Result<bool, ChatError> {
+    let enabled = super::feat134::exact_local_enabled(flag, environment, profile)?;
+    if enabled && (!feat134_streaming_enabled || !feat136_command_tool_items_enabled) {
         return Err(ChatError::InvalidConfiguration);
     }
     Ok(enabled)
@@ -1645,6 +1673,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -1728,6 +1757,32 @@ mod tests {
     }
 
     #[test]
+    fn feat137_sidecar_gate_is_exact_local_and_depends_on_v4_and_v5() {
+        assert_eq!(
+            feat137_exact_local_enabled(Some("true"), Some("local"), Some("demo_fast"), true, true,),
+            Ok(true)
+        );
+        for (flag, environment, profile, feat134, feat136) in [
+            (Some("true"), Some("local"), Some("demo_fast"), false, true),
+            (Some("true"), Some("local"), Some("demo_fast"), true, false),
+            (
+                Some("true"),
+                Some("production"),
+                Some("demo_fast"),
+                true,
+                true,
+            ),
+            (Some("true"), Some("local"), Some("default"), true, true),
+            (Some("TRUE"), Some("local"), Some("demo_fast"), true, true),
+        ] {
+            assert_eq!(
+                feat137_exact_local_enabled(flag, environment, profile, feat134, feat136),
+                Err(ChatError::InvalidConfiguration)
+            );
+        }
+    }
+
+    #[test]
     fn feat136_sidecar_child_environment_is_closed_and_dependent() {
         let disabled = SidecarConfig {
             binary: PathBuf::from("/synthetic/host"),
@@ -1740,6 +1795,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -1759,7 +1815,9 @@ mod tests {
         assert!(!disabled_environment.iter().any(|(name, _)| {
             matches!(
                 *name,
-                FEAT134_STREAMING_ENV | FEAT136_COMMAND_TOOL_ITEMS_ENV
+                FEAT134_STREAMING_ENV
+                    | FEAT136_COMMAND_TOOL_ITEMS_ENV
+                    | FEAT137_COMMAND_APPROVAL_ENV
             )
         }));
 
@@ -1789,6 +1847,23 @@ mod tests {
         }
         assert!(!enabled_environment
             .iter()
+            .any(|(name, _)| *name == FEAT137_COMMAND_APPROVAL_ENV));
+        let feat137_enabled = SidecarConfig {
+            feat137_command_approval_enabled: true,
+            ..enabled
+        };
+        let feat137_environment = child_environment(&feat137_enabled);
+        assert_eq!(
+            feat137_environment
+                .iter()
+                .filter(|(name, value)| {
+                    *name == FEAT137_COMMAND_APPROVAL_ENV && value == "true"
+                })
+                .count(),
+            1
+        );
+        assert!(!enabled_environment
+            .iter()
             .any(|(name, _)| *name == "VITE_YIJIE_FEAT136_EXECUTION_ENABLED"));
     }
 
@@ -1805,6 +1880,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -1862,6 +1938,7 @@ mod tests {
             artifact_v3_enabled: true,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: true,
             image_generation_enabled: true,
@@ -2078,6 +2155,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -2283,6 +2361,7 @@ mod tests {
                 artifact_v3_enabled: false,
                 feat134_streaming_enabled: false,
                 feat136_command_tool_items_enabled: false,
+                feat137_command_approval_enabled: false,
                 feat128_s10_profile: false,
                 minimax_provider_enabled: false,
                 image_generation_enabled: false,
@@ -2373,6 +2452,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,
@@ -2736,6 +2816,7 @@ mod tests {
             artifact_v3_enabled: false,
             feat134_streaming_enabled: false,
             feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
             feat128_s10_profile: false,
             minimax_provider_enabled: false,
             image_generation_enabled: false,

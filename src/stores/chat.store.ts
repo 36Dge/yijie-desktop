@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../api/chat-client";
 import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
 import { feat136ExecutionUiEnabled } from "../authorization/feat136-execution-ui-config";
+import { feat137ApprovalUiEnabled } from "../authorization/feat137-approval-ui-config";
 import {
   conversationMessageItemId,
   conversationReasoningItemOrdinal,
@@ -15,6 +16,13 @@ import {
   historyPageV5ToConversationSnapshot,
   projectionEventToConversation,
 } from "../api/chat-conversation-adapter";
+import {
+  approvalDecisionResultV6ToDomain,
+  createApprovalDecisionIntentV6,
+  historyPageV6ToApprovalEvents,
+  historyPageV6ToConversationSnapshot,
+  projectionEventV6ToDomain,
+} from "../api/chat-approval-adapter";
 import {
   chatArtifactLiveClient,
   type ChatArtifactLiveClient,
@@ -25,6 +33,8 @@ import type {
   ChatAllowedAction,
   ChatAttachment,
   ChatAttachmentImportEvent,
+  ChatApprovalErrorCodeV6,
+  ChatApprovalDecisionV6,
   ChatCleanupStatus,
   ChatControlPlaneEvent,
   ChatDraftTarget,
@@ -33,20 +43,34 @@ import type {
   ChatHistoryTurnV4,
   ChatHistoryPageV4,
   ChatHistoryPageV5,
+  ChatHistoryPageV6,
   ChatLocalReadiness,
   ChatMessageContentBlock,
   ChatProjectionEvent,
   ChatProjectionEventV4,
   ChatProjectionEventV5,
+  ChatProjectionEventV6,
   ChatProject,
   ChatReasoningItem,
   ChatResyncProjection,
   ChatResyncProjectionV4,
   ChatResyncProjectionV5,
+  ChatResyncProjectionV6,
+  ChatPendingApprovalSnapshotV6,
   ChatSession,
   ChatSessionControlPlane,
   ChatTurnContentBlock,
 } from "../domain/chat-ipc";
+import {
+  createConversationApprovalState,
+  disconnectConversationApprovals,
+  reconcileConversationApprovalSnapshot,
+  reduceConversationApprovalEvent,
+  requireConversationApprovalReconciliation,
+  revokeExpiredConversationApprovalAuthority,
+  type ConversationApprovalState,
+} from "../domain/conversation-approval";
+import { parseStrictRfc3339EpochNanoseconds } from "../domain/rfc3339";
 import {
   CHAT_NEW_DRAFT_TARGET,
   ChatClientError,
@@ -78,6 +102,8 @@ const MAX_SEEN_ARTIFACT_EVENT_IDS = 256;
 const MAX_BUFFERED_PROJECTION_EVENTS = 64;
 const MAX_BUFFERED_PROJECTION_BYTES = 4 * 1024 * 1024;
 const MAX_BUFFERED_ARTIFACT_EVENTS = 64;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 const CLEANUP_POLL_INTERVAL_MS = 1_000;
 const CLEANUP_POLL_MAX_ATTEMPTS = 120;
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
@@ -146,6 +172,26 @@ export type ChatSubmissionResult =
 const CHAT_SUBMISSION_NOT_ACCEPTED: ChatSubmissionResult = Object.freeze({
   status: "not_accepted",
 });
+
+export type ChatApprovalTransientError = ChatApprovalErrorCodeV6 | "unknown";
+
+export interface ChatApprovalTransientState {
+  readonly phase: "idle" | "submitting" | "reconciling" | "error";
+  readonly errorCode: ChatApprovalTransientError | null;
+}
+
+export interface ChatApprovalDecisionInput {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly itemId: string;
+  readonly approvalRequestId: string;
+  readonly decision: ChatApprovalDecisionV6;
+}
+
+export type ChatApprovalDecisionDisposition =
+  | "accepted"
+  | "reconciling"
+  | "ignored";
 
 function boundedValueStorageBytes(value: unknown, remaining: number): number {
   if (remaining <= 0 || value === null || value === undefined) return 0;
@@ -216,9 +262,17 @@ export interface ChatArtifactIntegration {
 }
 
 type ArtifactEventDisposition = "ignore" | "refresh" | "resync";
-type ChatHistoryAuthority = ChatHistoryPage | ChatHistoryPageV4 | ChatHistoryPageV5;
-type ChatProjectionAuthorityEvent = ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5;
-type ChatResyncAuthority = ChatResyncProjection | ChatResyncProjectionV4 | ChatResyncProjectionV5;
+type ChatHistoryAuthority =
+  ChatHistoryPage | ChatHistoryPageV4 | ChatHistoryPageV5 | ChatHistoryPageV6;
+type ChatProjectionAuthorityEvent =
+  ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5 | ChatProjectionEventV6;
+type ChatResyncAuthority =
+  ChatResyncProjection | ChatResyncProjectionV4 | ChatResyncProjectionV5 | ChatResyncProjectionV6;
+
+type ChatSubscriptionAuthority = Readonly<{
+  subscriptionId: string;
+  pendingApprovalSnapshot: ChatPendingApprovalSnapshotV6 | null;
+}>;
 
 function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
   return "sessionNotices" in history && !("schemaVersion" in history);
@@ -227,6 +281,11 @@ function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV
 function isHistoryV5(history: ChatHistoryAuthority): history is ChatHistoryPageV5 {
   return "sessionNotices" in history && "schemaVersion" in history &&
     history.schemaVersion === 5;
+}
+
+function isHistoryV6(history: ChatHistoryAuthority): history is ChatHistoryPageV6 {
+  return "sessionNotices" in history && "schemaVersion" in history &&
+    history.schemaVersion === 6;
 }
 
 function utf8Bytes(value: string): number {
@@ -268,8 +327,10 @@ export function createChatStoreDefinition(
   artifactIntegrationFactory?: () => ChatArtifactIntegration,
   streamingV4Enabled = feat134StreamingUiEnabled,
   executionV5Enabled = feat136ExecutionUiEnabled,
+  approvalV6Enabled = feat137ApprovalUiEnabled,
 ) {
   const streamingV5Enabled = streamingV4Enabled && executionV5Enabled;
+  const streamingV6Enabled = streamingV5Enabled && approvalV6Enabled;
   return defineStore(storeId, () => {
     const artifactIntegration = artifactIntegrationFactory?.() ?? null;
     const phase = ref<ChatViewPhase>("idle");
@@ -280,6 +341,13 @@ export function createChatStoreDefinition(
     const selectedSessionId = ref<string | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
     const conversationState = shallowRef<ConversationState>(createConversationState());
+    const conversationApprovalState = shallowRef<ConversationApprovalState>(
+      createConversationApprovalState(),
+    );
+    const approvalTransients = shallowRef<Readonly<
+      Record<string, ChatApprovalTransientState | undefined>
+    >>(Object.freeze({}));
+    const approvalAuthorityRevision = ref(0);
     const liveAssistantText = ref("");
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
     const liveTurnStatus = ref<string | null>(null);
@@ -328,6 +396,13 @@ export function createChatStoreDefinition(
       draftAttachments.value.length > 0 &&
       draftAttachments.value.every((attachment) => attachment.status === "ready"),
     );
+    const canDecideApprovals = computed(() =>
+      streamingV6Enabled && context.value !== null &&
+      selectedSessionId.value !== null && subscriptionId !== null &&
+      hasAction("submit_turn") &&
+      conversationApprovalState.value.reconciliation === "synchronized" &&
+      (phase.value === "ready" || phase.value === "streaming"),
+    );
 
     let selectionEpoch = 0;
     let authorityEpoch = 0;
@@ -345,6 +420,7 @@ export function createChatStoreDefinition(
     let controlPlaneSequence: bigint | null = null;
     let activeRead: AbortController | null = null;
     let contextExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let approvalExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollEpoch = 0;
     let resyncPromise: Promise<void> | null = null;
@@ -362,6 +438,7 @@ export function createChatStoreDefinition(
     let bufferingArtifactEvents = false;
     let bufferedArtifactEvents: ChatArtifactLiveEvent[] = [];
     let bufferedArtifactEventsOverflowed = false;
+    const activeApprovalDecisionAttempts = new Map<string, symbol>();
     let artifactExpectedSequence = 0n;
     let artifactAuthorityToken: ArtifactAuthorityToken | null = null;
     const seenArtifactEventIds = new Set<string>();
@@ -446,6 +523,69 @@ export function createChatStoreDefinition(
       }
     }
 
+    function clearApprovalExpiryTimer(): void {
+      if (approvalExpiryTimer !== null) {
+        clearTimeout(approvalExpiryTimer);
+        approvalExpiryTimer = null;
+      }
+    }
+
+    function setApprovalTransient(
+      approvalRequestId: string,
+      transient: ChatApprovalTransientState | null,
+    ): void {
+      if (transient === null) {
+        if (approvalTransients.value[approvalRequestId] === undefined) return;
+        const next = { ...approvalTransients.value };
+        delete next[approvalRequestId];
+        approvalTransients.value = Object.freeze(next);
+        return;
+      }
+      approvalTransients.value = Object.freeze({
+        ...approvalTransients.value,
+        [approvalRequestId]: Object.freeze({ ...transient }),
+      });
+    }
+
+    function markApprovalTransientsReconciling(): void {
+      const entries = Object.entries(approvalTransients.value);
+      if (entries.length === 0) return;
+      approvalTransients.value = Object.freeze(Object.fromEntries(
+        entries.map(([approvalRequestId, transient]) => [
+          approvalRequestId,
+          transient === undefined
+            ? undefined
+            : Object.freeze({
+                phase: "reconciling" as const,
+                errorCode: transient.errorCode,
+              }),
+        ]),
+      ));
+    }
+
+    function settleApprovalTransientsAfterResync(): void {
+      const retained = Object.fromEntries(Object.entries(approvalTransients.value)
+        .filter(([approvalRequestId]) =>
+          activeApprovalDecisionAttempts.has(approvalRequestId)));
+      approvalTransients.value = Object.freeze(retained);
+    }
+
+    function failApprovalTransientsAfterResync(): void {
+      const entries = Object.entries(approvalTransients.value);
+      if (entries.length === 0) return;
+      approvalTransients.value = Object.freeze(Object.fromEntries(
+        entries.map(([approvalRequestId, transient]) => [
+          approvalRequestId,
+          transient === undefined || transient.phase !== "reconciling"
+            ? transient
+            : Object.freeze({
+                phase: "error" as const,
+                errorCode: transient.errorCode ?? "unknown" as const,
+              }),
+        ]),
+      ));
+    }
+
     function clearCleanupPoll(): void {
       cleanupPollEpoch += 1;
       if (cleanupPollTimer !== null) {
@@ -457,11 +597,15 @@ export function createChatStoreDefinition(
     function clearSelection(): void {
       selectionEpoch += 1;
       clearCleanupPoll();
+      clearApprovalExpiryTimer();
       activeRead?.abort();
       activeRead = null;
       selectedSessionId.value = null;
       history.value = null;
       conversationState.value = createConversationState();
+      conversationApprovalState.value = createConversationApprovalState();
+      approvalTransients.value = Object.freeze({});
+      activeApprovalDecisionAttempts.clear();
       liveAssistantText.value = "";
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
@@ -633,8 +777,10 @@ export function createChatStoreDefinition(
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
       const generation = sessionListenerEpoch;
-      const pending = (streamingV5Enabled
-        ? client.onEventV5((event) => handleEvent(event), handleInvalidEvent)
+      const pending = (streamingV6Enabled
+        ? client.onEventV6((event) => handleEvent(event), handleInvalidEvent)
+        : streamingV5Enabled
+          ? client.onEventV5((event) => handleEvent(event), handleInvalidEvent)
         : streamingV4Enabled
           ? client.onEventV4((event) => handleEvent(event), handleInvalidEvent)
           : client.onEvent((event) => handleEvent(event), handleInvalidEvent))
@@ -681,6 +827,11 @@ export function createChatStoreDefinition(
       eventUnlisten = null;
       artifactEventUnlisten?.();
       artifactEventUnlisten = null;
+      if (streamingV6Enabled) {
+        conversationApprovalState.value = disconnectConversationApprovals(
+          conversationApprovalState.value,
+        );
+      }
     }
 
     async function ensureSessionEventListeners(): Promise<void> {
@@ -1057,6 +1208,48 @@ export function createChatStoreDefinition(
       return true;
     }
 
+    function approvalProtocolError(): ChatClientError {
+      return new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    }
+
+    function reduceApprovalHistory(
+      state: ConversationApprovalState,
+      threadId: string,
+      streamId: string,
+      page: ChatHistoryPageV6,
+    ): ConversationApprovalState {
+      return historyPageV6ToApprovalEvents(threadId, streamId, page)
+        .reduce(reduceConversationApprovalEvent, state);
+    }
+
+    function reconcileApprovalAuthority(
+      state: ConversationApprovalState,
+      snapshot: ChatPendingApprovalSnapshotV6,
+      threadId: string,
+      streamId: string,
+      conversation: ConversationState,
+    ): ConversationApprovalState {
+      return reconcileConversationApprovalSnapshot(state, snapshot, {
+        nowEpochMs: Date.now(),
+        expectedThreadId: threadId,
+        expectedStreamId: streamId,
+        hasCommandItem: (candidateThreadId, turnId, itemId) => {
+          const item = selectConversationItem(
+            conversation,
+            candidateThreadId,
+            turnId,
+            itemId,
+          );
+          return item?.kind === "command" && item.execution?.kind === "command";
+        },
+      });
+    }
+
     function handleInvalidEvent(scope?: ChatInvalidEventScope | null): void {
       if (scope !== null && scope !== undefined && (
         context.value === null ||
@@ -1078,7 +1271,41 @@ export function createChatStoreDefinition(
         event.sessionId !== selectedSessionId.value
       ) return;
 
-      const adapted = projectionEventToConversation(event);
+      const adapted = event.schemaVersion === 6
+        ? projectionEventV6ToDomain(event)
+        : projectionEventToConversation(event);
+      if (adapted.kind === "approval_event") {
+        const advancedConversation = reduceConversationEvent(
+          conversationState.value,
+          Object.freeze({
+            eventId: event.eventId,
+            streamId: event.subscriptionId,
+            sequence: event.projectionSequence,
+            threadId: event.sessionId,
+            kind: "auxiliary" as const,
+          }),
+        );
+        conversationState.value = advancedConversation;
+        if (advancedConversation.syncStatus === "recovery_required") {
+          conversationApprovalState.value = requireConversationApprovalReconciliation(
+            conversationApprovalState.value,
+          );
+          requestResync();
+          return;
+        }
+        const nextApproval = reduceConversationApprovalEvent(
+          conversationApprovalState.value,
+          adapted.event,
+        );
+        conversationApprovalState.value = nextApproval;
+        if (
+          nextApproval.reconciliation === "required" ||
+          adapted.event.projection.status === "pending"
+        ) {
+          requestResync();
+        }
+        return;
+      }
       if (adapted.kind === "context_invalidated") {
         lastErrorCode.value = "chat_context_invalid";
         clearAuthority("resync-required");
@@ -1148,7 +1375,7 @@ export function createChatStoreDefinition(
           event.sessionId === selectedSessionId.value;
         const includedInSnapshot = matchesAuthority &&
           durableCut !== null &&
-          (event.schemaVersion === 4 || event.schemaVersion === 5) &&
+          (event.schemaVersion === 4 || event.schemaVersion === 5 || event.schemaVersion === 6) &&
           "durableSequence" in event &&
           BigInt(event.durableSequence) <= durableCut;
         if (!includedInSnapshot) {
@@ -1296,12 +1523,60 @@ export function createChatStoreDefinition(
     }
 
     function requestResync(): void {
+      markApprovalTransientsReconciling();
+      if (streamingV6Enabled) {
+        conversationApprovalState.value = requireConversationApprovalReconciliation(
+          conversationApprovalState.value,
+        );
+      }
       liveAssistantText.value = "";
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
       phase.value = "resync-required";
       void resyncSelected();
     }
+
+    function scheduleApprovalExpiry(): void {
+      clearApprovalExpiryTimer();
+      if (!streamingV6Enabled) return;
+
+      const current = conversationApprovalState.value;
+      const checked = revokeExpiredConversationApprovalAuthority(current, Date.now());
+      if (checked !== current) {
+        conversationApprovalState.value = checked;
+        requestResync();
+        return;
+      }
+
+      let earliestExpiry: bigint | null = null;
+      for (const approval of Object.values(current.approvals)) {
+        if (approval.authority !== "actionable") continue;
+        const expiresAt = parseStrictRfc3339EpochNanoseconds(approval.expiresAt);
+        if (expiresAt !== null && (earliestExpiry === null || expiresAt < earliestExpiry)) {
+          earliestExpiry = expiresAt;
+        }
+      }
+      if (earliestExpiry === null) return;
+
+      const expiryEpochMs = (earliestExpiry + NANOSECONDS_PER_MILLISECOND - 1n) /
+        NANOSECONDS_PER_MILLISECOND;
+      const remainingMs = expiryEpochMs - BigInt(Date.now());
+      const delay = remainingMs <= 0n
+        ? 0
+        : Number(remainingMs > BigInt(MAX_TIMER_DELAY_MS)
+          ? BigInt(MAX_TIMER_DELAY_MS)
+          : remainingMs);
+      approvalExpiryTimer = setTimeout(() => {
+        approvalExpiryTimer = null;
+        scheduleApprovalExpiry();
+      }, delay);
+    }
+
+    watch(
+      conversationApprovalState,
+      scheduleApprovalExpiry,
+      { flush: "sync" },
+    );
 
     async function refreshCleanupFromEvent(event: ChatProjectionEvent): Promise<void> {
       const bound = context.value;
@@ -1424,12 +1699,26 @@ export function createChatStoreDefinition(
       return token;
     }
 
-    function subscribeAuthority(contextId: string, sessionId: string): Promise<string> {
-      return streamingV5Enabled
-        ? client.subscribeSessionV5(contextId, sessionId)
+    async function subscribeAuthority(
+      contextId: string,
+      sessionId: string,
+    ): Promise<ChatSubscriptionAuthority> {
+      if (streamingV6Enabled) {
+        const subscription = await client.subscribeSessionV6(contextId, sessionId);
+        return Object.freeze({
+          subscriptionId: subscription.subscriptionId,
+          pendingApprovalSnapshot: subscription.pendingApprovalSnapshot,
+        });
+      }
+      const nextSubscriptionId = streamingV5Enabled
+        ? await client.subscribeSessionV5(contextId, sessionId)
         : streamingV4Enabled
-          ? client.subscribeSessionV4(contextId, sessionId)
-          : client.subscribeSession(contextId, sessionId);
+          ? await client.subscribeSessionV4(contextId, sessionId)
+          : await client.subscribeSession(contextId, sessionId);
+      return Object.freeze({
+        subscriptionId: nextSubscriptionId,
+        pendingApprovalSnapshot: null,
+      });
     }
 
     function resyncAuthority(
@@ -1438,11 +1727,13 @@ export function createChatStoreDefinition(
       limit: number,
       signal: AbortSignal,
     ): Promise<ChatResyncAuthority> {
-      return streamingV5Enabled
-        ? client.resyncSessionV5(contextId, sessionId, limit, signal)
-        : streamingV4Enabled
-          ? client.resyncSessionV4(contextId, sessionId, limit, signal)
-          : client.resyncSessionV2(contextId, sessionId, limit, signal);
+      return streamingV6Enabled
+        ? client.resyncSessionV6(contextId, sessionId, limit, signal)
+        : streamingV5Enabled
+          ? client.resyncSessionV5(contextId, sessionId, limit, signal)
+          : streamingV4Enabled
+            ? client.resyncSessionV4(contextId, sessionId, limit, signal)
+            : client.resyncSessionV2(contextId, sessionId, limit, signal);
     }
 
     function loadHistoryAuthority(
@@ -1452,6 +1743,9 @@ export function createChatStoreDefinition(
       limit: number,
       signal?: AbortSignal,
     ): Promise<ChatHistoryAuthority> {
+      if (streamingV6Enabled) {
+        return client.loadHistoryV6(contextId, sessionId, cursor, limit, signal);
+      }
       if (streamingV5Enabled) {
         return client.loadHistoryV5(contextId, sessionId, cursor, limit, signal);
       }
@@ -1493,7 +1787,8 @@ export function createChatStoreDefinition(
         ]);
         if (!isCurrent(epoch, controller, sessionId)) return;
         artifactAuthorityToken = establishArtifactAuthority(sessionId);
-        const nextSubscription = await subscribeAuthority(bound.contextId, sessionId);
+        const nextSubscriptionAuthority = await subscribeAuthority(bound.contextId, sessionId);
+        const nextSubscription = nextSubscriptionAuthority.subscriptionId;
         if (!isCurrent(epoch, controller, sessionId)) {
           void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
           return;
@@ -1644,6 +1939,10 @@ export function createChatStoreDefinition(
       sessionId: string,
       authority: ChatHistoryAuthority,
     ) {
+      if (streamingV6Enabled) {
+        if (!isHistoryV6(authority)) throw approvalProtocolError();
+        return historyPageV6ToConversationSnapshot(sessionId, authority);
+      }
       if (!streamingV5Enabled) {
         return historyPageToConversationSnapshot(sessionId, authority);
       }
@@ -1670,7 +1969,43 @@ export function createChatStoreDefinition(
         authoritativeHistory,
       );
       const nextConversation = reconcileConversationSnapshot(conversationState.value, snapshot);
+      let nextApproval = streamingV6Enabled
+        ? createConversationApprovalState()
+        : conversationApprovalState.value;
+      if (streamingV6Enabled) {
+        if (
+          !("pendingApprovalSnapshot" in projection) ||
+          !isHistoryV6(authoritativeHistory) ||
+          subscriptionId === null
+        ) throw approvalProtocolError();
+        nextApproval = reduceApprovalHistory(
+          nextApproval,
+          projection.session.sessionId,
+          subscriptionId,
+          authoritativeHistory,
+        );
+        if (nextApproval.reconciliation === "required") {
+          conversationApprovalState.value = nextApproval;
+          throw approvalProtocolError();
+        }
+        nextApproval = reconcileApprovalAuthority(
+          nextApproval,
+          projection.pendingApprovalSnapshot,
+          projection.session.sessionId,
+          projection.pendingApprovalSnapshot.streamId,
+          nextConversation,
+        );
+        if (nextApproval.reconciliation === "required") {
+          conversationApprovalState.value = nextApproval;
+          throw approvalProtocolError();
+        }
+      }
       conversationState.value = nextConversation;
+      conversationApprovalState.value = nextApproval;
+      if (streamingV6Enabled && nextApproval.reconciliation === "synchronized") {
+        approvalAuthorityRevision.value += 1;
+        settleApprovalTransientsAfterResync();
+      }
       cleanupStatus.value = projection.cleanup;
       const latestConversationTurn = Object.values(nextConversation.turns)
         .filter((turn) => turn.threadId === projection.session.sessionId)
@@ -1720,6 +2055,11 @@ export function createChatStoreDefinition(
         liveTurnStatus.value = authoritativeLatestTurnStatus;
       }
       if (nextConversation.syncStatus === "recovery_required") {
+        if (streamingV6Enabled) {
+          conversationApprovalState.value = requireConversationApprovalReconciliation(
+            conversationApprovalState.value,
+          );
+        }
         lastErrorCode.value = "chat_protocol_error";
         phase.value = "resync-required";
         return;
@@ -1735,6 +2075,11 @@ export function createChatStoreDefinition(
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !subscriptionId) return;
+      if (streamingV6Enabled) {
+        conversationApprovalState.value = requireConversationApprovalReconciliation(
+          conversationApprovalState.value,
+        );
+      }
       const { epoch, controller } = startRead();
       phase.value = "resyncing";
       resetProjectionBuffer();
@@ -1745,7 +2090,8 @@ export function createChatStoreDefinition(
         try {
           await ensureSessionEventListeners();
           artifactAuthorityToken = establishArtifactAuthority(sessionId);
-          const nextSubscription = await subscribeAuthority(bound.contextId, sessionId);
+          const nextSubscriptionAuthority = await subscribeAuthority(bound.contextId, sessionId);
+          const nextSubscription = nextSubscriptionAuthority.subscriptionId;
           if (!isCurrent(epoch, controller, sessionId)) {
             void client.unsubscribeSession(bound.contextId, nextSubscription).catch(() => undefined);
             throw new ChatClientError({ schemaVersion: 1, code: "chat_request_cancelled", retryable: false, recovery: "none" });
@@ -1802,6 +2148,12 @@ export function createChatStoreDefinition(
           bufferingArtifactEvents = false;
           resetProjectionBuffer();
           bufferedArtifactEvents = [];
+          if (streamingV6Enabled) {
+            conversationApprovalState.value = requireConversationApprovalReconciliation(
+              conversationApprovalState.value,
+            );
+            failApprovalTransientsAfterResync();
+          }
           lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
           phase.value = phaseForError(error);
         }
@@ -1823,6 +2175,113 @@ export function createChatStoreDefinition(
       return promise;
     }
 
+    function approvalDecisionError(error: unknown): ChatApprovalTransientError {
+      return error instanceof ChatClientError
+        ? error.shape.approvalIssue ?? "unknown"
+        : "unknown";
+    }
+
+    function reconcileFailedApprovalDecision(
+      approvalRequestId: string,
+      errorCode: ChatApprovalTransientError,
+    ): ChatApprovalDecisionDisposition {
+      conversationApprovalState.value = requireConversationApprovalReconciliation(
+        conversationApprovalState.value,
+      );
+      setApprovalTransient(approvalRequestId, {
+        phase: "reconciling",
+        errorCode,
+      });
+      requestResync();
+      return "reconciling";
+    }
+
+    async function decideApproval(
+      input: ChatApprovalDecisionInput,
+    ): Promise<ChatApprovalDecisionDisposition> {
+      if (!streamingV6Enabled) return "ignored";
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      const activeSubscription = subscriptionId;
+      const attemptSelectionEpoch = selectionEpoch;
+      if (bound === null || sessionId === null || activeSubscription === null ||
+          sessionId !== input.threadId) {
+        return "ignored";
+      }
+      if (activeApprovalDecisionAttempts.has(input.approvalRequestId) ||
+          approvalTransients.value[input.approvalRequestId]?.phase === "submitting" ||
+          approvalTransients.value[input.approvalRequestId]?.phase === "reconciling") {
+        return "ignored";
+      }
+
+      const approval = conversationApprovalState.value.approvals[
+        input.approvalRequestId
+      ] ?? null;
+      const intent = createApprovalDecisionIntentV6(approval, input);
+      const expiresAt = approval === null
+        ? null
+        : parseStrictRfc3339EpochNanoseconds(approval.expiresAt);
+      const now = BigInt(Date.now()) * NANOSECONDS_PER_MILLISECOND;
+      const command = selectConversationItem(
+        conversationState.value,
+        sessionId,
+        input.turnId,
+        input.itemId,
+      );
+      if (!canDecideApprovals.value || intent === null || expiresAt === null ||
+          now >= expiresAt || command?.kind !== "command" ||
+          command.execution?.kind !== "command") {
+        return reconcileFailedApprovalDecision(
+          input.approvalRequestId,
+          expiresAt !== null && now >= expiresAt ? "approval_expired" : "unknown",
+        );
+      }
+
+      const token = Symbol("chat-approval-decision");
+      activeApprovalDecisionAttempts.set(intent.approvalRequestId, token);
+      setApprovalTransient(intent.approvalRequestId, {
+        phase: "submitting",
+        errorCode: null,
+      });
+      const isCurrentAttempt = (): boolean =>
+        activeApprovalDecisionAttempts.get(intent.approvalRequestId) === token &&
+        selectionEpoch === attemptSelectionEpoch &&
+        context.value?.contextId === bound.contextId &&
+        selectedSessionId.value === sessionId;
+
+      let result;
+      try {
+        result = await client.decideApprovalV6(
+          bound.contextId,
+          intent.threadId,
+          intent.turnId,
+          intent.itemId,
+          intent.approvalRequestId,
+          intent.decision,
+        );
+      } catch (error: unknown) {
+        if (!isCurrentAttempt()) return "ignored";
+        activeApprovalDecisionAttempts.delete(intent.approvalRequestId);
+        return reconcileFailedApprovalDecision(
+          intent.approvalRequestId,
+          approvalDecisionError(error),
+        );
+      }
+      if (!isCurrentAttempt()) return "ignored";
+      activeApprovalDecisionAttempts.delete(intent.approvalRequestId);
+      const adapted = approvalDecisionResultV6ToDomain(
+        conversationApprovalState.value,
+        intent,
+        result,
+      );
+      conversationApprovalState.value = adapted.state;
+      if (!adapted.correlated) {
+        return reconcileFailedApprovalDecision(intent.approvalRequestId, "unknown");
+      }
+      setApprovalTransient(intent.approvalRequestId, null);
+      return "accepted";
+    }
+
     async function loadOlderHistory(): Promise<void> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
@@ -1841,13 +2300,24 @@ export function createChatStoreDefinition(
         if (!isCurrent(epoch, controller, sessionId)) return;
         const currentHistory = history.value;
         if (currentHistory === null) throw new ChatClientError({
-          schemaVersion: streamingV5Enabled ? 5 : streamingV4Enabled ? 4 : 1,
+          schemaVersion: streamingV6Enabled ? 6 : streamingV5Enabled ? 5 : streamingV4Enabled ? 4 : 1,
           code: "chat_protocol_error",
           retryable: false,
           recovery: "resync",
         });
-        const mergedHistory: ChatHistoryAuthority = streamingV5Enabled
-          ? isHistoryV5(currentHistory) && isHistoryV5(page)
+        const mergedHistory: ChatHistoryAuthority = streamingV6Enabled
+          ? isHistoryV6(currentHistory) && isHistoryV6(page)
+            ? Object.freeze({
+                schemaVersion: 6 as const,
+                turns: Object.freeze([...currentHistory.turns, ...page.turns]),
+                nextCursor: page.nextCursor,
+                sessionNotices: currentHistory.sessionNotices,
+                durableSequenceCut: currentHistory.durableSequenceCut,
+                approvals: Object.freeze([...currentHistory.approvals, ...page.approvals]),
+              })
+            : (() => { throw approvalProtocolError(); })()
+          : streamingV5Enabled
+            ? isHistoryV5(currentHistory) && isHistoryV5(page)
             ? Object.freeze({
                 schemaVersion: 5 as const,
                 turns: Object.freeze([...currentHistory.turns, ...page.turns]),
@@ -1861,8 +2331,8 @@ export function createChatStoreDefinition(
                 retryable: false,
                 recovery: "resync",
               }); })()
-          : streamingV4Enabled
-            ? isHistoryV4(currentHistory) && isHistoryV4(page)
+            : streamingV4Enabled
+              ? isHistoryV4(currentHistory) && isHistoryV4(page)
               ? Object.freeze({
                   turns: Object.freeze([...currentHistory.turns, ...page.turns]),
                   nextCursor: page.nextCursor,
@@ -1875,28 +2345,56 @@ export function createChatStoreDefinition(
                   retryable: false,
                   recovery: "resync",
                 }); })()
-          : Object.freeze({
-              turns: Object.freeze([...currentHistory.turns, ...page.turns]),
-              nextCursor: page.nextCursor,
-            });
+              : Object.freeze({
+                  turns: Object.freeze([...currentHistory.turns, ...page.turns]),
+                  nextCursor: page.nextCursor,
+                });
         const appended = appendOlderConversationSnapshot(
           conversationState.value,
           conversationSnapshotFromHistory(sessionId, page),
         );
         if (appended.syncStatus === "recovery_required") {
           conversationState.value = appended;
+          if (streamingV6Enabled) {
+            conversationApprovalState.value = requireConversationApprovalReconciliation(
+              conversationApprovalState.value,
+            );
+          }
           lastErrorCode.value = "chat_protocol_error";
           phase.value = "resync-required";
           activeRead = null;
           return;
         }
         if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
+        let appendedApproval = conversationApprovalState.value;
+        if (streamingV6Enabled) {
+          if (!isHistoryV6(page) || subscriptionId === null) throw approvalProtocolError();
+          appendedApproval = reduceApprovalHistory(
+            appendedApproval,
+            sessionId,
+            subscriptionId,
+            page,
+          );
+          if (appendedApproval.reconciliation === "required") {
+            conversationApprovalState.value = appendedApproval;
+            lastErrorCode.value = "chat_protocol_error";
+            phase.value = "resync-required";
+            activeRead = null;
+            return;
+          }
+        }
         conversationState.value = appended;
+        conversationApprovalState.value = appendedApproval;
         history.value = mergedHistory;
         activeRead = null;
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
         activeRead = null;
+        if (streamingV6Enabled) {
+          conversationApprovalState.value = requireConversationApprovalReconciliation(
+            conversationApprovalState.value,
+          );
+        }
         phase.value = phaseForError(error);
       }
     }
@@ -2195,7 +2693,28 @@ export function createChatStoreDefinition(
         artifacts: Object.freeze([]),
       });
       let nextHistory: ChatHistoryAuthority;
-      if (streamingV5Enabled) {
+      if (streamingV6Enabled) {
+        const currentV6 = currentHistory !== null && isHistoryV6(currentHistory)
+          ? currentHistory
+          : null;
+        const queuedTurnV6: ChatHistoryTurnV4 = Object.freeze({
+          ...queuedTurn,
+          projectionAuthority: "legacy",
+          artifacts: Object.freeze([]),
+          terminalCode: null,
+          timelineItems: Object.freeze([]),
+          plan: null,
+          notices: Object.freeze([]),
+        });
+        nextHistory = Object.freeze({
+          schemaVersion: 6 as const,
+          turns: Object.freeze([...(currentV6?.turns ?? []), queuedTurnV6]),
+          nextCursor: currentV6?.nextCursor ?? null,
+          sessionNotices: currentV6?.sessionNotices ?? Object.freeze([]),
+          durableSequenceCut: currentV6?.durableSequenceCut ?? "0",
+          approvals: currentV6?.approvals ?? Object.freeze([]),
+        });
+      } else if (streamingV5Enabled) {
         const currentV5 = currentHistory !== null && isHistoryV5(currentHistory)
           ? currentHistory
           : null;
@@ -2706,6 +3225,7 @@ export function createChatStoreDefinition(
 
     async function dispose(): Promise<void> {
       const pendingResync = resyncPromise;
+      clearApprovalExpiryTimer();
       clearAuthority("idle");
       listenerEpoch += 1;
       releaseSessionListeners();
@@ -2726,6 +3246,9 @@ export function createChatStoreDefinition(
       selectedSessionId,
       history,
       conversationState,
+      conversationApprovalState,
+      approvalTransients,
+      approvalAuthorityRevision,
       liveAssistantText,
       liveReasoning,
       liveTurnStatus,
@@ -2746,12 +3269,14 @@ export function createChatStoreDefinition(
       canSend,
       canAttach,
       draftAttachmentsReady,
+      canDecideApprovals,
       hasAction,
       bind,
       selectSession,
       clearSelectedSession,
       retryDraftRecovery,
       resyncSelected,
+      decideApproval,
       loadOlderHistory,
       loadHistoryPage,
       loadReasoning,

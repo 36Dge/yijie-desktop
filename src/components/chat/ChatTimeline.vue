@@ -8,15 +8,27 @@ import type {
 } from "../../domain/conversation-timeline";
 import YjEmpty from "../yijie/YjEmpty.vue";
 import YjIcon from "../yijie/YjIcon.vue";
+import type {
+  ChatApprovalDecisionChange,
+  ChatApprovalTransientState,
+} from "./ChatCommandItem.vue";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-defineProps<{
+withDefaults(defineProps<{
   timeline: ConversationTimelineViewModel;
-}>();
+  canDecideApprovals?: boolean;
+  approvalAuthorityRevision?: number;
+  approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
+}>(), {
+  canDecideApprovals: false,
+  approvalAuthorityRevision: 0,
+  approvalTransients: () => Object.freeze({}),
+});
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
+  "approval-decision": [change: ChatApprovalDecisionChange];
 }>();
 
 const slots = defineSlots<{
@@ -39,6 +51,10 @@ const slots = defineSlots<{
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   emit("disclosure-change", change);
+}
+
+function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
+  emit("approval-decision", change);
 }
 
 function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): string {
@@ -134,7 +150,11 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
         <ChatTurnGroup
           :turn="turn"
           :position="index + 1"
+          :can-decide-approvals="canDecideApprovals"
+          :approval-authority-revision="approvalAuthorityRevision"
+          :approval-transients="approvalTransients"
           @disclosure-change="forwardDisclosure"
+          @approval-decision="forwardApprovalDecision"
         >
           <template
             v-if="slots['artifact-reference']"

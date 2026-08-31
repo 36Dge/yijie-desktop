@@ -45,6 +45,8 @@ case "$#" in
       VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
       YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
       VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
+      YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true
+      VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true
     )
     ;;
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
@@ -66,6 +68,11 @@ cd "$desktop_root"
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs
+if [[ "$stable_api_only" == "true" ]]; then
+  YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
+  YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
+    node scripts/check-agent-host-v6-contract.mjs
+fi
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
 YIJIE_DESKTOP_SKILLS_DIR="$workspace_root/yijie-skills" \
@@ -134,6 +141,8 @@ exec env \
   -u VITE_YIJIE_FEAT134_STREAMING_ENABLED \
   -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED \
   -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED \
+  -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED \
+  -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED \
   "${feat134_environment[@]}" \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \

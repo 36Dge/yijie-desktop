@@ -10,7 +10,10 @@ import type {
 } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
-import ChatCommandItem from "./ChatCommandItem.vue";
+import ChatCommandItem, {
+  type ChatApprovalDecisionChange,
+  type ChatApprovalTransientState,
+} from "./ChatCommandItem.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
@@ -18,13 +21,21 @@ import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
 
-defineProps<{
+withDefaults(defineProps<{
   turn: ConversationTimelineTurnViewModel;
   position: number;
-}>();
+  canDecideApprovals?: boolean;
+  approvalAuthorityRevision?: number;
+  approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
+}>(), {
+  canDecideApprovals: false,
+  approvalAuthorityRevision: 0,
+  approvalTransients: () => Object.freeze({}),
+});
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
+  "approval-decision": [change: ChatApprovalDecisionChange];
 }>();
 
 const slots = defineSlots<{
@@ -240,6 +251,10 @@ function reasoningStateMessage(item: ConversationTimelineItemViewModel): string 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   emit("disclosure-change", change);
 }
+
+function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
+  emit("approval-decision", change);
+}
 </script>
 
 <template>
@@ -288,7 +303,14 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
           v-if="item.presentation === 'command' && item.execution?.kind === 'command'"
           :item="item"
           :execution="item.execution"
+          :approval="item.approval ?? null"
+          :approval-transient="item.approval
+            ? approvalTransients[item.approval.approvalRequestId] ?? null
+            : null"
+          :can-decide-approval="canDecideApprovals"
+          :approval-authority-revision="approvalAuthorityRevision"
           @disclosure-change="forwardDisclosure"
+          @approval-decision="forwardApprovalDecision"
         />
 
         <ChatToolItem

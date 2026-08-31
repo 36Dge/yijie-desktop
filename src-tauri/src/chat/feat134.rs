@@ -826,6 +826,9 @@ impl Feat134TurnReducer {
             | HostEventKind::ToolCompleted { .. } => {
                 return Err(ChatError::OrchestrationUnavailable);
             }
+            HostEventKind::ApprovalRequested(_) | HostEventKind::ApprovalResolved(_) => {
+                TimelineDelta::Ignored
+            }
             HostEventKind::Error {
                 code,
                 message: _,

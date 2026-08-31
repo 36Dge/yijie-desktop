@@ -20,6 +20,7 @@ import {
   hydrateConversationState,
   reconcileConversationSnapshot,
 } from "../../domain/conversation-state";
+import { hydrateConversationApprovalState } from "../../domain/conversation-approval";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
 import {
@@ -291,6 +292,107 @@ describe("FEAT-126 ChatPage", () => {
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText).toHaveBeenCalledWith("标题检查完成");
     expect(wrapper.text()).toContain("已复制");
+  });
+
+  it("projects approval lifecycle, keeps the exact gate closed, and wires only typed decisions", async () => {
+    const { wrapper, store } = await mountPage(
+      `/chat/${SESSION_ID}`,
+      true,
+      HISTORY_WITHOUT_REASONING,
+    );
+    const source = Object.freeze({
+      sourceEventId: "13700000-0000-4000-8000-000000000041",
+      sourceSequence: "41",
+      sourceOccurredAt: "2026-08-30T14:28:00Z",
+    });
+    store.conversationState = hydrateConversationState({
+      threads: [{ threadId: SESSION_ID, status: "active" }],
+      turns: [{
+        threadId: SESSION_ID,
+        turnId: TURN_ID,
+        ordinal: 0,
+        status: "in_progress",
+        terminalStatus: null,
+      }],
+      items: [{
+        threadId: SESSION_ID,
+        turnId: TURN_ID,
+        itemId: "command-feat-137-page",
+        ordinal: 1,
+        kind: "command",
+        status: "streaming",
+        execution: {
+          kind: "command",
+          status: "running",
+          startedSource: source,
+          lastSource: source,
+          commandSummary: {
+            text: "Inspect repository status",
+            truncated: false,
+            truncationReason: null,
+          },
+          cwd: { kind: "workspace_root", segments: [] },
+          liveOutput: null,
+          output: null,
+          durationMs: null,
+          exitCode: null,
+          error: null,
+        },
+        contentBlocks: [],
+      }],
+    });
+    store.conversationApprovalState = hydrateConversationApprovalState({
+      schemaVersion: 1,
+      approvals: [{
+        approvalRequestId: "13700000-0000-4000-8000-000000000042",
+        threadId: SESSION_ID,
+        turnId: TURN_ID,
+        itemId: "command-feat-137-page",
+        revision: 1,
+        status: "pending",
+        actionId: "git_repository_check",
+        workspaceScope: "current_workspace",
+        decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+        requestedAt: "2026-08-30T14:28:00Z",
+        expiresAt: "2026-08-30T14:30:00Z",
+        resolvedAt: null,
+        decisionId: null,
+        decision: null,
+        outcome: null,
+        source,
+      }],
+    });
+    await flushPromises();
+
+    const timeline = wrapper.getComponent(ChatTimeline);
+    expect(timeline.props("canDecideApprovals")).toBe(false);
+    expect(timeline.props("timeline").turns[0]?.items[0]?.approval).toMatchObject({
+      approvalRequestId: "13700000-0000-4000-8000-000000000042",
+      authority: "historical",
+    });
+    expect(wrapper.get(".chat-approval-card__status").text()).toContain("连接已中断");
+    expect(wrapper.findAll(".chat-approval-card__button")
+      .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+
+    const decideApproval = vi.spyOn(store, "decideApproval").mockResolvedValue("ignored");
+    timeline.vm.$emit("approval-decision", {
+      itemIdentity: "timeline-command-feat-137-page",
+      threadId: SESSION_ID,
+      turnId: TURN_ID,
+      itemId: "command-feat-137-page",
+      approvalRequestId: "13700000-0000-4000-8000-000000000042",
+      decision: "accept_once",
+    });
+    await flushPromises();
+    expect(decideApproval).toHaveBeenCalledOnce();
+    expect(decideApproval).toHaveBeenCalledWith({
+      itemIdentity: "timeline-command-feat-137-page",
+      threadId: SESSION_ID,
+      turnId: TURN_ID,
+      itemId: "command-feat-137-page",
+      approvalRequestId: "13700000-0000-4000-8000-000000000042",
+      decision: "accept_once",
+    });
   });
 
   it("publishes a streaming burst and follows new content at most once per frame", async () => {

@@ -12,12 +12,213 @@ const REQUEST_ID = "019c1a00-0000-7000-8000-000000000001";
 const CONTEXT_ID = "019c1a00-0000-7000-8000-000000000003";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000004";
 const SUBSCRIPTION_ID = "019c1a00-0000-7000-8000-000000000005";
+const HOST_STREAM_ID = "019c1a00-0000-7000-8000-00000000000a";
+const TURN_ID = "019c1a00-0000-7000-8000-00000000000b";
+const APPROVAL_ID = "019c1a00-0000-7000-8000-00000000000c";
+const DECISION_ID = "019c1a00-0000-7000-8000-00000000000d";
+const ITEM_ID = "command-feat-137-decision";
 
 function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
   return { invoke, listen: async () => () => undefined };
 }
 
 describe("chat client", () => {
+  it("negotiates v6 approval subscription through the existing closed command", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 6,
+      requestId: REQUEST_ID,
+      data: {
+        subscriptionId: SUBSCRIPTION_ID,
+        pendingApprovalSnapshot: {
+          schemaVersion: 6,
+          streamId: HOST_STREAM_ID,
+          snapshotAt: "2026-08-30T12:00:10Z",
+          pending: [{
+            approvalRequestId: "019c1a00-0000-7000-8000-000000000006",
+            revision: 1,
+            turnId: "019c1a00-0000-7000-8000-000000000009",
+            itemId: "command-approval",
+            actionId: "git_repository_check",
+            workspaceScope: "current_workspace",
+            decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+            requestedAt: "2026-08-30T12:00:00Z",
+            expiresAt: "2026-08-30T12:02:00Z",
+            ttlSeconds: 120,
+          }],
+        },
+      },
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    const subscription = await client.subscribeSessionV6(CONTEXT_ID, SESSION_ID);
+
+    expect(subscription.subscriptionId).toBe(SUBSCRIPTION_ID);
+    expect(subscription.pendingApprovalSnapshot.streamId).toBe(HOST_STREAM_ID);
+    expect(subscription.pendingApprovalSnapshot.pending).toHaveLength(1);
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_subscribe_session_v1", {
+      request: {
+        schemaVersion: 6,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: { sessionId: SESSION_ID },
+      },
+    });
+  });
+
+  it.each([
+    ["accept_once" as const, "accepted_once" as const],
+    ["cancel_current_turn" as const, "cancelled_current_turn" as const],
+  ])("invokes one closed v6 approval decision without Web-minted Host authority for %s", async (
+    decision,
+    outcome,
+  ) => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 6,
+      requestId: REQUEST_ID,
+      data: {
+        schemaVersion: 6,
+        approvalRequestId: APPROVAL_ID,
+        decisionId: DECISION_ID,
+        streamId: HOST_STREAM_ID,
+        revision: 2,
+        decision,
+        outcome,
+        resolvedAt: "2026-08-30T12:00:30Z",
+      },
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    await expect(client.decideApprovalV6(
+      CONTEXT_ID,
+      SESSION_ID,
+      TURN_ID,
+      ITEM_ID,
+      APPROVAL_ID,
+      decision,
+    )).resolves.toMatchObject({ approvalRequestId: APPROVAL_ID, decision, outcome });
+
+    expect(nativeInvoke).toHaveBeenCalledOnce();
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_decide_approval_v6", {
+      request: {
+        schemaVersion: 6,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: {
+          sessionId: SESSION_ID,
+          turnId: TURN_ID,
+          itemId: ITEM_ID,
+          approvalRequestId: APPROVAL_ID,
+          decision,
+        },
+      },
+    });
+    const serialized = JSON.stringify(nativeInvoke.mock.calls[0]);
+    expect(serialized).not.toContain("expectedStreamId");
+    expect(serialized).not.toContain("decisionId");
+    expect(serialized).not.toContain(HOST_STREAM_ID);
+  });
+
+  it("maps only a closed v6 approval rejection and fails unknown errors to protocol recovery", async () => {
+    const known = createChatClient(transport(async () => {
+      throw {
+        schemaVersion: 6,
+        code: "chat_conflict",
+        retryable: false,
+        recovery: "resync",
+        approvalIssue: "approval_expired",
+      };
+    }));
+    await expect(known.decideApprovalV6(
+      CONTEXT_ID,
+      SESSION_ID,
+      TURN_ID,
+      ITEM_ID,
+      APPROVAL_ID,
+      "accept_once",
+    )).rejects.toMatchObject({
+      shape: { code: "chat_conflict", approvalIssue: "approval_expired" },
+    });
+
+    const widened = createChatClient(transport(async () => {
+      throw {
+        schemaVersion: 6,
+        code: "chat_conflict",
+        retryable: false,
+        recovery: "resync",
+        approvalIssue: "approval_expired",
+        rawReason: "forbidden",
+      };
+    }));
+    await expect(widened.decideApprovalV6(
+      CONTEXT_ID,
+      SESSION_ID,
+      TURN_ID,
+      ITEM_ID,
+      APPROVAL_ID,
+      "accept_once",
+    )).rejects.toMatchObject({
+      shape: { code: "chat_protocol_error", recovery: "resync" },
+    });
+  });
+
+  it("delivers only closed v6 approval events and rejects raw-field widening", async () => {
+    let listener!: (payload: unknown) => void;
+    const handler = vi.fn();
+    const invalid = vi.fn();
+    const client = createChatClient({
+      invoke: async () => undefined,
+      listen: async (_channel, callback) => {
+        listener = callback;
+        return () => undefined;
+      },
+    });
+    await client.onEventV6(handler, invalid);
+    const turnId = "019c1a00-0000-7000-8000-000000000006";
+    const event = {
+      schemaVersion: 6,
+      subscriptionId: SUBSCRIPTION_ID,
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      turnId,
+      projectionSequence: "1",
+      eventId: "019c1a00-0000-7000-8000-000000000007",
+      durableSequence: "1",
+      kind: "approval_changed",
+      payload: {
+        sourceEventId: "019c1a00-0000-7000-8000-000000000008",
+        sourceSequence: "1",
+        sourceOccurredAt: "2026-08-30T12:00:00Z",
+        turnId,
+        itemId: "command-approval",
+        approvalRequestId: "019c1a00-0000-7000-8000-000000000009",
+        status: "pending",
+        revision: 1,
+        actionId: "git_repository_check",
+        workspaceScope: "current_workspace",
+        decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+        requestedAt: "2026-08-30T12:00:00Z",
+        expiresAt: "2026-08-30T12:02:00Z",
+        ttlSeconds: 120,
+      },
+    };
+
+    listener(event);
+    listener({ ...event, payload: { ...event.payload, rawCommand: "forbidden" } });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+      schemaVersion: 6,
+      kind: "approval_changed",
+    }));
+    expect(invalid).toHaveBeenCalledWith({
+      contextId: CONTEXT_ID,
+      sessionId: SESSION_ID,
+      subscriptionId: SUBSCRIPTION_ID,
+    });
+  });
+
   it("negotiates v5 through the existing private commands without widening the envelope", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
     const nativeInvoke = vi.fn(async () => ({

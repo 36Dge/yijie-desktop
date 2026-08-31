@@ -4,7 +4,8 @@ import axe from "axe-core";
 import { mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { h } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ConversationApproval } from "../../domain/conversation-approval";
 import {
   hydrateConversationState,
   type ConversationItemSnapshot,
@@ -24,6 +25,10 @@ import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -80,6 +85,75 @@ function message(
   };
 }
 
+function command(): ConversationItemSnapshot {
+  const source = (sequence: string) => ({
+    sourceEventId: `command-event-${sequence}`,
+    sourceSequence: sequence,
+    sourceOccurredAt: "2026-08-30T14:28:00.000Z",
+  });
+  return {
+    threadId: THREAD_ID,
+    turnId: TURN_ID,
+    itemId: "command-demo",
+    ordinal: 0,
+    kind: "command",
+    status: "streaming",
+    execution: {
+      kind: "command",
+      status: "running",
+      startedSource: source("1"),
+      lastSource: source("2"),
+      commandSummary: {
+        text: "检查工作区状态",
+        truncated: false,
+        truncationReason: null,
+      },
+      cwd: { kind: "workspace_root", segments: [] },
+      liveOutput: null,
+      output: null,
+      durationMs: null,
+      exitCode: null,
+      error: null,
+    },
+    contentBlocks: [],
+  };
+}
+
+function pendingApproval(): ConversationApproval {
+  return deepFreeze({
+    approvalRequestId: "66666666-6666-4666-8666-666666666666",
+    threadId: THREAD_ID,
+    turnId: TURN_ID,
+    itemId: "command-demo",
+    revision: 1,
+    status: "pending",
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    decisions: { primary: "accept_once", secondary: "cancel_current_turn" },
+    requestedAt: "2026-08-30T14:28:00.000Z",
+    expiresAt: "2026-08-30T14:30:00.000Z",
+    resolvedAt: null,
+    decisionId: null,
+    decision: null,
+    outcome: null,
+    authority: "actionable",
+    authorityStreamId: "55555555-5555-4555-8555-555555555555",
+    source: {
+      sourceEventId: "44444444-4444-4444-8444-444444444444",
+      sourceSequence: "3",
+      sourceOccurredAt: "2026-08-30T14:28:00.000Z",
+    },
+  });
+}
+
+function turnWithApproval(): ConversationTimelineTurnViewModel {
+  const turn = projectedTurn({ status: "waiting_approval", items: [command()] });
+  return deepFreeze({
+    ...turn,
+    items: turn.items.map((item) => ({ ...item, approval: pendingApproval() })),
+  });
+}
+
 describe("ChatTurnGroup", () => {
   it("renders projected Items in order with closed role and unknown renderers", () => {
     const turn = projectedTurn({
@@ -129,6 +203,35 @@ describe("ChatTurnGroup", () => {
     expect(wrapper.get(".chat-timeline-item-shell__status").text()).toBe("未完整结束");
     expect(wrapper.get(".chat-timeline-item-shell").classes())
       .toContain("chat-timeline-item-shell--incomplete");
+  });
+
+  it("keeps approval decisions closed by default and relays complete identity through an explicit bridge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-08-30T14:29:00.000Z"));
+    const turn = turnWithApproval();
+    const closed = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+
+    expect(closed.find(".chat-approval-card").exists()).toBe(true);
+    expect(closed.findAll(".chat-approval-card__button")
+      .every((button) => button.attributes("disabled") !== undefined)).toBe(true);
+    expect(closed.text()).toContain("暂时无法确认");
+    closed.unmount();
+
+    const wrapper = mount(ChatTurnGroup, {
+      props: { turn, position: 1, canDecideApprovals: true },
+    });
+    const buttons = wrapper.findAll(".chat-approval-card__button");
+    expect(buttons.every((button) => button.attributes("disabled") === undefined)).toBe(true);
+
+    await buttons[1]!.trigger("click");
+    expect(wrapper.emitted("approval-decision")).toEqual([[{
+      itemIdentity: turn.items[0]!.identity,
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      itemId: "command-demo",
+      approvalRequestId: pendingApproval().approvalRequestId,
+      decision: "cancel_current_turn",
+    }]]);
   });
 
   it("collapses historical process content regardless of length and never hides the final answer", async () => {

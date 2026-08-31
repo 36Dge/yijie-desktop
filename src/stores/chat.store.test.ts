@@ -15,18 +15,24 @@ import { CHAT_INPUT_MAX_BYTES } from "../domain/chat-ui";
 import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
 import type {
   ChatAllowedAction,
+  ChatApprovalDecisionResultV6,
+  ChatApprovalProjectionV6,
   ChatAttachment,
   ChatAttachmentImportEvent,
   ChatControlPlaneEvent,
   ChatHistoryPage,
   ChatHistoryPageV4,
   ChatHistoryPageV5,
+  ChatHistoryPageV6,
+  ChatPendingApprovalSnapshotV6,
+  ChatProjectionEventV6,
   ChatProjectionEventV5,
   ChatProjectionEvent,
   ChatProjectionEventV4,
   ChatResyncProjection,
   ChatResyncProjectionV4,
   ChatResyncProjectionV5,
+  ChatResyncProjectionV6,
   ChatSession,
 } from "../domain/chat-ipc";
 import {
@@ -51,6 +57,16 @@ const SESSION_B = "019c1a00-0000-7000-8000-000000000006";
 const TURN_A = "019c1a00-0000-7000-8000-000000000007";
 const SESSION_CREATED = "019c1a00-0000-7000-8000-000000000008";
 const ARTIFACT_A = "019c1a00-0000-7000-8000-000000000019";
+const LOCAL_SUBSCRIPTION_A = "019c1a00-0000-7000-8000-00000000000a";
+const LOCAL_SUBSCRIPTION_B = "019c1a00-0000-7000-8000-00000000000b";
+const HOST_GENERATION_A = "019c1a00-0000-7000-8000-00000000000d";
+const HOST_GENERATION_B = "019c1a00-0000-7000-8000-00000000000e";
+const APPROVAL_A = "13700000-0000-4000-8000-000000000001";
+const APPROVAL_B = "13700000-0000-4000-8000-000000000002";
+const COMMAND_A = "command-feat-137-current";
+const COMMAND_B = "command-feat-137-older";
+const REQUESTED_AT = "2026-08-03T11:59:00Z";
+const EXPIRES_AT = "2026-08-03T12:01:00Z";
 const ALL_ALLOWED_ACTIONS = Object.freeze([
   "read_sessions", "create_session", "submit_turn", "rename_session", "pin_session",
   "interrupt_turn", "delete_session", "read_projects", "use_project", "pin_project",
@@ -123,6 +139,17 @@ function projectionV4(
   }),
 ): ChatResyncProjectionV4 {
   return Object.freeze({ session: session(sessionId), history, cleanup: null });
+}
+
+function emptyPendingApprovalSnapshot(
+  streamId = "019c1a00-0000-7000-8000-00000000000d",
+): ChatPendingApprovalSnapshotV6 {
+  return Object.freeze({
+    schemaVersion: 6,
+    streamId,
+    snapshotAt: "2026-08-03T12:00:00Z",
+    pending: Object.freeze([]),
+  });
 }
 
 function artifactHistory(nextCursor: string | null = null): ChatHistoryPage {
@@ -209,6 +236,257 @@ function sourceV4(sequence: number) {
   } as const;
 }
 
+function commandTurnV6(
+  turnId = TURN_A,
+  itemId = COMMAND_A,
+  completed = false,
+): ChatHistoryPageV6["turns"][number] {
+  const source = Object.freeze({
+    sourceEventId: itemId === COMMAND_A
+      ? "13700000-0000-4000-8000-000000000011"
+      : "13700000-0000-4000-8000-000000000012",
+    sourceSequence: itemId === COMMAND_A ? "40" : "20",
+    sourceOccurredAt: REQUESTED_AT,
+  });
+  return Object.freeze({
+    turnId,
+    projectionAuthority: "v5",
+    status: completed ? "completed" : "streaming",
+    terminalAt: completed ? NOW - 30_000 : null,
+    reasoningStatus: "unavailable",
+    reasoningReasonCode: "reasoning_not_emitted",
+    messages: Object.freeze([]),
+    reasoning: Object.freeze([]),
+    artifacts: Object.freeze([]),
+    terminalCode: null,
+    timelineItems: Object.freeze([Object.freeze({
+      ...source,
+      itemId,
+      itemOrdinal: 1,
+      itemType: "command",
+      phase: null,
+      status: completed ? "completed" : "in_progress",
+      text: "",
+      reasoningStatus: null,
+      reasoningReasonCode: null,
+      reasoningParts: Object.freeze([]),
+      startedAtMs: NOW - 60_000,
+      completedAtMs: completed ? NOW - 30_000 : null,
+      execution: Object.freeze({
+        kind: "command",
+        status: completed ? "completed" : "running",
+        startedSource: source,
+        lastSource: source,
+        commandSummary: Object.freeze({
+          text: "Inspect repository status",
+          truncated: false,
+          truncationReason: null,
+        }),
+        cwd: Object.freeze({ kind: "workspace_root", segments: Object.freeze([]) }),
+        liveOutput: null,
+        output: completed
+          ? Object.freeze({
+              retention: "complete" as const,
+              text: "",
+              head: null,
+              tail: null,
+              reason: null,
+              truncated: false,
+              truncationReason: null,
+            })
+          : null,
+        durationMs: completed ? 30_000 : null,
+        exitCode: completed ? 0 : null,
+        error: null,
+      }),
+    })]),
+    plan: null,
+    notices: Object.freeze([]),
+  });
+}
+
+function approvalProjectionV6(
+  approvalRequestId = APPROVAL_A,
+  turnId = TURN_A,
+  itemId = COMMAND_A,
+  overrides: Partial<ChatApprovalProjectionV6> = {},
+): ChatApprovalProjectionV6 {
+  return Object.freeze({
+    sourceEventId: approvalRequestId === APPROVAL_A
+      ? "13700000-0000-4000-8000-000000000021"
+      : "13700000-0000-4000-8000-000000000022",
+    sourceSequence: approvalRequestId === APPROVAL_A ? "41" : "21",
+    sourceOccurredAt: REQUESTED_AT,
+    turnId,
+    itemId,
+    approvalRequestId,
+    status: "pending",
+    revision: 1,
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    decisions: Object.freeze({ primary: "accept_once", secondary: "cancel_current_turn" }),
+    requestedAt: REQUESTED_AT,
+    expiresAt: EXPIRES_AT,
+    ttlSeconds: 120,
+    ...overrides,
+  } as ChatApprovalProjectionV6);
+}
+
+function resolvedApprovalProjectionV6(
+  approvalRequestId = APPROVAL_B,
+  turnId = "13700000-0000-4000-8000-000000000030",
+  itemId = COMMAND_B,
+): ChatApprovalProjectionV6 {
+  return Object.freeze({
+    sourceEventId: "13700000-0000-4000-8000-000000000023",
+    sourceSequence: "22",
+    sourceOccurredAt: "2026-08-03T11:59:30Z",
+    turnId,
+    itemId,
+    approvalRequestId,
+    status: "resolved",
+    revision: 2,
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    outcome: "resolved_elsewhere",
+    requestedAt: REQUESTED_AT,
+    expiresAt: EXPIRES_AT,
+    resolvedAt: "2026-08-03T11:59:30Z",
+  });
+}
+
+function expiredApprovalProjectionV6(): ChatApprovalProjectionV6 {
+  return Object.freeze({
+    sourceEventId: "13700000-0000-4000-8000-000000000024",
+    sourceSequence: "42",
+    sourceOccurredAt: EXPIRES_AT,
+    turnId: TURN_A,
+    itemId: COMMAND_A,
+    approvalRequestId: APPROVAL_A,
+    status: "resolved",
+    revision: 2,
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    outcome: "expired",
+    requestedAt: REQUESTED_AT,
+    expiresAt: EXPIRES_AT,
+    resolvedAt: EXPIRES_AT,
+  });
+}
+
+function approvalDecisionResultV6(
+  decision: "accept_once" | "cancel_current_turn" = "accept_once",
+  overrides: Partial<ChatApprovalDecisionResultV6> = {},
+): ChatApprovalDecisionResultV6 {
+  const common = {
+    schemaVersion: 6 as const,
+    approvalRequestId: APPROVAL_A,
+    decisionId: "13700000-0000-4000-8000-000000000090",
+    streamId: HOST_GENERATION_A,
+    revision: 2 as const,
+    resolvedAt: "2026-08-03T12:00:30Z",
+  };
+  return Object.freeze(decision === "accept_once"
+    ? { ...common, decision, outcome: "accepted_once" as const, ...overrides }
+    : { ...common, decision, outcome: "cancelled_current_turn" as const, ...overrides }) as
+      ChatApprovalDecisionResultV6;
+}
+
+function acceptedApprovalProjectionV6(): ChatApprovalProjectionV6 {
+  const result = approvalDecisionResultV6();
+  return Object.freeze({
+    sourceEventId: "13700000-0000-4000-8000-000000000025",
+    sourceSequence: "42",
+    sourceOccurredAt: result.resolvedAt,
+    turnId: TURN_A,
+    itemId: COMMAND_A,
+    approvalRequestId: APPROVAL_A,
+    status: "resolved",
+    revision: 2,
+    actionId: "git_repository_check",
+    workspaceScope: "current_workspace",
+    requestedAt: REQUESTED_AT,
+    expiresAt: EXPIRES_AT,
+    outcome: "accepted_once",
+    decisionId: result.decisionId,
+    decision: "accept_once",
+    resolvedAt: result.resolvedAt,
+  });
+}
+
+function pendingApprovalSnapshotV6(
+  streamId = HOST_GENERATION_A,
+  approval: ChatApprovalProjectionV6 | null = approvalProjectionV6(),
+): ChatPendingApprovalSnapshotV6 {
+  return Object.freeze({
+    schemaVersion: 6,
+    streamId,
+    snapshotAt: "2026-08-03T12:00:00Z",
+    pending: approval?.status === "pending"
+      ? Object.freeze([Object.freeze({
+          approvalRequestId: approval.approvalRequestId,
+          revision: 1 as const,
+          turnId: approval.turnId,
+          itemId: approval.itemId,
+          actionId: approval.actionId,
+          workspaceScope: approval.workspaceScope,
+          decisions: approval.decisions,
+          requestedAt: approval.requestedAt,
+          expiresAt: approval.expiresAt,
+          ttlSeconds: 120 as const,
+        })])
+      : Object.freeze([]),
+  });
+}
+
+function historyV6(
+  turns: ChatHistoryPageV6["turns"] = Object.freeze([commandTurnV6()]),
+  approvals: ChatHistoryPageV6["approvals"] = Object.freeze([approvalProjectionV6()]),
+  nextCursor: string | null = null,
+  durableSequenceCut = "41",
+): ChatHistoryPageV6 {
+  return Object.freeze({
+    schemaVersion: 6,
+    turns,
+    nextCursor,
+    sessionNotices: Object.freeze([]),
+    durableSequenceCut,
+    approvals,
+  });
+}
+
+function projectionV6(
+  sessionId: string,
+  history: ChatHistoryPageV6 = historyV6(),
+  pendingApprovalSnapshot: ChatPendingApprovalSnapshotV6 = pendingApprovalSnapshotV6(),
+): ChatResyncProjectionV6 {
+  return Object.freeze({
+    session: session(sessionId),
+    history,
+    cleanup: null,
+    pendingApprovalSnapshot,
+  });
+}
+
+function approvalEventV6(
+  projection: ChatApprovalProjectionV6 = approvalProjectionV6(),
+  subscriptionId = LOCAL_SUBSCRIPTION_A,
+  projectionSequence = "1",
+): ChatProjectionEventV6 {
+  return Object.freeze({
+    schemaVersion: 6,
+    subscriptionId,
+    contextId: CONTEXT,
+    sessionId: SESSION_A,
+    turnId: projection.turnId,
+    projectionSequence,
+    eventId: projection.sourceEventId,
+    durableSequence: projection.sourceSequence,
+    kind: "approval_changed",
+    payload: projection,
+  });
+}
+
 function attachmentImportEvent(
   stage: ChatAttachmentImportEvent["stage"],
   sequence: string,
@@ -231,6 +509,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   emit: (event: ChatProjectionEvent) => void;
   emitV4: (event: ChatProjectionEventV4) => void;
   emitV5: (event: ChatProjectionEventV5) => void;
+  emitV6: (event: ChatProjectionEventV6) => void;
   emitControlPlane: (event: ChatControlPlaneEvent) => void;
   emitAttachmentImport: (event: ChatAttachmentImportEvent) => void;
   invalidate: (scope?: ChatInvalidEventScope | null) => void;
@@ -238,6 +517,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   let eventHandler: (event: ChatProjectionEvent) => void = () => undefined;
   let eventHandlerV4: (event: ChatProjectionEventV4) => void = () => undefined;
   let eventHandlerV5: (event: ChatProjectionEventV5) => void = () => undefined;
+  let eventHandlerV6: (event: ChatProjectionEventV6) => void = () => undefined;
   let invalidHandler: (scope?: ChatInvalidEventScope | null) => void = () => undefined;
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
@@ -282,6 +562,14 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
       nextCursor: null,
       sessionNotices: Object.freeze([]),
       durableSequenceCut: "0",
+    }),
+    loadHistoryV6: async () => Object.freeze({
+      schemaVersion: 6 as const,
+      turns: Object.freeze([]),
+      nextCursor: null,
+      sessionNotices: Object.freeze([]),
+      durableSequenceCut: "0",
+      approvals: Object.freeze([]),
     }),
     loadReasoning: async () => [],
     renameSession: async (_context, _session, _title, operation) => operation,
@@ -335,6 +623,45 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     subscribeSessionV5: async (_context, sessionId) => sessionId === SESSION_A
       ? "019c1a00-0000-7000-8000-00000000000a"
       : "019c1a00-0000-7000-8000-00000000000b",
+    subscribeSessionV6: async (_context, sessionId) => {
+      const nextSubscriptionId = sessionId === SESSION_A
+        ? "019c1a00-0000-7000-8000-00000000000a"
+        : "019c1a00-0000-7000-8000-00000000000b";
+      return Object.freeze({
+        subscriptionId: nextSubscriptionId,
+        pendingApprovalSnapshot: emptyPendingApprovalSnapshot(sessionId === SESSION_A
+          ? "019c1a00-0000-7000-8000-00000000000d"
+          : "019c1a00-0000-7000-8000-00000000000e"),
+      });
+    },
+    decideApprovalV6: async (
+      _context,
+      _session,
+      _turn,
+      _item,
+      approvalRequestId,
+      decision,
+    ) => decision === "accept_once"
+      ? Object.freeze({
+          schemaVersion: 6 as const,
+          approvalRequestId,
+          decisionId: "13700000-0000-4000-8000-000000000090",
+          streamId: HOST_GENERATION_A,
+          revision: 2 as const,
+          decision,
+          outcome: "accepted_once" as const,
+          resolvedAt: "2026-08-03T12:00:30Z",
+        })
+      : Object.freeze({
+          schemaVersion: 6 as const,
+          approvalRequestId,
+          decisionId: "13700000-0000-4000-8000-000000000090",
+          streamId: HOST_GENERATION_A,
+          revision: 2 as const,
+          decision,
+          outcome: "cancelled_current_turn" as const,
+          resolvedAt: "2026-08-03T12:00:30Z",
+        }),
     resyncSession: async (_context, sessionId) => projection(sessionId),
     resyncSessionV2: (...arguments_) => client.resyncSession(...arguments_),
     resyncSessionV4: async (_context, sessionId) => projectionV4(sessionId),
@@ -348,6 +675,23 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
         durableSequenceCut: "0",
       }),
     }),
+    resyncSessionV6: async (_context, sessionId) => {
+      const streamId = sessionId === SESSION_A
+        ? "019c1a00-0000-7000-8000-00000000000d"
+        : "019c1a00-0000-7000-8000-00000000000e";
+      return Object.freeze({
+        ...projectionV4(sessionId),
+        history: Object.freeze({
+          schemaVersion: 6 as const,
+          turns: Object.freeze([]),
+          nextCursor: null,
+          sessionNotices: Object.freeze([]),
+          durableSequenceCut: "0",
+          approvals: Object.freeze([]),
+        }),
+        pendingApprovalSnapshot: emptyPendingApprovalSnapshot(streamId),
+      });
+    },
     unsubscribeSession: async () => true,
     cancelRequest: async () => true,
     onEvent: async (handler, onInvalid) => {
@@ -362,6 +706,11 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     },
     onEventV5: async (handler, onInvalid) => {
       eventHandlerV5 = handler;
+      invalidHandler = onInvalid ?? (() => undefined);
+      return () => undefined;
+    },
+    onEventV6: async (handler, onInvalid) => {
+      eventHandlerV6 = handler;
       invalidHandler = onInvalid ?? (() => undefined);
       return () => undefined;
     },
@@ -380,6 +729,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
     emit: (value) => eventHandler(value),
     emitV4: (value) => eventHandlerV4(value),
     emitV5: (value) => eventHandlerV5(value),
+    emitV6: (value) => eventHandlerV6(value),
     emitControlPlane: (value) => controlPlaneHandler(value),
     emitAttachmentImport: (value) => attachmentImportHandler(value),
     invalidate: (scope) => invalidHandler(scope),
@@ -388,6 +738,17 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
 
 function createStore(client: ChatClient) {
   return createChatStoreDefinition(client, `chat-test-${storeSequence++}`)();
+}
+
+function createV6Store(client: ChatClient) {
+  return createChatStoreDefinition(
+    client,
+    `chat-feat137-v6-${storeSequence++}`,
+    undefined,
+    true,
+    true,
+    true,
+  )();
 }
 
 async function finishAttachmentImportPresentation(): Promise<void> {
@@ -4589,5 +4950,538 @@ describe("FEAT-134 chat store v4 authority", () => {
     });
     expect(store.conversationState.streamPositions[subscriptionId]).toBe("2");
     expect(store.conversationState.recovery).toBeNull();
+  });
+
+  it("uses the gated v6 closed path and derives action authority only from the Host snapshot", async () => {
+    const subscribeV5 = vi.fn<ChatClient["subscribeSessionV5"]>();
+    const resyncV5 = vi.fn<ChatClient["resyncSessionV5"]>();
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client } = fakeClient({
+      subscribeSessionV5: subscribeV5,
+      resyncSessionV5: resyncV5,
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(subscribeV6).toHaveBeenCalledWith(CONTEXT, SESSION_A);
+    expect(resyncV6).toHaveBeenCalledOnce();
+    expect(subscribeV5).not.toHaveBeenCalled();
+    expect(resyncV5).not.toHaveBeenCalled();
+    expect(LOCAL_SUBSCRIPTION_A).not.toBe(HOST_GENERATION_A);
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      status: "pending",
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_A,
+    });
+    expect(selectConversationTimeline(
+      store.conversationState,
+      SESSION_A,
+      store.conversationApprovalState,
+    )?.turns[0]?.items[0]?.approval).toMatchObject({
+      approvalRequestId: APPROVAL_A,
+      authority: "actionable",
+    });
+    expect(JSON.stringify(store.conversationApprovalState)).not.toContain("agentSessionId");
+  });
+
+  it("revokes current authority on invalid input and restores it from a fresh successful resync", async () => {
+    let subscriptionCall = 0;
+    let resyncCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscriptionCall += 1;
+      const local = subscriptionCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B;
+      const host = subscriptionCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B;
+      return Object.freeze({
+        subscriptionId: local,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(host),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) => {
+      resyncCall += 1;
+      return projectionV6(
+        sessionId,
+        historyV6(),
+        pendingApprovalSnapshotV6(
+          resyncCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+        ),
+      );
+    });
+    const { client, invalidate } = fakeClient({
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]?.authorityStreamId)
+      .toBe(HOST_GENERATION_A);
+
+    invalidate({
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+    });
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "historical",
+      authorityStreamId: null,
+    });
+
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_B,
+    });
+  });
+
+  it("revokes authority at expiresAt and waits for the delayed Host terminal lifecycle", async () => {
+    const delayedExpiryResync = new Deferred<ChatResyncProjectionV6>();
+    let resyncCall = 0;
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>((_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1
+        ? Promise.resolve(projectionV6(sessionId))
+        : delayedExpiryResync.promise;
+    });
+    const { client, emitV6 } = fakeClient({ resyncSessionV6: resyncV6 });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "pending",
+      outcome: null,
+      authority: "actionable",
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resyncV6).toHaveBeenCalledTimes(2);
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "pending",
+      outcome: null,
+      authority: "historical",
+      authorityStreamId: null,
+    });
+
+    delayedExpiryResync.resolve(projectionV6(
+      SESSION_A,
+      historyV6(),
+      pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+    ));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "pending",
+      outcome: null,
+      authority: "historical",
+    });
+
+    emitV6(approvalEventV6(expiredApprovalProjectionV6()));
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      outcome: "expired",
+      authority: "historical",
+    });
+  });
+
+  it("folds a buffered v6 approval at the durable cut once without requesting a trailing resync", async () => {
+    const delayedResync = new Deferred<ChatResyncProjectionV6>();
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(() => delayedResync.promise);
+    const { client, emitV6 } = fakeClient({ resyncSessionV6: resyncV6 });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledOnce());
+    emitV6(approvalEventV6());
+    delayedResync.resolve(projectionV6(SESSION_A));
+    await selecting;
+
+    expect(resyncV6).toHaveBeenCalledOnce();
+    expect(store.conversationState.streamPositions[LOCAL_SUBSCRIPTION_A]).toBe("1");
+    expect(store.conversationApprovalState.processedEventIds[
+      approvalProjectionV6().sourceEventId
+    ]).toBe(true);
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_A,
+    });
+  });
+
+  it("requests normal resync for a live pending approval after advancing the auxiliary cursor", async () => {
+    const delayedRefresh = new Deferred<ChatResyncProjectionV6>();
+    let resyncCall = 0;
+    const emptyHistory = historyV6(
+      Object.freeze([commandTurnV6()]),
+      Object.freeze([]),
+      null,
+      "40",
+    );
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>((_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1
+        ? Promise.resolve(projectionV6(
+            sessionId,
+            emptyHistory,
+            pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+          ))
+        : delayedRefresh.promise;
+    });
+    const { client, emitV6 } = fakeClient({ resyncSessionV6: resyncV6 });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emitV6(approvalEventV6(approvalProjectionV6(), LOCAL_SUBSCRIPTION_B));
+    expect(store.conversationState.streamPositions[LOCAL_SUBSCRIPTION_B]).toBeUndefined();
+    expect(resyncV6).toHaveBeenCalledOnce();
+
+    emitV6(approvalEventV6());
+    expect(store.conversationState.streamPositions[LOCAL_SUBSCRIPTION_A]).toBe("1");
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "historical",
+    });
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(2));
+
+    delayedRefresh.resolve(projectionV6(
+      SESSION_A,
+      historyV6(),
+      pendingApprovalSnapshotV6(HOST_GENERATION_B),
+    ));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_B,
+    });
+  });
+
+  it("fails closed when a current Host snapshot cannot bind to its local Command item", async () => {
+    const mismatchedPending = approvalProjectionV6(
+      APPROVAL_A,
+      TURN_A,
+      "missing-command-item",
+    );
+    const { client } = fakeClient({
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        historyV6(),
+        pendingApprovalSnapshotV6(HOST_GENERATION_A, mismatchedPending),
+      ),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.phase).toBe("resync-required");
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "historical",
+      authorityStreamId: null,
+    });
+    expect(store.conversationApprovalState.diagnostics).toContainEqual({
+      code: "pending_snapshot_invalid",
+    });
+  });
+
+  it("merges older v6 approval lifecycle without revoking the current snapshot authority", async () => {
+    const olderTurnId = "13700000-0000-4000-8000-000000000030";
+    const currentPage = historyV6(
+      Object.freeze([commandTurnV6()]),
+      Object.freeze([approvalProjectionV6()]),
+      "abcdefghijklmnop",
+    );
+    const olderPage = historyV6(
+      Object.freeze([commandTurnV6(olderTurnId, COMMAND_B, true)]),
+      Object.freeze([resolvedApprovalProjectionV6(APPROVAL_B, olderTurnId, COMMAND_B)]),
+      null,
+      "22",
+    );
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => olderPage);
+    const { client } = fakeClient({
+      loadHistoryV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        currentPage,
+        pendingApprovalSnapshotV6(),
+      ),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.loadOlderHistory();
+
+    expect(loadHistoryV6).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      "abcdefghijklmnop",
+      20,
+      expect.any(AbortSignal),
+    );
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_A,
+    });
+    expect(store.conversationApprovalState.approvals[APPROVAL_B]).toMatchObject({
+      status: "resolved",
+      outcome: "resolved_elsewhere",
+      authority: "historical",
+    });
+    expect(store.history).toMatchObject({
+      schemaVersion: 6,
+      nextCursor: null,
+      durableSequenceCut: "41",
+      approvals: expect.arrayContaining([
+        expect.objectContaining({ approvalRequestId: APPROVAL_A }),
+        expect.objectContaining({ approvalRequestId: APPROVAL_B }),
+      ]),
+    });
+  });
+
+  it.each([
+    ["accept_once" as const, "accepted_once" as const],
+    ["cancel_current_turn" as const, "cancelled_current_turn" as const],
+  ])("submits one closed %s decision and projects the known %s terminal", async (
+    decision,
+    outcome,
+  ) => {
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>(async () =>
+      approvalDecisionResultV6(decision));
+    const { client } = fakeClient({
+      decideApprovalV6: decide,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.canDecideApprovals).toBe(true);
+    await expect(store.decideApproval({
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision,
+    })).resolves.toBe("accepted");
+
+    expect(decide).toHaveBeenCalledOnce();
+    expect(decide).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      TURN_A,
+      COMMAND_A,
+      APPROVAL_A,
+      decision,
+    );
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      decision,
+      outcome,
+      authority: "historical",
+      authorityStreamId: null,
+    });
+    expect(store.approvalTransients[APPROVAL_A]).toBeUndefined();
+  });
+
+  it("locks in flight at the store boundary and accepts an identical SSE-first result", async () => {
+    const deferred = new Deferred<ChatApprovalDecisionResultV6>();
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>(() => deferred.promise);
+    const { client, emitV6 } = fakeClient({
+      decideApprovalV6: decide,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const input = {
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision: "accept_once" as const,
+    };
+
+    const first = store.decideApproval(input);
+    expect(store.approvalTransients[APPROVAL_A]).toEqual({
+      phase: "submitting",
+      errorCode: null,
+    });
+    await expect(store.decideApproval(input)).resolves.toBe("ignored");
+    expect(decide).toHaveBeenCalledOnce();
+
+    emitV6(approvalEventV6(acceptedApprovalProjectionV6()));
+    deferred.resolve(approvalDecisionResultV6());
+    await expect(first).resolves.toBe("accepted");
+
+    expect(decide).toHaveBeenCalledOnce();
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.conversationApprovalState.diagnostics).not.toContainEqual({
+      code: "decision_result_invalid",
+    });
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      outcome: "accepted_once",
+    });
+  });
+
+  it("never retries an unknown result and unlocks the same request only after fresh authority", async () => {
+    let decisionCall = 0;
+    let resyncCall = 0;
+    const refresh = new Deferred<ChatResyncProjectionV6>();
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>(async () => {
+      decisionCall += 1;
+      if (decisionCall === 1) {
+        throw new ChatClientError({
+          schemaVersion: 6,
+          code: "chat_conflict",
+          retryable: false,
+          recovery: "resync",
+          approvalIssue: "approval_unavailable",
+        });
+      }
+      return approvalDecisionResultV6();
+    });
+    const resync = vi.fn<ChatClient["resyncSessionV6"]>((_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1
+        ? Promise.resolve(projectionV6(sessionId))
+        : refresh.promise;
+    });
+    const { client } = fakeClient({ decideApprovalV6: decide, resyncSessionV6: resync });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const input = {
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision: "accept_once" as const,
+    };
+
+    await expect(store.decideApproval(input)).resolves.toBe("reconciling");
+    expect(decide).toHaveBeenCalledOnce();
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "historical",
+      authorityStreamId: null,
+    });
+    await vi.waitFor(() => expect(resync).toHaveBeenCalledTimes(2));
+    expect(decide).toHaveBeenCalledOnce();
+    refresh.resolve(projectionV6(SESSION_A));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(decide).toHaveBeenCalledOnce();
+    expect(store.approvalTransients[APPROVAL_A]).toBeUndefined();
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_A,
+    });
+
+    await expect(store.decideApproval(input)).resolves.toBe("accepted");
+    expect(decide).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps capability-revoked approval actions disabled and never invokes", async () => {
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>();
+    const { client } = fakeClient({
+      decideApprovalV6: decide,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const input = {
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision: "accept_once" as const,
+    };
+
+    store.context = Object.freeze({
+      ...store.context!,
+      allowedActions: Object.freeze(store.context!.allowedActions
+        .filter((action) => action !== "submit_turn")),
+    });
+    expect(store.canDecideApprovals).toBe(false);
+    await expect(store.decideApproval(input)).resolves.toBe("reconciling");
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("revokes an exactly expired approval without invoking", async () => {
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>();
+    const { client } = fakeClient({
+      decideApprovalV6: decide,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    vi.setSystemTime(Date.parse(EXPIRES_AT));
+
+    await expect(store.decideApproval({
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision: "accept_once",
+    })).resolves.toBe("reconciling");
+
+    expect(decide).not.toHaveBeenCalled();
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      authority: "historical",
+      authorityStreamId: null,
+    });
+  });
+
+  it("keeps a disconnected approval locked while authoritative resync is pending", async () => {
+    const delayedResync = new Deferred<ChatResyncProjectionV6>();
+    let resyncCall = 0;
+    const resync = vi.fn<ChatClient["resyncSessionV6"]>((_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1
+        ? Promise.resolve(projectionV6(sessionId))
+        : delayedResync.promise;
+    });
+    const decide = vi.fn<ChatClient["decideApprovalV6"]>();
+    const { client, invalidate } = fakeClient({
+      decideApprovalV6: decide,
+      resyncSessionV6: resync,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    invalidate({
+      contextId: CONTEXT,
+      sessionId: SESSION_A,
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+    });
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    await expect(store.decideApproval({
+      threadId: SESSION_A,
+      turnId: TURN_A,
+      itemId: COMMAND_A,
+      approvalRequestId: APPROVAL_A,
+      decision: "accept_once",
+    })).resolves.toBe("reconciling");
+    expect(decide).not.toHaveBeenCalled();
+    delayedResync.resolve(projectionV6(SESSION_A));
   });
 });
