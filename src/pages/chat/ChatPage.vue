@@ -153,7 +153,7 @@ const isStreaming = computed(() => chatStore.phase === "streaming");
 const isHistoryLoading = computed(() =>
   isSessionRoute.value &&
   chatStore.history === null &&
-  ["binding", "loading", "resyncing", "ready"].includes(chatStore.phase),
+  ["binding", "loading", "binding-pending", "resyncing", "ready"].includes(chatStore.phase),
 );
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
@@ -168,6 +168,7 @@ const permissionDenied = computed(() =>
   )),
 );
 const statusAnnouncement = computed(() => {
+  if (chatStore.phase === "binding-pending") return "正在建立安全任务连接";
   if (chatStore.phase === "resyncing") return "正在同步任务历史";
   if (isStreaming.value) return "模型正在生成回答";
   if (chatStore.liveTurnStatus) return turnStatusLabel(chatStore.liveTurnStatus);
@@ -622,7 +623,7 @@ onBeforeUnmount(() => {
         class="chat-workspace__conversation"
         tabindex="-1"
         aria-label="任务对话记录"
-        :aria-busy="isHistoryLoading || chatStore.phase === 'resyncing'"
+        :aria-busy="isHistoryLoading || chatStore.phase === 'binding-pending' || chatStore.phase === 'resyncing'"
         @scroll="updateScrollPosition"
       >
         <div class="chat-workspace__column">

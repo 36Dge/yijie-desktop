@@ -35,6 +35,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -82,10 +83,12 @@ struct ChatIpcInner {
     process_epoch: Uuid,
     cursors: StdMutex<HashMap<String, CursorRecord>>,
     reads: StdMutex<HashMap<Uuid, bool>>,
+    pending_approval_snapshots: StdMutex<HashMap<(Uuid, Uuid, Uuid), PendingApprovalSnapshot>>,
     event_bridge: ChatEventBridge,
     coordinator: Mutex<Option<ConversationCoordinator>>,
     bind_generation: AtomicU64,
     bind_gate: Mutex<()>,
+    host_resume_generation: Mutex<Option<String>>,
 }
 
 impl Debug for ChatIpcRuntime {
@@ -112,6 +115,30 @@ struct CursorRecord {
     value: CursorValue,
 }
 
+async fn ensure_host_generation_once<T, E, Acquire, AcquireFuture, Resume, ResumeFuture>(
+    state: &Mutex<Option<String>>,
+    acquire: Acquire,
+    resume: Resume,
+) -> Result<(), E>
+where
+    Acquire: FnOnce() -> AcquireFuture,
+    AcquireFuture: Future<Output = Result<(String, T), E>>,
+    Resume: FnOnce(T) -> ResumeFuture,
+    ResumeFuture: Future<Output = Result<(), E>>,
+{
+    // Generation discovery and the resume that consumes its exact bridge are
+    // one singleflight critical section. A rollover cannot be cached under the
+    // generation that preceded it.
+    let mut resumed_generation = state.lock().await;
+    let (generation, authority) = acquire().await?;
+    if resumed_generation.as_deref() == Some(generation.as_str()) {
+        return Ok(());
+    }
+    resume(authority).await?;
+    *resumed_generation = Some(generation);
+    Ok(())
+}
+
 impl ChatIpcRuntime {
     pub fn new() -> Self {
         Self {
@@ -119,10 +146,12 @@ impl ChatIpcRuntime {
                 process_epoch: Uuid::now_v7(),
                 cursors: StdMutex::new(HashMap::new()),
                 reads: StdMutex::new(HashMap::new()),
+                pending_approval_snapshots: StdMutex::new(HashMap::new()),
                 event_bridge: ChatEventBridge::new(),
                 coordinator: Mutex::new(None),
                 bind_generation: AtomicU64::new(0),
                 bind_gate: Mutex::new(()),
+                host_resume_generation: Mutex::new(None),
             }),
         }
     }
@@ -258,15 +287,53 @@ impl ChatIpcRuntime {
         })
     }
 
+    fn cache_pending_approval_snapshot(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        subscription_id: Uuid,
+        snapshot: PendingApprovalSnapshot,
+    ) -> Result<(), ChatIpcError> {
+        self.inner
+            .pending_approval_snapshots
+            .lock()
+            .map_err(|_| ChatIpcError::temporarily_unavailable(None))?
+            .insert((context_id, session_id, subscription_id), snapshot);
+        Ok(())
+    }
+
+    fn take_pending_approval_snapshot(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        subscription_id: Uuid,
+    ) -> Result<Option<PendingApprovalSnapshot>, ChatIpcError> {
+        Ok(self
+            .inner
+            .pending_approval_snapshots
+            .lock()
+            .map_err(|_| ChatIpcError::temporarily_unavailable(None))?
+            .remove(&(context_id, session_id, subscription_id)))
+    }
+
+    fn discard_pending_approval_snapshot(&self, context_id: Uuid, subscription_id: Uuid) {
+        if let Ok(mut snapshots) = self.inner.pending_approval_snapshots.lock() {
+            snapshots.retain(|(owned_context, _, owned_subscription), _| {
+                *owned_context != context_id || *owned_subscription != subscription_id
+            });
+        }
+    }
+
     async fn ensure_coordinator(
         &self,
         app: AppHandle,
         application: ConversationApplication,
         authorization: ChatAuthorizationManager,
     ) -> Result<(), ChatError> {
+        let feat137_streaming_enabled = application.feat137_streaming_enabled();
         self.inner
             .event_bridge
-            .configure(app, authorization)
+            .configure(app, authorization, feat137_streaming_enabled)
             .map_err(|_| ChatError::OrchestrationUnavailable)?;
         let finished = {
             let mut coordinator = self.inner.coordinator.lock().await;
@@ -296,6 +363,23 @@ impl ChatIpcRuntime {
         Ok(())
     }
 
+    async fn ensure_bound_sessions_resumed(&self, runtime: &ChatRuntime) -> Result<(), ChatError> {
+        ensure_host_generation_once(
+            &self.inner.host_resume_generation,
+            || runtime.host_resume_authority(),
+            |host| runtime.feat137_resume_bound_sessions_with_host(host),
+        )
+        .await
+    }
+
+    async fn stop_coordinator(&self) -> Result<(), ChatError> {
+        let coordinator = self.inner.coordinator.lock().await.take();
+        if let Some(coordinator) = coordinator {
+            coordinator.stop().await?;
+        }
+        Ok(())
+    }
+
     pub fn invalidate_all(&self) {
         self.inner.event_bridge.invalidate_all();
         if let Ok(mut cursors) = self.inner.cursors.lock() {
@@ -303,6 +387,9 @@ impl ChatIpcRuntime {
         }
         if let Ok(mut reads) = self.inner.reads.lock() {
             reads.clear();
+        }
+        if let Ok(mut snapshots) = self.inner.pending_approval_snapshots.lock() {
+            snapshots.clear();
         }
     }
 
@@ -327,6 +414,29 @@ impl ChatIpcRuntime {
             .wrapping_add(1)
     }
 
+    fn begin_fail_closed_binding(
+        &self,
+        manager: &ChatAuthorizationManager,
+    ) -> Result<u64, ChatError> {
+        let generation = self.begin_binding();
+        let invalidated = manager.invalidate_all();
+        self.invalidate_all();
+        invalidated?;
+        Ok(generation)
+    }
+
+    fn begin_scoped_binding(
+        &self,
+        manager: &ChatAuthorizationManager,
+        feat137_enabled: bool,
+    ) -> Result<u64, ChatError> {
+        if feat137_enabled {
+            self.begin_fail_closed_binding(manager)
+        } else {
+            Ok(self.begin_binding())
+        }
+    }
+
     fn binding_is_current(&self, generation: u64) -> bool {
         self.inner.bind_generation.load(Ordering::SeqCst) == generation
     }
@@ -346,6 +456,7 @@ struct ChatEventBridge {
 struct EventBridgeState {
     app: Option<AppHandle>,
     authorization: Option<ChatAuthorizationManager>,
+    feat137_streaming_enabled: bool,
     subscriptions: HashMap<Uuid, SubscriptionRecord>,
     cleanup_sessions: HashMap<Uuid, Uuid>,
     control_plane_sequence: u64,
@@ -487,6 +598,7 @@ impl ChatEventBridge {
             inner: Arc::new(StdMutex::new(EventBridgeState {
                 app: None,
                 authorization: None,
+                feat137_streaming_enabled: false,
                 subscriptions: HashMap::new(),
                 cleanup_sessions: HashMap::new(),
                 control_plane_sequence: 0,
@@ -494,10 +606,16 @@ impl ChatEventBridge {
         }
     }
 
-    fn configure(&self, app: AppHandle, authorization: ChatAuthorizationManager) -> Result<(), ()> {
+    fn configure(
+        &self,
+        app: AppHandle,
+        authorization: ChatAuthorizationManager,
+        feat137_streaming_enabled: bool,
+    ) -> Result<(), ()> {
         let mut state = self.inner.lock().map_err(|_| ())?;
         state.app = Some(app);
         state.authorization = Some(authorization);
+        state.feat137_streaming_enabled = feat137_streaming_enabled;
         Ok(())
     }
 
@@ -555,6 +673,25 @@ impl ChatEventBridge {
             })
             .flatten()
             .is_some()
+    }
+
+    fn owns_subscription(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        subscription_id: Uuid,
+        schema_version: u8,
+    ) -> bool {
+        self.inner.lock().ok().is_some_and(|state| {
+            state
+                .subscriptions
+                .get(&subscription_id)
+                .is_some_and(|record| {
+                    record.context_id == context_id
+                        && record.session_id == session_id
+                        && record.schema_version == schema_version
+                })
+        })
     }
 
     fn invalidate_all(&self) {
@@ -657,12 +794,7 @@ impl ChatEventBridge {
                 .authorization
                 .clone()
                 .ok_or(ChatError::OrchestrationUnavailable)?;
-            let authorized = state.subscriptions.values().any(|record| {
-                record.session_id == projection.session_id
-                    && authorization
-                        .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
-                        .is_ok()
-            });
+            let authorized = authorization.has_authorized_context(ChatAction::ReadSessions, now)?;
             if !authorized {
                 return Ok(());
             }
@@ -672,7 +804,11 @@ impl ChatEventBridge {
                 .ok_or(ChatError::OrchestrationUnavailable)?;
             (
                 app,
-                ControlPlaneEventDto::from_status(state.control_plane_sequence, projection),
+                ControlPlaneEventDto::from_status(
+                    state.control_plane_sequence,
+                    projection,
+                    state.feat137_streaming_enabled,
+                ),
             )
         };
         app.emit(CHAT_CONTROL_PLANE_EVENT_CHANNEL, event)
@@ -2400,6 +2536,57 @@ struct RecoveryPayload {
     intent: RecoveryIntent,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LocalRecoveryPlan {
+    revoke_approval_authority: bool,
+    resume_bound_sessions: bool,
+    restart_normal_coordinator: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BindLifecycle {
+    Legacy,
+    Feat137,
+}
+
+fn bind_lifecycle(feat137_enabled: bool) -> BindLifecycle {
+    #[cfg(feature = "feat126-s10-driver")]
+    {
+        let _ = feat137_enabled;
+        BindLifecycle::Legacy
+    }
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    {
+        if feat137_enabled {
+            BindLifecycle::Feat137
+        } else {
+            BindLifecycle::Legacy
+        }
+    }
+}
+
+fn local_recovery_plan(feat137_enabled: bool) -> LocalRecoveryPlan {
+    #[cfg(feature = "feat126-s10-driver")]
+    {
+        let _ = feat137_enabled;
+        LocalRecoveryPlan {
+            revoke_approval_authority: false,
+            // ChatRuntime preserves the S10 baseline: every recovery performs
+            // its own exact Idle-only resume without the FEAT-137 generation cache.
+            resume_bound_sessions: false,
+            restart_normal_coordinator: false,
+        }
+    }
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    {
+        LocalRecoveryPlan {
+            revoke_approval_authority: feat137_enabled,
+            resume_bound_sessions: feat137_enabled,
+            restart_normal_coordinator: feat137_enabled,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SetProjectPinnedPayload {
@@ -2508,6 +2695,15 @@ struct ListSessionsPayload {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SessionReadPayload {
     session_id: Uuid,
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SessionResyncV6Payload {
+    session_id: Uuid,
+    subscription_id: Uuid,
     cursor: Option<String>,
     limit: Option<usize>,
 }
@@ -3089,26 +3285,37 @@ pub(crate) struct ControlPlaneDto {
 }
 
 impl ControlPlaneDto {
-    fn from_status(status: &PublicTaskControlPlaneStatus) -> Self {
-        let projected_state = match status.state {
-            PublicTaskBindingState::Pending | PublicTaskBindingState::Inflight => "pending",
-            PublicTaskBindingState::Bound => "bound",
-            PublicTaskBindingState::BlockedAuth => "blocked_auth",
-            PublicTaskBindingState::RetryWait => "retry_wait",
-            PublicTaskBindingState::Denied => "denied",
-            PublicTaskBindingState::Failed => "failed",
+    fn from_status(status: &PublicTaskControlPlaneStatus, feat137_enabled: bool) -> Self {
+        let projected_state = match (status.state, feat137_enabled) {
+            (PublicTaskBindingState::Pending | PublicTaskBindingState::Inflight, _) => "pending",
+            (PublicTaskBindingState::Bound, false) => "bound",
+            (PublicTaskBindingState::Bound, true) if status.host_session_bound => "bound",
+            (PublicTaskBindingState::Bound, true) => "binding_pending",
+            (PublicTaskBindingState::BlockedAuth, _) => "blocked_auth",
+            (PublicTaskBindingState::RetryWait, _) => "retry_wait",
+            (PublicTaskBindingState::Denied, _) => "denied",
+            (PublicTaskBindingState::Failed, _) => "failed",
         };
-        let (retryable, recovery) = match status.state {
-            PublicTaskBindingState::Pending | PublicTaskBindingState::Bound => (false, "none"),
-            PublicTaskBindingState::Inflight | PublicTaskBindingState::RetryWait => (true, "retry"),
-            PublicTaskBindingState::BlockedAuth => (false, "sign_in"),
-            PublicTaskBindingState::Denied => (false, "none"),
-            PublicTaskBindingState::Failed => (false, "resync"),
+        let (retryable, recovery) = match (status.state, feat137_enabled) {
+            (PublicTaskBindingState::Pending | PublicTaskBindingState::Bound, _) => (false, "none"),
+            (PublicTaskBindingState::Inflight, false) | (PublicTaskBindingState::RetryWait, _) => {
+                (true, "retry")
+            }
+            (PublicTaskBindingState::Inflight, true) => (false, "none"),
+            (PublicTaskBindingState::BlockedAuth, _) => (false, "sign_in"),
+            (PublicTaskBindingState::Denied, _) => (false, "none"),
+            (PublicTaskBindingState::Failed, _) => (false, "resync"),
+        };
+        let issue_code = match (status.state, feat137_enabled) {
+            (PublicTaskBindingState::Pending, true)
+            | (PublicTaskBindingState::Inflight, true)
+            | (PublicTaskBindingState::Bound, true) => None,
+            _ => status.issue_code.clone(),
         };
         Self {
             session_id: status.session_id.to_string(),
             state: projected_state,
-            issue_code: status.issue_code.clone(),
+            issue_code,
             retryable,
             recovery,
         }
@@ -3128,8 +3335,12 @@ struct ControlPlaneEventDto {
 }
 
 impl ControlPlaneEventDto {
-    fn from_status(sequence: u64, status: &PublicTaskControlPlaneStatus) -> Self {
-        let projection = ControlPlaneDto::from_status(status);
+    fn from_status(
+        sequence: u64,
+        status: &PublicTaskControlPlaneStatus,
+        feat137_enabled: bool,
+    ) -> Self {
+        let projection = ControlPlaneDto::from_status(status, feat137_enabled);
         Self {
             schema_version: CHAT_IPC_SCHEMA_VERSION,
             sequence: sequence.to_string(),
@@ -4275,7 +4486,9 @@ pub async fn chat_get_local_readiness_v1(
 #[tauri::command]
 pub async fn chat_request_local_recovery_v1(
     request: Value,
+    app: AppHandle,
     chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<super::ChatLocalReadiness>, ChatIpcError> {
     let request: CommandRequest<RecoveryPayload> = decode_request(request)?;
     validate_operation(request.payload.operation_id, request.request_id)?;
@@ -4289,10 +4502,51 @@ pub async fn chat_request_local_recovery_v1(
         ChatAction::ReadSessions,
         request.request_id,
     )?;
-    Ok(CommandResponse::new(
-        request.request_id,
-        chat_runtime.request_local_recovery().await,
-    ))
+    let recovery_plan = local_recovery_plan(chat_runtime.feat137_streaming_enabled());
+    if recovery_plan.revoke_approval_authority {
+        let stopped = ipc_runtime.stop_coordinator().await;
+        // Even an unknown coordinator stop outcome cannot preserve Host-minted
+        // action authority across a recovery generation.
+        ipc_runtime.invalidate_all();
+        stopped.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    }
+    let mut readiness = chat_runtime.request_local_recovery().await;
+    if readiness.host == super::ChatHostReadiness::Ready
+        && readiness.storage == super::ChatStorageReadiness::Ready
+    {
+        let resumed = if recovery_plan.resume_bound_sessions {
+            ipc_runtime
+                .ensure_bound_sessions_resumed(&chat_runtime)
+                .await
+        } else {
+            Ok(())
+        };
+        #[cfg(not(feature = "feat126-s10-driver"))]
+        let recovered = if recovery_plan.restart_normal_coordinator {
+            match resumed {
+                Ok(()) => match chat_runtime.local_conversation_application().await {
+                    Ok(application) => {
+                        ipc_runtime
+                            .ensure_coordinator(app, application, manager)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            }
+        } else {
+            Ok(())
+        };
+        #[cfg(feature = "feat126-s10-driver")]
+        let recovered = resumed;
+        #[cfg(feature = "feat126-s10-driver")]
+        let _ = app;
+        if recovered.is_err() {
+            chat_runtime.invalidate_host_bridge().await;
+            readiness = chat_runtime.local_readiness(false).await;
+        }
+    }
+    Ok(CommandResponse::new(request.request_id, readiness))
 }
 
 fn validate_input(input: &str, request_id: Uuid) -> Result<(), ChatIpcError> {
@@ -4347,6 +4601,153 @@ mod tests {
         CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
         ProjectionErrorCode, ReasoningPart, TimelineItemStatus,
     };
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use tokio::sync::Notify;
+
+    #[test]
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    fn feat137_normal_recovery_plan_is_exactly_gated() {
+        assert_eq!(
+            local_recovery_plan(false),
+            LocalRecoveryPlan {
+                revoke_approval_authority: false,
+                resume_bound_sessions: false,
+                restart_normal_coordinator: false,
+            }
+        );
+        assert_eq!(
+            local_recovery_plan(true),
+            LocalRecoveryPlan {
+                revoke_approval_authority: true,
+                resume_bound_sessions: true,
+                restart_normal_coordinator: true,
+            }
+        );
+        assert_eq!(bind_lifecycle(false), BindLifecycle::Legacy);
+        assert_eq!(bind_lifecycle(true), BindLifecycle::Feat137);
+    }
+
+    #[test]
+    #[cfg(feature = "feat126-s10-driver")]
+    fn feat126_s10_recovery_delegates_each_resume_to_chat_runtime() {
+        assert_eq!(
+            local_recovery_plan(false),
+            LocalRecoveryPlan {
+                revoke_approval_authority: false,
+                resume_bound_sessions: false,
+                restart_normal_coordinator: false,
+            }
+        );
+        assert_eq!(bind_lifecycle(false), BindLifecycle::Legacy);
+        assert_eq!(bind_lifecycle(true), BindLifecycle::Legacy);
+    }
+
+    #[tokio::test]
+    async fn feat137_host_generation_resume_is_atomic_exactly_once_and_failure_safe() {
+        let state = Mutex::new(None);
+        let resumes = AtomicUsize::new(0);
+        for generation in ["generation-a", "generation-a", "generation-b"] {
+            ensure_host_generation_once(
+                &state,
+                || async { Ok::<_, &'static str>((generation.to_owned(), ())) },
+                |_| async {
+                    resumes.fetch_add(1, AtomicOrdering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(resumes.load(AtomicOrdering::SeqCst), 2);
+        assert_eq!(state.lock().await.as_deref(), Some("generation-b"));
+
+        let failed_state = Mutex::new(None);
+        let failed_resumes = AtomicUsize::new(0);
+        let failed = ensure_host_generation_once(
+            &failed_state,
+            || async { Ok::<_, &'static str>(("generation-c".to_owned(), ())) },
+            |_| async {
+                failed_resumes.fetch_add(1, AtomicOrdering::SeqCst);
+                Err("resume_failed")
+            },
+        )
+        .await;
+        assert_eq!(failed, Err("resume_failed"));
+        assert!(failed_state.lock().await.is_none());
+        ensure_host_generation_once(
+            &failed_state,
+            || async { Ok::<_, &'static str>(("generation-c".to_owned(), ())) },
+            |_| async {
+                failed_resumes.fetch_add(1, AtomicOrdering::SeqCst);
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(failed_resumes.load(AtomicOrdering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn feat137_host_generation_discovery_waits_inside_singleflight() {
+        let state = Arc::new(Mutex::new(None));
+        let acquired = Arc::new(AtomicUsize::new(0));
+        let resumed = Arc::new(AtomicUsize::new(0));
+        let first_resume_started = Arc::new(Notify::new());
+        let release_first_resume = Arc::new(Notify::new());
+
+        let first = tokio::spawn({
+            let state = state.clone();
+            let acquired = acquired.clone();
+            let resumed = resumed.clone();
+            let first_resume_started = first_resume_started.clone();
+            let release_first_resume = release_first_resume.clone();
+            async move {
+                ensure_host_generation_once(
+                    &state,
+                    || async move {
+                        acquired.fetch_add(1, AtomicOrdering::SeqCst);
+                        Ok::<_, &'static str>(("generation-a".to_owned(), ()))
+                    },
+                    |_| async move {
+                        resumed.fetch_add(1, AtomicOrdering::SeqCst);
+                        first_resume_started.notify_one();
+                        release_first_resume.notified().await;
+                        Ok(())
+                    },
+                )
+                .await
+            }
+        });
+        first_resume_started.notified().await;
+
+        let second = tokio::spawn({
+            let state = state.clone();
+            let acquired = acquired.clone();
+            let resumed = resumed.clone();
+            async move {
+                ensure_host_generation_once(
+                    &state,
+                    || async move {
+                        acquired.fetch_add(1, AtomicOrdering::SeqCst);
+                        Ok::<_, &'static str>(("generation-b".to_owned(), ()))
+                    },
+                    |_| async move {
+                        resumed.fetch_add(1, AtomicOrdering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(acquired.load(AtomicOrdering::SeqCst), 1);
+        release_first_resume.notify_one();
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+        assert_eq!(acquired.load(AtomicOrdering::SeqCst), 2);
+        assert_eq!(resumed.load(AtomicOrdering::SeqCst), 2);
+        assert_eq!(state.lock().await.as_deref(), Some("generation-b"));
+    }
 
     #[test]
     fn feat137_decision_ipc_accepts_only_local_identity_and_closed_decision() {
@@ -4389,6 +4790,38 @@ mod tests {
         let mut unknown_decision = request;
         unknown_decision["payload"]["decision"] = json!("always_allow");
         assert!(decode_request_v6::<DecideApprovalV6Payload>(unknown_decision).is_err());
+    }
+
+    #[test]
+    fn feat137_resync_requires_one_closed_non_nil_subscription_continuation() {
+        let request_id = Uuid::now_v7();
+        let context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let subscription_id = Uuid::now_v7();
+        let request = json!({
+            "schemaVersion": 6,
+            "requestId": request_id,
+            "contextId": context_id,
+            "payload": {
+                "sessionId": session_id,
+                "subscriptionId": subscription_id,
+                "limit": 20,
+            }
+        });
+        let decoded: CommandRequest<SessionResyncV6Payload> =
+            decode_request_v6(request.clone()).unwrap();
+        assert_eq!(decoded.payload.session_id, session_id);
+        assert_eq!(decoded.payload.subscription_id, subscription_id);
+
+        let mut missing = request.clone();
+        missing["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("subscriptionId");
+        assert!(decode_request_v6::<SessionResyncV6Payload>(missing).is_err());
+        let mut widened = request;
+        widened["payload"]["hostStreamId"] = json!(Uuid::now_v7());
+        assert!(decode_request_v6::<SessionResyncV6Payload>(widened).is_err());
     }
 
     #[test]
@@ -4754,6 +5187,7 @@ mod tests {
             session_id: Uuid::parse_str(session_id).unwrap(),
             state: PublicTaskBindingState::RetryWait,
             issue_code: Some("chat_temporarily_unavailable".to_owned()),
+            host_session_bound: false,
         };
         let control_response: Value = serde_json::from_str(include_str!(
             "../../fixtures/chat-ipc-v1/control-plane-response.json"
@@ -4762,7 +5196,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CommandResponse::new(
                 request_id,
-                ControlPlaneDto::from_status(&control_status),
+                ControlPlaneDto::from_status(&control_status, false),
             ))
             .unwrap(),
             control_response
@@ -4778,7 +5212,9 @@ mod tests {
                     session_id: Uuid::parse_str(session_id).unwrap(),
                     state: PublicTaskBindingState::Bound,
                     issue_code: None,
+                    host_session_bound: true,
                 },
+                false,
             ))
             .unwrap(),
             control_event
@@ -6695,6 +7131,480 @@ mod tests {
         runtime.invalidate_pending_bindings();
         assert!(!runtime.binding_is_current(second));
     }
+
+    #[test]
+    fn decoded_rebind_immediately_revokes_context_subscription_and_snapshot_authority() {
+        let tenant_id = Uuid::now_v7();
+        let scope = crate::chat::database::ChatScope::new(
+            Uuid::now_v7().to_string(),
+            tenant_id.to_string(),
+        )
+        .unwrap();
+        let manager = ChatAuthorizationManager::new(&scope).unwrap();
+        let context = manager
+            .bind(
+                AuthoritativeChatProjection::from_trusted_native_projection(
+                    tenant_id,
+                    1,
+                    100,
+                    ["task.read".to_owned(), "task.create".to_owned()],
+                )
+                .unwrap(),
+                1,
+            )
+            .unwrap();
+        let runtime = ChatIpcRuntime::new();
+        let session_id = Uuid::now_v7();
+        let subscription_id = runtime
+            .inner
+            .event_bridge
+            .subscribe(context.context_id, session_id, CHAT_IPC_V6_SCHEMA_VERSION)
+            .unwrap();
+        runtime
+            .cache_pending_approval_snapshot(
+                context.context_id,
+                session_id,
+                subscription_id,
+                PendingApprovalSnapshot {
+                    stream_id: Uuid::now_v7(),
+                    snapshot_at: "2026-08-31T00:00:00Z".to_owned(),
+                    pending: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        let legacy_generation = runtime.begin_scoped_binding(&manager, false).unwrap();
+        assert!(runtime.binding_is_current(legacy_generation));
+        assert!(manager
+            .authorize_detailed(context.context_id, ChatAction::SubmitTurn, 2)
+            .is_ok());
+        assert!(runtime.inner.event_bridge.owns_subscription(
+            context.context_id,
+            session_id,
+            subscription_id,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ));
+        assert_eq!(
+            runtime
+                .inner
+                .pending_approval_snapshots
+                .lock()
+                .unwrap()
+                .len(),
+            1,
+        );
+
+        let generation = runtime.begin_scoped_binding(&manager, true).unwrap();
+
+        assert!(runtime.binding_is_current(generation));
+        assert_eq!(
+            manager.authorize_detailed(context.context_id, ChatAction::SubmitTurn, 2),
+            Err(AuthorizationFailure::ContextInvalid),
+        );
+        assert!(!runtime.inner.event_bridge.owns_subscription(
+            context.context_id,
+            session_id,
+            subscription_id,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ));
+        assert!(runtime
+            .take_pending_approval_snapshot(context.context_id, session_id, subscription_id,)
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn superseded_bind_inside_resume_cannot_publish_context_event_or_coordinator() {
+        let tenant_id = Uuid::now_v7();
+        let scope = crate::chat::database::ChatScope::new(
+            Uuid::now_v7().to_string(),
+            tenant_id.to_string(),
+        )
+        .unwrap();
+        let manager = ChatAuthorizationManager::new(&scope).unwrap();
+        let runtime = ChatIpcRuntime::new();
+        let first_generation = runtime.begin_fail_closed_binding(&manager).unwrap();
+        let first_guard = runtime.inner.bind_gate.lock().await;
+        let first_context = manager
+            .bind(
+                AuthoritativeChatProjection::from_trusted_native_projection(
+                    tenant_id,
+                    1,
+                    100,
+                    ["task.read".to_owned(), "task.create".to_owned()],
+                )
+                .unwrap(),
+                1,
+            )
+            .unwrap();
+        let session_id = Uuid::now_v7();
+        let first_subscription = runtime
+            .inner
+            .event_bridge
+            .subscribe(
+                first_context.context_id,
+                session_id,
+                CHAT_IPC_V6_SCHEMA_VERSION,
+            )
+            .unwrap();
+        let superseded = Arc::new(Notify::new());
+        let second = tokio::spawn({
+            let runtime = runtime.clone();
+            let manager = manager.clone();
+            let superseded = superseded.clone();
+            async move {
+                let generation = runtime.begin_fail_closed_binding(&manager).unwrap();
+                superseded.notify_one();
+                let _guard = runtime.inner.bind_gate.lock().await;
+                generation
+            }
+        });
+
+        // This is the checkpoint reached after the first bind's controlled Host
+        // resume/DB await. A newer decoded bind has already erected its barrier,
+        // even though it cannot yet enter the mutation gate.
+        superseded.notified().await;
+        assert!(!runtime.binding_is_current(first_generation));
+        assert_eq!(
+            manager.authorize_detailed(first_context.context_id, ChatAction::SubmitTurn, 2),
+            Err(AuthorizationFailure::ContextInvalid),
+        );
+        assert!(!runtime.inner.event_bridge.owns_subscription(
+            first_context.context_id,
+            session_id,
+            first_subscription,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ));
+        assert!(runtime.inner.coordinator.lock().await.is_none());
+        drop(first_guard);
+        let second_generation = second.await.unwrap();
+        assert!(runtime.binding_is_current(second_generation));
+    }
+
+    #[test]
+    fn feat137_control_plane_waits_for_host_identity_before_bound() {
+        let session_id = Uuid::now_v7();
+        let pending = ControlPlaneDto::from_status(
+            &PublicTaskControlPlaneStatus {
+                session_id,
+                state: PublicTaskBindingState::Bound,
+                issue_code: None,
+                host_session_bound: false,
+            },
+            true,
+        );
+        assert_eq!(pending.state, "binding_pending");
+        assert!(!pending.retryable);
+        assert_eq!(pending.recovery, "none");
+
+        let bound = ControlPlaneDto::from_status(
+            &PublicTaskControlPlaneStatus {
+                session_id,
+                state: PublicTaskBindingState::Bound,
+                issue_code: None,
+                host_session_bound: true,
+            },
+            true,
+        );
+        assert_eq!(bound.state, "bound");
+    }
+
+    #[test]
+    fn feat137_off_control_plane_projection_is_literal_legacy_behavior() {
+        let session_id = Uuid::now_v7();
+        let unbound = PublicTaskControlPlaneStatus {
+            session_id,
+            state: PublicTaskBindingState::Bound,
+            issue_code: None,
+            host_session_bound: false,
+        };
+        assert_eq!(ControlPlaneDto::from_status(&unbound, false).state, "bound");
+        assert_eq!(
+            ControlPlaneDto::from_status(&unbound, true).state,
+            "binding_pending"
+        );
+
+        let inflight = PublicTaskControlPlaneStatus {
+            session_id,
+            state: PublicTaskBindingState::Inflight,
+            issue_code: Some("chat_temporarily_unavailable".to_owned()),
+            host_session_bound: false,
+        };
+        let legacy = ControlPlaneDto::from_status(&inflight, false);
+        assert_eq!(legacy.state, "pending");
+        assert_eq!(
+            legacy.issue_code.as_deref(),
+            Some("chat_temporarily_unavailable")
+        );
+        assert!(legacy.retryable);
+        assert_eq!(legacy.recovery, "retry");
+        let feat137 = ControlPlaneDto::from_status(&inflight, true);
+        assert_eq!(feat137.state, "pending");
+        assert_eq!(feat137.issue_code, None);
+        assert!(!feat137.retryable);
+        assert_eq!(feat137.recovery, "none");
+    }
+
+    #[test]
+    fn feat137_control_plane_dto_matches_closed_web_shapes_during_inflight_and_exhaustion() {
+        let request_id = Uuid::parse_str("019c1a00-0000-7000-8000-000000000001").unwrap();
+        let session_id = Uuid::parse_str("019c1a00-0000-7000-8000-000000000005").unwrap();
+        for (status, fixture) in [
+            (
+                PublicTaskControlPlaneStatus {
+                    session_id,
+                    state: PublicTaskBindingState::Inflight,
+                    issue_code: Some("chat_temporarily_unavailable".to_owned()),
+                    host_session_bound: false,
+                },
+                include_str!("../../fixtures/chat-ipc-v1/control-plane-inflight-response.json"),
+            ),
+            (
+                PublicTaskControlPlaneStatus {
+                    session_id,
+                    state: PublicTaskBindingState::Failed,
+                    issue_code: Some("chat_temporarily_unavailable".to_owned()),
+                    host_session_bound: false,
+                },
+                include_str!("../../fixtures/chat-ipc-v1/control-plane-failed-response.json"),
+            ),
+        ] {
+            let expected: Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(
+                serde_json::to_value(CommandResponse::new(
+                    request_id,
+                    ControlPlaneDto::from_status(&status, true),
+                ))
+                .unwrap(),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn feat137_subscription_snapshot_is_exactly_bound_and_consumed_once() {
+        let runtime = ChatIpcRuntime::new();
+        let context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let first_subscription = Uuid::now_v7();
+        let second_subscription = Uuid::now_v7();
+        let first = PendingApprovalSnapshot {
+            stream_id: Uuid::now_v7(),
+            snapshot_at: "2026-08-31T00:00:00Z".to_owned(),
+            pending: Vec::new(),
+        };
+        let second = PendingApprovalSnapshot {
+            stream_id: Uuid::now_v7(),
+            snapshot_at: "2026-08-31T00:00:01Z".to_owned(),
+            pending: Vec::new(),
+        };
+
+        runtime
+            .cache_pending_approval_snapshot(
+                context_id,
+                session_id,
+                first_subscription,
+                first.clone(),
+            )
+            .unwrap();
+        runtime
+            .cache_pending_approval_snapshot(
+                context_id,
+                session_id,
+                second_subscription,
+                second.clone(),
+            )
+            .unwrap();
+        assert!(runtime
+            .take_pending_approval_snapshot(context_id, session_id, Uuid::now_v7())
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            runtime
+                .take_pending_approval_snapshot(context_id, session_id, first_subscription)
+                .unwrap(),
+            Some(first)
+        );
+        assert!(runtime
+            .take_pending_approval_snapshot(context_id, session_id, first_subscription)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            runtime
+                .take_pending_approval_snapshot(context_id, session_id, second_subscription)
+                .unwrap(),
+            Some(second)
+        );
+    }
+
+    #[test]
+    fn feat137_subscription_cleanup_requires_exact_context_ownership() {
+        let runtime = ChatIpcRuntime::new();
+        let context_id = Uuid::now_v7();
+        let foreign_context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let subscription_id = runtime
+            .inner
+            .event_bridge
+            .subscribe(context_id, session_id, CHAT_IPC_V6_SCHEMA_VERSION)
+            .unwrap();
+        let snapshot = PendingApprovalSnapshot {
+            stream_id: Uuid::now_v7(),
+            snapshot_at: "2026-08-31T00:00:00Z".to_owned(),
+            pending: Vec::new(),
+        };
+        runtime
+            .cache_pending_approval_snapshot(
+                context_id,
+                session_id,
+                subscription_id,
+                snapshot.clone(),
+            )
+            .unwrap();
+
+        assert!(!runtime
+            .inner
+            .event_bridge
+            .unsubscribe(foreign_context_id, subscription_id));
+        runtime.discard_pending_approval_snapshot(foreign_context_id, subscription_id);
+        assert!(!runtime.inner.event_bridge.owns_subscription(
+            foreign_context_id,
+            session_id,
+            subscription_id,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ));
+        assert!(runtime.inner.event_bridge.owns_subscription(
+            context_id,
+            session_id,
+            subscription_id,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ));
+        assert!(runtime
+            .inner
+            .event_bridge
+            .unsubscribe(context_id, subscription_id));
+        assert!(runtime
+            .take_pending_approval_snapshot(context_id, session_id, subscription_id)
+            .unwrap()
+            .is_some());
+        runtime
+            .cache_pending_approval_snapshot(context_id, session_id, subscription_id, snapshot)
+            .unwrap();
+        runtime.discard_pending_approval_snapshot(context_id, subscription_id);
+        assert!(runtime
+            .take_pending_approval_snapshot(context_id, session_id, subscription_id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn feat137_reopen_resumes_before_coordinator_and_subscribe_get_is_sse_first() {
+        let source = include_str!("ipc.rs");
+        assert!(source.contains("host_resume_generation: Mutex<Option<String>>"));
+        let bind_start = source.rfind("pub async fn chat_bind_context_v1(").unwrap();
+        let bind_end = source[bind_start..]
+            .find("pub async fn chat_list_projects_v1(")
+            .map(|offset| bind_start + offset)
+            .unwrap();
+        let bind = &source[bind_start..bind_end];
+        assert!(
+            bind.find("begin_scoped_binding(manager, true)").unwrap()
+                < bind.find(".chat_projection(").unwrap()
+        );
+        assert!(bind.contains("None => ipc_runtime.begin_binding()"));
+        let feat137_start = bind.find("let prepared = async").unwrap();
+        let feat137 = &bind[feat137_start..];
+        let context_bind = feat137.find(".bind(projection, now)").unwrap();
+        let after_context_bind = &feat137[context_bind..];
+        assert!(
+            after_context_bind.find(".bind(projection, now)").unwrap()
+                < after_context_bind.find("stop_coordinator()").unwrap()
+        );
+        assert!(
+            feat137.find(".bind(projection, now)").unwrap()
+                < feat137.find("ensure_demo_fast_sidecar()").unwrap()
+        );
+        assert!(
+            feat137.find("ensure_demo_fast_sidecar()").unwrap()
+                < feat137
+                    .find("ensure_bound_sessions_resumed(&chat_runtime)")
+                    .unwrap()
+        );
+        assert!(
+            feat137.find(".bind(projection, now)").unwrap()
+                < feat137
+                    .find(".ensure_coordinator(app, application")
+                    .unwrap()
+        );
+        assert!(bind.matches("binding_is_current(bind_generation)").count() >= 7);
+        assert!(feat137.contains("if native_can_read_task"));
+
+        let subscribe_start = source
+            .rfind("pub async fn chat_subscribe_session_v1(")
+            .unwrap();
+        let subscribe_end = source[subscribe_start..]
+            .find("pub async fn chat_unsubscribe_session_v1(")
+            .map(|offset| subscribe_start + offset)
+            .unwrap();
+        let subscribe = &source[subscribe_start..subscribe_end];
+        assert!(
+            subscribe.find("if !binding.host_session_bound").unwrap()
+                < subscribe
+                    .find(".event_bridge\n            .subscribe(")
+                    .unwrap()
+        );
+        assert!(
+            subscribe
+                .find(".event_bridge\n            .subscribe(")
+                .unwrap()
+                < subscribe
+                    .find(".pending_approvals_for_subscription_v6(")
+                    .unwrap()
+        );
+        assert!(
+            subscribe
+                .find(".pending_approvals_for_subscription_v6(")
+                .unwrap()
+                < subscribe.find("cache_pending_approval_snapshot(").unwrap()
+        );
+
+        let recovery_start = source
+            .find("pub async fn chat_request_local_recovery_v1(")
+            .unwrap();
+        let recovery_end = source[recovery_start..]
+            .find("fn validate_input(")
+            .map(|offset| recovery_start + offset)
+            .unwrap();
+        let recovery = &source[recovery_start..recovery_end];
+        assert!(recovery.contains("ipc_runtime: State<'_, ChatIpcRuntime>"));
+        assert!(
+            recovery.find("stop_coordinator()").unwrap()
+                < recovery.find("request_local_recovery().await").unwrap()
+        );
+        assert!(
+            recovery
+                .find("ensure_bound_sessions_resumed(&chat_runtime)")
+                .unwrap()
+                < recovery
+                    .find("ensure_coordinator(app, application")
+                    .unwrap()
+        );
+
+        let unsubscribe_start = source
+            .rfind("pub async fn chat_unsubscribe_session_v1(")
+            .unwrap();
+        let unsubscribe_end = source[unsubscribe_start..]
+            .find("pub async fn chat_cancel_request_v1(")
+            .map(|offset| unsubscribe_start + offset)
+            .unwrap();
+        let unsubscribe = &source[unsubscribe_start..unsubscribe_end];
+        assert!(
+            unsubscribe.find("manager.authorize_detailed(").unwrap()
+                < unsubscribe.find(".unsubscribe(request.context_id").unwrap()
+        );
+        assert!(unsubscribe.contains("Err(AuthorizationFailure::ContextInvalid)"));
+        assert!(unsubscribe.contains("Err(AuthorizationFailure::CapabilityDenied)"));
+    }
 }
 
 fn map_native_projection_error(error: NativeProjectionError, request_id: Uuid) -> ChatIpcError {
@@ -6808,20 +7718,56 @@ pub async fn chat_bind_context_v1(
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<BoundContextDto>, ChatIpcError> {
     let request = decode_bind_request(request)?;
-    let bind_generation = ipc_runtime.begin_binding();
+    let feat137_binding =
+        bind_lifecycle(chat_runtime.feat137_streaming_enabled()) == BindLifecycle::Feat137;
+    let early_manager = if feat137_binding {
+        Some(
+            chat_runtime
+                .authorization_manager()
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?,
+        )
+    } else {
+        None
+    };
+    // Only FEAT-137 erects the fail-closed authorization barrier before the
+    // first native await. The legacy path retains its original bind ordering.
+    let bind_generation = match early_manager.as_ref() {
+        Some(manager) => ipc_runtime
+            .begin_scoped_binding(manager, true)
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?,
+        None => ipc_runtime.begin_binding(),
+    };
     let now = unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    let native = auth_runtime
+    let native = match auth_runtime
         .chat_projection(&request.payload.tenant_selector, now)
         .await
-        .map_err(|error| map_native_projection_error(error, request.request_id))?;
+    {
+        Ok(native) => native,
+        Err(error) => {
+            if ipc_runtime.binding_is_current(bind_generation) && feat137_binding {
+                let _ = ipc_runtime.stop_coordinator().await;
+            }
+            return Err(map_native_projection_error(error, request.request_id));
+        }
+    };
+    if !ipc_runtime.binding_is_current(bind_generation) {
+        return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+    }
     let native_authorization_revision = native.authorization_revision;
     let native_can_create_task = native
         .capabilities
         .iter()
         .any(|capability| capability == "task.create");
-    let manager = chat_runtime
-        .authorization_manager()
-        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    let native_can_read_task = native
+        .capabilities
+        .iter()
+        .any(|capability| capability == "task.read");
+    let manager = match early_manager {
+        Some(manager) => manager,
+        None => chat_runtime
+            .authorization_manager()
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?,
+    };
     let projection = AuthoritativeChatProjection::from_trusted_native_projection(
         native.tenant_id,
         native.authorization_revision,
@@ -6833,51 +7779,141 @@ pub async fn chat_bind_context_v1(
     if !ipc_runtime.binding_is_current(bind_generation) {
         return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
     }
-    let context = manager
-        .bind(projection, now)
-        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    chat_runtime
-        .ensure_demo_fast_sidecar()
-        .await
-        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    app.state::<super::artifact_native::ArtifactNativeRuntime>()
-        .invalidate_all();
-    app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
-        .invalidate_all();
-    app.state::<super::artifact_file_native::ArtifactFileNativeRuntime>()
-        .invalidate_all();
-    let offline = chat_runtime
-        .local_offline_conversation_application()
-        .await
-        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    if native_can_create_task {
-        offline
-            .resume_blocked_public_tasks(native_authorization_revision)
+    if !feat137_binding {
+        let context = manager
+            .bind(projection, now)
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        chat_runtime
+            .ensure_demo_fast_sidecar()
             .await
             .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    }
-    ipc_runtime
-        .inner
-        .event_bridge
-        .configure(app.clone(), manager.clone())
-        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))?;
-    ipc_runtime.invalidate_all();
-    if let Ok(application) = chat_runtime.local_conversation_application().await {
+        app.state::<super::artifact_native::ArtifactNativeRuntime>()
+            .invalidate_all();
+        app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
+            .invalidate_all();
+        app.state::<super::artifact_file_native::ArtifactFileNativeRuntime>()
+            .invalidate_all();
+        let offline = chat_runtime
+            .local_offline_conversation_application()
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        if native_can_create_task {
+            offline
+                .resume_blocked_public_tasks(native_authorization_revision)
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        }
         ipc_runtime
-            .ensure_coordinator(app, application, manager.clone())
+            .inner
+            .event_bridge
+            .configure(app.clone(), manager.clone(), false)
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))?;
+        ipc_runtime.invalidate_all();
+        if let Ok(application) = chat_runtime.local_conversation_application().await {
+            ipc_runtime
+                .ensure_coordinator(app, application, manager.clone())
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        }
+        let allowed_actions =
+            manager
+                .allowed_actions(context.context_id, now)
+                .map_err(|failure| match failure {
+                    AuthorizationFailure::ContextInvalid => {
+                        ChatIpcError::context_invalid(Some(request.request_id))
+                    }
+                    AuthorizationFailure::CapabilityDenied => {
+                        ChatIpcError::capability_denied(Some(request.request_id))
+                    }
+                })?;
+        return Ok(CommandResponse::new(
+            request.request_id,
+            BoundContextDto {
+                context_id: context.context_id.to_string(),
+                expires_at_epoch_seconds: context.expires_at,
+                allowed_actions,
+            },
+        ));
+    }
+    let prepared = async {
+        let context = manager
+            .bind(projection, now)
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        let allowed_actions =
+            manager
+                .allowed_actions(context.context_id, now)
+                .map_err(|failure| match failure {
+                    AuthorizationFailure::ContextInvalid => {
+                        ChatIpcError::context_invalid(Some(request.request_id))
+                    }
+                    AuthorizationFailure::CapabilityDenied => {
+                        ChatIpcError::capability_denied(Some(request.request_id))
+                    }
+                })?;
+        ipc_runtime
+            .stop_coordinator()
             .await
             .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        if !ipc_runtime.binding_is_current(bind_generation) {
+            return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+        }
+        chat_runtime
+            .ensure_demo_fast_sidecar()
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        if !ipc_runtime.binding_is_current(bind_generation) {
+            return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+        }
+        app.state::<super::artifact_native::ArtifactNativeRuntime>()
+            .invalidate_all();
+        app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
+            .invalidate_all();
+        app.state::<super::artifact_file_native::ArtifactFileNativeRuntime>()
+            .invalidate_all();
+        if native_can_read_task {
+            ipc_runtime
+                .ensure_bound_sessions_resumed(&chat_runtime)
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+            if !ipc_runtime.binding_is_current(bind_generation) {
+                return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+            }
+        }
+        if native_can_read_task {
+            let application = chat_runtime
+                .local_conversation_application()
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+            if !ipc_runtime.binding_is_current(bind_generation) {
+                return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+            }
+            ipc_runtime
+                .ensure_coordinator(app, application, manager.clone())
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+            if !ipc_runtime.binding_is_current(bind_generation) {
+                return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+            }
+        }
+        Ok::<_, ChatIpcError>((context, allowed_actions))
     }
-    let allowed_actions = manager
-        .allowed_actions(context.context_id, now)
-        .map_err(|failure| match failure {
-            AuthorizationFailure::ContextInvalid => {
-                ChatIpcError::context_invalid(Some(request.request_id))
-            }
-            AuthorizationFailure::CapabilityDenied => {
-                ChatIpcError::capability_denied(Some(request.request_id))
-            }
-        })?;
+    .await;
+    let (context, allowed_actions) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = ipc_runtime.stop_coordinator().await;
+            let _ = manager.invalidate_all();
+            ipc_runtime.invalidate_all();
+            chat_runtime.invalidate_host_bridge().await;
+            return Err(error);
+        }
+    };
+    if !ipc_runtime.binding_is_current(bind_generation) {
+        let _ = ipc_runtime.stop_coordinator().await;
+        let _ = manager.invalidate_all();
+        ipc_runtime.invalidate_all();
+        return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+    }
     Ok(CommandResponse::new(
         request.request_id,
         BoundContextDto {
@@ -8044,7 +9080,7 @@ pub async fn chat_get_session_control_plane_v1(
     finished?;
     Ok(CommandResponse::new(
         request.request_id,
-        ControlPlaneDto::from_status(&status),
+        ControlPlaneDto::from_status(&status, chat_runtime.feat137_streaming_enabled()),
     ))
 }
 
@@ -8111,7 +9147,7 @@ pub async fn chat_resync_session_v2(
     ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, ChatIpcError> {
     if request_schema_version(&request) == Some(CHAT_IPC_V6_SCHEMA_VERSION) {
-        let request: CommandRequest<SessionReadPayload> = decode_request_v6(request)?;
+        let request: CommandRequest<SessionResyncV6Payload> = decode_request_v6(request)?;
         if !chat_runtime.feat137_streaming_enabled() || request.payload.cursor.is_some() {
             return Err(ChatIpcError::request_invalid(Some(request.request_id)).v6());
         }
@@ -8125,6 +9161,14 @@ pub async fn chat_resync_session_v2(
             request.request_id,
         )
         .map_err(ChatIpcError::v6)?;
+        if !ipc_runtime.inner.event_bridge.owns_subscription(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.subscription_id,
+            CHAT_IPC_V6_SCHEMA_VERSION,
+        ) {
+            return Err(ChatIpcError::context_invalid(Some(request.request_id)).v6());
+        }
         ipc_runtime
             .begin_read(request.request_id)
             .map_err(ChatIpcError::v6)?;
@@ -8141,10 +9185,20 @@ pub async fn chat_resync_session_v2(
         let finished = ipc_runtime.finish_read(request.request_id);
         let snapshot = result?;
         finished.map_err(ChatIpcError::v6)?;
-        let pending = authorized
-            .pending_approvals_v6(request.context_id, request.payload.session_id)
-            .await
-            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let pending = match ipc_runtime
+            .take_pending_approval_snapshot(
+                request.context_id,
+                request.payload.session_id,
+                request.payload.subscription_id,
+            )
+            .map_err(ChatIpcError::v6)?
+        {
+            Some(snapshot) => snapshot,
+            None => authorized
+                .pending_approvals_v6(request.context_id, request.payload.session_id)
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?,
+        };
         let next_cursor = snapshot
             .history
             .next_before_ordinal
@@ -8482,6 +9536,13 @@ pub async fn chat_subscribe_session_v1(
             )
             .await
             .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        let binding = authorized
+            .public_task_control_plane_status(request.context_id, request.payload.session_id)
+            .await
+            .map_err(|error| map_chat_error(error, Some(request.request_id)).v6())?;
+        if !binding.host_session_bound {
+            return Err(ChatIpcError::temporarily_unavailable(Some(request.request_id)).v6());
+        }
         ipc_runtime
             .ensure_coordinator(app, application, manager)
             .await
@@ -8496,7 +9557,7 @@ pub async fn chat_subscribe_session_v1(
             )
             .map_err(ChatIpcError::v6)?;
         let pending = match authorized
-            .pending_approvals_v6(request.context_id, request.payload.session_id)
+            .pending_approvals_for_subscription_v6(request.context_id, request.payload.session_id)
             .await
         {
             Ok(snapshot) => snapshot,
@@ -8508,6 +9569,18 @@ pub async fn chat_subscribe_session_v1(
                 return Err(map_chat_error(error, Some(request.request_id)).v6());
             }
         };
+        if let Err(error) = ipc_runtime.cache_pending_approval_snapshot(
+            request.context_id,
+            request.payload.session_id,
+            subscription_id,
+            pending.clone(),
+        ) {
+            ipc_runtime
+                .inner
+                .event_bridge
+                .unsubscribe(request.context_id, subscription_id);
+            return Err(error.v6());
+        }
         return serde_json::to_value(CommandResponse::new_v6(
             request.request_id,
             SubscriptionDtoV6 {
@@ -8653,16 +9726,32 @@ pub async fn chat_unsubscribe_session_v1(
     let manager = chat_runtime
         .authorization_manager()
         .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
-    authorize(
-        &manager,
-        request.context_id,
-        ChatAction::ReadSessions,
-        request.request_id,
-    )?;
+    let now = unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    match manager.authorize_detailed(request.context_id, ChatAction::ReadSessions, now) {
+        Ok(()) => {}
+        Err(AuthorizationFailure::ContextInvalid) => {
+            // Normal expiry/rebind cleanup is allowed only for the exact opaque
+            // context/subscription ownership pair and never changes authorization.
+            ipc_runtime
+                .inner
+                .event_bridge
+                .unsubscribe(request.context_id, request.payload.subscription_id);
+            ipc_runtime.discard_pending_approval_snapshot(
+                request.context_id,
+                request.payload.subscription_id,
+            );
+            return Err(ChatIpcError::context_invalid(Some(request.request_id)));
+        }
+        Err(AuthorizationFailure::CapabilityDenied) => {
+            return Err(ChatIpcError::capability_denied(Some(request.request_id)));
+        }
+    }
     let cancelled = ipc_runtime
         .inner
         .event_bridge
         .unsubscribe(request.context_id, request.payload.subscription_id);
+    ipc_runtime
+        .discard_pending_approval_snapshot(request.context_id, request.payload.subscription_id);
     Ok(CommandResponse::new(
         request.request_id,
         CancelledDto { cancelled },

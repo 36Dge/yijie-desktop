@@ -6,7 +6,6 @@ use super::artifact::{
     ReadyVideoReadError, StoredArtifactCommit, TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
-#[cfg(feature = "feat126-s10-driver")]
 use super::database::Feat126ResumeCandidate;
 use super::database::{
     ActiveTurnContext, AttachmentSummary, ChatRepository, ChatScope, ClaimedDeletion,
@@ -526,6 +525,14 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn fail_next_exhausted_public_task_binding(
+        &self,
+        now: i64,
+    ) -> Result<Option<PublicTaskControlPlaneStatus>, ChatError> {
+        self.call(move |repository| repository.fail_next_exhausted_public_task_binding(now))
+            .await
+    }
+
     pub async fn load_create_session_dispatch(
         &self,
         operation_id: uuid::Uuid,
@@ -572,6 +579,18 @@ impl DatabaseWorker {
     ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
         self.call(move |repository| repository.public_task_control_plane_status(session_id))
             .await
+    }
+
+    pub async fn fail_bound_public_task_binding(
+        &self,
+        create_operation_id: uuid::Uuid,
+        issue_code: String,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        self.call(move |repository| {
+            repository.fail_bound_public_task_binding(create_operation_id, &issue_code, now)
+        })
+        .await
     }
 
     pub async fn resume_blocked_public_tasks(
@@ -1130,7 +1149,6 @@ impl DatabaseWorker {
         self.call(|repository| repository.recovery_snapshot()).await
     }
 
-    #[cfg(feature = "feat126-s10-driver")]
     pub(crate) async fn feat126_resume_candidates(
         &self,
     ) -> Result<Vec<Feat126ResumeCandidate>, ChatError> {

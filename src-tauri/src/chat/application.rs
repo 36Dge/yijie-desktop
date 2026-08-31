@@ -13,17 +13,18 @@ use super::database::{
     MessageContentBlockProjection, OutboxKind, PendingConversation, ProjectSummary,
     PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart,
     ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
-    StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit, TurnProgress,
+    StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit, TurnProgress, OUTBOX_MAX_ATTEMPTS,
 };
 use super::error::ChatError;
 use super::feat134::{
-    Feat134HistoryProjection, Feat134Projection, Feat134ProjectionFailure,
+    Feat134HistoryProjection, Feat134Hydration, Feat134Projection, Feat134ProjectionFailure,
     Feat134ProjectionFailureKind, Feat134TurnReducer, TimelineReasoningStatus,
 };
 use super::feat136::{ExecutionProjection, Feat136TurnReducer};
 use super::feat137::{
     require_pending_decision_authority, ApprovalDecisionFailure, ApprovalDecisionIdentity,
-    ApprovalDecisionResult, ApprovalProjection, PendingApproval, PendingApprovalSnapshot,
+    ApprovalDecisionResult, ApprovalProjection, HostPendingApprovalSnapshot, PendingApproval,
+    PendingApprovalSnapshot,
 };
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
@@ -450,6 +451,17 @@ impl AuthorizedConversationApplication {
     ) -> Result<PendingApprovalSnapshot, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
         self.application.pending_approvals_v6(session_id).await
+    }
+
+    pub async fn pending_approvals_for_subscription_v6(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<PendingApprovalSnapshot, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        self.application
+            .pending_approvals_for_subscription_v6(session_id)
+            .await
     }
 
     pub async fn decide_approval_v6(
@@ -894,6 +906,94 @@ impl Debug for ReducerOutcome {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingApprovalProjectionMode {
+    Strict,
+    SubscriptionHandshake,
+}
+
+fn project_pending_approval_snapshot(
+    snapshot: HostPendingApprovalSnapshot,
+    expected_agent_session_id: Uuid,
+    local: Option<(&ActiveTurnContext, &Feat134Hydration)>,
+    mode: PendingApprovalProjectionMode,
+) -> Result<PendingApprovalSnapshot, ChatError> {
+    let Some((context, hydration)) = local else {
+        if snapshot
+            .pending
+            .iter()
+            .any(|approval| approval.agent_session_id != expected_agent_session_id)
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        if snapshot.pending.is_empty()
+            || mode == PendingApprovalProjectionMode::SubscriptionHandshake
+        {
+            return Ok(PendingApprovalSnapshot {
+                stream_id: snapshot.stream_id,
+                snapshot_at: snapshot.snapshot_at,
+                pending: Vec::new(),
+            });
+        }
+        return Err(ChatError::OrchestrationUnavailable);
+    };
+    if context.agent_session_id != expected_agent_session_id
+        || context
+            .cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.stream_id != snapshot.stream_id)
+        || snapshot.pending.iter().any(|approval| {
+            approval.task_id != context.task_id
+                || approval.agent_session_id != context.agent_session_id
+                || approval.codex_thread_id != context.codex_thread_id
+                || approval.turn_id != context.runtime_turn_id
+        })
+    {
+        return Err(ChatError::OrchestrationUnavailable);
+    }
+
+    let local_command_hydration_missing = snapshot.pending.iter().any(|approval| {
+        !hydration.items.iter().any(|item| {
+            item.item_id == approval.item_id
+                && item.item_type == "command"
+                && matches!(
+                    item.execution.as_ref(),
+                    Some(ExecutionProjection::Command(_))
+                )
+        })
+    });
+    if local_command_hydration_missing {
+        if mode == PendingApprovalProjectionMode::SubscriptionHandshake {
+            // The Host snapshot is not action authority until its Command has
+            // been durably projected. Keep the already-established local SSE
+            // subscription and return an empty, fail-closed snapshot; the
+            // persist-before-emit live projection will reconcile it.
+            return Ok(PendingApprovalSnapshot {
+                stream_id: snapshot.stream_id,
+                snapshot_at: snapshot.snapshot_at,
+                pending: Vec::new(),
+            });
+        }
+        return Err(ChatError::OrchestrationUnavailable);
+    }
+
+    Ok(PendingApprovalSnapshot {
+        stream_id: snapshot.stream_id,
+        snapshot_at: snapshot.snapshot_at,
+        pending: snapshot
+            .pending
+            .into_iter()
+            .map(|approval| PendingApproval {
+                approval_request_id: approval.approval_request_id,
+                turn_id: context.turn_id,
+                item_id: approval.item_id,
+                requested_at: approval.requested_at,
+                expires_at: approval.expires_at,
+            })
+            .collect(),
+    })
+}
+
 impl ConversationApplication {
     pub fn new(
         database: DatabaseWorker,
@@ -985,6 +1085,10 @@ impl ConversationApplication {
             feat136_streaming_enabled: false,
             feat137_streaming_enabled: false,
         }
+    }
+
+    pub(crate) fn feat137_streaming_enabled(&self) -> bool {
+        self.feat137_streaming_enabled
     }
 
     fn host(&self) -> Result<&HostBridge, ChatError> {
@@ -1228,6 +1332,26 @@ impl ConversationApplication {
         &self,
         session_id: Uuid,
     ) -> Result<PendingApprovalSnapshot, ChatError> {
+        self.pending_approvals_v6_with_mode(session_id, PendingApprovalProjectionMode::Strict)
+            .await
+    }
+
+    pub async fn pending_approvals_for_subscription_v6(
+        &self,
+        session_id: Uuid,
+    ) -> Result<PendingApprovalSnapshot, ChatError> {
+        self.pending_approvals_v6_with_mode(
+            session_id,
+            PendingApprovalProjectionMode::SubscriptionHandshake,
+        )
+        .await
+    }
+
+    async fn pending_approvals_v6_with_mode(
+        &self,
+        session_id: Uuid,
+        mode: PendingApprovalProjectionMode,
+    ) -> Result<PendingApprovalSnapshot, ChatError> {
         let agent_session_id = self
             .database
             .agent_session_id_for_session(session_id)
@@ -1237,59 +1361,24 @@ impl ConversationApplication {
             .pending_approvals_v6(agent_session_id)
             .await
             .map_err(map_host_error)?;
-        let desktop_turn_id = match self.database.active_turn_context(session_id).await {
+        match self.database.active_turn_context(session_id).await {
             Ok(context) => {
-                if context.agent_session_id != agent_session_id
-                    || context
-                        .cursor
-                        .as_ref()
-                        .is_some_and(|cursor| cursor.stream_id != snapshot.stream_id)
-                {
-                    return Err(ChatError::OrchestrationUnavailable);
-                }
                 let hydration = self
                     .database
                     .load_feat137_hydration(context.turn_id)
                     .await?;
-                if snapshot.pending.iter().any(|approval| {
-                    approval.task_id != context.task_id
-                        || approval.agent_session_id != context.agent_session_id
-                        || approval.codex_thread_id != context.codex_thread_id
-                        || approval.turn_id != context.runtime_turn_id
-                        || !hydration.items.iter().any(|item| {
-                            item.item_id == approval.item_id
-                                && item.item_type == "command"
-                                && matches!(
-                                    item.execution.as_ref(),
-                                    Some(ExecutionProjection::Command(_))
-                                )
-                        })
-                }) {
-                    return Err(ChatError::OrchestrationUnavailable);
-                }
-                Some(context.turn_id)
+                project_pending_approval_snapshot(
+                    snapshot,
+                    agent_session_id,
+                    Some((&context, &hydration)),
+                    mode,
+                )
             }
-            Err(ChatError::NotFound) if snapshot.pending.is_empty() => None,
-            Err(ChatError::NotFound) => return Err(ChatError::OrchestrationUnavailable),
-            Err(error) => return Err(error),
-        };
-        Ok(PendingApprovalSnapshot {
-            stream_id: snapshot.stream_id,
-            snapshot_at: snapshot.snapshot_at,
-            pending: snapshot
-                .pending
-                .into_iter()
-                .map(|approval| {
-                    Ok(PendingApproval {
-                        approval_request_id: approval.approval_request_id,
-                        turn_id: desktop_turn_id.ok_or(ChatError::OrchestrationUnavailable)?,
-                        item_id: approval.item_id,
-                        requested_at: approval.requested_at,
-                        expires_at: approval.expires_at,
-                    })
-                })
-                .collect::<Result<Vec<_>, ChatError>>()?,
-        })
+            Err(ChatError::NotFound) => {
+                project_pending_approval_snapshot(snapshot, agent_session_id, None, mode)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn decide_approval_v6(
@@ -1492,6 +1581,15 @@ impl ConversationApplication {
 
     pub async fn dispatch_next(&self) -> Result<DispatchOutcome, ChatError> {
         let now = unix_seconds()?;
+        if self.feat137_streaming_enabled {
+            if let Some(status) = self
+                .database
+                .fail_next_exhausted_public_task_binding(now)
+                .await?
+            {
+                return Ok(DispatchOutcome::ControlPlaneChanged(status));
+            }
+        }
         let Some(claimed) = self
             .database
             .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
@@ -1633,21 +1731,75 @@ impl ConversationApplication {
                         session.codex_thread_id.expect("checked above"),
                     )
                     .await?;
-                Ok(DispatchOutcome::SessionBound {
-                    session_id: dispatch.session_id,
-                })
+                if !self.feat137_streaming_enabled {
+                    return Ok(DispatchOutcome::SessionBound {
+                        session_id: dispatch.session_id,
+                    });
+                }
+                let status = self
+                    .database
+                    .public_task_control_plane_status(dispatch.session_id)
+                    .await?;
+                debug_assert!(status.host_session_bound);
+                Ok(DispatchOutcome::ControlPlaneChanged(status))
             }
             Ok(_) => {
-                self.database.fail_outbox(claimed.operation_id).await?;
-                Ok(DispatchOutcome::FailedSafely {
-                    operation_id: claimed.operation_id,
-                })
+                if !self.feat137_streaming_enabled {
+                    self.database.fail_outbox(claimed.operation_id).await?;
+                    return Ok(DispatchOutcome::FailedSafely {
+                        operation_id: claimed.operation_id,
+                    });
+                }
+                self.fail_host_session_binding(
+                    claimed.operation_id,
+                    PublicTaskIssueCode::ProtocolError,
+                    now,
+                )
+                .await
+            }
+            Err(error) if error.kind() == HostBridgeErrorKind::NotReady => {
+                if self.feat137_streaming_enabled
+                    && i64::from(claimed.attempt_count) >= OUTBOX_MAX_ATTEMPTS
+                {
+                    self.fail_host_session_binding(
+                        claimed.operation_id,
+                        PublicTaskIssueCode::TemporarilyUnavailable,
+                        now,
+                    )
+                    .await
+                } else {
+                    self.handle_dispatch_error(claimed.operation_id, now, error)
+                        .await
+                }
             }
             Err(error) => {
-                self.handle_dispatch_error(claimed.operation_id, now, error)
+                if !self.feat137_streaming_enabled {
+                    return self
+                        .handle_dispatch_error(claimed.operation_id, now, error)
+                        .await;
+                }
+                let issue = if error.kind() == HostBridgeErrorKind::Transport {
+                    PublicTaskIssueCode::TemporarilyUnavailable
+                } else {
+                    PublicTaskIssueCode::ProtocolError
+                };
+                self.fail_host_session_binding(claimed.operation_id, issue, now)
                     .await
             }
         }
+    }
+
+    async fn fail_host_session_binding(
+        &self,
+        operation_id: Uuid,
+        issue_code: PublicTaskIssueCode,
+        now: i64,
+    ) -> Result<DispatchOutcome, ChatError> {
+        let status = self
+            .database
+            .fail_bound_public_task_binding(operation_id, issue_code.as_str().to_owned(), now)
+            .await?;
+        Ok(DispatchOutcome::ControlPlaneChanged(status))
     }
 
     async fn transition_public_create(
@@ -4146,6 +4298,150 @@ mod tests {
         );
     }
 
+    #[test]
+    fn feat137_subscription_snapshot_fails_closed_only_for_local_command_hydration_lag() {
+        let (context, identity) = context();
+        let approval_request_id = Uuid::now_v7();
+        let item_id = "command-approval";
+        let snapshot = HostPendingApprovalSnapshot {
+            stream_id: identity.stream_id,
+            snapshot_at: "2026-08-31T01:00:01Z".to_owned(),
+            pending: vec![crate::chat::feat137::HostPendingApproval {
+                approval_request_id,
+                task_id: identity.task_id,
+                agent_session_id: identity.agent_session_id,
+                codex_thread_id: identity.thread_id,
+                turn_id: identity.turn_id,
+                item_id: item_id.to_owned(),
+                requested_at: "2026-08-31T01:00:00Z".to_owned(),
+                expires_at: "2026-08-31T01:02:00Z".to_owned(),
+            }],
+        };
+
+        assert_eq!(
+            project_pending_approval_snapshot(
+                snapshot.clone(),
+                identity.agent_session_id,
+                Some((&context, &Feat134Hydration::default())),
+                PendingApprovalProjectionMode::Strict,
+            ),
+            Err(ChatError::OrchestrationUnavailable),
+        );
+        let lagged = project_pending_approval_snapshot(
+            snapshot.clone(),
+            identity.agent_session_id,
+            Some((&context, &Feat134Hydration::default())),
+            PendingApprovalProjectionMode::SubscriptionHandshake,
+        )
+        .unwrap();
+        assert_eq!(lagged.stream_id, identity.stream_id);
+        assert!(lagged.pending.is_empty());
+
+        let pre_context = project_pending_approval_snapshot(
+            snapshot.clone(),
+            identity.agent_session_id,
+            None,
+            PendingApprovalProjectionMode::SubscriptionHandshake,
+        )
+        .unwrap();
+        assert!(pre_context.pending.is_empty());
+        assert_eq!(
+            project_pending_approval_snapshot(
+                snapshot.clone(),
+                identity.agent_session_id,
+                None,
+                PendingApprovalProjectionMode::Strict,
+            ),
+            Err(ChatError::OrchestrationUnavailable),
+        );
+
+        let mut mismatched = snapshot.clone();
+        mismatched.pending[0].task_id = Uuid::now_v7();
+        assert_eq!(
+            project_pending_approval_snapshot(
+                mismatched,
+                identity.agent_session_id,
+                Some((&context, &Feat134Hydration::default())),
+                PendingApprovalProjectionMode::SubscriptionHandshake,
+            ),
+            Err(ChatError::OrchestrationUnavailable),
+        );
+        let mut mismatched_agent = snapshot.clone();
+        mismatched_agent.pending[0].agent_session_id = Uuid::now_v7();
+        assert_eq!(
+            project_pending_approval_snapshot(
+                mismatched_agent,
+                identity.agent_session_id,
+                None,
+                PendingApprovalProjectionMode::SubscriptionHandshake,
+            ),
+            Err(ChatError::OrchestrationUnavailable),
+        );
+
+        let mut reducer = Feat136TurnReducer::new(context.clone(), None).unwrap();
+        let command = reducer
+            .apply(
+                event(
+                    &identity,
+                    1,
+                    Some(item_id),
+                    HostEventKind::CommandStarted {
+                        command_summary: crate::chat::host_domain::HostSafeText {
+                            text: "Inspect repository state".to_owned(),
+                            truncated: false,
+                            truncation_reason: None,
+                        },
+                        cwd: crate::chat::host_domain::HostCommandCwd::WorkspaceRoot,
+                    },
+                ),
+                1,
+            )
+            .unwrap()
+            .unwrap();
+        let hydrated = Feat134Hydration {
+            items: command.items,
+            plan: command.plan,
+            turn_notices: command.turn_notices,
+        };
+        let projected = project_pending_approval_snapshot(
+            snapshot,
+            identity.agent_session_id,
+            Some((&context, &hydrated)),
+            PendingApprovalProjectionMode::SubscriptionHandshake,
+        )
+        .unwrap();
+        assert_eq!(projected.pending.len(), 1);
+        assert_eq!(
+            projected.pending[0].approval_request_id,
+            approval_request_id
+        );
+        assert_eq!(projected.pending[0].turn_id, context.turn_id);
+    }
+
+    #[test]
+    fn feat137_projection_is_durable_before_its_live_approval_event_is_published() {
+        let source = include_str!("application.rs");
+        let reduce_start = source
+            .find("async fn reduce_and_persist_feat137_event(")
+            .unwrap();
+        let stream_start = source[reduce_start..]
+            .find("async fn stream_active_turn_v4(")
+            .map(|offset| reduce_start + offset)
+            .unwrap();
+        let reducer = &source[reduce_start..stream_start];
+        assert!(
+            reducer.contains("persist_feat137_projection(projection.clone(), approval.clone())")
+        );
+
+        let stream = &source[stream_start..];
+        assert!(
+            stream.find("reduce_and_persist_feat137_event(").unwrap()
+                < stream
+                    .find("sink.publish_feat137(projection.clone(), approval)?")
+                    .unwrap()
+        );
+    }
+
     fn event(
         identity: &EventIdentity,
         sequence: u64,
@@ -6522,6 +6818,7 @@ mod tests {
                 session_id: pending.session_id,
                 state: PublicTaskBindingState::Bound,
                 issue_code: None,
+                host_session_bound: false,
             })
         );
         assert_eq!(
@@ -6740,6 +7037,7 @@ mod tests {
                 session_id: pending.session_id,
                 state: PublicTaskBindingState::Bound,
                 issue_code: None,
+                host_session_bound: false,
             })
         );
         let public_calls = public_tasks.calls();
@@ -6750,7 +7048,7 @@ mod tests {
         assert_eq!(
             application.dispatch_next().await.unwrap(),
             DispatchOutcome::SessionBound {
-                session_id: pending.session_id
+                session_id: pending.session_id,
             }
         );
         assert_eq!(

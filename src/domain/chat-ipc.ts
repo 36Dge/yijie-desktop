@@ -624,6 +624,7 @@ export interface ChatCreatedTurn {
 
 export const CHAT_CONTROL_PLANE_STATES = Object.freeze([
   "pending",
+  "binding_pending",
   "bound",
   "blocked_auth",
   "retry_wait",
@@ -2436,7 +2437,10 @@ export function parseCreatedTurnResponseV2(value: unknown): ChatCreatedTurn {
   return responseDataV2(value, parseCreatedTurn);
 }
 
-function parseSessionControlPlane(value: unknown): ChatSessionControlPlane {
+function parseSessionControlPlane(
+  value: unknown,
+  feat137Enabled: boolean,
+): ChatSessionControlPlane {
   const body = exactObject(value, ["sessionId", "state", "issueCode", "retryable", "recovery"]);
   if (typeof body.retryable !== "boolean") throw new ChatContractError();
   const result: ChatSessionControlPlane = Object.freeze({
@@ -2446,9 +2450,12 @@ function parseSessionControlPlane(value: unknown): ChatSessionControlPlane {
     retryable: body.retryable,
     recovery: oneOf(body.recovery, CHAT_CONTROL_PLANE_RECOVERIES),
   });
+  if (!feat137Enabled && result.state === "binding_pending") throw new ChatContractError();
+  const pendingOrBound = feat137Enabled
+    ? result.state === "pending" || result.state === "binding_pending" || result.state === "bound"
+    : result.state === "pending" || result.state === "bound";
   const consistent =
-    ((result.state === "pending" || result.state === "bound") &&
-      result.issueCode === null && !result.retryable && result.recovery === "none") ||
+    (pendingOrBound && result.issueCode === null && !result.retryable && result.recovery === "none") ||
     (result.state === "blocked_auth" && result.issueCode === "chat_unauthenticated" &&
       !result.retryable && result.recovery === "sign_in") ||
     (result.state === "retry_wait" && result.issueCode === "chat_temporarily_unavailable" &&
@@ -2456,17 +2463,25 @@ function parseSessionControlPlane(value: unknown): ChatSessionControlPlane {
     (result.state === "denied" && result.issueCode === "chat_capability_denied" &&
       !result.retryable && result.recovery === "none") ||
     (result.state === "failed" &&
-      (result.issueCode === "chat_conflict" || result.issueCode === "chat_protocol_error") &&
+      ((feat137Enabled && result.issueCode === "chat_temporarily_unavailable") ||
+        result.issueCode === "chat_conflict" || result.issueCode === "chat_protocol_error") &&
       !result.retryable && result.recovery === "resync");
   if (!consistent) throw new ChatContractError();
   return result;
 }
 
 export function parseSessionControlPlaneResponse(value: unknown): ChatSessionControlPlane {
-  return responseData(value, parseSessionControlPlane);
+  return responseData(value, (data) => parseSessionControlPlane(data, false));
 }
 
-export function parseControlPlaneEvent(value: unknown): ChatControlPlaneEvent {
+export function parseSessionControlPlaneResponseV6(value: unknown): ChatSessionControlPlane {
+  return responseData(value, (data) => parseSessionControlPlane(data, true));
+}
+
+function parseControlPlaneEventWithAuthority(
+  value: unknown,
+  feat137Enabled: boolean,
+): ChatControlPlaneEvent {
   const event = exactObject(value, [
     "schemaVersion", "sequence", "sessionId", "state", "issueCode", "retryable", "recovery",
   ]);
@@ -2485,8 +2500,16 @@ export function parseControlPlaneEvent(value: unknown): ChatControlPlaneEvent {
       issueCode: event.issueCode,
       retryable: event.retryable,
       recovery: event.recovery,
-    }),
+    }, feat137Enabled),
   });
+}
+
+export function parseControlPlaneEvent(value: unknown): ChatControlPlaneEvent {
+  return parseControlPlaneEventWithAuthority(value, false);
+}
+
+export function parseControlPlaneEventV6(value: unknown): ChatControlPlaneEvent {
+  return parseControlPlaneEventWithAuthority(value, true);
 }
 
 export function parseLocalReadinessResponse(value: unknown): ChatLocalReadiness {

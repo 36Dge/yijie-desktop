@@ -20,6 +20,7 @@ import {
   parseChatProjectionEvent,
   parseCleanupResponse,
   parseControlPlaneEvent,
+  parseControlPlaneEventV6,
   parseCreatedTurnResponse,
   parseHistoryPageResponse,
   parseHistoryPageResponseV2,
@@ -35,6 +36,7 @@ import {
   parseResyncResponse,
   parseSessionPageResponse,
   parseSessionControlPlaneResponse,
+  parseSessionControlPlaneResponseV6,
   parseSubscriptionResponse,
 } from "./chat-ipc";
 
@@ -287,6 +289,62 @@ describe("private chat IPC v1 contract", () => {
     const inconsistent = fixture("control-plane-response.json") as Record<string, unknown>;
     (inconsistent.data as Record<string, unknown>).recovery = "none";
     expect(() => parseSessionControlPlaneResponse(inconsistent)).toThrow(ChatContractError);
+  });
+
+  it("keeps Host identity binding pending distinct from a missing task", () => {
+    const response = fixture("control-plane-response.json") as Record<string, unknown>;
+    response.data = {
+      ...(response.data as Record<string, unknown>),
+      state: "binding_pending",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    };
+    expect(() => parseSessionControlPlaneResponse(response)).toThrow(ChatContractError);
+    expect(parseSessionControlPlaneResponseV6(response)).toMatchObject({
+      state: "binding_pending",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+  });
+
+  it("accepts the exact Rust control-plane shapes for inflight and exhausted bindings", () => {
+    expect(parseSessionControlPlaneResponse(
+      fixture("control-plane-inflight-response.json"),
+    )).toMatchObject({
+      state: "pending",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    expect(parseSessionControlPlaneResponseV6(
+      fixture("control-plane-inflight-response.json"),
+    )).toMatchObject({
+      state: "pending",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    expect(() => parseSessionControlPlaneResponse(
+      fixture("control-plane-failed-response.json"),
+    )).toThrow(ChatContractError);
+    expect(parseSessionControlPlaneResponseV6(
+      fixture("control-plane-failed-response.json"),
+    )).toMatchObject({
+      state: "failed",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: false,
+      recovery: "resync",
+    });
+
+    const event = fixture("control-plane-event.json") as Record<string, unknown>;
+    event.state = "binding_pending";
+    event.issueCode = null;
+    event.retryable = false;
+    event.recovery = "none";
+    expect(() => parseControlPlaneEvent(event)).toThrow(ChatContractError);
+    expect(parseControlPlaneEventV6(event).state).toBe("binding_pending");
   });
 
   it("parses only v2 attachment issues with a matching stable error code", () => {

@@ -24,6 +24,7 @@ import {
   parseChatProjectionEventV6,
   parseCleanupResponse,
   parseControlPlaneEvent,
+  parseControlPlaneEventV6,
   parseCreatedTurnResponse,
   parseCreatedTurnResponseV2,
   parseHistoryPageResponse,
@@ -47,6 +48,7 @@ import {
   parseResyncResponseV6,
   parseSessionPageResponse,
   parseSessionControlPlaneResponse,
+  parseSessionControlPlaneResponseV6,
   parseSubscriptionResponse,
   parseSubscriptionResponseV4,
   parseSubscriptionResponseV5,
@@ -136,7 +138,12 @@ export interface ChatClient {
   interruptTurn(contextId: string, sessionId: string, operationId: string): Promise<ChatCreatedTurn>;
   deleteSession(contextId: string, sessionId: string, operationId: string): Promise<ChatCleanupStatus>;
   getCleanupStatus(contextId: string, operationId: string, signal?: AbortSignal): Promise<ChatCleanupStatus | null>;
-  getSessionControlPlane(contextId: string, sessionId: string, signal?: AbortSignal): Promise<ChatSessionControlPlane>;
+  getSessionControlPlane(
+    contextId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+    feat137Enabled?: boolean,
+  ): Promise<ChatSessionControlPlane>;
   getLocalReadiness(contextId: string, signal?: AbortSignal): Promise<ChatLocalReadiness>;
   requestLocalRecovery(contextId: string, operationId: string): Promise<ChatLocalReadiness>;
   subscribeSession(contextId: string, sessionId: string): Promise<string>;
@@ -155,7 +162,13 @@ export interface ChatClient {
   resyncSessionV2(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjection>;
   resyncSessionV4(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV4>;
   resyncSessionV5(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV5>;
-  resyncSessionV6(contextId: string, sessionId: string, limit?: number, signal?: AbortSignal): Promise<ChatResyncProjectionV6>;
+  resyncSessionV6(
+    contextId: string,
+    sessionId: string,
+    subscriptionId: string,
+    limit?: number,
+    signal?: AbortSignal,
+  ): Promise<ChatResyncProjectionV6>;
   unsubscribeSession(contextId: string, subscriptionId: string): Promise<boolean>;
   cancelRequest(contextId: string, targetRequestId: string): Promise<boolean>;
   onEvent(
@@ -177,6 +190,7 @@ export interface ChatClient {
   onControlPlaneEvent(
     handler: (event: ChatControlPlaneEvent) => void,
     onInvalid?: () => void,
+    feat137Enabled?: boolean,
   ): Promise<UnlistenFn>;
   onAttachmentImportEvent(
     handler: (event: ChatAttachmentImportEvent) => void,
@@ -606,12 +620,12 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     getCleanupStatus: (contextId, operationId, signal) =>
       runRead("chat_get_cleanup_status_v1", contextId, { operationId }, parseOptionalCleanupResponse, signal),
-    getSessionControlPlane: (contextId, sessionId, signal) =>
+    getSessionControlPlane: (contextId, sessionId, signal, feat137Enabled = false) =>
       runRead(
         "chat_get_session_control_plane_v1",
         contextId,
         { sessionId },
-        parseSessionControlPlaneResponse,
+        feat137Enabled ? parseSessionControlPlaneResponseV6 : parseSessionControlPlaneResponse,
         signal,
       ),
     getLocalReadiness: (contextId, signal) =>
@@ -664,8 +678,14 @@ export function createChatClient(transport: ChatClientTransport = productionTran
       runReadV4("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV4, signal),
     resyncSessionV5: (contextId, sessionId, limit, signal) =>
       runReadV5("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV5, signal),
-    resyncSessionV6: (contextId, sessionId, limit, signal) =>
-      runReadV6("chat_resync_session_v2", contextId, { sessionId, cursor: undefined, limit }, parseResyncResponseV6, signal),
+    resyncSessionV6: (contextId, sessionId, subscriptionId, limit, signal) =>
+      runReadV6(
+        "chat_resync_session_v2",
+        contextId,
+        { sessionId, subscriptionId, cursor: undefined, limit },
+        parseResyncResponseV6,
+        signal,
+      ),
     unsubscribeSession(contextId, subscriptionId) {
       const envelope = operationEnvelope(contextId, { subscriptionId });
       return run("chat_unsubscribe_session_v1", envelope.request, parseCancelledResponse);
@@ -714,10 +734,10 @@ export function createChatClient(transport: ChatClientTransport = productionTran
         }
       });
     },
-    async onControlPlaneEvent(handler, onInvalid) {
+    async onControlPlaneEvent(handler, onInvalid, feat137Enabled = false) {
       return transport.listen(CHAT_CONTROL_PLANE_EVENT_CHANNEL, (payload) => {
         try {
-          handler(parseControlPlaneEvent(payload));
+          handler(feat137Enabled ? parseControlPlaneEventV6(payload) : parseControlPlaneEvent(payload));
         } catch (error: unknown) {
           if (!(error instanceof ChatContractError)) throw error;
           onInvalid?.();

@@ -66,6 +66,35 @@ describe("chat client", () => {
     });
   });
 
+  it("binds each v6 resync request to one non-nil subscription authority", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
+    const nativeInvoke = vi.fn(async () => ({
+      schemaVersion: 6,
+      requestId: REQUEST_ID,
+      data: {},
+    }));
+    const client = createChatClient(transport(nativeInvoke));
+
+    await expect(client.resyncSessionV6(
+      CONTEXT_ID,
+      SESSION_ID,
+      SUBSCRIPTION_ID,
+      20,
+    )).rejects.toBeDefined();
+    expect(nativeInvoke).toHaveBeenCalledWith("chat_resync_session_v2", {
+      request: {
+        schemaVersion: 6,
+        requestId: REQUEST_ID,
+        contextId: CONTEXT_ID,
+        payload: {
+          sessionId: SESSION_ID,
+          subscriptionId: SUBSCRIPTION_ID,
+          limit: 20,
+        },
+      },
+    });
+  });
+
   it.each([
     ["accept_once" as const, "accepted_once" as const],
     ["cancel_current_turn" as const, "cancelled_current_turn" as const],

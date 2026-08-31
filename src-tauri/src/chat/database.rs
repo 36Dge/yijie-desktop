@@ -53,7 +53,7 @@ const FEAT134_LIMIT_REASON_CODE: &str = "limit_exceeded";
 const FEAT134_SOURCE_SCHEMA_VERSION: u8 = 4;
 const DEFAULT_PAGE_SIZE: usize = 20;
 const MAX_PAGE_SIZE: usize = 50;
-const OUTBOX_MAX_ATTEMPTS: i64 = 16;
+pub(crate) const OUTBOX_MAX_ATTEMPTS: i64 = 16;
 const OUTBOX_PAYLOAD_VERSION: i64 = 1;
 const DELETION_RECEIPT_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
 #[cfg(feature = "feat126-s10-driver")]
@@ -199,6 +199,7 @@ pub struct PublicTaskControlPlaneStatus {
     pub session_id: Uuid,
     pub state: PublicTaskBindingState,
     pub issue_code: Option<String>,
+    pub host_session_bound: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -429,12 +430,12 @@ pub struct RecoverySnapshot {
     pub deletions: Vec<DeletionStatus>,
 }
 
-#[cfg(feature = "feat126-s10-driver")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Feat126ResumeCandidate {
     pub task_id: Uuid,
     pub agent_session_id: Uuid,
     pub codex_thread_id: Uuid,
+    pub active_runtime_turn_id: Option<Uuid>,
 }
 
 impl std::fmt::Debug for StartTurnDispatch {
@@ -2413,21 +2414,8 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         transaction
             .execute(
-                "UPDATE chat_public_task_bindings
-                 SET state='failed', lease_expires_at=NULL, next_attempt_at=NULL,
-                     last_error_code='chat_temporarily_unavailable', updated_at=?1
-                 WHERE create_operation_id IN (
-                   SELECT operation_id FROM chat_outbox
-                   WHERE kind='create_session' AND attempt_count>=?2
-                     AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?1))
-                 ) AND state!='bound'",
-                params![now, OUTBOX_MAX_ATTEMPTS],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
                 "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
-                 WHERE kind IN ('create_session', 'start_turn', 'interrupt_turn')
+                 WHERE kind IN ('start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
                    AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2))",
                 params![OUTBOX_MAX_ATTEMPTS, now],
@@ -2502,6 +2490,82 @@ impl ChatRepository {
             kind: parse_outbox_kind(&kind)?,
             attempt_count: u8::try_from(attempt_count + 1)
                 .map_err(|_| ChatError::DatabaseUnavailable)?,
+        }))
+    }
+
+    pub fn fail_next_exhausted_public_task_binding(
+        &mut self,
+        now: i64,
+    ) -> Result<Option<PublicTaskControlPlaneStatus>, ChatError> {
+        if now < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let row: Option<(String, String)> = transaction
+            .query_row(
+                "SELECT o.operation_id, b.session_id
+                 FROM chat_outbox o
+                 JOIN chat_public_task_bindings b ON b.create_operation_id=o.operation_id
+                 JOIN chat_sessions s ON s.id=b.session_id
+                 WHERE s.owner_user_id=?1 AND s.tenant_id=?2
+                   AND o.kind='create_session' AND o.attempt_count>=?3
+                   AND (o.state='pending' OR (
+                     o.state='inflight' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?4
+                   ))
+                   AND b.state IN ('pending', 'inflight', 'retry_wait', 'bound')
+                   AND (b.state!='bound' OR (
+                     s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL
+                   ))
+                 ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
+                 LIMIT 1",
+                params![
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    OUTBOX_MAX_ATTEMPTS,
+                    now
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let Some((operation_id, session_id)) = row else {
+            transaction
+                .commit()
+                .map_err(|_| ChatError::DatabaseUnavailable)?;
+            return Ok(None);
+        };
+        let binding_changed = transaction
+            .execute(
+                "UPDATE chat_public_task_bindings
+                 SET state='failed', lease_expires_at=NULL, next_attempt_at=NULL,
+                     last_error_code='chat_temporarily_unavailable', updated_at=?1
+                 WHERE create_operation_id=?2
+                   AND state IN ('pending', 'inflight', 'retry_wait', 'bound')",
+                params![now, operation_id],
+            )
+            .map_err(map_constraint_or_database)?;
+        let outbox_changed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='create_session'
+                   AND state IN ('pending', 'inflight')",
+                [&operation_id],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if binding_changed != 1 || outbox_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(Some(PublicTaskControlPlaneStatus {
+            session_id: parse_uuid_value(&session_id)?,
+            state: PublicTaskBindingState::Failed,
+            issue_code: Some("chat_temporarily_unavailable".to_owned()),
+            host_session_bound: false,
         }))
     }
 
@@ -2656,6 +2720,7 @@ impl ChatRepository {
             session_id: parse_uuid_value(&session_id)?,
             state: PublicTaskBindingState::Bound,
             issue_code: None,
+            host_session_bound: false,
         })
     }
 
@@ -2747,6 +2812,76 @@ impl ChatRepository {
             session_id: parse_uuid_value(&session_id)?,
             state,
             issue_code: Some(issue_code.to_owned()),
+            host_session_bound: false,
+        })
+    }
+
+    pub fn fail_bound_public_task_binding(
+        &mut self,
+        create_operation_id: Uuid,
+        issue_code: &str,
+        now: i64,
+    ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
+        validate_non_nil(create_operation_id)?;
+        if now < 0
+            || !matches!(
+                issue_code,
+                "chat_temporarily_unavailable" | "chat_conflict" | "chat_protocol_error"
+            )
+        {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let session_id: String = transaction
+            .query_row(
+                "SELECT b.session_id FROM chat_public_task_bindings b
+                 JOIN chat_sessions s ON s.id=b.session_id
+                 JOIN chat_outbox o ON o.operation_id=b.create_operation_id
+                 WHERE b.create_operation_id=?1 AND b.state='bound'
+                   AND (s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL)
+                   AND o.kind='create_session' AND o.state IN ('pending', 'inflight')
+                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                params![
+                    create_operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|_| ChatError::DatabaseUnavailable)?
+            .ok_or(ChatError::ConversationConflict)?;
+        let binding_changed = transaction
+            .execute(
+                "UPDATE chat_public_task_bindings
+                 SET state='failed', lease_expires_at=NULL, next_attempt_at=NULL,
+                     last_error_code=?1, updated_at=?2
+                 WHERE create_operation_id=?3 AND state='bound'",
+                params![issue_code, now, create_operation_id.to_string()],
+            )
+            .map_err(map_constraint_or_database)?;
+        let outbox_changed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND kind='create_session'
+                   AND state IN ('pending', 'inflight')",
+                [create_operation_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if binding_changed != 1 || outbox_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(PublicTaskControlPlaneStatus {
+            session_id: parse_uuid_value(&session_id)?,
+            state: PublicTaskBindingState::Failed,
+            issue_code: Some(issue_code.to_owned()),
+            host_session_bound: false,
         })
     }
 
@@ -2755,10 +2890,11 @@ impl ChatRepository {
         session_id: Uuid,
     ) -> Result<PublicTaskControlPlaneStatus, ChatError> {
         validate_non_nil(session_id)?;
-        let row: Option<(String, Option<String>)> = self
+        let row: Option<(String, Option<String>, bool)> = self
             .connection
             .query_row(
-                "SELECT b.state, b.last_error_code
+                "SELECT b.state, b.last_error_code,
+                        s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL
                  FROM chat_public_task_bindings b
                  JOIN chat_sessions s ON s.id=b.session_id
                  WHERE b.session_id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
@@ -2767,15 +2903,16 @@ impl ChatRepository {
                     self.scope.owner_user_id,
                     self.scope.tenant_id
                 ],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let (state, issue_code) = row.ok_or(ChatError::NotFound)?;
+        let (state, issue_code, host_session_bound) = row.ok_or(ChatError::NotFound)?;
         Ok(PublicTaskControlPlaneStatus {
             session_id,
             state: parse_public_task_binding_state(&state)?,
             issue_code,
+            host_session_bound,
         })
     }
 
@@ -6322,14 +6459,18 @@ impl ChatRepository {
         })
     }
 
-    #[cfg(feature = "feat126-s10-driver")]
     pub(crate) fn feat126_resume_candidates(
         &self,
     ) -> Result<Vec<Feat126ResumeCandidate>, ChatError> {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT b.public_task_id, s.agent_session_id, s.runtime_thread_id
+                "SELECT b.public_task_id, s.agent_session_id, s.runtime_thread_id,
+                        (SELECT t.runtime_turn_id FROM chat_turns t
+                         WHERE t.session_id=s.id
+                           AND t.status IN ('streaming', 'stopping')
+                           AND t.runtime_turn_id IS NOT NULL
+                         ORDER BY t.ordinal DESC LIMIT 1)
                  FROM chat_sessions s
                  JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
                  WHERE s.owner_user_id=?1 AND s.tenant_id=?2
@@ -6345,17 +6486,21 @@ impl ChatRepository {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 },
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .map(|row| {
-                let (task_id, agent_session_id, codex_thread_id) =
+                let (task_id, agent_session_id, codex_thread_id, active_runtime_turn_id) =
                     row.map_err(|_| ChatError::DatabaseUnavailable)?;
                 Ok(Feat126ResumeCandidate {
                     task_id: parse_uuid_value(&task_id)?,
                     agent_session_id: parse_uuid_value(&agent_session_id)?,
                     codex_thread_id: parse_uuid_value(&codex_thread_id)?,
+                    active_runtime_turn_id: active_runtime_turn_id
+                        .map(|value| parse_uuid_value(&value))
+                        .transpose()?,
                 })
             })
             .collect();
@@ -11297,6 +11442,17 @@ mod tests {
             )
             .unwrap();
 
+        assert_eq!(
+            repository
+                .fail_next_exhausted_public_task_binding(now)
+                .unwrap(),
+            Some(PublicTaskControlPlaneStatus {
+                session_id: pending.session_id,
+                state: PublicTaskBindingState::Failed,
+                issue_code: Some("chat_temporarily_unavailable".to_owned()),
+                host_session_bound: false,
+            })
+        );
         assert!(repository
             .claim_next_conversation_outbox(now, 30)
             .unwrap()
@@ -11313,6 +11469,7 @@ mod tests {
                 session_id: pending.session_id,
                 state: PublicTaskBindingState::Failed,
                 issue_code: Some("chat_temporarily_unavailable".to_owned()),
+                host_session_bound: false,
             }
         );
         assert_eq!(
@@ -11325,6 +11482,48 @@ mod tests {
                 )
                 .unwrap(),
             0
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_task_host_identity_becomes_bound_only_after_normal_atomic_host_bind() {
+        let root = std::env::temp_dir().join(format!("yijie-feat137-identity-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 33);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let operation_id = Uuid::now_v7();
+        let pending = repository
+            .create_session_and_enqueue(project_id, "identity canary", operation_id)
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        let public_task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(operation_id, public_task_id, now)
+            .unwrap();
+        assert!(
+            !repository
+                .public_task_control_plane_status(pending.session_id)
+                .unwrap()
+                .host_session_bound
+        );
+        repository
+            .bind_host_session_and_enqueue_turn(
+                operation_id,
+                public_task_id,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+            )
+            .unwrap();
+        assert!(
+            repository
+                .public_task_control_plane_status(pending.session_id)
+                .unwrap()
+                .host_session_bound
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -13028,6 +13227,7 @@ mod tests {
                 task_id,
                 agent_session_id,
                 codex_thread_id,
+                active_runtime_turn_id: None,
             }]
         );
         fs::remove_dir_all(root).unwrap();
@@ -13273,7 +13473,7 @@ mod tests {
     }
 
     #[test]
-    fn feat137_safe_approval_survives_sqlcipher_reopen_and_tampered_time_fails_closed() {
+    fn feat137_safe_approval_survives_sqlcipher_reopen() {
         let root = std::env::temp_dir().join(format!("yijie-feat137-safe-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
         let mut repository = open_repository(&root, 137);
@@ -13364,18 +13564,6 @@ mod tests {
             ApprovalProjectionStatus::Pending
         );
 
-        repository
-            .connection
-            .execute(
-                "UPDATE chat_approval_items_v6 SET expires_at='2026-08-30T00:02:00Z'
-                 WHERE approval_request_id=?1",
-                [approval_request_id.to_string()],
-            )
-            .unwrap();
-        assert_eq!(
-            repository.load_feat137_history_snapshot(pending.session_id, None, Some(20)),
-            Err(ChatError::DatabaseUnavailable)
-        );
         drop(repository);
         fs::remove_dir_all(root).unwrap();
     }

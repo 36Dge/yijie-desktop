@@ -560,7 +560,7 @@
       "required": ["sessionId", "state", "issueCode", "retryable", "recovery"],
       "properties": {
         "sessionId": { "$ref": "#/$defs/uuid" },
-        "state": { "enum": ["pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
+        "state": { "enum": ["pending", "binding_pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
         "issueCode": {
           "type": ["string", "null"],
           "enum": [null, "chat_unauthenticated", "chat_capability_denied", "chat_temporarily_unavailable", "chat_conflict", "chat_protocol_error"]
@@ -815,7 +815,7 @@
         "schemaVersion": { "const": 1 },
         "sequence": { "$ref": "#/$defs/uint64String" },
         "sessionId": { "$ref": "#/$defs/uuid" },
-        "state": { "enum": ["pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
+        "state": { "enum": ["pending", "binding_pending", "bound", "blocked_auth", "retry_wait", "denied", "failed"] },
         "issueCode": {
           "type": ["string", "null"],
           "enum": [null, "chat_unauthenticated", "chat_capability_denied", "chat_temporarily_unavailable", "chat_conflict", "chat_protocol_error"]

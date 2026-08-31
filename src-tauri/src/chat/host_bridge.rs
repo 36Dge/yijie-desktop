@@ -421,6 +421,10 @@ impl HostBridge {
         })
     }
 
+    pub(crate) fn instance_nonce(&self) -> &str {
+        &self.expected_nonce
+    }
+
     pub async fn start_session(
         &self,
         task_id: Uuid,

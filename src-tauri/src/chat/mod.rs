@@ -153,7 +153,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = artifact_report_native::chat_save_artifact_report_v1;
 }
 
-const CONTRACT_COMMIT: &str = "2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6";
+const CONTRACT_COMMIT: &str = "aeccf5d561bd4259389cdb325bae84ce3e0dea86";
 const ARTIFACTS_V3_FLAG: &str = "YIJIE_CHAT_ARTIFACTS_V3_ENABLED";
 
 fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
@@ -583,6 +583,32 @@ impl ChatRuntime {
         Ok(())
     }
 
+    pub(crate) async fn host_resume_authority(
+        &self,
+    ) -> Result<(String, Arc<HostBridge>), ChatError> {
+        let host = self.local_host_bridge().await?;
+        Ok((host.instance_nonce().to_owned(), host))
+    }
+
+    pub(crate) async fn invalidate_host_bridge(&self) {
+        *self.host_bridge.lock().await = None;
+    }
+
+    pub(crate) async fn feat137_resume_bound_sessions_with_host(
+        &self,
+        host: Arc<HostBridge>,
+    ) -> Result<(), ChatError> {
+        let candidates = self.database().await?.feat126_resume_candidates().await?;
+        for candidate in candidates {
+            let resumed = host
+                .resume_session(candidate.agent_session_id, &HostTrace::default())
+                .await
+                .map_err(|_| ChatError::SidecarUnavailable)?;
+            validate_feat137_resumed_session(&candidate, &resumed)?;
+        }
+        Ok(())
+    }
+
     async fn pick_project(&self) -> Result<Option<database::ProjectSummary>, ChatError> {
         let worker = self.database().await?;
         let Some(selection) = native_project::pick_project().await? else {
@@ -985,6 +1011,29 @@ fn validate_feat126_resumed_session(
     Ok(())
 }
 
+fn validate_feat137_resumed_session(
+    candidate: &database::Feat126ResumeCandidate,
+    resumed: &HostSession,
+) -> Result<(), ChatError> {
+    let lifecycle_matches = match candidate.active_runtime_turn_id {
+        Some(active_turn_id) => {
+            resumed.state == HostSessionState::Active
+                && resumed.active_turn_id == Some(active_turn_id)
+        }
+        None => resumed.state == HostSessionState::Idle && resumed.active_turn_id.is_none(),
+    };
+    if resumed.task_id != candidate.task_id
+        || resumed.agent_session_id != candidate.agent_session_id
+        || resumed.codex_thread_id != Some(candidate.codex_thread_id)
+        || !lifecycle_matches
+        || !resumed.model_ready
+        || resumed.failure_code.is_some()
+    {
+        return Err(ChatError::SidecarUnavailable);
+    }
+    Ok(())
+}
+
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
     match error {
         ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
@@ -1068,7 +1117,6 @@ pub async fn chat_stop_local_host(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "feat126-s10-driver")]
     use uuid::Uuid;
 
     #[cfg(feature = "feat128-s10-runtime")]
@@ -1099,7 +1147,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "feat126-s10-driver")]
     fn resumed_session(candidate: &database::Feat126ResumeCandidate) -> HostSession {
         HostSession {
             task_id: candidate.task_id,
@@ -1115,26 +1162,65 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "feat126-s10-driver")]
     #[test]
-    fn r8_resume_projection_accepts_only_exact_idle_terminal_identity() {
+    fn feat137_resume_projection_accepts_only_exact_durable_idle_or_active_identity() {
         let candidate = database::Feat126ResumeCandidate {
             task_id: Uuid::now_v7(),
             agent_session_id: Uuid::now_v7(),
             codex_thread_id: Uuid::now_v7(),
+            active_runtime_turn_id: None,
         };
         let valid = resumed_session(&candidate);
-        assert_eq!(validate_feat126_resumed_session(&candidate, &valid), Ok(()));
+        assert_eq!(validate_feat137_resumed_session(&candidate, &valid), Ok(()));
 
         let mut mismatched = resumed_session(&candidate);
         mismatched.codex_thread_id = Some(Uuid::now_v7());
         assert_eq!(
-            validate_feat126_resumed_session(&candidate, &mismatched),
+            validate_feat137_resumed_session(&candidate, &mismatched),
             Err(ChatError::SidecarUnavailable)
         );
         let mut active = resumed_session(&candidate);
         active.active_turn_id = Some(Uuid::now_v7());
         active.state = HostSessionState::Active;
+        assert_eq!(
+            validate_feat137_resumed_session(&candidate, &active),
+            Err(ChatError::SidecarUnavailable)
+        );
+
+        let active_turn_id = Uuid::now_v7();
+        let active_candidate = database::Feat126ResumeCandidate {
+            active_runtime_turn_id: Some(active_turn_id),
+            ..candidate.clone()
+        };
+        let mut exact_active = resumed_session(&active_candidate);
+        exact_active.active_turn_id = Some(active_turn_id);
+        exact_active.state = HostSessionState::Active;
+        assert_eq!(
+            validate_feat137_resumed_session(&active_candidate, &exact_active),
+            Ok(())
+        );
+        exact_active.active_turn_id = Some(Uuid::now_v7());
+        assert_eq!(
+            validate_feat137_resumed_session(&active_candidate, &exact_active),
+            Err(ChatError::SidecarUnavailable)
+        );
+    }
+
+    #[cfg(feature = "feat126-s10-driver")]
+    #[test]
+    fn feat126_s10_resume_projection_remains_exact_idle_only() {
+        let candidate = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_runtime_turn_id: None,
+        };
+        let idle = resumed_session(&candidate);
+        assert_eq!(validate_feat126_resumed_session(&candidate, &idle), Ok(()));
+
+        let mut active = resumed_session(&candidate);
+        active.state = HostSessionState::Active;
+        active.active_turn_id = Some(Uuid::now_v7());
         assert_eq!(
             validate_feat126_resumed_session(&candidate, &active),
             Err(ChatError::SidecarUnavailable)

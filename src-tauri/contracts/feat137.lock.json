@@ -1,12 +1,16 @@
 {
-  "contractCommit": "2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6",
+  "contractCommit": "aeccf5d561bd4259389cdb325bae84ce3e0dea86",
   "contractVersion": "v0.7.0",
   "schemaVersion": 6,
   "sources": {
     "openapi/agent-host/agent-host.yaml": "8716d11ebae140d7c2cec72f6528bbd39ac5976c898c28e0044bec71fb004083",
-    "jsonschema/agent/session-event-v6.schema.json": "2ca5f830a5962fb3be628e7992cb86c69d5d202bc48100fd8e5f83e9e5c17773",
+    "jsonschema/agent/session-event-v6.schema.json": "c71d7eb7a266e5ac7c1b3f09536d536fed2cf36379d49c0007eab792f34a4bee",
     "jsonschema/compatibility/agent-host-runtime-approval-v6.schema.json": "b7e8c2ef294adf7c7066f23d06cb24192d62d8d2b1c6d9c8134875a88a715e80",
     "compatibility/agent-host-runtime-approval-v6.json": "992d939b7cb7959591c9c74f706ada5224a8b63d8cfa0c88f4aeb28f72639a57",
+    "jsonschema/compatibility/agent-host-runtime-approval-v6-v2.schema.json": "55f5984910324446bbf9359c938885b4f1410d3b736aacad47fe3589dac58658",
+    "compatibility/agent-host-runtime-approval-v6-v2.json": "ab5333f9ff1e76dc06827d72ff81f83701d234f91a2cbf6664f146247f24db60",
+    "jsonschema/compatibility/agent-host-runtime-approval-v6-v3.schema.json": "ef83669eee5ca57597f8bf643f0fb9d6acd7b4f5413ec980f594b5251013d2d1",
+    "compatibility/agent-host-runtime-approval-v6-v3.json": "9c196a0f6e34dfa917f9c3e6f27400307d991b81d37ba911c0f717d40642c90a",
     "protobuf/yijie/events/v6/agent_session.proto": "d8abdc1f523b2931d5be984b9a0d27af0724dad88e350ad6cb41b0734e075c5d"
   },
   "fixtureTrees": {
@@ -15,8 +19,8 @@
   },
   "desktopBaseCommit": "7026b47828961e58854b06c822c9c9e11252260d",
   "hostAuthority": {
-    "commit": "118651804b7f5a7849bc68cdf29d88c74a21f8a1",
-    "tree": "9ae73d7b6f024bda241071371487a627810c1058"
+    "commit": "078769a22d035c2921e315e5776185bed6f7feeb",
+    "tree": "df7e5b6bc4994a1a4023793e766a87c7806f1e07"
   },
   "activation": {
     "environment": "local",

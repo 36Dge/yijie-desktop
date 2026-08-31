@@ -48,7 +48,7 @@ if (process.argv.length > (reviewWorktree ? 3 : 2)) {
   fail("unsupported arguments; expected only --review-worktree");
 }
 
-if (lock.contractCommit !== "2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6" ||
+if (lock.contractCommit !== "aeccf5d561bd4259389cdb325bae84ce3e0dea86" ||
     lock.contractVersion !== "v0.7.0" || lock.schemaVersion !== 6 ||
     lock.desktopBaseCommit !== "7026b47828961e58854b06c822c9c9e11252260d") {
   fail("Contracts identity is not the frozen v0.7.0 / v6 authority");
@@ -68,8 +68,8 @@ for (const [relativeTree, expected] of Object.entries(lock.fixtureTrees)) {
 }
 
 const host = lock.hostAuthority;
-if (host?.commit !== "118651804b7f5a7849bc68cdf29d88c74a21f8a1" ||
-    host?.tree !== "9ae73d7b6f024bda241071371487a627810c1058") {
+if (host?.commit !== "078769a22d035c2921e315e5776185bed6f7feeb" ||
+    host?.tree !== "df7e5b6bc4994a1a4023793e766a87c7806f1e07") {
   fail("Host identity is not the reviewed immutable v6 authority");
 }
 if (git(hostRoot, "rev-parse", "HEAD") !== host.commit ||
@@ -83,6 +83,10 @@ for (const [contractFile, hostFile] of [
   ["jsonschema/agent/session-event-v6.schema.json", "api/jsonschema/agent-session-event-v6.schema.json"],
   ["jsonschema/compatibility/agent-host-runtime-approval-v6.schema.json", "api/jsonschema/agent-host-runtime-approval-v6.schema.json"],
   ["compatibility/agent-host-runtime-approval-v6.json", "api/compatibility/agent-host-runtime-approval-v6.json"],
+  ["jsonschema/compatibility/agent-host-runtime-approval-v6-v2.schema.json", "api/jsonschema/agent-host-runtime-approval-v6-v2.schema.json"],
+  ["compatibility/agent-host-runtime-approval-v6-v2.json", "api/compatibility/agent-host-runtime-approval-v6-v2.json"],
+  ["jsonschema/compatibility/agent-host-runtime-approval-v6-v3.schema.json", "api/jsonschema/agent-host-runtime-approval-v6-v3.schema.json"],
+  ["compatibility/agent-host-runtime-approval-v6-v3.json", "api/compatibility/agent-host-runtime-approval-v6-v3.json"],
 ]) {
   if (sha256(readFileSync(join(contractsRoot, contractFile))) !==
       sha256(readFileSync(join(hostRoot, hostFile)))) {
@@ -99,6 +103,18 @@ if (!sidecarSource.includes(`const FEAT137_COMMAND_APPROVAL_ENV: &str = "${lock.
   fail("Desktop sidecar does not own the exact FEAT-137 native flag");
 }
 const ipcSource = readFileSync(join(desktopRoot, "src-tauri/src/chat/ipc.rs"), "utf8");
+for (const relativeFile of [
+  "src-tauri/src/chat/ipc.rs",
+  "src-tauri/src/chat/database.rs",
+  "src/domain/chat-ipc.ts",
+  "src/stores/chat.store.ts",
+  "src/pages/chat/ChatPage.vue",
+]) {
+  const source = readFileSync(join(desktopRoot, relativeFile), "utf8");
+  if (/sandboxPermissions|sandbox_permissions/.test(source)) {
+    fail(`Runtime sandbox provenance escaped into Desktop projection: ${relativeFile}`);
+  }
+}
 const approvalCommands = [...new Set(
   ipcSource.match(/\bchat_[a-z0-9_]*approval[a-z0-9_]*\b/g) ?? [],
 )];

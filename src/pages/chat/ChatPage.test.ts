@@ -253,6 +253,20 @@ afterEach(() => {
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("announces Host identity binding without presenting a missing-resource failure", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+
+    store.history = null;
+    store.phase = "binding-pending";
+    store.lastErrorCode = null;
+    await flushPromises();
+
+    expect(wrapper.get(".chat-workspace__conversation").attributes("aria-busy")).toBe("true");
+    expect(wrapper.get('.chat-workspace > .sr-only[aria-live="polite"]').text())
+      .toBe("正在建立安全任务连接");
+    expect(wrapper.text()).not.toContain("任务不可用");
+  });
+
   it("keeps the last committed conversation visible while metadata resyncs", async () => {
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
 

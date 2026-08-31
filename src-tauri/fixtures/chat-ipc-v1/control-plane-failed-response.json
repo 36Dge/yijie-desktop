@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "requestId": "019c1a00-0000-7000-8000-000000000001",
+  "data": {
+    "sessionId": "019c1a00-0000-7000-8000-000000000005",
+    "state": "failed",
+    "issueCode": "chat_temporarily_unavailable",
+    "retryable": false,
+    "recovery": "resync"
+  }
+}

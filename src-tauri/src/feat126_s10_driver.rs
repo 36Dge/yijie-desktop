@@ -1446,8 +1446,10 @@ pub(crate) async fn feat126_s10_driver_revalidate_project(
 #[tauri::command]
 pub(crate) async fn feat126_s10_driver_request_local_recovery(
     request: Value,
+    app: AppHandle,
     driver: State<'_, Feat126S10DriverRuntime>,
     chat: State<'_, ChatRuntime>,
+    ipc: State<'_, ChatIpcRuntime>,
 ) -> Result<Value, String> {
     driver
         .validate_bound_request(&request)
@@ -1457,7 +1459,7 @@ pub(crate) async fn feat126_s10_driver_request_local_recovery(
         .begin_recovery(&request)
         .await
         .map_err(str::to_owned)?;
-    let response = crate::chat::ipc::chat_request_local_recovery_v1(request, chat)
+    let response = crate::chat::ipc::chat_request_local_recovery_v1(request, app, chat, ipc)
         .await
         .map_err(|_| "driver_recovery_failed".to_owned())?;
     serde_json::to_value(response).map_err(|_| "driver_recovery_failed".to_owned())

@@ -24,6 +24,7 @@ import type {
   ChatHistoryPageV4,
   ChatHistoryPageV5,
   ChatHistoryPageV6,
+  ChatLocalReadiness,
   ChatPendingApprovalSnapshotV6,
   ChatProjectionEventV6,
   ChatProjectionEventV5,
@@ -34,6 +35,7 @@ import type {
   ChatResyncProjectionV5,
   ChatResyncProjectionV6,
   ChatSession,
+  ChatSessionControlPlane,
 } from "../domain/chat-ipc";
 import {
   CHAT_NEW_DRAFT_TARGET,
@@ -629,7 +631,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
         : "019c1a00-0000-7000-8000-00000000000b";
       return Object.freeze({
         subscriptionId: nextSubscriptionId,
-        pendingApprovalSnapshot: emptyPendingApprovalSnapshot(sessionId === SESSION_A
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(sessionId === SESSION_A
           ? "019c1a00-0000-7000-8000-00000000000d"
           : "019c1a00-0000-7000-8000-00000000000e"),
       });
@@ -1923,6 +1925,65 @@ describe("chat view-model store", () => {
     expect(store.controlPlane?.state).toBe("retry_wait");
     expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
     expect(store.canSend).toBe(false);
+  });
+
+  it("keeps the v6 global control-plane cursor monotonic across session selection changes", async () => {
+    const { client, emitControlPlane } = fakeClient();
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_B,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    await store.selectSession(SESSION_B);
+    expect(store.controlPlane?.state).toBe("bound");
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_B,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    expect(store.controlPlane?.state).toBe("bound");
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_B,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    expect(store.controlPlane?.state).toBe("retry_wait");
   });
 
   it("resubscribes and reloads the authoritative snapshot on backpressure", async () => {
@@ -4960,7 +5021,11 @@ describe("FEAT-134 chat store v4 authority", () => {
       pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
     }));
     const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
-      projectionV6(sessionId));
+      projectionV6(
+        sessionId,
+        historyV6(),
+        pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+      ));
     const { client } = fakeClient({
       subscribeSessionV5: subscribeV5,
       resyncSessionV5: resyncV5,
@@ -4994,6 +5059,1125 @@ describe("FEAT-134 chat store v4 authority", () => {
       authority: "actionable",
     });
     expect(JSON.stringify(store.conversationApprovalState)).not.toContain("agentSessionId");
+  });
+
+  it("keeps authority revoked and reconciles once when approval is requested after the subscribe snapshot", async () => {
+    const firstResync = new Deferred<ChatResyncProjectionV6>();
+    const secondResync = new Deferred<ChatResyncProjectionV6>();
+    let subscribeCall = 0;
+    let resyncCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      return Object.freeze({
+        subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+          subscribeCall === 1 ? null : approvalProjectionV6(),
+        ),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(() => {
+      resyncCall += 1;
+      return resyncCall === 1 ? firstResync.promise : secondResync.promise;
+    });
+    const { client, emitV6 } = fakeClient({
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(1));
+    emitV6(approvalEventV6());
+    firstResync.resolve(projectionV6(
+      SESSION_A,
+      historyV6(),
+      pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+    ));
+    await selecting;
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(2));
+
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]?.authority)
+      .toBe("historical");
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+
+    secondResync.resolve(projectionV6(
+      SESSION_A,
+      historyV6(),
+      pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+    ));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "pending",
+      authority: "actionable",
+      authorityStreamId: HOST_GENERATION_B,
+    });
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(resyncV6).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not apply a stale pending snapshot when resolution races the first history resync", async () => {
+    const firstResync = new Deferred<ChatResyncProjectionV6>();
+    const secondResync = new Deferred<ChatResyncProjectionV6>();
+    let subscribeCall = 0;
+    let resyncCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      return Object.freeze({
+        subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+          subscribeCall === 1 ? approvalProjectionV6() : null,
+        ),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(() => {
+      resyncCall += 1;
+      return resyncCall === 1 ? firstResync.promise : secondResync.promise;
+    });
+    const { client, emitV6 } = fakeClient({
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(1));
+    const resolved = acceptedApprovalProjectionV6();
+    emitV6(approvalEventV6(resolved));
+    const resolvedHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([approvalProjectionV6(), resolved]),
+      null,
+      "42",
+    );
+    firstResync.resolve(projectionV6(
+      SESSION_A,
+      resolvedHistory,
+      pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    ));
+    await selecting;
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(2));
+
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      authority: "historical",
+      outcome: "accepted_once",
+    });
+    expect(store.lastErrorCode).not.toBe("chat_protocol_error");
+
+    secondResync.resolve(projectionV6(
+      SESSION_A,
+      resolvedHistory,
+      pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+    ));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      authority: "historical",
+      outcome: "accepted_once",
+    });
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(resyncV6).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a fresh local task binding-pending and activates v6 exactly once after Host identity binds", async () => {
+    let bindingState: ChatSessionControlPlane["state"] = "binding_pending";
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: bindingState,
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const accepted = await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    expect(accepted.status).toBe("local_durable_accepted");
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+    expect(store.lastErrorCode).not.toBe("chat_resource_not_found");
+    expect(subscribeV6).not.toHaveBeenCalled();
+    expect(resyncV6).not.toHaveBeenCalled();
+
+    bindingState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await Promise.resolve();
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not lose a live bound edge behind the fresh-create control-plane GET", async () => {
+    const staleInitialRead = new Deferred<ChatSessionControlPlane>();
+    const initialReadStarted = new Deferred<void>();
+    let controlPlaneReads = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        if (controlPlaneReads === 1) {
+          initialReadStarted.resolve();
+          return staleInitialRead.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const creating = store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await initialReadStarted.promise;
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(controlPlaneReads).toBe(3);
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+
+    staleInitialRead.resolve({
+      sessionId: SESSION_A,
+      state: "binding_pending",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await creating;
+    expect(store.phase).toBe("ready");
+    expect(store.controlPlane?.state).toBe("bound");
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older control-plane GET overwrite a newer live bound observation", async () => {
+    const staleRefresh = new Deferred<ChatSessionControlPlane>();
+    const refreshStarted = new Deferred<void>();
+    let controlPlaneReads = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        if (controlPlaneReads === 2) {
+          refreshStarted.resolve();
+          return staleRefresh.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await refreshStarted.promise;
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    staleRefresh.resolve({
+      sessionId: SESSION_B,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    await selecting;
+
+    expect(store.phase).toBe("ready");
+    expect(store.controlPlane?.state).toBe("bound");
+    expect(store.lastErrorCode).not.toBe("chat_temporarily_unavailable");
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]?.authority).toBe("actionable");
+    expect(controlPlaneReads).toBe(2);
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older failed GET overwrite a newer live bound observation", async () => {
+    const staleRefresh = new Deferred<ChatSessionControlPlane>();
+    const refreshStarted = new Deferred<void>();
+    let controlPlaneReads = 0;
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        if (controlPlaneReads === 2) {
+          refreshStarted.resolve();
+          return staleRefresh.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: async () => Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      }),
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+
+    const selecting = store.selectSession(SESSION_A);
+    await refreshStarted.promise;
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    staleRefresh.reject(new Error("older read unavailable"));
+    await selecting;
+
+    expect(store.phase).toBe("ready");
+    expect(store.controlPlane?.state).toBe("bound");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]?.authority).toBe("actionable");
+    expect(controlPlaneReads).toBe(2);
+  });
+
+  it("rejects a foreign-session control-plane GET before callers can use its state", async () => {
+    let controlPlaneReads = 0;
+    const unsubscribeSession = vi.fn<ChatClient["unsubscribeSession"]>(async () => true);
+    const { client } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        return {
+          sessionId: controlPlaneReads === 1 ? sessionId : SESSION_B,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: async () => Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      }),
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+      unsubscribeSession,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.phase).toBe("resync-required");
+    expect(store.controlPlane?.sessionId).toBe(SESSION_A);
+    expect(store.lastErrorCode).toBe("chat_protocol_error");
+    expect(controlPlaneReads).toBe(2);
+    expect(unsubscribeSession).toHaveBeenCalledWith(CONTEXT, LOCAL_SUBSCRIPTION_A);
+  });
+
+  it("uses one live-driven trailing GET when a newer no-subscription gap supersedes the first", async () => {
+    const gapRead = new Deferred<ChatSessionControlPlane>();
+    const gapReadStarted = new Deferred<void>();
+    let controlPlaneReads = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        if (controlPlaneReads === 1) {
+          return {
+            sessionId,
+            state: "binding_pending" as const,
+            issueCode: null,
+            retryable: false,
+            recovery: "none" as const,
+          };
+        }
+        if (controlPlaneReads === 2) {
+          gapReadStarted.resolve();
+          return gapRead.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "5",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await gapReadStarted.promise;
+    expect(controlPlaneReads).toBe(2);
+    expect(subscribeV6).not.toHaveBeenCalled();
+
+    gapRead.resolve({
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    // Initial binding read + first gap read + one live-driven trailing gap
+    // read + the normal activation entry/final authority reads.
+    expect(controlPlaneReads).toBe(5);
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not turn a no-subscription gap GET into a trailing activation retry", async () => {
+    let bindingState: ChatSessionControlPlane["state"] = "binding_pending";
+    const firstSubscription = new Deferred<Awaited<
+      ReturnType<ChatClient["subscribeSessionV6"]>
+    >>();
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      if (subscribeCall === 1) return firstSubscription.promise;
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_B),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: bindingState,
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    bindingState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledTimes(1));
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    firstSubscription.reject(new Error("subscription unavailable"));
+    await vi.waitFor(() => expect(store.lastErrorCode).toBe("chat_protocol_error"));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(resyncV6).not.toHaveBeenCalled();
+
+    await store.resyncSelected();
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not bypass an unresolved no-subscription gap with a cached bound state", async () => {
+    const failedGapRead = new Deferred<ChatSessionControlPlane>();
+    const gapReadStarted = new Deferred<void>();
+    let controlPlaneReads = 0;
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      if (subscribeCall === 1) throw new Error("first activation unavailable");
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneReads += 1;
+        if (controlPlaneReads === 1) {
+          return {
+            sessionId,
+            state: "binding_pending" as const,
+            issueCode: null,
+            retryable: false,
+            recovery: "none" as const,
+          };
+        }
+        if (controlPlaneReads === 3) {
+          gapReadStarted.resolve();
+          return failedGapRead.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(store.lastErrorCode).toBe("chat_protocol_error"));
+    expect(store.controlPlane?.state).toBe("bound");
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await gapReadStarted.promise;
+    const duringGap = store.resyncSelected();
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+
+    failedGapRead.reject(new Error("gap read unavailable"));
+    await duringGap;
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(controlPlaneReads).toBe(3);
+
+    await store.resyncSelected();
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(controlPlaneReads).toBe(6);
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry or activate stale selection after a no-subscription gap GET", async () => {
+    const failedGapRead = new Deferred<ChatSessionControlPlane>();
+    let sessionAReads = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async (_context, sessionId) =>
+      Object.freeze({
+        subscriptionId: sessionId === SESSION_A
+          ? LOCAL_SUBSCRIPTION_A
+          : LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      }));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        if (sessionId === SESSION_A) {
+          sessionAReads += 1;
+          if (sessionAReads === 1) {
+            return {
+              sessionId,
+              state: "binding_pending" as const,
+              issueCode: null,
+              retryable: false,
+              recovery: "none" as const,
+            };
+          }
+          return failedGapRead.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(sessionAReads).toBe(2));
+    await store.selectSession(SESSION_B);
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(subscribeV6).toHaveBeenLastCalledWith(CONTEXT, SESSION_B);
+
+    failedGapRead.reject(new Error("control-plane unavailable"));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(sessionAReads).toBe(2);
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.phase).toBe("ready");
+  });
+
+  it.each([
+    ["failed", "chat_temporarily_unavailable", "resync", "resync-required", false],
+    ["denied", "chat_capability_denied", "none", "permission-denied", false],
+    ["blocked_auth", "chat_unauthenticated", "sign_in", "signed-out", false],
+    ["retry_wait", "chat_temporarily_unavailable", "retry", "unavailable", true],
+  ] as const)(
+    "maps a live %s binding projection to a safe phase and explicit retry authority",
+    async (state, issueCode, recovery, expectedPhase, retainsRetryAuthority) => {
+      let bindingState: ChatSessionControlPlane["state"] = "binding_pending";
+      const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      }));
+      const { client, emitControlPlane } = fakeClient({
+        getSessionControlPlane: async (_context, sessionId) => ({
+          sessionId,
+          state: bindingState,
+          issueCode: null,
+          retryable: false,
+          recovery: "none",
+        }),
+        subscribeSessionV6: subscribeV6,
+        resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+      });
+      const store = createV6Store(client);
+      await store.bind(TENANT);
+      await store.createSessionWithResult(
+        "019c1a00-0000-7000-8000-000000000009",
+        "Inspect the repository",
+      );
+      await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+      emitControlPlane({
+        schemaVersion: 1,
+        sequence: "1",
+        sessionId: SESSION_A,
+        state,
+        issueCode,
+        retryable: state === "retry_wait",
+        recovery,
+      });
+      expect(store.phase).toBe(expectedPhase);
+      expect(store.lastErrorCode).toBe(issueCode);
+      expect(subscribeV6).not.toHaveBeenCalled();
+
+      bindingState = "bound";
+      emitControlPlane({
+        schemaVersion: 1,
+        sequence: "2",
+        sessionId: SESSION_A,
+        state: "bound",
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      });
+      if (retainsRetryAuthority) {
+        await vi.waitFor(() => expect(store.phase).toBe("ready"));
+        expect(subscribeV6).toHaveBeenCalledTimes(1);
+      } else {
+        for (let index = 0; index < 8; index += 1) await Promise.resolve();
+        expect(subscribeV6).not.toHaveBeenCalled();
+        expect(store.phase).toBe(expectedPhase);
+      }
+    },
+  );
+
+  it("keeps live pending and binding-pending projections non-actionable without polling", async () => {
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>();
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "binding_pending",
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      }),
+      subscribeSessionV6: subscribeV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+    for (const [sequence, state] of [["1", "pending"], ["2", "binding_pending"]] as const) {
+      emitControlPlane({
+        schemaVersion: 1,
+        sequence,
+        sessionId: SESSION_A,
+        state,
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      });
+      expect(store.phase).toBe("binding-pending");
+    }
+    expect(subscribeV6).not.toHaveBeenCalled();
+  });
+
+  it("retains binding authority after a transient activation failure and retries only on explicit resync", async () => {
+    let bindingState: ChatSessionControlPlane["state"] = "binding_pending";
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      if (subscribeCall === 1) throw new Error("transient activation failure");
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: bindingState,
+        issueCode: null,
+        retryable: false,
+        recovery: "none",
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    bindingState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledTimes(1));
+    expect(resyncV6).not.toHaveBeenCalled();
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+
+    await store.resyncSelected();
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(resyncV6).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs one trailing activation for a live bound event that supersedes an in-flight activation", async () => {
+    let bindingState: ChatSessionControlPlane["state"] = "binding_pending";
+    const firstSubscription = new Deferred<Awaited<
+      ReturnType<ChatClient["subscribeSessionV6"]>
+    >>();
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      if (subscribeCall === 1) return firstSubscription.promise;
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_B),
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: bindingState,
+        issueCode: bindingState === "retry_wait"
+          ? "chat_temporarily_unavailable" as const
+          : null,
+        retryable: bindingState === "retry_wait",
+        recovery: bindingState === "retry_wait" ? "retry" as const : "none" as const,
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.createSessionWithResult(
+      "019c1a00-0000-7000-8000-000000000009",
+      "Inspect the repository",
+    );
+    await vi.waitFor(() => expect(store.phase).toBe("binding-pending"));
+
+    bindingState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledTimes(1));
+
+    bindingState = "retry_wait";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_A,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    expect(store.phase).toBe("unavailable");
+    bindingState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    expect(subscribeV6).toHaveBeenCalledTimes(1);
+
+    firstSubscription.resolve(Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A),
+    }));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a full v6 resubscribe and resync to restore authority after a global control-plane gap", async () => {
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      return Object.freeze({
+        subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+        ),
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) =>
+      projectionV6(sessionId));
+    const { client, emitControlPlane } = fakeClient({
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(resyncV6).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+  });
+
+  it("keeps gap recovery non-actionable until a fresh control-plane GET confirms bound", async () => {
+    const delayedControlPlane = new Deferred<ChatSessionControlPlane>();
+    const gapReadStarted = new Deferred<void>();
+    let delayGapRead = false;
+    let gapReadConsumed = false;
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      return Object.freeze({
+        subscriptionId: [
+          LOCAL_SUBSCRIPTION_A,
+          LOCAL_SUBSCRIPTION_B,
+          "019c1a00-0000-7000-8000-00000000000c",
+        ][subscribeCall - 1]!,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+        ),
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      getSessionControlPlane: async (_context, sessionId) => {
+        if (delayGapRead && !gapReadConsumed) {
+          gapReadConsumed = true;
+          gapReadStarted.resolve();
+          return delayedControlPlane.promise;
+        }
+        return {
+          sessionId,
+          state: "bound" as const,
+          issueCode: null,
+          retryable: false,
+          recovery: "none" as const,
+        };
+      },
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.canDecideApprovals).toBe(true);
+
+    delayGapRead = true;
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await gapReadStarted.promise;
+    expect(store.phase).toBe("resyncing");
+    expect(store.canDecideApprovals).toBe(false);
+
+    delayGapRead = false;
+    delayedControlPlane.reject(new Error("control-plane unavailable"));
+    await vi.waitFor(() => expect(store.phase).toBe("resync-required"));
+    expect(store.canDecideApprovals).toBe(false);
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "4",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.canDecideApprovals).toBe(true);
+    expect(subscribeV6).toHaveBeenCalledTimes(3);
+  });
+
+  it("revokes Host-minted approval authority before normal recovery and reacquires it once", async () => {
+    const recovery = new Deferred<ChatLocalReadiness>();
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      return Object.freeze({
+        subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+        ),
+      });
+    });
+    const { client } = fakeClient({
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(sessionId),
+      requestLocalRecovery: async () => recovery.promise,
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.canDecideApprovals).toBe(true);
+
+    const recovering = store.requestLocalRecovery();
+    expect(store.canDecideApprovals).toBe(false);
+    expect(store.phase).toBe("resync-required");
+    expect(store.conversationApprovalState.reconciliation).toBe("required");
+
+    recovery.resolve({
+      lifecycle: "ready",
+      host: "ready",
+      runtime: "ready",
+      storage: "ready",
+      canSend: true,
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await recovering;
+    expect(store.phase).toBe("ready");
+    expect(store.canDecideApprovals).toBe(true);
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
   });
 
   it("revokes current authority on invalid input and restores it from a fresh successful resync", async () => {
@@ -5051,13 +6235,26 @@ describe("FEAT-134 chat store v4 authority", () => {
   it("revokes authority at expiresAt and waits for the delayed Host terminal lifecycle", async () => {
     const delayedExpiryResync = new Deferred<ChatResyncProjectionV6>();
     let resyncCall = 0;
+    let subscribeCall = 0;
     const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>((_context, sessionId) => {
       resyncCall += 1;
       return resyncCall === 1
         ? Promise.resolve(projectionV6(sessionId))
         : delayedExpiryResync.promise;
     });
-    const { client, emitV6 } = fakeClient({ resyncSessionV6: resyncV6 });
+    const { client, emitV6 } = fakeClient({
+      resyncSessionV6: resyncV6,
+      subscribeSessionV6: async () => {
+        subscribeCall += 1;
+        return Object.freeze({
+          subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+          pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+            subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+            subscribeCall === 1 ? approvalProjectionV6() : null,
+          ),
+        });
+      },
+    });
     const store = createV6Store(client);
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
@@ -5092,7 +6289,7 @@ describe("FEAT-134 chat store v4 authority", () => {
       authority: "historical",
     });
 
-    emitV6(approvalEventV6(expiredApprovalProjectionV6()));
+    emitV6(approvalEventV6(expiredApprovalProjectionV6(), LOCAL_SUBSCRIPTION_B));
     expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
       status: "resolved",
       outcome: "expired",
@@ -5127,6 +6324,7 @@ describe("FEAT-134 chat store v4 authority", () => {
   it("requests normal resync for a live pending approval after advancing the auxiliary cursor", async () => {
     const delayedRefresh = new Deferred<ChatResyncProjectionV6>();
     let resyncCall = 0;
+    let subscribeCall = 0;
     const emptyHistory = historyV6(
       Object.freeze([commandTurnV6()]),
       Object.freeze([]),
@@ -5143,7 +6341,18 @@ describe("FEAT-134 chat store v4 authority", () => {
           ))
         : delayedRefresh.promise;
     });
-    const { client, emitV6 } = fakeClient({ resyncSessionV6: resyncV6 });
+    const { client, emitV6 } = fakeClient({
+      resyncSessionV6: resyncV6,
+      subscribeSessionV6: async () => {
+        subscribeCall += 1;
+        return Object.freeze({
+          subscriptionId: subscribeCall === 1 ? LOCAL_SUBSCRIPTION_A : LOCAL_SUBSCRIPTION_B,
+          pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+            subscribeCall === 1 ? HOST_GENERATION_A : HOST_GENERATION_B,
+          ),
+        });
+      },
+    });
     const store = createV6Store(client);
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
@@ -5179,6 +6388,13 @@ describe("FEAT-134 chat store v4 authority", () => {
       "missing-command-item",
     );
     const { client } = fakeClient({
+      subscribeSessionV6: async () => Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(
+          HOST_GENERATION_A,
+          mismatchedPending,
+        ),
+      }),
       resyncSessionV6: async (_context, sessionId) => projectionV6(
         sessionId,
         historyV6(),

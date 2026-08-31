@@ -331,6 +331,30 @@ impl ChatAuthorizationManager {
         Ok(actions)
     }
 
+    pub(crate) fn has_authorized_context(
+        &self,
+        action: ChatAction,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        if now < 0 {
+            return Ok(false);
+        }
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| ChatError::ScopeDenied)?;
+        state.contexts.retain(|_, record| record.expires_at > now);
+        Ok(state.contexts.values().any(|record| {
+            record.process_epoch == self.inner.process_epoch
+                && record.authorization_revision == state.highest_revision
+                && action
+                    .required_capabilities()
+                    .iter()
+                    .all(|capability| record.capabilities.contains(*capability))
+        }))
+    }
+
     pub fn invalidate_all(&self) -> Result<(), ChatError> {
         self.inner
             .state
@@ -374,6 +398,9 @@ mod tests {
         );
         let context = manager.bind(projection(tenant, 1, 999), 10).unwrap();
         assert_eq!(context.expires_at, 310);
+        assert!(manager
+            .has_authorized_context(ChatAction::ReadSessions, 309)
+            .unwrap());
         manager
             .authorize(context.context_id, ChatAction::DeleteSession, 309)
             .unwrap();
@@ -381,6 +408,9 @@ mod tests {
             manager.authorize(context.context_id, ChatAction::DeleteSession, 310),
             Err(ChatError::ScopeDenied)
         );
+        assert!(!manager
+            .has_authorized_context(ChatAction::ReadSessions, 310)
+            .unwrap());
 
         let read_only = manager
             .bind(

@@ -154,6 +154,7 @@ export type ChatViewPhase =
   | "ready"
   | "streaming"
   | "resyncing"
+  | "binding-pending"
   | "resync-required"
   | "permission-denied"
   | "signed-out"
@@ -266,6 +267,7 @@ type ChatHistoryAuthority =
   ChatHistoryPage | ChatHistoryPageV4 | ChatHistoryPageV5 | ChatHistoryPageV6;
 type ChatProjectionAuthorityEvent =
   ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5 | ChatProjectionEventV6;
+type ChatApprovalChangedEventV6 = Extract<ChatProjectionEventV6, { kind: "approval_changed" }>;
 type ChatResyncAuthority =
   ChatResyncProjection | ChatResyncProjectionV4 | ChatResyncProjectionV5 | ChatResyncProjectionV6;
 
@@ -273,6 +275,12 @@ type ChatSubscriptionAuthority = Readonly<{
   subscriptionId: string;
   pendingApprovalSnapshot: ChatPendingApprovalSnapshotV6 | null;
 }>;
+
+type ControlPlaneRefreshResult =
+  | Readonly<{ kind: "applied"; status: ChatSessionControlPlane }>
+  | Readonly<{ kind: "superseded" }>
+  | Readonly<{ kind: "selection_changed" }>
+  | Readonly<{ kind: "unavailable" }>;
 
 function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
   return "sessionNotices" in history && !("schemaVersion" in history);
@@ -425,6 +433,14 @@ export function createChatStoreDefinition(
     let cleanupPollEpoch = 0;
     let resyncPromise: Promise<void> | null = null;
     let resyncTrailingRequested = false;
+    let bindingPendingSessionId: string | null = null;
+    let bindingActivationPromise: Promise<void> | null = null;
+    let bindingActivationTrailingSessionId: string | null = null;
+    let controlPlaneGapRecoveryPromise: Promise<void> | null = null;
+    let controlPlaneGapRecoveryTrailingRequested = false;
+    let controlPlaneObservationEpoch = 0;
+    let controlPlaneGapEpoch = 0;
+    let controlPlaneTrustedGapEpoch = 0;
     let artifactRefreshPromise: Promise<void> | null = null;
     let artifactRefreshTrailingRequested = false;
     let draftEpoch = 0;
@@ -611,9 +627,14 @@ export function createChatStoreDefinition(
       liveTurnStatus.value = null;
       cleanupStatus.value = null;
       controlPlane.value = null;
-      controlPlaneSequence = null;
+      if (!streamingV6Enabled) controlPlaneSequence = null;
       deleteDisposition.value = null;
       subscriptionId = null;
+      bindingPendingSessionId = null;
+      bindingActivationPromise = null;
+      bindingActivationTrailingSessionId = null;
+      controlPlaneGapRecoveryPromise = null;
+      controlPlaneGapRecoveryTrailingRequested = false;
       resetProjectionBuffer();
       bufferingEvents = false;
       bufferingArtifactEvents = false;
@@ -624,6 +645,38 @@ export function createChatStoreDefinition(
       resyncTrailingRequested = false;
       artifactRefreshPromise = null;
       artifactRefreshTrailingRequested = false;
+    }
+
+    function revokeSelectedSessionAuthority(
+      nextPhase: ChatViewPhase,
+      retainedBindingSessionId: string | null = null,
+    ): void {
+      const revokedContextId = context.value?.contextId;
+      const revokedSubscriptionId = subscriptionId;
+      selectionEpoch += 1;
+      activeRead?.abort();
+      activeRead = null;
+      subscriptionId = null;
+      releaseSessionListeners();
+      clearApprovalExpiryTimer();
+      activeApprovalDecisionAttempts.clear();
+      approvalTransients.value = Object.freeze({});
+      approvalAuthorityRevision.value += 1;
+      conversationApprovalState.value = requireConversationApprovalReconciliation(
+        conversationApprovalState.value,
+      );
+      bufferingEvents = false;
+      bufferingArtifactEvents = false;
+      resetProjectionBuffer();
+      bufferedArtifactEvents = [];
+      resyncPromise = null;
+      resyncTrailingRequested = false;
+      bindingPendingSessionId = retainedBindingSessionId;
+      phase.value = nextPhase;
+      if (revokedContextId && revokedSubscriptionId) {
+        void client.unsubscribeSession(revokedContextId, revokedSubscriptionId)
+          .catch(() => false);
+      }
     }
 
     function dropDraftReferences(): void {
@@ -732,6 +785,7 @@ export function createChatStoreDefinition(
       const oldContext = context.value?.contextId;
       const oldSubscription = subscriptionId;
       clearSelection();
+      controlPlaneSequence = null;
       dropDraftReferences();
       draftTarget.value = null;
       draftTargetReady.value = false;
@@ -849,7 +903,11 @@ export function createChatStoreDefinition(
       if (controlPlaneUnlisten !== null) return;
       if (controlPlaneListenerPromise !== null) return controlPlaneListenerPromise;
       const generation = listenerEpoch;
-      const pending = client.onControlPlaneEvent(handleControlPlaneEvent, requestControlPlaneResync)
+      const pending = client.onControlPlaneEvent(
+        handleControlPlaneEvent,
+        requestControlPlaneResync,
+        streamingV6Enabled,
+      )
         .then((unlisten) => {
           if (generation !== listenerEpoch) {
             unlisten();
@@ -1029,7 +1087,10 @@ export function createChatStoreDefinition(
       acceptAttachmentImportEvent(active, event);
     }
 
-    function applyControlPlaneStatus(status: ChatSessionControlPlane): void {
+    function applyControlPlaneStatus(
+      status: ChatSessionControlPlane,
+      activateFromLiveBound = false,
+    ): void {
       if (status.sessionId !== selectedSessionId.value) return;
       controlPlane.value = status;
       if (status.issueCode !== null) {
@@ -1046,43 +1107,218 @@ export function createChatStoreDefinition(
       ) {
         lastErrorCode.value = null;
       }
+      const hasV6AuthorityToReconcile = streamingV6Enabled &&
+        (bindingPendingSessionId === status.sessionId || subscriptionId !== null);
+      if (hasV6AuthorityToReconcile && status.state !== "bound") {
+        revokeForControlPlaneStatus(status);
+      }
+      if (
+        streamingV6Enabled &&
+        activateFromLiveBound &&
+        status.state === "bound" &&
+        bindingPendingSessionId === status.sessionId &&
+        subscriptionId === null
+      ) {
+        requestBindingActivation(status.sessionId, true);
+      }
+    }
+
+    function revokeForControlPlaneStatus(status: ChatSessionControlPlane): void {
+      switch (status.state) {
+        case "pending":
+        case "binding_pending":
+          revokeSelectedSessionAuthority("binding-pending", status.sessionId);
+          break;
+        case "retry_wait":
+          revokeSelectedSessionAuthority("unavailable", status.sessionId);
+          break;
+        case "blocked_auth":
+          revokeSelectedSessionAuthority("signed-out");
+          break;
+        case "denied":
+          revokeSelectedSessionAuthority("permission-denied");
+          break;
+        case "failed":
+          revokeSelectedSessionAuthority("resync-required");
+          break;
+        case "bound":
+          break;
+      }
+    }
+
+    function requestBindingActivation(
+      sessionId: string,
+      allowLiveTrailingActivation = false,
+    ): void {
+      if (
+        !streamingV6Enabled ||
+        bindingPendingSessionId !== sessionId || selectedSessionId.value !== sessionId ||
+        context.value === null || controlPlane.value?.sessionId !== sessionId ||
+        controlPlane.value.state !== "bound"
+      ) return;
+      if (bindingActivationPromise !== null) {
+        // Only a newly accepted live bound event may supersede an activation
+        // already in flight. GET/resync and explicit UI recovery never turn a
+        // transport failure into an automatic retry.
+        if (allowLiveTrailingActivation) {
+          bindingActivationTrailingSessionId = sessionId;
+        }
+        return;
+      }
+      const expectedContextId = context.value.contextId;
+      const pending = selectSessionInternal(sessionId)
+        .finally(() => {
+          if (bindingActivationPromise !== pending) return;
+          bindingActivationPromise = null;
+          const queuedSessionId = bindingActivationTrailingSessionId;
+          bindingActivationTrailingSessionId = null;
+          if (
+            queuedSessionId !== null && bindingPendingSessionId === queuedSessionId &&
+            context.value?.contextId === expectedContextId &&
+            selectedSessionId.value === queuedSessionId &&
+            controlPlane.value?.sessionId === queuedSessionId &&
+            controlPlane.value.state === "bound"
+          ) requestBindingActivation(queuedSessionId);
+        });
+      bindingActivationPromise = pending;
     }
 
     function handleControlPlaneEvent(event: ChatControlPlaneEvent): void {
-      if (event.sessionId !== selectedSessionId.value || context.value === null) return;
+      if (context.value === null) return;
+      // FEAT-137 consumes one Host-global control-plane sequence across
+      // selections. Legacy consumers retain the original selected-session
+      // cursor semantics.
+      if (!streamingV6Enabled && event.sessionId !== selectedSessionId.value) return;
       const sequence = BigInt(event.sequence);
       if (controlPlaneSequence !== null) {
         if (sequence <= controlPlaneSequence) return;
-        if (sequence !== controlPlaneSequence + 1n) return requestControlPlaneResync();
+        if (sequence !== controlPlaneSequence + 1n) return requestControlPlaneResync(sequence);
       }
       controlPlaneSequence = sequence;
-      applyControlPlaneStatus(event);
+      if (event.sessionId !== selectedSessionId.value) return;
+      controlPlaneObservationEpoch += 1;
+      applyControlPlaneStatus(event, true);
     }
 
-    function requestControlPlaneResync(): void {
+    function requestControlPlaneResync(observedSequence: bigint | null = null): void {
+      if (streamingV6Enabled) {
+        controlPlaneGapEpoch += 1;
+        controlPlaneSequence = observedSequence;
+        conversationApprovalState.value = requireConversationApprovalReconciliation(
+          conversationApprovalState.value,
+        );
+        if (subscriptionId !== null) {
+          requestResync();
+          return;
+        }
+        requestBindingActivationAfterControlPlaneGap();
+        return;
+      }
       controlPlaneSequence = null;
       void refreshControlPlane();
     }
 
-    async function refreshControlPlane(): Promise<ChatSessionControlPlane | null> {
+    function requestBindingActivationAfterControlPlaneGap(): void {
+      if (controlPlaneGapRecoveryPromise !== null) {
+        // A later live sequence gap is the only source allowed to queue one
+        // trailing GET. GET failure/success never retries itself.
+        controlPlaneGapRecoveryTrailingRequested = true;
+        return;
+      }
+      const expectedContextId = context.value?.contextId;
+      const expectedSessionId = selectedSessionId.value;
+      const expectedSelectionEpoch = selectionEpoch;
+      if (expectedContextId === undefined || expectedSessionId === null) return;
+      const pending = (async (): Promise<void> => {
+        const result = await refreshControlPlaneGuarded();
+        if (
+          result.kind !== "applied" || result.status.state !== "bound" ||
+          selectionEpoch !== expectedSelectionEpoch ||
+          context.value?.contextId !== expectedContextId ||
+          selectedSessionId.value !== expectedSessionId
+        ) return;
+        // The sequence gap is a fresh external observation. A successful GET may
+        // therefore activate exactly once; a failed GET never schedules a retry.
+        requestBindingActivation(expectedSessionId);
+      })().finally(() => {
+        if (controlPlaneGapRecoveryPromise !== pending) return;
+        controlPlaneGapRecoveryPromise = null;
+        const runTrailing = controlPlaneGapRecoveryTrailingRequested;
+        controlPlaneGapRecoveryTrailingRequested = false;
+        if (
+          runTrailing && selectionEpoch === expectedSelectionEpoch &&
+          context.value?.contextId === expectedContextId &&
+          selectedSessionId.value === expectedSessionId &&
+          bindingPendingSessionId === expectedSessionId && subscriptionId === null
+        ) requestBindingActivationAfterControlPlaneGap();
+      });
+      controlPlaneGapRecoveryPromise = pending;
+    }
+
+    async function refreshControlPlaneGuarded(): Promise<ControlPlaneRefreshResult> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId) return null;
+      if (!bound || !sessionId) return { kind: "selection_changed" };
+      const expectedSelectionEpoch = selectionEpoch;
+      const expectedObservationEpoch = controlPlaneObservationEpoch;
+      const expectedGapEpoch = controlPlaneGapEpoch;
       try {
-        const status = await client.getSessionControlPlane(bound.contextId, sessionId);
-        if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) {
-          return null;
+        const status = await client.getSessionControlPlane(
+          bound.contextId,
+          sessionId,
+          undefined,
+          streamingV6Enabled,
+        );
+        if (
+          selectionEpoch !== expectedSelectionEpoch ||
+          context.value?.contextId !== bound.contextId ||
+          selectedSessionId.value !== sessionId
+        ) {
+          return { kind: "selection_changed" };
         }
+        if (
+          streamingV6Enabled &&
+          (controlPlaneObservationEpoch !== expectedObservationEpoch ||
+            controlPlaneGapEpoch !== expectedGapEpoch)
+        ) {
+          return { kind: "superseded" };
+        }
+        if (status.sessionId !== sessionId) {
+          lastErrorCode.value = "chat_protocol_error";
+          return { kind: "unavailable" };
+        }
+        controlPlaneTrustedGapEpoch = expectedGapEpoch;
         applyControlPlaneStatus(status);
-        return status;
+        return { kind: "applied", status };
       } catch (error: unknown) {
+        if (
+          selectionEpoch !== expectedSelectionEpoch ||
+          context.value?.contextId !== bound.contextId ||
+          selectedSessionId.value !== sessionId
+        ) {
+          return { kind: "selection_changed" };
+        }
+        if (
+          streamingV6Enabled &&
+          (controlPlaneObservationEpoch !== expectedObservationEpoch ||
+            controlPlaneGapEpoch !== expectedGapEpoch)
+        ) {
+          return { kind: "superseded" };
+        }
         if (context.value?.contextId === bound.contextId && selectedSessionId.value === sessionId) {
           lastErrorCode.value = error instanceof ChatClientError
             ? error.shape.code
             : "chat_protocol_error";
         }
-        return null;
+        return { kind: "unavailable" };
       }
+    }
+
+    async function refreshControlPlane(): Promise<ChatSessionControlPlane | null> {
+      const result = await refreshControlPlaneGuarded();
+      if (result.kind === "applied") return result.status;
+      if (result.kind === "superseded") return controlPlane.value;
+      return null;
     }
 
     function itemText(item: ConversationItem | null): string {
@@ -1396,6 +1632,35 @@ export function createChatStoreDefinition(
           return;
         }
       }
+    }
+
+    function bufferedApprovalSnapshotRaced(
+      contextId: string,
+      sessionId: string,
+      activeSubscriptionId: string,
+      snapshot: ChatPendingApprovalSnapshotV6 | null,
+    ): boolean {
+      const approvalEvents = bufferedEvents.filter((event): event is ChatApprovalChangedEventV6 =>
+        event.schemaVersion === 6 && event.kind === "approval_changed" &&
+        event.contextId === contextId && event.sessionId === sessionId &&
+        event.subscriptionId === activeSubscriptionId)
+        .sort((left, right) =>
+          BigInt(left.projectionSequence) < BigInt(right.projectionSequence) ? -1 :
+            BigInt(left.projectionSequence) > BigInt(right.projectionSequence) ? 1 : 0);
+      const latest = approvalEvents[approvalEvents.length - 1];
+      if (latest === undefined) return false;
+      if (snapshot === null) return true;
+      if (latest.payload.status === "resolved") return snapshot.pending.length !== 0;
+      const pending = snapshot.pending[0];
+      return snapshot.pending.length !== 1 || pending === undefined ||
+        pending.approvalRequestId !== latest.payload.approvalRequestId ||
+        pending.turnId !== latest.payload.turnId || pending.itemId !== latest.payload.itemId ||
+        pending.actionId !== latest.payload.actionId ||
+        pending.workspaceScope !== latest.payload.workspaceScope ||
+        pending.requestedAt !== latest.payload.requestedAt ||
+        pending.expiresAt !== latest.payload.expiresAt ||
+        pending.decisions.primary !== latest.payload.decisions.primary ||
+        pending.decisions.secondary !== latest.payload.decisions.secondary;
     }
 
     function handleEvent(event: ChatProjectionAuthorityEvent): void {
@@ -1724,11 +1989,18 @@ export function createChatStoreDefinition(
     function resyncAuthority(
       contextId: string,
       sessionId: string,
+      activeSubscriptionId: string,
       limit: number,
       signal: AbortSignal,
     ): Promise<ChatResyncAuthority> {
       return streamingV6Enabled
-        ? client.resyncSessionV6(contextId, sessionId, limit, signal)
+        ? client.resyncSessionV6(
+            contextId,
+            sessionId,
+            activeSubscriptionId,
+            limit,
+            signal,
+          )
         : streamingV5Enabled
           ? client.resyncSessionV5(contextId, sessionId, limit, signal)
           : streamingV4Enabled
@@ -1757,7 +2029,7 @@ export function createChatStoreDefinition(
         : client.loadHistoryV3(contextId, sessionId, cursor, limit, signal);
     }
 
-    async function selectSession(sessionId: string): Promise<void> {
+    async function selectSessionInternal(sessionId: string): Promise<void> {
       const bound = context.value;
       if (!bound || !hasAction("read_sessions")) {
         phase.value = "permission-denied";
@@ -1772,6 +2044,10 @@ export function createChatStoreDefinition(
       const oldSession = selectedSessionId.value;
       clearSelection();
       selectedSessionId.value = sessionId;
+      // Establish the scoped activation intent before installing listeners or
+      // issuing the first GET. A live bound edge may then supersede this read;
+      // the older GET is rejected by the selection generation.
+      if (streamingV6Enabled) bindingPendingSessionId = sessionId;
       phase.value = "resyncing";
       if (oldSubscription && oldSession) {
         void client.unsubscribeSession(bound.contextId, oldSubscription).catch(() => undefined);
@@ -1787,6 +2063,34 @@ export function createChatStoreDefinition(
         ]);
         if (!isCurrent(epoch, controller, sessionId)) return;
         artifactAuthorityToken = establishArtifactAuthority(sessionId);
+        if (streamingV6Enabled) {
+          const status = await client.getSessionControlPlane(
+            bound.contextId,
+            sessionId,
+            controller.signal,
+            streamingV6Enabled,
+          );
+          if (!isCurrent(epoch, controller, sessionId)) return;
+          if (status.sessionId !== sessionId) {
+            throw new ChatClientError({
+              schemaVersion: 1,
+              code: "chat_protocol_error",
+              retryable: false,
+              recovery: "resync",
+            });
+          }
+          controlPlaneTrustedGapEpoch = controlPlaneGapEpoch;
+          applyControlPlaneStatus(status);
+          const currentStatus = controlPlane.value;
+          if (currentStatus?.sessionId !== sessionId || currentStatus.state !== "bound") {
+            bufferingEvents = false;
+            bufferingArtifactEvents = false;
+            resetProjectionBuffer();
+            bufferedArtifactEvents = [];
+            activeRead = null;
+            return;
+          }
+        }
         const nextSubscriptionAuthority = await subscribeAuthority(bound.contextId, sessionId);
         const nextSubscription = nextSubscriptionAuthority.subscriptionId;
         if (!isCurrent(epoch, controller, sessionId)) {
@@ -1796,8 +2100,22 @@ export function createChatStoreDefinition(
         subscriptionId = nextSubscription;
         resetArtifactStream();
         bufferingArtifactEvents = artifactIntegration !== null;
-        const projection = await resyncAuthority(bound.contextId, sessionId, 20, controller.signal);
+        const projection = await resyncAuthority(
+          bound.contextId,
+          sessionId,
+          nextSubscription,
+          20,
+          controller.signal,
+        );
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+        const authoritativeProjection = streamingV6Enabled &&
+          nextSubscriptionAuthority.pendingApprovalSnapshot !== null &&
+          "pendingApprovalSnapshot" in projection
+          ? Object.freeze({
+              ...projection,
+              pendingApprovalSnapshot: nextSubscriptionAuthority.pendingApprovalSnapshot,
+            })
+          : projection;
         let authoritativeHistory: ChatHistoryAuthority = projection.history;
         let trailingArtifactRefresh = false;
         if (artifactIntegration !== null) {
@@ -1832,8 +2150,35 @@ export function createChatStoreDefinition(
           ) return;
           authoritativeHistory = secondHistory;
         }
-        applyResync(projection, authoritativeHistory);
-        await refreshControlPlane();
+        const approvalSnapshotRaced = streamingV6Enabled && bufferedApprovalSnapshotRaced(
+          bound.contextId,
+          sessionId,
+          nextSubscription,
+          nextSubscriptionAuthority.pendingApprovalSnapshot,
+        );
+        applyResync(
+          authoritativeProjection,
+          authoritativeHistory,
+          !approvalSnapshotRaced,
+        );
+        if (approvalSnapshotRaced) resyncTrailingRequested = true;
+        const refreshedControlPlane = await refreshControlPlaneGuarded();
+        if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+        if (streamingV6Enabled && refreshedControlPlane.kind === "unavailable") {
+          revokeSelectedSessionAuthority("resync-required", sessionId);
+          return;
+        }
+        if (
+          streamingV6Enabled && refreshedControlPlane.kind === "applied" &&
+          refreshedControlPlane.status.state !== "bound"
+        ) {
+          if (refreshedControlPlane.status.state === "failed") {
+            revokeSelectedSessionAuthority("resync-required", sessionId);
+          } else {
+            revokeForControlPlaneStatus(refreshedControlPlane.status);
+          }
+          return;
+        }
         const lateNotifications = bufferedArtifactEvents;
         bufferedArtifactEvents = [];
         for (const event of lateNotifications) {
@@ -1854,8 +2199,15 @@ export function createChatStoreDefinition(
         } else if (trailingArtifactRefresh) {
           requestArtifactRefresh();
         }
+        bindingPendingSessionId = null;
+        return;
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
+        const failedSubscription = subscriptionId;
+        subscriptionId = null;
+        if (failedSubscription !== null) {
+          void client.unsubscribeSession(bound.contextId, failedSubscription).catch(() => false);
+        }
         releaseSessionListeners();
         bufferingEvents = false;
         bufferingArtifactEvents = false;
@@ -1864,7 +2216,18 @@ export function createChatStoreDefinition(
         activeRead = null;
         lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
         phase.value = phaseForError(error);
+        if (streamingV6Enabled) {
+          conversationApprovalState.value = requireConversationApprovalReconciliation(
+            conversationApprovalState.value,
+          );
+          bindingPendingSessionId = sessionId;
+        }
+        return;
       }
+    }
+
+    function selectSession(sessionId: string): Promise<void> {
+      return selectSessionInternal(sessionId);
     }
 
     async function clearSelectedSession(): Promise<void> {
@@ -1960,6 +2323,7 @@ export function createChatStoreDefinition(
     function applyResync(
       projection: ChatResyncAuthority,
       authoritativeHistory: ChatHistoryAuthority = projection.history,
+      approvalSnapshotCurrent = true,
     ): void {
       if (projection.session.sessionId !== selectedSessionId.value) {
         throw new ChatClientError({ schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync" });
@@ -1988,16 +2352,20 @@ export function createChatStoreDefinition(
           conversationApprovalState.value = nextApproval;
           throw approvalProtocolError();
         }
-        nextApproval = reconcileApprovalAuthority(
-          nextApproval,
-          projection.pendingApprovalSnapshot,
-          projection.session.sessionId,
-          projection.pendingApprovalSnapshot.streamId,
-          nextConversation,
-        );
-        if (nextApproval.reconciliation === "required") {
-          conversationApprovalState.value = nextApproval;
-          throw approvalProtocolError();
+        if (approvalSnapshotCurrent) {
+          nextApproval = reconcileApprovalAuthority(
+            nextApproval,
+            projection.pendingApprovalSnapshot,
+            projection.session.sessionId,
+            projection.pendingApprovalSnapshot.streamId,
+            nextConversation,
+          );
+          if (nextApproval.reconciliation === "required") {
+            conversationApprovalState.value = nextApproval;
+            throw approvalProtocolError();
+          }
+        } else {
+          nextApproval = requireConversationApprovalReconciliation(nextApproval);
         }
       }
       conversationState.value = nextConversation;
@@ -2074,7 +2442,31 @@ export function createChatStoreDefinition(
       }
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !subscriptionId) return;
+      if (!bound || !sessionId) return;
+      if (!subscriptionId) {
+        if (streamingV6Enabled && bindingPendingSessionId === sessionId) {
+          if (controlPlaneGapRecoveryPromise !== null) {
+            // Reuse the live-gap read already in flight. Its failure does not
+            // authorize this explicit action to retry automatically.
+            await controlPlaneGapRecoveryPromise;
+            return bindingActivationPromise ?? Promise.resolve();
+          }
+          if (
+            controlPlaneTrustedGapEpoch === controlPlaneGapEpoch &&
+            controlPlane.value?.sessionId === sessionId &&
+            controlPlane.value.state === "bound"
+          ) {
+            requestBindingActivation(sessionId);
+          } else {
+            const refreshed = await refreshControlPlaneGuarded();
+            if (refreshed.kind === "applied" && refreshed.status.state === "bound") {
+              requestBindingActivation(sessionId);
+            }
+          }
+          return bindingActivationPromise ?? Promise.resolve();
+        }
+        return;
+      }
       if (streamingV6Enabled) {
         conversationApprovalState.value = requireConversationApprovalReconciliation(
           conversationApprovalState.value,
@@ -2103,10 +2495,19 @@ export function createChatStoreDefinition(
           const projection = await resyncAuthority(
             bound.contextId,
             sessionId,
+            nextSubscription,
             20,
             controller.signal,
           );
           if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+          const authoritativeProjection = streamingV6Enabled &&
+            nextSubscriptionAuthority.pendingApprovalSnapshot !== null &&
+            "pendingApprovalSnapshot" in projection
+            ? Object.freeze({
+                ...projection,
+                pendingApprovalSnapshot: nextSubscriptionAuthority.pendingApprovalSnapshot,
+              })
+            : projection;
           let authoritativeHistory: ChatHistoryAuthority = projection.history;
           if (artifactIntegration !== null) {
             const page = await loadHistoryAuthority(
@@ -2123,8 +2524,35 @@ export function createChatStoreDefinition(
             ) return;
             authoritativeHistory = page;
           }
-          applyResync(projection, authoritativeHistory);
-          void refreshControlPlane();
+          const approvalSnapshotRaced = streamingV6Enabled && bufferedApprovalSnapshotRaced(
+            bound.contextId,
+            sessionId,
+            nextSubscription,
+            nextSubscriptionAuthority.pendingApprovalSnapshot,
+          );
+          applyResync(
+            authoritativeProjection,
+            authoritativeHistory,
+            !approvalSnapshotRaced,
+          );
+          if (approvalSnapshotRaced) resyncTrailingRequested = true;
+          if (streamingV6Enabled) {
+            const refreshedControlPlane = await refreshControlPlaneGuarded();
+            if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+            if (refreshedControlPlane.kind === "unavailable") {
+              revokeSelectedSessionAuthority("resync-required", sessionId);
+              return;
+            }
+            if (
+              refreshedControlPlane.kind === "applied" &&
+              refreshedControlPlane.status.state !== "bound"
+            ) {
+              revokeForControlPlaneStatus(refreshedControlPlane.status);
+              return;
+            }
+          } else {
+            void refreshControlPlane();
+          }
           const pendingArtifactEvents = bufferedArtifactEvents;
           bufferedArtifactEvents = [];
           let needsTrailingArtifactRefresh = false;
@@ -3008,9 +3436,21 @@ export function createChatStoreDefinition(
     async function requestLocalRecovery(): Promise<ChatLocalReadiness | null> {
       const bound = context.value;
       if (!bound) return null;
+      const recoverySessionId = streamingV6Enabled ? selectedSessionId.value : null;
+      if (recoverySessionId !== null) {
+        revokeSelectedSessionAuthority("resync-required");
+      }
       const projection = await client.requestLocalRecovery(bound.contextId, operationId());
       if (context.value?.contextId !== bound.contextId) return null;
       localReadiness.value = projection;
+      if (
+        recoverySessionId !== null && selectedSessionId.value === recoverySessionId &&
+        projection.lifecycle === "ready" && projection.canSend
+      ) {
+        await selectSessionInternal(recoverySessionId);
+      } else if (recoverySessionId !== null && selectedSessionId.value === recoverySessionId) {
+        await refreshControlPlane();
+      }
       return projection;
     }
 
