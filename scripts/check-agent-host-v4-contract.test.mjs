@@ -71,14 +71,14 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
           encoding: "utf8",
         }).trim(),
       ),
-    ).resolves.toBe("2e490dea4444ea1e33c2df1a5267b2bff5bfb8e6");
+    ).resolves.toBe("aeccf5d561bd4259389cdb325bae84ce3e0dea86");
     await expect(
       import("node:child_process").then(({ execFileSync }) =>
         execFileSync("git", ["-C", agentHostRoot, "rev-parse", "HEAD"], {
           encoding: "utf8",
         }).trim(),
       ),
-    ).resolves.toBe("118651804b7f5a7849bc68cdf29d88c74a21f8a1");
+    ).resolves.toBe("078769a22d035c2921e315e5776185bed6f7feeb");
   });
 
   it("pins the Host consumption lock bytes and rejects any drift", async () => {
@@ -168,6 +168,13 @@ describe("FEAT-134 stable-only launcher boundary", () => {
     [
       "public profile",
       runner.replace("  YIJIE_LOCAL_PROFILE=demo_fast \\", "  YIJIE_LOCAL_PROFILE=public \\")
+    ],
+    [
+      "Bash nounset-unsafe empty environment expansion",
+      runner.replace(
+        '"${feat134_environment[@]+"${feat134_environment[@]}"}"',
+        '"${feat134_environment[@]}"',
+      ),
     ],
   ])("rejects %s", (_label, candidate) => {
     expect(() => validateStableActivation(packageJson, candidate, lock.activation)).toThrow(

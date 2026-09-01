@@ -109,7 +109,7 @@ describe("local demo launcher profiles", () => {
     expect(execBoundary).toContain("-u VITE_YIJIE_FEAT136_EXECUTION_ENABLED \\");
     expect(execBoundary).toContain("-u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED \\");
     expect(execBoundary).toContain("-u VITE_YIJIE_FEAT137_APPROVAL_ENABLED \\");
-    expect(execBoundary).toContain('"${feat134_environment[@]}"');
+    expect(execBoundary).toContain('"${feat134_environment[@]+"${feat134_environment[@]}"}"');
     expect(execBoundary).toContain("YIJIE_ENV=local \\");
     expect(execBoundary).toContain("YIJIE_LOCAL_PROFILE=demo_fast \\");
   });
@@ -179,6 +179,17 @@ describe("local demo launcher profiles", () => {
     expect(runner).toContain("src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop");
     expect(runner).toContain("launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)");
     expect(runner).toContain('"${launch_command[@]}"');
+  });
+
+  it("expands an empty profile environment safely under macOS Bash nounset", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const { stdout } = await exec("/bin/bash", [
+      "-c",
+      'set -u; values=(); set -- "${values[@]+"${values[@]}"}"; printf "%s" "$#"',
+    ]);
+
+    expect(runner).toContain('"${feat134_environment[@]+"${feat134_environment[@]}"}"');
+    expect(stdout).toBe("0");
   });
 
   it("isolates stable app identity and durable local state from the default demo", async () => {

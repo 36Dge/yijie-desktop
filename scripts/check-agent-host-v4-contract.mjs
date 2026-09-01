@@ -485,7 +485,10 @@ export function validateStableActivation(packageJson, runnerSource, activation) 
     !hasExactShellLine(execBoundary, `  -u ${activation.compile_flag} \\`) ||
     !hasExactShellLine(execBoundary, `  -u ${activation.feat136_runtime_flag} \\`) ||
     !hasExactShellLine(execBoundary, `  -u ${activation.feat136_compile_flag} \\`) ||
-    !hasExactShellLine(execBoundary, '  "${feat134_environment[@]}" \\') ||
+    !hasExactShellLine(
+      execBoundary,
+      '  "${feat134_environment[@]+"${feat134_environment[@]}"}" \\',
+    ) ||
     !hasExactShellLine(execBoundary, "  YIJIE_ENV=local \\") ||
     !hasExactShellLine(execBoundary, "  YIJIE_LOCAL_PROFILE=demo_fast \\") ||
     !hasExactShellLine(execBoundary, "  VITE_YIJIE_ENV=local \\") ||

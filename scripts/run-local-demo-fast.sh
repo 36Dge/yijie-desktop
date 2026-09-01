@@ -143,7 +143,7 @@ exec env \
   -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED \
   -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED \
   -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED \
-  "${feat134_environment[@]}" \
+  "${feat134_environment[@]+"${feat134_environment[@]}"}" \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \
   VITE_FEAT128_S10D_RUNTIME=false \
