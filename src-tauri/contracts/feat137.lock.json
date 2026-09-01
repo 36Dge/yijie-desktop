@@ -18,6 +18,14 @@
     "tests/fixtures/agent/host-v6": "38b70fd668c2d01d6660083fd0784327aa653228"
   },
   "desktopBaseCommit": "7026b47828961e58854b06c822c9c9e11252260d",
+  "runtimeAuthority": {
+    "commit": "acf2da55d8a53175343aaf112e03368dfef9922a",
+    "tree": "97557e0bd736a91bbbf94ccfa11b57a4bbf23a74",
+    "artifactRelativeRoot": ".yijie/build/macos/aarch64-apple-darwin",
+    "hostArtifactDirectory": "feat-137-acf2da55d8a5",
+    "binarySha256": "84bb0445a15f99354ddd38ccb407b9b0d3d28522accece3fa9755918ab6978e3",
+    "manifestSha256": "e62d8210f5abcad7ff0fc1b4d068c7fe4da59501c6fa6b12f18dc4a1f939c6aa"
+  },
   "hostAuthority": {
     "commit": "078769a22d035c2921e315e5776185bed6f7feeb",
     "tree": "df7e5b6bc4994a1a4023793e766a87c7806f1e07"

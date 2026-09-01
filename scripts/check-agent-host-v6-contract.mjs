@@ -11,6 +11,9 @@ const contractsRoot = resolve(
 const hostRoot = resolve(
   process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? join(desktopRoot, "../yijie-agent-host"),
 );
+const runtimeRoot = resolve(
+  process.env.YIJIE_DESKTOP_CODEX_RUNTIME_DIR ?? join(desktopRoot, "../yijie-codex"),
+);
 const lock = JSON.parse(
   readFileSync(join(desktopRoot, "src-tauri/contracts/feat137.lock.json"), "utf8"),
 );
@@ -64,6 +67,34 @@ for (const [relativeFile, expected] of Object.entries(lock.sources)) {
 for (const [relativeTree, expected] of Object.entries(lock.fixtureTrees)) {
   if (git(contractsRoot, "rev-parse", `HEAD:${relativeTree}`) !== expected) {
     fail(`Contracts fixture tree drifted: ${relativeTree}`);
+  }
+}
+
+const runtime = lock.runtimeAuthority;
+if (runtime?.commit !== "acf2da55d8a53175343aaf112e03368dfef9922a" ||
+    runtime?.tree !== "97557e0bd736a91bbbf94ccfa11b57a4bbf23a74" ||
+    runtime?.artifactRelativeRoot !== ".yijie/build/macos/aarch64-apple-darwin" ||
+    runtime?.hostArtifactDirectory !== "feat-137-acf2da55d8a5" ||
+    runtime?.binarySha256 !== "84bb0445a15f99354ddd38ccb407b9b0d3d28522accece3fa9755918ab6978e3" ||
+    runtime?.manifestSha256 !== "e62d8210f5abcad7ff0fc1b4d068c7fe4da59501c6fa6b12f18dc4a1f939c6aa") {
+  fail("Runtime identity is not the reviewed immutable FEAT-137 provenance authority");
+}
+if (git(runtimeRoot, "rev-parse", "HEAD") !== runtime.commit ||
+    git(runtimeRoot, "rev-parse", "HEAD^{tree}") !== runtime.tree ||
+    git(runtimeRoot, "status", "--porcelain=v1", "--untracked-files=all") !== "") {
+  fail("Runtime checkout is not the exact clean frozen commit/tree");
+}
+const runtimeBuildRoot = join(runtimeRoot, runtime.artifactRelativeRoot);
+const hostRuntimeArtifactRoot = join(hostRoot, ".local/runtime-artifacts", runtime.hostArtifactDirectory);
+for (const [name, expected] of [
+  ["codex", runtime.binarySha256],
+  ["runtime-manifest.json", runtime.manifestSha256],
+]) {
+  if (sha256(readFileSync(join(runtimeBuildRoot, name))) !== expected) {
+    fail(`Runtime build artifact drifted: ${name}`);
+  }
+  if (sha256(readFileSync(join(hostRuntimeArtifactRoot, name))) !== expected) {
+    fail(`Host stable Runtime artifact drifted: ${name}`);
   }
 }
 
@@ -269,6 +300,15 @@ for (const scriptName of ["generate", "generate:check"]) {
 }
 
 const runner = readFileSync(join(desktopRoot, "scripts/run-local-demo-fast.sh"), "utf8");
+for (const line of [
+  `feat137_runtime_binary_sha256="${runtime.binarySha256}"`,
+  `feat137_runtime_manifest_sha256="${runtime.manifestSha256}"`,
+  `    codex_runtime_root="$host_root/.local/runtime-artifacts/${runtime.hostArtifactDirectory}"`,
+]) {
+  if (runner.split("\n").filter((candidate) => candidate === line).length !== 1) {
+    fail(`canonical runner does not contain exactly one Runtime authority line: ${line.trim()}`);
+  }
+}
 for (const line of [
   `      ${lock.activation.nativeFlag}=true`,
   `      ${lock.activation.webFlag}=true`,

@@ -8,8 +8,8 @@ codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/macos/aarch64-apple
 host_binary="$host_root/.local/bin/yijie-agent-host"
 codex_binary="$codex_runtime_root/codex"
 codex_manifest="$codex_runtime_root/runtime-manifest.json"
-feat136_runtime_binary_sha256="4efe16d2848680752cf9aacf4c17741ab2eeb7415894a66c2bb03652b00a322d"
-feat136_runtime_manifest_sha256="1cfa2e0a139b2213f4d29b1efeed71d4810110ac865f0bcbd931ff33b0062c1b"
+feat137_runtime_binary_sha256="84bb0445a15f99354ddd38ccb407b9b0d3d28522accece3fa9755918ab6978e3"
+feat137_runtime_manifest_sha256="e62d8210f5abcad7ff0fc1b4d068c7fe4da59501c6fa6b12f18dc4a1f939c6aa"
 provider_key_file="$host_root/.local/secrets/minimax-api-key"
 runtime_root="$desktop_root/.local/demo-fast"
 host_home="$runtime_root/host-home"
@@ -37,7 +37,7 @@ case "$#" in
     runtime_root="$desktop_root/.local/feat131-stable"
     host_home="$runtime_root/host-home"
     codex_home="$runtime_root/codex-home"
-    codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"
+    codex_runtime_root="$host_root/.local/runtime-artifacts/feat-137-acf2da55d8a5"
     codex_binary="$codex_runtime_root/codex"
     codex_manifest="$codex_runtime_root/runtime-manifest.json"
     feat134_environment=(
@@ -55,10 +55,10 @@ esac
 [[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]] || fail "Codex Runtime binary is missing"
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 if [[ "$stable_api_only" == "true" ]]; then
-  [[ "$(sha256_file "$codex_binary")" == "$feat136_runtime_binary_sha256" ]] ||
-    fail "Codex Runtime binary differs from the reviewed FEAT-136 artifact"
-  [[ "$(sha256_file "$codex_manifest")" == "$feat136_runtime_manifest_sha256" ]] ||
-    fail "Codex Runtime manifest differs from the reviewed FEAT-136 artifact"
+  [[ "$(sha256_file "$codex_binary")" == "$feat137_runtime_binary_sha256" ]] ||
+    fail "Codex Runtime binary differs from the reviewed FEAT-137 artifact"
+  [[ "$(sha256_file "$codex_manifest")" == "$feat137_runtime_manifest_sha256" ]] ||
+    fail "Codex Runtime manifest differs from the reviewed FEAT-137 artifact"
 fi
 [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 

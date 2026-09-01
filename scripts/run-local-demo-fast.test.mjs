@@ -53,7 +53,7 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
     expect(argumentBoundary).toContain(
-      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"',
+      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-137-acf2da55d8a5"',
     );
     expect(argumentBoundary).toContain('codex_binary="$codex_runtime_root/codex"');
     expect(argumentBoundary).toContain('codex_manifest="$codex_runtime_root/runtime-manifest.json"');
@@ -67,22 +67,22 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('case "$#" in');
   });
 
-  it("pins the stable entry to the reviewed FEAT-136 Runtime artifact pair", async () => {
+  it("pins the stable entry to the reviewed FEAT-137 Runtime provenance artifact pair", async () => {
     const runner = await readFile(runnerPath, "utf8");
 
     expect(runner).toContain(
-      'feat136_runtime_binary_sha256="4efe16d2848680752cf9aacf4c17741ab2eeb7415894a66c2bb03652b00a322d"',
+      'feat137_runtime_binary_sha256="84bb0445a15f99354ddd38ccb407b9b0d3d28522accece3fa9755918ab6978e3"',
     );
     expect(runner).toContain(
-      'feat136_runtime_manifest_sha256="1cfa2e0a139b2213f4d29b1efeed71d4810110ac865f0bcbd931ff33b0062c1b"',
+      'feat137_runtime_manifest_sha256="e62d8210f5abcad7ff0fc1b4d068c7fe4da59501c6fa6b12f18dc4a1f939c6aa"',
     );
     expect(runner).toContain('if [[ "$stable_api_only" == "true" ]]; then');
     expect(runner).toContain(
       '[[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]]',
     );
-    expect(runner).toContain('[[ "$(sha256_file "$codex_binary")" == "$feat136_runtime_binary_sha256" ]]');
-    expect(runner).toContain('[[ "$(sha256_file "$codex_manifest")" == "$feat136_runtime_manifest_sha256" ]]');
-    expect(runner.match(/\.local\/runtime-artifacts\/feat-136-b2b20e2fc4a0/g)).toHaveLength(1);
+    expect(runner).toContain('[[ "$(sha256_file "$codex_binary")" == "$feat137_runtime_binary_sha256" ]]');
+    expect(runner).toContain('[[ "$(sha256_file "$codex_manifest")" == "$feat137_runtime_manifest_sha256" ]]');
+    expect(runner.match(/\.local\/runtime-artifacts\/feat-137-acf2da55d8a5/g)).toHaveLength(1);
   });
 
   it("injects the dependent FEAT-134, FEAT-136 and FEAT-137 flags only through the exact stable branch", async () => {
