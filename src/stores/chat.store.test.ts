@@ -1203,6 +1203,8 @@ describe("chat view-model store", () => {
       await store.bind(TENANT);
       expect(store.lastBindFailureStage).toBe(stage);
       expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+      expect(store.context).toBeNull();
+      expect(store.isAuthorityBound()).toBe(false);
       await store.dispose();
     }
   });
@@ -1247,6 +1249,7 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
 
     expect(store.context?.contextId).toBe(CONTEXT);
+    expect(store.isAuthorityBound()).toBe(true);
     expect(store.phase).toBe("unavailable");
     expect(store.lastBindFailureStage).toBe("draft_attachments");
     expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
@@ -1538,7 +1541,7 @@ describe("chat view-model store", () => {
       { operationId: cleanupOperationId, state: "pending" },
     ));
     for (let index = 0; index < 8; index += 1) await Promise.resolve();
-    expect(resync).toHaveBeenCalledTimes(2);
+    expect(resync).toHaveBeenCalledTimes(1);
     expect(getCleanupStatus).toHaveBeenCalledTimes(cleanupRefreshCalls);
   });
 
@@ -3555,6 +3558,118 @@ describe("chat view-model store", () => {
     });
   });
 
+  it("resumes the same cleanup operation after the retry limit is reached", async () => {
+    const retryLimit = {
+      operationId: "019c1a00-0000-7000-8000-000000000073",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "retry_limit_exceeded",
+      lastErrorCode: "chat_cleanup_incomplete",
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    };
+    const resumed = { ...retryLimit, outcomeCode: "pending", lastErrorCode: null };
+    let deleteCall = 0;
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>(async () => {
+      deleteCall += 1;
+      return deleteCall === 1 ? retryLimit : resumed;
+    });
+    const { client } = fakeClient({ deleteSession });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.cleanupStatus).toEqual(retryLimit);
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+
+    expect(deleteSession).toHaveBeenCalledTimes(2);
+    expect(store.cleanupStatus).toEqual(resumed);
+  });
+
+  it("does not let an older cleanup poll regress a manual retry-limit result", async () => {
+    const pending = {
+      operationId: "019c1a00-0000-7000-8000-000000000076",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    };
+    const retryLimit = {
+      ...pending,
+      outcomeCode: "retry_limit_exceeded",
+      lastErrorCode: "chat_cleanup_incomplete",
+    };
+    const olderPoll = new Deferred<typeof pending>();
+    let cleanupRead = 0;
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>(async () => {
+      cleanupRead += 1;
+      return cleanupRead === 1 ? olderPoll.promise : retryLimit;
+    });
+    const { client } = fakeClient({
+      deleteSession: async () => pending,
+      getCleanupStatus,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.deleteSelected();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(getCleanupStatus).toHaveBeenCalledOnce());
+    await store.refreshSelectedCleanup();
+    expect(store.cleanupStatus).toEqual(retryLimit);
+
+    olderPoll.resolve(pending);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(store.cleanupStatus).toEqual(retryLimit);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(getCleanupStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("finishes an already complete cleanup without dispatching another delete", async () => {
+    let listCount = 0;
+    const complete = {
+      operationId: "019c1a00-0000-7000-8000-000000000074",
+      desktopState: "complete" as const,
+      hostState: "complete" as const,
+      runtimeState: "complete" as const,
+      outcomeCode: "cleanup_complete",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: 2,
+      expiresAt: 3,
+    };
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>();
+    const { client } = fakeClient({
+      listSessions: async () => {
+        listCount += 1;
+        return listCount === 1
+          ? { sessions: [session(SESSION_A), session(SESSION_B)], nextCursor: null }
+          : { sessions: [session(SESSION_B)], nextCursor: null };
+      },
+      deleteSession,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    store.cleanupStatus = complete;
+
+    await expect(store.deleteSelected()).resolves.toMatchObject({
+      kind: "navigate",
+      deletedSessionId: SESSION_A,
+    });
+    expect(deleteSession).not.toHaveBeenCalled();
+    expect(store.selectedSessionId).toBeNull();
+  });
+
   it("does not redirect a newer selection when completed-cleanup lists arrive late", async () => {
     const delayedSessions = new Deferred<Awaited<ReturnType<ChatClient["listSessions"]>>>();
     let listCalls = 0;
@@ -3676,6 +3791,40 @@ describe("FEAT-134 chat store v4 authority", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps a selected v4 session writable without a v6 control plane", async () => {
+    const submitTurnV2 = vi.fn<ChatClient["submitTurnV2"]>(
+      async (_context, sessionId, _blocks, operationId) => ({
+        sessionId,
+        turnId: TURN_A,
+        operationId,
+      }),
+    );
+    const { client } = fakeClient({
+      submitTurnV2,
+      getSessionControlPlane: async () => {
+        throw new Error("v6 control plane disabled");
+      },
+    });
+    const store = createChatStoreDefinition(
+      client,
+      `chat-feat134-rollback-send-${storeSequence++}`,
+      undefined,
+      true,
+      false,
+      false,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.selectedAccessMode).toBe("live");
+    expect(store.controlPlane).toBeNull();
+    expect(store.canSend).toBe(true);
+    await expect(store.submitTurnWithResult("continue"))
+      .resolves.toMatchObject({ status: "local_durable_accepted" });
+    expect(submitTurnV2).toHaveBeenCalledOnce();
   });
 
   it("routes a text-only create through v2 when streaming v4 is enabled", async () => {
@@ -5059,6 +5208,1606 @@ describe("FEAT-134 chat store v4 authority", () => {
       authority: "actionable",
     });
     expect(JSON.stringify(store.conversationApprovalState)).not.toContain("agentSessionId");
+  });
+
+  it("reads terminal local v6 history when a stale bound Host session no longer exists", async () => {
+    const currentPage = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([acceptedApprovalProjectionV6()]),
+      "abcdefghijklmnop",
+      "42",
+    );
+    const olderTurnId = "13700000-0000-4000-8000-000000000030";
+    const olderPage = historyV6(
+      Object.freeze([commandTurnV6(olderTurnId, COMMAND_B, true)]),
+      Object.freeze([resolvedApprovalProjectionV6(APPROVAL_B, olderTurnId, COMMAND_B)]),
+      null,
+      "22",
+    );
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    });
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>();
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(
+      async (_context, _sessionId, cursor) => cursor === undefined ? currentPage : olderPage,
+    );
+    const interruptTurn = vi.fn<ChatClient["interruptTurn"]>();
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+      loadHistoryV6,
+      interruptTurn,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(subscribeV6).toHaveBeenCalledOnce();
+    expect(resyncV6).not.toHaveBeenCalled();
+    expect(loadHistoryV6).toHaveBeenCalledWith(
+      CONTEXT,
+      SESSION_A,
+      undefined,
+      20,
+      expect.any(AbortSignal),
+    );
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.phase).toBe("ready");
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(store.canDecideApprovals).toBe(false);
+    await expect(store.interruptSelected()).resolves.toBe(false);
+    expect(interruptTurn).not.toHaveBeenCalled();
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A))
+      .toMatchObject({ status: "completed" });
+    expect(store.conversationApprovalState.approvals[APPROVAL_A]).toMatchObject({
+      status: "resolved",
+      authority: "historical",
+      authorityStreamId: null,
+    });
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "3",
+      sessionId: SESSION_B,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.selectedAccessMode).toBe("history-only");
+
+    await store.loadOlderHistory();
+
+    expect(loadHistoryV6).toHaveBeenCalledTimes(2);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, olderTurnId))
+      .toMatchObject({ status: "completed" });
+    expect(store.conversationApprovalState.approvals[APPROVAL_B]).toMatchObject({
+      status: "resolved",
+      authority: "historical",
+      authorityStreamId: null,
+    });
+  });
+
+  it("uses local v6 history directly for terminal control-plane protocol failures", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>();
+    const resyncV6 = vi.fn<ChatClient["resyncSessionV6"]>();
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => terminalHistory);
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async (_context, target) => {
+      if (target.type === "new") return [];
+      throw new ChatClientError({
+        schemaVersion: 2,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    });
+    let liveListenerAvailable = true;
+    const onEventV6 = vi.fn<ChatClient["onEventV6"]>(async () => {
+      if (!liveListenerAvailable) throw new Error("listener unavailable");
+      return () => undefined;
+    });
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: resyncV6,
+      loadHistoryV6,
+      listDraftAttachments,
+      onEventV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.deactivatePageSession();
+    liveListenerAvailable = false;
+    await store.selectSession(SESSION_A);
+
+    expect(store.phase).toBe("ready");
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.lastErrorCode).toBeNull();
+    expect(loadHistoryV6).toHaveBeenCalledOnce();
+    expect(listDraftAttachments.mock.calls.some(([, target]) => target.type === "session")).toBe(false);
+    expect(onEventV6).toHaveBeenCalledOnce();
+    expect(subscribeV6).not.toHaveBeenCalled();
+    expect(resyncV6).not.toHaveBeenCalled();
+    expect(store.controlPlane).toMatchObject({ state: "failed", issueCode: "chat_protocol_error" });
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A))
+      .toMatchObject({ status: "completed" });
+  });
+
+  it("retries a transient first local-history read and then enters history-only mode", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    let historyAttempt = 0;
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => {
+      historyAttempt += 1;
+      if (historyAttempt === 1) {
+        throw new ChatClientError({
+          schemaVersion: 6,
+          code: "chat_temporarily_unavailable",
+          retryable: true,
+          recovery: "retry",
+        });
+      }
+      return terminalHistory;
+    });
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+    expect(store.phase).toBe("unavailable");
+
+    await store.selectSession(SESSION_A);
+
+    expect(loadHistoryV6).toHaveBeenCalledTimes(2);
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.phase).toBe("ready");
+  });
+
+  it("uses a terminal failed event that arrives while the first control-plane read is pending", async () => {
+    const pendingControlPlane = new Deferred<ChatSessionControlPlane>();
+    const getSessionControlPlane = vi.fn<ChatClient["getSessionControlPlane"]>(
+      () => pendingControlPlane.promise,
+    );
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane,
+      loadHistoryV6: async () => terminalHistory,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(getSessionControlPlane).toHaveBeenCalledOnce());
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.phase).toBe("resyncing");
+    pendingControlPlane.resolve({
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    await selecting;
+
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.history).toBe(terminalHistory);
+  });
+
+  it("does not let an older same-session read steal a newer terminal candidate", async () => {
+    const automaticRead = new Deferred<ChatSessionControlPlane>();
+    const manualRead = new Deferred<ChatSessionControlPlane>();
+    let controlPlaneCall = 0;
+    const terminalFailure: ChatSessionControlPlane = {
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    };
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const getSessionControlPlane = vi.fn<ChatClient["getSessionControlPlane"]>(async () => {
+      controlPlaneCall += 1;
+      if (controlPlaneCall === 1) return terminalFailure;
+      if (controlPlaneCall === 2) return automaticRead.promise;
+      return manualRead.promise;
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane,
+      loadHistoryV6: async () => terminalHistory,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(controlPlaneCall).toBe(2));
+
+    const manualSelection = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(controlPlaneCall).toBe(3));
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      ...terminalFailure,
+    });
+    automaticRead.resolve(terminalFailure);
+    await Promise.resolve();
+    manualRead.resolve(terminalFailure);
+    await manualSelection;
+
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.history).toBe(terminalHistory);
+  });
+
+  it("does not publish a terminal control-plane error while local history is still loading", async () => {
+    const delayedHistory = new Deferred<ChatHistoryPageV6>();
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(() => delayedHistory.promise);
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    const selecting = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(loadHistoryV6).toHaveBeenCalledOnce());
+
+    expect(store.controlPlane).toBeNull();
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.selectedAccessMode).toBeNull();
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    expect(store.controlPlane).toBeNull();
+    expect(store.phase).toBe("resyncing");
+
+    delayedHistory.resolve(historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    ));
+    await selecting;
+
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.controlPlane).toMatchObject({ state: "failed", issueCode: "chat_protocol_error" });
+  });
+
+  it("keeps artifact authority for older pages in direct history-only mode", async () => {
+    const olderTurnId = "13700000-0000-4000-8000-000000000031";
+    const currentPage = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+      "abcdefghijklmnop",
+      "42",
+    );
+    const olderPage = historyV6(
+      Object.freeze([commandTurnV6(olderTurnId, COMMAND_B, true)]),
+      Object.freeze([]),
+      null,
+      "22",
+    );
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(
+      async (_context, _sessionId, cursor) => cursor === undefined ? currentPage : olderPage,
+    );
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6,
+    });
+    const artifacts = createArtifactStoreDefinition(`artifact-history-only-${storeSequence++}`)();
+    const store = createChatStoreDefinition(
+      client,
+      `chat-history-only-${storeSequence++}`,
+      () => ({
+        liveClient: { listen: async () => () => undefined },
+        store: artifacts,
+        authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+      }),
+      true,
+      true,
+      true,
+    )();
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.loadOlderHistory();
+
+    expect(loadHistoryV6).toHaveBeenCalledTimes(2);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, olderTurnId))
+      .toMatchObject({ status: "completed" });
+    expect(store.history?.turns).toHaveLength(2);
+  });
+
+  it("can retry an older history page after a transient history-only failure", async () => {
+    const olderTurnId = "13700000-0000-4000-8000-000000000032";
+    const currentPage = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([acceptedApprovalProjectionV6()]),
+      "abcdefghijklmnop",
+      "42",
+    );
+    const olderPage = historyV6(
+      Object.freeze([commandTurnV6(olderTurnId, COMMAND_B, true)]),
+      Object.freeze([resolvedApprovalProjectionV6(APPROVAL_B, olderTurnId, COMMAND_B)]),
+      null,
+      "22",
+    );
+    let olderAttempts = 0;
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async (_context, _sessionId, cursor) => {
+      if (cursor === undefined) return currentPage;
+      olderAttempts += 1;
+      if (olderAttempts === 1) {
+        throw new ChatClientError({
+          schemaVersion: 6,
+          code: "chat_temporarily_unavailable",
+          retryable: true,
+          recovery: "retry",
+        });
+      }
+      return olderPage;
+    });
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await store.loadOlderHistory();
+
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+
+    await store.loadOlderHistory();
+
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.conversationApprovalState.reconciliation).toBe("synchronized");
+    expect(selectConversationTurn(store.conversationState, SESSION_A, olderTurnId))
+      .toMatchObject({ status: "completed" });
+    expect(store.conversationApprovalState.approvals[APPROVAL_B]).toMatchObject({
+      status: "resolved",
+      authority: "historical",
+    });
+  });
+
+  it("does not let a stale history-only fallback overwrite a newer live selection", async () => {
+    const delayedHistory = new Deferred<ChatHistoryPageV6>();
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async (_context, sessionId) => {
+      if (sessionId === SESSION_A) {
+        throw new ChatClientError({
+          schemaVersion: 6,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+      });
+    });
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      loadHistoryV6: async (_context, sessionId) => sessionId === SESSION_A
+        ? delayedHistory.promise
+        : historyV6(),
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        historyV6(),
+        pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+      ),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    const selectA = store.selectSession(SESSION_A);
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledWith(CONTEXT, SESSION_A));
+    const selectB = store.selectSession(SESSION_B);
+    await selectB;
+    delayedHistory.resolve(historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    ));
+    await selectA;
+
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.selectedAccessMode).toBe("live");
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+  });
+
+  it("does not let a newer control-plane observation get overwritten by a history-only refresh", async () => {
+    const delayedRefresh = new Deferred<ChatHistoryPageV6>();
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    let historyCalls = 0;
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => {
+      historyCalls += 1;
+      return historyCalls === 1 ? terminalHistory : delayedRefresh.promise;
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const refreshing = store.resyncSelected();
+    await vi.waitFor(() => expect(loadHistoryV6).toHaveBeenCalledTimes(2));
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    delayedRefresh.resolve(terminalHistory);
+    await refreshing;
+
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.phase).toBe("ready");
+    expect(store.controlPlane).toMatchObject({
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+    });
+  });
+
+  it("restores live authority when a fresh bound event reaches history-only mode", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    let subscribeCalls = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCalls += 1;
+      if (subscribeCalls === 1) {
+        throw new ChatClientError({
+          schemaVersion: 6,
+          code: "chat_protocol_error",
+          retryable: false,
+          recovery: "resync",
+        });
+      }
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_A,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      loadHistoryV6: async () => terminalHistory,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        terminalHistory,
+        pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+      ),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.selectedAccessMode).toBe("history-only");
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("live"));
+    expect(store.phase).toBe("ready");
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+    expect(store.canSend).toBe(true);
+  });
+
+  it("keeps verified history when an automatic live activation fails transiently", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    let controlPlaneState: "failed" | "bound" = "failed";
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => controlPlaneState === "failed"
+        ? {
+            sessionId,
+            state: "failed",
+            issueCode: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          }
+        : {
+            sessionId,
+            state: "bound",
+            issueCode: null,
+            retryable: false,
+            recovery: "none",
+          },
+      loadHistoryV6: async () => terminalHistory,
+      subscribeSessionV6: subscribeV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const verifiedHistory = store.history;
+    controlPlaneState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("history-only"));
+    expect(store.history).toBe(verifiedHistory);
+    expect(selectConversationTurn(store.conversationState, SESSION_A, TURN_A))
+      .toMatchObject({ status: "completed" });
+    expect(store.lastErrorCode).toBe("chat_temporarily_unavailable");
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(store.canDecideApprovals).toBe(false);
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_A,
+      state: "retry_wait",
+      issueCode: "chat_temporarily_unavailable",
+      retryable: true,
+      recovery: "retry",
+    });
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.history).toBe(verifiedHistory);
+  });
+
+  it("does not leave history busy when live activation cancels a local history refresh", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const delayedRefresh = new Deferred<ChatHistoryPageV6>();
+    let historyCall = 0;
+    let controlPlaneState: "failed" | "bound" = "failed";
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => {
+      historyCall += 1;
+      return historyCall === 1 ? terminalHistory : delayedRefresh.promise;
+    });
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => controlPlaneState === "failed"
+        ? {
+            sessionId,
+            state: "failed",
+            issueCode: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          }
+        : {
+            sessionId,
+            state: "bound",
+            issueCode: null,
+            retryable: false,
+            recovery: "none",
+          },
+      loadHistoryV6,
+      subscribeSessionV6: subscribeV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const refreshing = store.resyncSelected();
+    await vi.waitFor(() => expect(loadHistoryV6).toHaveBeenCalledTimes(2));
+    expect(store.phase).toBe("resyncing");
+    controlPlaneState = "bound";
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("history-only"));
+    expect(store.phase).not.toBe("resyncing");
+    expect(store.history).toBe(terminalHistory);
+    delayedRefresh.resolve(terminalHistory);
+    await refreshing;
+  });
+
+  it("ignores a stale activation GET when a newer bound event queues live activation", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const staleActivation = new Deferred<ChatSessionControlPlane>();
+    let controlPlaneCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+    }));
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneCall += 1;
+        if (controlPlaneCall === 1) {
+          return {
+            sessionId,
+            state: "failed",
+            issueCode: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          };
+        }
+        if (controlPlaneCall === 2) return staleActivation.promise;
+        return {
+          sessionId,
+          state: "bound",
+          issueCode: null,
+          retryable: false,
+          recovery: "none",
+        };
+      },
+      loadHistoryV6: async () => terminalHistory,
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        terminalHistory,
+        pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+      ),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(controlPlaneCall).toBe(2));
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    staleActivation.resolve({
+      sessionId: SESSION_A,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    });
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("live"));
+    expect(store.phase).toBe("ready");
+    expect(store.controlPlane).toMatchObject({ state: "bound", issueCode: null });
+    expect(subscribeV6).toHaveBeenCalledOnce();
+    expect(controlPlaneCall).toBeGreaterThanOrEqual(3);
+  });
+
+  it("runs the queued live activation when the first subscribe falls back", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const firstSubscription = new Deferred<Awaited<
+      ReturnType<ChatClient["subscribeSessionV6"]>
+    >>();
+    let controlPlaneCall = 0;
+    let subscribeCall = 0;
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      subscribeCall += 1;
+      if (subscribeCall === 1) return firstSubscription.promise;
+      return Object.freeze({
+        subscriptionId: LOCAL_SUBSCRIPTION_B,
+        pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+      });
+    });
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneCall += 1;
+        return controlPlaneCall === 1
+          ? {
+              sessionId,
+              state: "failed",
+              issueCode: "chat_protocol_error",
+              retryable: false,
+              recovery: "resync",
+            }
+          : {
+              sessionId,
+              state: "bound",
+              issueCode: null,
+              retryable: false,
+              recovery: "none",
+            };
+      },
+      loadHistoryV6: async () => terminalHistory,
+      subscribeSessionV6: subscribeV6,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        terminalHistory,
+        pendingApprovalSnapshotV6(HOST_GENERATION_B, null),
+      ),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeV6).toHaveBeenCalledOnce());
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "2",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    firstSubscription.reject(new ChatClientError({
+      schemaVersion: 6,
+      code: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    }));
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("live"));
+    expect(store.phase).toBe("ready");
+    expect(subscribeV6).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores the terminal session summary when live activation is revoked after resync", async () => {
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const activeHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, false)]),
+      Object.freeze([]),
+    );
+    let controlPlaneCall = 0;
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneCall += 1;
+        if (controlPlaneCall === 1 || controlPlaneCall === 3) {
+          return {
+            sessionId,
+            state: "failed",
+            issueCode: "chat_protocol_error",
+            retryable: false,
+            recovery: "resync",
+          };
+        }
+        return {
+          sessionId,
+          state: "bound",
+          issueCode: null,
+          retryable: false,
+          recovery: "none",
+        };
+      },
+      loadHistoryV6: async () => terminalHistory,
+      resyncSessionV6: async (_context, sessionId) => projectionV6(
+        sessionId,
+        activeHistory,
+        pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+      ),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("history-only"));
+    expect(store.sessions.find((session) => session.sessionId === SESSION_A)?.latestTurnStatus)
+      .toBe("completed");
+    await store.resyncSelected();
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.phase).toBe("ready");
+  });
+
+  it("preserves pending cleanup authority while refreshing history-only content", async () => {
+    const pending = Object.freeze({
+      operationId: "019c1a00-0000-7000-8000-000000000070",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>(async () => pending);
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6: async () => terminalHistory,
+      deleteSession: async () => pending,
+      getCleanupStatus,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await Promise.resolve();
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.cleanupStatus).toEqual(pending);
+
+    await store.resyncSelected();
+
+    expect(store.cleanupStatus).toEqual(pending);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getCleanupStatus).toHaveBeenCalledWith(CONTEXT, pending.operationId);
+    expect(store.cleanupStatus).toEqual(pending);
+  });
+
+  it("keeps history closed to activation and mutations while delete is in flight", async () => {
+    const pending = Object.freeze({
+      operationId: "019c1a00-0000-7000-8000-000000000071",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const deleteResult = new Deferred<typeof pending>();
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>();
+    const renameSession = vi.fn<ChatClient["renameSession"]>();
+    const setSessionPinned = vi.fn<ChatClient["setSessionPinned"]>();
+    const interruptTurn = vi.fn<ChatClient["interruptTurn"]>();
+    const requestLocalRecovery = vi.fn<ChatClient["requestLocalRecovery"]>();
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>(() => deleteResult.promise);
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6: async () => terminalHistory,
+      subscribeSessionV6: subscribeV6,
+      deleteSession,
+      renameSession,
+      setSessionPinned,
+      interruptTurn,
+      requestLocalRecovery,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const deleting = store.deleteSelected();
+    await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledOnce());
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+
+    await store.selectSession(SESSION_A);
+    await store.renameSelected("renamed");
+    await store.setSelectedPinned(true);
+    await expect(store.interruptSelected()).resolves.toBe(false);
+    await store.requestLocalRecovery();
+    await store.resyncSelected();
+    expect(store.selectedAccessMode).toBe("history-only");
+    expect(store.history).toBe(terminalHistory);
+    expect(subscribeV6).not.toHaveBeenCalled();
+    expect(renameSession).not.toHaveBeenCalled();
+    expect(setSessionPinned).not.toHaveBeenCalled();
+    expect(interruptTurn).not.toHaveBeenCalled();
+    expect(requestLocalRecovery).not.toHaveBeenCalled();
+
+    deleteResult.resolve(pending);
+    await expect(deleting).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.cleanupStatus).toEqual(pending);
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(store.canDecideApprovals).toBe(false);
+  });
+
+  it("cancels an activation that was already in flight when cleanup begins", async () => {
+    const pending = Object.freeze({
+      operationId: "019c1a00-0000-7000-8000-000000000077",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const terminalHistory = historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    );
+    const pendingSubscription = new Deferred<Awaited<
+      ReturnType<ChatClient["subscribeSessionV6"]>
+    >>();
+    let controlPlaneCall = 0;
+    const subscribeSessionV6 = vi.fn<ChatClient["subscribeSessionV6"]>(
+      () => pendingSubscription.promise,
+    );
+    const resyncSessionV6 = vi.fn<ChatClient["resyncSessionV6"]>();
+    const unsubscribeSession = vi.fn<ChatClient["unsubscribeSession"]>(async () => true);
+    const { client, emitControlPlane } = fakeClient({
+      listSessions: async () => ({
+        sessions: [Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" })],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => {
+        controlPlaneCall += 1;
+        return controlPlaneCall === 1
+          ? {
+              sessionId,
+              state: "failed",
+              issueCode: "chat_protocol_error",
+              retryable: false,
+              recovery: "resync",
+            }
+          : {
+              sessionId,
+              state: "bound",
+              issueCode: null,
+              retryable: false,
+              recovery: "none",
+            };
+      },
+      loadHistoryV6: async () => terminalHistory,
+      subscribeSessionV6,
+      resyncSessionV6,
+      unsubscribeSession,
+      deleteSession: async () => pending,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitControlPlane({
+      schemaVersion: 1,
+      sequence: "1",
+      sessionId: SESSION_A,
+      state: "bound",
+      issueCode: null,
+      retryable: false,
+      recovery: "none",
+    });
+    await vi.waitFor(() => expect(subscribeSessionV6).toHaveBeenCalledOnce());
+    await store.deleteSelected();
+    pendingSubscription.resolve(Object.freeze({
+      subscriptionId: LOCAL_SUBSCRIPTION_A,
+      pendingApprovalSnapshot: pendingApprovalSnapshotV6(HOST_GENERATION_A, null),
+    }));
+
+    await vi.waitFor(() => expect(store.selectedAccessMode).toBe("history-only"));
+    expect(store.phase).toBe("ready");
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.cleanupStatus).toEqual(pending);
+    expect(resyncSessionV6).not.toHaveBeenCalled();
+    expect(unsubscribeSession).toHaveBeenCalledWith(CONTEXT, LOCAL_SUBSCRIPTION_A);
+  });
+
+  it("does not let an older live resync erase a newer pending cleanup", async () => {
+    const pending = Object.freeze({
+      operationId: "019c1a00-0000-7000-8000-000000000072",
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const delayedResync = new Deferred<ChatResyncProjectionV6>();
+    let resyncCall = 0;
+    const resyncSessionV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1 ? projectionV6(sessionId) : delayedResync.promise;
+    });
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>(async () => pending);
+    const removeAttachment = vi.fn<ChatClient["removeAttachment"]>();
+    const unsubscribeSession = vi.fn<ChatClient["unsubscribeSession"]>(async () => true);
+    const releaseEventListener = vi.fn();
+    const { client } = fakeClient({
+      resyncSessionV6,
+      deleteSession: async () => pending,
+      getCleanupStatus,
+      removeAttachment,
+      unsubscribeSession,
+      onEventV6: async () => releaseEventListener,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const resyncing = store.resyncSelected();
+    await vi.waitFor(() => expect(resyncSessionV6).toHaveBeenCalledTimes(2));
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.cleanupStatus).toEqual(pending);
+
+    delayedResync.resolve(projectionV6(SESSION_A));
+    await resyncing;
+
+    expect(store.cleanupStatus).toEqual(pending);
+    expect(store.canSend).toBe(false);
+    expect(releaseEventListener).toHaveBeenCalledOnce();
+    expect(unsubscribeSession).toHaveBeenCalledTimes(2);
+    expect(unsubscribeSession).toHaveBeenLastCalledWith(CONTEXT, LOCAL_SUBSCRIPTION_A);
+    store.draftAttachments = Object.freeze([attachment()]);
+    await store.removeDraftAttachment(attachment().attachmentId);
+    await store.resyncSelected();
+    expect(removeAttachment).not.toHaveBeenCalled();
+    expect(resyncSessionV6).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getCleanupStatus).toHaveBeenCalledWith(CONTEXT, pending.operationId);
+  });
+
+  it("does not let stale pending cleanup overwrite a newer retry-limit status", async () => {
+    const operationId = "019c1a00-0000-7000-8000-000000000075";
+    const stalePending = Object.freeze({
+      operationId,
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const retryLimit = Object.freeze({
+      ...stalePending,
+      outcomeCode: "retry_limit_exceeded",
+      lastErrorCode: "chat_cleanup_incomplete",
+    });
+    const delayedResync = new Deferred<ChatResyncProjectionV6>();
+    let resyncCall = 0;
+    const resyncSessionV6 = vi.fn<ChatClient["resyncSessionV6"]>(async (_context, sessionId) => {
+      resyncCall += 1;
+      return resyncCall === 1 ? projectionV6(sessionId) : delayedResync.promise;
+    });
+    let deleteCall = 0;
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>(async () => {
+      deleteCall += 1;
+      return deleteCall === 1 ? retryLimit : stalePending;
+    });
+    const { client } = fakeClient({ resyncSessionV6, deleteSession });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const resyncing = store.resyncSelected();
+    await vi.waitFor(() => expect(resyncSessionV6).toHaveBeenCalledTimes(2));
+    await store.deleteSelected();
+    expect(store.cleanupStatus).toEqual(retryLimit);
+
+    delayedResync.resolve(Object.freeze({
+      ...projectionV6(SESSION_A),
+      cleanup: stalePending,
+    }));
+    await resyncing;
+
+    expect(store.cleanupStatus).toEqual(retryLimit);
+    await store.deleteSelected();
+    expect(deleteSession).toHaveBeenCalledTimes(2);
+    expect(store.cleanupStatus).toEqual(stalePending);
+  });
+
+  it("rejects a pre-resume cleanup observation after retry starts a new generation", async () => {
+    const cleanupOperationId = "019c1a00-0000-7000-8000-000000000078";
+    const pending = Object.freeze({
+      operationId: cleanupOperationId,
+      desktopState: "pending" as const,
+      hostState: "pending" as const,
+      runtimeState: "pending" as const,
+      outcomeCode: "pending",
+      lastErrorCode: null,
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    });
+    const retryLimit = Object.freeze({
+      ...pending,
+      desktopState: "complete" as const,
+      hostState: "incomplete" as const,
+      runtimeState: "incomplete" as const,
+      outcomeCode: "retry_limit_exceeded",
+      lastErrorCode: "chat_cleanup_incomplete",
+    });
+    const staleObservation = new Deferred<typeof retryLimit | null>();
+    let deleteCall = 0;
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>(async () => {
+      deleteCall += 1;
+      return deleteCall === 1 ? retryLimit : pending;
+    });
+    let cleanupRead = 0;
+    const getCleanupStatus = vi.fn<ChatClient["getCleanupStatus"]>(() => {
+      cleanupRead += 1;
+      return cleanupRead === 1 ? staleObservation.promise : Promise.resolve(pending);
+    });
+    const store = createV6Store(fakeClient({ deleteSession, getCleanupStatus }).client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.cleanupStatus).toEqual(retryLimit);
+
+    const staleRefresh = store.refreshSelectedCleanup();
+    await vi.waitFor(() => expect(getCleanupStatus).toHaveBeenCalledOnce());
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.cleanupStatus).toEqual(pending);
+
+    staleObservation.resolve(retryLimit);
+    await staleRefresh;
+    expect(store.cleanupStatus).toEqual(pending);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(getCleanupStatus).toHaveBeenCalledTimes(2);
+    expect(store.cleanupStatus).toEqual(pending);
+  });
+
+  it("clears the previous draft before a non-bound session control plane returns", async () => {
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(
+      async (_context, target) => target.type === "new" ? [attachment()] : [],
+    );
+    const { client } = fakeClient({
+      listDraftAttachments,
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "retry_wait",
+        issueCode: "chat_temporarily_unavailable",
+        retryable: true,
+        recovery: "retry",
+      }),
+    });
+    const store = createV6Store(client);
+    await store.bind(TENANT);
+    expect(store.draftTarget).toEqual(CHAT_NEW_DRAFT_TARGET);
+    expect(store.draftAttachments).toHaveLength(1);
+
+    await store.selectSession(SESSION_B);
+
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.draftTarget).toBeNull();
+    expect(store.draftAttachments).toEqual([]);
+    expect(listDraftAttachments.mock.calls.some(([, target]) =>
+      target.type === "session" && target.sessionId === SESSION_B
+    )).toBe(false);
+  });
+
+  it("does not hide a stale Host failure while local v6 history is still active", async () => {
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 6,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    });
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      loadHistoryV6: async () => historyV6(),
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.phase).toBe("resync-required");
+    expect(store.lastErrorCode).toBe("chat_protocol_error");
+    expect(store.history).toBeNull();
+  });
+
+  it("does not treat a local response-decoder failure as a stale Host session", async () => {
+    const subscribeV6 = vi.fn<ChatClient["subscribeSessionV6"]>(async () => {
+      throw new ChatClientError({
+        schemaVersion: 1,
+        code: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      });
+    });
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    ));
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      subscribeSessionV6: subscribeV6,
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(loadHistoryV6).not.toHaveBeenCalled();
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.phase).toBe("resync-required");
+    expect(store.lastErrorCode).toBe("chat_protocol_error");
+  });
+
+  it.each([
+    { label: "retryable failure", retryable: true, recovery: "resync" as const },
+    { label: "non-resync recovery", retryable: false, recovery: "retry" as const },
+  ])("keeps direct control-plane $label closed", async ({ retryable, recovery }) => {
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => historyV6(
+      Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    ));
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus: "completed" }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable,
+        recovery,
+      }),
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(loadHistoryV6).not.toHaveBeenCalled();
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.phase).toBe("resync-required");
+    expect(store.lastErrorCode).toBe("chat_protocol_error");
+  });
+
+  it.each([
+    { label: "missing terminal summary", latestTurnStatus: null, emptyHistory: false },
+    { label: "active summary", latestTurnStatus: "streaming" as const, emptyHistory: false },
+    { label: "mismatched terminal summary", latestTurnStatus: "failed" as const, emptyHistory: false },
+    { label: "empty terminal history", latestTurnStatus: "completed" as const, emptyHistory: true },
+  ])("keeps direct control-plane failures closed for $label", async ({
+    latestTurnStatus,
+    emptyHistory,
+  }) => {
+    const loadHistoryV6 = vi.fn<ChatClient["loadHistoryV6"]>(async () => historyV6(
+      emptyHistory
+        ? Object.freeze([])
+        : Object.freeze([commandTurnV6(TURN_A, COMMAND_A, true)]),
+      Object.freeze([]),
+    ));
+    const { client } = fakeClient({
+      listSessions: async () => ({
+        sessions: [
+          Object.freeze({ ...session(SESSION_A), latestTurnStatus }),
+          session(SESSION_B),
+        ],
+        nextCursor: null,
+      }),
+      getSessionControlPlane: async (_context, sessionId) => ({
+        sessionId,
+        state: "failed",
+        issueCode: "chat_protocol_error",
+        retryable: false,
+        recovery: "resync",
+      }),
+      loadHistoryV6,
+    });
+    const store = createV6Store(client);
+
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(loadHistoryV6).toHaveBeenCalledOnce();
+    expect(store.selectedAccessMode).toBeNull();
+    expect(store.phase).toBe("resync-required");
+    expect(store.lastErrorCode).toBe("chat_protocol_error");
+    expect(store.history).toBeNull();
   });
 
   it("keeps authority revoked and reconciles once when approval is requested after the subscribe snapshot", async () => {

@@ -3,13 +3,16 @@
 import { flushPromises, mount, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
+import { defineComponent, h, inject } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHAT_NEW_DRAFT_TARGET } from "./domain/chat-ipc";
 import { useChatStore } from "./stores/chat.store";
 import App from "./App.vue";
+import { CHAT_AUTHORITY_RETRY_KEY } from "./authorization/chat-authority-recovery";
 
 const chatPermissionLifecycle = vi.hoisted(() => ({
   synchronize: vi.fn(async () => undefined),
+  retry: vi.fn(async () => true),
   stop: vi.fn(async () => undefined),
 }));
 
@@ -33,6 +36,42 @@ afterEach(() => {
 });
 
 describe("App chat route synchronization", () => {
+  it("provides the Chat authority retry through the App lifecycle", async () => {
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: () => "#000000",
+    }));
+    chatPermissionLifecycle.retry.mockClear();
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const page = defineComponent({
+      setup() {
+        const retry = inject(CHAT_AUTHORITY_RETRY_KEY);
+        return () => h("button", {
+          class: "retry-authority",
+          onClick: () => { void retry?.(); },
+        }, "retry");
+      },
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/chat", component: page }],
+    });
+    await router.push("/chat");
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+
+    await wrapper.get(".retry-authority").trigger("click");
+    await flushPromises();
+
+    expect(chatPermissionLifecycle.retry).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
   it("applies accessible frontend zoom and cleans root state on unmount", async () => {
     vi.stubGlobal("matchMedia", () => ({
       matches: false,

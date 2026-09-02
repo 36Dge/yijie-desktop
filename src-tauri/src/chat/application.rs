@@ -22,9 +22,9 @@ use super::feat134::{
 };
 use super::feat136::{ExecutionProjection, Feat136TurnReducer};
 use super::feat137::{
-    require_pending_decision_authority, ApprovalDecisionFailure, ApprovalDecisionIdentity,
-    ApprovalDecisionResult, ApprovalProjection, HostPendingApprovalSnapshot, PendingApproval,
-    PendingApprovalSnapshot,
+    protect_process_projection, require_pending_decision_authority, ApprovalDecisionFailure,
+    ApprovalDecisionIdentity, ApprovalDecisionResult, ApprovalProjection,
+    HostPendingApprovalSnapshot, PendingApproval, PendingApprovalSnapshot,
 };
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
@@ -2869,6 +2869,7 @@ impl ConversationApplication {
             Err(error) => return Err(error),
             Ok(Some(projection)) => projection,
         };
+        let projection = protect_process_projection(projection)?;
         if feat134_projection_requires_limit_terminal(&projection)? {
             return self
                 .database
@@ -4430,7 +4431,12 @@ mod tests {
             .unwrap();
         let reducer = &source[reduce_start..stream_start];
         assert!(
-            reducer.contains("persist_feat137_projection(projection.clone(), approval.clone())")
+            reducer
+                .find("protect_process_projection(projection)?")
+                .unwrap()
+                < reducer
+                    .find("persist_feat137_projection(projection.clone(), approval.clone())")
+                    .unwrap()
         );
 
         let stream = &source[stream_start..];

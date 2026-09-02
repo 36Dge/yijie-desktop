@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   hydrateConversationState,
   type ConversationContentBlock,
@@ -10,6 +11,7 @@ import {
   type ConversationTurnStatus,
 } from "./conversation-state";
 import {
+  APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
   selectConversationTimeline,
   type ConversationTimelineItemKind,
   type ConversationTimelineItemPhase,
@@ -17,6 +19,7 @@ import {
   type ConversationTimelineThreadPhase,
   type ConversationTimelineTurnPhase,
 } from "./conversation-timeline";
+import { copyableTimelineItemText } from "./conversation-timeline-copy";
 
 const THREAD_ID = "thread-main";
 const TURN_ID = "turn-main";
@@ -71,6 +74,111 @@ function singleItemState(status: ConversationItemStatus = "completed"): Conversa
 }
 
 describe("selectConversationTimeline", () => {
+  it("wires the FEAT-137 policy into the ChatPage projection boundary", () => {
+    const source = readFileSync("src/pages/chat/ChatPage.vue", "utf8");
+
+    expect(source).toContain(
+      'import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";',
+    );
+    expect(source).toContain("{ protectApprovalProcessContent: feat137ApprovalUiEnabled }");
+  });
+
+  it("protects commentary, reasoning, unclassified assistant content, and plans behind the approval policy", () => {
+    const processCanary = "PRIVATE_PROCESS_CANARY_DO_NOT_PROJECT";
+    const safeFinalAnswer = "安全的最终回答";
+    const state = hydrate({
+      threads: [{ threadId: THREAD_ID, status: "ready" }],
+      turns: [{
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        ordinal: 0,
+        status: "completed",
+        terminalStatus: "completed",
+        plan: {
+          explanation: processCanary,
+          steps: [{ ordinal: 0, text: processCanary, status: "completed" }],
+        },
+      }],
+      items: [
+        {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          itemId: "commentary",
+          ordinal: 0,
+          kind: "assistant_message",
+          status: "completed",
+          agentMessagePhase: "commentary",
+          contentBlocks: [{ blockIndex: 0, type: "text", text: processCanary }],
+        },
+        {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          itemId: "reasoning-empty",
+          ordinal: 1,
+          kind: "reasoning",
+          status: "streaming",
+          contentBlocks: [],
+        },
+        {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          itemId: "unclassified",
+          ordinal: 2,
+          kind: "assistant_message",
+          status: "completed",
+          agentMessagePhase: "unknown",
+          contentBlocks: [{ blockIndex: 0, type: "code", language: "sh", text: processCanary }],
+        },
+        {
+          threadId: THREAD_ID,
+          turnId: TURN_ID,
+          itemId: "final",
+          ordinal: 3,
+          kind: "assistant_message",
+          status: "completed",
+          agentMessagePhase: "final_answer",
+          contentBlocks: [{ blockIndex: 0, type: "text", text: safeFinalAnswer }],
+        },
+      ],
+    });
+
+    const protectedTurn = selectConversationTimeline(
+      state,
+      THREAD_ID,
+      undefined,
+      { protectApprovalProcessContent: true },
+    )!.turns[0]!;
+    const processItems = protectedTurn.items.filter((item) => item.role === "process");
+
+    expect(processItems).toHaveLength(3);
+    for (const item of processItems) {
+      expect(item.contentBlocks).toEqual([
+        expect.objectContaining({
+          blockIndex: 0,
+          type: "text",
+          text: APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
+        }),
+      ]);
+      expect(item.copyPolicy).toBe("none");
+      expect(copyableTimelineItemText(item)).toBeNull();
+    }
+    expect(protectedTurn.plan).toMatchObject({
+      explanation: APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
+      steps: [{ text: APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE }],
+    });
+    expect(JSON.stringify(protectedTurn)).not.toContain(processCanary);
+    expect(copyableTimelineItemText(protectedTurn.items[3]!)).toBe(safeFinalAnswer);
+
+    const unprotectedTurn = selectConversationTimeline(
+      state,
+      THREAD_ID,
+      undefined,
+      { protectApprovalProcessContent: false },
+    )!.turns[0]!;
+    expect(JSON.stringify(unprotectedTurn)).toContain(processCanary);
+    expect(unprotectedTurn.plan?.explanation).toBe(processCanary);
+  });
+
   it("sorts related Turns and Items by ordinal then stable domain identity", () => {
     const normalized = hydrate({
       threads: [{ threadId: THREAD_ID, status: "ready" }],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   canRenderProtectedPath,
@@ -12,6 +12,7 @@ import { skillMarketplaceUiEnabled } from "./authorization/skill-marketplace-ui-
 import { storeShowcaseUiEnabled } from "./authorization/store-showcase-ui-config";
 import { workflowShowcaseUiEnabled } from "./authorization/workflow-showcase-ui-config";
 import { createChatPermissionLifecycle } from "./authorization/chat-permission-lifecycle";
+import { CHAT_AUTHORITY_RETRY_KEY } from "./authorization/chat-authority-recovery";
 import { demoFastLocalProfileEnabled } from "./authorization/local-profile";
 import {
   darkTheme,
@@ -46,6 +47,7 @@ let permissionLifecycle: PermissionLifecycle | undefined;
 let routeSelectionEpoch = 0;
 const opaqueSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const chatPermissionLifecycle = createChatPermissionLifecycle(chatStore, localChatUiEnabled);
+provide(CHAT_AUTHORITY_RETRY_KEY, () => chatPermissionLifecycle.retry());
 
 const permissionSnapshot = computed(() => ({
   enabled: authoritativePermissionUiEnabled,

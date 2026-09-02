@@ -102,8 +102,10 @@ use serde::Serialize;
 use sidecar::{SidecarState, SidecarSupervisor};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 use worker::DatabaseWorker;
 
 // The feature handler deliberately omits these production commands and private URI protocols.
@@ -598,12 +600,49 @@ impl ChatRuntime {
         &self,
         host: Arc<HostBridge>,
     ) -> Result<(), ChatError> {
-        let candidates = self.database().await?.feat126_resume_candidates().await?;
+        let database = self.database().await?;
+        let candidates = database.feat126_resume_candidates().await?;
         for candidate in candidates {
-            let resumed = host
+            let resumed = match host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
                 .await
-                .map_err(|_| ChatError::SidecarUnavailable)?;
+            {
+                Ok(resumed) => resumed,
+                Err(error) => match feat137_missing_session_recovery(&candidate, &error) {
+                    Some(Feat137MissingSessionRecovery::RetainTerminalHistory) => continue,
+                    Some(Feat137MissingSessionRecovery::FinalizeOrphanedQueuedTurn {
+                        session_id,
+                        turn_id,
+                        operation_id,
+                    }) => {
+                        database
+                            .finalize_orphaned_queued_turn_without_host(
+                                session_id,
+                                turn_id,
+                                operation_id,
+                                current_unix_seconds()?,
+                            )
+                            .await?;
+                        continue;
+                    }
+                    Some(Feat137MissingSessionRecovery::FinalizeOrphanedActiveTurn {
+                        session_id,
+                        turn_id,
+                        runtime_turn_id,
+                    }) => {
+                        database
+                            .finalize_orphaned_turn_without_stream(
+                                session_id,
+                                turn_id,
+                                runtime_turn_id,
+                                current_unix_seconds()?,
+                            )
+                            .await?;
+                        continue;
+                    }
+                    None => return Err(ChatError::SidecarUnavailable),
+                },
+            };
             validate_feat137_resumed_session(&candidate, &resumed)?;
         }
         Ok(())
@@ -1017,8 +1056,9 @@ fn validate_feat137_resumed_session(
 ) -> Result<(), ChatError> {
     let lifecycle_matches = match candidate.active_runtime_turn_id {
         Some(active_turn_id) => {
-            resumed.state == HostSessionState::Active
-                && resumed.active_turn_id == Some(active_turn_id)
+            (resumed.state == HostSessionState::Active
+                && resumed.active_turn_id == Some(active_turn_id))
+                || (resumed.state == HostSessionState::Idle && resumed.active_turn_id.is_none())
         }
         None => resumed.state == HostSessionState::Idle && resumed.active_turn_id.is_none(),
     };
@@ -1032,6 +1072,61 @@ fn validate_feat137_resumed_session(
         return Err(ChatError::SidecarUnavailable);
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Feat137MissingSessionRecovery {
+    RetainTerminalHistory,
+    FinalizeOrphanedQueuedTurn {
+        session_id: Uuid,
+        turn_id: Uuid,
+        operation_id: Uuid,
+    },
+    FinalizeOrphanedActiveTurn {
+        session_id: Uuid,
+        turn_id: Uuid,
+        runtime_turn_id: Uuid,
+    },
+}
+
+fn feat137_missing_session_recovery(
+    candidate: &database::Feat126ResumeCandidate,
+    error: &HostBridgeError,
+) -> Option<Feat137MissingSessionRecovery> {
+    if error.code() != Some(HostErrorCode::SessionNotFound) {
+        return None;
+    }
+    match (
+        candidate.active_local_turn_id,
+        candidate.active_runtime_turn_id,
+        candidate.active_turn_operation_id,
+    ) {
+        (None, None, None) => Some(Feat137MissingSessionRecovery::RetainTerminalHistory),
+        (Some(turn_id), None, Some(operation_id)) => {
+            Some(Feat137MissingSessionRecovery::FinalizeOrphanedQueuedTurn {
+                session_id: candidate.session_id,
+                turn_id,
+                operation_id,
+            })
+        }
+        (Some(turn_id), Some(runtime_turn_id), Some(_)) => {
+            Some(Feat137MissingSessionRecovery::FinalizeOrphanedActiveTurn {
+                session_id: candidate.session_id,
+                turn_id,
+                runtime_turn_id,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn current_unix_seconds() -> Result<i64, ChatError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ChatError::DatabaseUnavailable)
+        .and_then(|duration| {
+            i64::try_from(duration.as_secs()).map_err(|_| ChatError::DatabaseUnavailable)
+        })
 }
 
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
@@ -1166,9 +1261,12 @@ mod tests {
     fn feat137_resume_projection_accepts_only_exact_durable_idle_or_active_identity() {
         let candidate = database::Feat126ResumeCandidate {
             task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
             agent_session_id: Uuid::now_v7(),
             codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
             active_runtime_turn_id: None,
+            active_turn_operation_id: None,
         };
         let valid = resumed_session(&candidate);
         assert_eq!(validate_feat137_resumed_session(&candidate, &valid), Ok(()));
@@ -1189,7 +1287,9 @@ mod tests {
 
         let active_turn_id = Uuid::now_v7();
         let active_candidate = database::Feat126ResumeCandidate {
+            active_local_turn_id: Some(Uuid::now_v7()),
             active_runtime_turn_id: Some(active_turn_id),
+            active_turn_operation_id: Some(Uuid::now_v7()),
             ..candidate.clone()
         };
         let mut exact_active = resumed_session(&active_candidate);
@@ -1199,10 +1299,82 @@ mod tests {
             validate_feat137_resumed_session(&active_candidate, &exact_active),
             Ok(())
         );
+        let idle_after_normal_restart = resumed_session(&active_candidate);
+        assert_eq!(
+            validate_feat137_resumed_session(&active_candidate, &idle_after_normal_restart),
+            Ok(())
+        );
         exact_active.active_turn_id = Some(Uuid::now_v7());
         assert_eq!(
             validate_feat137_resumed_session(&active_candidate, &exact_active),
             Err(ChatError::SidecarUnavailable)
+        );
+    }
+
+    #[test]
+    fn feat137_missing_host_session_recovers_terminal_history_and_orphaned_active_turn() {
+        let terminal_candidate = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+        };
+        let missing = HostBridgeError::rejected(HostErrorCode::SessionNotFound);
+        assert_eq!(
+            feat137_missing_session_recovery(&terminal_candidate, &missing),
+            Some(Feat137MissingSessionRecovery::RetainTerminalHistory)
+        );
+
+        let local_turn_id = Uuid::now_v7();
+        let runtime_turn_id = Uuid::now_v7();
+        let active_candidate = database::Feat126ResumeCandidate {
+            active_local_turn_id: Some(local_turn_id),
+            active_runtime_turn_id: Some(runtime_turn_id),
+            active_turn_operation_id: Some(Uuid::now_v7()),
+            ..terminal_candidate.clone()
+        };
+        assert_eq!(
+            feat137_missing_session_recovery(&active_candidate, &missing),
+            Some(Feat137MissingSessionRecovery::FinalizeOrphanedActiveTurn {
+                session_id: active_candidate.session_id,
+                turn_id: local_turn_id,
+                runtime_turn_id,
+            })
+        );
+
+        let unavailable = HostBridgeError::rejected(HostErrorCode::RuntimeUnavailable);
+        assert_eq!(
+            feat137_missing_session_recovery(&terminal_candidate, &unavailable),
+            None
+        );
+        let queued_turn_id = Uuid::now_v7();
+        let queued_operation_id = Uuid::now_v7();
+        let queued = database::Feat126ResumeCandidate {
+            active_local_turn_id: Some(queued_turn_id),
+            active_runtime_turn_id: None,
+            active_turn_operation_id: Some(queued_operation_id),
+            ..terminal_candidate.clone()
+        };
+        assert_eq!(
+            feat137_missing_session_recovery(&queued, &missing),
+            Some(Feat137MissingSessionRecovery::FinalizeOrphanedQueuedTurn {
+                session_id: queued.session_id,
+                turn_id: queued_turn_id,
+                operation_id: queued_operation_id,
+            })
+        );
+        let inconsistent = database::Feat126ResumeCandidate {
+            active_local_turn_id: Some(Uuid::now_v7()),
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+            ..terminal_candidate
+        };
+        assert_eq!(
+            feat137_missing_session_recovery(&inconsistent, &missing),
+            None
         );
     }
 
@@ -1211,9 +1383,12 @@ mod tests {
     fn feat126_s10_resume_projection_remains_exact_idle_only() {
         let candidate = database::Feat126ResumeCandidate {
             task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
             agent_session_id: Uuid::now_v7(),
             codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
             active_runtime_turn_id: None,
+            active_turn_operation_id: None,
         };
         let idle = resumed_session(&candidate);
         assert_eq!(validate_feat126_resumed_session(&candidate, &idle), Ok(()));

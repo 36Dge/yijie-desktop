@@ -106,6 +106,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 const CLEANUP_POLL_INTERVAL_MS = 1_000;
 const CLEANUP_POLL_MAX_ATTEMPTS = 120;
+const CHAT_TERMINAL_TURN_STATUSES = new Set(["completed", "failed", "interrupted"]);
 export const CHAT_DRAFT_ATTACHMENT_LIMIT = 10;
 export const CHAT_ATTACHMENT_IMPORT_STAGE_MIN_MS = 220;
 const ATTACHMENT_IMPORT_TRANSITIONS = {
@@ -159,6 +160,8 @@ export type ChatViewPhase =
   | "permission-denied"
   | "signed-out"
   | "unavailable";
+
+export type ChatSelectedAccessMode = "live" | "history-only";
 
 export type ChatSubmissionResult =
   | Readonly<{ status: "not_accepted" }>
@@ -282,6 +285,33 @@ type ControlPlaneRefreshResult =
   | Readonly<{ kind: "selection_changed" }>
   | Readonly<{ kind: "unavailable" }>;
 
+type ChatSelectionActivationStage =
+  | "control-plane"
+  | "subscription"
+  | "resync"
+  | "projection";
+
+type ChatHistoryOnlyHydrationResult = "applied" | "unavailable" | "superseded";
+
+type CleanupObservationToken = Readonly<{
+  generation: number;
+  sequence: number;
+}>;
+
+type ChatHistoryOnlySelectionSnapshot = Readonly<{
+  sessionId: string;
+  history: ChatHistoryAuthority;
+  conversation: ConversationState;
+  approvals: ConversationApprovalState;
+  approvalTransients: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
+  liveAssistantText: string;
+  liveReasoning: readonly LiveReasoningPart[];
+  liveTurnStatus: string | null;
+  latestTurnStatus: ChatSession["latestTurnStatus"];
+  phase: ChatViewPhase;
+  lastErrorCode: string | null;
+}>;
+
 function isHistoryV4(history: ChatHistoryAuthority): history is ChatHistoryPageV4 {
   return "sessionNotices" in history && !("schemaVersion" in history);
 }
@@ -347,6 +377,7 @@ export function createChatStoreDefinition(
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
+    const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
     const conversationState = shallowRef<ConversationState>(createConversationState());
     const conversationApprovalState = shallowRef<ConversationApprovalState>(
@@ -360,6 +391,7 @@ export function createChatStoreDefinition(
     const liveReasoning = shallowRef<readonly LiveReasoningPart[]>(Object.freeze([]));
     const liveTurnStatus = ref<string | null>(null);
     const cleanupStatus = shallowRef<ChatCleanupStatus | null>(null);
+    const deleteInFlightSessionId = ref<string | null>(null);
     const controlPlane = shallowRef<ChatSessionControlPlane | null>(null);
     const localReadiness = shallowRef<ChatLocalReadiness | null>(null);
     const draftTarget = shallowRef<ChatDraftTarget | null>(null);
@@ -381,7 +413,14 @@ export function createChatStoreDefinition(
       draftTargetReady.value &&
       hasSendPermission.value &&
       localReadiness.value?.canSend === true &&
-      (selectedSessionId.value === null || controlPlane.value?.state === "bound"),
+      (selectedSessionId.value === null || (
+        deleteInFlightSessionId.value === null && cleanupStatus.value === null &&
+        selectedAccessMode.value === "live" &&
+        (
+          controlPlane.value?.state === "bound" ||
+          (!streamingV6Enabled && controlPlane.value === null)
+        )
+      )),
     );
     const canAttach = computed(() =>
       canSend.value &&
@@ -407,12 +446,15 @@ export function createChatStoreDefinition(
     const canDecideApprovals = computed(() =>
       streamingV6Enabled && context.value !== null &&
       selectedSessionId.value !== null && subscriptionId !== null &&
+      selectedAccessMode.value === "live" && controlPlane.value?.state === "bound" &&
+      deleteInFlightSessionId.value === null && cleanupStatus.value === null &&
       hasAction("submit_turn") &&
       conversationApprovalState.value.reconciliation === "synchronized" &&
       (phase.value === "ready" || phase.value === "streaming"),
     );
 
     let selectionEpoch = 0;
+    let selectionIntentEpoch = 0;
     let authorityEpoch = 0;
     let listenerEpoch = 0;
     let subscriptionId: string | null = null;
@@ -431,6 +473,9 @@ export function createChatStoreDefinition(
     let approvalExpiryTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollTimer: ReturnType<typeof setTimeout> | null = null;
     let cleanupPollEpoch = 0;
+    let cleanupObservationGeneration = 0;
+    let cleanupObservationSequence = 0;
+    let cleanupCommittedObservationSequence = 0;
     let resyncPromise: Promise<void> | null = null;
     let resyncTrailingRequested = false;
     let bindingPendingSessionId: string | null = null;
@@ -441,6 +486,12 @@ export function createChatStoreDefinition(
     let controlPlaneObservationEpoch = 0;
     let controlPlaneGapEpoch = 0;
     let controlPlaneTrustedGapEpoch = 0;
+    let controlPlaneRead: {
+      readonly token: symbol;
+      readonly sessionId: string;
+      terminalCandidate: ChatSessionControlPlane | null;
+    } | null = null;
+    let terminalHistoryCandidate: ChatSessionControlPlane | null = null;
     let artifactRefreshPromise: Promise<void> | null = null;
     let artifactRefreshTrailingRequested = false;
     let draftEpoch = 0;
@@ -610,13 +661,29 @@ export function createChatStoreDefinition(
       }
     }
 
+    function invalidateCleanupObservations(): void {
+      cleanupObservationGeneration += 1;
+      cleanupCommittedObservationSequence = 0;
+    }
+
+    function startCleanupObservation(): CleanupObservationToken {
+      cleanupObservationSequence += 1;
+      return Object.freeze({
+        generation: cleanupObservationGeneration,
+        sequence: cleanupObservationSequence,
+      });
+    }
+
     function clearSelection(): void {
+      selectionIntentEpoch += 1;
       selectionEpoch += 1;
       clearCleanupPoll();
+      invalidateCleanupObservations();
       clearApprovalExpiryTimer();
       activeRead?.abort();
       activeRead = null;
       selectedSessionId.value = null;
+      selectedAccessMode.value = null;
       history.value = null;
       conversationState.value = createConversationState();
       conversationApprovalState.value = createConversationApprovalState();
@@ -626,6 +693,7 @@ export function createChatStoreDefinition(
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
       cleanupStatus.value = null;
+      deleteInFlightSessionId.value = null;
       controlPlane.value = null;
       if (!streamingV6Enabled) controlPlaneSequence = null;
       deleteDisposition.value = null;
@@ -635,6 +703,8 @@ export function createChatStoreDefinition(
       bindingActivationTrailingSessionId = null;
       controlPlaneGapRecoveryPromise = null;
       controlPlaneGapRecoveryTrailingRequested = false;
+      controlPlaneRead = null;
+      terminalHistoryCandidate = null;
       resetProjectionBuffer();
       bufferingEvents = false;
       bufferingArtifactEvents = false;
@@ -656,6 +726,7 @@ export function createChatStoreDefinition(
       selectionEpoch += 1;
       activeRead?.abort();
       activeRead = null;
+      selectedAccessMode.value = null;
       subscriptionId = null;
       releaseSessionListeners();
       clearApprovalExpiryTimer();
@@ -675,6 +746,39 @@ export function createChatStoreDefinition(
       phase.value = nextPhase;
       if (revokedContextId && revokedSubscriptionId) {
         void client.unsubscribeSession(revokedContextId, revokedSubscriptionId)
+          .catch(() => false);
+      }
+    }
+
+    function revokeSelectedRealtimeAuthorityForCleanup(
+      bound: BoundChatContext,
+      sessionId: string,
+    ): void {
+      if (
+        context.value?.contextId !== bound.contextId ||
+        selectedSessionId.value !== sessionId
+      ) return;
+      const revokedSubscriptionId = subscriptionId;
+      selectionEpoch += 1;
+      activeRead?.abort();
+      activeRead = null;
+      subscriptionId = null;
+      bindingPendingSessionId = null;
+      bindingActivationTrailingSessionId = null;
+      releaseSessionListeners();
+      clearApprovalExpiryTimer();
+      activeApprovalDecisionAttempts.clear();
+      approvalTransients.value = Object.freeze({});
+      approvalAuthorityRevision.value += 1;
+      bufferingEvents = false;
+      bufferingArtifactEvents = false;
+      resetProjectionBuffer();
+      bufferedArtifactEvents = [];
+      resyncTrailingRequested = false;
+      artifactRefreshTrailingRequested = false;
+      if (phase.value === "resyncing") phase.value = "ready";
+      if (revokedSubscriptionId !== null) {
+        void client.unsubscribeSession(bound.contextId, revokedSubscriptionId)
           .catch(() => false);
       }
     }
@@ -1093,20 +1197,28 @@ export function createChatStoreDefinition(
     ): void {
       if (status.sessionId !== selectedSessionId.value) return;
       controlPlane.value = status;
-      if (status.issueCode !== null) {
-        lastErrorCode.value = status.issueCode;
-      } else if (
-        lastErrorCode.value !== null &&
-        [
-          "chat_unauthenticated",
-          "chat_capability_denied",
-          "chat_temporarily_unavailable",
-          "chat_conflict",
-          "chat_protocol_error",
-        ].includes(lastErrorCode.value)
-      ) {
-        lastErrorCode.value = null;
+      const historyOnly = selectedAccessMode.value === "history-only";
+      if (!historyOnly) {
+        if (status.issueCode !== null) {
+          lastErrorCode.value = status.issueCode;
+        } else if (
+          lastErrorCode.value !== null &&
+          [
+            "chat_unauthenticated",
+            "chat_capability_denied",
+            "chat_temporarily_unavailable",
+            "chat_conflict",
+            "chat_protocol_error",
+          ].includes(lastErrorCode.value)
+        ) {
+          lastErrorCode.value = null;
+        }
       }
+      if (
+        streamingV6Enabled && historyOnly && activateFromLiveBound &&
+        status.state === "bound" && subscriptionId === null && cleanupStatus.value === null &&
+        deleteInFlightSessionId.value === null
+      ) bindingPendingSessionId = status.sessionId;
       const hasV6AuthorityToReconcile = streamingV6Enabled &&
         (bindingPendingSessionId === status.sessionId || subscriptionId !== null);
       if (hasV6AuthorityToReconcile && status.state !== "bound") {
@@ -1146,6 +1258,103 @@ export function createChatStoreDefinition(
       }
     }
 
+    function captureHistoryOnlySelection(
+      sessionId: string,
+    ): ChatHistoryOnlySelectionSnapshot | null {
+      if (
+        selectedSessionId.value !== sessionId ||
+        selectedAccessMode.value !== "history-only" ||
+        history.value === null
+      ) return null;
+      return Object.freeze({
+        sessionId,
+        history: history.value,
+        conversation: conversationState.value,
+        approvals: conversationApprovalState.value,
+        approvalTransients: approvalTransients.value,
+        liveAssistantText: liveAssistantText.value,
+        liveReasoning: liveReasoning.value,
+        liveTurnStatus: liveTurnStatus.value,
+        latestTurnStatus: sessions.value.find((session) => session.sessionId === sessionId)
+          ?.latestTurnStatus ?? null,
+        phase: phase.value === "resyncing" ? "ready" : phase.value,
+        lastErrorCode: lastErrorCode.value,
+      });
+    }
+
+    function restoreHistoryOnlySelection(
+      snapshot: ChatHistoryOnlySelectionSnapshot,
+      expectedSelectionIntentEpoch: number,
+      preserveBindingPending: boolean,
+    ): void {
+      if (
+        context.value === null ||
+        selectionIntentEpoch !== expectedSelectionIntentEpoch ||
+        selectedSessionId.value !== snapshot.sessionId ||
+        selectedAccessMode.value !== null
+      ) return;
+      const failedPhase = phase.value;
+      const failedErrorCode = lastErrorCode.value;
+      const danglingSubscription = subscriptionId;
+      if (danglingSubscription !== null) {
+        void client.unsubscribeSession(context.value.contextId, danglingSubscription)
+          .catch(() => false);
+      }
+      subscriptionId = null;
+      if (!preserveBindingPending) bindingPendingSessionId = null;
+      releaseSessionListeners();
+      activeRead?.abort();
+      activeRead = null;
+      clearDraftTargetState();
+      selectedAccessMode.value = "history-only";
+      history.value = snapshot.history;
+      conversationState.value = snapshot.conversation;
+      conversationApprovalState.value = snapshot.approvals;
+      approvalTransients.value = snapshot.approvalTransients;
+      approvalAuthorityRevision.value += 1;
+      liveAssistantText.value = snapshot.liveAssistantText;
+      liveReasoning.value = snapshot.liveReasoning;
+      liveTurnStatus.value = snapshot.liveTurnStatus;
+      sessions.value = Object.freeze(sessions.value.map((session) =>
+        session.sessionId === snapshot.sessionId
+          ? Object.freeze({ ...session, latestTurnStatus: snapshot.latestTurnStatus })
+          : session
+      ));
+      bufferingEvents = false;
+      bufferingArtifactEvents = false;
+      resetProjectionBuffer();
+      bufferedArtifactEvents = [];
+      resetArtifactStream();
+      resyncPromise = null;
+      resyncTrailingRequested = false;
+      artifactRefreshPromise = null;
+      artifactRefreshTrailingRequested = false;
+      try {
+        artifactAuthorityToken = establishArtifactAuthority(snapshot.sessionId);
+        if (
+          artifactIntegration !== null &&
+          !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, snapshot.history)
+        ) {
+          artifactIntegration.store.clearAuthority();
+          artifactAuthorityToken = null;
+        }
+      } catch {
+        artifactIntegration?.store.clearAuthority();
+        artifactAuthorityToken = null;
+      }
+      if (
+        failedPhase === "resyncing" ||
+        deleteInFlightSessionId.value === snapshot.sessionId ||
+        cleanupStatus.value !== null
+      ) {
+        phase.value = snapshot.phase;
+        lastErrorCode.value = snapshot.lastErrorCode;
+      } else {
+        phase.value = failedPhase;
+        lastErrorCode.value = failedErrorCode;
+      }
+    }
+
     function requestBindingActivation(
       sessionId: string,
       allowLiveTrailingActivation = false,
@@ -1154,7 +1363,8 @@ export function createChatStoreDefinition(
         !streamingV6Enabled ||
         bindingPendingSessionId !== sessionId || selectedSessionId.value !== sessionId ||
         context.value === null || controlPlane.value?.sessionId !== sessionId ||
-        controlPlane.value.state !== "bound"
+        controlPlane.value.state !== "bound" || cleanupStatus.value !== null ||
+        deleteInFlightSessionId.value !== null
       ) return;
       if (bindingActivationPromise !== null) {
         // Only a newly accepted live bound event may supersede an activation
@@ -1166,8 +1376,21 @@ export function createChatStoreDefinition(
         return;
       }
       const expectedContextId = context.value.contextId;
-      const pending = selectSessionInternal(sessionId)
+      const historyOnlySnapshot = captureHistoryOnlySelection(sessionId);
+      const activation = selectSessionInternal(sessionId);
+      const expectedSelectionIntentEpoch = selectionIntentEpoch;
+      const pending = activation
         .finally(() => {
+          const preserveBindingPending = bindingActivationTrailingSessionId === sessionId &&
+            controlPlane.value?.sessionId === sessionId && controlPlane.value.state === "bound" &&
+            deleteInFlightSessionId.value === null && cleanupStatus.value === null;
+          if (historyOnlySnapshot !== null) {
+            restoreHistoryOnlySelection(
+              historyOnlySnapshot,
+              expectedSelectionIntentEpoch,
+              preserveBindingPending,
+            );
+          }
           if (bindingActivationPromise !== pending) return;
           bindingActivationPromise = null;
           const queuedSessionId = bindingActivationTrailingSessionId;
@@ -1196,6 +1419,21 @@ export function createChatStoreDefinition(
       }
       controlPlaneSequence = sequence;
       if (event.sessionId !== selectedSessionId.value) return;
+      if (
+        controlPlaneRead?.sessionId === event.sessionId &&
+        isTerminalHistoryControlPlaneFailure(event)
+      ) {
+        controlPlaneRead.terminalCandidate = event;
+        return;
+      }
+      if (
+        terminalHistoryCandidate !== null &&
+        terminalHistoryCandidate.sessionId === event.sessionId &&
+        terminalHistoryCandidate.state === event.state &&
+        terminalHistoryCandidate.issueCode === event.issueCode &&
+        terminalHistoryCandidate.retryable === event.retryable &&
+        terminalHistoryCandidate.recovery === event.recovery
+      ) return;
       controlPlaneObservationEpoch += 1;
       applyControlPlaneStatus(event, true);
     }
@@ -1204,6 +1442,7 @@ export function createChatStoreDefinition(
       if (streamingV6Enabled) {
         controlPlaneGapEpoch += 1;
         controlPlaneSequence = observedSequence;
+        if (selectedAccessMode.value === "history-only") return;
         conversationApprovalState.value = requireConversationApprovalReconciliation(
           conversationApprovalState.value,
         );
@@ -1451,6 +1690,22 @@ export function createChatStoreDefinition(
         retryable: false,
         recovery: "resync",
       });
+    }
+
+    function selectionActivationCancelledError(): ChatClientError {
+      return new ChatClientError({
+        schemaVersion: 1,
+        code: "chat_request_cancelled",
+        retryable: false,
+        recovery: "none",
+      });
+    }
+
+    function assertSelectionActivationAllowed(sessionId: string): void {
+      if (
+        deleteInFlightSessionId.value === sessionId ||
+        cleanupStatus.value !== null
+      ) throw selectionActivationCancelledError();
     }
 
     function reduceApprovalHistory(
@@ -1788,6 +2043,11 @@ export function createChatStoreDefinition(
     }
 
     function requestResync(): void {
+      const sessionId = selectedSessionId.value;
+      if (
+        sessionId !== null &&
+        (deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null)
+      ) return;
       markApprovalTransientsReconciling();
       if (streamingV6Enabled) {
         conversationApprovalState.value = requireConversationApprovalReconciliation(
@@ -1848,24 +2108,29 @@ export function createChatStoreDefinition(
       const sessionId = selectedSessionId.value;
       const activeSubscription = subscriptionId;
       const cleanupSelectionEpoch = selectionEpoch;
+      const cleanupObservationGenerationAtStart = cleanupObservationGeneration;
       if (
         event.kind !== "cleanup_state" || bound === null || sessionId === null ||
         activeSubscription === null || event.contextId !== bound.contextId ||
-        event.sessionId !== sessionId || event.subscriptionId !== activeSubscription
+        event.sessionId !== sessionId || event.subscriptionId !== activeSubscription ||
+        deleteInFlightSessionId.value === sessionId
       ) return;
       const operation = event.payload.operationId;
       if (typeof operation !== "string") return requestResync();
       const isCurrentCleanupEvent = (): boolean => (
         context.value?.contextId === bound.contextId &&
         selectionEpoch === cleanupSelectionEpoch &&
+        cleanupObservationGeneration === cleanupObservationGenerationAtStart &&
         selectedSessionId.value === sessionId &&
-        subscriptionId === activeSubscription
+        subscriptionId === activeSubscription &&
+        deleteInFlightSessionId.value === null
       );
       try {
         if (cleanupStatus.value?.operationId !== operation) {
+          const observation = startCleanupObservation();
           const status = await client.getCleanupStatus(bound.contextId, operation);
           if (!isCurrentCleanupEvent()) return;
-          cleanupStatus.value = status;
+          commitObservedCleanupStatus(status, observation);
         }
         if (!isCurrentCleanupEvent()) return;
         await refreshSelectedCleanup();
@@ -1927,6 +2192,10 @@ export function createChatStoreDefinition(
         }
         clearAuthority(phaseForError(error));
       }
+    }
+
+    function isAuthorityBound(): boolean {
+      return context.value !== null;
     }
 
     function establishArtifactAuthority(sessionId: string): ArtifactAuthorityToken | null {
@@ -2029,17 +2298,140 @@ export function createChatStoreDefinition(
         : client.loadHistoryV3(contextId, sessionId, cursor, limit, signal);
     }
 
+    function isTerminalHistoryControlPlaneFailure(status: ChatSessionControlPlane): boolean {
+      return status.state === "failed" &&
+        status.issueCode === "chat_protocol_error" &&
+        status.retryable === false &&
+        status.recovery === "resync";
+    }
+
+    function terminalLocalHistoryStatus(
+      sessionId: string,
+      state: ConversationState,
+    ): string | null {
+      const turns = Object.values(state.turns).filter((turn) => turn.threadId === sessionId);
+      const persisted = sessions.value.find((session) => session.sessionId === sessionId)
+        ?.latestTurnStatus ?? null;
+      // History-only requires two independent local authorities to agree: the
+      // persisted session summary and every turn in the newest durable page.
+      if (
+        turns.length === 0 ||
+        turns.some((turn) => turn.terminalStatus === null) ||
+        persisted === null ||
+        !CHAT_TERMINAL_TURN_STATUSES.has(persisted)
+      ) return null;
+      const latestTerminalStatus = turns.reduce(
+        (latest, turn) => turn.ordinal > latest.ordinal ? turn : latest,
+      ).terminalStatus;
+      return latestTerminalStatus === persisted ? latestTerminalStatus : null;
+    }
+
+    function canFallbackFromActivationFailure(
+      error: unknown,
+      stage: ChatSelectionActivationStage,
+    ): boolean {
+      return streamingV6Enabled &&
+        (stage === "subscription" || stage === "resync") &&
+        error instanceof ChatClientError &&
+        error.shape.schemaVersion === 6 &&
+        error.shape.code === "chat_protocol_error" &&
+        error.shape.retryable === false &&
+        error.shape.recovery === "resync";
+    }
+
+    async function hydrateHistoryOnlySelection(
+      bound: BoundChatContext,
+      status: ChatSessionControlPlane,
+      sessionId: string,
+      epoch: number,
+      controller: AbortController,
+      requireTerminalHistory: boolean,
+    ): Promise<ChatHistoryOnlyHydrationResult> {
+      if (!streamingV6Enabled || status.sessionId !== sessionId) return "unavailable";
+      const expectedObservationEpoch = controlPlaneObservationEpoch;
+      const expectedGapEpoch = controlPlaneGapEpoch;
+      artifactAuthorityToken = establishArtifactAuthority(sessionId);
+      const token = artifactAuthorityToken;
+      const page = await loadHistoryAuthority(
+        bound.contextId,
+        sessionId,
+        undefined,
+        20,
+        controller.signal,
+      );
+      if (
+        !isCurrent(epoch, controller, sessionId) ||
+        controlPlaneObservationEpoch !== expectedObservationEpoch ||
+        controlPlaneGapEpoch !== expectedGapEpoch
+      ) return "superseded";
+      if (!isHistoryV6(page)) throw approvalProtocolError();
+
+      const nextConversation = reconcileConversationSnapshot(
+        createConversationState(),
+        historyPageV6ToConversationSnapshot(sessionId, page),
+      );
+      if (nextConversation.syncStatus === "recovery_required") {
+        throw approvalProtocolError();
+      }
+      const snapshotTerminalStatus = terminalLocalHistoryStatus(sessionId, nextConversation);
+      if (requireTerminalHistory && snapshotTerminalStatus === null) {
+        return "unavailable";
+      }
+
+      const nextApproval = reduceApprovalHistory(
+        createConversationApprovalState(),
+        sessionId,
+        sessionId,
+        page,
+      );
+      if (nextApproval.reconciliation === "required") throw approvalProtocolError();
+      if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) {
+        return "unavailable";
+      }
+      if (
+        !isCurrent(epoch, controller, sessionId) ||
+        controlPlaneObservationEpoch !== expectedObservationEpoch ||
+        controlPlaneGapEpoch !== expectedGapEpoch
+      ) return "superseded";
+
+      releaseSessionListeners();
+      clearDraftTargetState();
+      selectedAccessMode.value = "history-only";
+      controlPlane.value = status;
+      bindingPendingSessionId = null;
+      subscriptionId = null;
+      conversationState.value = nextConversation;
+      conversationApprovalState.value = disconnectConversationApprovals(nextApproval);
+      approvalAuthorityRevision.value += 1;
+      history.value = page;
+      liveAssistantText.value = "";
+      liveReasoning.value = Object.freeze([]);
+      liveTurnStatus.value = snapshotTerminalStatus;
+      lastErrorCode.value = null;
+      bufferingEvents = false;
+      bufferingArtifactEvents = false;
+      resetProjectionBuffer();
+      bufferedArtifactEvents = [];
+      activeRead = null;
+      phase.value = "ready";
+      return "applied";
+    }
+
     async function selectSessionInternal(sessionId: string): Promise<void> {
       const bound = context.value;
       if (!bound || !hasAction("read_sessions")) {
         phase.value = "permission-denied";
         return;
       }
+      if (
+        selectedSessionId.value === sessionId &&
+        (deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null)
+      ) return;
       lastErrorCode.value = null;
-      const targetSync = hasAction("submit_turn")
-        ? switchDraftTarget(chatSessionDraftTarget(sessionId))
-        : Promise.resolve();
-      if (!hasAction("submit_turn")) clearDraftTargetState();
+      const canSyncDraftTarget = hasAction("submit_turn");
+      // Never carry attachment names or recovery state across a selection
+      // boundary. A live bound session reloads only its own draft below.
+      clearDraftTargetState();
       const oldSubscription = subscriptionId;
       const oldSession = selectedSessionId.value;
       clearSelection();
@@ -2056,21 +2448,41 @@ export function createChatStoreDefinition(
       resetProjectionBuffer();
       bufferingEvents = true;
       bufferingArtifactEvents = artifactIntegration !== null;
+      let activationStage: ChatSelectionActivationStage = "control-plane";
       try {
-        await Promise.all([
-          targetSync,
-          ensureSessionEventListeners(),
-        ]);
-        if (!isCurrent(epoch, controller, sessionId)) return;
-        artifactAuthorityToken = establishArtifactAuthority(sessionId);
         if (streamingV6Enabled) {
-          const status = await client.getSessionControlPlane(
-            bound.contextId,
-            sessionId,
-            controller.signal,
-            streamingV6Enabled,
-          );
-          if (!isCurrent(epoch, controller, sessionId)) return;
+          const expectedObservationEpoch = controlPlaneObservationEpoch;
+          const expectedGapEpoch = controlPlaneGapEpoch;
+          const readToken = Symbol(sessionId);
+          controlPlaneRead = { token: readToken, sessionId, terminalCandidate: null };
+          let status: ChatSessionControlPlane;
+          let readCandidate: ChatSessionControlPlane | null = null;
+          try {
+            status = await client.getSessionControlPlane(
+              bound.contextId,
+              sessionId,
+              controller.signal,
+              streamingV6Enabled,
+            );
+          } catch (error: unknown) {
+            const candidate = controlPlaneRead?.token === readToken
+              ? controlPlaneRead.terminalCandidate
+              : null;
+            if (candidate === null) throw error;
+            status = candidate;
+          } finally {
+            if (controlPlaneRead?.token === readToken) {
+              readCandidate = controlPlaneRead.terminalCandidate;
+              controlPlaneRead = null;
+            }
+          }
+          if (readCandidate !== null) status = readCandidate;
+          if (
+            !isCurrent(epoch, controller, sessionId) ||
+            controlPlaneObservationEpoch !== expectedObservationEpoch ||
+            controlPlaneGapEpoch !== expectedGapEpoch
+          ) return;
+          assertSelectionActivationAllowed(sessionId);
           if (status.sessionId !== sessionId) {
             throw new ChatClientError({
               schemaVersion: 1,
@@ -2080,6 +2492,24 @@ export function createChatStoreDefinition(
             });
           }
           controlPlaneTrustedGapEpoch = controlPlaneGapEpoch;
+          if (isTerminalHistoryControlPlaneFailure(status)) {
+            terminalHistoryCandidate = status;
+            let historyOnly: ChatHistoryOnlyHydrationResult;
+            try {
+              historyOnly = await hydrateHistoryOnlySelection(
+                bound,
+                status,
+                sessionId,
+                epoch,
+                controller,
+                true,
+              );
+            } finally {
+              if (terminalHistoryCandidate === status) terminalHistoryCandidate = null;
+            }
+            if (historyOnly === "applied" || historyOnly === "superseded") return;
+            throw approvalProtocolError();
+          }
           applyControlPlaneStatus(status);
           const currentStatus = controlPlane.value;
           if (currentStatus?.sessionId !== sessionId || currentStatus.state !== "bound") {
@@ -2091,6 +2521,16 @@ export function createChatStoreDefinition(
             return;
           }
         }
+        await Promise.all([
+          canSyncDraftTarget
+            ? switchDraftTarget(chatSessionDraftTarget(sessionId))
+            : Promise.resolve(),
+          ensureSessionEventListeners(),
+        ]);
+        if (!isCurrent(epoch, controller, sessionId)) return;
+        assertSelectionActivationAllowed(sessionId);
+        artifactAuthorityToken = establishArtifactAuthority(sessionId);
+        activationStage = "subscription";
         const nextSubscriptionAuthority = await subscribeAuthority(bound.contextId, sessionId);
         const nextSubscription = nextSubscriptionAuthority.subscriptionId;
         if (!isCurrent(epoch, controller, sessionId)) {
@@ -2098,8 +2538,10 @@ export function createChatStoreDefinition(
           return;
         }
         subscriptionId = nextSubscription;
+        assertSelectionActivationAllowed(sessionId);
         resetArtifactStream();
         bufferingArtifactEvents = artifactIntegration !== null;
+        activationStage = "resync";
         const projection = await resyncAuthority(
           bound.contextId,
           sessionId,
@@ -2108,6 +2550,8 @@ export function createChatStoreDefinition(
           controller.signal,
         );
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+        assertSelectionActivationAllowed(sessionId);
+        activationStage = "projection";
         const authoritativeProjection = streamingV6Enabled &&
           nextSubscriptionAuthority.pendingApprovalSnapshot !== null &&
           "pendingApprovalSnapshot" in projection
@@ -2131,6 +2575,7 @@ export function createChatStoreDefinition(
             subscriptionId !== nextSubscription ||
             !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, firstHistory)
           ) return;
+          assertSelectionActivationAllowed(sessionId);
           const initiallyBuffered = bufferedArtifactEvents;
           bufferedArtifactEvents = [];
           for (const event of initiallyBuffered) {
@@ -2148,6 +2593,7 @@ export function createChatStoreDefinition(
             subscriptionId !== nextSubscription ||
             !artifactIntegration.store.ingestHistoryV3(artifactAuthorityToken, secondHistory)
           ) return;
+          assertSelectionActivationAllowed(sessionId);
           authoritativeHistory = secondHistory;
         }
         const approvalSnapshotRaced = streamingV6Enabled && bufferedApprovalSnapshotRaced(
@@ -2164,6 +2610,7 @@ export function createChatStoreDefinition(
         if (approvalSnapshotRaced) resyncTrailingRequested = true;
         const refreshedControlPlane = await refreshControlPlaneGuarded();
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
+        assertSelectionActivationAllowed(sessionId);
         if (streamingV6Enabled && refreshedControlPlane.kind === "unavailable") {
           revokeSelectedSessionAuthority("resync-required", sessionId);
           return;
@@ -2188,9 +2635,11 @@ export function createChatStoreDefinition(
         }
         bufferingEvents = false;
         bufferingArtifactEvents = false;
+        assertSelectionActivationAllowed(sessionId);
         const pending = bufferedEvents;
         resetProjectionBuffer();
         activeRead = null;
+        selectedAccessMode.value = "live";
         if (phase.value === "resyncing") phase.value = "ready";
         applyBufferedEvents(pending, authoritativeHistory);
         if (resyncTrailingRequested) {
@@ -2203,6 +2652,7 @@ export function createChatStoreDefinition(
         return;
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
+        let selectionError = error;
         const failedSubscription = subscriptionId;
         subscriptionId = null;
         if (failedSubscription !== null) {
@@ -2213,9 +2663,35 @@ export function createChatStoreDefinition(
         bufferingArtifactEvents = false;
         resetProjectionBuffer();
         bufferedArtifactEvents = [];
+        const retainedControlPlane = controlPlane.value;
+        const hasQueuedLiveActivation = bindingActivationTrailingSessionId === sessionId &&
+          retainedControlPlane?.sessionId === sessionId &&
+          retainedControlPlane.state === "bound";
+        if (
+          !hasQueuedLiveActivation &&
+          retainedControlPlane?.sessionId === sessionId &&
+          canFallbackFromActivationFailure(selectionError, activationStage)
+        ) {
+          try {
+            const historyOnly = await hydrateHistoryOnlySelection(
+              bound,
+              retainedControlPlane,
+              sessionId,
+              epoch,
+              controller,
+              true,
+            );
+            if (historyOnly === "applied" || historyOnly === "superseded") return;
+          } catch (fallbackError: unknown) {
+            selectionError = fallbackError;
+          }
+        }
+        if (!isCurrent(epoch, controller, sessionId)) return;
         activeRead = null;
-        lastErrorCode.value = error instanceof ChatClientError ? error.shape.code : "chat_protocol_error";
-        phase.value = phaseForError(error);
+        lastErrorCode.value = selectionError instanceof ChatClientError
+          ? selectionError.shape.code
+          : "chat_protocol_error";
+        phase.value = phaseForError(selectionError);
         if (streamingV6Enabled) {
           conversationApprovalState.value = requireConversationApprovalReconciliation(
             conversationApprovalState.value,
@@ -2374,7 +2850,10 @@ export function createChatStoreDefinition(
         approvalAuthorityRevision.value += 1;
         settleApprovalTransientsAfterResync();
       }
-      cleanupStatus.value = projection.cleanup;
+      // A projection captured before a delete acknowledgement must not erase
+      // the newer cleanup operation. Non-null cleanup authority is cleared only
+      // by the cleanup completion path that also removes the selection.
+      if (cleanupStatus.value === null) cleanupStatus.value = projection.cleanup;
       const latestConversationTurn = Object.values(nextConversation.turns)
         .filter((turn) => turn.threadId === projection.session.sessionId)
         .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
@@ -2443,6 +2922,46 @@ export function createChatStoreDefinition(
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId) return;
+      if (deleteInFlightSessionId.value === sessionId) return;
+      if (selectedAccessMode.value === "history-only") {
+        const retainedControlPlane = controlPlane.value;
+        if (retainedControlPlane?.sessionId !== sessionId) return;
+        const { epoch, controller } = startRead();
+        phase.value = "resyncing";
+        const run = async (): Promise<void> => {
+          try {
+            const historyOnly = await hydrateHistoryOnlySelection(
+              bound,
+              retainedControlPlane,
+              sessionId,
+              epoch,
+              controller,
+              true,
+            );
+            if (historyOnly === "unavailable") throw approvalProtocolError();
+            if (historyOnly === "superseded" && isCurrent(epoch, controller, sessionId)) {
+              activeRead = null;
+              phase.value = "ready";
+            }
+          } catch (error: unknown) {
+            if (!isCurrent(epoch, controller, sessionId)) return;
+            activeRead = null;
+            lastErrorCode.value = error instanceof ChatClientError
+              ? error.shape.code
+              : "chat_protocol_error";
+            phase.value = phaseForError(error);
+          }
+        };
+        const promise = run().finally(() => {
+          if (resyncPromise === promise) {
+            resyncPromise = null;
+            resyncTrailingRequested = false;
+          }
+        });
+        resyncPromise = promise;
+        return promise;
+      }
+      if (cleanupStatus.value !== null) return;
       if (!subscriptionId) {
         if (streamingV6Enabled && bindingPendingSessionId === sessionId) {
           if (controlPlaneGapRecoveryPromise !== null) {
@@ -2796,11 +3315,16 @@ export function createChatStoreDefinition(
         if (artifactIntegration !== null && !artifactIntegration.store.ingestHistoryV3(token, page)) return;
         let appendedApproval = conversationApprovalState.value;
         if (streamingV6Enabled) {
-          if (!isHistoryV6(page) || subscriptionId === null) throw approvalProtocolError();
+          const approvalHistoryStreamId = subscriptionId ?? (
+            selectedAccessMode.value === "history-only" ? sessionId : null
+          );
+          if (!isHistoryV6(page) || approvalHistoryStreamId === null) {
+            throw approvalProtocolError();
+          }
           appendedApproval = reduceApprovalHistory(
             appendedApproval,
             sessionId,
-            subscriptionId,
+            approvalHistoryStreamId,
             page,
           );
           if (appendedApproval.reconciliation === "required") {
@@ -2815,14 +3339,21 @@ export function createChatStoreDefinition(
         conversationApprovalState.value = appendedApproval;
         history.value = mergedHistory;
         activeRead = null;
+        if (selectedAccessMode.value === "history-only") {
+          lastErrorCode.value = null;
+          phase.value = "ready";
+        }
       } catch (error: unknown) {
         if (!isCurrent(epoch, controller, sessionId)) return;
         activeRead = null;
-        if (streamingV6Enabled) {
+        if (streamingV6Enabled && selectedAccessMode.value !== "history-only") {
           conversationApprovalState.value = requireConversationApprovalReconciliation(
             conversationApprovalState.value,
           );
         }
+        lastErrorCode.value = error instanceof ChatClientError
+          ? error.shape.code
+          : "chat_protocol_error";
         phase.value = phaseForError(error);
       }
     }
@@ -3020,6 +3551,10 @@ export function createChatStoreDefinition(
       const target = draftTarget.value;
       if (
         !bound || !target || !hasSendPermission.value ||
+        (
+          target.type === "session" && target.sessionId === selectedSessionId.value &&
+          (deleteInFlightSessionId.value === target.sessionId || cleanupStatus.value !== null)
+        ) ||
         !draftAttachments.value.some((attachment) => attachment.attachmentId === attachmentId)
       ) return;
       const epoch = draftEpoch;
@@ -3437,6 +3972,10 @@ export function createChatStoreDefinition(
       const bound = context.value;
       if (!bound) return null;
       const recoverySessionId = streamingV6Enabled ? selectedSessionId.value : null;
+      if (
+        recoverySessionId !== null &&
+        (deleteInFlightSessionId.value === recoverySessionId || cleanupStatus.value !== null)
+      ) return localReadiness.value;
       if (recoverySessionId !== null) {
         revokeSelectedSessionAuthority("resync-required");
       }
@@ -3457,7 +3996,10 @@ export function createChatStoreDefinition(
     async function renameSelected(title: string): Promise<void> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("rename_session")) return;
+      if (
+        !bound || !sessionId || !hasAction("rename_session") ||
+        deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null
+      ) return;
       await client.renameSession(bound.contextId, sessionId, title, operationId());
       if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
       await reloadSessions();
@@ -3466,7 +4008,10 @@ export function createChatStoreDefinition(
     async function setSelectedPinned(pinned: boolean): Promise<void> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("pin_session")) return;
+      if (
+        !bound || !sessionId || !hasAction("pin_session") ||
+        deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null
+      ) return;
       await client.setSessionPinned(bound.contextId, sessionId, pinned, operationId());
       if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
       await reloadSessions();
@@ -3475,13 +4020,54 @@ export function createChatStoreDefinition(
     async function interruptSelected(): Promise<boolean> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("interrupt_turn")) return false;
+      if (
+        !bound || !sessionId || !hasAction("interrupt_turn") ||
+        deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null ||
+        selectedAccessMode.value !== "live" || subscriptionId === null ||
+        (streamingV6Enabled && controlPlane.value?.state !== "bound")
+      ) return false;
       await client.interruptTurn(bound.contextId, sessionId, operationId());
       return context.value?.contextId === bound.contextId && selectedSessionId.value === sessionId;
     }
 
     function cleanupIsComplete(status: ChatCleanupStatus): boolean {
       return status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete";
+    }
+
+    function cleanupSurfaceRank(state: ChatCleanupStatus["desktopState"]): number {
+      switch (state) {
+        case "not_attempted": return 0;
+        case "pending": return 1;
+        case "incomplete": return 2;
+        case "complete": return 3;
+      }
+    }
+
+    function commitObservedCleanupStatus(
+      status: ChatCleanupStatus | null,
+      observation: CleanupObservationToken,
+    ): boolean {
+      if (
+        observation.generation !== cleanupObservationGeneration ||
+        observation.sequence < cleanupCommittedObservationSequence
+      ) return false;
+      cleanupCommittedObservationSequence = observation.sequence;
+      if (status === null) return false;
+      const current = cleanupStatus.value;
+      if (current !== null) {
+        if (
+          current.operationId !== status.operationId || cleanupIsComplete(current) ||
+          current.outcomeCode === "retry_limit_exceeded" || current.completedAt !== null ||
+          cleanupSurfaceRank(status.desktopState) < cleanupSurfaceRank(current.desktopState) ||
+          cleanupSurfaceRank(status.hostState) < cleanupSurfaceRank(current.hostState) ||
+          cleanupSurfaceRank(status.runtimeState) < cleanupSurfaceRank(current.runtimeState)
+        ) return false;
+      }
+      cleanupStatus.value = status;
+      if (cleanupIsComplete(status) || status.outcomeCode === "retry_limit_exceeded") {
+        clearCleanupPoll();
+      }
+      return true;
     }
 
     function scheduleSelectedCleanupPoll(
@@ -3491,39 +4077,52 @@ export function createChatStoreDefinition(
     ): void {
       clearCleanupPoll();
       const pollEpoch = cleanupPollEpoch;
+      const pollCleanupGeneration = cleanupObservationGeneration;
       let attempts = 0;
       const poll = async (): Promise<void> => {
         cleanupPollTimer = null;
         if (
           cleanupPollEpoch !== pollEpoch ||
+          cleanupObservationGeneration !== pollCleanupGeneration ||
           context.value?.contextId !== bound.contextId ||
           selectedSessionId.value !== sessionId ||
-          cleanupStatus.value?.operationId !== cleanupOperationId
+          cleanupStatus.value?.operationId !== cleanupOperationId ||
+          deleteInFlightSessionId.value !== null
         ) return;
         try {
+          const observation = startCleanupObservation();
           const status = await client.getCleanupStatus(bound.contextId, cleanupOperationId);
           if (
             cleanupPollEpoch !== pollEpoch ||
+            cleanupObservationGeneration !== pollCleanupGeneration ||
             context.value?.contextId !== bound.contextId ||
-            selectedSessionId.value !== sessionId
+            selectedSessionId.value !== sessionId ||
+            cleanupStatus.value?.operationId !== cleanupOperationId ||
+            deleteInFlightSessionId.value !== null
           ) return;
-          if (status !== null) {
-            cleanupStatus.value = status;
+          if (commitObservedCleanupStatus(status, observation) && status !== null) {
             if (cleanupIsComplete(status)) {
-              clearCleanupPoll();
               await finishCompletedCleanup(bound, sessionId, status);
               return;
             }
             if (status.outcomeCode === "retry_limit_exceeded") {
-              clearCleanupPoll();
               return;
             }
           }
+          const retainedCleanup = cleanupStatus.value;
+          if (retainedCleanup !== null && cleanupIsComplete(retainedCleanup)) {
+            await finishCompletedCleanup(bound, sessionId, retainedCleanup);
+            return;
+          }
+          if (retainedCleanup?.outcomeCode === "retry_limit_exceeded") return;
         } catch {
           // A manual status check remains available; keep polling while this selection is current.
         }
         attempts += 1;
-        if (attempts >= CLEANUP_POLL_MAX_ATTEMPTS || cleanupPollEpoch !== pollEpoch) {
+        if (
+          attempts >= CLEANUP_POLL_MAX_ATTEMPTS || cleanupPollEpoch !== pollEpoch ||
+          cleanupObservationGeneration !== pollCleanupGeneration
+        ) {
           clearCleanupPoll();
           return;
         }
@@ -3576,35 +4175,83 @@ export function createChatStoreDefinition(
     async function deleteSelected(): Promise<DeleteDisposition | null> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
-      if (!bound || !sessionId || !hasAction("delete_session")) return null;
-      const status = await client.deleteSession(bound.contextId, sessionId, operationId());
-      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return null;
-      cleanupStatus.value = status;
-      if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
-      scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
-      const disposition: DeleteDisposition = Object.freeze({
-        kind: "cleanup_pending",
-        deletedSessionId: sessionId,
-        nextSessionId: null,
-        path: `/chat/${sessionId}`,
-      });
-      deleteDisposition.value = disposition;
-      return disposition;
+      if (
+        !bound || !sessionId || !hasAction("delete_session") ||
+        deleteInFlightSessionId.value !== null
+      ) return null;
+      const currentCleanup = cleanupStatus.value;
+      if (currentCleanup !== null) {
+        if (cleanupIsComplete(currentCleanup)) {
+          return finishCompletedCleanup(bound, sessionId, currentCleanup);
+        }
+        if (currentCleanup.outcomeCode !== "retry_limit_exceeded") {
+          scheduleSelectedCleanupPoll(bound, sessionId, currentCleanup.operationId);
+          const retainedDisposition: DeleteDisposition = Object.freeze({
+            kind: "cleanup_pending",
+            deletedSessionId: sessionId,
+            nextSessionId: null,
+            path: `/chat/${sessionId}`,
+          });
+          deleteDisposition.value = retainedDisposition;
+          return retainedDisposition;
+        }
+      }
+      deleteInFlightSessionId.value = sessionId;
+      clearCleanupPoll();
+      invalidateCleanupObservations();
+      try {
+        const status = await client.deleteSession(bound.contextId, sessionId, operationId());
+        if (
+          context.value?.contextId !== bound.contextId ||
+          selectedSessionId.value !== sessionId
+        ) return null;
+        cleanupStatus.value = status;
+        revokeSelectedRealtimeAuthorityForCleanup(bound, sessionId);
+        if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+        if (status.outcomeCode !== "retry_limit_exceeded") {
+          scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
+        }
+        const disposition: DeleteDisposition = Object.freeze({
+          kind: "cleanup_pending",
+          deletedSessionId: sessionId,
+          nextSessionId: null,
+          path: `/chat/${sessionId}`,
+        });
+        deleteDisposition.value = disposition;
+        return disposition;
+      } finally {
+        if (deleteInFlightSessionId.value === sessionId) deleteInFlightSessionId.value = null;
+      }
     }
 
     async function refreshSelectedCleanup(): Promise<DeleteDisposition | null> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       const operation = cleanupStatus.value?.operationId;
-      if (!bound || !sessionId || !operation) return null;
+      if (
+        !bound || !sessionId || !operation ||
+        deleteInFlightSessionId.value === sessionId
+      ) return null;
+      const observation = startCleanupObservation();
       const status = await client.getCleanupStatus(bound.contextId, operation);
-      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId || status === null) {
+      if (
+        context.value?.contextId !== bound.contextId ||
+        selectedSessionId.value !== sessionId ||
+        cleanupStatus.value?.operationId !== operation ||
+        observation.generation !== cleanupObservationGeneration ||
+        deleteInFlightSessionId.value !== null
+      ) {
         return null;
       }
-      cleanupStatus.value = status;
-      if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
-      if (status.outcomeCode !== "retry_limit_exceeded") {
-        scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
+      commitObservedCleanupStatus(status, observation);
+      if (status === null) return null;
+      const retainedStatus = cleanupStatus.value;
+      if (retainedStatus === null) return null;
+      if (cleanupIsComplete(retainedStatus)) {
+        return finishCompletedCleanup(bound, sessionId, retainedStatus);
+      }
+      if (retainedStatus.outcomeCode !== "retry_limit_exceeded") {
+        scheduleSelectedCleanupPoll(bound, sessionId, retainedStatus.operationId);
       }
       return deleteDisposition.value;
     }
@@ -3684,6 +4331,7 @@ export function createChatStoreDefinition(
       sessions,
       sessionsCursor,
       selectedSessionId,
+      selectedAccessMode,
       history,
       conversationState,
       conversationApprovalState,
@@ -3712,6 +4360,7 @@ export function createChatStoreDefinition(
       canDecideApprovals,
       hasAction,
       bind,
+      isAuthorityBound,
       selectSession,
       clearSelectedSession,
       retryDraftRecovery,

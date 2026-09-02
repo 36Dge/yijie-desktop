@@ -14,7 +14,10 @@ use super::feat136::{
     ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus, TruncationReason,
     SOURCE_SCHEMA_VERSION as FEAT136_SOURCE_SCHEMA_VERSION,
 };
-use super::feat137::{ApprovalProjection, ApprovalProjectionStatus};
+use super::feat137::{
+    validate_process_projection, validate_process_state, ApprovalProjection,
+    ApprovalProjectionStatus,
+};
 use super::host_domain::{HostApprovalDecision, HostApprovalOutcome};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
@@ -433,9 +436,12 @@ pub struct RecoverySnapshot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Feat126ResumeCandidate {
     pub task_id: Uuid,
+    pub session_id: Uuid,
     pub agent_session_id: Uuid,
     pub codex_thread_id: Uuid,
+    pub active_local_turn_id: Option<Uuid>,
     pub active_runtime_turn_id: Option<Uuid>,
+    pub active_turn_operation_id: Option<Uuid>,
 }
 
 impl std::fmt::Debug for StartTurnDispatch {
@@ -3687,6 +3693,14 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         transaction
             .execute(
+                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
+                 WHERE session_id=?1 AND kind='interrupt_turn'
+                   AND state IN ('pending', 'inflight')",
+                [session_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .execute(
                 "UPDATE chat_output_artifacts SET state='failed', content_blob=NULL, poster_blob=NULL,
                    progress_stage=NULL, progress_percent=NULL, local_committed_at=NULL,
                    expires_at=NULL, ack_id=NULL, ack_state=NULL, acknowledged_at=NULL,
@@ -3707,6 +3721,101 @@ impl ChatRepository {
                 params![terminal_at, session_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
+    pub fn finalize_orphaned_queued_turn_without_host(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        operation_id: Uuid,
+        terminal_at: i64,
+    ) -> Result<(), ChatError> {
+        for value in [session_id, turn_id, operation_id] {
+            validate_non_nil(value)?;
+        }
+        if terminal_at < 0 {
+            return Err(ChatError::InvalidInput);
+        }
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let owned: bool = transaction
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1
+                   FROM chat_turns t
+                   JOIN chat_sessions s ON s.id=t.session_id
+                   JOIN chat_outbox o ON o.operation_id=t.operation_id
+                   WHERE s.id=?1 AND t.id=?2 AND t.operation_id=?3
+                     AND t.status='queued' AND t.runtime_turn_id IS NULL
+                     AND o.session_id=s.id AND o.kind='start_turn'
+                     AND o.state IN ('pending', 'inflight', 'failed')
+                     AND s.owner_user_id=?4 AND s.tenant_id=?5
+                 )",
+                params![
+                    session_id.to_string(),
+                    turn_id.to_string(),
+                    operation_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if !owned {
+            return Err(ChatError::ConversationConflict);
+        }
+        transaction
+            .execute(
+                "UPDATE chat_messages SET status='failed'
+                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
+                [turn_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let turn_changed = transaction
+            .execute(
+                "UPDATE chat_turns SET status='failed', terminal_at=?1,
+                   reasoning_status='unavailable', reasoning_reason_code='host_shutdown'
+                 WHERE id=?2 AND session_id=?3 AND operation_id=?4
+                   AND status='queued' AND runtime_turn_id IS NULL",
+                params![
+                    terminal_at,
+                    turn_id.to_string(),
+                    session_id.to_string(),
+                    operation_id.to_string()
+                ],
+            )
+            .map_err(map_constraint_or_database)?;
+        let outbox_changed = transaction
+            .execute(
+                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
+                 WHERE operation_id=?1 AND session_id=?2 AND kind='start_turn'
+                   AND state IN ('pending', 'inflight', 'failed')",
+                params![operation_id.to_string(), session_id.to_string()],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if turn_changed != 1 || outbox_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        let session_changed = transaction
+            .execute(
+                "UPDATE chat_sessions SET last_activity_at=MAX(last_activity_at, ?1)
+                 WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4",
+                params![
+                    terminal_at,
+                    session_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if session_changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)
@@ -4405,6 +4514,7 @@ impl ChatRepository {
             return Err(ChatError::InvalidInput);
         }
         validate_projection_for_schema(projection, FEAT136_SOURCE_SCHEMA_VERSION)?;
+        validate_process_projection(projection)?;
         validate_feat137_projection_pair(projection, approval)?;
         let transaction = self
             .connection
@@ -4455,6 +4565,9 @@ impl ChatRepository {
         feat137_stream: bool,
     ) -> Result<u64, ChatError> {
         validate_projection_for_schema(projection, source_schema_version)?;
+        if feat137_stream {
+            validate_process_projection(projection)?;
+        }
         let terminal = projection
             .terminal
             .as_ref()
@@ -4819,11 +4932,7 @@ impl ChatRepository {
             Some(failure.turn_id),
             TimelineNoticeScope::Turn,
         )?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-
-        Ok(Feat134Projection {
+        let projection = Feat134Projection {
             session_id: failure.session_id,
             turn_id: failure.turn_id,
             cursor: failure.cursor.clone(),
@@ -4840,7 +4949,14 @@ impl ChatRepository {
             session_notice: None,
             terminal: Some(terminal.clone()),
             delta: TimelineDelta::TurnTerminal(terminal),
-        })
+        };
+        if feat137_stream {
+            validate_process_projection(&projection)?;
+        }
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(projection)
     }
 
     pub fn commit_terminal_turn(&mut self, terminal: &TerminalTurnCommit) -> Result<(), ChatError> {
@@ -5201,6 +5317,24 @@ impl ChatRepository {
             &turn_ids,
             source_schema_version,
         )?;
+        if include_approvals {
+            for turn in &feat134.turns {
+                let feat137_turn: bool = transaction
+                    .query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM chat_turn_stream_versions_v6
+                           WHERE turn_id=?1 AND schema_version=6
+                         )",
+                        [turn.turn_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                if feat137_turn {
+                    validate_process_state(&turn.items, turn.plan.as_ref())
+                        .map_err(|_| ChatError::DatabaseUnavailable)?;
+                }
+            }
+        }
         let approvals = if include_approvals {
             load_feat137_approvals(&transaction, &self.scope, session_id, &turn_ids)?
         } else {
@@ -5328,7 +5462,10 @@ impl ChatRepository {
     }
 
     pub fn load_feat137_hydration(&self, turn_id: Uuid) -> Result<Feat134Hydration, ChatError> {
-        self.load_feat136_hydration(turn_id)
+        let hydration = self.load_feat136_hydration(turn_id)?;
+        validate_process_state(&hydration.items, hydration.plan.as_ref())
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Ok(hydration)
     }
 
     pub fn classify_feat136_observed_event(
@@ -6465,14 +6602,13 @@ impl ChatRepository {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT b.public_task_id, s.agent_session_id, s.runtime_thread_id,
-                        (SELECT t.runtime_turn_id FROM chat_turns t
-                         WHERE t.session_id=s.id
-                           AND t.status IN ('streaming', 'stopping')
-                           AND t.runtime_turn_id IS NOT NULL
-                         ORDER BY t.ordinal DESC LIMIT 1)
+                "SELECT b.public_task_id, s.id, s.agent_session_id, s.runtime_thread_id,
+                        active_turn.id, active_turn.runtime_turn_id, active_turn.operation_id
                  FROM chat_sessions s
                  JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
+                 LEFT JOIN chat_turns active_turn
+                   ON active_turn.session_id=s.id
+                  AND active_turn.status IN ('queued', 'streaming', 'stopping')
                  WHERE s.owner_user_id=?1 AND s.tenant_id=?2
                    AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL
                  ORDER BY s.id",
@@ -6486,19 +6622,47 @@ impl ChatRepository {
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?
             .map(|row| {
-                let (task_id, agent_session_id, codex_thread_id, active_runtime_turn_id) =
-                    row.map_err(|_| ChatError::DatabaseUnavailable)?;
+                let (
+                    task_id,
+                    session_id,
+                    agent_session_id,
+                    codex_thread_id,
+                    active_local_turn_id,
+                    active_runtime_turn_id,
+                    active_turn_operation_id,
+                ) = row.map_err(|_| ChatError::DatabaseUnavailable)?;
+                let valid_active_identity = matches!(
+                    (
+                        active_local_turn_id.is_some(),
+                        active_runtime_turn_id.is_some(),
+                        active_turn_operation_id.is_some(),
+                    ),
+                    (false, false, false) | (true, false, true) | (true, true, true)
+                );
+                if !valid_active_identity {
+                    return Err(ChatError::DatabaseUnavailable);
+                }
                 Ok(Feat126ResumeCandidate {
                     task_id: parse_uuid_value(&task_id)?,
+                    session_id: parse_uuid_value(&session_id)?,
                     agent_session_id: parse_uuid_value(&agent_session_id)?,
                     codex_thread_id: parse_uuid_value(&codex_thread_id)?,
+                    active_local_turn_id: active_local_turn_id
+                        .map(|value| parse_uuid_value(&value))
+                        .transpose()?,
                     active_runtime_turn_id: active_runtime_turn_id
+                        .map(|value| parse_uuid_value(&value))
+                        .transpose()?,
+                    active_turn_operation_id: active_turn_operation_id
                         .map(|value| parse_uuid_value(&value))
                         .transpose()?,
                 })
@@ -10470,10 +10634,11 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::feat137::{protect_process_projection, PROCESS_CONTENT_PROTECTED_MESSAGE};
     use crate::chat::host_domain::{
-        HostApprovalRequested, HostCommandCwd, HostCommandErrorCode, HostCommandOutput,
-        HostCommandStatus, HostEvent, HostEventCursor, HostEventKind, HostProjectionError,
-        HostSafeText,
+        HostAgentMessagePhase, HostApprovalRequested, HostCommandCwd, HostCommandErrorCode,
+        HostCommandOutput, HostCommandStatus, HostEvent, HostEventCursor, HostEventKind,
+        HostPlanStep, HostPlanStepStatus, HostProjectionError, HostSafeText, HostTurnStatus,
     };
     use crate::chat::{Feat134TurnReducer, SourceIdentity, TimelineDelta, TimelineTerminal};
     use std::os::unix::fs::symlink;
@@ -11232,6 +11397,20 @@ mod tests {
         let next_session_id = before[1];
         let context = repository.active_turn_context(orphan_session_id).unwrap();
         let next_context = repository.active_turn_context(next_session_id).unwrap();
+        let inflight_interrupt = Uuid::now_v7();
+        repository
+            .enqueue_interrupt(orphan_session_id, inflight_interrupt)
+            .unwrap();
+        let claimed_interrupt = repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed_interrupt.operation_id, inflight_interrupt);
+        assert_eq!(claimed_interrupt.kind, OutboxKind::InterruptTurn);
+        let pending_interrupt = Uuid::now_v7();
+        repository
+            .enqueue_interrupt(orphan_session_id, pending_interrupt)
+            .unwrap();
 
         repository
             .finalize_orphaned_turn_without_stream(
@@ -11250,6 +11429,14 @@ mod tests {
             OutboxState::Done
         );
         assert_eq!(
+            repository.outbox_state(inflight_interrupt).unwrap(),
+            OutboxState::Done
+        );
+        assert_eq!(
+            repository.outbox_state(pending_interrupt).unwrap(),
+            OutboxState::Done
+        );
+        assert_eq!(
             repository
                 .outbox_state(next_context.turn_operation_id)
                 .unwrap(),
@@ -11259,6 +11446,93 @@ mod tests {
             .load_history(context.session_id, None, None)
             .unwrap();
         assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(
+            history.turns[0].reasoning_reason_code.as_deref(),
+            Some("host_shutdown")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_host_queued_turn_is_not_terminal_history_and_is_finalized_without_dispatch() {
+        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 19);
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        let task_id = Uuid::now_v7();
+        repository
+            .bind_public_task(create.operation_id, task_id, now)
+            .unwrap();
+        repository
+            .reschedule_outbox(create.operation_id, now)
+            .unwrap();
+        let create = repository
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        let agent_session_id = Uuid::now_v7();
+        let codex_thread_id = Uuid::now_v7();
+        repository
+            .bind_host_session_and_enqueue_turn(
+                create.operation_id,
+                task_id,
+                agent_session_id,
+                codex_thread_id,
+            )
+            .unwrap();
+
+        assert_eq!(
+            repository.feat126_resume_candidates().unwrap(),
+            vec![Feat126ResumeCandidate {
+                task_id,
+                session_id: pending.session_id,
+                agent_session_id,
+                codex_thread_id,
+                active_local_turn_id: Some(pending.turn_id),
+                active_runtime_turn_id: None,
+                active_turn_operation_id: Some(pending.turn_operation_id),
+            }]
+        );
+
+        repository
+            .finalize_orphaned_queued_turn_without_host(
+                pending.session_id,
+                pending.turn_id,
+                pending.turn_operation_id,
+                now + 1,
+            )
+            .unwrap();
+
+        assert_eq!(
+            repository.feat126_resume_candidates().unwrap(),
+            vec![Feat126ResumeCandidate {
+                task_id,
+                session_id: pending.session_id,
+                agent_session_id,
+                codex_thread_id,
+                active_local_turn_id: None,
+                active_runtime_turn_id: None,
+                active_turn_operation_id: None,
+            }]
+        );
+        assert_eq!(
+            repository.outbox_state(pending.turn_operation_id).unwrap(),
+            OutboxState::Done
+        );
+        let history = repository
+            .load_history(pending.session_id, None, None)
+            .unwrap();
+        assert_eq!(history.turns.len(), 1);
+        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].reasoning_status, "unavailable");
         assert_eq!(
             history.turns[0].reasoning_reason_code.as_deref(),
             Some("host_shutdown")
@@ -13200,10 +13474,20 @@ mod tests {
         let now = unix_seconds().unwrap();
         let (agent_session_id, codex_thread_id) =
             bind_and_accept_first_turn(&mut repository, &pending, now);
-        let task_id = repository
-            .active_turn_context(pending.session_id)
-            .unwrap()
-            .task_id;
+        let active = repository.active_turn_context(pending.session_id).unwrap();
+        let task_id = active.task_id;
+        assert_eq!(
+            repository.feat126_resume_candidates().unwrap(),
+            vec![Feat126ResumeCandidate {
+                task_id,
+                session_id: pending.session_id,
+                agent_session_id,
+                codex_thread_id,
+                active_local_turn_id: Some(pending.turn_id),
+                active_runtime_turn_id: Some(active.runtime_turn_id),
+                active_turn_operation_id: Some(pending.turn_operation_id),
+            }]
+        );
         repository
             .commit_terminal_turn(&TerminalTurnCommit {
                 local_turn_id: pending.turn_id,
@@ -13225,9 +13509,12 @@ mod tests {
             repository.feat126_resume_candidates().unwrap(),
             vec![Feat126ResumeCandidate {
                 task_id,
+                session_id: pending.session_id,
                 agent_session_id,
                 codex_thread_id,
+                active_local_turn_id: None,
                 active_runtime_turn_id: None,
+                active_turn_operation_id: None,
             }]
         );
         fs::remove_dir_all(root).unwrap();
@@ -13563,6 +13850,261 @@ mod tests {
             snapshot.approvals[0].status,
             ApprovalProjectionStatus::Pending
         );
+
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat137_native_boundary_rejects_raw_process_and_reopens_content_free() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/feat-137/native-boundary-canary.json"
+        ))
+        .unwrap();
+        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
+        let safe_final_answer = fixture["safeFinalAnswer"].as_str().unwrap();
+
+        let root = std::env::temp_dir().join(format!("yijie-feat137-process-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository(&root, 138);
+        let repository_scope = repository.scope.clone();
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        let context = repository.active_turn_context(pending.session_id).unwrap();
+        let stream_id = Uuid::now_v7();
+        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
+        let event = |sequence: u64, item_id: Option<&str>, kind: HostEventKind| HostEvent {
+            cursor: HostEventCursor::new(stream_id, sequence).unwrap(),
+            event_type: "synthetic.process".to_owned(),
+            event_id: Uuid::now_v7(),
+            task_id: context.task_id,
+            agent_session_id: context.agent_session_id,
+            codex_thread_id: context.codex_thread_id,
+            turn_id: Some(context.runtime_turn_id),
+            item_id: item_id.map(str::to_owned),
+            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+            encoded_bytes: 64,
+            kind,
+        };
+
+        let raw_commentary = reducer
+            .apply(
+                event(
+                    1,
+                    Some("commentary"),
+                    HostEventKind::ItemStarted {
+                        item_type: "agentMessage".to_owned(),
+                        text: Some(forbidden_canary.to_owned()),
+                        phase: Some(HostAgentMessagePhase::Commentary),
+                    },
+                ),
+                1,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            repository.persist_feat137_projection(&raw_commentary, None),
+            Err(ChatError::InvalidInput)
+        );
+        let commentary = protect_process_projection(raw_commentary).unwrap();
+        assert_eq!(
+            repository.persist_feat137_projection(&commentary, None),
+            Ok(1)
+        );
+
+        let reasoning = reducer
+            .apply(
+                event(
+                    2,
+                    Some("reasoning"),
+                    HostEventKind::ReasoningTextDelta {
+                        content_index: 0,
+                        delta: forbidden_canary.to_owned(),
+                    },
+                ),
+                2,
+            )
+            .unwrap()
+            .unwrap();
+        let reasoning = protect_process_projection(reasoning).unwrap();
+        let TimelineDelta::ReasoningAppend { ref text, .. } = reasoning.delta else {
+            panic!("protected reasoning append expected");
+        };
+        assert_eq!(text, PROCESS_CONTENT_PROTECTED_MESSAGE);
+        assert_eq!(
+            repository.persist_feat137_projection(&reasoning, None),
+            Ok(2)
+        );
+
+        let plan = reducer
+            .apply(
+                event(
+                    3,
+                    None,
+                    HostEventKind::TurnPlanUpdated {
+                        explanation: Some(forbidden_canary.to_owned()),
+                        steps: vec![HostPlanStep {
+                            step: forbidden_canary.to_owned(),
+                            status: HostPlanStepStatus::InProgress,
+                        }],
+                    },
+                ),
+                3,
+            )
+            .unwrap()
+            .unwrap();
+        let plan = protect_process_projection(plan).unwrap();
+        assert_eq!(repository.persist_feat137_projection(&plan, None), Ok(3));
+
+        let final_started = reducer
+            .apply(
+                event(
+                    4,
+                    Some("final"),
+                    HostEventKind::ItemStarted {
+                        item_type: "agentMessage".to_owned(),
+                        text: Some(safe_final_answer.to_owned()),
+                        phase: Some(HostAgentMessagePhase::FinalAnswer),
+                    },
+                ),
+                4,
+            )
+            .unwrap()
+            .unwrap();
+        let final_started_cursor = final_started.cursor.clone();
+        let final_started_count = final_started.items.len();
+        let final_started = protect_process_projection(final_started).unwrap();
+        assert_eq!(final_started.cursor, final_started_cursor);
+        assert_eq!(final_started.items.len(), final_started_count);
+        assert_eq!(final_started.items.last().unwrap().text, safe_final_answer);
+        assert_eq!(
+            repository.persist_feat137_projection(&final_started, None),
+            Ok(4)
+        );
+
+        let final_completed = reducer
+            .apply(
+                event(
+                    5,
+                    Some("final"),
+                    HostEventKind::ItemCompleted {
+                        item_type: "agentMessage".to_owned(),
+                        text: Some(safe_final_answer.to_owned()),
+                        phase: Some(HostAgentMessagePhase::FinalAnswer),
+                    },
+                ),
+                5,
+            )
+            .unwrap()
+            .unwrap();
+        let final_completed = protect_process_projection(final_completed).unwrap();
+        assert_eq!(final_completed.assistant_text, safe_final_answer);
+        assert_eq!(
+            repository.persist_feat137_projection(&final_completed, None),
+            Ok(5)
+        );
+
+        let terminal = reducer
+            .apply(
+                event(
+                    6,
+                    None,
+                    HostEventKind::TurnCompleted {
+                        status: HostTurnStatus::Completed,
+                        code: None,
+                        message: None,
+                    },
+                ),
+                6,
+            )
+            .unwrap()
+            .unwrap();
+        let terminal_cursor = terminal.cursor.clone();
+        let terminal_item_count = terminal.items.len();
+        let terminal = protect_process_projection(terminal).unwrap();
+        assert_eq!(terminal.cursor, terminal_cursor);
+        assert_eq!(terminal.items.len(), terminal_item_count);
+        assert_eq!(terminal.assistant_text, safe_final_answer);
+        assert!(matches!(terminal.delta, TimelineDelta::TurnTerminal(_)));
+        assert_eq!(usize::from(terminal.terminal.is_some()), 1);
+        assert_eq!(repository.commit_feat137_terminal(&terminal), Ok(6));
+
+        drop(repository);
+        let mut repository = open_repository_for_scope(&root, 138, repository_scope);
+        let hydration = repository.load_feat137_hydration(context.turn_id).unwrap();
+        assert_eq!(hydration.items[0].text, PROCESS_CONTENT_PROTECTED_MESSAGE);
+        assert_eq!(hydration.items[1].reasoning_parts.len(), 1);
+        assert_eq!(
+            hydration.items[1].reasoning_parts[0].text,
+            PROCESS_CONTENT_PROTECTED_MESSAGE
+        );
+        assert_eq!(
+            hydration
+                .plan
+                .as_ref()
+                .and_then(|plan| plan.explanation.as_deref()),
+            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
+        );
+        let history = repository
+            .load_feat137_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.feat134.durable_sequence_cut, 6);
+        let turn = history
+            .feat134
+            .turns
+            .iter()
+            .find(|turn| turn.turn_id == context.turn_id)
+            .unwrap();
+        validate_process_state(&turn.items, turn.plan.as_ref()).unwrap();
+        assert_eq!(turn.items.len(), terminal_item_count);
+        assert_eq!(turn.items.last().unwrap().text, safe_final_answer);
+        assert_eq!(
+            history
+                .history
+                .turns
+                .iter()
+                .find(|turn| turn.turn_id == context.turn_id)
+                .and_then(|turn| turn
+                    .messages
+                    .iter()
+                    .find(|message| message.role == "assistant"))
+                .map(|message| message.content.as_str()),
+            Some(safe_final_answer)
+        );
+
+        let forbidden_hits: i64 = repository
+            .connection
+            .query_row(
+                "SELECT
+                   (SELECT count(*) FROM chat_timeline_items_v4
+                    WHERE turn_id=?1 AND instr(text, ?2) > 0)
+                 + (SELECT count(*) FROM chat_timeline_reasoning_parts_v4
+                    WHERE turn_id=?1 AND instr(text, ?2) > 0)
+                 + (SELECT count(*) FROM chat_turn_plans_v4
+                    WHERE turn_id=?1 AND instr(COALESCE(explanation, ''), ?2) > 0)
+                 + (SELECT count(*) FROM chat_turn_plan_steps_v4
+                    WHERE turn_id=?1 AND instr(step, ?2) > 0)
+                 + (SELECT count(*) FROM chat_messages
+                    WHERE turn_id=?1 AND instr(content, ?2) > 0)
+                 + (SELECT count(*) FROM chat_reasoning_parts
+                    WHERE turn_id=?1 AND instr(text, ?2) > 0)",
+                params![context.turn_id.to_string(), forbidden_canary],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(forbidden_hits, 0);
+        let terminal_cardinality: i64 = repository
+            .connection
+            .query_row(
+                "SELECT count(*) FROM chat_turn_terminals_v4 WHERE turn_id=?1",
+                [context.turn_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(terminal_cardinality, 1);
 
         drop(repository);
         fs::remove_dir_all(root).unwrap();

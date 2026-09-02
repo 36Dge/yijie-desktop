@@ -8,12 +8,14 @@ export interface ChatAuthoritySnapshot {
 }
 
 export interface ChatAuthorityStoreBoundary {
-  bind(tenantSelector: string): Promise<void>;
+  bind(tenantSelector: string): Promise<boolean | void>;
+  isAuthorityBound?(): boolean;
   dispose(): Promise<void>;
 }
 
 export interface ChatPermissionLifecycle {
-  synchronize(snapshot: ChatAuthoritySnapshot): Promise<void>;
+  synchronize(snapshot: ChatAuthoritySnapshot): Promise<boolean>;
+  retry(): Promise<boolean>;
   stop(): Promise<void>;
 }
 
@@ -23,6 +25,13 @@ export function createChatPermissionLifecycle(
 ): ChatPermissionLifecycle {
   let epoch = 0;
   let desiredAuthorityKey: string | null = null;
+  let boundAuthorityKey: string | null = null;
+  let latestSnapshot: ChatAuthoritySnapshot | null = null;
+  let pending: Readonly<{
+    key: string | null;
+    epoch: number;
+    promise: Promise<boolean>;
+  }> | null = null;
 
   function authorityKey(snapshot: ChatAuthoritySnapshot): string | null {
     if (
@@ -43,25 +52,77 @@ export function createChatPermissionLifecycle(
     ].join(":");
   }
 
-  return {
-    async synchronize(snapshot) {
-      const nextAuthorityKey = authorityKey(snapshot);
-      if (nextAuthorityKey === desiredAuthorityKey) return;
-      desiredAuthorityKey = nextAuthorityKey;
-      const current = ++epoch;
-      await store.dispose();
-      if (
-        current !== epoch ||
-        nextAuthorityKey === null ||
-        snapshot.tenantId === null
-      ) {
-        return;
+  function synchronizeSnapshot(
+    snapshot: ChatAuthoritySnapshot,
+    force: boolean,
+  ): Promise<boolean> {
+    const nextAuthorityKey = authorityKey(snapshot);
+    const previousDesiredAuthorityKey = desiredAuthorityKey;
+    latestSnapshot = snapshot;
+    desiredAuthorityKey = nextAuthorityKey;
+
+    if (pending?.key === nextAuthorityKey) return pending.promise;
+    if (!force && nextAuthorityKey !== null && nextAuthorityKey === boundAuthorityKey) {
+      return Promise.resolve(true);
+    }
+    if (
+      nextAuthorityKey === null &&
+      previousDesiredAuthorityKey === null &&
+      boundAuthorityKey === null
+    ) {
+      return Promise.resolve(false);
+    }
+
+    boundAuthorityKey = null;
+    const current = ++epoch;
+    const attempt = {
+      key: nextAuthorityKey,
+      epoch: current,
+      promise: Promise.resolve(false),
+    };
+    attempt.promise = Promise.resolve().then(async () => {
+      try {
+        await store.dispose();
+        if (
+          current !== epoch ||
+          desiredAuthorityKey !== nextAuthorityKey ||
+          nextAuthorityKey === null ||
+          snapshot.tenantId === null
+        ) {
+          return false;
+        }
+        const result = await store.bind(snapshot.tenantId);
+        if (current !== epoch || desiredAuthorityKey !== nextAuthorityKey) return false;
+        const succeeded = result !== false && (store.isAuthorityBound?.() ?? true);
+        boundAuthorityKey = succeeded ? nextAuthorityKey : null;
+        return succeeded;
+      } catch {
+        if (current === epoch && desiredAuthorityKey === nextAuthorityKey) {
+          boundAuthorityKey = null;
+        }
+        return false;
       }
-      await store.bind(snapshot.tenantId);
+    }).finally(() => {
+      if (pending?.epoch === current) pending = null;
+    });
+    pending = attempt;
+    return attempt.promise;
+  }
+
+  return {
+    synchronize(snapshot) {
+      return synchronizeSnapshot(snapshot, false);
+    },
+    retry() {
+      if (latestSnapshot === null) return Promise.resolve(false);
+      return synchronizeSnapshot(latestSnapshot, true);
     },
     async stop() {
       epoch += 1;
       desiredAuthorityKey = null;
+      boundAuthorityKey = null;
+      latestSnapshot = null;
+      pending = null;
       await store.dispose();
     },
   };

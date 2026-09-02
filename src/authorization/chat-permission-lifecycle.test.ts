@@ -36,6 +36,60 @@ describe("Chat permission lifecycle", () => {
     expect(store.bind).toHaveBeenCalledTimes(1);
   });
 
+  it("retries the same authority after its previous bind failed", async () => {
+    let bound = false;
+    let bindAttempt = 0;
+    const store = {
+      dispose: vi.fn(async () => undefined),
+      bind: vi.fn(async () => {
+        bindAttempt += 1;
+        bound = bindAttempt > 1;
+      }),
+      isAuthorityBound: () => bound,
+    };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+
+    await expect(lifecycle.synchronize(accepted)).resolves.toBe(false);
+    await expect(lifecycle.synchronize({ ...accepted })).resolves.toBe(true);
+
+    expect(store.dispose).toHaveBeenCalledTimes(2);
+    expect(store.bind).toHaveBeenCalledTimes(2);
+  });
+
+  it("forces a same-authority rebind on an explicit retry", async () => {
+    const store = {
+      dispose: vi.fn(async () => undefined),
+      bind: vi.fn(async () => true),
+    };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+
+    await lifecycle.synchronize(accepted);
+    await expect(lifecycle.retry()).resolves.toBe(true);
+
+    expect(store.dispose).toHaveBeenCalledTimes(2);
+    expect(store.bind).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent retries for the same authority", async () => {
+    let releaseBind!: (result: boolean) => void;
+    const bindResult = new Promise<boolean>((resolve) => { releaseBind = resolve; });
+    const store = {
+      dispose: vi.fn(async () => undefined),
+      bind: vi.fn(() => bindResult),
+    };
+    const lifecycle = createChatPermissionLifecycle(store, true);
+
+    const initial = lifecycle.synchronize(accepted);
+    await vi.waitFor(() => expect(store.bind).toHaveBeenCalledOnce());
+    const retry = lifecycle.retry();
+    expect(store.bind).toHaveBeenCalledOnce();
+    expect(store.dispose).toHaveBeenCalledOnce();
+
+    releaseBind(true);
+    await expect(Promise.all([initial, retry])).resolves.toEqual([true, true]);
+    expect(store.bind).toHaveBeenCalledOnce();
+  });
+
   it("renews the Chat context when the permission projection expiry advances", async () => {
     const store = {
       dispose: vi.fn(async () => undefined),

@@ -1,0 +1,5 @@
+{
+  "forbiddenCanary": "FEAT137_PRIVATE_PROCESS_CANARY_91D72A_DO_NOT_PERSIST",
+  "protectedMessage": "为保护命令、路径与审批上下文，模型过程内容已隐藏。",
+  "safeFinalAnswer": "FEAT-137 数据边界验证完成。"
+}

@@ -59,6 +59,13 @@ export type ConversationTimelineItemPresentation =
 export type ConversationTimelineContentMode = "rich" | "plain";
 export type ConversationTimelineCopyPolicy = "text_and_code" | "none";
 
+export type ConversationTimelineProjectionPolicy = Readonly<{
+  protectApprovalProcessContent: boolean;
+}>;
+
+export const APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE =
+  "为保护命令、路径与审批上下文，模型过程内容已隐藏。";
+
 type TimelineContentBlockBase = Readonly<{
   identity: string;
   blockIndex: number;
@@ -326,6 +333,25 @@ function projectReasoningContentBlock(
   return unknownContentBlock(itemIdentity, blockIndex);
 }
 
+function isModelProcessPresentation(
+  presentation: ConversationTimelineItemPresentation,
+): boolean {
+  return presentation === "commentary" ||
+    presentation === "assistant_unclassified" ||
+    presentation === "reasoning";
+}
+
+function protectedProcessContentBlock(
+  itemIdentity: string,
+): ConversationTimelineTextContentBlock {
+  return Object.freeze({
+    identity: blockIdentity(itemIdentity, 0, "protected-process-text"),
+    blockIndex: 0,
+    type: "text" as const,
+    text: APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
+  });
+}
+
 function relatedTurns(
   state: ConversationState,
   thread: ConversationThread,
@@ -416,19 +442,24 @@ function projectItem(
   item: ConversationItem,
   turn: ConversationTurn,
   approvalState?: ConversationApprovalState,
+  policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineItemViewModel {
   const identity = stableIdentity("timeline-item", item.threadId, item.turnId, item.itemId);
   const kind = ITEM_KINDS[item.kind] ?? "unknown";
   const presentation = itemPresentation(item);
-  const contentBlocks: readonly ConversationTimelineContentBlock[] = kind === "unknown"
-    ? Object.freeze([unknownContentBlock(identity, 0)])
-    : Object.freeze([...item.contentBlocks]
-      .sort((left, right) =>
-        safeBlockIndex(left.blockIndex) - safeBlockIndex(right.blockIndex) ||
-        left.type.localeCompare(right.type))
-      .map((block) => presentation === "reasoning"
-        ? projectReasoningContentBlock(identity, block)
-        : projectContentBlock(identity, block)));
+  const protectProcessContent = policy?.protectApprovalProcessContent === true &&
+    isModelProcessPresentation(presentation);
+  const contentBlocks: readonly ConversationTimelineContentBlock[] = protectProcessContent
+    ? Object.freeze([protectedProcessContentBlock(identity)])
+    : kind === "unknown"
+      ? Object.freeze([unknownContentBlock(identity, 0)])
+      : Object.freeze([...item.contentBlocks]
+        .sort((left, right) =>
+          safeBlockIndex(left.blockIndex) - safeBlockIndex(right.blockIndex) ||
+          left.type.localeCompare(right.type))
+        .map((block) => presentation === "reasoning"
+          ? projectReasoningContentBlock(identity, block)
+          : projectContentBlock(identity, block)));
   const collapsible = presentation === "commentary" ||
     presentation === "assistant_unclassified" ||
     (presentation === "reasoning" && contentBlocks.length > 0);
@@ -462,7 +493,7 @@ function projectItem(
       : "rich" as const,
     collapsible,
     defaultExpanded: collapsible ? activeTurn(turn) : true,
-    copyPolicy: presentation === "reasoning" || presentation === "command" ||
+    copyPolicy: protectProcessContent || presentation === "reasoning" || presentation === "command" ||
         presentation === "tool" || presentation === "unknown"
       ? "none" as const
       : "text_and_code" as const,
@@ -471,18 +502,24 @@ function projectItem(
   });
 }
 
-function projectPlan(turn: ConversationTurn): ConversationTimelinePlanViewModel | null {
+function projectPlan(
+  turn: ConversationTurn,
+  policy?: ConversationTimelineProjectionPolicy,
+): ConversationTimelinePlanViewModel | null {
   if (turn.plan === null) return null;
   const identity = stableIdentity("timeline-plan", turn.threadId, turn.turnId);
+  const protectProcessContent = policy?.protectApprovalProcessContent === true;
   return Object.freeze({
     identity,
-    explanation: turn.plan.explanation,
+    explanation: protectProcessContent && turn.plan.explanation !== null
+      ? APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE
+      : turn.plan.explanation,
     steps: Object.freeze([...turn.plan.steps]
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((step) => Object.freeze({
         identity: stableIdentity(identity, "step", String(step.ordinal)),
         ordinal: step.ordinal,
-        text: step.text,
+        text: protectProcessContent ? APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE : step.text,
         status: step.status,
       }))),
     collapsible: true as const,
@@ -593,6 +630,7 @@ function projectTurn(
   state: ConversationState,
   turn: ConversationTurn,
   approvalState?: ConversationApprovalState,
+  policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
@@ -603,11 +641,11 @@ function projectTurn(
     phase: TURN_PHASES[turn.status],
     terminalStatus: turn.terminalStatus,
     terminalCode: turn.terminalCode,
-    plan: projectPlan(turn),
+    plan: projectPlan(turn, policy),
     progress: projectProgress(turn),
     notices: projectNotices(turn),
     items: Object.freeze(relatedItems(state, turn)
-      .map((item) => projectItem(item, turn, approvalState))),
+      .map((item) => projectItem(item, turn, approvalState, policy))),
   });
 }
 
@@ -615,11 +653,12 @@ export function selectConversationTimeline(
   state: ConversationState,
   threadId: string,
   approvalState?: ConversationApprovalState,
+  policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineViewModel | null {
   const thread = state.threads[threadId];
   if (thread === undefined || thread.threadId !== threadId) return null;
   const turns = Object.freeze(relatedTurns(state, thread)
-    .map((turn) => projectTurn(state, turn, approvalState)));
+    .map((turn) => projectTurn(state, turn, approvalState, policy)));
   return Object.freeze({
     identity: stableIdentity("conversation-timeline", thread.threadId),
     threadId: thread.threadId,

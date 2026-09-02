@@ -36,6 +36,7 @@ import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-nat
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import { LEGACY_CHAT_TIMELINE_ROLLBACK_KEY } from "../../authorization/chat-timeline-ui-config";
+import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import ChatPage from "./ChatPage.vue";
 
 type MockDragDropPayload =
@@ -197,6 +198,7 @@ async function mountPage(
   active = false,
   activeHistory: ChatHistoryPage = HISTORY,
   legacyTimelineRollback = false,
+  retryChatAuthority: () => Promise<boolean> = async () => false,
 ) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   const pinia = createPinia();
@@ -215,6 +217,7 @@ async function mountPage(
   store.projects = [PROJECT];
   store.sessions = active ? [SESSION] : [];
   store.selectedSessionId = active ? SESSION_ID : null;
+  store.selectedAccessMode = active ? "live" : null;
   store.draftTarget = active ? chatSessionDraftTarget(SESSION_ID) : CHAT_NEW_DRAFT_TARGET;
   store.draftTargetReady = true;
   if (active) setHistoryProjection(store, activeHistory);
@@ -237,7 +240,10 @@ async function mountPage(
     attachTo: document.body,
     global: {
       plugins: [pinia, router],
-      provide: { [LEGACY_CHAT_TIMELINE_ROLLBACK_KEY as symbol]: legacyTimelineRollback },
+      provide: {
+        [LEGACY_CHAT_TIMELINE_ROLLBACK_KEY as symbol]: legacyTimelineRollback,
+        [CHAT_AUTHORITY_RETRY_KEY as symbol]: retryChatAuthority,
+      },
     },
   });
   await flushPromises();
@@ -280,6 +286,73 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).not.toContain("正在读取本地对话");
+  });
+
+  it("shows stale terminal tasks as local read-only history without a protocol error", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    store.selectedAccessMode = "history-only";
+    store.controlPlane = {
+      sessionId: SESSION_ID,
+      state: "failed",
+      issueCode: "chat_protocol_error",
+      retryable: false,
+      recovery: "resync",
+    };
+    store.lastErrorCode = null;
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("标题检查完成");
+    expect(wrapper.text()).toContain("此任务仅保留本地历史记录，当前无法继续发送。");
+    expect(wrapper.text()).not.toContain("本地组件状态不一致");
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(store.canDecideApprovals).toBe(false);
+    expect(wrapper.getComponent(ChatComposer).props("canSend")).toBe(false);
+  });
+
+  it("routes history-only read failures to local history resync before draft recovery", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const resyncSelected = vi.spyOn(store, "resyncSelected").mockImplementation(async () => {
+      store.lastErrorCode = null;
+      store.phase = "ready";
+    });
+    const retryDraftRecovery = vi.spyOn(store, "retryDraftRecovery");
+    store.selectedAccessMode = "history-only";
+    store.draftTarget = null;
+    store.draftTargetReady = false;
+    store.lastErrorCode = "chat_temporarily_unavailable";
+    store.phase = "unavailable";
+    await flushPromises();
+
+    await wrapper.get(".chat-workspace__composer-error button").trigger("click");
+    await flushPromises();
+
+    expect(resyncSelected).toHaveBeenCalledOnce();
+    expect(retryDraftRecovery).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed history activation before readiness or draft recovery", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const selectSession = vi.spyOn(store, "selectSession").mockImplementation(async () => {
+      store.selectedAccessMode = "history-only";
+      store.lastErrorCode = null;
+      store.phase = "ready";
+    });
+    const retryDraftRecovery = vi.spyOn(store, "retryDraftRecovery");
+    const requestLocalRecovery = vi.spyOn(store, "requestLocalRecovery");
+    const refreshLocalReadiness = vi.spyOn(store, "refreshLocalReadiness");
+    store.selectedAccessMode = null;
+    store.lastErrorCode = "chat_temporarily_unavailable";
+    store.phase = "unavailable";
+    await flushPromises();
+
+    await wrapper.get(".chat-workspace__composer-error button").trigger("click");
+    await flushPromises();
+
+    expect(selectSession).toHaveBeenCalledWith(SESSION_ID);
+    expect(retryDraftRecovery).not.toHaveBeenCalled();
+    expect(requestLocalRecovery).not.toHaveBeenCalled();
+    expect(refreshLocalReadiness).not.toHaveBeenCalled();
   });
 
   it("uses the FEAT-132 Timeline exclusively when the projection is complete", async () => {
@@ -823,6 +896,48 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(retryDraftRecovery).toHaveBeenCalledOnce();
     expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("routes a bind-stage storage retry through the authority lifecycle", async () => {
+    let storeAtRetry: ReturnType<typeof useChatStore> | null = null;
+    const retryChatAuthority = vi.fn(async () => {
+      if (storeAtRetry !== null) {
+        storeAtRetry.lastBindFailureStage = null;
+        storeAtRetry.lastErrorCode = null;
+        storeAtRetry.phase = "ready";
+      }
+      return true;
+    });
+    const { wrapper, store } = await mountPage(
+      "/chat",
+      false,
+      HISTORY,
+      false,
+      retryChatAuthority,
+    );
+    storeAtRetry = store;
+    const retryDraftRecovery = vi.spyOn(store, "retryDraftRecovery");
+    const requestLocalRecovery = vi.spyOn(store, "requestLocalRecovery");
+    const refreshLocalReadiness = vi.spyOn(store, "refreshLocalReadiness");
+    store.context = null;
+    store.projects = [];
+    store.sessions = [];
+    store.localReadiness = null;
+    store.draftTarget = null;
+    store.draftTargetReady = false;
+    store.lastBindFailureStage = "sessions";
+    store.lastErrorCode = "chat_storage_unavailable";
+    store.phase = "unavailable";
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("本地存储暂不可用");
+    await wrapper.get(".chat-notice__action").trigger("click");
+    await flushPromises();
+
+    expect(retryChatAuthority).toHaveBeenCalledOnce();
+    expect(retryDraftRecovery).not.toHaveBeenCalled();
+    expect(requestLocalRecovery).not.toHaveBeenCalled();
+    expect(refreshLocalReadiness).not.toHaveBeenCalled();
   });
 
   it("uses the legacy renderer only through the explicit rollback boundary", async () => {

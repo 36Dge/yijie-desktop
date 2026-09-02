@@ -697,6 +697,24 @@ impl DatabaseWorker {
         .await
     }
 
+    pub async fn finalize_orphaned_queued_turn_without_host(
+        &self,
+        session_id: uuid::Uuid,
+        turn_id: uuid::Uuid,
+        operation_id: uuid::Uuid,
+        terminal_at: i64,
+    ) -> Result<(), ChatError> {
+        self.call(move |repository| {
+            repository.finalize_orphaned_queued_turn_without_host(
+                session_id,
+                turn_id,
+                operation_id,
+                terminal_at,
+            )
+        })
+        .await
+    }
+
     pub async fn suspend_started_turn_retry(
         &self,
         operation_id: uuid::Uuid,

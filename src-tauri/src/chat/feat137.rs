@@ -1,4 +1,8 @@
 use super::error::ChatError;
+use super::feat134::{
+    Feat134Projection, TimelineDelta, TimelineItem, TimelinePhase, TimelinePlan,
+    TimelineReasoningPart, TimelineReasoningStatus,
+};
 use super::host_domain::{
     protocol_error, HostApprovalDecision, HostApprovalOutcome, HostBridgeError,
     HostBridgeErrorKind, HostErrorCode, HostEvent, HostEventKind,
@@ -14,6 +18,178 @@ pub const WORKSPACE_SCOPE: &str = "current_workspace";
 pub const PRIMARY_DECISION: &str = "accept_once";
 pub const SECONDARY_DECISION: &str = "cancel_current_turn";
 pub const TTL_SECONDS: u16 = 120;
+pub const PROCESS_CONTENT_PROTECTED_MESSAGE: &str =
+    "为保护命令、路径与审批上下文，模型过程内容已隐藏。";
+
+fn is_process_agent_message(item: &TimelineItem) -> bool {
+    item.item_type == "agentMessage" && item.phase != Some(TimelinePhase::FinalAnswer)
+}
+
+fn protected_reasoning_parts(
+    status: Option<TimelineReasoningStatus>,
+    had_parts: bool,
+) -> Result<Vec<TimelineReasoningPart>, ChatError> {
+    match status {
+        Some(TimelineReasoningStatus::Complete | TimelineReasoningStatus::Incomplete) => {
+            if !had_parts {
+                return Err(ChatError::InvalidInput);
+            }
+            Ok(vec![TimelineReasoningPart {
+                content_index: 0,
+                text: PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned(),
+            }])
+        }
+        Some(TimelineReasoningStatus::Unavailable) => {
+            if had_parts {
+                Err(ChatError::InvalidInput)
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        None => {
+            if had_parts {
+                Ok(vec![TimelineReasoningPart {
+                    content_index: 0,
+                    text: PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned(),
+                }])
+            } else {
+                Ok(Vec::new())
+            }
+        }
+    }
+}
+
+fn protect_item(item: &mut TimelineItem) -> Result<(), ChatError> {
+    if is_process_agent_message(item) {
+        item.text = PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned();
+        item.reasoning_parts.clear();
+    } else if item.item_type == "reasoning" {
+        item.text.clear();
+        item.reasoning_parts =
+            protected_reasoning_parts(item.reasoning_status, !item.reasoning_parts.is_empty())?;
+    }
+    Ok(())
+}
+
+fn protect_plan(plan: &mut TimelinePlan) {
+    if plan.explanation.is_some() {
+        plan.explanation = Some(PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned());
+    }
+    for step in &mut plan.steps {
+        step.step = PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned();
+    }
+}
+
+fn protect_delta(delta: &mut TimelineDelta) -> Result<(), ChatError> {
+    match delta {
+        TimelineDelta::PlanUpdated(plan) => protect_plan(plan),
+        TimelineDelta::ItemStarted(item) | TimelineDelta::ItemCompleted(item) => {
+            protect_item(item)?;
+        }
+        TimelineDelta::AgentMessageAppend { phase, text, .. }
+            if *phase != Some(TimelinePhase::FinalAnswer) =>
+        {
+            *text = PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned();
+        }
+        TimelineDelta::ReasoningAppend { text, .. } => {
+            *text = PROCESS_CONTENT_PROTECTED_MESSAGE.to_owned();
+        }
+        TimelineDelta::ReasoningFinalized { status, parts, .. } => {
+            *parts = protected_reasoning_parts(Some(*status), !parts.is_empty())?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Converts Runtime-derived v6 process content into one fixed Desktop-private projection before
+/// the value can cross either the SQLCipher or WebView boundary. The reducer may retain its
+/// bounded source state for reconciliation, but every durable/live clone must pass through here.
+pub(crate) fn protect_process_projection(
+    mut projection: Feat134Projection,
+) -> Result<Feat134Projection, ChatError> {
+    for item in &mut projection.items {
+        protect_item(item)?;
+    }
+    if let Some(plan) = &mut projection.plan {
+        protect_plan(plan);
+    }
+    protect_delta(&mut projection.delta)?;
+    validate_process_projection(&projection)?;
+    Ok(projection)
+}
+
+fn protected_parts_are_valid(
+    status: Option<TimelineReasoningStatus>,
+    parts: &[TimelineReasoningPart],
+) -> bool {
+    let protected = parts.len() == 1
+        && parts[0].content_index == 0
+        && parts[0].text == PROCESS_CONTENT_PROTECTED_MESSAGE;
+    match status {
+        Some(TimelineReasoningStatus::Complete | TimelineReasoningStatus::Incomplete) => protected,
+        Some(TimelineReasoningStatus::Unavailable) => parts.is_empty(),
+        None => parts.is_empty() || protected,
+    }
+}
+
+fn protected_item_is_valid(item: &TimelineItem) -> bool {
+    if is_process_agent_message(item) {
+        item.text == PROCESS_CONTENT_PROTECTED_MESSAGE && item.reasoning_parts.is_empty()
+    } else if item.item_type == "reasoning" {
+        item.text.is_empty()
+            && protected_parts_are_valid(item.reasoning_status, &item.reasoning_parts)
+    } else {
+        true
+    }
+}
+
+fn protected_plan_is_valid(plan: &TimelinePlan) -> bool {
+    plan.explanation
+        .as_ref()
+        .is_none_or(|value| value == PROCESS_CONTENT_PROTECTED_MESSAGE)
+        && plan
+            .steps
+            .iter()
+            .all(|step| step.step == PROCESS_CONTENT_PROTECTED_MESSAGE)
+}
+
+pub(crate) fn validate_process_state(
+    items: &[TimelineItem],
+    plan: Option<&TimelinePlan>,
+) -> Result<(), ChatError> {
+    if items.iter().all(protected_item_is_valid) && plan.is_none_or(protected_plan_is_valid) {
+        Ok(())
+    } else {
+        Err(ChatError::InvalidInput)
+    }
+}
+
+/// Defense-in-depth invariant for every v6 SQLCipher and IPC entry point. This is deliberately
+/// validation-only: callers must use `protect_process_projection` rather than silently repairing
+/// a projection at a storage or transport boundary.
+pub(crate) fn validate_process_projection(projection: &Feat134Projection) -> Result<(), ChatError> {
+    validate_process_state(&projection.items, projection.plan.as_ref())?;
+    let valid_delta = match &projection.delta {
+        TimelineDelta::PlanUpdated(plan) => protected_plan_is_valid(plan),
+        TimelineDelta::ItemStarted(item) | TimelineDelta::ItemCompleted(item) => {
+            protected_item_is_valid(item)
+        }
+        TimelineDelta::AgentMessageAppend { phase, text, .. } => {
+            *phase == Some(TimelinePhase::FinalAnswer) || text == PROCESS_CONTENT_PROTECTED_MESSAGE
+        }
+        TimelineDelta::ReasoningAppend { text, .. } => text == PROCESS_CONTENT_PROTECTED_MESSAGE,
+        TimelineDelta::ReasoningFinalized { status, parts, .. } => {
+            protected_parts_are_valid(Some(*status), parts)
+        }
+        _ => true,
+    };
+    if valid_delta {
+        Ok(())
+    } else {
+        Err(ChatError::InvalidInput)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApprovalProjectionStatus {
@@ -786,10 +962,309 @@ fn days_from_civil(year: u32, month: u32, day: u32) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::database::StoredEventCursor;
+    use crate::chat::feat134::{
+        SourceIdentity, TimelineItemStatus, TimelinePlanStep, TimelineReasoningPart,
+        TimelineTerminal,
+    };
     use crate::chat::host_domain::{HostApprovalRequested, HostEventCursor};
     use serde_json::json;
 
     const SESSION_ID: &str = "22222222-2222-4222-8222-222222222222";
+
+    fn native_boundary_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../tests/fixtures/feat-137/native-boundary-canary.json"
+        ))
+        .expect("native boundary canary fixture")
+    }
+
+    fn process_item(
+        item_id: &str,
+        item_ordinal: usize,
+        item_type: &str,
+        phase: Option<TimelinePhase>,
+        text: &str,
+        reasoning_status: Option<TimelineReasoningStatus>,
+        reasoning_parts: Vec<TimelineReasoningPart>,
+    ) -> TimelineItem {
+        TimelineItem {
+            item_id: item_id.to_owned(),
+            item_ordinal,
+            item_type: item_type.to_owned(),
+            phase,
+            status: TimelineItemStatus::Completed,
+            text: text.to_owned(),
+            reasoning_status,
+            reasoning_reason_code: None,
+            reasoning_parts,
+            reasoning_finalized_at_ms: reasoning_status.map(|_| 2),
+            execution: None,
+            started_at_ms: 1,
+            completed_at_ms: Some(2),
+            source_event_id: Uuid::from_u128(0x1370 + item_ordinal as u128),
+            source_sequence: item_ordinal as u64,
+            source_occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+        }
+    }
+
+    fn raw_process_projection(delta: TimelineDelta) -> Feat134Projection {
+        let fixture = native_boundary_fixture();
+        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
+        let safe_final_answer = fixture["safeFinalAnswer"].as_str().unwrap();
+        Feat134Projection {
+            session_id: Uuid::from_u128(0x137001),
+            turn_id: Uuid::from_u128(0x137002),
+            cursor: StoredEventCursor {
+                stream_id: Uuid::from_u128(0x137003),
+                sequence: 5,
+                event_id: Uuid::from_u128(0x137004),
+            },
+            source_event_type: "item.agent_message.delta".to_owned(),
+            source_turn_id: Some(Uuid::from_u128(0x137005)),
+            source_occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+            source_event_bytes: 64,
+            observed_at_ms: 1,
+            durable_sequence: None,
+            assistant_text: safe_final_answer.to_owned(),
+            items: vec![
+                process_item(
+                    "commentary",
+                    1,
+                    "agentMessage",
+                    Some(TimelinePhase::Commentary),
+                    forbidden_canary,
+                    None,
+                    Vec::new(),
+                ),
+                process_item(
+                    "unclassified",
+                    2,
+                    "agentMessage",
+                    None,
+                    forbidden_canary,
+                    None,
+                    Vec::new(),
+                ),
+                process_item(
+                    "reasoning",
+                    3,
+                    "reasoning",
+                    None,
+                    "",
+                    Some(TimelineReasoningStatus::Complete),
+                    vec![
+                        TimelineReasoningPart {
+                            content_index: 0,
+                            text: forbidden_canary.to_owned(),
+                        },
+                        TimelineReasoningPart {
+                            content_index: 1,
+                            text: forbidden_canary.to_owned(),
+                        },
+                    ],
+                ),
+                process_item(
+                    "final",
+                    4,
+                    "agentMessage",
+                    Some(TimelinePhase::FinalAnswer),
+                    safe_final_answer,
+                    None,
+                    Vec::new(),
+                ),
+            ],
+            plan: Some(TimelinePlan {
+                source_event_id: Uuid::from_u128(0x137006),
+                source_sequence: 4,
+                source_occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+                explanation: Some(forbidden_canary.to_owned()),
+                steps: vec![TimelinePlanStep {
+                    ordinal: 0,
+                    step: forbidden_canary.to_owned(),
+                    status: "in_progress",
+                }],
+                observed_at_ms: 1,
+            }),
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta,
+        }
+    }
+
+    fn projection_forbidden_hits(projection: &Feat134Projection, needle: &str) -> usize {
+        let text_hits = |value: &str| value.matches(needle).count();
+        let item_hits = |item: &TimelineItem| {
+            text_hits(&item.text)
+                + item
+                    .reasoning_parts
+                    .iter()
+                    .map(|part| text_hits(&part.text))
+                    .sum::<usize>()
+        };
+        let plan_hits = |plan: &TimelinePlan| {
+            plan.explanation.as_deref().map_or(0, text_hits)
+                + plan
+                    .steps
+                    .iter()
+                    .map(|step| text_hits(&step.step))
+                    .sum::<usize>()
+        };
+        let delta_hits = match &projection.delta {
+            TimelineDelta::PlanUpdated(plan) => plan_hits(plan),
+            TimelineDelta::ItemStarted(item) | TimelineDelta::ItemCompleted(item) => {
+                item_hits(item)
+            }
+            TimelineDelta::AgentMessageAppend { text, .. }
+            | TimelineDelta::ReasoningAppend { text, .. } => text_hits(text),
+            TimelineDelta::ReasoningFinalized { parts, .. } => {
+                parts.iter().map(|part| text_hits(&part.text)).sum()
+            }
+            _ => 0,
+        };
+        text_hits(&projection.assistant_text)
+            + projection.items.iter().map(item_hits).sum::<usize>()
+            + projection.plan.as_ref().map_or(0, plan_hits)
+            + delta_hits
+    }
+
+    #[test]
+    fn v6_process_projection_is_protected_before_storage_or_ipc() {
+        let fixture = native_boundary_fixture();
+        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
+        let safe_final_answer = fixture["safeFinalAnswer"].as_str().unwrap();
+        assert_eq!(
+            fixture["protectedMessage"].as_str(),
+            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
+        );
+        let source = SourceIdentity {
+            event_id: Uuid::from_u128(0x137004),
+            sequence: 5,
+            occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+        };
+        let raw = raw_process_projection(TimelineDelta::AgentMessageAppend {
+            source,
+            item_id: "commentary".to_owned(),
+            item_ordinal: 1,
+            phase: Some(TimelinePhase::Commentary),
+            text: forbidden_canary.to_owned(),
+        });
+        let raw_cursor = raw.cursor.clone();
+        let raw_source_turn_id = raw.source_turn_id;
+        let raw_item_count = raw.items.len();
+        let raw_terminal_count = usize::from(raw.terminal.is_some());
+        let raw_durable_sequence = raw.durable_sequence;
+        let raw_event_id = match &raw.delta {
+            TimelineDelta::AgentMessageAppend { source, .. } => source.event_id,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            validate_process_projection(&raw),
+            Err(ChatError::InvalidInput)
+        );
+
+        let protected = protect_process_projection(raw).unwrap();
+        validate_process_projection(&protected).unwrap();
+        assert_eq!(projection_forbidden_hits(&protected, forbidden_canary), 0);
+        let TimelineDelta::AgentMessageAppend { text, .. } = &protected.delta else {
+            panic!("protected commentary append expected");
+        };
+        assert_eq!(text, PROCESS_CONTENT_PROTECTED_MESSAGE);
+        assert_eq!(protected.cursor, raw_cursor);
+        assert_eq!(protected.source_turn_id, raw_source_turn_id);
+        assert_eq!(protected.items.len(), raw_item_count);
+        assert_eq!(
+            usize::from(protected.terminal.is_some()),
+            raw_terminal_count
+        );
+        assert_eq!(protected.durable_sequence, raw_durable_sequence);
+        let protected_event_id = match &protected.delta {
+            TimelineDelta::AgentMessageAppend { source, .. } => source.event_id,
+            _ => unreachable!(),
+        };
+        assert_eq!(protected_event_id, raw_event_id);
+        assert_eq!(protected.assistant_text, safe_final_answer);
+        assert_eq!(protected.items[3].text, safe_final_answer);
+        for item in &protected.items[..2] {
+            assert_eq!(item.text, PROCESS_CONTENT_PROTECTED_MESSAGE);
+        }
+        assert_eq!(protected.items[2].text, "");
+        assert_eq!(protected.items[2].reasoning_parts.len(), 1);
+        assert_eq!(
+            protected.items[2].reasoning_parts[0].text,
+            PROCESS_CONTENT_PROTECTED_MESSAGE
+        );
+        let plan = protected.plan.as_ref().unwrap();
+        assert_eq!(
+            plan.explanation.as_deref(),
+            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
+        );
+        assert_eq!(plan.steps[0].step, PROCESS_CONTENT_PROTECTED_MESSAGE);
+    }
+
+    #[test]
+    fn v6_process_delta_projection_is_closed_but_final_answer_is_unchanged() {
+        let fixture = native_boundary_fixture();
+        let safe_final_answer = fixture["safeFinalAnswer"].as_str().unwrap();
+        let mut plan = raw_process_projection(TimelineDelta::Ignored).plan.unwrap();
+        plan.source_sequence = 5;
+        let protected_plan =
+            protect_process_projection(raw_process_projection(TimelineDelta::PlanUpdated(plan)))
+                .unwrap();
+        let TimelineDelta::PlanUpdated(plan) = protected_plan.delta else {
+            panic!("protected plan delta expected");
+        };
+        assert_eq!(plan.steps[0].step, PROCESS_CONTENT_PROTECTED_MESSAGE);
+
+        let final_delta = TimelineDelta::AgentMessageAppend {
+            source: SourceIdentity {
+                event_id: Uuid::from_u128(0x137004),
+                sequence: 5,
+                occurred_at: "2026-08-30T12:00:00Z".to_owned(),
+            },
+            item_id: "final".to_owned(),
+            item_ordinal: 4,
+            phase: Some(TimelinePhase::FinalAnswer),
+            text: safe_final_answer.to_owned(),
+        };
+        let protected_final =
+            protect_process_projection(raw_process_projection(final_delta)).unwrap();
+        let TimelineDelta::AgentMessageAppend { text, phase, .. } = protected_final.delta else {
+            panic!("final answer delta expected");
+        };
+        assert_eq!(phase, Some(TimelinePhase::FinalAnswer));
+        assert_eq!(text, safe_final_answer);
+
+        let terminal = TimelineTerminal {
+            source_event_id: Uuid::from_u128(0x137007),
+            source_sequence: 6,
+            source_occurred_at: "2026-08-30T12:00:01Z".to_owned(),
+            status: "completed",
+            code: None,
+            unfinished_reasoning_reason_code: None,
+            observed_at_ms: 2,
+        };
+        let mut terminal_projection =
+            raw_process_projection(TimelineDelta::TurnTerminal(terminal.clone()));
+        terminal_projection.terminal = Some(terminal.clone());
+        terminal_projection.durable_sequence = Some(6);
+        let protected_terminal = protect_process_projection(terminal_projection).unwrap();
+        assert_eq!(
+            projection_forbidden_hits(
+                &protected_terminal,
+                fixture["forbiddenCanary"].as_str().unwrap(),
+            ),
+            0
+        );
+        assert_eq!(protected_terminal.terminal.as_ref(), Some(&terminal));
+        assert_eq!(protected_terminal.durable_sequence, Some(6));
+        assert!(matches!(
+            protected_terminal.delta,
+            TimelineDelta::TurnTerminal(ref value) if value == &terminal
+        ));
+        assert_eq!(usize::from(protected_terminal.terminal.is_some()), 1);
+    }
 
     fn pending_snapshot() -> serde_json::Value {
         json!({

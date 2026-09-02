@@ -40,6 +40,7 @@ import {
   type ConversationTimelineItemViewModel,
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
+import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";
 import type { ConversationState } from "../../domain/conversation-state";
 import {
   browserFrameProjectionScheduler,
@@ -63,6 +64,7 @@ import {
   LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
   legacyChatTimelineRollbackEnabled as configuredLegacyChatTimelineRollbackEnabled,
 } from "../../authorization/chat-timeline-ui-config";
+import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 
 const route = useRoute();
 const router = useRouter();
@@ -72,6 +74,7 @@ const legacyChatTimelineRollbackEnabled = inject(
   LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
   configuredLegacyChatTimelineRollbackEnabled,
 );
+const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const composerDrafts = shallowRef(createChatComposerDrafts());
 const routeSessionId = computed(() => typeof route.params.sessionId === "string"
   ? route.params.sessionId
@@ -142,12 +145,17 @@ const conversationTimeline = computed(() => {
         renderedConversationState.value,
         sessionId,
         chatStore.conversationApprovalState,
+        { protectApprovalProcessContent: feat137ApprovalUiEnabled },
       );
 });
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
 const stableError = computed(() => errorNotice(
-  actionErrorCode.value ?? chatStore.controlPlane?.issueCode ?? chatStore.lastErrorCode,
+  actionErrorCode.value ?? (
+    chatStore.selectedAccessMode === "history-only"
+      ? chatStore.lastErrorCode
+      : chatStore.controlPlane?.issueCode ?? chatStore.lastErrorCode
+  ),
 ));
 const isStreaming = computed(() => chatStore.phase === "streaming");
 const isHistoryLoading = computed(() =>
@@ -405,6 +413,21 @@ async function handleStableErrorAction(): Promise<void> {
   }
   if (code === "chat_project_invalid") return void pickProject();
   if (code === "chat_context_invalid" || code === "chat_unauthenticated") return void router.replace("/settings");
+  if (chatStore.context === null && chatStore.lastBindFailureStage !== null) {
+    actionErrorCode.value = null;
+    transientNotice.value = null;
+    await retryChatAuthority();
+    return;
+  }
+  if (chatStore.selectedSessionId !== null && chatStore.selectedAccessMode === null) {
+    await chatStore.selectSession(chatStore.selectedSessionId);
+    return;
+  }
+  if (chatStore.selectedAccessMode === "history-only") {
+    if (code === "chat_cleanup_incomplete") await chatStore.refreshSelectedCleanup();
+    else await chatStore.resyncSelected();
+    return;
+  }
   if (!chatStore.draftTargetReady) {
     await chatStore.retryDraftRecovery();
     return;
@@ -866,6 +889,11 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="chat-workspace__composer">
+      <p
+        v-if="chatStore.selectedAccessMode === 'history-only'"
+        class="chat-workspace__composer-note"
+        role="status"
+      >此任务仅保留本地历史记录，当前无法继续发送。</p>
       <p v-if="stableError && !permissionDenied" class="chat-workspace__composer-error" role="alert">
         <strong>{{ stableError.title }}</strong> {{ stableError.detail }}
         <button v-if="stableError.actionLabel" type="button" @click="handleStableErrorAction">{{ stableError.actionLabel }}</button>
@@ -1084,6 +1112,7 @@ onBeforeUnmount(() => {
 .permission-dialog button:focus-visible { outline: var(--yj-space-1) solid var(--yj-color-brand-border); outline-offset: var(--yj-space-1); }
 
 .chat-workspace__composer { z-index: 1; display: flex; flex-direction: column; align-items: center; padding: var(--yj-space-3) var(--yj-space-8) var(--yj-space-5); border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); background: linear-gradient(to bottom, color-mix(in srgb, var(--yj-color-bg-page) 82%, transparent), var(--yj-color-bg-page) 24%); }
+.chat-workspace__composer-note { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-text-muted); font-size: var(--yj-font-size-caption); }
 .chat-workspace__composer-error { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-2); color: var(--yj-color-error); font-size: var(--yj-font-size-caption); }
 .chat-workspace__composer-error button { padding: 0; border: 0; color: inherit; background: transparent; font-weight: var(--yj-font-weight-semibold); text-decoration: underline; }
 

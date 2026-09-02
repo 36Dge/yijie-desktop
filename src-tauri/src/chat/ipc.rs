@@ -26,7 +26,8 @@ use super::feat136::{
     ToolIdentityProjection,
 };
 use super::feat137::{
-    ApprovalIssue, ApprovalProjection, ApprovalProjectionStatus, PendingApprovalSnapshot,
+    validate_process_projection, ApprovalIssue, ApprovalProjection, ApprovalProjectionStatus,
+    PendingApprovalSnapshot,
 };
 use super::host_domain::HostApprovalDecision;
 use super::{ChatError, ChatRuntime};
@@ -1184,6 +1185,7 @@ impl TurnProjectionSink for ChatEventBridge {
         projection: Feat134Projection,
         approval: Option<ApprovalProjection>,
     ) -> Result<(), ChatError> {
+        validate_process_projection(&projection).map_err(|_| ChatError::DatabaseUnavailable)?;
         let durable_sequence = projection
             .durable_sequence
             .filter(|sequence| *sequence > 0)
@@ -4597,9 +4599,10 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::feat137::{protect_process_projection, PROCESS_CONTENT_PROTECTED_MESSAGE};
     use crate::chat::{
         CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
-        ProjectionErrorCode, ReasoningPart, TimelineItemStatus,
+        ProjectionErrorCode, ReasoningPart, TimelineItemStatus, TimelinePhase,
     };
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tokio::sync::Notify;
@@ -6144,6 +6147,111 @@ mod tests {
         ] {
             assert!(encoded["pending"][0].get(forbidden).is_none());
         }
+    }
+
+    #[test]
+    fn feat137_live_ipc_accepts_only_native_protected_process_projection() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/feat-137/native-boundary-canary.json"
+        ))
+        .unwrap();
+        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
+        assert_eq!(
+            fixture["protectedMessage"].as_str(),
+            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
+        );
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let source = SourceIdentity {
+            event_id: Uuid::now_v7(),
+            sequence: 1,
+            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
+        };
+        let item = TimelineItem {
+            item_id: "commentary".to_owned(),
+            item_ordinal: 1,
+            item_type: "agentMessage".to_owned(),
+            phase: Some(TimelinePhase::Commentary),
+            status: TimelineItemStatus::InProgress,
+            text: forbidden_canary.to_owned(),
+            reasoning_status: None,
+            reasoning_reason_code: None,
+            reasoning_parts: Vec::new(),
+            reasoning_finalized_at_ms: None,
+            execution: None,
+            started_at_ms: 1,
+            completed_at_ms: None,
+            source_event_id: source.event_id,
+            source_sequence: source.sequence,
+            source_occurred_at: source.occurred_at.clone(),
+        };
+        let raw = Feat134Projection {
+            session_id,
+            turn_id,
+            cursor: crate::chat::StoredEventCursor {
+                stream_id: Uuid::now_v7(),
+                sequence: source.sequence,
+                event_id: source.event_id,
+            },
+            source_event_type: "item.started".to_owned(),
+            source_turn_id: Some(Uuid::now_v7()),
+            source_occurred_at: source.occurred_at.clone(),
+            source_event_bytes: 64,
+            observed_at_ms: 1,
+            durable_sequence: None,
+            assistant_text: String::new(),
+            items: vec![item.clone()],
+            plan: None,
+            turn_notices: Vec::new(),
+            session_notice: None,
+            terminal: None,
+            delta: TimelineDelta::ItemStarted(item),
+        };
+        assert_eq!(
+            validate_process_projection(&raw),
+            Err(ChatError::InvalidInput)
+        );
+
+        let original_cursor = raw.cursor.clone();
+        let original_item_count = raw.items.len();
+        let mut protected = protect_process_projection(raw).unwrap();
+        protected.durable_sequence = Some(1);
+        validate_process_projection(&protected).unwrap();
+        assert_eq!(protected.cursor, original_cursor);
+        assert_eq!(protected.items.len(), original_item_count);
+        assert_eq!(
+            format!("{:?}", protected.items)
+                .matches(forbidden_canary)
+                .count(),
+            0
+        );
+        let (_, kind, payload, _) = feat136_event_payload(&protected).unwrap().unwrap();
+        assert_eq!(kind, "item_started");
+        assert_eq!(
+            payload["text"].as_str(),
+            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
+        );
+        let encoded = serde_json::to_string(&payload).unwrap();
+        assert_eq!(encoded.matches(forbidden_canary).count(), 0);
+
+        let mut raw_append = protected.clone();
+        raw_append.durable_sequence = None;
+        raw_append.delta = TimelineDelta::AgentMessageAppend {
+            source,
+            item_id: "commentary".to_owned(),
+            item_ordinal: 1,
+            phase: Some(TimelinePhase::Commentary),
+            text: forbidden_canary.to_owned(),
+        };
+        raw_append.items[0].text = forbidden_canary.to_owned();
+        let mut protected_append = protect_process_projection(raw_append).unwrap();
+        protected_append.durable_sequence = Some(2);
+        let (_, kind, payload, _) = feat134_event_payload(&protected_append)
+            .unwrap()
+            .expect("protected live append");
+        assert_eq!(kind, "agent_message_append");
+        assert_eq!(payload["text"], PROCESS_CONTENT_PROTECTED_MESSAGE);
+        assert_eq!(payload.to_string().matches(forbidden_canary).count(), 0);
     }
 
     #[test]
