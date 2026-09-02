@@ -16,6 +16,7 @@ import { authoritativePermissionUiEnabled } from "../authorization/permission-ui
 import { localChatUiEnabled } from "../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "../authorization/store-showcase-ui-config";
+import { workflowShowcaseUiEnabled } from "../authorization/workflow-showcase-ui-config";
 import type { KnownCapability } from "../domain/permissions";
 import { usePermissionStore } from "../stores/permission.store";
 
@@ -24,6 +25,7 @@ const RootRoutePage: Component = { render: () => null };
 export interface AppPageLoaders {
   chat: () => Promise<Component>;
   store: () => Promise<Component>;
+  workflows: () => Promise<Component>;
   plugins: () => Promise<Component>;
   settings: () => Promise<Component>;
   accessDenied: () => Promise<Component>;
@@ -32,6 +34,7 @@ export interface AppPageLoaders {
 const APP_PAGE_LOADERS: AppPageLoaders = {
   chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
   store: async () => (await import("../pages/store/StorePage.vue")).default,
+  workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
   plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
@@ -72,6 +75,7 @@ export function createAppRouteRecords(
   chatUiEnabled = localChatUiEnabled,
   skillUiEnabled = skillMarketplaceUiEnabled,
   storeUiEnabled = storeShowcaseUiEnabled,
+  workflowUiEnabled = workflowShowcaseUiEnabled,
 ): readonly RouteRecordRaw[] {
   const records: RouteRecordRaw[] = [
     {
@@ -117,6 +121,15 @@ export function createAppRouteRecords(
     meta: {
       navKey: "store",
       documentTitle: "我的店铺 · 易界 AI",
+    },
+  });
+  if (workflowUiEnabled) records.push({
+    path: "/workflows",
+    name: "workflows",
+    component: pageLoaders.workflows,
+    meta: {
+      navKey: "workspace",
+      documentTitle: "工作流 · 易界 AI",
     },
   });
   records.push(
@@ -165,10 +178,17 @@ export function createAppRouter(
   chatUiEnabled = localChatUiEnabled,
   skillUiEnabled = skillMarketplaceUiEnabled,
   storeUiEnabled = storeShowcaseUiEnabled,
+  workflowUiEnabled = workflowShowcaseUiEnabled,
 ) {
   const appRouter = createRouter({
     history,
-    routes: createAppRouteRecords(pageLoaders, chatUiEnabled, skillUiEnabled, storeUiEnabled),
+    routes: createAppRouteRecords(
+      pageLoaders,
+      chatUiEnabled,
+      skillUiEnabled,
+      storeUiEnabled,
+      workflowUiEnabled,
+    ),
   });
 
   appRouter.beforeEach(async (route) => {
@@ -186,6 +206,9 @@ export function createAppRouter(
       return { path: "/settings", replace: true };
     }
     if (!storeUiEnabled && route.path === "/store") {
+      return { path: "/settings", replace: true };
+    }
+    if (!workflowUiEnabled && route.path === "/workflows") {
       return { path: "/settings", replace: true };
     }
 

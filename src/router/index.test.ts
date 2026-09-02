@@ -28,16 +28,20 @@ function pageLoaders(): {
   loaders: AppPageLoaders;
   chat: ReturnType<typeof vi.fn>;
   store: ReturnType<typeof vi.fn>;
+  workflows: ReturnType<typeof vi.fn>;
 } {
   const page = defineComponent({ template: "<h1>test page</h1>" });
   const chat = vi.fn(async () => page);
   const store = vi.fn(async () => page);
+  const workflows = vi.fn(async () => page);
   return {
     chat,
     store,
+    workflows,
     loaders: {
       chat,
       store,
+      workflows,
       plugins: async () => page,
       settings: async () => page,
       accessDenied: async () => page,
@@ -134,7 +138,7 @@ describe("app router", () => {
       "/access-denied",
     ]);
     expect(APP_ROUTE_RECORDS.map((route) => route.path)).not.toEqual(
-      expect.arrayContaining(["/tasks", "/store", "/workspace", "/scheduled-tasks", "/plugins", "/knowledge"]),
+      expect.arrayContaining(["/tasks", "/store", "/workflows", "/scheduled-tasks", "/plugins", "/knowledge"]),
     );
   });
 
@@ -180,6 +184,55 @@ describe("app router", () => {
       false,
     );
     await router.push("/store");
+    await router.isReady();
+    expect(router.currentRoute.value.path).toBe("/settings");
+  });
+
+  it("FEAT-151 registers and protects the local workflow showcase", async () => {
+    const deniedPages = pageLoaders();
+    const allowed = createAppRouter(
+      createMemoryHistory(),
+      boundary(["workspace.use"]),
+      undefined,
+      true,
+      true,
+      true,
+      true,
+    );
+    await allowed.push("/workflows");
+    await allowed.isReady();
+    expect(allowed.currentRoute.value).toMatchObject({
+      path: "/workflows",
+      name: "workflows",
+      meta: { navKey: "workspace", documentTitle: "工作流 · 易界 AI" },
+    });
+
+    const denied = createAppRouter(
+      createMemoryHistory(),
+      boundary(["task.read"]),
+      deniedPages.loaders,
+      true,
+      true,
+      true,
+      true,
+    );
+    await denied.push("/workflows");
+    await denied.isReady();
+    expect(denied.currentRoute.value.path).toBe("/access-denied");
+    expect(deniedPages.workflows).not.toHaveBeenCalled();
+  });
+
+  it("FEAT-151 keeps /workflows closed outside the exact local feature profile", async () => {
+    const router = createAppRouter(
+      createMemoryHistory(),
+      boundary(["workspace.use"]),
+      undefined,
+      true,
+      true,
+      true,
+      false,
+    );
+    await router.push("/workflows");
     await router.isReady();
     expect(router.currentRoute.value.path).toBe("/settings");
   });
@@ -270,6 +323,14 @@ describe("app router", () => {
       .toMatchObject({
         name: "store",
         meta: { navKey: "store", documentTitle: "我的店铺 · 易界 AI" },
+      });
+  });
+
+  it("FEAT-151 registers the workflow title and navigation key", () => {
+    expect(createAppRouteRecords(undefined, true, true, true, true).find((route) => route.path === "/workflows"))
+      .toMatchObject({
+        name: "workflows",
+        meta: { navKey: "workspace", documentTitle: "工作流 · 易界 AI" },
       });
   });
 

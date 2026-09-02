@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 
-export type AppRoutePath = "/chat" | "/store" | "/plugins" | "/settings";
+export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/settings";
 export type AppNavPlacement = "main" | "bottom";
 export type AppNavItemKey =
   | "newTask"
@@ -63,10 +63,11 @@ export const APP_NAVIGATION = [
   {
     kind: "item",
     key: "workspace",
-    label: "工作台",
+    label: "工作流",
     icon: "workspace",
     placement: "main",
-    disabled: true,
+    disabled: false,
+    to: "/workflows",
   },
   {
     kind: "item",

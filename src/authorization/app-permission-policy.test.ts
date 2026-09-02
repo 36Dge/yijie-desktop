@@ -83,6 +83,23 @@ describe("app permission policy", () => {
     }).store).toBe(false);
   });
 
+  it("FEAT-151 protects the local workflow showcase with workspace.use", () => {
+    const allowed = snapshot(["workspace.use"]);
+    const denied = snapshot(["task.read"]);
+
+    expect(requiredCapabilityForPath("/workflows")).toBe("workspace.use");
+    expect(canRenderProtectedPath("/workflows", allowed)).toBe(true);
+    expect(canRenderProtectedPath("/workflows", denied)).toBe(false);
+    expect(canRenderProtectedPath("/workflows", {
+      ...allowed,
+      workflowShowcaseUiEnabled: false,
+    })).toBe(false);
+    expect(resolveNavigationVisibility({
+      ...allowed,
+      workflowShowcaseUiEnabled: false,
+    }).workspace).toBe(false);
+  });
+
   it.each([
     [["task.create", "task.read"] as const, "/chat"],
     [["task.read"] as const, "/settings"],

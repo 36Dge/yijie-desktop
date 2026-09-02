@@ -40,6 +40,7 @@ async function mountSidebar(capabilities: readonly KnownCapability[]) {
       { path: "/chat", component: defineComponent({ template: "<div />" }) },
       { path: "/chat/:sessionId", component: defineComponent({ template: "<div />" }) },
       { path: "/store", component: defineComponent({ template: "<div />" }) },
+      { path: "/workflows", component: defineComponent({ template: "<div />" }) },
       { path: "/plugins", component: defineComponent({ template: "<div />" }) },
       { path: "/settings", component: defineComponent({ template: "<div />" }) },
     ],
@@ -100,6 +101,16 @@ describe("YjSidebar permission rendering", () => {
     expect(wrapper.find('[aria-label="我的店铺，即将开放"]').exists()).toBe(false);
   });
 
+  it("FEAT-151 renders the allowed workflow showcase as an enabled selected route", async () => {
+    const wrapper = await mountSidebar(["workspace.use"]);
+    await wrapper.setProps({ currentPath: "/workflows" });
+    const workflowLink = wrapper.findAll("a").find((link) => link.text().includes("工作流"));
+
+    expect(workflowLink?.attributes("href")).toBe("/workflows");
+    expect(workflowLink?.attributes("aria-current")).toBe("page");
+    expect(wrapper.find('[aria-label="工作流，即将开放"]').exists()).toBe(false);
+  });
+
   it("FEAT-126 hides the sidebar visibility control when chat owns the fixed App Shell", async () => {
     const wrapper = await mountSidebar(["task.create"]);
     await wrapper.setProps({ allowToggle: false, currentPath: "/chat" });
@@ -136,7 +147,7 @@ describe("YjSidebar permission rendering", () => {
     ).map((entry) => entry.text())).toEqual([
       "新建任务",
       "我的店铺",
-      "工作台",
+      "工作流",
       "定时任务",
       "插件",
       "资料库",

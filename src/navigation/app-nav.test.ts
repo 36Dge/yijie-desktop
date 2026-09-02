@@ -18,7 +18,7 @@ describe("app navigation", () => {
     expect(resolved.map((entry) => entry.label)).toEqual([
       "新建任务",
       "我的店铺",
-      "工作台",
+      "工作流",
       "定时任务",
       "插件",
       "资料库",
@@ -39,6 +39,7 @@ describe("app navigation", () => {
     ).toEqual([
       { key: "newTask", to: "/chat" },
       { key: "store", to: "/store" },
+      { key: "workspace", to: "/workflows" },
       { key: "plugin", to: "/plugins" },
       { key: "settings", to: "/settings" },
     ]);

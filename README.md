@@ -8,7 +8,7 @@
 - Chat 对话流；
 - Agent 任务进度展示；
 - 工具调用审批；
-- Listing、广告、合规、物流、经营分析等工作台入口；
+- Listing、广告、合规、物流、经营分析等工作流入口；
 - 本地 Codex / Agent Host sidecar 管理；
 - Mac App 签名、打包和自动更新。
 

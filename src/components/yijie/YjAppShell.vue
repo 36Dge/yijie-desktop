@@ -6,6 +6,7 @@ import { authoritativePermissionUiEnabled } from "../../authorization/permission
 import { localChatUiEnabled } from "../../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "../../authorization/store-showcase-ui-config";
+import { workflowShowcaseUiEnabled } from "../../authorization/workflow-showcase-ui-config";
 import { resolveAppNavigation } from "../../navigation/app-nav";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -28,6 +29,7 @@ const navigationEntries = computed(() =>
       chatUiEnabled: localChatUiEnabled,
       skillMarketplaceUiEnabled,
       storeShowcaseUiEnabled,
+      workflowShowcaseUiEnabled,
       hasCapability: permissionStore.hasCapability,
     }),
   ),
@@ -67,7 +69,7 @@ function recoverCurrentNewTask(): void {
       @toggle="sidebarStore.toggle"
       @recover-new-task="recoverCurrentNewTask"
     />
-    <main class="yj-app-shell__content">
+    <main class="yj-app-shell__content" tabindex="0">
       <slot />
     </main>
   </div>
