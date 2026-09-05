@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isFeat137ApprovalUiEnabled } from "./feat137-approval-ui-config";
 
 describe("FEAT-137 approval UI gate", () => {
-  it("enables only for the exact local demo_fast conjunction after FEAT-136", () => {
-    expect(isFeat137ApprovalUiEnabled("local", "demo_fast", "true", true)).toBe(true);
+  it("stays retired even for the former exact local activation", () => {
+    expect(isFeat137ApprovalUiEnabled("local", "demo_fast", "true", true)).toBe(false);
   });
 
   it.each([

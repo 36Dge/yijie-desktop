@@ -298,9 +298,8 @@ impl ChatRuntime {
             std::env::var("YIJIE_ENV").ok().as_deref(),
             std::env::var("YIJIE_LOCAL_PROFILE").ok().as_deref(),
         ) {
-            Ok(enabled) if !enabled || (feat134_streaming_enabled && feat136_streaming_enabled) => {
-                enabled
-            }
+            // Owner permanently terminated FEAT-137; stale opt-ins fail closed.
+            Ok(false) => false,
             Ok(_) | Err(_) => {
                 return Self {
                     mode: RuntimeMode::Invalid,

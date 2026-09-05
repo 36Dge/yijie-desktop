@@ -31,9 +31,9 @@ describe("local demo launcher profiles", () => {
       "VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true",
     );
     expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
-      "node scripts/check-agent-host-v6-contract.mjs",
+      "node scripts/check-approval-retirement.mjs",
     );
-    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).toContain(
+    expect(packageJson.scripts["tauri:build:demo-fast:stable"]).not.toContain(
       "VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true",
     );
   });
@@ -52,40 +52,40 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('[[ "$1" == "--stable-api-only" ]]');
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
-    expect(argumentBoundary).toContain(
-      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-137-acf2da55d8a5"',
+    expect(runner).toContain(
+      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"',
     );
-    expect(argumentBoundary).toContain('codex_binary="$codex_runtime_root/codex"');
-    expect(argumentBoundary).toContain('codex_manifest="$codex_runtime_root/runtime-manifest.json"');
+    expect(runner).toContain('codex_binary="$codex_runtime_root/codex"');
+    expect(runner).toContain('codex_manifest="$codex_runtime_root/runtime-manifest.json"');
     expect(argumentBoundary).toContain("feat134_environment=(");
     expect(argumentBoundary).toContain("YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(argumentBoundary).toContain("YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true");
     expect(argumentBoundary).toContain("VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true");
-    expect(argumentBoundary).toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
-    expect(argumentBoundary).toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
+    expect(argumentBoundary).not.toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
+    expect(argumentBoundary).not.toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
     expect(argumentBoundary).toContain('case "$#" in');
   });
 
-  it("pins the stable entry to the reviewed FEAT-137 Runtime provenance artifact pair", async () => {
+  it("pins both entries to the retained FEAT-136 Runtime provenance artifact pair", async () => {
     const runner = await readFile(runnerPath, "utf8");
 
     expect(runner).toContain(
-      'feat137_runtime_binary_sha256="84bb0445a15f99354ddd38ccb407b9b0d3d28522accece3fa9755918ab6978e3"',
+      'runtime_binary_sha256="4efe16d2848680752cf9aacf4c17741ab2eeb7415894a66c2bb03652b00a322d"',
     );
     expect(runner).toContain(
-      'feat137_runtime_manifest_sha256="e62d8210f5abcad7ff0fc1b4d068c7fe4da59501c6fa6b12f18dc4a1f939c6aa"',
+      'runtime_manifest_sha256="1cfa2e0a139b2213f4d29b1efeed71d4810110ac865f0bcbd931ff33b0062c1b"',
     );
     expect(runner).toContain('if [[ "$stable_api_only" == "true" ]]; then');
     expect(runner).toContain(
       '[[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]]',
     );
-    expect(runner).toContain('[[ "$(sha256_file "$codex_binary")" == "$feat137_runtime_binary_sha256" ]]');
-    expect(runner).toContain('[[ "$(sha256_file "$codex_manifest")" == "$feat137_runtime_manifest_sha256" ]]');
-    expect(runner.match(/\.local\/runtime-artifacts\/feat-137-acf2da55d8a5/g)).toHaveLength(1);
+    expect(runner).toContain('[[ "$(sha256_file "$codex_binary")" == "$runtime_binary_sha256" ]]');
+    expect(runner).toContain('[[ "$(sha256_file "$codex_manifest")" == "$runtime_manifest_sha256" ]]');
+    expect(runner.match(/\.local\/runtime-artifacts\/feat-136-b2b20e2fc4a0/g)).toHaveLength(1);
   });
 
-  it("injects the dependent FEAT-134, FEAT-136 and FEAT-137 flags only through the exact stable branch", async () => {
+  it("retains FEAT-134 and FEAT-136 in stable mode without reactivating FEAT-137", async () => {
     const runner = await readFile(runnerPath, "utf8");
     const stableBranch = runner.slice(runner.indexOf("  1)"), runner.indexOf("    ;;"));
     const execBoundary = runner.slice(runner.indexOf("exec env \\"));
@@ -95,14 +95,14 @@ describe("local demo launcher profiles", () => {
     expect(stableBranch).toContain("VITE_YIJIE_FEAT134_STREAMING_ENABLED=true");
     expect(stableBranch).toContain("YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true");
     expect(stableBranch).toContain("VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true");
-    expect(stableBranch).toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
-    expect(stableBranch).toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
+    expect(stableBranch).not.toContain("YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true");
+    expect(stableBranch).not.toContain("VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true");
     expect(runner.match(/^\s+YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+VITE_YIJIE_FEAT134_STREAMING_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true$/gm)).toHaveLength(1);
     expect(runner.match(/^\s+VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true$/gm)).toHaveLength(1);
-    expect(runner.match(/^\s+YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true$/gm)).toHaveLength(1);
-    expect(runner.match(/^\s+VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true$/gm)).toHaveLength(1);
+    expect(runner.match(/^\s+YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED=true$/gm)).toBeNull();
+    expect(runner.match(/^\s+VITE_YIJIE_FEAT137_APPROVAL_ENABLED=true$/gm)).toBeNull();
     expect(execBoundary).toContain("-u YIJIE_FEAT134_STREAMING_ENABLED \\");
     expect(execBoundary).toContain("-u VITE_YIJIE_FEAT134_STREAMING_ENABLED \\");
     expect(execBoundary).toContain("-u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED \\");
@@ -114,19 +114,17 @@ describe("local demo launcher profiles", () => {
     expect(execBoundary).toContain("YIJIE_LOCAL_PROFILE=demo_fast \\");
   });
 
-  it("checks the reviewed v6 candidate only at the stable runner boundary", async () => {
+  it("checks permanent retirement at the shared runner boundary", async () => {
     const runner = await readFile(runnerPath, "utf8");
-    const check = "node scripts/check-agent-host-v6-contract.mjs";
-    const stableGuardStart = runner.indexOf(
-      'if [[ "$stable_api_only" == "true" ]]; then',
-      runner.indexOf('cd "$desktop_root"'),
-    );
-    const stableGuard = runner.slice(stableGuardStart, runner.indexOf("\nfi", stableGuardStart));
+    const check = "node scripts/check-approval-retirement.mjs";
+    const stableGuardStart = runner.indexOf(check);
+    const stableGuard = runner.slice(stableGuardStart);
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
 
     expect(stableGuardStart).toBeGreaterThanOrEqual(0);
     expect(stableGuard).toContain(check);
-    expect(runner.match(/node scripts\/check-agent-host-v6-contract\.mjs/g)).toHaveLength(1);
+    expect(runner.match(/node scripts\/check-approval-retirement\.mjs/g)).toHaveLength(1);
+    expect(runner).not.toContain("check-agent-host-v6-contract.mjs");
     expect(packageJson.scripts.generate).not.toContain(check);
     expect(packageJson.scripts["generate:check"]).not.toContain(check);
   });
@@ -151,7 +149,7 @@ describe("local demo launcher profiles", () => {
     expect(stableBuild.match(new RegExp(`${webFlag}=true`, "g"))).toHaveLength(1);
   });
 
-  it("clears ambient FEAT-137 activation from every non-stable package entry", async () => {
+  it("clears ambient FEAT-137 activation from every package entry", async () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
     const nativeFlag = "YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED";
     const webFlag = "VITE_YIJIE_FEAT137_APPROVAL_ENABLED";
@@ -168,7 +166,7 @@ describe("local demo launcher profiles", () => {
     expect(stableBuild).toContain(`-u ${nativeFlag}`);
     expect(stableBuild).toContain(`-u ${webFlag}`);
     expect(stableBuild).not.toContain(`${nativeFlag}=true`);
-    expect(stableBuild.match(new RegExp(`${webFlag}=true`, "g"))).toHaveLength(1);
+    expect(stableBuild).not.toContain(`${webFlag}=true`);
   });
 
   it("builds and launches the registered debug app only for the stable UI entry", async () => {

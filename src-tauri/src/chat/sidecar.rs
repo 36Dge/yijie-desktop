@@ -354,11 +354,12 @@ fn feat137_exact_local_enabled(
     flag: Option<&str>,
     environment: Option<&str>,
     profile: Option<&str>,
-    feat134_streaming_enabled: bool,
-    feat136_command_tool_items_enabled: bool,
+    _feat134_streaming_enabled: bool,
+    _feat136_command_tool_items_enabled: bool,
 ) -> Result<bool, ChatError> {
     let enabled = super::feat134::exact_local_enabled(flag, environment, profile)?;
-    if enabled && (!feat134_streaming_enabled || !feat136_command_tool_items_enabled) {
+    // Retired permanently, including the former exact local-only profile.
+    if enabled {
         return Err(ChatError::InvalidConfiguration);
     }
     Ok(enabled)
@@ -1757,10 +1758,10 @@ mod tests {
     }
 
     #[test]
-    fn feat137_sidecar_gate_is_exact_local_and_depends_on_v4_and_v5() {
+    fn feat137_retirement_rejects_former_exact_activation() {
         assert_eq!(
             feat137_exact_local_enabled(Some("true"), Some("local"), Some("demo_fast"), true, true,),
-            Ok(true)
+            Err(ChatError::InvalidConfiguration)
         );
         for (flag, environment, profile, feat134, feat136) in [
             (Some("true"), Some("local"), Some("demo_fast"), false, true),

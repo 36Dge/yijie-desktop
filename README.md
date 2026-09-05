@@ -1,5 +1,7 @@
 # yijie-desktop
 
+> 2026-09-05：FEAT-137 已按“Owner 永久终止、未完成验收”收尾。普通与 stable 入口均使用现存 FEAT-136 两补丁 Runtime；stable 保留 FEAT-134/136，审批 v6、原生 opt-in 和 UI 均停用。Contracts 权威为 `4d3f967938dde1c86ca34003a0a5628717f96262:docs/retirements/FEAT-137.json`。历史 v6 lock/checker、存储读取和源码不作活动入口，也不代表验收 PASS；完整记录见相邻 yijie 仓库 FEAT-137 的 `03-termination.md`。
+
 易界 AI Mac 桌面端，使用 Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI 和 pnpm。
 
 ## 仓库职责
