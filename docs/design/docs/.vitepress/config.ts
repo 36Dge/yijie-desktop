@@ -5,9 +5,10 @@ export default defineConfig({
   description: 'yijie-desktop Design System / UX 规范',
   lang: 'zh-CN',
   themeConfig: {
-    logo: '/brand/yijie-bag-logo.svg',
+    logo: { light: '/brand/yijie-mark.svg', dark: '/brand/yijie-mark-dark.svg', alt: '易界' },
     nav: [
       { text: '总览', link: '/design/' },
+      { text: '2.0 配色与品牌', link: '/design/03-ui-system/07-color-brand-preview' },
       { text: 'AI 规则', link: '/design/07-ai-codex/01-ai-development-rules' },
       { text: '实现', link: '/design/09-implementation/01-recommended-file-structure' }
     ],
@@ -50,7 +51,8 @@ export default defineConfig({
           { text: '插画与图片', link: '/design/03-ui-system/03-illustration-imagery' },
           { text: '数据可视化', link: '/design/03-ui-system/04-data-visualization' },
           { text: '主题与暗色模式', link: '/design/03-ui-system/05-theme-dark-mode' },
-          { text: '品牌资产', link: '/design/03-ui-system/06-brand-assets' }
+          { text: '品牌资产', link: '/design/03-ui-system/06-brand-assets' },
+          { text: '颜色与品牌预览', link: '/design/03-ui-system/07-color-brand-preview' }
         ]
       },
       {
@@ -112,7 +114,8 @@ export default defineConfig({
           { text: 'ADR 模板', link: '/design/08-governance/03-adr-template' },
           { text: '贡献指南', link: '/design/08-governance/04-contribution-guide' },
           { text: '质量门禁', link: '/design/08-governance/05-quality-gates' },
-          { text: '后续策略预留', link: '/design/08-governance/06-deferred-policy-decisions' }
+          { text: '后续策略预留', link: '/design/08-governance/06-deferred-policy-decisions' },
+          { text: '2.0 色彩与品牌更新', link: '/design/08-governance/07-lime-white-brand-refresh' }
         ]
       },
       {

@@ -1,15 +1,19 @@
 export const yijieChartPalette = [
-  '#95BF47', '#4C84FF', '#22B8CF', '#8B5CF6',
+  '#C3F35B', '#4C84FF', '#22B8CF', '#8B5CF6',
   '#F59E0B', '#F97316', '#EF4444', '#64748B'
 ]
 
+// Thin lines and points need a readable brand ink on a white chart surface.
+// The remaining series retain their established semantic palette.
+export const yijieChartPaletteLight = ['#4B651D', ...yijieChartPalette.slice(1)]
+
 export function createYijieEChartsTheme(isDark: boolean) {
   return {
-    color: yijieChartPalette,
+    color: isDark ? yijieChartPalette : yijieChartPaletteLight,
     backgroundColor: 'transparent',
     textStyle: {
       fontFamily: 'var(--yj-font-family-sans)',
-      color: isDark ? '#C6D0BC' : '#526046'
+      color: isDark ? '#C2C7CE' : '#60666E'
     },
     grid: {
       left: 32,
@@ -20,25 +24,25 @@ export function createYijieEChartsTheme(isDark: boolean) {
     },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: isDark ? '#222B1C' : '#FFFFFF',
-      borderColor: isDark ? 'rgba(221, 241, 183, 0.14)' : '#D6DEC8',
+      backgroundColor: isDark ? '#2E3237' : '#FFFFFF',
+      borderColor: isDark ? '#414850' : '#E2E5E8',
       textStyle: {
-        color: isDark ? '#F4F7EF' : '#18230F'
+        color: isDark ? '#F5F7FA' : '#25282B'
       }
     },
     legend: {
       textStyle: {
-        color: isDark ? '#C6D0BC' : '#526046'
+        color: isDark ? '#C2C7CE' : '#60666E'
       }
     },
     categoryAxis: {
-      axisLine: { lineStyle: { color: isDark ? 'rgba(221, 241, 183, 0.14)' : '#D6DEC8' } },
+      axisLine: { lineStyle: { color: isDark ? '#414850' : '#E2E5E8' } },
       axisTick: { show: false },
-      axisLabel: { color: isDark ? '#98A58E' : '#7A8670' }
+      axisLabel: { color: isDark ? '#969EA8' : '#6F757D' }
     },
     valueAxis: {
-      splitLine: { lineStyle: { color: isDark ? 'rgba(221, 241, 183, 0.08)' : '#E6ECDD' } },
-      axisLabel: { color: isDark ? '#98A58E' : '#7A8670' }
+      splitLine: { lineStyle: { color: isDark ? '#30363D' : '#ECEEF0' } },
+      axisLabel: { color: isDark ? '#969EA8' : '#6F757D' }
     }
   }
 }

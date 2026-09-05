@@ -1,77 +1,86 @@
 # 品牌资产规范
 
-
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 更新日期：2026-09-05
 - 适用仓库：`yijie-desktop`
-- 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
+- 决策：[清爽青柠与纯白品牌更新](../08-governance/07-lime-white-brand-refresh.md)
 
-## 目标
+## 目标与范围
 
-定义易界 Logo、App Icon、产品名称和品牌资产落地方式。
+统一 App 图标、侧栏、登录页、关于页面、文档与空态的易界品牌资产。本次替换品牌形态与配色，产品名称、页面结构、组件职责和业务交互规则继续沿用。
 
-## 适用范围
+中文界面使用 **易界**，技术命名使用 `yijie`，品牌缩写使用 `YJ` / `YIJIE`。标志来源为用户本次确认的「商品包裹折面 × YJ 负形」截图，不再使用旧手提袋加字母占位图形。
 
-适用于 App 图标、侧栏 Logo、登录页、关于页面、文档、空态和安装包资产。
+## 正式矢量形态
 
-## 规范正文
+- 石墨主体表达商品包装折面，中间留白形成 Y，右侧回折融入 J。
+- 青柠色位于右上包装折角，主体轮廓和负形在单色版中保持一致。
+- 横版包含图形与已转为路径的「易界 / YIJIE」字标，不依赖系统字体重新排字。
+- 使用纯色轮廓；截图中的纹理、光影和像素渐变不进入矢量母版。
+- 所有 SVG 均为真实 `path` / `rect` 几何，不允许嵌入 PNG、JPEG、base64 位图或外部字体。
 
-## 产品名称
+## 资产清单
 
-- 中文界面显示：易界。
-- 技术命名：yijie。
-- 品牌缩写：YJ / YIJIE。
+规范站资产位于 `docs/design/docs/public/brand/`；迁移参考副本位于 `docs/design/exports/src/assets/brand/`。
 
-## 初始 Logo
+| 文件 | 用途 | 颜色 / 背景 |
+|---|---|---|
+| `yijie-mark.svg` | 标准图形标志、导航、侧栏 | 石墨主体 + 青柠折角，用于白色或浅色背景 |
+| `yijie-mark-dark.svg` | 暗色页面图形标志 | 白色主体 + 青柠折角，用于石墨背景 |
+| `yijie-mark-mono.svg` | 单色印刷或单色界面 | 石墨单色，用于浅色背景 |
+| `yijie-mark-mono-inverse.svg` | 单色反白 | 白色单色，用于深色背景 |
+| `yijie-horizontal.svg` | 登录页、侧栏、关于页横版字标 | 浅色背景；图形与中英文字标同一 SVG |
+| `yijie-horizontal-dark.svg` | 暗色横版字标 | 深色背景；白色字标 + 青柠折角 |
+| `yijie-app-icon.svg` | App Icon 矢量源 | 石墨圆角方形、白色主体、青柠折角；画布透明留边 |
+| `yijie-bag-logo.svg` | 旧文件名兼容入口 | 与 `yijie-mark.svg` 字节一致；内容已是新标志 |
 
-当前无 Figma/品牌稿，因此本规范提供初始工程资产：
+`yijie-bag-logo.svg` 仅保留路径兼容，不代表可以继续使用旧袋形。新引用使用 `yijie-mark.svg`。暗色页面需切换专用暗底版，不能直接复用亮底兼容文件。
 
-```text
-docs/design/docs/public/brand/yijie-bag-logo.svg
-docs/design/docs/public/brand/yijie-app-icon.svg
+## 配色与尺寸
+
+- 标准主体：`#25282B`；青柠折角：`#C3F35B`；反白主体：`#FFFFFF`。
+- 青柠色由 `--yj-color-brand-primary` 驱动，白色与石墨由亮色规范 token 驱动，禁止单独修改某个派生 SVG 的填色。
+- 图形建议最小显示尺寸 24 × 24 px；横版建议最小高度 32 px，较小的导航位置优先使用图形版。
+- 保持原始宽高比；独立展示时四周至少留出图形宽度的 1/8，不挤压、拉伸、旋转或重新拼接字标。
+- App Icon 使用独立圆角方形构图，不能把整块 App Icon 当作页面插画，也不能给透明图形版任意加底板。
+
+## 单一母版与同步
+
+`docs/design/brand/logo-geometry.json` 保存可编辑路径、构图及用户确认截图的 SHA-256 来源记录。`docs/design/scripts/sync-brand-assets.mjs` 从该母版与颜色 tokens 生成上述两处资源。
+
+在仓库根目录执行：
+
+```sh
+pnpm --dir docs/design brand:sync
+pnpm --dir docs/design brand:check
+pnpm docs:build
 ```
 
-视觉形态：手提袋 + YJ 字母。
+先修改几何母版或颜色 token，再同步派生 SVG；禁止让 `public/brand` 与 `exports` 两套副本各自演进。`brand:check` 核对资源是否与母版一致，文档构建前自动执行该检查。
 
-- 手提袋代表跨境电商卖家经营。
-- YJ 代表易界。
-- 主色使用 `#95BF47`。
-- App Icon 使用 macOS 圆角图标语义。
+## 组件与迁移
 
-## 使用规则
+展示品牌时使用 [YjLogo 参考组件](../09-implementation/07-logo-code-scaffold.md)。通过显式主题或应用主题选择亮暗资产，不能对整张 Logo 使用 CSS `filter: invert()`，以免青柠颜色被反转。
 
-- 侧边栏和登录页使用 `yijie-bag-logo.svg`。
-- App 打包图标可以先基于 `yijie-app-icon.svg` 导出 PNG/ICNS。
-- 品牌资产后续若由设计稿替换，必须保留文件名兼容或提供迁移说明。
+本次已替换的是 `docs/design/` 权威规范、预览和迁移参考，**活跃 `src/` 与 `src-tauri/` 尚未迁移**。后续新需求与已有页面改造以本规范为准，在各自任务中迁移 tokens、主题与 SVG；App 打包任务再从新 SVG 生成 PNG/ICNS，不覆盖既有签名或发布二进制。
 
 ## 禁止事项
 
-- 不允许 AI 随机生成多个 logo 版本混用。
-- 不允许在不同页面使用不同品牌写法。
-- 不允许把平台品牌图标与易界品牌图标混合成联合 logo。
-
-## AI / Codex 必须遵守
-
-- 需要展示品牌时使用 `YjLogo`，不要手写 img。
-- 不允许生成新的 Logo 资产，除非有明确任务和 ADR。
-- 不允许把 App Icon 当作普通页面插画使用。
-- 不允许修改 SVG 颜色而不更新 token。
-
-## 实现要求
-
-实现 `YjLogo.vue`，支持 `mark`、`horizontal`、`iconOnly` 三种模式。App Icon 由构建脚本导出不同尺寸资源，源文件保持 SVG。
+- 不混用旧袋形、新包裹形或前序未选中的 Logo 提案。
+- 不用普通文本重新排版横版字标，不把平台品牌图标拼接成联合 Logo。
+- 不靠调透明度或反色滤镜生成暗色版本。
+- 不随机生成额外品牌版本；后续形态更新仍需明确任务与设计决策记录。
 
 ## 验收清单
 
-- [ ] Logo 使用统一资产。
-- [ ] 产品名称写法统一。
-- [ ] App Icon 可导出打包资产。
-- [ ] 暗色主题下 Logo 可读。
-- [ ] 后续替换有版本记录。
+- [ ] 图形及中英文字标与确认稿一致，包含单色与暗底版。
+- [ ] 所有资源为纯矢量路径，无嵌入位图和字体依赖。
+- [ ] 两处资源通过 `brand:check`，兼容文件与标准图形一致。
+- [ ] 亮暗主题下 24 / 32 px 图形清晰，横版宽高比保持正确。
+- [ ] 所有引用明确迁移范围，没有把规范更新描述为应用已完成改造。
 
-## 关联文件
-
-`docs/design/docs/public/brand/yijie-bag-logo.svg`、`docs/design/docs/public/brand/yijie-app-icon.svg`、`docs/design/docs/design/09-implementation/07-logo-code-scaffold.md`
+参见：[实际配色与品牌预览](./07-color-brand-preview.md)、[颜色 Tokens](../02-tokens/02-color-tokens.md)、[主题与暗色模式](./05-theme-dark-mode.md)。

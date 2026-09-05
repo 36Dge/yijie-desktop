@@ -1,0 +1,75 @@
+/* The documentation site uses the same semantic tokens as the reference UI. */
+:root,
+.dark {
+  --vp-font-family-base: var(--yj-font-family-sans);
+  --vp-font-family-mono: var(--yj-font-family-mono);
+
+  --vp-c-bg: var(--yj-color-bg-page);
+  --vp-c-bg-alt: var(--yj-color-bg-nav);
+  --vp-c-bg-elv: var(--yj-color-bg-elevated);
+  --vp-c-bg-soft: var(--yj-color-bg-card);
+  --vp-c-text-1: var(--yj-color-text-primary);
+  --vp-c-text-2: var(--yj-color-text-secondary);
+  --vp-c-text-3: var(--yj-color-text-tertiary);
+  --vp-c-border: var(--yj-color-border-default);
+  --vp-c-divider: var(--yj-color-border-subtle);
+  --vp-c-gutter: var(--yj-color-border-subtle);
+
+  /* Links need ink contrast; lime is reserved for filled emphasis. */
+  --vp-c-brand-1: var(--yj-color-brand-text);
+  --vp-c-brand-2: var(--yj-color-brand-text);
+  --vp-c-brand-3: var(--yj-color-brand-text);
+  --vp-c-brand-soft: var(--yj-color-brand-soft);
+  --vp-c-default-1: var(--yj-color-text-secondary);
+  --vp-c-default-2: var(--yj-color-border-default);
+  --vp-c-default-3: var(--yj-color-border-subtle);
+  --vp-c-default-soft: var(--yj-color-bg-subtle);
+
+  --vp-nav-bg-color: var(--yj-color-bg-nav);
+  --vp-nav-screen-bg-color: var(--yj-color-bg-nav);
+  --vp-local-nav-bg-color: var(--yj-color-bg-nav);
+  --vp-sidebar-bg-color: var(--yj-color-bg-nav);
+  --vp-input-bg-color: var(--yj-color-bg-card);
+  --vp-code-block-bg: var(--yj-color-bg-subtle);
+
+  --vp-button-brand-border: var(--yj-color-brand-primary);
+  --vp-button-brand-bg: var(--yj-color-brand-primary);
+  --vp-button-brand-text: var(--yj-color-on-brand);
+  --vp-button-brand-hover-border: var(--yj-color-brand-hover);
+  --vp-button-brand-hover-bg: var(--yj-color-brand-hover);
+  --vp-button-brand-hover-text: var(--yj-color-on-brand);
+  --vp-button-brand-active-border: var(--yj-color-brand-active);
+  --vp-button-brand-active-bg: var(--yj-color-brand-active);
+  --vp-button-brand-active-text: var(--yj-color-on-brand);
+  --vp-button-alt-border: var(--yj-color-border-default);
+  --vp-button-alt-bg: var(--yj-color-bg-card);
+  --vp-button-alt-text: var(--yj-color-text-primary);
+  --vp-button-alt-hover-border: var(--yj-color-border-strong);
+  --vp-button-alt-hover-bg: var(--yj-color-bg-card);
+  --vp-button-alt-hover-text: var(--yj-color-text-primary);
+  --vp-button-alt-active-border: var(--yj-color-border-strong);
+  --vp-button-alt-active-bg: var(--yj-color-bg-card);
+  --vp-button-alt-active-text: var(--yj-color-text-primary);
+
+  --vp-home-hero-name-color: var(--yj-color-text-primary);
+  --vp-home-hero-name-background: none;
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+  --vp-local-search-highlight-bg: var(--yj-color-brand-primary);
+  --vp-local-search-highlight-text: var(--yj-color-on-brand);
+}
+
+.VPFeature,
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--yj-color-border-default);
+}
+
+.VPNavBar.has-sidebar .content-body,
+.VPNavBar:not(.has-sidebar):not(.home.top) {
+  background-color: var(--yj-color-bg-nav);
+}
+
+:is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--yj-color-focus-ring);
+  outline-offset: 3px;
+}

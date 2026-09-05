@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -23,6 +24,12 @@
 
 ```text
 请在 yijie-desktop 中实现该页面。必须遵守 docs/design 下的设计系统：使用 YjPage/YjPageHeader/YjSection/YjCard 等组件；颜色、间距、圆角、字体必须使用 token；图标必须通过 YjIcon 和 registry；页面必须包含 loading、empty、error、permission denied 状态；默认中文文案，专业语气；兼容亮色和暗色主题。
+```
+
+## 色彩与品牌改造 Prompt 片段
+
+```text
+采用已确认的 2.0.0 色彩与品牌基线：A「清爽青柠」＋01「纯白通透」。亮色背景、导航、卡片使用纯白 token，正文使用石墨；青柠主操作配石墨文字/图标，局部选中态使用品牌 token；空间通过既有留白、间距及细中性边框区分。暗色使用中性石墨背景、卡片和弹层层级。Logo 引用商品包裹 / YJ 负形 SVG 的对应主题变体。色值、状态及前景色以颜色和主题章节为准；保留当前字体、间距、圆角尺度、布局、组件 API、交互和独立语义状态色。
 ```
 
 ## 新组件 Prompt 片段

@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -26,6 +27,13 @@
 - Tertiary：弱操作。
 - Danger：危险操作。
 - Ghost：工具栏或图标按钮。
+
+## 颜色与状态
+
+- Primary：使用 `--yj-color-brand-primary` 背景，文字、图标始终使用 `--yj-color-on-brand`；hover/pressed 分别使用品牌 hover/active，不能继承白色前景。
+- Secondary：亮色为白底、石墨文字和细中性边框；暗色使用主题卡片或浮层色与可读前景。
+- Tertiary / Ghost：使用中性文字；文本型品牌操作使用 `--yj-color-brand-text`，不直接使用浅青柠小字。
+- Danger、loading、disabled 与焦点继续使用独立语义 token，不用青柠替代风险或禁用状态。
 
 ## 高影响操作
 

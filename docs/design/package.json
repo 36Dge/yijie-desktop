@@ -3,8 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "brand:sync": "node scripts/sync-brand-assets.mjs",
+    "brand:check": "node scripts/sync-brand-assets.mjs --check",
+    "typecheck:reference": "vue-tsc --noEmit --project tsconfig.json",
     "docs:dev": "vitepress docs --host 0.0.0.0",
-    "docs:build": "vitepress build docs",
+    "docs:build": "pnpm brand:check && pnpm typecheck:reference && vitepress build docs",
     "docs:preview": "vitepress preview docs --host 0.0.0.0"
   },
   "devDependencies": {

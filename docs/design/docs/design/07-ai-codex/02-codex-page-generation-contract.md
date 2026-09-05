@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -23,6 +24,8 @@
 
 Codex 必须先判断页面类型：Chat、Agent 任务、数据页、流程页、设置页、领域分析页。
 
+颜色和品牌采用当前 2.0.0 基线，先读颜色 token、暗色主题和品牌资产章节。新需求与现有页面改造都使用纯白/石墨空间、青柠主操作及商品包裹 / YJ SVG；旧页面截图不是旧灰绿底色继续使用的依据。
+
 ## 页面生成步骤
 
 1. 选择 pattern。
@@ -33,6 +36,7 @@ Codex 必须先判断页面类型：Chat、Agent 任务、数据页、流程页�
 6. 编写 Vue 页面。
 7. 补充类型、store 或 composable。
 8. 运行 lint/typecheck/test。
+9. 检查亮色、暗色及 1180 × 760 下的阅读层级、按钮前景色、Logo 变体与键盘焦点；不改动已确认的布局和交互规范。
 
 ## 输出要求
 

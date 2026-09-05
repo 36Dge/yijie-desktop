@@ -1,8 +1,8 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">易界 YJ Logo</title>
-  <desc id="desc">A rounded shopping bag icon with YJ letters.</desc>
-  <rect x="16" y="24" width="96" height="88" rx="24" fill="#95BF47"/>
-  <path d="M42 42C42 28.7452 51.8497 18 64 18C76.1503 18 86 28.7452 86 42" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
-  <path d="M35 52H93" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="2" stroke-linecap="round"/>
-  <text x="64" y="83" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="800" letter-spacing="-1.5" fill="#FFFFFF">YJ</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" fill="none" role="img" aria-labelledby="yijie-mark-title yijie-mark-desc">
+  <title id="yijie-mark-title">易界 Logo · 亮底</title>
+  <desc id="yijie-mark-desc">易界商品包裹折面与 YJ 负形标志。纯矢量轮廓，无位图和字体依赖。</desc>
+  <!-- Generated from brand/logo-geometry.json and exports/src/styles/variables.css. -->
+  <path d="M35 34 C25 28 16 36 16 50 V336 C16 360 30 372 52 372 H146 C194 372 232 350 232 306 V191 C232 181 229 175 222 170 L46 40 C42 37 38 35 35 34 Z" fill="#25282B"/>
+  <path d="M380 109 L287 174 C282 178 280 184 280 192 V308 C280 338 252 363 202 374 H278 C343 374 380 339 380 276 Z" fill="#25282B"/>
+  <path d="M180 24 H344 C367 24 380 38 380 59 V83 L294 140 Q290 144 286 141 L168 44 C155 34 163 24 180 24 Z" fill="#C3F35B"/>
 </svg>

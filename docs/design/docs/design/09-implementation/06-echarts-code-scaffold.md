@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -30,10 +31,15 @@ ECharts 配置必须从统一主题取色：
 
 ```ts
 export const yijieChartPalette = [
-  '#95BF47', '#4C84FF', '#22B8CF', '#8B5CF6',
+  '#C3F35B', '#4C84FF', '#22B8CF', '#8B5CF6',
   '#F59E0B', '#F97316', '#EF4444', '#64748B'
 ]
+
+// 亮色信息性线条 / 点使用可读的深品牌色。
+export const yijieChartPaletteLight = ['#4B651D', ...yijieChartPalette.slice(1)]
 ```
+
+主题 factory 在亮色使用 `yijieChartPaletteLight`，暗色使用 `yijieChartPalette`；背景、正文、边框从当前主题 token 解析。颜色表仅在主题定义层声明，业务页面不得复制。FEAT-128 的 closed adapter 继续使用其专用系列 token、完整文字表格和其他限制。
 
 `YjChartCard` 必须封装 title、description、loading、empty、error、timeRange 和 tooltip 约定。
 

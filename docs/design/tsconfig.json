@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"],
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@/*": ["./exports/src/*"]
+    }
+  },
+  "include": [
+    "exports/src/**/*.ts",
+    "exports/src/**/*.vue",
+    "docs/.vitepress/config.ts",
+    "docs/.vitepress/theme/**/*.ts",
+    "docs/.vitepress/theme/**/*.vue"
+  ]
+}

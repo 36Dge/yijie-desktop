@@ -3,24 +3,27 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
-- 来源：基于项目方反馈固化
+- 色彩与品牌基线版本：2.0.0
+- 最后更新：2026-09-05
+- 来源：基于项目方反馈固化；2026-09-05 用户明确授权以已选配色与截图 Logo 覆盖规范的色彩、主题及品牌部分
 - 生效范围：`yijie-desktop` Design System / UX 规范
 
 ## P0 决策
 
 | 编号 | 决策项 | 终版结果 | 落地位置 |
 |---|---|---|---|
-| P0-01 | 品牌主色 | `#95BF47`；hover/active/soft 由本规范派生 | `02-tokens/02-color-tokens.md` |
-| P0-02 | Logo 与 App Icon | 初始生成：手提袋 + YJ 字母 | `03-ui-system/06-brand-assets.md`、`docs/design/docs/public/brand/` |
+| P0-01 | 品牌主色与空间 | A「清爽青柠」＋01「纯白通透」；青柠 `#C3F35B` + 石墨 `#25282B`；亮色背景、导航、卡片 `#FFFFFF`，以留白、间距、细中性边框分层 | `02-tokens/02-color-tokens.md` |
+| P0-02 | Logo 与 App Icon | 使用用户截图中的商品包裹折面 + YJ 负形，重建为 SVG 矢量资产；提供亮色、暗色与单色适配 | `03-ui-system/06-brand-assets.md`、`docs/design/docs/public/brand/` |
 | P0-03 | 产品显示名称 | 中文：易界；英文/技术名：yijie；品牌缩写：YJ/YIJIE | 全局文案与品牌资产 |
 | P0-04 | 视觉气质 | 专业可信、清爽高效、数据驱动、AI 可控、跨境经营感 | `01-foundations/03-brand-personality.md` |
-| P0-05 | 默认主题 | 跟随系统 | `03-ui-system/05-theme-dark-mode.md` |
+| P0-05 | 默认主题 | 跟随系统；暗色采用中性石墨背景 `#191C20`、卡片 `#25282B`、弹层 `#2E3237`、主文字 `#F5F7FA`，品牌青柠同亮色 | `03-ui-system/05-theme-dark-mode.md` |
 | P0-06 | 主图标库 | Lucide | `03-ui-system/02-iconography.md` |
 | P0-07 | 页面密度 | 标准 | `01-foundations/06-window-density-baseline.md` |
 | P0-08 | 最小窗口尺寸 | 最小 1180 × 760；推荐 1280 × 820 | `01-foundations/06-window-density-baseline.md` |
 | P0-09 | 首批核心页面范围 | 首批页面优先级一致，不区分先后 | `05-patterns/` |
-| P0-10 | Figma/品牌稿 | 无；本规范提供初始可落地资产 | `docs/design/docs/public/brand/` |
+| P0-10 | Figma/品牌稿 | 以用户确认的 Logo 截图为形态参考，以本规范 SVG 为工程资产；无 Figma 文件 | `docs/design/docs/public/brand/` |
+
+本次只替换色系搭配、主题和 Logo；其余基础决策、页面布局、组件及行为规则保持有效。详见 [2.0.0 更新记录](./08-governance/07-lime-white-brand-refresh.md)。
 
 ## P1 决策
 

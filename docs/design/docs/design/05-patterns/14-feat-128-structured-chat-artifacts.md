@@ -3,8 +3,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.7.1
-- 最后更新：2026-08-23
+- 版本：1.7.2
+- 最后更新：2026-09-05
 - 适用 Feature：`FEAT-128`
 - Contract impact：`semantic`
 - 适用仓库：`yijie-desktop`
@@ -509,11 +509,14 @@ G3 仍为 S3/S4/S5，G4 pending。
   规避。超限、integrity/license/transitive 漂移或出现 install script/额外 package 即停止并回滚 S9B-D。
 - S9B-D 新增的 semantic chart token 名称只能是 `--yj-color-chart-series-1` 至
   `--yj-color-chart-series-8`，按序精确映射 light
-  `#6B8E23,#356BEA,#0E7490,#7C3AED,#B45309,#C2410C,#DC2626,#475569` 和 dark
-  `#A6CC62,#78A2FF,#46C7D8,#A78BFA,#FBBF24,#FB923C,#F87171,#94A3B8`；文字/背景/边框/焦点/
-  字体使用既有 text-primary/text-secondary/bg-card/bg-elevated/border-default/brand-border/font tokens。文字
+  `#4B651D,#356BEA,#0E7490,#7C3AED,#B45309,#C2410C,#DC2626,#475569` 和 dark
+  `#C3F35B,#78A2FF,#46C7D8,#A78BFA,#FBBF24,#FB923C,#F87171,#94A3B8`；文字/背景/边框/焦点/
+  字体使用 text-primary/text-secondary/bg-card/bg-elevated/border-default/focus-ring/font tokens（焦点映射到 2.0.0 的 `--yj-color-focus-ring`）。文字
   对比至少 4.5:1，焦点与信息性图形至少 3:1；颜色仍必须配合 decal、line symbol/style、HTML
   legend 与可见 table。theme factory 只接受 resolved required-token reader，缺 token 则 table fallback。
+  2026-09-05 的设计系统 2.0.0 仅更新首序列配色：亮色使用可读的深品牌图形色，暗色使用品牌青柠；
+  焦点改用可读的 focus-ring token；其余七个系列色、系列 token 名称、closed adapter、fallback 和本 pattern 的安全/行为边界保持不变。
+  此处是后续 UI 迁移要求，不追溯修改原 S9B 验收结果，也不代表本次已改动活跃应用。
 - `YjChartCard` 只接受 closed frozen adapter model，不接受 `EChartsOption`、option fragment、provider config、
   generic slot 或 event callback。固定 transparent background、standard height `280px`、narrow/200% zoom height `180px`、
   grid `{left:16,right:16,top:24,bottom:32,containLabel:true}`、`animation=false`、

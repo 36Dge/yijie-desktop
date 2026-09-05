@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -41,11 +42,22 @@ export function createNaiveThemeOverrides(readVariable) {
       primaryColor: token('--yj-color-brand-primary'),
       primaryColorHover: token('--yj-color-brand-hover'),
       primaryColorPressed: token('--yj-color-brand-active'),
-      borderRadius: token('--yj-radius-md')
+      borderRadius: token('--yj-radius-md'),
+      bodyColor: token('--yj-color-bg-app'),
+      cardColor: token('--yj-color-bg-card'),
+      textColorBase: token('--yj-color-text-primary')
+    },
+    Button: {
+      textColorPrimary: token('--yj-color-on-brand'),
+      textColorHoverPrimary: token('--yj-color-on-brand'),
+      textColorPressedPrimary: token('--yj-color-on-brand'),
+      textColorFocusPrimary: token('--yj-color-on-brand')
     }
   }
 }
 ```
+
+上例仅展示主色、结构背景和实色主按钮前景的关键映射。完整配置还需覆盖 Menu、Layout、Card、Input、Modal 等控件及其亮暗状态，见 `exports/src/design/theme/naive-theme.ts`。不能只替换 primaryColor 而保留白字青柠按钮。
 
 `App.vue` 在设置 light/dark 的 `data-theme` 后，通过
 `getComputedStyle(document.documentElement).getPropertyValue(name)` 读取 token。

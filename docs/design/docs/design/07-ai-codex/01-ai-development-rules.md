@@ -4,7 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.0.0
+- 最后更新：2026-09-05
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -32,12 +33,24 @@
 9. 页面标准密度，不允许随意缩小字号或间距。
 10. 不允许将平台 token、真实店铺数据、真实卖家数据写入示例或 mock。
 
+## 色彩与品牌基线
+
+新页面与现有页面后续改造均采用 A「清爽青柠」＋01「纯白通透」：
+
+- 亮色的 App、页面、导航、卡片与面板均使用纯白结构背景 token；以留白、既有间距尺度和细中性边框区分空间。
+- 主文字使用石墨；主按钮使用青柠背景与 `--yj-color-on-brand` 石墨文字/图标，hover 与 pressed 也保持这一前景色。亮底链接和文本型操作使用 `--yj-color-brand-text`，不直接用浅青柠正文。
+- 青柠软底只用于选中项、hover 等局部交互状态，不用作全页或整个业务分组的底色。
+- 暗色使用中性石墨背景、卡片、弹层层级；同样的青柠主按钮配石墨字。成功、警告、失败、Agent 状态保持独立语义。
+- Logo 统一引用品牌章节的商品包裹 / YJ 负形 SVG 及亮暗变体，不重绘轮廓、不嵌入 PNG。
+
+准确值以 [颜色 Tokens](../02-tokens/02-color-tokens.md)、[主题与暗色模式](../03-ui-system/05-theme-dark-mode.md)、[品牌资产](../03-ui-system/06-brand-assets.md) 为准。此次基线不改变字体、间距、圆角尺度、布局结构和交互规则。
+
 ## 样式约束
 
 禁止：
 
 ```css
-color: #95BF47;
+color: #C3F35B;
 padding: 17px;
 border-radius: 11px;
 box-shadow: 0 8px 30px rgba(0,0,0,.2);
@@ -46,7 +59,7 @@ box-shadow: 0 8px 30px rgba(0,0,0,.2);
 应该：
 
 ```css
-color: var(--yj-color-brand-primary);
+color: var(--yj-color-text-primary);
 padding: var(--yj-space-4);
 border-radius: var(--yj-radius-lg);
 box-shadow: var(--yj-shadow-card);
@@ -70,6 +83,8 @@ box-shadow: var(--yj-shadow-card);
 - [ ] 图标走 registry。
 - [ ] 状态完整。
 - [ ] 无硬编码视觉值。
+- [ ] 亮色为纯白结构空间，暗色为中性石墨层级，青柠实色控件配石墨文字。
+- [ ] Logo 为当前批准 SVG 的正确主题变体。
 
 ## 关联文件
 
