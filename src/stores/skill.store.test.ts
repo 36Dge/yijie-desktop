@@ -136,6 +136,33 @@ describe("Skill store", () => {
     expect(store.skills[0]?.installationStatus).toBe("not_installed");
   });
 
+  it("opens the live catalog when a scan is busy instead of declaring the service unavailable", async () => {
+    const nativeClient = client({
+      scan: vi.fn(async () => { throw new SkillNativeClientError("busy"); }),
+    });
+    const store = createStore(nativeClient);
+    await store.open(true);
+    expect(nativeClient.list).toHaveBeenCalledOnce();
+    expect(store.phase).toBe("ready");
+    expect(store.skills).toHaveLength(1);
+    expect(store.lastFailure).toBeNull();
+    await store.refresh(true, "window_resume");
+    expect(nativeClient.list).toHaveBeenCalledTimes(2);
+    expect(store.phase).toBe("ready");
+  });
+
+  it("preserves a real read failure after a busy scan and never bypasses permissions", async () => {
+    const nativeClient = client({
+      scan: vi.fn(async () => { throw new SkillNativeClientError("busy"); }),
+      list: vi.fn(async () => { throw new SkillNativeClientError("permission-denied"); }),
+    });
+    const store = createStore(nativeClient);
+    await store.open(true);
+    expect(store.phase).toBe("permission-denied");
+    expect(store.skills).toEqual([]);
+    expect(store.lastFailure).toBe("permission-denied");
+  });
+
   it("keeps the last valid catalog while a refresh is unavailable", async () => {
     const scan = vi.fn()
       .mockResolvedValueOnce(snapshot())

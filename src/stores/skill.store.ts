@@ -146,9 +146,18 @@ export function createSkillStoreDefinition(
       refreshing.value = hadProjection;
       lastFailure.value = null;
       try {
-        const snapshot = canManage
-          ? await client.scan(reason, controller.signal)
-          : await client.list(controller.signal);
+        let snapshot: SkillCatalogSnapshot;
+        try {
+          snapshot = canManage
+            ? await client.scan(reason, controller.signal)
+            : await client.list(controller.signal);
+        } catch (error: unknown) {
+          // A busy scan does not mean the catalog service is unavailable.
+          // Read its live projection, including when talking to an older Host
+          // with a full scan journal. Auth/compatibility failures never fall back.
+          if (!canManage || failureKind(error) !== "busy" || controller.signal.aborted) throw error;
+          snapshot = await client.list(controller.signal);
+        }
         if (disposed || activeRead !== controller || epoch !== readEpoch || controller.signal.aborted) {
           return;
         }

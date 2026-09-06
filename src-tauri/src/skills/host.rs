@@ -104,10 +104,15 @@ impl SkillRuntime {
         }
         let catalog = self.catalog()?;
         let host = self.host(chat).await?;
-        let snapshot = host
-            .scan_managed_skills(Uuid::now_v7(), reason)
-            .await
-            .map_err(SkillCommandError::from_host)?;
+        // GET already reconciles the managed directory and Runtime. Automatic
+        // refreshes must not allocate permanent records for page/focus events.
+        // An explicit rescan retains its existing idempotent operation semantics.
+        let snapshot = if reason == "user_retry" {
+            host.scan_managed_skills(Uuid::now_v7(), reason).await
+        } else {
+            host.list_managed_skills().await
+        }
+        .map_err(SkillCommandError::from_host)?;
         let snapshot = if matches!(
             reason,
             "startup" | "app_upgrade" | "page_open" | "user_retry"
