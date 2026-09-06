@@ -92,9 +92,9 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
 .yj-tabs__tab {
   min-height: var(--yj-space-8);
   padding: var(--yj-space-1) var(--yj-space-3);
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-full);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
@@ -105,20 +105,37 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
 }
 
 .yj-tabs__tab:hover {
-  border-color: var(--yj-color-brand-border);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  border-color: var(--yj-color-border-control-hover);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-control-hover);
 }
 
 .yj-tabs__tab:focus-visible {
-  outline: var(--yj-border-width) solid var(--yj-color-brand-primary);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
 .yj-tabs__tab--selected {
-  border-color: var(--yj-color-brand-border);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-subtle);
+  border-color: var(--yj-color-on-brand);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
   font-weight: var(--yj-font-weight-semibold);
+}
+.yj-tabs__tab:active {
+  color: var(--yj-color-text-primary);
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-pressed);
+}
+
+.yj-tabs__tab--selected:hover {
+  color: var(--yj-color-on-brand);
+  border-color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-hover);
+}
+
+.yj-tabs__tab--selected:active {
+  color: var(--yj-color-on-brand);
+  border-color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-active);
 }
 </style>

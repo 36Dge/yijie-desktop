@@ -40,6 +40,8 @@ exports/src/components/yijie/YjIcon.vue
 3. 使用语义名称，不使用图标原始名称作为业务名。
 4. 在 PR 中说明用途。
 
+2.1.0 的 `primary` 图标 tone 表示重要普通操作，映射中性 `text-primary`，不直接映射浅青柠。success/warning/error 图标使用对应可读 semantic ink；Logo 与图表保持独立资产/系列颜色。
+
 ## AI / Codex 必须遵守
 
 - 代码必须与文档一致。

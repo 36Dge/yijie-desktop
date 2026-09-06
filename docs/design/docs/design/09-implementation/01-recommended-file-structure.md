@@ -44,6 +44,7 @@ yijie-desktop/
 
     styles/
       variables.css
+      component-colors.css  # 统一Naive状态/文本选区颜色适配
       global.css
       reset.css
 

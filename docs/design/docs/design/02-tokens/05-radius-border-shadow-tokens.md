@@ -4,7 +4,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
+- 版本：2.1.0
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -35,7 +35,9 @@
 - `border-subtle`：弱边框，用于卡片分隔。
 - `border-default`：默认控件边框。
 - `border-strong`：分隔强边界；选中需同时配合可读文字与局部标记。
-- `focus-ring`：键盘聚焦与关键交互边界，亮色使用 `#4B651D`、暗色使用 `#C3F35B`。浅边框不能独立承担 focus 提示。
+- `border-control`：输入/选择控件轮廓，亮色 `#8C939B`、暗色 `#6A727C`。
+- `border-control-hover`：hover 轮廓，亮色 `#60666E`、暗色 `#969EA8`；暗色浮层内 Input/Select 的默认边界也使用此角色。
+- `focus-ring`：中性焦点，亮色 `#25282B`、暗色 `#F5F7FA`，宽度 `--yj-focus-ring-width: 2px`，无模糊/无 glow。selected 标记与 error 边框不能覆盖焦点。
 
 | 边框 token | 亮色 | 暗色 |
 |---|---|---|
@@ -47,21 +49,20 @@
 
 ## 阴影
 
-- `shadow-xs`：轻微悬浮。
-- `shadow-card`：卡片悬浮。
+- `shadow-xs` / `shadow-card`：兼容 token，值为 none；普通卡片与输入所有状态不加投影。
 - `shadow-popover`：Popover、Dropdown。
 - `shadow-modal`：Modal、Drawer。
 
-阴影必须克制，桌面端不使用大面积重阴影。普通静态卡片优先使用细边框；`shadow-card` 仅在需要表达悬浮关系时使用。亮色阴影使用中性石墨，去掉旧绿色阴影；暗色阴影使用黑色并配合边框建立层级。
+普通卡片、图标底板和输入使用细边框，hover/focus 也不浮起。真实 Popover、Dropdown、Modal 和 Drawer 才使用统一轻投影；焦点的 2px 零模糊色环不是投影，不得再叠加 glow 或卡片阴影。
 
 | Token | 亮色 | 暗色 |
 |---|---|---|
-| `--yj-shadow-xs` | `0 1px 2px rgba(37, 40, 43, 0.06)` | `0 1px 2px rgba(0, 0, 0, 0.16)` |
-| `--yj-shadow-card` | `0 8px 24px rgba(37, 40, 43, 0.08)` | `0 8px 24px rgba(0, 0, 0, 0.20)` |
-| `--yj-shadow-popover` | `0 12px 32px rgba(37, 40, 43, 0.12)` | `0 12px 32px rgba(0, 0, 0, 0.28)` |
-| `--yj-shadow-modal` | `0 24px 64px rgba(37, 40, 43, 0.18)` | `0 24px 64px rgba(0, 0, 0, 0.36)` |
+| `--yj-shadow-xs` | `none` | `none` |
+| `--yj-shadow-card` | `none` | `none` |
+| `--yj-shadow-popover` | `0 6px 20px rgba(37, 40, 43, 0.10)` | `0 6px 20px rgba(0, 0, 0, 0.28)` |
+| `--yj-shadow-modal` | 与 `shadow-popover` 相同 | 与 `shadow-popover` 相同 |
 
-本次只调整颜色和暗色透明度；阴影尺寸、圆角与间距值保持原规范。
+2.1.0 按用户批准的组件状态方案统一焦点宽度和轻投影，圆角与布局间距尺度不变。完整组合见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
 
 ## AI / Codex 必须遵守
 

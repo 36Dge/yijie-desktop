@@ -324,7 +324,7 @@ onBeforeUnmount(() => {
 
 .skill-marketplace__loading > p,
 .skill-marketplace__category-empty {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }
@@ -354,14 +354,14 @@ onBeforeUnmount(() => {
 }
 
 .skill-marketplace__dialog-copy {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }
 
 .skill-marketplace__dialog-error {
   margin-top: var(--yj-space-3);
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }

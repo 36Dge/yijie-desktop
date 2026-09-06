@@ -12,32 +12,48 @@ function readRequiredToken(readVariable: CssVariableReader, variableName: string
   return value
 }
 
+/** Resolves the approved component color roles into one shared Naive UI theme. */
 export function createNaiveThemeOverrides(
   readVariable: CssVariableReader
 ): GlobalThemeOverrides {
   const token = (variableName: string) => readRequiredToken(readVariable, variableName)
+  const fontFamily = token('--yj-font-family-sans')
   const onBrand = token('--yj-color-on-brand')
   const brandText = token('--yj-color-brand-text')
   const focusColor = token('--yj-color-focus-ring')
   const focusBorder = `1px solid ${focusColor}`
-  const focusShadow = `0 0 0 2px ${focusColor}`
-  const controlOutline = token('--yj-color-text-tertiary')
-  const selectedInk = token('--yj-color-text-primary')
-  const selectedSurface = token('--yj-color-brand-soft')
   const surface = token('--yj-color-bg-card')
   const brandFill = token('--yj-color-brand-primary')
+  const ink = token('--yj-color-text-primary')
+  const body = token('--yj-color-text-body')
+  const secondary = token('--yj-color-text-secondary')
+  const disabled = token('--yj-color-text-disabled')
+  const nav = token('--yj-color-bg-nav')
+  const elevated = token('--yj-color-bg-elevated')
+  const hover = token('--yj-color-control-hover')
+  const pressed = token('--yj-color-control-pressed')
+  const disabledBg = token('--yj-color-control-disabled-bg')
+  const border = `1px solid ${token('--yj-color-border-control')}`
+  const hoverBorder = `1px solid ${token('--yj-color-border-control-hover')}`
+  const focus = token('--yj-shadow-control-focus')
+  const error = token('--yj-color-error')
+  const overlayShadow = token('--yj-shadow-popover')
+  const successInk = token('--yj-color-semantic-success-ink')
+  const warningInk = token('--yj-color-semantic-warning-ink')
+  const errorInk = token('--yj-color-semantic-error-ink')
+  const infoInk = token('--yj-color-semantic-info-ink')
 
   return {
     common: {
-      fontFamily: token('--yj-font-family-sans'),
+      fontFamily,
       primaryColor: token('--yj-color-brand-primary'),
       primaryColorHover: token('--yj-color-brand-hover'),
       primaryColorPressed: token('--yj-color-brand-active'),
       primaryColorSuppl: token('--yj-color-brand-hover'),
       borderRadius: token('--yj-radius-md'),
-      textColorBase: token('--yj-color-text-primary'),
+      textColorBase: body,
       textColor1: token('--yj-color-text-primary'),
-      textColor2: token('--yj-color-text-secondary'),
+      textColor2: secondary,
       textColor3: token('--yj-color-text-tertiary'),
       textColorDisabled: token('--yj-color-text-disabled'),
       placeholderColor: token('--yj-color-text-tertiary'),
@@ -53,22 +69,30 @@ export function createNaiveThemeOverrides(
       tableColor: token('--yj-color-bg-card'),
       tableHeaderColor: token('--yj-color-bg-subtle'),
       inputColor: token('--yj-color-bg-card'),
-      inputColorDisabled: token('--yj-color-bg-subtle'),
+      inputColorDisabled: disabledBg,
       actionColor: token('--yj-color-bg-subtle'),
       borderColor: token('--yj-color-border-default'),
-      dividerColor: token('--yj-color-border-subtle')
+      dividerColor: token('--yj-color-border-subtle'),
+      buttonColor2: surface,
+      buttonColor2Hover: hover,
+      buttonColor2Pressed: pressed,
+      hoverColor: hover,
+      pressedColor: pressed,
+      tableColorHover: hover,
+      tableColorStriped: surface,
+      boxShadow1: overlayShadow,
+      boxShadow2: overlayShadow,
+      boxShadow3: overlayShadow
     },
     Button: {
       borderRadiusMedium: token('--yj-radius-md'),
       heightMedium: '36px',
       fontWeight: '500',
-      // Lime fills always carry graphite text, including dark mode.
       textColorPrimary: onBrand,
       textColorHoverPrimary: onBrand,
       textColorPressedPrimary: onBrand,
       textColorFocusPrimary: onBrand,
-      textColorDisabledPrimary: onBrand,
-      // Text and ghost controls need a readable ink color on a white surface.
+      textColorDisabledPrimary: disabled,
       textColorTextPrimary: brandText,
       textColorTextHoverPrimary: brandText,
       textColorTextPressedPrimary: brandText,
@@ -86,69 +110,101 @@ export function createNaiveThemeOverrides(
       textColorGhostHover: brandText,
       textColorGhostPressed: brandText,
       textColorGhostFocus: brandText,
-      borderHover: focusBorder,
-      borderPressed: focusBorder,
+      borderHover: hoverBorder,
+      borderPressed: hoverBorder,
       borderFocus: focusBorder,
-      borderFocusPrimary: focusBorder
+      borderFocusPrimary: focusBorder,
+      color: surface,
+      colorHover: hover,
+      colorPressed: pressed,
+      colorFocus: surface,
+      colorDisabled: disabledBg,
+      textColor: ink,
+      textColorDisabled: disabled,
+      colorDisabledPrimary: disabledBg,
+      borderDisabledPrimary: `1px solid ${token('--yj-color-border-default')}`,
+      textColorTextDisabled: disabled,
+      textColorTextDisabledPrimary: disabled,
+      textColorGhostDisabled: disabled,
+      textColorGhostDisabledPrimary: disabled,
+      opacityDisabled: '1',
+      borderPrimary: border,
+      borderHoverPrimary: hoverBorder,
+      borderPressedPrimary: hoverBorder,
+      colorSecondary: surface,
+      colorSecondaryHover: hover,
+      colorSecondaryPressed: pressed,
+      colorTertiary: surface,
+      colorTertiaryHover: hover,
+      colorTertiaryPressed: pressed,
+      colorQuaternaryHover: hover,
+      colorQuaternaryPressed: pressed
     },
-    // Menu ink must not inherit the lime fill color from common.primaryColor.
     Menu: {
       color: token('--yj-color-bg-nav'),
-      itemColorHover: selectedSurface,
-      itemColorActive: selectedSurface,
-      itemColorActiveHover: selectedSurface,
-      itemColorActiveCollapsed: selectedSurface,
-      itemTextColorHover: selectedInk,
-      itemTextColorActive: selectedInk,
-      itemTextColorActiveHover: selectedInk,
-      itemTextColorChildActive: selectedInk,
-      itemTextColorChildActiveHover: selectedInk,
-      itemTextColorHoverHorizontal: selectedInk,
-      itemTextColorActiveHorizontal: selectedInk,
-      itemTextColorActiveHoverHorizontal: selectedInk,
-      itemTextColorChildActiveHorizontal: selectedInk,
-      itemTextColorChildActiveHoverHorizontal: selectedInk,
-      itemIconColorHover: selectedInk,
-      itemIconColorActive: selectedInk,
-      itemIconColorActiveHover: selectedInk,
-      itemIconColorChildActive: selectedInk,
-      itemIconColorChildActiveHover: selectedInk,
-      itemIconColorHoverHorizontal: selectedInk,
-      itemIconColorActiveHorizontal: selectedInk,
-      itemIconColorActiveHoverHorizontal: selectedInk,
-      itemIconColorChildActiveHorizontal: selectedInk,
-      itemIconColorChildActiveHoverHorizontal: selectedInk,
-      arrowColorHover: selectedInk,
-      arrowColorActive: selectedInk,
-      arrowColorActiveHover: selectedInk,
-      arrowColorChildActive: selectedInk,
-      arrowColorChildActiveHover: selectedInk,
+      itemColorHover: hover,
+      itemColorActive: nav,
+      itemColorActiveHover: hover,
+      itemColorActiveCollapsed: nav,
+      itemTextColorHover: ink,
+      itemTextColorActive: ink,
+      itemTextColorActiveHover: ink,
+      itemTextColorChildActive: ink,
+      itemTextColorChildActiveHover: ink,
+      itemTextColorHoverHorizontal: ink,
+      itemTextColorActiveHorizontal: ink,
+      itemTextColorActiveHoverHorizontal: ink,
+      itemTextColorChildActiveHorizontal: ink,
+      itemTextColorChildActiveHoverHorizontal: ink,
+      itemIconColorHover: ink,
+      itemIconColorActive: ink,
+      itemIconColorActiveHover: ink,
+      itemIconColorChildActive: ink,
+      itemIconColorChildActiveHover: ink,
+      itemIconColorHoverHorizontal: ink,
+      itemIconColorActiveHorizontal: ink,
+      itemIconColorActiveHoverHorizontal: ink,
+      itemIconColorChildActiveHorizontal: ink,
+      itemIconColorChildActiveHoverHorizontal: ink,
+      arrowColorHover: ink,
+      arrowColorActive: ink,
+      arrowColorActiveHover: ink,
+      arrowColorChildActive: ink,
+      arrowColorChildActiveHover: ink,
       borderColorHorizontal: brandText
     },
     Checkbox: {
       color: surface,
       colorChecked: brandFill,
       checkMarkColor: onBrand,
-      border: `1px solid ${controlOutline}`,
+      border,
       borderChecked: `1px solid ${onBrand}`,
       borderFocus: focusBorder,
-      boxShadowFocus: focusShadow
+      boxShadowFocus: focus,
+      textColor: body,
+      textColorDisabled: disabled,
+      colorDisabled: disabledBg,
+      colorDisabledChecked: disabledBg,
+      checkMarkColorDisabledChecked: disabled
     },
     Radio: {
       color: surface,
       colorActive: brandFill,
       dotColorActive: onBrand,
-      boxShadow: `inset 0 0 0 1px ${controlOutline}`,
+      boxShadow: `inset 0 0 0 1px ${token('--yj-color-border-control')}`,
       boxShadowActive: `inset 0 0 0 1px ${onBrand}`,
-      boxShadowHover: `inset 0 0 0 1px ${focusColor}`,
-      boxShadowFocus: `inset 0 0 0 1px ${focusColor}, ${focusShadow}`,
+      boxShadowHover: `inset 0 0 0 1px ${token('--yj-color-border-control-hover')}`,
+      boxShadowFocus: `inset 0 0 0 1px ${focusColor}, ${focus}`,
       buttonColor: surface,
-      buttonColorActive: selectedSurface,
-      buttonTextColorActive: selectedInk,
+      buttonColorActive: token('--yj-color-brand-primary'),
+      buttonTextColorActive: onBrand,
       buttonTextColorHover: brandText,
-      buttonBorderColorActive: focusColor,
+      buttonBorderColorActive: onBrand,
       buttonBorderColorHover: focusColor,
-      buttonBoxShadowFocus: `inset 0 0 0 1px ${focusColor}, ${focusShadow}`
+      buttonBoxShadowFocus: focus,
+      textColor: body,
+      textColorDisabled: disabled,
+      colorDisabled: disabledBg
     },
     Switch: {
       railColor: token('--yj-color-control-track'),
@@ -157,44 +213,52 @@ export function createNaiveThemeOverrides(
       textColor: onBrand,
       iconColor: brandFill,
       loadingColor: brandFill,
-      boxShadowFocus: focusShadow
+      boxShadowFocus: focus
     },
     Tabs: {
-      colorSegment: token('--yj-color-bg-subtle'),
+      colorSegment: surface,
       tabColor: surface,
-      tabColorSegment: selectedSurface,
-      tabTextColorActiveLine: selectedInk,
+      tabColorSegment: hover,
+      tabTextColorActiveLine: ink,
       tabTextColorHoverLine: brandText,
-      tabTextColorActiveBar: selectedInk,
+      tabTextColorActiveBar: ink,
       tabTextColorHoverBar: brandText,
-      tabTextColorActiveCard: selectedInk,
+      tabTextColorActiveCard: ink,
       tabTextColorHoverCard: brandText,
-      tabTextColorActiveSegment: selectedInk,
+      tabTextColorActiveSegment: ink,
       tabTextColorHoverSegment: brandText,
       barColor: brandText
     },
-    // These shared peers cover Select and other selectors that consume them.
     InternalSelection: {
+      border,
       color: surface,
       colorActive: surface,
-      textColor: selectedInk,
-      caretColor: selectedInk,
-      borderHover: focusBorder,
+      textColor: body,
+      caretColor: ink,
+      borderHover: hoverBorder,
       borderActive: focusBorder,
       borderFocus: focusBorder,
-      boxShadowActive: focusShadow,
-      boxShadowFocus: focusShadow,
-      loadingColor: brandText
+      boxShadowActive: focus,
+      boxShadowFocus: focus,
+      loadingColor: brandText,
+      colorDisabled: disabledBg,
+      textColorDisabled: disabled,
+      boxShadowHover: 'none',
+      boxShadowFocusError: focus,
+      boxShadowActiveError: focus,
+      boxShadowFocusWarning: focus,
+      boxShadowActiveWarning: focus
     },
     InternalSelectMenu: {
       color: token('--yj-color-bg-elevated'),
-      optionTextColorActive: selectedInk,
-      optionTextColorPressed: selectedInk,
-      optionCheckColor: brandText,
-      optionColorPending: selectedSurface,
-      optionColorActive: selectedSurface,
-      optionColorActivePending: selectedSurface,
-      loadingColor: brandText
+      optionTextColorActive: ink,
+      optionTextColorPressed: ink,
+      optionCheckColor: ink,
+      optionColorPending: hover,
+      optionColorActive: elevated,
+      optionColorActivePending: hover,
+      loadingColor: brandText,
+      optionTextColor: body
     },
     Pagination: {
       itemTextColorHover: brandText,
@@ -212,36 +276,109 @@ export function createNaiveThemeOverrides(
     },
     Card: {
       borderRadius: token('--yj-radius-lg'),
-      paddingMedium: token('--yj-space-5')
+      paddingMedium: token('--yj-space-5'),
+      color: surface,
+      textColor: body,
+      boxShadow: 'none',
+      actionColor: surface
     },
     Input: {
+      border,
       borderRadius: token('--yj-radius-md'),
       heightMedium: '36px',
       colorFocus: token('--yj-color-bg-card'),
       caretColor: token('--yj-color-text-primary'),
-      borderHover: focusBorder,
-      borderFocus: focusBorder
+      boxShadowFocus: focus,
+      borderHover: hoverBorder,
+      borderFocus: focusBorder,
+      textColor: body,
+      textColorDisabled: disabled,
+      loadingColor: ink,
+      loadingColorError: errorInk,
+      loadingColorWarning: warningInk,
+      color: surface,
+      colorDisabled: disabledBg,
+      borderError: `1px solid ${error}`,
+      borderHoverError: `1px solid ${error}`,
+      borderFocusError: `1px solid ${error}`,
+      boxShadowFocusError: focus,
+      boxShadowFocusWarning: focus
     },
     DataTable: {
       borderRadius: token('--yj-radius-lg'),
-      thColor: token('--yj-color-bg-subtle'),
-      borderColor: token('--yj-color-border-subtle')
+      thColor: surface,
+      borderColor: token('--yj-color-border-subtle'),
+      tdTextColor: body,
+      thTextColor: secondary,
+      tdColor: surface,
+      tdColorHover: hover,
+      tdColorStriped: surface,
+      tdColorSorting: surface,
+      thColorHover: hover,
+      thColorSorting: surface,
+      loadingColor: ink
     },
     Tag: {
       borderRadius: token('--yj-radius-sm'),
-      color: token('--yj-color-bg-subtle'),
-      colorBordered: token('--yj-color-bg-subtle'),
+      color: surface,
+      colorBordered: surface,
       textColorChecked: onBrand,
       colorChecked: brandFill,
       colorCheckedHover: token('--yj-color-brand-hover'),
       colorCheckedPressed: token('--yj-color-brand-active'),
-      textColorPrimary: brandText,
-      colorPrimary: selectedSurface,
-      colorBorderedPrimary: selectedSurface,
+      textColorPrimary: ink,
+      colorPrimary: surface,
+      colorBorderedPrimary: surface,
       borderPrimary: `1px solid ${token('--yj-color-brand-border')}`,
       closeIconColorPrimary: brandText,
       closeIconColorHoverPrimary: brandText,
-      closeIconColorPressedPrimary: brandText
+      closeIconColorPressedPrimary: brandText,
+      textColor: secondary,
+      textColorSuccess: successInk,
+      closeIconColorSuccess: successInk,
+      textColorWarning: warningInk,
+      closeIconColorWarning: warningInk,
+      textColorError: errorInk,
+      closeIconColorError: errorInk,
+      textColorInfo: infoInk,
+      closeIconColorInfo: infoInk,
+      textColorCheckable: ink,
+      colorHoverCheckable: hover,
+      colorPressedCheckable: pressed
+    },
+    Alert: {
+      contentTextColorSuccess: body,
+      contentTextColorWarning: body,
+      contentTextColorError: body,
+      contentTextColorInfo: body,
+      titleTextColorSuccess: successInk,
+      iconColorSuccess: successInk,
+      titleTextColorWarning: warningInk,
+      iconColorWarning: warningInk,
+      titleTextColorError: errorInk,
+      iconColorError: errorInk,
+      titleTextColorInfo: infoInk,
+      iconColorInfo: infoInk
+    },
+    Popover: {
+      color: elevated,
+      textColor: body,
+      boxShadow: overlayShadow
+    },
+    Dropdown: {
+      color: elevated,
+      optionTextColor: body,
+      optionTextColorActive: ink,
+      optionTextColorChildActive: ink,
+      optionColorHover: hover,
+      optionColorActive: elevated
+    },
+    Select: {
+      menuBoxShadow: overlayShadow
+    },
+    Spin: {
+      color: ink,
+      textColor: body
     }
   }
 }

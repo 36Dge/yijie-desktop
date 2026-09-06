@@ -174,7 +174,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
 }
 
 .artifact-shell:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -235,7 +235,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
 .artifact-shell__progress { width: 100%; }
 .artifact-shell__failure-guidance {
   margin: 0;
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   font-size: var(--yj-font-size-caption);
 }
 

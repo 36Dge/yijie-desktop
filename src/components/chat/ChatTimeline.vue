@@ -203,7 +203,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   background: var(--yj-color-bg-subtle);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
@@ -237,7 +237,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   background: var(--yj-color-bg-subtle);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);

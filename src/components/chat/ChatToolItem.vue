@@ -344,7 +344,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
 }
 
 .chat-tool-item__error {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   background: var(--yj-color-error-soft);
 }
 
@@ -358,7 +358,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
 }
 
 .chat-tool-item__capability-gap {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   background: var(--yj-color-warning-soft);
 }
 

@@ -59,18 +59,18 @@ const toneClass = computed(() => `yj-icon--${props.tone}`);
 }
 
 .yj-icon--primary {
-  color: var(--yj-color-brand-primary);
+  color: var(--yj-color-text-primary);
 }
 
 .yj-icon--success {
-  color: var(--yj-color-success);
+  color: var(--yj-color-semantic-success-ink);
 }
 
 .yj-icon--warning {
-  color: var(--yj-color-warning);
+  color: var(--yj-color-semantic-warning-ink);
 }
 
 .yj-icon--error {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 </style>

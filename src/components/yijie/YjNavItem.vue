@@ -52,7 +52,7 @@ const accessibleLabel = computed(() =>
   gap: var(--yj-space-3);
   padding: var(--yj-space-2) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-body);
   font-weight: 500;
   line-height: var(--yj-line-height-body);
@@ -62,19 +62,24 @@ const accessibleLabel = computed(() =>
     background-color var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
-.yj-nav-item:hover {
+.yj-nav-item:not(.yj-nav-item--disabled):hover {
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-control-hover);
 }
 
 .yj-nav-item:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: calc(var(--yj-space-1) * -1);
 }
 
 .yj-nav-item--selected {
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-bg-nav);
+  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
+}
+
+.yj-nav-item:not(.yj-nav-item--disabled):active {
+  background: var(--yj-color-control-pressed);
 }
 
 .yj-nav-item--collapsed {
@@ -85,6 +90,10 @@ const accessibleLabel = computed(() =>
 .yj-nav-item--disabled {
   color: var(--yj-color-text-disabled);
   cursor: not-allowed;
+}
+
+.yj-nav-item--disabled :deep(.yj-icon) {
+  color: var(--yj-color-text-disabled);
 }
 
 .yj-nav-item--disabled:hover {

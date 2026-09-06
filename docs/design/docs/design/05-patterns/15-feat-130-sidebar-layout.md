@@ -3,8 +3,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用 Feature：`FEAT-130`、`FEAT-151`
 - 适用仓库：`yijie-desktop`
 - Contract impact：`none`
@@ -51,11 +51,11 @@
 - 仅主页新建任务 composer 上方的项目选择条圆角由 `--yj-radius-md` 提升为
   `--yj-radius-lg`，即从 8px 增加到 12px。
 - 未 hover 状态使用结构背景 token：亮色项目条与页面均为纯白，以现有间距、标签和细中性边框建立可辨认边界；不再要求 app/page 的填色差。
-- hover 使用局部 `--yj-color-brand-soft`，边框保持既有中性层级；键盘焦点环、disabled、暗色主题和
+- hover 使用局部 `--yj-color-control-hover`，边框按 control-hover；键盘焦点使用 2px 中性 focus-ring。disabled、暗色主题和
   reduced-motion 行为沿用现有规范。
 - 不硬编码颜色或圆角，不改变活跃会话中的只读项目条。
 
-本节仅按设计系统 2.0.0 更新颜色与分层方式，主导航顺序、树结构、滚动、状态、权限和项目选择行为不变。
+本节按设计系统 2.1.0 更新颜色、焦点与分层方式，主导航顺序、树结构、滚动、状态、权限和项目选择行为不变。
 
 ## 5. 状态与可访问性
 

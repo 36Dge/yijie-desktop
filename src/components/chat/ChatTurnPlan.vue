@@ -131,11 +131,11 @@ function toggle(): void {
 }
 
 .chat-turn-plan__disclosure:hover {
-  background: var(--yj-color-bg-card);
+  background: var(--yj-color-control-hover);
 }
 
 .chat-turn-plan__disclosure:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -171,7 +171,7 @@ function toggle(): void {
 
 .chat-turn-plan__explanation {
   margin: var(--yj-space-0);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   overflow-wrap: anywhere;

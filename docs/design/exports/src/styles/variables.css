@@ -2,48 +2,48 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --yj-color-brand-primary: #C3F35B;
-  --yj-color-brand-hover: #D0F780;
-  --yj-color-brand-active: #B1E343;
-  --yj-color-brand-soft: #F0F8DF;
-  --yj-color-brand-subtle: #F0F8DF;
-  --yj-color-brand-border: #C9D7B3;
-  --yj-color-brand-text: #4B651D;
-  --yj-color-on-brand: #25282B;
-  --yj-color-focus-ring: #4B651D;
-  --yj-color-control-track: #B8BEC5;
+  --yj-color-brand-primary: #c3f35b;
+  --yj-color-brand-hover: #d0f780;
+  --yj-color-brand-active: #b1e343;
+  --yj-color-brand-soft: #ffffff;
+  --yj-color-brand-subtle: #ffffff;
+  --yj-color-brand-border: #e2e5e8;
+  --yj-color-brand-text: #25282b;
+  --yj-color-on-brand: #25282b;
+  --yj-color-focus-ring: #25282b;
+  --yj-color-control-track: #b8bec5;
 
-  --yj-color-text-primary: #25282B;
-  --yj-color-text-secondary: #60666E;
-  --yj-color-text-tertiary: #6F757D;
-  --yj-color-text-disabled: #A5ABB2;
+  --yj-color-text-primary: #25282b;
+  --yj-color-text-secondary: #51565d;
+  --yj-color-text-tertiary: #6f757d;
+  --yj-color-text-disabled: #a5abb2;
 
-  --yj-color-bg-app: #FFFFFF;
-  --yj-color-bg-page: #FFFFFF;
-  --yj-color-bg-nav: #FFFFFF;
-  --yj-color-bg-card: #FFFFFF;
-  --yj-color-bg-elevated: #FFFFFF;
-  --yj-color-bg-subtle: #FFFFFF;
+  --yj-color-bg-app: #ffffff;
+  --yj-color-bg-page: #ffffff;
+  --yj-color-bg-nav: #ffffff;
+  --yj-color-bg-card: #ffffff;
+  --yj-color-bg-elevated: #ffffff;
+  --yj-color-bg-subtle: #ffffff;
 
-  --yj-color-border-subtle: #ECEEF0;
-  --yj-color-border-default: #E2E5E8;
-  --yj-color-border-strong: #B8BEC5;
+  --yj-color-border-subtle: #eceef0;
+  --yj-color-border-default: #e2e5e8;
+  --yj-color-border-strong: #b8bec5;
 
-  --yj-color-success: #16A34A;
-  --yj-color-warning: #D97706;
-  --yj-color-error: #DC2626;
-  --yj-color-info: #2563EB;
-  --yj-color-neutral: #64748B;
+  --yj-color-success: #16a34a;
+  --yj-color-warning: #d97706;
+  --yj-color-error: #dc2626;
+  --yj-color-info: #2563eb;
+  --yj-color-neutral: #64748b;
 
-  --yj-color-agent-thinking: #8B5CF6;
-  --yj-color-agent-running: #2563EB;
-  --yj-color-agent-waiting: #D97706;
-  --yj-color-agent-success: #16A34A;
-  --yj-color-agent-failed: #DC2626;
-  --yj-color-agent-paused: #64748B;
+  --yj-color-agent-thinking: #8b5cf6;
+  --yj-color-agent-running: #2563eb;
+  --yj-color-agent-waiting: #d97706;
+  --yj-color-agent-success: #16a34a;
+  --yj-color-agent-failed: #dc2626;
+  --yj-color-agent-paused: #64748b;
 
-  --yj-color-icon-default: #60666E;
-  --yj-color-icon-muted: #6F757D;
+  --yj-color-icon-default: #25282b;
+  --yj-color-icon-muted: #6f757d;
 
   --yj-font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --yj-font-family-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
@@ -81,10 +81,10 @@
   --yj-radius-xl: 16px;
   --yj-radius-full: 999px;
 
-  --yj-shadow-xs: 0 1px 2px rgba(37, 40, 43, 0.06);
-  --yj-shadow-card: 0 8px 24px rgba(37, 40, 43, 0.08);
-  --yj-shadow-popover: 0 12px 32px rgba(37, 40, 43, 0.12);
-  --yj-shadow-modal: 0 24px 64px rgba(37, 40, 43, 0.18);
+  --yj-shadow-xs: none;
+  --yj-shadow-card: none;
+  --yj-shadow-popover: 0 6px 20px rgba(37, 40, 43, 0.10);
+  --yj-shadow-modal: var(--yj-shadow-popover);
 
   --yj-motion-fast: 120ms;
   --yj-motion-base: 180ms;
@@ -98,6 +98,34 @@
   --yj-layout-chat-list: 280px;
   --yj-layout-right-panel-min: 320px;
   --yj-layout-right-panel-max: 380px;
+  --yj-focus-ring-width: 2px;
+  --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
+  --yj-color-control-hover: #f7f8f9;
+  --yj-color-control-pressed: #eceef0;
+  --yj-color-control-disabled-bg: #f7f8f9;
+  --yj-color-text-body: #25282b;
+  --yj-color-text-on-accent: var(--yj-color-on-brand);
+  --yj-color-text-selection-bg: #c3f35b;
+  --yj-color-text-selection-ink: #25282b;
+  --yj-color-text-on-danger: #ffffff;
+  --yj-color-border-control: #8c939b;
+  --yj-color-border-control-hover: #60666e;
+  --yj-color-error-soft: #fef2f2;
+  --yj-color-warning-soft: #fffbeb;
+  --yj-color-success-soft: #f0fdf4;
+  --yj-color-semantic-success-ink: #166534;
+  --yj-color-semantic-warning-ink: #92400e;
+  --yj-color-semantic-error-ink: #b91c1c;
+  --yj-color-semantic-info-ink: #1d4ed8;
+  --yj-color-chart-series-1: #4b651d;
+  --yj-color-chart-series-2: #356bea;
+  --yj-color-chart-series-3: #0e7490;
+  --yj-color-chart-series-4: #7c3aed;
+  --yj-color-chart-series-5: #b45309;
+  --yj-color-chart-series-6: #c2410c;
+  --yj-color-chart-series-7: #dc2626;
+  --yj-color-chart-series-8: #475569;
+  --yj-border-width: 1px;
 }
 
 /* Logo visibility inherits from explicit theme boundaries. The component
@@ -112,38 +140,62 @@
   --yj-brand-logo-light-display: none;
   --yj-brand-logo-dark-display: block;
   color-scheme: dark;
-  --yj-color-brand-primary: #C3F35B;
-  --yj-color-brand-hover: #D0F780;
-  --yj-color-brand-active: #B1E343;
-  --yj-color-brand-soft: #2E3823;
-  --yj-color-brand-subtle: #39462A;
-  --yj-color-brand-border: #61783C;
-  --yj-color-brand-text: #C3F35B;
-  --yj-color-on-brand: #25282B;
-  --yj-color-focus-ring: #C3F35B;
-  --yj-color-control-track: #B8BEC5;
+  --yj-color-brand-primary: #c3f35b;
+  --yj-color-brand-hover: #d0f780;
+  --yj-color-brand-active: #b1e343;
+  --yj-color-brand-soft: #25282b;
+  --yj-color-brand-subtle: #25282b;
+  --yj-color-brand-border: #414850;
+  --yj-color-brand-text: #f5f7fa;
+  --yj-color-on-brand: #25282b;
+  --yj-color-focus-ring: #f5f7fa;
+  --yj-color-control-track: #b8bec5;
 
-  --yj-color-text-primary: #F5F7FA;
-  --yj-color-text-secondary: #C2C7CE;
-  --yj-color-text-tertiary: #969EA8;
-  --yj-color-text-disabled: #69717B;
+  --yj-color-text-primary: #f5f7fa;
+  --yj-color-text-secondary: #c2c7ce;
+  --yj-color-text-tertiary: #969ea8;
+  --yj-color-text-disabled: #69717b;
 
-  --yj-color-bg-app: #191C20;
-  --yj-color-bg-page: #191C20;
-  --yj-color-bg-nav: #191C20;
-  --yj-color-bg-card: #25282B;
-  --yj-color-bg-elevated: #2E3237;
-  --yj-color-bg-subtle: #22262A;
+  --yj-color-bg-app: #191c20;
+  --yj-color-bg-page: #191c20;
+  --yj-color-bg-nav: #191c20;
+  --yj-color-bg-card: #25282b;
+  --yj-color-bg-elevated: #2e3237;
+  --yj-color-bg-subtle: #22262a;
 
-  --yj-color-border-subtle: #30363D;
+  --yj-color-border-subtle: #30363d;
   --yj-color-border-default: #414850;
-  --yj-color-border-strong: #69717B;
+  --yj-color-border-strong: #69717b;
 
-  --yj-color-icon-default: #C2C7CE;
-  --yj-color-icon-muted: #969EA8;
+  --yj-color-icon-default: #f5f7fa;
+  --yj-color-icon-muted: #969ea8;
 
-  --yj-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.16);
-  --yj-shadow-card: 0 8px 24px rgba(0, 0, 0, 0.20);
-  --yj-shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.28);
-  --yj-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.36);
+  --yj-shadow-xs: none;
+  --yj-shadow-card: none;
+  --yj-shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --yj-shadow-modal: var(--yj-shadow-popover);
+  --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
+  --yj-color-control-hover: #30363d;
+  --yj-color-control-pressed: #414850;
+  --yj-color-control-disabled-bg: #30363d;
+  --yj-color-text-body: #e6e9ed;
+  --yj-color-text-on-accent: var(--yj-color-on-brand);
+  --yj-color-text-on-danger: #ffffff;
+  --yj-color-border-control: #6a727c;
+  --yj-color-border-control-hover: #969ea8;
+  --yj-color-error-soft: rgba(220, 38, 38, 0.14);
+  --yj-color-warning-soft: rgba(217, 119, 6, 0.14);
+  --yj-color-success-soft: rgba(22, 163, 74, 0.14);
+  --yj-color-semantic-success-ink: #86efac;
+  --yj-color-semantic-warning-ink: #fcd34d;
+  --yj-color-semantic-error-ink: #fca5a5;
+  --yj-color-semantic-info-ink: #93c5fd;
+  --yj-color-chart-series-1: #c3f35b;
+  --yj-color-chart-series-2: #78a2ff;
+  --yj-color-chart-series-3: #46c7d8;
+  --yj-color-chart-series-4: #a78bfa;
+  --yj-color-chart-series-5: #fbbf24;
+  --yj-color-chart-series-6: #fb923c;
+  --yj-color-chart-series-7: #f87171;
+  --yj-color-chart-series-8: #94a3b8;
 }

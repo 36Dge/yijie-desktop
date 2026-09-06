@@ -24,7 +24,7 @@
   border: 1px solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
 }
 
 .access-denied__eyebrow {
@@ -40,13 +40,18 @@
 }
 
 .access-denied p {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
 }
 
 .access-denied__action {
   display: inline-flex;
   margin-top: var(--yj-space-4);
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   font-weight: var(--yj-font-weight-semibold);
+}
+
+.access-denied__action:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: var(--yj-space-1);
 }
 </style>

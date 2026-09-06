@@ -137,7 +137,7 @@ import {
   justify-content: center;
   gap: var(--yj-space-2);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
   font-size: var(--yj-font-size-body);
   font-weight: var(--yj-font-weight-semibold);
@@ -150,16 +150,18 @@ import {
   border-radius: var(--yj-radius-lg);
 }
 
-.workflow-page__category :deep(.yj-icon) {
-  color: var(--workflow-accent-color);
+.workflow-page__category :deep(.yj-icon),
+.workflow-page__filter :deep(.yj-icon),
+.workflow-page__view :deep(.yj-icon) {
+  color: inherit;
 }
 
 .workflow-page__category--selected,
 .workflow-page__filter--selected,
 .workflow-page__view--selected {
-  border-color: var(--yj-color-brand-border);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  border-color: var(--yj-color-on-brand);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
 }
 
 .workflow-page__toolbar {
@@ -247,14 +249,11 @@ import {
 
 .workflow-page__view-all {
   border-color: transparent;
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   background: transparent;
 }
 
-.workflow-accent--brand { --workflow-accent-color: var(--yj-color-brand-primary); }
 .workflow-accent--blue { --workflow-accent-color: var(--yj-color-chart-series-2); }
-.workflow-accent--cyan { --workflow-accent-color: var(--yj-color-chart-series-3); }
 .workflow-accent--green { --workflow-accent-color: var(--yj-color-success); }
-.workflow-accent--orange { --workflow-accent-color: var(--yj-color-chart-series-6); }
 .workflow-accent--purple { --workflow-accent-color: var(--yj-color-chart-series-4); }
 </style>

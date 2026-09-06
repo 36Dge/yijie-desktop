@@ -432,7 +432,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 
 .chat-command-item__state,
 .chat-command-item__notice {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
 }
 
 .chat-command-item__output-section {
@@ -459,7 +459,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 .chat-command-item__error {
   padding: var(--yj-space-2) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   background: var(--yj-color-error-soft);
 }
 

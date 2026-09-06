@@ -275,7 +275,7 @@ onBeforeUnmount(() => {
   border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
 }
 
 .yj-chart-card__header {
@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
 .yj-chart-card__description,
 .yj-chart-card__fallback {
   margin: var(--yj-space-1) 0 0;
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }
@@ -303,8 +303,8 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   padding: var(--yj-space-1) var(--yj-space-2);
   border-radius: var(--yj-radius-full);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-bg-card);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
 }
 
 .yj-chart-card__table-region:focus-visible {
-  outline: 3px solid var(--yj-color-chart-series-1);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: 2px;
 }
 

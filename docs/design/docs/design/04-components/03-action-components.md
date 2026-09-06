@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -30,10 +30,12 @@
 
 ## 颜色与状态
 
-- Primary：使用 `--yj-color-brand-primary` 背景，文字、图标始终使用 `--yj-color-on-brand`；hover/pressed 分别使用品牌 hover/active，不能继承白色前景。
+- Primary：可操作 default/hover/pressed/focus/loading 使用品牌填充与 on-brand；disabled 使用禁用前景/底色。hover/pressed 分别使用品牌 hover/active，不能继承白色前景。
 - Secondary：亮色为白底、石墨文字和细中性边框；暗色使用主题卡片或浮层色与可读前景。
-- Tertiary / Ghost：使用中性文字；文本型品牌操作使用 `--yj-color-brand-text`，不直接使用浅青柠小字。
-- Danger、loading、disabled 与焦点继续使用独立语义 token，不用青柠替代风险或禁用状态。
+- Tertiary / Ghost：普通链接与文本操作直接使用 `--yj-color-text-primary`，正文说明使用 `--yj-color-text-body`；新代码不使用 brand-text 兼容槽位。
+- Danger 保留独立语义。focus 为 2px 中性无 glow；普通 loading 使用当前中性前景，青柠按钮内部 spinner 为 on-brand。readonly 不用于动作按钮，disabled 与 loading 不混同。
+
+完整颜色、状态优先级及原生 primary+secondary 等反例见 [组件配色与状态矩阵](./09-component-color-state-matrix.md)。
 
 ## 高影响操作
 

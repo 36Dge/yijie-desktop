@@ -390,8 +390,8 @@ function decide(decision: ChatApprovalDecision): void {
 
 .chat-approval-card--submitting,
 .chat-approval-card--reconciling {
-  border-color: var(--yj-color-brand-border);
-  background: var(--yj-color-brand-soft);
+  border-color: var(--yj-color-info);
+  background: var(--yj-color-info-soft);
 }
 
 .chat-approval-card--accepted {
@@ -411,7 +411,7 @@ function decide(decision: ChatApprovalDecision): void {
 }
 
 .chat-approval-card:focus {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -479,7 +479,7 @@ function decide(decision: ChatApprovalDecision): void {
 .chat-approval-card__state,
 .chat-approval-card__action-hint,
 .chat-approval-card__facts {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
@@ -547,19 +547,24 @@ function decide(decision: ChatApprovalDecision): void {
 }
 
 .chat-approval-card__button--secondary:hover:not(:disabled) {
-  border-color: var(--yj-color-border-strong);
-  background: var(--yj-color-bg-subtle);
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-hover);
+}
+
+.chat-approval-card__button--secondary:active:not(:disabled) {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-pressed);
 }
 
 .chat-approval-card__button:disabled {
   border-color: var(--yj-color-border-subtle);
   color: var(--yj-color-text-disabled);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-control-disabled-bg);
   cursor: default;
 }
 
 .chat-approval-card__button:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 

@@ -120,7 +120,7 @@ function handleEntryClick(entry: AppNavEntry): void {
   flex: 0 0 var(--yj-layout-sidebar-expanded);
   flex-direction: column;
   border-right: 1px solid var(--yj-color-border-subtle);
-  background: var(--yj-color-bg-card);
+  background: var(--yj-color-bg-nav);
   transition:
     width var(--yj-motion-base) var(--yj-ease-standard),
     flex-basis var(--yj-motion-base) var(--yj-ease-standard);
@@ -160,7 +160,7 @@ function handleEntryClick(entry: AppNavEntry): void {
   border-radius: var(--yj-radius-full);
   color: var(--yj-color-icon-default);
   background: var(--yj-color-bg-elevated);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
   cursor: pointer;
   transition:
     color var(--yj-motion-fast) var(--yj-ease-standard),
@@ -169,13 +169,17 @@ function handleEntryClick(entry: AppNavEntry): void {
 }
 
 .yj-sidebar__toggle:hover {
-  border-color: var(--yj-color-brand-border);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  border-color: var(--yj-color-border-control-hover);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-control-hover);
+}
+
+.yj-sidebar__toggle:active {
+  background: var(--yj-color-control-pressed);
 }
 
 .yj-sidebar__toggle:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -224,14 +228,14 @@ function handleEntryClick(entry: AppNavEntry): void {
   gap: var(--yj-space-3);
   padding: var(--yj-space-2) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-body);
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-body);
 }
 
 .yj-sidebar__section--active {
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
 }
 
 .yj-sidebar__section--collapsed {

@@ -214,7 +214,7 @@ function requestUninstall(event: MouseEvent): void {
   border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
   gap: var(--yj-space-4);
   transition:
     border-color var(--yj-motion-fast) var(--yj-ease-standard),
@@ -224,7 +224,7 @@ function requestUninstall(event: MouseEvent): void {
 .skill-card:hover,
 .skill-card:focus-within {
   border-color: var(--yj-color-border-default);
-  box-shadow: var(--yj-shadow-card);
+  box-shadow: none;
 }
 
 .skill-card__main {
@@ -240,10 +240,12 @@ function requestUninstall(event: MouseEvent): void {
   height: var(--yj-space-12);
   align-items: center;
   justify-content: center;
-  border: var(--yj-border-width) solid var(--yj-color-brand-border);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-brand-soft);
+  background: var(--yj-color-bg-card);
 }
+
+.skill-card__icon :deep(.yj-icon) { color: var(--yj-color-text-primary); }
 
 .skill-card__content {
   display: grid;
@@ -280,7 +282,7 @@ function requestUninstall(event: MouseEvent): void {
 .skill-card__description {
   display: -webkit-box;
   overflow: hidden;
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   -webkit-box-orient: vertical;
@@ -325,17 +327,18 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__delete:hover,
 .skill-card__delete:focus-visible {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   background: var(--yj-color-error-soft);
 }
 
 .skill-card__delete:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
 .skill-card__delete:disabled {
   color: var(--yj-color-text-disabled);
+  background: transparent;
   cursor: not-allowed;
 }
 
@@ -364,11 +367,11 @@ function requestUninstall(event: MouseEvent): void {
 }
 
 .skill-card__blocked-reason {
-  color: var(--yj-color-warning);
+  color: var(--yj-color-semantic-warning-ink);
 }
 
 .skill-card__error {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 
 @media (hover: none) {

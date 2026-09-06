@@ -5,11 +5,11 @@ import {
 } from "./echarts-theme";
 
 const lightPalette = [
-  "#6B8E23", "#356BEA", "#0E7490", "#7C3AED",
+  "#4B651D", "#356BEA", "#0E7490", "#7C3AED",
   "#B45309", "#C2410C", "#DC2626", "#475569",
 ] as const;
 const darkPalette = [
-  "#A6CC62", "#78A2FF", "#46C7D8", "#A78BFA",
+  "#C3F35B", "#78A2FF", "#46C7D8", "#A78BFA",
   "#FBBF24", "#FB923C", "#F87171", "#94A3B8",
 ] as const;
 
@@ -28,11 +28,11 @@ function contrast(foreground: string, background: string): number {
 
 function tokenReader(overrides: Readonly<Record<string, string>> = {}) {
   const values: Record<string, string> = {
-    "--yj-color-text-primary": "#18230f",
-    "--yj-color-text-secondary": "#526046",
+    "--yj-color-text-primary": "#25282b",
+    "--yj-color-text-secondary": "#60666e",
     "--yj-color-bg-elevated": "#ffffff",
-    "--yj-color-border-default": "#d6dec8",
-    "--yj-color-border-subtle": "#e6ecdd",
+    "--yj-color-border-default": "#e2e5e8",
+    "--yj-color-border-subtle": "#eceef0",
     "--yj-font-family-sans": "system-ui",
     ...Object.fromEntries(ARTIFACT_REPORT_CHART_TOKEN_NAMES.map((name, index) => [name, lightPalette[index]])),
     ...overrides,
@@ -59,6 +59,6 @@ describe("createArtifactReportEChartsTheme", () => {
 
   it("keeps every light and dark informational series above the 3:1 contrast floor", () => {
     expect(lightPalette.every((color) => contrast(color, "#FFFFFF") >= 3)).toBe(true);
-    expect(darkPalette.every((color) => contrast(color, "#1B2316") >= 3)).toBe(true);
+    expect(darkPalette.every((color) => contrast(color, "#25282B") >= 3)).toBe(true);
   });
 });

@@ -1,0 +1,90 @@
+[
+  {
+    "repository": "yijie",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-admin-web",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-agent-host",
+    "headUnchanged": true,
+    "preexistingFiles": 6,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-api",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-codex",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-connectors",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-contracts",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-desktop",
+    "headUnchanged": true,
+    "preexistingFiles": 38,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-infra",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-knowledge",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  },
+  {
+    "repository": "yijie-skills",
+    "headUnchanged": true,
+    "preexistingFiles": 0,
+    "preexistingContentChanged": [],
+    "unexpectedChanges": [],
+    "staged": []
+  }
+]

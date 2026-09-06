@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -39,7 +39,7 @@ export const yijieChartPalette = [
 export const yijieChartPaletteLight = ['#4B651D', ...yijieChartPalette.slice(1)]
 ```
 
-主题 factory 在亮色使用 `yijieChartPaletteLight`，暗色使用 `yijieChartPalette`；背景、正文、边框从当前主题 token 解析。颜色表仅在主题定义层声明，业务页面不得复制。FEAT-128 的 closed adapter 继续使用其专用系列 token、完整文字表格和其他限制。
+主题 factory 在亮色使用 `yijieChartPaletteLight`，暗色使用 `yijieChartPalette`；背景、正文、边框从当前主题 token 解析。颜色表仅在主题定义层声明，业务页面不得复制；首序列与 brand-text 解耦，普通组件文字中性化不能改变图表系列颜色。FEAT-128 的 closed adapter 继续使用其专用系列 token、完整文字表格和其他限制。
 
 `YjChartCard` 必须封装 title、description、loading、empty、error、timeRange 和 tooltip 约定。
 

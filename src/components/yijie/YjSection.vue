@@ -17,7 +17,7 @@ const titleId = useId();
   <section class="yj-section" :aria-labelledby="titleId">
     <header class="yj-section__header">
       <div class="yj-section__heading">
-        <YjIcon v-if="icon" :name="icon" size="lg" tone="muted" />
+        <YjIcon v-if="icon" :name="icon" size="lg" tone="default" />
         <h2 :id="titleId" class="yj-section__title">{{ title }}</h2>
         <span v-if="count !== undefined" class="yj-section__count" :aria-label="`${count} 个 Skill`">
           {{ count }}
@@ -73,7 +73,7 @@ const titleId = useId();
 }
 
 .yj-section__description {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }

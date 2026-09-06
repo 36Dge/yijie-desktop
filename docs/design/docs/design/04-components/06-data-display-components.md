@@ -4,7 +4,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.1.0
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -30,6 +30,8 @@
 ## 规则
 
 数据展示必须明确单位、时间范围和数据来源。空值不能显示为 `null` 或 `undefined`，应显示 `—` 或业务文案。表格操作必须可追踪，批量操作必须显示影响数量。
+
+本类组件的文字、图标、背景、边界、2px 中性焦点、普通容器无阴影与真实浮层轻投影，以 [组件配色与状态矩阵](./09-component-color-state-matrix.md) 为准。readonly 保留正常读值；disabled 只作用于不可用控件；error 与 selected 不能抹掉焦点。现有组件职责、布局与交互不变。
 
 ## AI / Codex 必须遵守
 

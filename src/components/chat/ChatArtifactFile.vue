@@ -453,7 +453,18 @@ onBeforeUnmount(() => {
   font: inherit;
 }
 
+.artifact-file button:hover:not(:disabled) {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-hover);
+}
+
+.artifact-file button:active:not(:disabled) {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-pressed);
+}
+
 .artifact-file button:disabled {
+  background: var(--yj-color-control-disabled-bg);
   color: var(--yj-color-text-disabled);
   cursor: not-allowed;
 }
@@ -463,7 +474,7 @@ onBeforeUnmount(() => {
 .artifact-file__preview:focus-visible,
 .artifact-file__text:focus-visible,
 .artifact-file__table-scroll:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -479,7 +490,7 @@ onBeforeUnmount(() => {
 .artifact-file__error {
   padding: var(--yj-space-3);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   background: var(--yj-color-error-soft);
 }
 
@@ -503,7 +514,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: var(--yj-space-2) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-warning);
+  color: var(--yj-color-semantic-warning-ink);
   background: var(--yj-color-warning-soft);
   font-size: var(--yj-font-size-caption);
 }
@@ -524,10 +535,10 @@ onBeforeUnmount(() => {
   min-height: var(--yj-space-10);
   min-width: 0;
   padding: var(--yj-space-2) var(--yj-space-3);
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  border: var(--yj-border-width) solid var(--yj-color-border-control);
   border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-bg-card);
   font: inherit;
 }
 
@@ -582,8 +593,8 @@ onBeforeUnmount(() => {
 }
 
 .artifact-file__feedback { text-align: right; }
-.artifact-file__feedback--success { color: var(--yj-color-success); }
-.artifact-file__feedback--error { color: var(--yj-color-error); }
+.artifact-file__feedback--success { color: var(--yj-color-semantic-success-ink); }
+.artifact-file__feedback--error { color: var(--yj-color-semantic-error-ink); }
 
 @media (max-width: 720px) {
   .artifact-file__actions,

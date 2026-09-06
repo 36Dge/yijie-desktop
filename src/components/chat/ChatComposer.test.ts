@@ -96,14 +96,14 @@ describe("ChatComposer", () => {
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音|附件/);
   });
 
-  it("FEAT-130 applies the refined new-task radius, contrast, and borderless hover tokens", () => {
+  it("FEAT-130 preserves the new-task radius and uses the approved neutral hover token", () => {
     const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
     expect(source).toContain(`.chat-composer--new .chat-composer__project {
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-app);
 }`);
     expect(source).toContain(`.chat-composer__project--button:hover:not(:disabled) {
-  background: var(--yj-color-brand-soft);
+  background: var(--yj-color-control-hover);
 }`);
   });
 

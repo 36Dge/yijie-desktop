@@ -1,0 +1,42 @@
+[
+  {
+    "file": "preview/PageHarness.vue",
+    "sha256": "d3977c1dc74b21b7a369143173aff913c5ea14ee56fa0ab1cf4304417e7591d8"
+  },
+  {
+    "file": "preview/PreviewControls.vue",
+    "sha256": "dcefa354520e7995d8054edb188c3fd489f8afde1538968fe6b4ad276ed68a0d"
+  },
+  {
+    "file": "preview/StateAtlas.vue",
+    "sha256": "66aade3ff6cf0641a8bda2d2e92ede1be7cdb2827628bb0619acad111419c60a"
+  },
+  {
+    "file": "preview/atlas.css",
+    "sha256": "1c9e728202c4b76bb68c6adde084220d1e3c41251adbe938fb14c8da2c268fd3"
+  },
+  {
+    "file": "preview/candidate-theme.ts",
+    "sha256": "dc7df0bef208b687889691852dc60eb6facc6eae39805173f9b996d09233eb94"
+  },
+  {
+    "file": "preview/candidate-tokens.css",
+    "sha256": "9490c9336cb2863b98fd0d9c3ccd74c0567da0429737d078ca439c1e4bf9aa8d"
+  },
+  {
+    "file": "preview/index.html",
+    "sha256": "1141a0ce81d5142ab003a72a5803b3424b1620454a25c6ea571e781c04e2c8ef"
+  },
+  {
+    "file": "preview/main.ts",
+    "sha256": "64690dd27797170d44acdd59207dcaa23df3fe582b8ed29a1073081e6aa8def0"
+  },
+  {
+    "file": "preview/page-candidate.css",
+    "sha256": "18226fa15f88801290f4c1a41cd1c0606c5ceeeeb3bc36d1f83f6d4af298b5e2"
+  },
+  {
+    "file": "preview/tauri-stub.ts",
+    "sha256": "af0827c2afde9f3494baccbacc01c37cfc8b4fb50c092256af9c0fe3149408b2"
+  }
+]

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import logoMarkUrl from "../../assets/brand/yijie-bag-logo.svg";
+import logoMarkUrl from "../../assets/brand/yijie-mark.svg";
+import logoMarkDarkUrl from "../../assets/brand/yijie-mark-dark.svg";
 
 const props = withDefaults(
   defineProps<{
@@ -23,7 +24,8 @@ const showText = computed(() => props.variant === "horizontal");
     aria-label="易界"
     role="img"
   >
-    <img class="yj-logo__mark" :src="logoMarkUrl" alt="" />
+    <img class="yj-logo__mark yj-logo__mark--light" :src="logoMarkUrl" alt="" />
+    <img class="yj-logo__mark yj-logo__mark--dark" :src="logoMarkDarkUrl" alt="" />
     <span v-if="showText" class="yj-logo__text" aria-hidden="true">易界</span>
   </span>
 </template>
@@ -42,6 +44,15 @@ const showText = computed(() => props.variant === "horizontal");
   display: block;
   width: var(--yj-logo-mark-size);
   height: var(--yj-logo-mark-size);
+}
+
+/* Use the application's existing theme boundary; do not read system preference here. */
+.yj-logo__mark--light {
+  display: var(--yj-brand-logo-light-display, block);
+}
+
+.yj-logo__mark--dark {
+  display: var(--yj-brand-logo-dark-display, none);
 }
 
 .yj-logo--sm {

@@ -126,17 +126,22 @@ async function copy(): Promise<void> {
   cursor: pointer;
 }
 
-.chat-copy-action__button:hover {
+.chat-copy-action__button:hover:not([aria-disabled="true"]) {
   border-color: var(--yj-color-border-subtle);
-  background: var(--yj-color-bg-card);
+  background: var(--yj-color-control-hover);
+}
+
+.chat-copy-action__button:active:not([aria-disabled="true"]) {
+  background: var(--yj-color-control-pressed);
 }
 
 .chat-copy-action__button[aria-disabled="true"] {
+  color: var(--yj-color-text-disabled);
   cursor: default;
 }
 
 .chat-copy-action__button:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -148,11 +153,11 @@ async function copy(): Promise<void> {
 }
 
 .chat-copy-action--success .chat-copy-action__feedback {
-  color: var(--yj-color-success);
+  color: var(--yj-color-semantic-success-ink);
 }
 
 .chat-copy-action--error .chat-copy-action__feedback {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 
 .chat-copy-action__announcement {

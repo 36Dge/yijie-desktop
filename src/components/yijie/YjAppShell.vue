@@ -80,7 +80,7 @@ function recoverCurrentNewTask(): void {
   display: flex;
   width: 100%;
   min-width: var(--yj-layout-window-min-width);
-  min-height: var(--yj-layout-window-min-height);
+  min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
   height: var(--yj-ui-viewport-height, 100vh);
   overflow: hidden;
   color: var(--yj-color-text-primary);

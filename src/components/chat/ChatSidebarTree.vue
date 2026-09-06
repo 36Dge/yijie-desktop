@@ -452,12 +452,12 @@ async function confirmRemoveProject(): Promise<void> {
 .chat-tree__more:focus-visible,
 .chat-tree__session-link:focus-visible,
 .chat-tree__load-more:focus-visible,
-.chat-tree__dialog-button:focus-visible { outline: var(--yj-space-1) solid var(--yj-color-brand-border); outline-offset: var(--yj-space-1); }
+.chat-tree__dialog-button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 
 .chat-tree__project-name {
   min-width: 0;
   flex: 1;
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-caption);
   font-weight: var(--yj-font-weight-semibold);
   overflow: hidden;
@@ -479,12 +479,17 @@ async function confirmRemoveProject(): Promise<void> {
   padding: var(--yj-space-1) var(--yj-space-2);
   border: 0;
   border-radius: var(--yj-radius-sm);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   background: transparent;
   text-align: left;
 }
 
-.chat-tree__session-link--active { color: var(--yj-color-brand-text); background: var(--yj-color-brand-soft); }
+.chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-bg-nav);
+  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
+}
+
+.chat-tree__session-link:hover { background: var(--yj-color-control-hover); }
+.chat-tree__session-link:active { background: var(--yj-color-control-pressed); }
 .chat-tree__session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-tree__session-status { flex: none; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 
@@ -497,7 +502,7 @@ async function confirmRemoveProject(): Promise<void> {
   line-height: var(--yj-line-height-caption);
 }
 
-.chat-tree__error { color: var(--yj-color-error); }
+.chat-tree__error { color: var(--yj-color-semantic-error-ink); }
 .chat-tree__load-more {
   width: 100%;
   padding: var(--yj-space-2);
@@ -510,8 +515,8 @@ async function confirmRemoveProject(): Promise<void> {
 .chat-tree__load-more:hover { background: var(--yj-color-bg-subtle); }
 
 .chat-tree__dialog { width: min(440px, calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-12))); }
-.chat-tree__dialog-copy { margin: 0 0 var(--yj-space-4); color: var(--yj-color-text-secondary); line-height: var(--yj-line-height-body); }
-.chat-tree__dialog-error { margin: var(--yj-space-2) 0 0; color: var(--yj-color-error); font-size: var(--yj-font-size-caption); }
+.chat-tree__dialog-copy { margin: 0 0 var(--yj-space-4); color: var(--yj-color-text-body); line-height: var(--yj-line-height-body); }
+.chat-tree__dialog-error { margin: var(--yj-space-2) 0 0; color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
 .chat-tree__dialog-actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); margin-top: var(--yj-space-5); }
 .chat-tree__dialog-button {
   min-height: var(--yj-space-10);
@@ -521,7 +526,9 @@ async function confirmRemoveProject(): Promise<void> {
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
 }
-.chat-tree__dialog-button--primary { border-color: var(--yj-color-brand-active); color: var(--yj-color-text-on-accent); background: var(--yj-color-brand-active); }
+.chat-tree__dialog-button--primary { border-color: var(--yj-color-brand-primary); color: var(--yj-color-text-on-accent); background: var(--yj-color-brand-primary); }
+.chat-tree__dialog-button--primary:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
+.chat-tree__dialog-button--primary:active:not(:disabled) { background: var(--yj-color-brand-active); }
 .chat-tree__dialog-button--danger { border-color: var(--yj-color-error); color: var(--yj-color-text-on-danger); background: var(--yj-color-error); }
 
 @media (prefers-reduced-motion: reduce) {

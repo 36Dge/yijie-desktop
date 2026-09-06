@@ -56,7 +56,7 @@ const trendDirection = computed(() => {
   border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
   gap: var(--yj-space-2);
 }
 
@@ -68,7 +68,7 @@ const trendDirection = computed(() => {
 }
 
 .yj-metric-card__label {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   font-weight: var(--yj-font-weight-regular);
   line-height: var(--yj-line-height-body);
@@ -111,15 +111,15 @@ const trendDirection = computed(() => {
 }
 
 .yj-metric-card__trend--success {
-  color: var(--yj-color-success);
+  color: var(--yj-color-semantic-success-ink);
 }
 
 .yj-metric-card__trend--warning {
-  color: var(--yj-color-warning);
+  color: var(--yj-color-semantic-warning-ink);
 }
 
 .yj-metric-card__trend--error {
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 
 .yj-metric-card__trend--neutral {

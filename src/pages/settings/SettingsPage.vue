@@ -384,7 +384,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 
 .page__card {
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
 }
 
 .access-state {
@@ -411,7 +411,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 }
 
 .access-state__facts dt {
-  color: var(--yj-color-text-tertiary);
+  color: var(--yj-color-text-secondary);
 }
 
 .access-state__facts dd {
@@ -429,7 +429,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 
 .tenant-selector legend {
   margin-bottom: var(--yj-space-2);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-weight: var(--yj-font-weight-semibold);
 }
 
@@ -448,29 +448,55 @@ async function selectTenant(tenantId: string): Promise<void> {
   text-align: left;
 }
 
+.tenant-selector__option:hover:not(:disabled),
+.button:hover:not(:disabled) {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-hover);
+}
+
+.tenant-selector__option:active:not(:disabled),
+.button:active:not(:disabled) {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-pressed);
+}
+
 .tenant-selector__option--selected {
-  border-color: var(--yj-color-brand-border);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  border-color: var(--yj-color-on-brand);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
 }
 
 .button--primary {
   border-color: var(--yj-color-brand-primary);
-  color: var(--yj-color-text-primary);
+  color: var(--yj-color-on-brand);
   background: var(--yj-color-brand-primary);
+}
+
+.tenant-selector__option--selected:hover:not(:disabled),
+.button--primary:hover:not(:disabled) {
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-hover);
+}
+
+.tenant-selector__option--selected:active:not(:disabled),
+.button--primary:active:not(:disabled) {
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-active);
 }
 
 .tenant-selector__option:focus-visible,
 .button:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
 .tenant-selector__option:disabled,
 .button:disabled {
+  border-color: var(--yj-color-border-default);
   color: var(--yj-color-text-disabled);
+  background: var(--yj-color-control-disabled-bg);
   cursor: not-allowed;
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .access-state__actions {
@@ -481,7 +507,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 
 .access-state__error {
   margin: 0;
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 
 .local-login-form {
@@ -505,7 +531,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 }
 
 .local-login-form__field label {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-weight: var(--yj-font-weight-semibold);
 }
 
@@ -513,7 +539,7 @@ async function selectTenant(tenantId: string): Promise<void> {
   width: 100%;
   min-height: var(--yj-space-10);
   padding: var(--yj-space-2) var(--yj-space-3);
-  border: 1px solid var(--yj-color-border-default);
+  border: 1px solid var(--yj-color-border-control);
   border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
@@ -521,19 +547,25 @@ async function selectTenant(tenantId: string): Promise<void> {
 }
 
 .local-login-form__input:focus-visible {
-  border-color: var(--yj-color-brand-border);
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  border-color: var(--yj-color-focus-ring);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
+.local-login-form__input:hover:not(:disabled):not(:focus-visible) {
+  border-color: var(--yj-color-border-control-hover);
+}
+
 .local-login-form__input:disabled {
+  border-color: var(--yj-color-border-default);
   color: var(--yj-color-text-disabled);
+  background: var(--yj-color-control-disabled-bg);
   cursor: not-allowed;
-  opacity: 0.72;
+  opacity: 1;
 }
 
 .local-login-form__error {
   margin: 0;
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
 }
 </style>

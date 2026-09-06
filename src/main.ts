@@ -46,6 +46,7 @@ if ([featureDriverEnabled, feat128S7bRuntimeEnabled, feat128S10dRuntimeEnabled].
       import("./App.vue"),
       import("./router"),
       import("./styles/main.css"),
+      import("./styles/component-colors.css"),
     ]);
     const app = createApp(App).use(createPinia()).use(router);
     await router.isReady();

@@ -129,8 +129,8 @@ watch(() => props.defaultExpanded, (value) => {
   text-align: left;
 }
 
-.reasoning__trigger:hover { background: color-mix(in srgb, var(--yj-color-bg-card) 44%, transparent); }
-.reasoning__trigger:focus-visible { outline: var(--yj-space-1) solid var(--yj-color-brand-border); outline-offset: var(--yj-space-1); }
+.reasoning__trigger:hover { background: var(--yj-color-control-hover); }
+.reasoning__trigger:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 
 .reasoning__title {
   display: inline-flex;
@@ -156,7 +156,7 @@ watch(() => props.defaultExpanded, (value) => {
 .reasoning__item + .reasoning__item { margin-top: var(--yj-space-4); }
 
 .reasoning__part {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-family: var(--yj-font-family-sans);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
@@ -176,6 +176,6 @@ watch(() => props.defaultExpanded, (value) => {
   font-size: var(--yj-font-size-caption);
 }
 
-.reasoning__warning { margin-bottom: var(--yj-space-3); color: var(--yj-color-warning); }
-.reasoning__state--error { color: var(--yj-color-error); }
+.reasoning__warning { margin-bottom: var(--yj-space-3); color: var(--yj-color-semantic-warning-ink); }
+.reasoning__state--error { color: var(--yj-color-semantic-error-ink); }
 </style>

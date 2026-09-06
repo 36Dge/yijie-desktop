@@ -321,8 +321,8 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     document.documentElement.dataset.theme = "dark";
     const darkRoot = getComputedStyle(document.documentElement);
     expect(darkRoot.colorScheme).toBe("dark");
-    expect(darkRoot.getPropertyValue("--yj-color-bg-card").trim()).toBe("#1b2316");
-    expect(getComputedStyle(tokenProbe).backgroundColor).toBe("#1b2316");
+    expect(darkRoot.getPropertyValue("--yj-color-bg-card").trim()).toBe("#25282b");
+    expect(getComputedStyle(tokenProbe).backgroundColor).toBe("#25282b");
   });
 
   it("locks the minimum-window grid and horizontal-overflow prevention invariants", () => {

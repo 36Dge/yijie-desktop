@@ -1,0 +1,118 @@
+{
+  "captured_at": "2026-09-06T11:43:31.935332+08:00",
+  "scope": "Candidate preview only; pending owner review before phases 4-5.",
+  "repositories": [
+    {
+      "name": "yijie",
+      "branch": "chore/retirement-baseline-20260905",
+      "head": "7e7d380b3d05c9d8c50524c0b45a7087ae08449b",
+      "files": {}
+    },
+    {
+      "name": "yijie-admin-web",
+      "branch": "develop",
+      "head": "d009cafccb112c098114c075d60f67ee5e0296d8",
+      "files": {}
+    },
+    {
+      "name": "yijie-agent-host",
+      "branch": "chore/retirement-baseline-20260905",
+      "head": "f77c689fe45418aa24b098fdd47ace6b500a3ad7",
+      "files": {
+        "README.md": "c564b6449be7fafbd146945c76fe4731d638660057dd76ef126dd8c36d2d680f",
+        "docs/skills-journal-v2.md": "fc24a5bfdcf9b0ec1b9bcf6d9cad22de95a2266359d7e915e6dd892d39f3d0c0",
+        "internal/skills/service.go": "ad46e4963ea089998a17682ea3e4f66a40f4a153d9260b00faa1770a192803ed",
+        "internal/skills/store.go": "f646d8992b503264f199593b30d1064b81f911772a0cdbf44c0516f07a05c4fa",
+        "internal/skills/store_database.go": "6bec62a456c81a32e02cc52501824db8085fa38485c5452f7822859f307024f4",
+        "internal/skills/store_database_test.go": "5320bcd71f700b1efe7227a8e7016306868423468a245c47f04ba78d0c506f22"
+      }
+    },
+    {
+      "name": "yijie-api",
+      "branch": "feat/feat-126-foundation-closure",
+      "head": "f9d730a157bcb012a8fe178cbfebcd4ea27419fc",
+      "files": {}
+    },
+    {
+      "name": "yijie-codex",
+      "branch": "chore/retirement-baseline-20260905",
+      "head": "6c1ad767f0997845b8258a1c452fd4eb7577579f",
+      "files": {}
+    },
+    {
+      "name": "yijie-connectors",
+      "branch": "develop",
+      "head": "273eec40bbbfeb17e817643f283db7c81e9b190c",
+      "files": {}
+    },
+    {
+      "name": "yijie-contracts",
+      "branch": "chore/retirement-baseline-20260905",
+      "head": "0e680e5a565e7bac3a60f228ae59c2f8387f9bb4",
+      "files": {}
+    },
+    {
+      "name": "yijie-desktop",
+      "branch": "chore/retirement-baseline-20260905",
+      "head": "4fdd28a79a3aac51172c43c7fefd8b87217c1afb",
+      "files": {
+        "docs/verification/DESIGN-2.0-visual-migration.md": "6c29a4b6551c2f2523ad27c6d52bfe3e67475c465498ca0a584e93f5329b7211",
+        "docs/verification/SKILLS-startup-unavailable-20260906.md": "c1079a5968933406723a389afa1b9e4ba9008c6e654f9c3422dd6492fac3e21d",
+        "src-tauri/src/skills/host.rs": "53751029a82c5c04ac28ba8cad1216308341be5182d570d4d95f482e293ed486",
+        "src/assets/brand/yijie-bag-logo.svg": "d73f9fe785e2a87844126f4f600ba73c0b4623bbd6745a69e831ad9e632f8f29",
+        "src/assets/brand/yijie-mark-dark.svg": "dee934e9552311186db80215a46042d4b926605368a9e6d5386e1b7235fd1ae4",
+        "src/assets/brand/yijie-mark.svg": "d73f9fe785e2a87844126f4f600ba73c0b4623bbd6745a69e831ad9e632f8f29",
+        "src/components/chat/ChatApprovalCard.vue": "97d6a25266920bb04d84bda892b3c148cfcc1ebb4657d20bfd99ea596b8c79ea",
+        "src/components/chat/ChatArtifactFile.vue": "477357f02b796a7fcd8c2202ec089309d0bb85451d50174c503965e1edc5474a",
+        "src/components/chat/ChatArtifactImage.vue": "f2b3b668577f729fb5f09d4a2c940777a4fc73c941f0ad5d3c232a05e234ca0b",
+        "src/components/chat/ChatArtifactReport.vue": "5a7bcd16b794df877f65de7544e60207533be42944993a660f1fc1eb7f97e615",
+        "src/components/chat/ChatArtifactShell.vue": "f3aeb171aefabbb560950c28885b9c1e2ca7098077b00b5e9f410bc930996fc9",
+        "src/components/chat/ChatArtifactVideo.vue": "355f8226107c0074b621d116c385dd9f602baf3361d3bcbad62d8081c32b4d01",
+        "src/components/chat/ChatComposer.vue": "b25f7c197a49786cc8de8a3514579e40be189592ac0d596a087f8c5611e454f3",
+        "src/components/chat/ChatCopyAction.vue": "528202f045f3a292cf69bcb72cecade5fe04b30260e24a7edb30b0f2e117d602",
+        "src/components/chat/ChatReasoningDisclosure.vue": "98883196c211a63a05943cef3672f6b3d465d09a25cbc0367cba3e2645cc4d7e",
+        "src/components/chat/ChatSafeContent.vue": "3bfa287a5ada8d532bb80a5cb11da4f42dd81da82e884eac2042640a2fd79f57",
+        "src/components/chat/ChatSidebarTree.vue": "46e777bc87dc906843e4ffaeb6439ec6aa72ad2b1fc2118788377437a650edd0",
+        "src/components/chat/ChatTimelineItemShell.vue": "747655050179d000a2c5c0efb723d222b70d46541f9ea9d237c21496d90c0e1a",
+        "src/components/chat/ChatTurnPlan.vue": "2c34b6b10aa73cfb952adc2791c3ded87b4e4380e6f3cd479cc6b6852f3ad3d5",
+        "src/components/skills/SkillCard.vue": "5c73839d76fa89bf59f5913c54d5773e7fc65bd8c548405da9184ed886d2995f",
+        "src/components/workflows/RecommendedWorkflowCard.vue": "46351a14bbbdfbe0a14d56371c5d7f5762378c98e655fdeae29255378de281d1",
+        "src/components/workflows/WorkflowSummaryCard.vue": "3126c3cd50b964030aab1bf8cc3e099e8c40565aca6f5a6496077591cd07b4e1",
+        "src/components/yijie/YjIcon.vue": "02a3bfca86f204d273539a8884f316eef8e6f728816baca0f5c8ce6ccb5c821b",
+        "src/components/yijie/YjLogo.vue": "72df66d4127874b6e305c7583c89e8e857c1073d4d895f76132554afecaf9987",
+        "src/components/yijie/YjNavItem.vue": "ea950c1d33ac845ece1c5cb99c9d610ea9a5c52cce3402698bb07135894ea4c6",
+        "src/components/yijie/YjSidebar.vue": "bea65b205b747c08ff05053ad333ac45c2e796d71f54c4f3e36455548da42f1d",
+        "src/components/yijie/YjTabs.vue": "80564806afd857c3d210293eabe470a4d45a5637a1dd5278faf4caf51ad04fb2",
+        "src/design/theme/echarts-theme.test.ts": "9b2e19c8ffce45e0cff5b1c7499a73b242f6053ef36a191a96224ef4998e742f",
+        "src/design/theme/naive-theme.test.ts": "a64e32a3b18dbf4ed78fed11be068c2d3efed43cd9a22bc8b7341c74fa455bf3",
+        "src/design/theme/naive-theme.ts": "586863eba7d60bd8878470b82263957c539c1a0d5bab331b68e66ab14ccf0245",
+        "src/pages/chat/ChatPage.vue": "aed12a5e1acdd5c339e44dcbdcea492bf708592bcbd2006e8f40aa215eeccbee",
+        "src/pages/plugins/SkillMarketplacePage.ac009.test.ts": "df81dc5ee29fad565b224b6517174cf2d021ddc1bc4117a698f41dfbddb4ddeb",
+        "src/pages/settings/SettingsPage.vue": "38f4c3af85bb8d08f66d542dd58db1929c1cac014a4ef2784a5324e894628403",
+        "src/pages/store/StorePage.vue": "1a2d5a231a8c199cd00b1dabd971c6f970adfe64c8a3757cc9a97f7a22806b37",
+        "src/pages/workflows/WorkflowPage.vue": "7c43b3ad07416722047ded00789fe0a5f3d0b230f813fbf83a5519654d0a30d0",
+        "src/stores/skill.store.test.ts": "7a380b08dd0afc7f7218af904dbc781d7c151152bae85af5bef132eb692a5974",
+        "src/stores/skill.store.ts": "d6a3f28886034062ccbfe8022013c0fa30209cce6dddd8d982580ec346bb9bc5",
+        "src/styles/variables.css": "eda899b2190a5e1c77534e0553eb8619a38f9f82d95a6bd111bc30e7e5c504dd"
+      }
+    },
+    {
+      "name": "yijie-infra",
+      "branch": "feat/feat-126-s10e",
+      "head": "19b7920696904f83030a8ddaba71af15c3c05ad8",
+      "files": {}
+    },
+    {
+      "name": "yijie-knowledge",
+      "branch": "develop",
+      "head": "e9091d2b673ba779ecb39271ce9148e3a41fc256",
+      "files": {}
+    },
+    {
+      "name": "yijie-skills",
+      "branch": "develop",
+      "head": "488714a8d96f40806a257aae097683815b1dd458",
+      "files": {}
+    }
+  ]
+}

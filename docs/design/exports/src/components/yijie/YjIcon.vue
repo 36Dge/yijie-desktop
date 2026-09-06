@@ -48,8 +48,8 @@ const toneClass = computed(() => `yj-icon--${props.tone}`)
 
 .yj-icon--default { color: var(--yj-color-icon-default); }
 .yj-icon--muted { color: var(--yj-color-icon-muted); }
-.yj-icon--primary { color: var(--yj-color-brand-primary); }
-.yj-icon--success { color: var(--yj-color-success); }
-.yj-icon--warning { color: var(--yj-color-warning); }
-.yj-icon--error { color: var(--yj-color-error); }
+.yj-icon--primary { color: var(--yj-color-text-primary); }
+.yj-icon--success { color: var(--yj-color-semantic-success-ink); }
+.yj-icon--warning { color: var(--yj-color-semantic-warning-ink); }
+.yj-icon--error { color: var(--yj-color-semantic-error-ink); }
 </style>

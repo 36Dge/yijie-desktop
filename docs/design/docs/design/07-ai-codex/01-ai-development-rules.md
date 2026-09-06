@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -38,12 +38,14 @@
 新页面与现有页面后续改造均采用 A「清爽青柠」＋01「纯白通透」：
 
 - 亮色的 App、页面、导航、卡片与面板均使用纯白结构背景 token；以留白、既有间距尺度和细中性边框区分空间。
-- 主文字使用石墨；主按钮使用青柠背景与 `--yj-color-on-brand` 石墨文字/图标，hover 与 pressed 也保持这一前景色。亮底链接和文本型操作使用 `--yj-color-brand-text`，不直接用浅青柠正文。
-- 青柠软底只用于选中项、hover 等局部交互状态，不用作全页或整个业务分组的底色。
+- 主文字使用石墨；主按钮使用青柠背景与 `--yj-color-on-brand` 石墨文字/图标，hover 与 pressed 也保持这一前景色。普通链接和文本型操作直接使用 `--yj-color-text-primary`；操作中的正文说明使用 `--yj-color-text-body`，新代码不使用 brand-text 兼容槽位。
+- 普通 UI 不消费浅绿/深绿 soft：导航常态保持原底+3px 青柠标记，小筛选实色青柠；hover/pressed 用局部中性底。
 - 暗色使用中性石墨背景、卡片、弹层层级；同样的青柠主按钮配石墨字。成功、警告、失败、Agent 状态保持独立语义。
 - Logo 统一引用品牌章节的商品包裹 / YJ 负形 SVG 及亮暗变体，不重绘轮廓、不嵌入 PNG。
 
 准确值以 [颜色 Tokens](../02-tokens/02-color-tokens.md)、[主题与暗色模式](../03-ui-system/05-theme-dark-mode.md)、[品牌资产](../03-ui-system/06-brand-assets.md) 为准。此次基线不改变字体、间距、圆角尺度、布局结构和交互规则。
+
+普通文字按 primary/body/secondary/metadata/disabled 分角色；正文和普通工具图标不使用深绿或青柠，图表首色独立固定。所有新页面及现有页面修改都必须逐项查 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)：2px 中性 focus、普通卡片/输入无阴影、浮层轻投影、readonly/disabled 与组合优先级不可省略。
 
 ## 样式约束
 
@@ -62,7 +64,7 @@ box-shadow: 0 8px 30px rgba(0,0,0,.2);
 color: var(--yj-color-text-primary);
 padding: var(--yj-space-4);
 border-radius: var(--yj-radius-lg);
-box-shadow: var(--yj-shadow-card);
+box-shadow: none; /* 普通卡片/输入不使用浮层投影 */
 ```
 
 ## AI / Codex 必须遵守

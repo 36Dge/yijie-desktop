@@ -3,8 +3,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 色彩与品牌基线版本：2.0.0
-- 最后更新：2026-09-05
+- 组件配色与状态基线版本：2.1.0
+- 最后更新：2026-09-06
 - 来源：基于项目方反馈固化；2026-09-05 用户明确授权以已选配色与截图 Logo 覆盖规范的色彩、主题及品牌部分
 - 生效范围：`yijie-desktop` Design System / UX 规范
 
@@ -24,6 +24,12 @@
 | P0-10 | Figma/品牌稿 | 以用户确认的 Logo 截图为形态参考，以本规范 SVG 为工程资产；无 Figma 文件 | `docs/design/docs/public/brand/` |
 
 本次只替换色系搭配、主题和 Logo；其余基础决策、页面布局、组件及行为规则保持有效。详见 [2.0.0 更新记录](./08-governance/07-lime-white-brand-refresh.md)。
+
+## 2.1.0 组件状态决策
+
+2026-09-06 用户确认候选组件矩阵并授权正式同步：正文、普通图标与链接使用中性角色；导航原底+3px青柠标记、小筛选实色青柠；2px中性focus无glow；普通卡片/输入无阴影、浮层轻投影；readonly、disabled、loading及selected/error/focus组合按[完整矩阵](./04-components/09-component-color-state-matrix.md)。图表首序列与独立语义状态不跟随brand-text中性化。
+
+该决策覆盖2.0.0中冲突的softgreen、brand-text、focus和阴影使用条目，已批准Logo、字体、间距、圆角、布局与业务行为不变。[批准依据与范围](./08-governance/08-component-color-convergence.md)。
 
 ## P1 决策
 

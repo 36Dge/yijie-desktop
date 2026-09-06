@@ -1,0 +1,852 @@
+{
+  "recordedAt": "2026-09-06T04:12:39.575Z",
+  "engine": "Installed Chrome, 1180 × 760; isolated browser only",
+  "readyPages": [
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".chat-entry__subtitle": {
+          "color": "rgb(111, 117, 125)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(111, 117, 125)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(111, 117, 125)"
+        },
+        ".chat-entry__eyebrow": {
+          "color": "rgb(75, 101, 29)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(75, 101, 29)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(75, 101, 29)"
+        },
+        ".chat-composer__field": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderColor": "rgb(236, 238, 240)",
+          "boxShadow": "rgba(37, 40, 43, 0.08) 0px 8px 24px 0px",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".chat-composer__permission-value": {
+          "color": "rgb(75, 101, 29)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(75, 101, 29)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(75, 101, 29)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(240, 248, 223)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".chat-entry__subtitle": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".chat-entry__eyebrow": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".chat-composer__field": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderColor": "rgb(140, 147, 155)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".chat-composer__permission-value": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(96, 102, 110)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(96, 102, 110)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(96, 102, 110)"
+        },
+        ".store-scene-card__description": {
+          "color": "rgb(96, 102, 110)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(96, 102, 110)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(96, 102, 110)"
+        },
+        ".yj-tabs__tab--selected": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(240, 248, 223)",
+          "borderColor": "rgb(201, 215, 179)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".store-page__source-label": {
+          "color": "rgb(75, 101, 29)",
+          "backgroundColor": "rgb(240, 248, 223)",
+          "borderColor": "rgb(75, 101, 29)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(75, 101, 29)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(240, 248, 223)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".store-scene-card__description": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".yj-tabs__tab--selected": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(195, 243, 91)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".store-page__source-label": {
+          "color": "rgb(81, 86, 93)",
+          "backgroundColor": "rgb(247, 248, 249)",
+          "borderColor": "rgb(81, 86, 93)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(81, 86, 93)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(96, 102, 110)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(96, 102, 110)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(96, 102, 110)"
+        },
+        ".skill-card": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderColor": "rgb(236, 238, 240)",
+          "boxShadow": "rgba(37, 40, 43, 0.06) 0px 1px 2px 0px",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card__description": {
+          "color": "rgb(96, 102, 110)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(96, 102, 110)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(96, 102, 110)"
+        },
+        ".skill-card__icon": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(240, 248, 223)",
+          "borderColor": "rgb(201, 215, 179)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card__icon .yj-icon": {
+          "color": "rgb(75, 101, 29)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(75, 101, 29)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(75, 101, 29)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(240, 248, 223)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderColor": "rgb(236, 238, 240)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card__description": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card__icon": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(255, 255, 255)",
+          "borderColor": "rgb(226, 229, 232)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".skill-card__icon .yj-icon": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      },
+      "skillHover": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(226, 229, 232)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      },
+      "refresh": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      }
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".chat-entry__subtitle": {
+          "color": "rgb(150, 158, 168)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(150, 158, 168)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(150, 158, 168)"
+        },
+        ".chat-entry__eyebrow": {
+          "color": "rgb(195, 243, 91)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(195, 243, 91)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(195, 243, 91)"
+        },
+        ".chat-composer__field": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(37, 40, 43)",
+          "borderColor": "rgb(48, 54, 61)",
+          "boxShadow": "rgba(0, 0, 0, 0.2) 0px 8px 24px 0px",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".chat-composer__permission-value": {
+          "color": "rgb(195, 243, 91)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(195, 243, 91)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(195, 243, 91)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(46, 56, 35)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".chat-entry__subtitle": {
+          "color": "rgb(230, 233, 237)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(230, 233, 237)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(230, 233, 237)"
+        },
+        ".chat-entry__eyebrow": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(245, 247, 250)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".chat-composer__field": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(37, 40, 43)",
+          "borderColor": "rgb(106, 114, 124)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".chat-composer__permission-value": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(245, 247, 250)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(25, 28, 32)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(194, 199, 206)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(194, 199, 206)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(194, 199, 206)"
+        },
+        ".store-scene-card__description": {
+          "color": "rgb(194, 199, 206)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(194, 199, 206)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(194, 199, 206)"
+        },
+        ".yj-tabs__tab--selected": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(57, 70, 42)",
+          "borderColor": "rgb(97, 120, 60)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".store-page__source-label": {
+          "color": "rgb(195, 243, 91)",
+          "backgroundColor": "rgb(46, 56, 35)",
+          "borderColor": "rgb(195, 243, 91)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(195, 243, 91)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(46, 56, 35)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(230, 233, 237)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(230, 233, 237)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(230, 233, 237)"
+        },
+        ".store-scene-card__description": {
+          "color": "rgb(230, 233, 237)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(230, 233, 237)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(230, 233, 237)"
+        },
+        ".yj-tabs__tab--selected": {
+          "color": "rgb(37, 40, 43)",
+          "backgroundColor": "rgb(195, 243, 91)",
+          "borderColor": "rgb(37, 40, 43)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(37, 40, 43)"
+        },
+        ".store-page__source-label": {
+          "color": "rgb(194, 199, 206)",
+          "backgroundColor": "rgb(48, 54, 61)",
+          "borderColor": "rgb(194, 199, 206)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(194, 199, 206)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(25, 28, 32)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "current",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(194, 199, 206)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(194, 199, 206)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(194, 199, 206)"
+        },
+        ".skill-card": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(37, 40, 43)",
+          "borderColor": "rgb(48, 54, 61)",
+          "boxShadow": "rgba(0, 0, 0, 0.16) 0px 1px 2px 0px",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".skill-card__description": {
+          "color": "rgb(194, 199, 206)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(194, 199, 206)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(194, 199, 206)"
+        },
+        ".skill-card__icon": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(46, 56, 35)",
+          "borderColor": "rgb(97, 120, 60)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".skill-card__icon .yj-icon": {
+          "color": "rgb(195, 243, 91)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(195, 243, 91)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(195, 243, 91)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(46, 56, 35)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "candidate",
+      "native": [],
+      "selectors": {
+        ".yj-page-header__description": {
+          "color": "rgb(230, 233, 237)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(230, 233, 237)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(230, 233, 237)"
+        },
+        ".skill-card": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(37, 40, 43)",
+          "borderColor": "rgb(48, 54, 61)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".skill-card__description": {
+          "color": "rgb(230, 233, 237)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(230, 233, 237)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(230, 233, 237)"
+        },
+        ".skill-card__icon": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgb(37, 40, 43)",
+          "borderColor": "rgb(65, 72, 80)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        },
+        ".skill-card__icon .yj-icon": {
+          "color": "rgb(245, 247, 250)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderColor": "rgb(245, 247, 250)",
+          "boxShadow": "none",
+          "outlineWidth": "3px",
+          "outlineColor": "rgb(245, 247, 250)"
+        }
+      },
+      "navigation": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(25, 28, 32)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "rgb(195, 243, 91) 3px 0px 0px 0px inset",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      },
+      "skillHover": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(37, 40, 43)",
+        "borderColor": "rgb(65, 72, 80)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      },
+      "refresh": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(37, 40, 43)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "none",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      }
+    }
+  ],
+  "statePages": [
+    {
+      "page": "chat",
+      "theme": "light",
+      "state": "loading",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n正在读取本地任务…\n\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n正在启动本地服务\n服务就绪后即可发送任务。\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "state": "empty",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n暂无任务记录\n\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n选择本地项目\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "state": "error",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n任务记录更新失败，已显示上次读取内容\n\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n本地服务暂时繁忙\n请稍后重试。\n重试\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "state": "denied",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n当前账号无权执行此操作\n请确认当前租户权限后再试。\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "state": "loading",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n\n正在读取内置清单并扫描本地 Skill…\n\n  \n  \n  ",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "state": "empty",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n当前客户端没有可展示的 Skill\n\n本地安装包未包含已审核的 Skill。升级客户端后可重新扫描内置清单。\n\n重新扫描",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "state": "error",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n本地 Skill 服务暂不可用\n\n本地 Skill 服务暂不可用，请确认服务已启动后重试。\n\n重新扫描",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "state": "denied",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n无权访问 Skill 广场\n\n当前本地身份没有插件浏览权限。请重新打开本地 Demo，或联系管理员检查权限配置。",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "state": "loading",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n正在读取本地任务…\n\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n正在启动本地服务\n服务就绪后即可发送任务。\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "state": "empty",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n暂无任务记录\n\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n选择本地项目\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "state": "error",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\n\n任务记录更新失败，已显示上次读取内容\n\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n本地服务暂时繁忙\n请稍后重试。\n重试\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "state": "denied",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\n当前账号无权执行此操作\n请确认当前租户权限后再试。\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "state": "loading",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n\n正在读取内置清单并扫描本地 Skill…\n\n  \n  \n  ",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "state": "empty",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n当前客户端没有可展示的 Skill\n\n本地安装包未包含已审核的 Skill。升级客户端后可重新扫描内置清单。\n\n重新扫描",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "state": "error",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n本地 Skill 服务暂不可用\n\n本地 Skill 服务暂不可用，请确认服务已启动后重试。\n\n重新扫描",
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "state": "denied",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n无权访问 Skill 广场\n\n当前本地身份没有插件浏览权限。请重新打开本地 Demo，或联系管理员检查权限配置。",
+      "native": [],
+      "memoryActions": []
+    }
+  ],
+  "interactions": [
+    {
+      "page": "chat",
+      "theme": "light",
+      "kind": "focus-and-permission-dialog",
+      "focus": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "rgb(37, 40, 43) 0px 0px 0px 2px",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      },
+      "dialog": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(255, 255, 255)",
+        "borderColor": "rgb(37, 40, 43)",
+        "boxShadow": "rgba(37, 40, 43, 0.1) 0px 6px 20px 0px",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(37, 40, 43)"
+      },
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "kind": "synthetic-install-and-toggle",
+      "native": [],
+      "memoryActions": [
+        "skills:scan-synthetic",
+        "skills:install-synthetic",
+        "skills:toggle-synthetic"
+      ]
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "kind": "focus-and-permission-dialog",
+      "focus": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgb(37, 40, 43)",
+        "borderColor": "rgb(245, 247, 250)",
+        "boxShadow": "rgb(245, 247, 250) 0px 0px 0px 2px",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(245, 247, 250)"
+      },
+      "dialog": {
+        "color": "rgb(230, 233, 237)",
+        "backgroundColor": "rgb(46, 50, 55)",
+        "borderColor": "rgb(230, 233, 237)",
+        "boxShadow": "rgba(0, 0, 0, 0.28) 0px 6px 20px 0px",
+        "outlineWidth": "3px",
+        "outlineColor": "rgb(230, 233, 237)"
+      },
+      "native": [],
+      "memoryActions": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "kind": "synthetic-install-and-toggle",
+      "native": [],
+      "memoryActions": [
+        "skills:scan-synthetic",
+        "skills:install-synthetic",
+        "skills:toggle-synthetic"
+      ]
+    }
+  ],
+  "limitations": [
+    "StorePage uses its actual fixed showcase data and has no whole-page loading/error/denied branches. No replacement page was invented.",
+    "State projections and Skill install/toggle/uninstall actions are synthetic and memory-only. No native or backend behavior is validated.",
+    "No production resources, existing .local preview files, executable files or permissions are changed."
+  ],
+  "errors": []
+}

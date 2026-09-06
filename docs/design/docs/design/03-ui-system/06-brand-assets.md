@@ -66,7 +66,7 @@ pnpm docs:build
 
 展示品牌时使用 [YjLogo 参考组件](../09-implementation/07-logo-code-scaffold.md)。通过显式主题或应用主题选择亮暗资产，不能对整张 Logo 使用 CSS `filter: invert()`，以免青柠颜色被反转。
 
-本次已替换的是 `docs/design/` 权威规范、预览和迁移参考，**活跃 `src/` 与 `src-tauri/` 尚未迁移**。后续新需求与已有页面改造以本规范为准，在各自任务中迁移 tokens、主题与 SVG；App 打包任务再从新 SVG 生成 PNG/ICNS，不覆盖既有签名或发布二进制。
+SVG 品牌资产版本保持 2.0.0；2026-09-06 的组件配色 2.1.0 不重新绘制或改写 Logo。活跃页面已接入图形亮暗资产，后续页面继续使用现有位置、比例与可访问名称。应用打包图标、签名和发布二进制不属于组件换色范围；App 打包任务另行从 SVG 导出 PNG/ICNS。
 
 ## 禁止事项
 

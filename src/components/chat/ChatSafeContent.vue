@@ -564,9 +564,9 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
 }
 
 .chat-safe-content__inert-link {
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   text-decoration: underline;
-  text-decoration-color: var(--yj-color-brand-border);
+  text-decoration-color: var(--yj-color-text-primary);
   text-underline-offset: var(--yj-space-1);
 }
 
@@ -585,7 +585,7 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
 
 .chat-safe-content__code-region:focus-visible,
 .chat-safe-content__table-region:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -653,11 +653,11 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
   padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   background: var(--yj-color-bg-subtle);
 }
 
 .chat-safe-content__unknown {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
 }
 </style>

@@ -2,6 +2,7 @@ import DefaultTheme from 'vitepress/theme'
 import { useData, type Theme } from 'vitepress'
 import { watch } from 'vue'
 import '../../../exports/src/styles/variables.css'
+import '../../../exports/src/styles/component-colors.css'
 import './style.css'
 import ColorBrandPreview from './components/ColorBrandPreview.vue'
 

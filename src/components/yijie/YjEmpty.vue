@@ -37,7 +37,7 @@ withDefaults(defineProps<{
   padding: var(--yj-space-8);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   background: var(--yj-color-bg-card);
   text-align: center;
 }
@@ -49,7 +49,7 @@ withDefaults(defineProps<{
   align-items: center;
   justify-content: center;
   border-radius: var(--yj-radius-full);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-bg-card);
 }
 
 .yj-empty__copy {

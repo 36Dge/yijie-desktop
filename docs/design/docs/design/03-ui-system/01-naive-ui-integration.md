@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -29,9 +29,15 @@ Naive UI 是基础组件库，不是易界完整设计系统。易界设计系�
 - 页面不得直接堆叠大量 Naive UI 组件形成一次性布局。
 - 全局 Provider 必须集中在应用入口配置。
 
-主题映射必须同时覆盖背景与控件前景：亮色布局、菜单和卡片为纯白；青柠 Primary 按钮的默认、hover、pressed 和 focus 前景为石墨。Menu 选中态使用局部品牌 token，文本型按钮使用可读品牌文字 token；暗色采用中性石墨层级。仅修改 `common.primaryColor` 不能视为完成本次配色接入。
+主题映射必须同时覆盖背景与控件前景：亮色布局、菜单和卡片为纯白；青柠 Primary 按钮的默认、hover、pressed 和 focus 前景为石墨。Menu 选中常态保持导航原底并加 3px 青柠标记，文本型按钮使用中性文字 token；暗色采用中性石墨层级。仅修改 `common.primaryColor` 不能视为完成本次配色接入。
 
-当前参考主题支持普通按钮、实心 `type="primary"`、`text` 和 `ghost` 品牌按钮，以及颜色 Tokens 中列出的选中控件。Naive UI 的 `secondary` / `tertiary` / `quaternary` 与 `type="primary"` 组合会直接把主填充色用于文字，不能依靠 `textColorPrimary` 等全局文字键修正；本规范示例不使用这些组合。后续确需使用时，在共享 `Yj*` 按钮封装中提供可读的文字/底色映射并验证明暗状态，不在业务页面临时补色。
+当前参考主题支持普通按钮、实心 `type="primary"`、`text` 和 `ghost` 品牌按钮，以及颜色 Tokens 中列出的选中控件。Naive UI 的 `secondary` / `tertiary` / `quaternary` 与 `type="primary"` 组合会直接把主填充色用于文字，不能依靠 `textColorPrimary` 等全局文字键修正；这些组合不作为推荐用法，冻结评审仅将其作为反例。后续确需使用时，在共享 `Yj*` 按钮封装中提供可读的文字/底色映射并验证明暗状态，不在业务页面临时补色。
+
+颜色主题由 `variables.css` 与唯一 `createNaiveThemeOverrides` 入口共同定义；`component-colors.css` 仅承接主题 API 无法表达的文字选区、导航标记、focus、禁用 Switch 与暗色浮层控件轮廓。该样式在应用入口集中加载，不在页面散落相同补丁。文档站加载同规则的 reference exports。
+
+Naive 之外的原生 focus 也使用中性焦点色和 2px 宽度。路由标题保留程序焦点与辅助技术公告；WebKit 的 `auto` outline 会忽略自定义颜色，因此该标题焦点使用 `solid` 绘制，不恢复系统蓝色。各输入组件已有的字段焦点环与 outline 样式仍由组件自身负责，避免叠加双重焦点圈。
+
+普通 secondary 按钮默认白/卡片底，hover/pressed 为小控件中性底；普通 Input/NSpin loading 图标中性，error/warning 输入 spinner 使用相应可读语义前景。主按钮 disabled 使用禁用前景/局部底，loading 则保留动作身份与 on-brand。全部状态与组合见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
 
 ## 推荐 Provider
 

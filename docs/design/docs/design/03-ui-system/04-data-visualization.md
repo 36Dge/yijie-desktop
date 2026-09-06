@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -45,7 +45,7 @@
 | 7 | `#EF4444` | 风险 / 下降 |
 | 8 | `#64748B` | 其他 / 中性 |
 
-通用主题的亮色首序列使用 `yijieChartPaletteLight`，暗色使用品牌首色的 `yijieChartPalette`，避免浅青柠在白底上的信息损失。其余类别色保持领域含义，不受品牌换色影响。若具体 pattern 已定义更严格的可访问性色板与 closed adapter，以该 pattern 为准；FEAT-128 保留其专用亮暗系列 token。
+图表首色不得间接绑定已中性化的 `brand-text`；亮色 `#4B651D`、暗色 `#C3F35B` 独立固定，其余系列语义不变。通用主题的亮色首序列使用 `yijieChartPaletteLight`，暗色使用品牌首色的 `yijieChartPalette`，避免浅青柠在白底上的信息损失。其余类别色保持领域含义，不受品牌换色影响。若具体 pattern 已定义更严格的可访问性色板与 closed adapter，以该 pattern 为准；FEAT-128 保留其专用亮暗系列 token。
 
 ## 趋势色
 

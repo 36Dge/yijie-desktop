@@ -528,7 +528,7 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__project--button:hover:not(:disabled) {
-  background: var(--yj-color-brand-soft);
+  background: var(--yj-color-control-hover);
 }
 
 .chat-composer__project-name {
@@ -561,7 +561,7 @@ function handlePaste(event: ClipboardEvent): void {
   padding: var(--yj-space-1) var(--yj-space-3);
   border: var(--yj-border-width) solid transparent;
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-primary);
   background: transparent;
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
@@ -605,7 +605,7 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__permission:focus-visible,
 .chat-composer__recovery:focus-visible,
 .chat-composer__send:focus-visible {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 
@@ -614,7 +614,7 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__permission-value {
   min-width: 0;
   overflow: hidden;
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   font-weight: var(--yj-font-weight-semibold);
   text-overflow: ellipsis;
 }
@@ -669,27 +669,27 @@ function handlePaste(event: ClipboardEvent): void {
   min-width: 0;
   overflow: hidden;
   margin-top: calc(var(--yj-space-2) * -1);
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  border: var(--yj-border-width) solid var(--yj-color-border-control);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-card);
+  box-shadow: none;
   transition: border-color var(--yj-motion-fast) var(--yj-ease-standard), box-shadow var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
 .chat-composer__field:hover {
-  border-color: var(--yj-color-border-default);
+  border-color: var(--yj-color-border-control-hover);
 }
 
 .chat-composer__readiness + .chat-composer__field { margin-top: var(--yj-space-2); }
 
 .chat-composer__field:focus-within {
-  border-color: var(--yj-color-brand-active);
-  box-shadow: 0 0 0 var(--yj-space-1) var(--yj-color-brand-border), var(--yj-shadow-card);
+  border-color: var(--yj-color-focus-ring);
+  box-shadow: var(--yj-shadow-control-focus);
 }
 
 .chat-composer__field--drag-active {
-  border-color: var(--yj-color-brand-active);
-  box-shadow: 0 0 0 var(--yj-space-1) var(--yj-color-brand-border), var(--yj-shadow-card);
+  border-color: var(--yj-color-focus-ring);
+  box-shadow: var(--yj-shadow-control-focus);
 }
 
 .chat-composer__attachments {
@@ -729,7 +729,7 @@ function handlePaste(event: ClipboardEvent): void {
   align-items: center;
   justify-content: center;
   border-radius: var(--yj-radius-sm);
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
 }
 
@@ -782,7 +782,7 @@ function handlePaste(event: ClipboardEvent): void {
   outline: none;
   color: var(--yj-color-text-primary);
   background: transparent;
-  caret-color: var(--yj-color-brand-active);
+  caret-color: var(--yj-color-text-primary);
   font: inherit;
   line-height: var(--yj-line-height-body);
 }
@@ -816,6 +816,8 @@ function handlePaste(event: ClipboardEvent): void {
   overflow: hidden;
 }
 
+.chat-composer__permission :deep(.yj-icon) { color: inherit; }
+
 .chat-composer__drop-overlay {
   position: absolute;
   z-index: 4;
@@ -825,7 +827,7 @@ function handlePaste(event: ClipboardEvent): void {
   justify-content: center;
   gap: var(--yj-space-2);
   border-radius: inherit;
-  color: var(--yj-color-brand-text);
+  color: var(--yj-color-text-primary);
   background: color-mix(in srgb, var(--yj-color-bg-elevated) 92%, transparent);
   font-size: var(--yj-font-size-body);
   font-weight: var(--yj-font-weight-semibold);
@@ -834,7 +836,7 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__validation {
   margin: var(--yj-space-2) var(--yj-space-4) 0;
-  color: var(--yj-color-error);
+  color: var(--yj-color-semantic-error-ink);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
@@ -852,7 +854,7 @@ function handlePaste(event: ClipboardEvent): void {
   width: var(--yj-space-2);
   height: var(--yj-space-2);
   border-radius: var(--yj-radius-full);
-  background: var(--yj-color-brand-active);
+  background: var(--yj-color-agent-running);
 }
 
 .chat-composer__send {
@@ -867,13 +869,15 @@ function handlePaste(event: ClipboardEvent): void {
   border: 0;
   border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-on-accent);
-  background: var(--yj-color-brand-active);
-  box-shadow: var(--yj-shadow-xs);
+  background: var(--yj-color-brand-primary);
+  box-shadow: none;
 }
 
+.chat-composer__send :deep(.yj-icon) { color: inherit; }
 .chat-composer__send:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
-.chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-bg-subtle); cursor: not-allowed; }
-.chat-composer__send--stop { color: var(--yj-color-error); background: var(--yj-color-error-soft); }
+.chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
+.chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }
+.chat-composer__send--stop { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }
 
 button:disabled { cursor: not-allowed; opacity: 0.64; }
 

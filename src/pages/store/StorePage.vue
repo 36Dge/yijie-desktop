@@ -215,7 +215,7 @@ function updateRoleFilter(value: string): void {
 }
 
 .store-page__brief-description {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
 }
 
 .store-page__module {
@@ -223,12 +223,8 @@ function updateRoleFilter(value: string): void {
   padding: var(--yj-space-5);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-xl);
-  background: linear-gradient(
-    135deg,
-    var(--yj-color-brand-soft),
-    var(--yj-color-bg-page)
-  );
-  box-shadow: var(--yj-shadow-xs);
+  background: var(--yj-color-bg-card);
+  box-shadow: none;
 }
 
 .store-page__brief-panel {
@@ -264,8 +260,8 @@ function updateRoleFilter(value: string): void {
   justify-content: center;
   padding: var(--yj-space-1) var(--yj-space-3);
   border-radius: var(--yj-radius-full);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
@@ -286,7 +282,7 @@ function updateRoleFilter(value: string): void {
 
 .store-page__brief-panel:focus-visible,
 .store-page__scene-panel:focus-visible {
-  outline: var(--yj-border-width) solid var(--yj-color-brand-primary);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 

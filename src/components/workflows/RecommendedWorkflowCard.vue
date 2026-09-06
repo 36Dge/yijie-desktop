@@ -65,7 +65,7 @@ defineProps<{
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
 }
 
 .recommended-workflow-card__header,
@@ -100,21 +100,23 @@ defineProps<{
 }
 
 .recommended-workflow-card__badge--popular {
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-warning-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
 }
 
 .recommended-workflow-card__badge--recommended {
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-success-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
 }
 
 .recommended-workflow-card__description,
 .recommended-workflow-card__usage {
-  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
+
+.recommended-workflow-card__description { color: var(--yj-color-text-body); }
+.recommended-workflow-card__usage { color: var(--yj-color-text-secondary); }
 
 .recommended-workflow-card__flow {
   display: flex;
@@ -139,10 +141,10 @@ defineProps<{
   place-items: center;
   gap: var(--yj-space-1);
   padding: var(--yj-space-2);
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-md);
-  color: var(--workflow-accent-color);
-  background: var(--yj-color-bg-subtle);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-bg-card);
 }
 
 .recommended-workflow-card__node :deep(.yj-icon) {
@@ -150,7 +152,7 @@ defineProps<{
 }
 
 .recommended-workflow-card__node-label {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
   text-align: center;
@@ -181,25 +183,22 @@ defineProps<{
   align-items: center;
   justify-content: center;
   padding: var(--yj-space-1) var(--yj-space-3);
-  border: var(--yj-border-width) solid var(--yj-color-brand-border);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-md);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-bg-card);
+  color: var(--yj-color-text-disabled);
+  background: var(--yj-color-control-disabled-bg);
   font-size: var(--yj-font-size-body);
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-body);
 }
 
 .recommended-workflow-card__action--primary {
-  border-color: var(--yj-color-brand-primary);
-  color: var(--yj-color-text-on-accent);
-  background: var(--yj-color-brand-primary);
+  border-color: var(--yj-color-border-default);
+  color: var(--yj-color-text-disabled);
+  background: var(--yj-color-control-disabled-bg);
 }
 
-.workflow-accent--brand { --workflow-accent-color: var(--yj-color-brand-primary); }
 .workflow-accent--blue { --workflow-accent-color: var(--yj-color-chart-series-2); }
-.workflow-accent--cyan { --workflow-accent-color: var(--yj-color-chart-series-3); }
 .workflow-accent--green { --workflow-accent-color: var(--yj-color-success); }
-.workflow-accent--orange { --workflow-accent-color: var(--yj-color-chart-series-6); }
 .workflow-accent--purple { --workflow-accent-color: var(--yj-color-chart-series-4); }
 </style>

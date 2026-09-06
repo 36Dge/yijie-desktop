@@ -1,0 +1,87 @@
+/* Shared color adapters for Naive UI states without independent theme keys.
+   Component structure, typography and interaction behavior stay in their owners. */
+::selection {
+  color: var(--yj-color-text-selection-ink);
+  background-color: var(--yj-color-text-selection-bg);
+}
+
+/* Keep WebKit's native focus indication in the same neutral role. Components
+   that deliberately use a field ring still retain their own outline style. */
+:focus-visible {
+  outline-color: var(--yj-color-focus-ring);
+  outline-width: var(--yj-focus-ring-width);
+}
+
+/* Route headings receive programmatic focus for announcements. WebKit's auto
+   outline ignores outline-color, so keep that existing indication solid. */
+main h1[tabindex="-1"]:focus-visible {
+  outline-style: solid;
+}
+
+.n-button {
+  --n-wave-color: transparent !important;
+}
+
+.n-button .yj-icon {
+  color: inherit;
+}
+
+/* Draw the neutral secondary border without changing the button's box geometry. */
+.n-button--default-type.n-button--secondary::after {
+  position: absolute;
+  inset: 0;
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.n-button--default-type.n-button--secondary:not(.n-button--disabled):is(:hover, :active)::after {
+  border-color: var(--yj-color-border-control-hover);
+}
+
+.n-button:not(.n-button--disabled):focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.n-menu .n-menu-item-content--selected::before {
+  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
+}
+
+.n-menu .n-menu-item-content--selected:hover::before {
+  background: var(--yj-color-control-hover);
+}
+
+.n-menu .n-menu-item-content:not(.n-menu-item-content--disabled):active::before {
+  background: var(--yj-color-control-pressed);
+}
+
+/* Disabled takes precedence over checked color while preserving the actual value. */
+.n-switch--disabled {
+  --n-rail-color: var(--yj-color-control-disabled-bg) !important;
+  --n-rail-color-active: var(--yj-color-control-disabled-bg) !important;
+  --n-button-color: var(--yj-color-text-disabled) !important;
+  --n-text-color: var(--yj-color-text-disabled) !important;
+  --n-opacity-disabled: 1 !important;
+}
+
+.n-tag--disabled {
+  --n-color-checked: var(--yj-color-control-disabled-bg) !important;
+  --n-color: var(--yj-color-control-disabled-bg) !important;
+  --n-text-color-checked: var(--yj-color-text-disabled) !important;
+  --n-text-color: var(--yj-color-text-disabled) !important;
+  --n-opacity-disabled: 1 !important;
+}
+
+:is(.n-modal.n-card, .n-modal.n-dialog, .n-popover) {
+  box-shadow: var(--yj-shadow-popover);
+}
+
+/* The elevated dark surface needs a stronger default boundary than a dark card.
+   Error, focus and disabled use their own variables and remain independent. */
+[data-theme="dark"] :is(.n-modal, .n-popover, .n-drawer)
+  :is(.n-input:not(.n-input--disabled), .n-base-selection:not(.n-base-selection--disabled)) {
+  --n-border: 1px solid var(--yj-color-border-control-hover) !important;
+}

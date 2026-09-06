@@ -13,7 +13,7 @@ export function createYijieEChartsTheme(isDark: boolean) {
     backgroundColor: 'transparent',
     textStyle: {
       fontFamily: 'var(--yj-font-family-sans)',
-      color: isDark ? '#C2C7CE' : '#60666E'
+      color: isDark ? '#C2C7CE' : '#51565D'
     },
     grid: {
       left: 32,
@@ -32,7 +32,7 @@ export function createYijieEChartsTheme(isDark: boolean) {
     },
     legend: {
       textStyle: {
-        color: isDark ? '#C2C7CE' : '#60666E'
+        color: isDark ? '#C2C7CE' : '#51565D'
       }
     },
     categoryAxis: {

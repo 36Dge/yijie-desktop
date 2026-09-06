@@ -49,7 +49,7 @@ const titleId = useId();
 
 .yj-page-header__description {
   max-width: var(--yj-layout-form-max);
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }

@@ -152,7 +152,7 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell--active {
-  border-color: var(--yj-color-brand-border);
+  border-color: var(--yj-color-info);
 }
 
 .chat-timeline-item-shell__header {
@@ -188,12 +188,12 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell__disclosure:hover {
-  background: var(--yj-color-bg-card);
+  background: var(--yj-color-control-hover);
 }
 
 .chat-timeline-item-shell__disclosure:focus-visible,
 .chat-timeline-item-shell__actions :deep(:focus-visible) {
-  outline: var(--yj-space-1) solid var(--yj-color-brand-border);
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
 

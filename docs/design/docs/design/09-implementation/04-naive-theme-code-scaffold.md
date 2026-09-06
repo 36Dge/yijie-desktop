@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -29,35 +29,18 @@ exports/src/design/theme/naive-theme.ts
 主题必须集中配置，不允许页面局部覆盖。
 
 ```ts
-export function createNaiveThemeOverrides(readVariable) {
-  const token = (name) => {
-    const value = readVariable(name).trim()
-    if (!value) throw new Error(`Missing design token: ${name}`)
-    return value
-  }
+// 应用入口 / 主题控制器：引用本应用已归位的文件，不 import docs/design/exports。
+import './styles/variables.css'
+import './styles/component-colors.css'
+import { createNaiveThemeOverrides } from './design/theme/naive-theme'
 
-  return {
-    common: {
-      fontFamily: token('--yj-font-family-sans'),
-      primaryColor: token('--yj-color-brand-primary'),
-      primaryColorHover: token('--yj-color-brand-hover'),
-      primaryColorPressed: token('--yj-color-brand-active'),
-      borderRadius: token('--yj-radius-md'),
-      bodyColor: token('--yj-color-bg-app'),
-      cardColor: token('--yj-color-bg-card'),
-      textColorBase: token('--yj-color-text-primary')
-    },
-    Button: {
-      textColorPrimary: token('--yj-color-on-brand'),
-      textColorHoverPrimary: token('--yj-color-on-brand'),
-      textColorPressedPrimary: token('--yj-color-on-brand'),
-      textColorFocusPrimary: token('--yj-color-on-brand')
-    }
-  }
+export function resolveThemeOverrides() {
+  const styles = getComputedStyle(document.documentElement)
+  return createNaiveThemeOverrides((name) => styles.getPropertyValue(name).trim())
 }
 ```
 
-上例仅展示主色、结构背景和实色主按钮前景的关键映射。完整配置还需覆盖 Menu、Layout、Card、Input、Modal 等控件及其亮暗状态，见 `exports/src/design/theme/naive-theme.ts`。不能只替换 primaryColor 而保留白字青柠按钮。
+上例展示统一入口；完整 theme factory 参考 `exports/src/design/theme/naive-theme.ts`。颜色角色与共享适配 CSS 必须一起接入：中性普通文字、正文、2px focus、导航标记、disabled优先级、semantic ink、无阴影普通容器和浮层轻投影。不要再追加第二个候选/覆盖主题函数；完整状态见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
 
 `App.vue` 在设置 light/dark 的 `data-theme` 后，通过
 `getComputedStyle(document.documentElement).getPropertyValue(name)` 读取 token。

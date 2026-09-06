@@ -1,0 +1,5521 @@
+{
+  "capturedAt": "2026-09-06T04:15:40.859Z",
+  "engine": "Installed Chrome / Playwright; not Tauri WebKit",
+  "images": [
+    {
+      "key": "page-chat-light-current-wide",
+      "file": "page-chat-light-current-wide.png"
+    },
+    {
+      "key": "page-chat-light-candidate-wide",
+      "file": "page-chat-light-candidate-wide.png"
+    },
+    {
+      "key": "page-chat-dark-current-wide",
+      "file": "page-chat-dark-current-wide.png"
+    },
+    {
+      "key": "page-chat-dark-candidate-wide",
+      "file": "page-chat-dark-candidate-wide.png"
+    },
+    {
+      "key": "page-store-light-current-wide",
+      "file": "page-store-light-current-wide.png"
+    },
+    {
+      "key": "page-store-light-candidate-wide",
+      "file": "page-store-light-candidate-wide.png"
+    },
+    {
+      "key": "page-store-dark-current-wide",
+      "file": "page-store-dark-current-wide.png"
+    },
+    {
+      "key": "page-store-dark-candidate-wide",
+      "file": "page-store-dark-candidate-wide.png"
+    },
+    {
+      "key": "page-plugins-light-current-wide",
+      "file": "page-plugins-light-current-wide.png"
+    },
+    {
+      "key": "page-plugins-light-candidate-wide",
+      "file": "page-plugins-light-candidate-wide.png"
+    },
+    {
+      "key": "page-plugins-dark-current-wide",
+      "file": "page-plugins-dark-current-wide.png"
+    },
+    {
+      "key": "page-plugins-dark-candidate-wide",
+      "file": "page-plugins-dark-candidate-wide.png"
+    },
+    {
+      "key": "page-chat-light-current-min",
+      "file": "page-chat-light-current-min.png"
+    },
+    {
+      "key": "page-chat-light-candidate-min",
+      "file": "page-chat-light-candidate-min.png"
+    },
+    {
+      "key": "page-chat-dark-current-min",
+      "file": "page-chat-dark-current-min.png"
+    },
+    {
+      "key": "page-chat-dark-candidate-min",
+      "file": "page-chat-dark-candidate-min.png"
+    },
+    {
+      "key": "page-store-light-current-min",
+      "file": "page-store-light-current-min.png"
+    },
+    {
+      "key": "page-store-light-candidate-min",
+      "file": "page-store-light-candidate-min.png"
+    },
+    {
+      "key": "page-store-dark-current-min",
+      "file": "page-store-dark-current-min.png"
+    },
+    {
+      "key": "page-store-dark-candidate-min",
+      "file": "page-store-dark-candidate-min.png"
+    },
+    {
+      "key": "page-plugins-light-current-min",
+      "file": "page-plugins-light-current-min.png"
+    },
+    {
+      "key": "page-plugins-light-candidate-min",
+      "file": "page-plugins-light-candidate-min.png"
+    },
+    {
+      "key": "page-plugins-dark-current-min",
+      "file": "page-plugins-dark-current-min.png"
+    },
+    {
+      "key": "page-plugins-dark-candidate-min",
+      "file": "page-plugins-dark-candidate-min.png"
+    },
+    {
+      "key": "atlas-text-light",
+      "file": "atlas-text-light.png"
+    },
+    {
+      "key": "atlas-buttons-light",
+      "file": "atlas-buttons-light.png"
+    },
+    {
+      "key": "atlas-inputs-light",
+      "file": "atlas-inputs-light.png"
+    },
+    {
+      "key": "atlas-navigation-light",
+      "file": "atlas-navigation-light.png"
+    },
+    {
+      "key": "atlas-selection-light",
+      "file": "atlas-selection-light.png"
+    },
+    {
+      "key": "atlas-cards-light",
+      "file": "atlas-cards-light.png"
+    },
+    {
+      "key": "atlas-tags-light",
+      "file": "atlas-tags-light.png"
+    },
+    {
+      "key": "atlas-table-light",
+      "file": "atlas-table-light.png"
+    },
+    {
+      "key": "atlas-overlays-light",
+      "file": "atlas-overlays-light.png"
+    },
+    {
+      "key": "atlas-text-dark",
+      "file": "atlas-text-dark.png"
+    },
+    {
+      "key": "atlas-buttons-dark",
+      "file": "atlas-buttons-dark.png"
+    },
+    {
+      "key": "atlas-inputs-dark",
+      "file": "atlas-inputs-dark.png"
+    },
+    {
+      "key": "atlas-navigation-dark",
+      "file": "atlas-navigation-dark.png"
+    },
+    {
+      "key": "atlas-selection-dark",
+      "file": "atlas-selection-dark.png"
+    },
+    {
+      "key": "atlas-cards-dark",
+      "file": "atlas-cards-dark.png"
+    },
+    {
+      "key": "atlas-tags-dark",
+      "file": "atlas-tags-dark.png"
+    },
+    {
+      "key": "atlas-table-dark",
+      "file": "atlas-table-dark.png"
+    },
+    {
+      "key": "atlas-overlays-dark",
+      "file": "atlas-overlays-dark.png"
+    },
+    {
+      "key": "atlas-input-hover-light",
+      "file": "atlas-input-hover-light.png"
+    },
+    {
+      "key": "atlas-input-focus-light",
+      "file": "atlas-input-focus-light.png"
+    },
+    {
+      "key": "atlas-error-focus-light",
+      "file": "atlas-error-focus-light.png"
+    },
+    {
+      "key": "atlas-choice-focus-light",
+      "file": "atlas-choice-focus-light.png"
+    },
+    {
+      "key": "atlas-select-menu-light",
+      "file": "atlas-select-menu-light.png"
+    },
+    {
+      "key": "atlas-popover-open-light",
+      "file": "atlas-popover-open-light.png"
+    },
+    {
+      "key": "atlas-dropdown-open-light",
+      "file": "atlas-dropdown-open-light.png"
+    },
+    {
+      "key": "atlas-modal-open-light",
+      "file": "atlas-modal-open-light.png"
+    },
+    {
+      "key": "atlas-chat-focus-light",
+      "file": "atlas-chat-focus-light.png"
+    },
+    {
+      "key": "atlas-chat-permission-light",
+      "file": "atlas-chat-permission-light.png"
+    },
+    {
+      "key": "atlas-input-hover-dark",
+      "file": "atlas-input-hover-dark.png"
+    },
+    {
+      "key": "atlas-input-focus-dark",
+      "file": "atlas-input-focus-dark.png"
+    },
+    {
+      "key": "atlas-error-focus-dark",
+      "file": "atlas-error-focus-dark.png"
+    },
+    {
+      "key": "atlas-choice-focus-dark",
+      "file": "atlas-choice-focus-dark.png"
+    },
+    {
+      "key": "atlas-select-menu-dark",
+      "file": "atlas-select-menu-dark.png"
+    },
+    {
+      "key": "atlas-popover-open-dark",
+      "file": "atlas-popover-open-dark.png"
+    },
+    {
+      "key": "atlas-dropdown-open-dark",
+      "file": "atlas-dropdown-open-dark.png"
+    },
+    {
+      "key": "atlas-modal-open-dark",
+      "file": "atlas-modal-open-dark.png"
+    },
+    {
+      "key": "atlas-chat-focus-dark",
+      "file": "atlas-chat-focus-dark.png"
+    },
+    {
+      "key": "atlas-chat-permission-dark",
+      "file": "atlas-chat-permission-dark.png"
+    }
+  ],
+  "sections": [
+    {
+      "id": "text",
+      "title": "文字与图标"
+    },
+    {
+      "id": "buttons",
+      "title": "按钮与真实指针状态"
+    },
+    {
+      "id": "inputs",
+      "title": "输入框与状态组合"
+    },
+    {
+      "id": "navigation",
+      "title": "导航与筛选"
+    },
+    {
+      "id": "selection",
+      "title": "选择控件"
+    },
+    {
+      "id": "cards",
+      "title": "卡片、空态与加载"
+    },
+    {
+      "id": "tags",
+      "title": "标签与状态"
+    },
+    {
+      "id": "table",
+      "title": "表格与分页"
+    },
+    {
+      "id": "overlays",
+      "title": "真实弹层与操作反馈"
+    },
+    {
+      "id": "input-hover",
+      "title": "交互核验 · 输入框悬停"
+    },
+    {
+      "id": "input-focus",
+      "title": "交互核验 · 输入框键盘焦点"
+    },
+    {
+      "id": "error-focus",
+      "title": "交互核验 · 错误与焦点并存"
+    },
+    {
+      "id": "choice-focus",
+      "title": "交互核验 · 已选控件键盘焦点"
+    },
+    {
+      "id": "select-menu",
+      "title": "交互核验 · 下拉选中、悬停与禁用"
+    },
+    {
+      "id": "popover-open",
+      "title": "交互核验 · 说明浮层"
+    },
+    {
+      "id": "dropdown-open",
+      "title": "交互核验 · 操作菜单"
+    },
+    {
+      "id": "modal-open",
+      "title": "交互核验 · 确认弹窗"
+    },
+    {
+      "id": "chat-focus",
+      "title": "真实页面 · 任务输入、可发送与焦点"
+    },
+    {
+      "id": "chat-permission",
+      "title": "真实页面 · 权限说明弹窗"
+    }
+  ],
+  "pages": [
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 400,
+          "y": 265.578125,
+          "width": 880,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 400,
+          "y": 305.578125,
+          "width": 880,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 400,
+          "y": 265.578125,
+          "width": 880,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 400,
+          "y": 305.578125,
+          "width": 880,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 400,
+          "y": 265.578125,
+          "width": 880,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 400,
+          "y": 305.578125,
+          "width": 880,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 400,
+          "y": 265.578125,
+          "width": 880,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 400,
+          "y": 305.578125,
+          "width": 880,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 522.796875,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 739.59375,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 956.390625,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 1173.1875,
+          "y": 314,
+          "width": 200.8125,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 848,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1129.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1799,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1799,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 522.796875,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 739.59375,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 956.390625,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 1173.1875,
+          "y": 314,
+          "width": 200.8125,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 848,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1129.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1799,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1799,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 522.796875,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 739.59375,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 956.390625,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 1173.1875,
+          "y": 314,
+          "width": 200.8125,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 848,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1129.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1799,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1799,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 522.796875,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 739.59375,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 956.390625,
+          "y": 314,
+          "width": 200.796875,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 1173.1875,
+          "y": 314,
+          "width": 200.8125,
+          "height": 140,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 848,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1129.5,
+          "y": 679,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 566.5,
+          "y": 895,
+          "width": 265.5,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1299,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1299,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 735.390625,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 960.59375,
+          "y": 1561,
+          "width": 209.203125,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 1185.796875,
+          "y": 1561,
+          "width": 209.1875,
+          "height": 222,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1799,
+          "width": 209.1875,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 510.1875,
+          "y": 1799,
+          "width": 209.203125,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 152,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 422,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 692,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 962,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 1232,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1440,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 152,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 422,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 692,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 962,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 1232,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "current",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 152,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 422,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 692,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 962,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 1232,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "wide",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1440,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 1200,
+          "height": 900,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 1152,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 152,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 152,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 422,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 422,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 692,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 692,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 962,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 962,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 653.328125,
+          "y": 1232,
+          "width": 373.328125,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 1042.65625,
+          "y": 1232,
+          "width": 373.34375,
+          "height": 196,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 272,
+          "y": 265.578125,
+          "width": 876,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 272,
+          "y": 305.578125,
+          "width": 876,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 272,
+          "y": 265.578125,
+          "width": 876,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 272,
+          "y": 305.578125,
+          "width": 876,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 272,
+          "y": 265.578125,
+          "width": 876,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 272,
+          "y": 305.578125,
+          "width": 876,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "chat",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n本地 AI 工作区\n易界AI\n\n选择本地项目，用一句话开始任务。\n\nyijie\n输入你的任务需求\n权限审批\n只读 · 禁止写入",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell yj-app-shell--chat",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer chat-composer--new",
+          "x": 272,
+          "y": 265.578125,
+          "width": 876,
+          "height": 178,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "chat-composer__field",
+          "x": 272,
+          "y": 305.578125,
+          "width": 876,
+          "height": 138,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "0px",
+          "margin": "-8px 0px 0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 470.796875,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 635.59375,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 800.390625,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 965.1875,
+          "y": 314,
+          "width": 148.8125,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 715,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 931,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 470.796875,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 635.59375,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 800.390625,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 965.1875,
+          "y": 314,
+          "width": 148.8125,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 715,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 931,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 470.796875,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 635.59375,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 800.390625,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 965.1875,
+          "y": 314,
+          "width": 148.8125,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 715,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 931,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "store",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\n我的店铺\n\n把经营信号和常用分析场景放在一处，快速找到下一项值得处理的工作。\n\n经营快报\n\n最近 7 天 · 固定演示口径 · 无店铺数据连接\n\n近 7 天销售战报\n近 7 天店铺广告\nFBA 库存总览\n近 7 天销售战报\n\n汇总最近 7 天的演示销售表现，帮助快速识别增长与退货信号。\n\n本地合成\n销售额\n\n128,640\n元\n\n↑\n较上一演示周期 +12.8%\n\n订单量\n\n1,286\n单\n\n↑\n较上一演示周期 +9.4%\n\nTop 1 ASIN 贡献\n\n18.6\n%\n\n—\n演示结构占比较平稳\n\nTop 1 退货榜\n\nYJ-DEMO-12\nASIN\n\n↑\n演示退货率 4.8%\n\n销量暴跌的 ASIN\n\n3\n个\n\n↓\n演示商品 YJ-DEMO-07 跌幅最大\n\n精选场景\n\n按经营目标查看适合当前问题的分析方向。\n\n全部\n降 ACOS\n提转化\n防差评\n防断货\n查销量\n提流量\n盯竞品\n健康诊断\n\n全部 · 6 个演示场景\n\n精品\n热门\n搜索词表现分析\n\n拆解演示搜索词的花费、点击和转化效率，识别高价值词与低效词。\n\n演示热度 · 11,025\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n热门\n关键词投放诊断\n\n检查演示关键词的出价、匹配类型与广告位效率，整理优化清单。\n\n演示热度 · 1,672\n\n免费版\n热门\n关键词埋词优化\n\n基于合成搜索词表现优化 Listing 埋词，提升自然关键词覆盖度。\n\n演示热度 · 2,096\n\n近7天广告点击多但无转化的\n\n定位演示周期内高点击零转化的投放项，并给出预算调整建议。\n\n演示热度 · 2,355\n\n精品\n热门\nListing全漏斗转化分析\n\n分析曝光、点击、购买与售后演示漏斗，定位主要转化断点。\n\n演示热度 · 815\n\n角色场景推荐\n\n按岗位聚合日常关注点，帮助团队更快进入工作。\n\n全部\n店铺负责人\n选品经理\n运营专员\n广告优化师\n供应链\n\n全部 · 12 个演示场景\n\n精品\n热门\n店铺广告健康诊断v2\n\n综合评估演示广告结构、浪费活动与增长机会，给出分层改进方向。\n\n演示热度 · 341\n\n精品\n店铺客户体验健康诊断-v2\n\n从演示评价与服务反馈诊断客户体验，整理改善方向。\n\n演示热度 · 1,056\n\n关联\n子体Listing表现\n\n按子体拆解演示 Listing 转化、点击与广告表现，定位优化重点。\n\n演示热度 · 3,435\n\n近3天TOP10销售子ASIN排名\n\n展示近 3 天演示销量排名与趋势，识别短期增长和下滑商品。\n\n演示热度 · 2,910\n\n热门\n本周销售战报（含广告）\n\n融合演示销售与广告数据，提供本周经营概览。\n\n演示热度 · 1,135\n\n点击多不出单的ASIN\n\n筛出演示高点击但未出单的 ASIN，帮助快速定位转化漏洞。\n\n演示热度 · 3,390\n\n热门\n本周销售情况分析\n\n汇总本周演示订单、销售与广告结构，快速掌握经营动态。\n\n演示热度 · 2,518\n\n热门\n销量暴跌的商品\n\n识别本周演示销量跌幅最大的 ASIN，提示优先排查流量、库存与转化。\n\n演示热度 · 4,726\n\n双周流量总览\n\n对比两周演示流量变化趋势，快速发现渠道异常。\n\n演示热度 · 1,727\n\n精品\n关联\n店铺今日销售\n\n查看今日演示销售额、订单与退款等核心经营指标。\n\n演示热度 · 5,047\n\n精品\n关联\n父ASIN变体退货归因分析\n\n按演示变体维度归纳退货原因，识别主要问题和改善方向。\n\n演示热度 · 1,242\n\n精品\n关联\n子ASIN退货深度分析\n\n分析演示子 ASIN 退货明细，定位具体问题与改善方向。\n\n演示热度 · 1,299",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 306,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 470.796875,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 635.59375,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 800.390625,
+          "y": 314,
+          "width": 148.796875,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-metric-card",
+          "x": 965.1875,
+          "y": 314,
+          "width": 148.8125,
+          "height": 176,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "16px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 715,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 715,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 573.65625,
+          "y": 931,
+          "width": 272.671875,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 862.328125,
+          "y": 931,
+          "width": 272.65625,
+          "height": 200,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1335,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1597,
+          "width": 200.5,
+          "height": 224,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 285,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 501.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 718,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "store-scene-card",
+          "x": 934.5,
+          "y": 1837,
+          "width": 200.5,
+          "height": 246,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 152,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 444,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 736,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1028,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1320,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "light",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1180,
+      "background": "rgb(255, 255, 255)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 152,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 444,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 736,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1028,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1320,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "current",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 152,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 444,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 736,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1028,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1320,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "page": "plugins",
+      "theme": "dark",
+      "variant": "candidate",
+      "size": "min",
+      "text": "易界\n新建任务\n我的店铺\n工作流\n插件\n任务记录\nyijie\n商品详情页优化建议\n已完成\n整理经营周报\n已完成\n分析广告投放表现\n已完成\n店铺运营样例\n市场机会与选品分析\n已完成\n制作商品图片方案\n已完成\n梳理上新工作计划\n已完成\n设置\nSkill 广场\n\n发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。\n\n重新扫描\n货源与选品\n3\n选品机会分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n供应商对比建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n商品潜力评估\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n市场调研与分析\n3\n目标市场分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n竞品经营观察\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n消费需求研究\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n内容创作与营销\n3\n跨境营销文案\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\nListing 内容优化\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n品牌内容计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量获取与广告\n3\n广告效果分析\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n关键词投放建议\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n流量增长计划\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n店铺运营与基建\n3\n店铺经营诊断\n模型可用\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n库存情况梳理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n低风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only\n经营周报整理\n未安装\n\n整理关键经营信息，提供清晰的分析方向与行动建议。此处使用固定合成样例。\n\nv0.1.0\n来源：易界内部\n中风险\n适用：易界 AI 对话\n模型内执行，不访问网络或本地文件\n许可：LicenseRef-YiJie-Local-Development-Only",
+      "width": 1180,
+      "background": "rgb(25, 28, 32)",
+      "boxes": [
+        {
+          "class": "yj-app-shell",
+          "x": 0,
+          "y": 0,
+          "width": 1180,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-sidebar yj-sidebar--chat-tree",
+          "x": 0,
+          "y": 0,
+          "width": 240,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-logo yj-logo--horizontal yj-logo--md",
+          "x": 16,
+          "y": 15.5,
+          "width": 76,
+          "height": 32,
+          "fontSize": "18px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-app-shell__content",
+          "x": 240,
+          "y": 0,
+          "width": 940,
+          "height": 760,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "yj-page-header",
+          "x": 264,
+          "y": 24,
+          "width": 892,
+          "height": 62,
+          "fontSize": "14px",
+          "borderRadius": "0px",
+          "padding": "0px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 152,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 152,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 444,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 444,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 736,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 736,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1028,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1028,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 264,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 566.65625,
+          "y": 1320,
+          "width": 286.671875,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        },
+        {
+          "class": "skill-card",
+          "x": 869.328125,
+          "y": 1320,
+          "width": 286.65625,
+          "height": 218,
+          "fontSize": "14px",
+          "borderRadius": "12px",
+          "padding": "20px",
+          "margin": "0px"
+        }
+      ],
+      "errors": [],
+      "externalRequests": []
+    }
+  ],
+  "interactions": [
+    {
+      "theme": "light",
+      "forcedPseudoSamples": 3,
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "theme": "dark",
+      "forcedPseudoSamples": 3,
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "theme": "light",
+      "normalFocus": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "borderColor": "rgb(37, 40, 43)",
+        "borderWidth": "1px",
+        "boxShadow": "rgb(37, 40, 43) 0px 0px 0px 2px",
+        "outline": "rgb(37, 40, 43) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "8px"
+      },
+      "errorFocus": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "borderColor": "rgb(220, 38, 38)",
+        "borderWidth": "1px",
+        "boxShadow": "rgb(37, 40, 43) 0px 0px 0px 2px",
+        "outline": "rgb(37, 40, 43) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "8px"
+      },
+      "textSelection": {
+        "color": "rgb(37, 40, 43)",
+        "background": "rgb(195, 243, 91)"
+      },
+      "themeSwitchPreservesInput": true,
+      "readonly": true,
+      "switchToggled": true,
+      "selectChanged": true,
+      "modalFocusRestored": true,
+      "axe": [],
+      "axeExclusions": [
+        "Explicit unsupported raw primary+secondary counterexample",
+        "Isolated disabled-text color demonstration"
+      ]
+    },
+    {
+      "theme": "light",
+      "chatSend": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(195, 243, 91)",
+        "borderColor": "rgb(37, 40, 43)",
+        "borderWidth": "0px",
+        "boxShadow": "none",
+        "outline": "rgb(37, 40, 43) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "999px"
+      },
+      "permissionPreservesDraft": true,
+      "nativeAttemptedCommands": [],
+      "errors": [],
+      "externalRequests": []
+    },
+    {
+      "theme": "dark",
+      "normalFocus": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "borderColor": "rgb(245, 247, 250)",
+        "borderWidth": "1px",
+        "boxShadow": "rgb(245, 247, 250) 0px 0px 0px 2px",
+        "outline": "rgb(245, 247, 250) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "8px"
+      },
+      "errorFocus": {
+        "color": "rgb(245, 247, 250)",
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "borderColor": "rgb(220, 38, 38)",
+        "borderWidth": "1px",
+        "boxShadow": "rgb(245, 247, 250) 0px 0px 0px 2px",
+        "outline": "rgb(245, 247, 250) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "8px"
+      },
+      "textSelection": {
+        "color": "rgb(37, 40, 43)",
+        "background": "rgb(195, 243, 91)"
+      },
+      "themeSwitchPreservesInput": true,
+      "readonly": true,
+      "switchToggled": true,
+      "selectChanged": true,
+      "modalFocusRestored": true,
+      "axe": [],
+      "axeExclusions": [
+        "Explicit unsupported raw primary+secondary counterexample",
+        "Isolated disabled-text color demonstration"
+      ]
+    },
+    {
+      "theme": "dark",
+      "chatSend": {
+        "color": "rgb(37, 40, 43)",
+        "backgroundColor": "rgb(195, 243, 91)",
+        "borderColor": "rgb(37, 40, 43)",
+        "borderWidth": "0px",
+        "boxShadow": "none",
+        "outline": "rgb(37, 40, 43) none 3px",
+        "fontSize": "14px",
+        "borderRadius": "999px"
+      },
+      "permissionPreservesDraft": true,
+      "nativeAttemptedCommands": [],
+      "errors": [],
+      "externalRequests": []
+    }
+  ],
+  "warnings": []
+}

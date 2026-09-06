@@ -53,7 +53,7 @@ defineProps<{
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
 }
 
 .workflow-summary-card__header {
@@ -74,8 +74,8 @@ defineProps<{
   width: var(--yj-space-12);
   height: var(--yj-space-12);
   border-radius: var(--yj-radius-lg);
-  color: var(--workflow-accent-color);
-  background: var(--yj-color-bg-subtle);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-bg-card);
 }
 
 .workflow-summary-card__icon :deep(.yj-icon) {
@@ -115,14 +115,14 @@ defineProps<{
   padding: var(--yj-space-1) var(--yj-space-2);
   border-radius: var(--yj-radius-sm);
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-control-hover);
   font-size: var(--yj-font-size-caption);
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-caption);
 }
 
 .workflow-summary-card__description {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
 }
@@ -135,10 +135,7 @@ defineProps<{
   font-variant-numeric: tabular-nums;
 }
 
-.workflow-accent--brand { --workflow-accent-color: var(--yj-color-brand-primary); }
 .workflow-accent--blue { --workflow-accent-color: var(--yj-color-chart-series-2); }
-.workflow-accent--cyan { --workflow-accent-color: var(--yj-color-chart-series-3); }
 .workflow-accent--green { --workflow-accent-color: var(--yj-color-success); }
-.workflow-accent--orange { --workflow-accent-color: var(--yj-color-chart-series-6); }
 .workflow-accent--purple { --workflow-accent-color: var(--yj-color-chart-series-4); }
 </style>

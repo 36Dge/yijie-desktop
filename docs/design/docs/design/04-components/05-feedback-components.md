@@ -4,7 +4,7 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.0.0-final
+- 版本：2.1.0
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -31,6 +31,8 @@
 ## 规则
 
 长时间 Agent 任务不得只用 Loading spinner，必须展示阶段、日志或进度。错误反馈必须提供重试、查看详情或联系支持入口。
+
+本类组件的文字、图标、背景、边界、2px 中性焦点、普通容器无阴影与真实浮层轻投影，以 [组件配色与状态矩阵](./09-component-color-state-matrix.md) 为准。readonly 保留正常读值；disabled 只作用于不可用控件；error 与 selected 不能抹掉焦点。现有组件职责、布局与交互不变。
 
 ## AI / Codex 必须遵守
 

@@ -4,8 +4,8 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：2.0.0
-- 最后更新：2026-09-05
+- 版本：2.1.0
+- 最后更新：2026-09-06
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
@@ -33,7 +33,8 @@
 - All pages must support loading, empty, error, permission denied, and ready states.
 - UI copy must be Chinese and professional.
 - Default theme follows system setting; all pages must work in light and dark themes.
-- Follow the accepted 2.0.0 color/brand baseline: pure-white light surfaces, graphite text, lime primary controls with graphite foreground; use whitespace, existing spacing tokens, and thin neutral borders for hierarchy.
+- Follow the accepted 2.1.0 component color/state baseline: pure-white light surfaces, graphite text, lime primary controls with graphite foreground; use whitespace, existing spacing tokens, and thin neutral borders for hierarchy.
+- Read `04-components/09-component-color-state-matrix.md` for every component state: neutral text/icons, 2px neutral focus with selected/error preserved, no card/input shadow, and lightweight overlay shadows. Readonly values remain readable; disabled affects unavailable controls only.
 - Dark mode uses neutral graphite surface levels; keep the same lime brand accent and independent semantic status colors.
 - Use the approved parcel / YJ negative-space SVG assets with the correct light/dark variant. Do not use the legacy bag mark or embed raster images in SVG.
 - This color/brand refresh does not change typography, spacing/radius scales, layout, component APIs, or interaction rules.

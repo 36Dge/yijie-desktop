@@ -59,7 +59,7 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
   border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  box-shadow: var(--yj-shadow-xs);
+  box-shadow: none;
   gap: var(--yj-space-4);
 }
 
@@ -82,8 +82,8 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
   padding: var(--yj-space-1) var(--yj-space-3);
   border: 0;
   border-radius: var(--yj-radius-full);
-  color: var(--yj-color-brand-text);
-  background: var(--yj-color-brand-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
   font-size: var(--yj-font-size-caption);
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-caption);
@@ -91,18 +91,18 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
 }
 
 .store-scene-card__badge--warning {
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-warning-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
 }
 
 .store-scene-card__badge--error {
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-error-soft);
+  color: var(--yj-color-text-secondary);
+  background: var(--yj-color-control-hover);
 }
 
 .store-scene-card__badge--neutral {
   color: var(--yj-color-text-secondary);
-  background: var(--yj-color-bg-subtle);
+  background: var(--yj-color-control-hover);
 }
 
 .store-scene-card__copy {
@@ -126,7 +126,7 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
 }
 
 .store-scene-card__description {
-  color: var(--yj-color-text-secondary);
+  color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   overflow-wrap: anywhere;
