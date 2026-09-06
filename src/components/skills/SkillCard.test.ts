@@ -65,6 +65,7 @@ describe("SkillCard", () => {
   it("offers one labelled install control with a hover and keyboard-focus tooltip", async () => {
     const wrapper = mountCard();
     const install = wrapper.get(`button[aria-label="安装 跨境营销文案"]`);
+    expect(wrapper.classes()).toContain("skill-card--actionable");
 
     const tooltip = wrapper.getComponent(NTooltip);
     expect(tooltip.props("trigger")).toBe("manual");
@@ -86,10 +87,17 @@ describe("SkillCard", () => {
     await install.trigger("click");
 
     expect(wrapper.emitted("install")).toEqual([[SKILL_ID]]);
-    expect(wrapper.text()).toContain("v0.1.0");
+    expect(wrapper.text()).not.toContain("v0.1.0");
+    expect(wrapper.text()).not.toContain("来源：");
     expect(wrapper.text()).not.toContain("低风险");
-    expect(wrapper.text()).toContain("中风险");
-    expect(wrapper.text()).toContain("模型内执行，不访问网络或本地文件");
+    expect(wrapper.text()).not.toContain("中风险");
+    expect(wrapper.text()).not.toContain("适用：");
+    expect(wrapper.text()).not.toContain("许可：");
+    expect(wrapper.text()).not.toContain("模型内执行，不访问网络或本地文件");
+    expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe("skillCopywriting");
+    await wrapper.setProps({ operation: "install" });
+    expect(wrapper.classes()).not.toContain("skill-card--actionable");
+    expect(install.attributes("disabled")).toBeDefined();
   });
 
   it("replaces install with delete and enable controls for an installed Skill", async () => {
@@ -116,6 +124,7 @@ describe("SkillCard", () => {
   it("renders a read-only catalog without mutation controls", () => {
     const uninstalled = mountCard(skill(), false);
     expect(uninstalled.find(".skill-card__actions button").exists()).toBe(false);
+    expect(uninstalled.classes()).not.toContain("skill-card--actionable");
 
     uninstalled.unmount();
     const installed = mountCard(skill({
@@ -125,10 +134,11 @@ describe("SkillCard", () => {
     }), false);
     expect(installed.find(".skill-card__delete").exists()).toBe(false);
     expect(installed.getComponent(NSwitch).props("disabled")).toBe(true);
+    expect(installed.classes()).not.toContain("skill-card--actionable");
   });
 
   it("falls back to the semantic plugin icon for an unknown iconKey", () => {
-    const wrapper = mountCard(skill({ iconKey: "futureIcon" }));
+    const wrapper = mountCard(skill({ id: "partner.future-skill", iconKey: "futureIcon" }));
 
     expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe("plugin");
   });
@@ -142,7 +152,8 @@ describe("SkillCard", () => {
     });
     const wrapper = mountCard(projection);
     expect(wrapper.get(`button[aria-label="安装 跨境营销文案"]`)).toBeDefined();
-    expect(wrapper.text()).toContain("可安装 · 需工具");
+    expect(wrapper.text()).not.toContain("可安装 · 需工具");
+    expect(wrapper.find(".n-tag").exists()).toBe(false);
 
     await wrapper.setProps({
       skill: skill({
@@ -169,6 +180,7 @@ describe("SkillCard", () => {
     expect(wrapper.text()).toContain("许可尚未通过审核");
     expect(wrapper.text()).toContain("暂不可安装");
     expect(wrapper.find(".skill-card__install").exists()).toBe(false);
+    expect(wrapper.classes()).not.toContain("skill-card--actionable");
   });
 
   it("turns an install failure into an explicit retry action", () => {
@@ -194,7 +206,7 @@ describe("SkillCard", () => {
     "skillSourcing",
     "skillTraffic",
   ])("renders the reviewed iconKey %s without fallback", (iconKey) => {
-    const wrapper = mountCard(skill({ iconKey }));
+    const wrapper = mountCard(skill({ id: "partner.future-skill", iconKey }));
     expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe(iconKey);
   });
 

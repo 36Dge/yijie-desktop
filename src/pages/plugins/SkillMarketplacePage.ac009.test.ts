@@ -354,7 +354,7 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     expect(shellSource).toMatch(/\.yj-app-shell__content\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*auto;/s);
     expect(shellSource).toMatch(/\.yj-app-shell\s*{[^}]*overflow:\s*hidden;/s);
     expect(cardSource).toMatch(
-      /\.skill-card__delete:hover,[\s\S]*color:\s*var\(--yj-color-error\);[\s\S]*background:\s*var\(--yj-color-error-soft\);/,
+      /\.skill-card__delete:hover,[\s\S]*color:\s*var\(--yj-color-semantic-error-ink\);[\s\S]*background:\s*var\(--yj-color-error-soft\);/,
     );
     expect(`${marketplaceSource}\n${cardSource}`).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });

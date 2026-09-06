@@ -50,6 +50,14 @@ src/icons/registry.ts
 
 默认线宽为 2。单页不得混用明显不同线宽。
 
+## Skill 广场分类图标（2026-09-07 用户确认）
+
+五个分类标题使用 `skillCategory*` registry 条目：在原有 Lucide 轮廓上，以品牌青柠 token 绘制局部笔画，与中性主体共同构成图标；背景透明，不添加青柠底板。包裹封口、趋势线、扩音器分隔线、点击射线、扳手柄分别作为强调细节。沿用 `lg` 20px、2 单位线宽、圆端点。
+
+主体继承 `YjIcon` 的中性前景，暗色主题自动使用高对比浅色；青柠固定使用 `--yj-color-brand-primary`。分类文字同时提供完整含义，青柠细节不单独承担识别、操作或状态信息。所有 Skill 卡片继续使用各自独立的单色 Lucide 图标；不将分类双色外观用于卡片或其他普通图标。
+
+来源为项目已固定的 `@lucide/vue` 1.27.0（ISC），局部描线在 `src/icons/skill-category-icons.ts`，保留许可声明，不增加图标依赖。
+
 ## 品牌图标
 
 Amazon、Temu、Shopee、TikTok Shop、LinkedIn、飞书、钉钉等品牌图标必须优先使用官方素材。官方素材进入：
