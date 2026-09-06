@@ -93,19 +93,21 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 
 ### 3.2 输入框、搜索框与 Chat Composer
 
+2026-09-07 用户调整：新建任务与继续对话的 Chat Composer 聚焦、拖放态采用单层 1 px 品牌青柠边框（`--yj-border-width` / `--yj-color-brand-primary`），不叠加外圈或阴影。此项覆盖本矩阵通用 F 规则对 Composer 外框的约束；内部按钮仍保留各自键盘焦点。新建任务标题上方移除“本地 AI 工作区”。
+
 | 状态 | 内容前景 / 背景 / 边框 | 焦点 | 阴影及说明 |
 |---|---|---|---|
 | default | `T / C / BC`；placeholder=M，label=P | 无 | none |
 | hover | `T / C / BH` | 无 | none；不改变输入填充 |
 | pressed | `T / C / BH` | 若获得焦点使用 F | none；按压不是长期状态 |
 | selected | 仅已选文字 `ON / L`：两主题文本选区均为青柠底、石墨字；其余内容仍 `T / C` | 原焦点可保留 | none；不把整个输入改为青柠底 |
-| focus | `T / C / F` | 2 px F | 无投影 / glow；Composer 和普通 Input 同一强度 |
+| focus | 普通 Input：`T / C / F`；Composer：`T / C / L` | 普通 Input：2 px F；Composer：1 px 青柠边框 | 无投影 / glow；Composer 不叠加外圈 |
 | readonly | `T / C / BC`；保留可选择/复制的值及“只读”说明 | 键盘可达时仍有 F | none；不使用 D、DB 或禁用光标伪装只读 |
 | disabled | `D / DB / B` | 原生 disabled 为 N/A | none；不得拿禁用样式承载权限原因正文 |
 | loading | `T / C / BC`；spinner 使用 P，错误/警告 spinner 分别使用 EI/WI；明确 busy 信息 | 已聚焦则 F | none；保持现有内容，不把正文清空成不可读骨架 |
 | error | `T / C / E`；消息正文=T/S，错误标记=EI | 有焦点时仍叠 F | none；E 边框不被 F 覆盖，F 也不被 error 清除 |
 
-输入的 readonly 与 disabled 是不同语义。只读值有信息价值，仍使用正常文字对比；disabled 只表示无法使用的控件。审批的“只读 · 禁止写入”是正常权限说明，不是禁用文字。文本选区使用 `text-selection-bg / text-selection-ink`，只改变绘制色，不改变原生选词、键盘选择、复制和输入法行为；它与输入框的中性焦点圈可以并存。Composer 拖放态采用清楚的中性边界与拖放说明；附件真实错误、警告仍使用既有语义标记，不叠 4 px 绿色外环。
+输入的 readonly 与 disabled 是不同语义。只读值有信息价值，仍使用正常文字对比；disabled 只表示无法使用的控件。审批的“只读 · 禁止写入”是正常权限说明，不是禁用文字。文本选区使用 `text-selection-bg / text-selection-ink`，只改变绘制色，不改变原生选词、键盘选择、复制和输入法行为；它与输入框焦点可以并存。Composer 拖放态采用单层 1 px 青柠边框与拖放说明；附件真实错误、警告仍使用既有语义标记，不叠外环。
 
 ### 3.3 主导航、标签页与筛选
 

@@ -579,7 +579,6 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="!isSessionRoute" class="chat-entry" aria-labelledby="new-task-title">
     <div class="chat-entry__content">
-      <div class="chat-entry__eyebrow">本地 AI 工作区</div>
       <h1 id="new-task-title" class="chat-entry__heading">易界AI</h1>
       <p id="new-task-subtitle" class="chat-entry__subtitle">选择本地项目，用一句话开始任务。</p>
 
@@ -969,14 +968,6 @@ onBeforeUnmount(() => {
   align-items: center;
   align-self: start;
   margin: var(--yj-layout-chat-entry-top-offset) auto 0;
-}
-
-.chat-entry__eyebrow {
-  margin-bottom: var(--yj-space-3);
-  color: var(--yj-color-text-primary);
-  font-size: var(--yj-font-size-caption);
-  font-weight: var(--yj-font-weight-semibold);
-  letter-spacing: 0.08em;
 }
 
 .chat-entry__heading,

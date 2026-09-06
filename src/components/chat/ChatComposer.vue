@@ -682,14 +682,9 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__readiness + .chat-composer__field { margin-top: var(--yj-space-2); }
 
-.chat-composer__field:focus-within {
-  border-color: var(--yj-color-focus-ring);
-  box-shadow: var(--yj-shadow-control-focus);
-}
-
+.chat-composer__field:focus-within,
 .chat-composer__field--drag-active {
-  border-color: var(--yj-color-focus-ring);
-  box-shadow: var(--yj-shadow-control-focus);
+  border-color: var(--yj-color-brand-primary);
 }
 
 .chat-composer__attachments {
