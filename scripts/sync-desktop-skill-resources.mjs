@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
+import { isLocalPermissionCandidate, verifyLocalPermissionCandidate } from "./local-permission-candidate.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,7 +119,7 @@ async function verifyRepository(root, repository, commit, { requireHead = false 
   if (pinnedCommit !== commit) throw new Error(`${root} pinned commit resolves to ${pinnedCommit}, expected ${commit}`);
   if (requireHead && head !== commit) throw new Error(`${root} HEAD is ${head}, expected ${commit}`);
   if (normalizeRepository(origin) !== normalizeRepository(repository)) throw new Error(`${root} origin differs from its lock`);
-  if (status) throw new Error(`${root} immutable checkout is not clean`);
+  if (status && (requireHead || !isLocalPermissionCandidate())) throw new Error(`${root} immutable checkout is not clean`);
 }
 
 async function readRegularFile(filePath, maximum = Number.MAX_SAFE_INTEGER) {
@@ -357,6 +358,17 @@ async function packageProducerChannels(skillsRoot, producerExecutor) {
   await producerExecutor("pnpm", ["--dir", skillsRoot, "package:desktop-release"], { cwd: repositoryRoot, maxBuffer: 16 * 1024 * 1024 });
 }
 
+async function defaultLocalSkillsRoot() {
+  const sibling = path.resolve(repositoryRoot, "../yijie-skills");
+  if (!isLocalPermissionCandidate()) return sibling;
+  const lock = validateResourceLock(JSON.parse(await readFile(lockPath, "utf8")));
+  const { stdout } = await exec("git", ["-C", sibling, "rev-parse", "HEAD"]);
+  if (stdout.trim() === lock.producer.full_commit) return sibling;
+  const pinned = path.join(repositoryRoot, ".local", `skills-pinned-${lock.producer.full_commit.slice(0, 7)}`);
+  await verifyRepository(pinned, lock.producer.repository, lock.producer.full_commit, { requireHead: true });
+  return pinned;
+}
+
 export async function syncDesktopSkillResources({
   channel = "local-development", allChannels = false,
   skillsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills"),
@@ -365,6 +377,12 @@ export async function syncDesktopSkillResources({
   outputRoot, check = false, packageProducer = false, producerExecutor = exec,
 } = {}) {
   if (!SKILL_CHANNELS.includes(channel)) throw new Error(`Unsupported Skill channel: ${channel}`);
+  if (isLocalPermissionCandidate()) {
+    if (channel !== "local-development" || allChannels) {
+      throw new Error("Permission candidates are restricted to local development consumption");
+    }
+    await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
+  }
   const lock = validateResourceLock(JSON.parse(await readFile(lockPath, "utf8")));
   if (packageProducer) {
     await verifySourceChain(skillsRoot, contractsRoot, agentHostRoot, lock);
@@ -395,8 +413,9 @@ if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
       throw new Error("CLI Skill resource output must stay inside yijie-desktop/.local");
     }
   }
+  const explicitSkillsRoot = argument("--skills-root") ?? process.env.YIJIE_DESKTOP_SKILLS_DIR;
   syncDesktopSkillResources({ channel, allChannels,
-    skillsRoot: path.resolve(repositoryRoot, argument("--skills-root") ?? process.env.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills"),
+    skillsRoot: explicitSkillsRoot ? path.resolve(repositoryRoot, explicitSkillsRoot) : await defaultLocalSkillsRoot(),
     contractsRoot: path.resolve(repositoryRoot, argument("--contracts-root") ?? process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
     agentHostRoot: path.resolve(repositoryRoot, argument("--agent-host-root") ?? process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
     outputRoot, check, packageProducer: !process.argv.includes("--skip-package") && !check,

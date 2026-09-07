@@ -4,6 +4,9 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
 import { useRoute, useRouter } from "vue-router";
+import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
+import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
+import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
@@ -158,6 +161,14 @@ const stableError = computed(() => errorNotice(
   ),
 ));
 const isStreaming = computed(() => chatStore.phase === "streaming");
+const runtimePermissionsEnabled = import.meta.env.VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED === "true" && import.meta.env.VITE_YIJIE_ENV === "local" && import.meta.env.VITE_YIJIE_LOCAL_PROFILE === "demo_fast";
+const permissions = useRuntimePermissions(
+  () => runtimePermissionsEnabled ? chatStore.context?.contextId ?? null : null,
+  () => chatStore.selectedSessionId,
+  () => isStreaming.value || composerSubmissionState.value !== "idle",
+);
+const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
+
 const isHistoryLoading = computed(() =>
   isSessionRoute.value &&
   chatStore.history === null &&
@@ -326,7 +337,7 @@ async function pickProject(): Promise<void> {
 }
 
 async function submit(): Promise<void> {
-  if (submitting.value) return;
+  if (submitting.value || !permissionCanSend.value) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
@@ -594,6 +605,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="transientNotice" class="chat-entry__unsupported" role="alert">{{ transientNotice }}</p>
 
+      <p v-if="runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -601,7 +613,7 @@ onBeforeUnmount(() => {
         :projects="chatStore.projects"
         :selected-project-id="selectedProjectId"
         :readiness="readiness"
-        :can-send="chatStore.canSend"
+        :can-send="chatStore.canSend && permissionCanSend"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -619,7 +631,11 @@ onBeforeUnmount(() => {
         @submit="submit"
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
-      />
+      >
+        <template v-if="runtimePermissionsEnabled" #permission-control>
+          <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
+        </template>
+      </ChatComposer>
     </div>
   </section>
 
@@ -872,6 +888,7 @@ onBeforeUnmount(() => {
             </div>
             <button v-if="cleanup.actionLabel" class="chat-notice__action" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
+          <RuntimeApprovalList v-if="runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
         </div>
       </div>
 
@@ -898,6 +915,7 @@ onBeforeUnmount(() => {
         <button v-if="stableError.actionLabel" type="button" @click="handleStableErrorAction">{{ stableError.actionLabel }}</button>
       </p>
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
+      <p v-if="runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -906,7 +924,7 @@ onBeforeUnmount(() => {
         :selected-project-id="selectedSession?.projectId ?? null"
         :active-project-name="activeProject?.safeName"
         :readiness="readiness"
-        :can-send="chatStore.canSend"
+        :can-send="chatStore.canSend && permissionCanSend"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="isStreaming"
@@ -925,7 +943,11 @@ onBeforeUnmount(() => {
         @interrupt="interrupt"
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
-      />
+      >
+        <template v-if="runtimePermissionsEnabled" #permission-control>
+          <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
+        </template>
+      </ChatComposer>
     </footer>
     <div class="sr-only" aria-live="polite">{{ statusAnnouncement }}</div>
   </section>

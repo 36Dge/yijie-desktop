@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatRuntimePermissionsV1",
+  "description": "FEAT-152 extension. Existing v1 command envelopes and context authorization; local demo only. Mode stored in SQLCipher before dispatch.",
+  "definitions": {
+    "PermissionMode": {
+      "type": "string",
+      "enum": [
+        "ask",
+        "auto",
+        "full"
+      ]
+    },
+    "PermissionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "fullAccessConfirmed",
+        "busy"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/PermissionMode"
+        },
+        "fullAccessConfirmed": {
+          "type": "boolean"
+        },
+        "busy": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SessionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      }
+    },
+    "SetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "mode",
+        "confirmFullAccess"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "mode": {
+          "$ref": "#/definitions/PermissionMode"
+        },
+        "confirmFullAccess": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DecisionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "approvalId",
+        "decision"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "approvalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve_once",
+            "reject"
+          ]
+        }
+      }
+    }
+  },
+  "x-yijie-command-contracts": {
+    "chat_get_permissions_v1": "SessionPayload",
+    "chat_set_permissions_v1": "SetPayload",
+    "chat_runtime_approvals_v1": "SessionPayload",
+    "chat_decide_runtime_approval_v1": "DecisionPayload"
+  }
+}

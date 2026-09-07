@@ -537,6 +537,102 @@ impl HostBridge {
         parse_required_uuid(&wire.turn_id).map_err(|_| accepted_response_invalid())
     }
 
+    pub async fn start_permission_turn(
+        &self,
+        session_id: Uuid,
+        operation_id: Uuid,
+        content_blocks: &[HostTurnInputBlock],
+        trace: &HostTrace,
+        mode: super::runtime_permissions::PermissionMode,
+    ) -> Result<Uuid, HostBridgeError> {
+        require_non_nil(session_id)?;
+        require_non_nil(operation_id)?;
+        validate_trace(trace)?;
+        validate_turn_v2_blocks(content_blocks)?;
+        let turn = StartTurnV2Request {
+            operation_id,
+            trace,
+            content_blocks,
+        };
+        let response = self
+            .send_json_with_limit(
+                Method::POST,
+                &format!("/v1/agent-sessions/{session_id}/permission-turns"),
+                &serde_json::json!({"permission_mode": mode, "turn": turn}),
+                MAX_TURN_V2_JSON_BYTES,
+            )
+            .await?;
+        if response.status() != StatusCode::ACCEPTED {
+            return Err(parse_rejection(response).await);
+        }
+        let bytes = read_json_body(response)
+            .await
+            .map_err(|_| accepted_response_invalid())?;
+        let wire: StartTurnResponse =
+            serde_json::from_slice(&bytes).map_err(|_| accepted_response_invalid())?;
+        parse_required_uuid(&wire.turn_id).map_err(|_| accepted_response_invalid())
+    }
+
+    pub async fn runtime_approvals(
+        &self,
+        session_id: Uuid,
+    ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, HostBridgeError> {
+        require_non_nil(session_id)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v1/agent-sessions/{session_id}/runtime-approvals"),
+            )
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        let bytes = read_json_body(response).await?;
+        let snapshot: super::runtime_permissions::RuntimeApprovalSnapshot =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        snapshot.validate().map_err(|_| protocol_error())?;
+        Ok(snapshot)
+    }
+
+    pub async fn decide_runtime_approval(
+        &self,
+        session_id: Uuid,
+        approval_id: Uuid,
+        decision: &str,
+    ) -> Result<super::runtime_permissions::RuntimeApproval, HostBridgeError> {
+        require_non_nil(session_id)?;
+        require_non_nil(approval_id)?;
+        if !["approve_once", "reject"].contains(&decision) {
+            return Err(protocol_error());
+        }
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!("/v1/agent-sessions/{session_id}/runtime-approvals/{approval_id}"),
+                &serde_json::json!({"decision":decision}),
+            )
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        let bytes = read_json_body(response).await?;
+        let value: super::runtime_permissions::RuntimeApproval =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        super::runtime_permissions::RuntimeApprovalSnapshot {
+            requests: vec![value.clone()],
+        }
+        .validate()
+        .map_err(|_| protocol_error())?;
+        if value.id != approval_id {
+            return Err(protocol_error());
+        }
+        Ok(value)
+    }
+
     pub async fn interrupt_turn(
         &self,
         session_id: Uuid,

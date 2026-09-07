@@ -6,6 +6,7 @@ import {
   SkillCategorySourcing,
   SkillCategoryTraffic,
 } from "./skill-category-icons";
+import { Hand as PermissionHand, ShieldAlert as PermissionAlert, Check as PermissionCheck } from "@lucide/vue";
 import {
   ArrowDown,
   ArrowRight,
@@ -94,6 +95,9 @@ import {
 } from "@lucide/vue";
 
 export const iconRegistry = {
+  permissionHand: PermissionHand,
+  permissionAlert: PermissionAlert,
+  permissionCheck: PermissionCheck,
   assistant: Bot,
   backToBottom: ArrowDown,
   arrowRight: ArrowRight,

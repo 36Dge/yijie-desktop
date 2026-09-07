@@ -38,6 +38,7 @@ import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-n
 import { LEGACY_CHAT_TIMELINE_ROLLBACK_KEY } from "../../authorization/chat-timeline-ui-config";
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import ChatPage from "./ChatPage.vue";
+import { runtimePermissionClient } from "../../api/runtime-permission-client";
 
 type MockDragDropPayload =
   | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
@@ -256,6 +257,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("FEAT-126 ChatPage", () => {
@@ -1395,6 +1397,45 @@ describe("FEAT-126 ChatPage", () => {
     expect(document.body.textContent).toContain("只读访问 · 禁止写入");
     expect(document.body.textContent).toContain("不能在页面中提升权限");
     expect(document.body.textContent).not.toContain("允许写入");
+  });
+
+  it.each([false, true])("opens the native permission menu in local Demo (existing task: %s)", async (active) => {
+    vi.stubEnv("VITE_YIJIE_ENV", "local");
+    vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
+    vi.stubEnv("VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true");
+    const get = vi.spyOn(runtimePermissionClient, "get").mockResolvedValue({ mode: "ask", busy: false, fullAccessConfirmed: false });
+    vi.spyOn(runtimePermissionClient, "approvals").mockResolvedValue([]);
+    const { wrapper, store } = await mountPage(active ? `/chat/${SESSION_ID}` : "/chat", active);
+    try {
+      await flushPromises();
+      expect(get).toHaveBeenCalledWith(store.context!.contextId, active ? SESSION_ID : null);
+      expect(wrapper.find(".chat-composer__permission").exists()).toBe(false);
+      await wrapper.get(".permission-trigger").trigger("click");
+      await flushPromises();
+      const options = [...document.querySelectorAll('[role="menuitemradio"]')];
+      expect(options).toHaveLength(3);
+      expect(options.map((option) => option.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+      expect(options.map((option) => option.textContent).join(" ")).toContain("帮我批准");
+    } finally { wrapper.unmount(); }
+  });
+
+  it("keeps permission failures on the new control and recovers through retry", async () => {
+    vi.stubEnv("VITE_YIJIE_ENV", "local");
+    vi.stubEnv("VITE_YIJIE_LOCAL_PROFILE", "demo_fast");
+    vi.stubEnv("VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true");
+    vi.spyOn(runtimePermissionClient, "get").mockRejectedValueOnce(new Error("temporarily unavailable"))
+      .mockResolvedValue({ mode: "ask", busy: false, fullAccessConfirmed: false });
+    const { wrapper } = await mountPage("/chat");
+    try {
+      await flushPromises();
+      expect(wrapper.find(".chat-composer__permission").exists()).toBe(false);
+      expect(wrapper.get(".permission-trigger").attributes("disabled")).toBeDefined();
+      expect(wrapper.text()).toContain("暂时无法同步权限或审批，请重试。");
+      await wrapper.get(".chat-workspace__composer-error button").trigger("click");
+      await flushPromises();
+      expect(wrapper.get(".permission-trigger").attributes("disabled")).toBeUndefined();
+      expect(wrapper.get(".permission-trigger").text()).toBe("请求批准");
+    } finally { wrapper.unmount(); }
   });
 
   it("projects cleanup pending instead of removing the session optimistically", async () => {

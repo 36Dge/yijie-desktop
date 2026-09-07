@@ -14,6 +14,18 @@ pnpm tauri:dev
 它不显示登录、退出登录或白名单账号密码表单，也不依赖 Keycloak、浏览器 OIDC、
 `/v1/me/*` 或 `/v2/tasks`。Chat、Artifact、owner/tenant/session 与 native context 校验仍保留。
 
+2026-09-08 起，普通及 stable 本地启动器同时启用 FEAT-152 的 renderer/native 权限开关，
+本地 App 构建也包含三档权限菜单。新任务默认“请求批准”；运行中禁止切换，首次完全访问需要确认。
+本地源码校验继续检查既有不可变基线及权限同源契约；正常启动无需验收计数代理。
+显式配置验收代理时仍只接受既有固定 loopback 地址。public/production 的开关默认值不变。
+已有独立 App 必须从包含 FEAT-152 的当前源码重新构建，不能复用遗漏该功能的历史隔离构建。
+
+`contracts/runtime-permissions.lock.json` 独立固定 FEAT-152 的 Contracts/Host 完整提交和来源摘要；
+本地入口同时验证对应 Git 对象、消费文件以及 Host 实际构建输入。旧 v4、Skills 和 Runtime 的锁继续保留。
+Skills sibling 已前进时，未显式配置路径的本地入口使用已存在的 `.local/skills-pinned-<固定提交前7位>`，
+并按旧 Skills 锁重新核对干净状态、origin 和完整提交；不会静默改用新 Skills 版本。
+App 包仍通过本地启动器提供 Native 的 local/demo_fast 环境，直接双击裸开发包不等于完整本地启动。
+
 Agent Host 的 owner-only loopback token 由 Desktop 自动管理；MiniMax API Key 由 owner-only
 本地文件提供。这两者是进程/外部服务凭据，不是用户登录。`demo_fast` 仅允许 `local` 环境；
 公网或生产构建继续使用正式 OIDC 与服务端权限链。

@@ -777,6 +777,31 @@ impl DatabaseWorker {
             .await
     }
 
+    pub async fn permission_state(
+        &self,
+        session_id: Option<uuid::Uuid>,
+    ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
+        self.call(move |r| r.permission_state(session_id)).await
+    }
+
+    pub async fn set_permission_mode(
+        &self,
+        session_id: Option<uuid::Uuid>,
+        mode: super::runtime_permissions::PermissionMode,
+        confirm_full: bool,
+    ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
+        self.call(move |r| r.set_permission_mode(session_id, mode, confirm_full))
+            .await
+    }
+
+    pub async fn runtime_approval_session_id(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<Option<uuid::Uuid>, ChatError> {
+        self.call(move |repository| repository.runtime_approval_session_id(session_id))
+            .await
+    }
+
     pub async fn agent_session_id_for_session(
         &self,
         session_id: uuid::Uuid,

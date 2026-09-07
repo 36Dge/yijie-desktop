@@ -55,6 +55,7 @@ const emit = defineEmits<{
 }>();
 
 defineSlots<{
+  "permission-control"(): unknown;
   "active-turn-action"(props: {
     disabled: boolean;
     interrupt: () => void;
@@ -397,6 +398,7 @@ function handlePaste(event: ClipboardEvent): void {
           >
             <YjIcon name="plus" size="lg" />
           </button>
+          <slot name="permission-control">
           <button
             class="chat-composer__permission"
             type="button"
@@ -408,6 +410,7 @@ function handlePaste(event: ClipboardEvent): void {
             <span class="chat-composer__permission-label">权限审批</span>
             <span class="chat-composer__permission-value">只读 · 禁止写入</span>
           </button>
+          </slot>
         </div>
         <template v-if="streaming">
           <slot

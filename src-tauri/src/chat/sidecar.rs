@@ -31,6 +31,27 @@ const FEAT128_SYNTHETIC_MANIFEST: &str = "feat128-artifact-v1";
 const MAX_CHILD_LOG_BYTES: u64 = 256 << 10;
 const MAX_PROVIDER_KEY_FILE_BYTES: u64 = 16 << 10;
 
+fn permission_child_environment(
+    enabled: bool,
+    meter_url: Option<&str>,
+    review_policy_file: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    if !enabled {
+        return Vec::new();
+    }
+    let mut values = vec![("YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true".to_owned())];
+    if meter_url == Some("http://127.0.0.1:18083/v1") {
+        values.push((
+            "YIJIE_PERMISSION_VERIFICATION_BASE_URL",
+            "http://127.0.0.1:18083/v1".to_owned(),
+        ));
+        if let Some(path) = review_policy_file.filter(|path| !path.is_empty()) {
+            values.push(("YIJIE_PERMISSION_VERIFICATION_POLICY_FILE", path.to_owned()));
+        }
+    }
+    values
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FEAT126TestProfile {
     run_id: String,
@@ -226,6 +247,15 @@ impl SidecarConfig {
         ];
         if demo_fast {
             values.push(("YIJIE_LOCAL_PROFILE", "demo_fast".to_owned()));
+            values.extend(permission_child_environment(
+                super::runtime_permissions::enabled(),
+                std::env::var("YIJIE_PERMISSION_VERIFICATION_BASE_URL")
+                    .ok()
+                    .as_deref(),
+                std::env::var("YIJIE_PERMISSION_VERIFICATION_POLICY_FILE")
+                    .ok()
+                    .as_deref(),
+            ));
         }
         if self.feat134_streaming_enabled {
             values.push((FEAT134_STREAMING_ENV, "true".to_owned()));
@@ -1550,6 +1580,29 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn feat152_permission_policy_reaches_the_allowlisted_child_environment() {
+        let path = "/local-verification/native-review-policy.md";
+        let values =
+            permission_child_environment(true, Some("http://127.0.0.1:18083/v1"), Some(path));
+        assert!(values.iter().any(|(name, value)| {
+            *name == "YIJIE_PERMISSION_VERIFICATION_POLICY_FILE" && value == path
+        }));
+        assert!(
+            permission_child_environment(false, Some("http://127.0.0.1:18083/v1"), Some(path))
+                .is_empty()
+        );
+        for meter in [None, Some("http://127.0.0.1:18084/v1")] {
+            let values = permission_child_environment(true, meter, Some(path));
+            assert!(!values
+                .iter()
+                .any(|(name, _)| { *name == "YIJIE_PERMISSION_VERIFICATION_POLICY_FILE" }));
+        }
+        let without_policy =
+            permission_child_environment(true, Some("http://127.0.0.1:18083/v1"), None);
+        assert_eq!(without_policy.len(), 2);
+    }
 
     #[cfg(feature = "feat126-s10-driver")]
     #[test]

@@ -4516,13 +4516,14 @@ pub async fn chat_request_local_recovery_v1(
     if readiness.host == super::ChatHostReadiness::Ready
         && readiness.storage == super::ChatStorageReadiness::Ready
     {
-        let resumed = if recovery_plan.resume_bound_sessions {
-            ipc_runtime
-                .ensure_bound_sessions_resumed(&chat_runtime)
-                .await
-        } else {
-            Ok(())
-        };
+        let resumed =
+            if recovery_plan.resume_bound_sessions || super::runtime_permissions::enabled() {
+                ipc_runtime
+                    .ensure_bound_sessions_resumed(&chat_runtime)
+                    .await
+            } else {
+                Ok(())
+            };
         #[cfg(not(feature = "feat126-s10-driver"))]
         let recovered = if recovery_plan.restart_normal_coordinator {
             match resumed {
@@ -7895,6 +7896,14 @@ pub async fn chat_bind_context_v1(
             .ensure_demo_fast_sidecar()
             .await
             .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        if super::runtime_permissions::enabled() && native_can_read_task {
+            // Reuse normal thread/resume before dispatching a saved task. This
+            // does not enable the retired v6 approval/event authority.
+            ipc_runtime
+                .ensure_bound_sessions_resumed(&chat_runtime)
+                .await
+                .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        }
         app.state::<super::artifact_native::ArtifactNativeRuntime>()
             .invalidate_all();
         app.state::<super::artifact_video_native::ArtifactVideoNativeRuntime>()
@@ -9887,4 +9896,135 @@ pub async fn chat_cancel_request_v1(
         request.request_id,
         CancelledDto { cancelled },
     ))
+}
+
+// FEAT-152 private IPC; existing envelopes/context authorization are reused.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PermissionSessionPayload {
+    session_id: Option<Uuid>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SetPermissionPayload {
+    session_id: Option<Uuid>,
+    mode: super::runtime_permissions::PermissionMode,
+    confirm_full_access: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeApprovalDecisionPayload {
+    session_id: Uuid,
+    approval_id: Uuid,
+    decision: String,
+}
+
+fn require_runtime_permissions(request_id: Uuid) -> Result<(), ChatIpcError> {
+    if super::runtime_permissions::enabled() {
+        Ok(())
+    } else {
+        Err(map_chat_error(ChatError::Disabled, Some(request_id)))
+    }
+}
+
+#[tauri::command]
+pub async fn chat_get_permissions_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::PermissionState>, ChatIpcError> {
+    let r: CommandRequest<PermissionSessionPayload> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    let (app, _, manager) = offline_applications(&chat_runtime, r.request_id).await?;
+    authorize(
+        &manager,
+        r.context_id,
+        if r.payload.session_id.is_some() {
+            ChatAction::ReadSessions
+        } else {
+            ChatAction::CreateSession
+        },
+        r.request_id,
+    )?;
+    let value = app
+        .permission_state(r.payload.session_id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_set_permissions_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::PermissionState>, ChatIpcError> {
+    let r: CommandRequest<SetPermissionPayload> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
+    authorize(
+        &manager,
+        r.context_id,
+        if r.payload.session_id.is_some() {
+            ChatAction::SubmitTurn
+        } else {
+            ChatAction::CreateSession
+        },
+        r.request_id,
+    )?;
+    let value = app
+        .set_permission_mode(
+            r.payload.session_id,
+            r.payload.mode,
+            r.payload.confirm_full_access,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_runtime_approvals_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::RuntimeApprovalSnapshot>, ChatIpcError> {
+    let r: CommandRequest<PermissionSessionPayload> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
+    authorize(
+        &manager,
+        r.context_id,
+        ChatAction::ReadSessions,
+        r.request_id,
+    )?;
+    let id = r
+        .payload
+        .session_id
+        .ok_or_else(|| map_chat_error(ChatError::InvalidInput, Some(r.request_id)))?;
+    let value = app
+        .runtime_approvals(id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_decide_runtime_approval_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::RuntimeApproval>, ChatIpcError> {
+    let r: CommandRequest<RuntimeApprovalDecisionPayload> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
+    authorize(&manager, r.context_id, ChatAction::SubmitTurn, r.request_id)?;
+    if !["approve_once", "reject"].contains(&r.payload.decision.as_str()) {
+        return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
+    }
+    let value = app
+        .decide_runtime_approval(
+            r.payload.session_id,
+            r.payload.approval_id,
+            &r.payload.decision,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
 }

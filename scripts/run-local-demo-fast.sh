@@ -47,6 +47,13 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
+# FEAT-152 is part of the completed local Demo. Keep renderer/native admission
+# together, including the preflight source checks and the stable bundle build.
+export YIJIE_ENV=local
+export YIJIE_LOCAL_PROFILE=demo_fast
+export YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
+export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
+
 [[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]] || fail "Codex Runtime binary is missing"
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ "$(sha256_file "$codex_binary")" == "$runtime_binary_sha256" ]] ||
@@ -65,7 +72,6 @@ YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
   node scripts/check-approval-retirement.mjs
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
-YIJIE_DESKTOP_SKILLS_DIR="$workspace_root/yijie-skills" \
   pnpm skills:sync:local
 
 mkdir -p "$host_root/.local/bin" "$host_home" "$codex_home"

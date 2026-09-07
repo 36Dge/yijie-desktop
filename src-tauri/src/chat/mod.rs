@@ -20,6 +20,7 @@ mod keychain;
 mod migrations;
 mod native_project;
 mod public_tasks;
+mod runtime_permissions;
 mod sidecar;
 mod worker;
 

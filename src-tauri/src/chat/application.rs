@@ -1095,6 +1095,69 @@ impl ConversationApplication {
         self.host.as_deref().ok_or(ChatError::SidecarUnavailable)
     }
 
+    pub async fn permission_state(
+        &self,
+        session_id: Option<Uuid>,
+    ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
+        self.database.permission_state(session_id).await
+    }
+
+    pub async fn set_permission_mode(
+        &self,
+        session_id: Option<Uuid>,
+        mode: super::runtime_permissions::PermissionMode,
+        confirm_full: bool,
+    ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
+        if let Some(id) = session_id {
+            let state = self.database.permission_state(Some(id)).await?;
+            if state.busy {
+                return Err(ChatError::ConversationConflict);
+            }
+            let snapshot = self.runtime_approvals(id).await?;
+            if snapshot.requests.iter().any(|r| r.status == "pending") {
+                return Err(ChatError::ConversationConflict);
+            }
+        }
+        self.database
+            .set_permission_mode(session_id, mode, confirm_full)
+            .await
+    }
+
+    pub async fn runtime_approvals(
+        &self,
+        session_id: Uuid,
+    ) -> Result<super::runtime_permissions::RuntimeApprovalSnapshot, ChatError> {
+        let Some(id) = self
+            .database
+            .runtime_approval_session_id(session_id)
+            .await?
+        else {
+            // A newly queued task has no Runtime yet and cannot have a
+            // Runtime approval. Ownership was checked by the DB query.
+            return Ok(super::runtime_permissions::RuntimeApprovalSnapshot::default());
+        };
+        self.host()?
+            .runtime_approvals(id)
+            .await
+            .map_err(map_host_error)
+    }
+
+    pub async fn decide_runtime_approval(
+        &self,
+        session_id: Uuid,
+        approval_id: Uuid,
+        decision: &str,
+    ) -> Result<super::runtime_permissions::RuntimeApproval, ChatError> {
+        let id = self
+            .database
+            .agent_session_id_for_session(session_id)
+            .await?;
+        self.host()?
+            .decide_runtime_approval(id, approval_id, decision)
+            .await
+            .map_err(map_host_error)
+    }
+
     fn public_tasks(&self) -> Result<&dyn PublicTaskControlPlane, ChatError> {
         self.public_tasks
             .as_deref()
@@ -1842,10 +1905,28 @@ impl ConversationApplication {
                     request_id: Some(dispatch.operation_id),
                     ..HostTrace::default()
                 };
-                let result = self
-                    .host()?
-                    .start_turn(dispatch.agent_session_id, &dispatch.input, &trace)
-                    .await;
+                let result = if super::runtime_permissions::enabled() {
+                    let mode = self
+                        .database
+                        .permission_state(Some(dispatch.session_id))
+                        .await?
+                        .mode;
+                    self.host()?
+                        .start_permission_turn(
+                            dispatch.agent_session_id,
+                            dispatch.operation_id,
+                            &[super::database::HostTurnInputBlock::Text {
+                                text: dispatch.input.clone(),
+                            }],
+                            &trace,
+                            mode,
+                        )
+                        .await
+                } else {
+                    self.host()?
+                        .start_turn(dispatch.agent_session_id, &dispatch.input, &trace)
+                        .await
+                };
                 self.finish_turn_dispatch(
                     now,
                     1,
@@ -1880,15 +1961,31 @@ impl ConversationApplication {
                     request_id: Some(dispatch.operation_id),
                     ..HostTrace::default()
                 };
-                let result = self
-                    .host()?
-                    .start_turn_v2(
-                        dispatch.agent_session_id,
-                        dispatch.operation_id,
-                        &dispatch.content_blocks,
-                        &trace,
-                    )
-                    .await;
+                let result = if super::runtime_permissions::enabled() {
+                    let mode = self
+                        .database
+                        .permission_state(Some(dispatch.session_id))
+                        .await?
+                        .mode;
+                    self.host()?
+                        .start_permission_turn(
+                            dispatch.agent_session_id,
+                            dispatch.operation_id,
+                            &dispatch.content_blocks,
+                            &trace,
+                            mode,
+                        )
+                        .await
+                } else {
+                    self.host()?
+                        .start_turn_v2(
+                            dispatch.agent_session_id,
+                            dispatch.operation_id,
+                            &dispatch.content_blocks,
+                            &trace,
+                        )
+                        .await
+                };
                 if self.feat134_streaming_enabled
                     && result.as_ref().is_err_and(|error| {
                         matches!(

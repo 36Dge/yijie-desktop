@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 12] = [
+const CATALOG: [CatalogEntry; 13] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -91,6 +91,11 @@ const CATALOG: [CatalogEntry; 12] = [
         version: 12,
         name: "0012_chat_approval_v6_process_protection",
         sql: CHAT_APPROVAL_V6_PROCESS_PROTECTION_SQL,
+    },
+    CatalogEntry {
+        version: 13,
+        name: "0013_chat_permission_modes",
+        sql: include_str!("../../migrations/chat/0013_chat_permission_modes.sql"),
     },
 ];
 

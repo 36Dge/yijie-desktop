@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import { loadPinnedOpenApiParser } from "./check-agent-host-contract.mjs";
+import { isLocalPermissionCandidate, verifyLocalPermissionCandidate } from "./local-permission-candidate.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -182,13 +183,13 @@ async function gitBytes(root, maximum, ...arguments_) {
   return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
 }
 
-export async function verifyImmutableGitObject(root, repository, commit, label) {
+export async function verifyImmutableGitObject(root, repository, commit, label, { localCandidate = false } = {}) {
   const [status, origin, resolvedCommit] = await Promise.all([
     git(root, "status", "--porcelain"),
     git(root, "remote", "get-url", "origin"),
     git(root, "rev-parse", "--verify", `${commit}^{commit}`).catch(() => ""),
   ]);
-  if (status !== "") throw new Error(`${label} checkout is not clean`);
+  if (status !== "" && !localCandidate) throw new Error(`${label} checkout is not clean`);
   if (normalizeRepository(origin) !== normalizeRepository(repository)) {
     throw new Error(`${label} origin differs from its exact pin`);
   }
@@ -503,18 +504,22 @@ export async function checkAgentHostV4Contract({
   agentHostRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
 } = {}) {
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
+  const localCandidate = isLocalPermissionCandidate();
+  if (localCandidate) await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
   await Promise.all([
     verifyImmutableGitObject(
       contractsRoot,
       lock.contracts.repository,
       lock.contracts.full_commit,
       "Contracts",
+      { localCandidate },
     ),
     verifyImmutableGitObject(
       agentHostRoot,
       lock.agent_host.repository,
       lock.agent_host.full_commit,
       "Agent Host",
+      { localCandidate },
     ),
   ]);
 
