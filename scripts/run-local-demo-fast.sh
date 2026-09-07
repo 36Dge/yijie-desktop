@@ -29,28 +29,28 @@ image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
 feat134_environment=()
+# The ordinary packaged entry keeps the existing stable-only branch intact.
+if [[ "$#" == "1" && "$1" == "--packaged" ]]; then
+  packaged_app="true"
+  shift
+fi
 case "$#" in
   0) ;;
   1)
-    case "$1" in
-      --packaged) packaged_app="true" ;;
-      --stable-api-only)
-        image_generation_enabled="false"
-        stable_api_only="true"
-        runtime_root="$desktop_root/.local/feat131-stable"
-        host_home="$runtime_root/host-home"
-        codex_home="$runtime_root/codex-home"
-        feat134_environment=(
-          YIJIE_FEAT134_STREAMING_ENABLED=true
-          VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
-          YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
-          VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
-        )
-        ;;
-      *) fail "unsupported arguments; expected --packaged or --stable-api-only" ;;
-    esac
+    [[ "$1" == "--stable-api-only" ]] || fail "unsupported arguments; expected no arguments or --stable-api-only"
+    image_generation_enabled="false"
+    stable_api_only="true"
+    runtime_root="$desktop_root/.local/feat131-stable"
+    host_home="$runtime_root/host-home"
+    codex_home="$runtime_root/codex-home"
+    feat134_environment=(
+      YIJIE_FEAT134_STREAMING_ENABLED=true
+      VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
+      YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
+      VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
+    )
     ;;
-  *) fail "unsupported arguments; expected no arguments, --packaged or --stable-api-only" ;;
+  *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
 # FEAT-152 is part of the completed local Demo. Keep renderer/native admission
