@@ -27,24 +27,30 @@ sha256_file() {
 
 image_generation_enabled="true"
 stable_api_only="false"
+packaged_app="false"
 feat134_environment=()
 case "$#" in
   0) ;;
   1)
-    [[ "$1" == "--stable-api-only" ]] || fail "unsupported arguments; expected no arguments or --stable-api-only"
-    image_generation_enabled="false"
-    stable_api_only="true"
-    runtime_root="$desktop_root/.local/feat131-stable"
-    host_home="$runtime_root/host-home"
-    codex_home="$runtime_root/codex-home"
-    feat134_environment=(
-      YIJIE_FEAT134_STREAMING_ENABLED=true
-      VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
-      YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
-      VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
-    )
+    case "$1" in
+      --packaged) packaged_app="true" ;;
+      --stable-api-only)
+        image_generation_enabled="false"
+        stable_api_only="true"
+        runtime_root="$desktop_root/.local/feat131-stable"
+        host_home="$runtime_root/host-home"
+        codex_home="$runtime_root/codex-home"
+        feat134_environment=(
+          YIJIE_FEAT134_STREAMING_ENABLED=true
+          VITE_YIJIE_FEAT134_STREAMING_ENABLED=true
+          YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED=true
+          VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true
+        )
+        ;;
+      *) fail "unsupported arguments; expected --packaged or --stable-api-only" ;;
+    esac
     ;;
-  *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
+  *) fail "unsupported arguments; expected no arguments, --packaged or --stable-api-only" ;;
 esac
 
 # FEAT-152 is part of the completed local Demo. Keep renderer/native admission
@@ -94,6 +100,11 @@ if [[ "$stable_api_only" == "true" ]]; then
   pnpm tauri:build:demo-fast:stable
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop"
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "stable Desktop app bundle is missing"
+  launch_command=("$bundle_binary")
+elif [[ "$packaged_app" == "true" ]]; then
+  pnpm tauri:build:demo-fast
+  bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
+  [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 else
   launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)

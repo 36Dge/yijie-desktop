@@ -8,6 +8,15 @@
 pnpm tauri:dev
 ```
 
+日常使用已打包的普通易界 App（保留普通应用身份和任务历史）：
+
+```bash
+pnpm tauri:demo-fast:app
+```
+
+该命令复用同一个本地启动器，先核验固定来源并构建 `易界 AI.app`，再携带 Native 所需环境启动；
+无需验收代理或手工填写 Skills 路径。`tauri:demo-fast:stable` 仍保留为独立验收应用入口。
+
 `pnpm tauri:demo-fast` 是同一入口的显式别名。该入口固定使用
 `YIJIE_ENV=local + YIJIE_LOCAL_PROFILE=demo_fast`，自动绑定本地 Demo
 身份和工作空间，启动 Desktop 管理的 Agent Host / Codex Runtime sidecar，并直达 `/chat`。
