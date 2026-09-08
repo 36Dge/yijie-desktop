@@ -1,97 +1,95 @@
-import { computed, ref, shallowRef, watch } from "vue";
-import { defineStore } from "pinia";
+import {conversationMessageItemId} from "../api/chat-conversation-adapter";
+import {selectConversationItem} from "../domain/conversation-view";
+import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { defineStore } from "pinia";
+import { computed,ref,shallowRef,watch } from "vue";
 import {
-  chatClient,
-  type ChatClient,
-  type ChatInvalidEventScope,
+approvalDecisionResultV6ToDomain,
+createApprovalDecisionIntentV6,
+historyPageV6ToApprovalEvents,
+historyPageV6ToConversationSnapshot,
+projectionEventV6ToDomain,
+} from "../api/chat-approval-adapter";
+import {
+chatArtifactLiveClient,
+type ChatArtifactLiveClient,
+} from "../api/chat-artifact-live-client";
+import {
+chatClient,
+type ChatClient,
+type ChatInvalidEventScope,
 } from "../api/chat-client";
+import {
+historyPageToConversationSnapshot,
+historyPageV5ToConversationSnapshot,
+} from "../api/chat-conversation-adapter";
+import type { NativeConversationView,NativeConversationViewEvent } from "../api/generated/native-conversation-private.gen";
 import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
 import { feat136ExecutionUiEnabled } from "../authorization/feat136-execution-ui-config";
 import { feat137ApprovalUiEnabled } from "../authorization/feat137-approval-ui-config";
-import {
-  conversationMessageItemId,
-  conversationReasoningItemOrdinal,
-  historyPageToConversationSnapshot,
-  historyPageV5ToConversationSnapshot,
-  projectionEventToConversation,
-} from "../api/chat-conversation-adapter";
-import {
-  approvalDecisionResultV6ToDomain,
-  createApprovalDecisionIntentV6,
-  historyPageV6ToApprovalEvents,
-  historyPageV6ToConversationSnapshot,
-  projectionEventV6ToDomain,
-} from "../api/chat-approval-adapter";
-import {
-  chatArtifactLiveClient,
-  type ChatArtifactLiveClient,
-} from "../api/chat-artifact-live-client";
 import type { ChatArtifactLiveEvent } from "../domain/chat-artifact-live";
-import type {
-  BoundChatContext,
-  ChatAllowedAction,
-  ChatAttachment,
-  ChatAttachmentImportEvent,
-  ChatApprovalErrorCodeV6,
-  ChatApprovalDecisionV6,
-  ChatCleanupStatus,
-  ChatControlPlaneEvent,
-  ChatDraftTarget,
-  ChatHistoryPage,
-  ChatHistoryTurn,
-  ChatHistoryTurnV4,
-  ChatHistoryPageV4,
-  ChatHistoryPageV5,
-  ChatHistoryPageV6,
-  ChatLocalReadiness,
-  ChatMessageContentBlock,
-  ChatProjectionEvent,
-  ChatProjectionEventV4,
-  ChatProjectionEventV5,
-  ChatProjectionEventV6,
-  ChatProject,
-  ChatReasoningItem,
-  ChatResyncProjection,
-  ChatResyncProjectionV4,
-  ChatResyncProjectionV5,
-  ChatResyncProjectionV6,
-  ChatPendingApprovalSnapshotV6,
-  ChatSession,
-  ChatSessionControlPlane,
-  ChatTurnContentBlock,
-} from "../domain/chat-ipc";
-import {
-  createConversationApprovalState,
-  disconnectConversationApprovals,
-  reconcileConversationApprovalSnapshot,
-  reduceConversationApprovalEvent,
-  requireConversationApprovalReconciliation,
-  revokeExpiredConversationApprovalAuthority,
-  type ConversationApprovalState,
-} from "../domain/conversation-approval";
-import { parseStrictRfc3339EpochNanoseconds } from "../domain/rfc3339";
-import {
-  CHAT_NEW_DRAFT_TARGET,
-  ChatClientError,
-  chatSessionDraftTarget,
-} from "../domain/chat-ipc";
-import {
-  appendOlderConversationSnapshot,
-  createConversationState,
-  reconcileConversationSnapshot,
-  reduceConversationEvent,
-  selectConversationItem,
-  selectConversationTurn,
-  type ConversationItem,
-  type ConversationState,
-} from "../domain/conversation-state";
 import type { ChatComposerSubmissionState } from "../domain/chat-composer";
+import type {
+BoundChatContext,
+ChatAllowedAction,
+ChatApprovalDecisionV6,
+ChatApprovalErrorCodeV6,
+ChatAttachment,
+ChatAttachmentImportEvent,
+ChatCleanupStatus,
+ChatControlPlaneEvent,
+ChatDraftTarget,
+ChatHistoryPage,
+ChatHistoryPageV4,
+ChatHistoryPageV5,
+ChatHistoryPageV6,
+ChatHistoryTurn,
+ChatHistoryTurnV4,
+ChatLocalReadiness,
+ChatMessageContentBlock,
+ChatPendingApprovalSnapshotV6,
+ChatProject,
+ChatProjectionEvent,
+ChatProjectionEventV4,
+ChatProjectionEventV5,
+ChatProjectionEventV6,
+ChatReasoningItem,
+ChatResyncProjection,
+ChatResyncProjectionV4,
+ChatResyncProjectionV5,
+ChatResyncProjectionV6,
+ChatSession,
+ChatSessionControlPlane,
+ChatTurnContentBlock,
+} from "../domain/chat-ipc";
+import {
+CHAT_NEW_DRAFT_TARGET,
+ChatClientError,
+chatSessionDraftTarget,
+} from "../domain/chat-ipc";
 import { CHAT_INPUT_MAX_BYTES } from "../domain/chat-ui";
 import {
-  useArtifactStore,
-  type ArtifactAuthority,
-  type ArtifactAuthorityToken,
+createConversationApprovalState,
+disconnectConversationApprovals,
+reconcileConversationApprovalSnapshot,
+reduceConversationApprovalEvent,
+requireConversationApprovalReconciliation,
+revokeExpiredConversationApprovalAuthority,
+type ConversationApprovalState,
+} from "../domain/conversation-approval";
+import {
+composeConversationView,
+emptyConversationView,
+selectConversationTurn,
+type ConversationItem,
+type ConversationView,
+} from "../domain/conversation-view";
+import { parseStrictRfc3339EpochNanoseconds } from "../domain/rfc3339";
+import {
+useArtifactStore,
+type ArtifactAuthority,
+type ArtifactAuthorityToken,
 } from "./artifact.store";
 import { usePermissionStore } from "./permission.store";
 
@@ -301,7 +299,7 @@ type CleanupObservationToken = Readonly<{
 type ChatHistoryOnlySelectionSnapshot = Readonly<{
   sessionId: string;
   history: ChatHistoryAuthority;
-  conversation: ConversationState;
+  conversation: ConversationView;
   approvals: ConversationApprovalState;
   approvalTransients: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
   liveAssistantText: string;
@@ -379,7 +377,9 @@ export function createChatStoreDefinition(
     const selectedSessionId = ref<string | null>(null);
     const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
-    const conversationState = shallowRef<ConversationState>(createConversationState());
+    const localSubmissions = shallowRef<Readonly<Record<string, LocalSubmissionView>>>({});
+    const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
+    const conversationState = shallowRef<ConversationView>(emptyConversationView());
     const conversationApprovalState = shallowRef<ConversationApprovalState>(
       createConversationApprovalState(),
     );
@@ -410,6 +410,9 @@ export function createChatStoreDefinition(
       : hasAction("submit_turn"));
     const canSend = computed(() =>
       phase.value === "ready" &&
+      !Object.values(nativeViews.value).some(v => v.source === "native_observed" && !v.terminalObserved && !(v.statusSource === "runtime_read" && (v.status === "completed" || v.status === "failed" || v.status === "interrupted"))) &&
+      !Object.values(localSubmissions.value).some(v => v.status === "queued" || v.status === "uncertain") &&
+      !["streaming", "stopping"].includes(liveTurnStatus.value ?? "") &&
       draftTargetReady.value &&
       hasSendPermission.value &&
       localReadiness.value?.canSend === true &&
@@ -685,7 +688,9 @@ export function createChatStoreDefinition(
       selectedSessionId.value = null;
       selectedAccessMode.value = null;
       history.value = null;
-      conversationState.value = createConversationState();
+      conversationState.value = emptyConversationView();
+      nativeViews.value = {};
+      localSubmissions.value = {};
       conversationApprovalState.value = createConversationApprovalState();
       approvalTransients.value = Object.freeze({});
       activeApprovalDecisionAttempts.clear();
@@ -935,14 +940,18 @@ export function createChatStoreDefinition(
       if (eventUnlisten !== null) return;
       if (eventListenerPromise !== null) return eventListenerPromise;
       const generation = sessionListenerEpoch;
-      const pending = (streamingV6Enabled
+      const pending = Promise.allSettled([client.onNativeView(applyNativeView, handleInvalidEvent), (streamingV6Enabled
         ? client.onEventV6((event) => handleEvent(event), handleInvalidEvent)
         : streamingV5Enabled
           ? client.onEventV5((event) => handleEvent(event), handleInvalidEvent)
         : streamingV4Enabled
           ? client.onEventV4((event) => handleEvent(event), handleInvalidEvent)
-          : client.onEvent((event) => handleEvent(event), handleInvalidEvent))
-        .then((unlisten) => {
+          : client.onEvent((event) => handleEvent(event), handleInvalidEvent))])
+        .then((results) => {
+          const listeners = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+          const unlisten = () => listeners.forEach(stop => stop());
+          const rejected = results.find(result => result.status === "rejected");
+          if (rejected?.status === "rejected") { unlisten(); throw rejected.reason; }
           if (generation !== sessionListenerEpoch) {
             unlisten();
           } else if (eventUnlisten === null) {
@@ -1569,7 +1578,7 @@ export function createChatStoreDefinition(
     }
 
     function liveProjection(
-      state: ConversationState,
+      state: ConversationView,
       threadId: string,
       turnId: string,
     ): Readonly<{
@@ -1577,29 +1586,14 @@ export function createChatStoreDefinition(
       reasoning: readonly LiveReasoningPart[];
       turnStatus: string | null;
     }> {
-      const assistantText = streamingV4Enabled
-        ? Object.values(state.items)
-            .filter((item) =>
-              item.threadId === threadId &&
-              item.turnId === turnId &&
-              item.kind === "assistant_message" &&
-              item.agentMessagePhase === "final_answer"
-            )
-            .sort((left, right) => left.ordinal - right.ordinal || left.itemId.localeCompare(right.itemId))
-            .map((item) => itemText(item))
-            .filter((text) => text.length > 0)
-            .join("\n\n")
-        : itemText(selectConversationItem(
-            state,
-            threadId,
-            turnId,
-            conversationMessageItemId(turnId, "assistant"),
-          ));
+      const assistantText = Object.values(state.items)
+        .filter(item => item.threadId === threadId && item.turnId === turnId && item.kind === "assistant_message" && item.agentMessagePhase === "final_answer")
+        .sort((left,right) => left.ordinal-right.ordinal)
+        .map(item => itemText(item)).filter(text => text.length>0).join("\n\n");
       const reasoning = Object.values(state.items)
         .filter((item) => item.threadId === threadId && item.turnId === turnId && item.kind === "reasoning")
         .flatMap((item) => {
-          const itemOrdinal = conversationReasoningItemOrdinal(turnId, item.itemId) ??
-            (streamingV4Enabled ? item.ordinal : null);
+          const itemOrdinal = item.ordinal;
           if (itemOrdinal === null) return [];
           return item.contentBlocks
             .filter((block) => block.type === "text" || block.type === "code")
@@ -1621,52 +1615,6 @@ export function createChatStoreDefinition(
         reasoning: Object.freeze(reasoning),
         turnStatus,
       });
-    }
-
-    function compatibilityTurnStatus(
-      state: ConversationState,
-      threadId: string,
-      turnId: string,
-    ): string | null {
-      const turn = selectConversationTurn(state, threadId, turnId);
-      if (turn === null || turn.status === "recovery_required") return null;
-      if (turn.terminalStatus !== null) return turn.terminalStatus;
-      if (turn.status === "in_progress" || turn.status === "waiting_approval") return "streaming";
-      return turn.status;
-    }
-
-    function syncSelectedTurnLifecycle(
-      state: ConversationState,
-      threadId: string,
-      turnId: string,
-    ): void {
-      const status = compatibilityTurnStatus(state, threadId, turnId);
-      if (status === null || selectedSessionId.value !== threadId) return;
-      liveTurnStatus.value = status;
-
-      const currentHistory = history.value;
-      if (currentHistory?.turns.some((turn) => turn.turnId === turnId && turn.status !== status)) {
-        history.value = Object.freeze({
-          ...currentHistory,
-          turns: Object.freeze(currentHistory.turns.map((turn) =>
-            turn.turnId === turnId ? Object.freeze({ ...turn, status }) : turn
-          )),
-        });
-      }
-
-      const latestTurn = Object.values(state.turns)
-        .filter((turn) => turn.threadId === threadId)
-        .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
-      if (latestTurn?.turnId !== turnId) return;
-      if (sessions.value.some((session) =>
-        session.sessionId === threadId && session.latestTurnStatus !== status
-      )) {
-        sessions.value = Object.freeze(sessions.value.map((session) =>
-          session.sessionId === threadId
-            ? Object.freeze({ ...session, latestTurnStatus: status })
-            : session
-        ));
-      }
     }
 
     function syncLiveProjection(projected: ReturnType<typeof liveProjection>): boolean {
@@ -1723,7 +1671,7 @@ export function createChatStoreDefinition(
       snapshot: ChatPendingApprovalSnapshotV6,
       threadId: string,
       streamId: string,
-      conversation: ConversationState,
+      conversation: ConversationView,
     ): ConversationApprovalState {
       return reconcileConversationApprovalSnapshot(state, snapshot, {
         nowEpochMs: Date.now(),
@@ -1755,137 +1703,75 @@ export function createChatStoreDefinition(
 
     function applyEvent(event: ChatProjectionAuthorityEvent): void {
       const bound = context.value;
-      if (
-        bound === null ||
-        event.contextId !== bound.contextId ||
-        event.subscriptionId !== subscriptionId ||
-        event.sessionId !== selectedSessionId.value
-      ) return;
-
-      const adapted = event.schemaVersion === 6
-        ? projectionEventV6ToDomain(event)
-        : projectionEventToConversation(event);
-      if (adapted.kind === "approval_event") {
-        const advancedConversation = reduceConversationEvent(
-          conversationState.value,
-          Object.freeze({
-            eventId: event.eventId,
-            streamId: event.subscriptionId,
-            sequence: event.projectionSequence,
-            threadId: event.sessionId,
-            kind: "auxiliary" as const,
-          }),
-        );
-        conversationState.value = advancedConversation;
-        if (advancedConversation.syncStatus === "recovery_required") {
-          conversationApprovalState.value = requireConversationApprovalReconciliation(
-            conversationApprovalState.value,
-          );
-          requestResync();
-          return;
-        }
-        const nextApproval = reduceConversationApprovalEvent(
-          conversationApprovalState.value,
-          adapted.event,
-        );
-        conversationApprovalState.value = nextApproval;
-        if (
-          nextApproval.reconciliation === "required" ||
-          adapted.event.projection.status === "pending"
-        ) {
-          requestResync();
-        }
-        return;
-      }
-      if (adapted.kind === "context_invalidated") {
+      if (!bound || event.contextId !== bound.contextId || event.subscriptionId !== subscriptionId || event.sessionId !== selectedSessionId.value) return;
+      if (event.kind === "context_invalidated") {
         lastErrorCode.value = "chat_context_invalid";
         clearAuthority("resync-required");
-        return;
-      }
-      if (adapted.kind === "cleanup_state") {
-        const previous = conversationState.value;
-        const next = reduceConversationEvent(previous, adapted.event);
-        if (next === previous) return;
-        conversationState.value = next;
-        if (next.syncStatus === "recovery_required") {
-          requestResync();
-          return;
+      } else if (event.kind === "resync_required") requestResync();
+      else if (event.schemaVersion === 1 && event.kind === "cleanup_state") void refreshCleanupFromEvent(event);
+      else if (event.schemaVersion === 6 && event.kind === "approval_changed") {
+        const adapted = projectionEventV6ToDomain(event);
+        if (adapted.kind === "approval_event") {
+          conversationApprovalState.value = reduceConversationApprovalEvent(conversationApprovalState.value, adapted.event);
+          if (conversationApprovalState.value.reconciliation === "required") requestResync();
         }
-        if (event.schemaVersion === 1) void refreshCleanupFromEvent(event);
-        return;
       }
-      if (adapted.kind === "resync_required") {
-        requestResync();
-        return;
-      }
-      if (adapted.event.kind === "thread.notice") {
-        const previous = conversationState.value;
-        const next = reduceConversationEvent(previous, adapted.event);
-        if (next !== previous) conversationState.value = next;
-        if (next.syncStatus === "recovery_required") requestResync();
-        return;
-      }
-      if (event.turnId === undefined) {
-        requestResync();
-        return;
-      }
-
-      const previous = conversationState.value;
-      const next = reduceConversationEvent(previous, adapted.event);
-      if (next === previous) return;
-      const projected = liveProjection(next, event.sessionId, event.turnId);
-      if (!syncLiveProjection(projected)) {
-        requestResync();
-        return;
-      }
-      conversationState.value = next;
-      if (next.syncStatus === "recovery_required") {
-        requestResync();
-        return;
-      }
-      syncSelectedTurnLifecycle(next, event.sessionId, event.turnId);
-      if (event.kind === "turn_terminal") {
-        phase.value = "ready";
-        void resyncSelected();
-        return;
-      }
-      phase.value = "streaming";
+      // Legacy content notifications have no semantic consumer. Native publishes full views.
     }
 
-    function applyBufferedEvents(
-      pending: readonly ChatProjectionAuthorityEvent[],
-      snapshotHistory: ChatHistoryAuthority,
-    ): void {
-      const durableCut = "sessionNotices" in snapshotHistory
-        ? BigInt(snapshotHistory.durableSequenceCut)
-        : null;
+    function applyBufferedEvents(pending: readonly ChatProjectionAuthorityEvent[], snapshot: ChatHistoryAuthority): void {
+      const cut = "durableSequenceCut" in snapshot ? BigInt(snapshot.durableSequenceCut) : null;
       for (const event of pending) {
-        const matchesAuthority = context.value !== null &&
-          event.contextId === context.value.contextId &&
-          event.subscriptionId === subscriptionId &&
-          event.sessionId === selectedSessionId.value;
-        const includedInSnapshot = matchesAuthority &&
-          durableCut !== null &&
-          (event.schemaVersion === 4 || event.schemaVersion === 5 || event.schemaVersion === 6) &&
-          "durableSequence" in event &&
-          BigInt(event.durableSequence) <= durableCut;
-        if (!includedInSnapshot) {
-          applyEvent(event);
-          continue;
-        }
+        if (cut !== null && "durableSequence" in event && BigInt(event.durableSequence) <= cut) continue;
+        applyEvent(event);
+      }
+    }
 
-        const next = reduceConversationEvent(conversationState.value, Object.freeze({
-          eventId: event.eventId,
-          streamId: event.subscriptionId,
-          sequence: event.projectionSequence,
-          threadId: event.sessionId,
-          kind: "auxiliary" as const,
-        }));
-        conversationState.value = next;
-        if (next.syncStatus === "recovery_required") {
-          requestResync();
-          return;
-        }
+    function displayNativeViews(): void {
+      const sessionId = selectedSessionId.value;
+      if (!sessionId || !history.value) return;
+      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value));
+      const latest = Object.values(nativeViews.value).sort((a,b) => (b.ordinal ?? 0) - (a.ordinal ?? 0))[0];
+      if (!latest) return;
+      syncLiveProjection(liveProjection(conversationState.value, sessionId, latest.turnId));
+      // Only an explicit native status controls sending. Availability never closes a turn.
+      if (latest.source === "native_observed" && latest.status != null) {
+        liveTurnStatus.value = latest.status === "inProgress" ? "streaming" : latest.status;
+        sessions.value = sessions.value.map(session => session.sessionId === sessionId ? {...session, latestTurnStatus: liveTurnStatus.value} : session);
+      }
+    }
+
+    function applyNativeView(event: NativeConversationViewEvent): void {
+      if (event.contextId !== context.value?.contextId || event.subscriptionId !== subscriptionId || event.sessionId !== selectedSessionId.value) return;
+      const previous = nativeViews.value[event.view.turnId];
+      if (previous && BigInt(previous.revision) >= BigInt(event.view.revision)) return;
+      nativeViews.value = {...nativeViews.value, [event.view.turnId]: event.view};
+      const submission = localSubmissions.value[event.view.turnId];
+      if (submission) localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
+      displayNativeViews();
+      if (event.view.terminalObserved || event.view.statusSource === "runtime_read") void resyncSelected();
+      else if (event.view.status === "inProgress") phase.value = "streaming";
+    }
+
+    async function loadNativeViews(contextId: string, sessionId: string, epoch: number, controller: AbortController, turnIds: readonly string[]): Promise<void> {
+      let pending = [...turnIds];
+      while (pending.length > 0) {
+      const result = await client.loadNativeHistory(contextId, sessionId, pending, controller.signal);
+      if (!isCurrent(epoch, controller, sessionId) || context.value?.contextId !== contextId) return;
+      // A proven native view means Runtime accepted this local submission. A
+      // slower outbox read must not turn it back into queued/uncertain.
+      localSubmissions.value = {...localSubmissions.value, ...Object.fromEntries(result.submissions.map(s => [s.turnId,
+        nativeViews.value[s.turnId] ? {...s, status: "submitted" as const} : s]))};
+      const current = {...nativeViews.value};
+      for (const view of result.views) {
+        if (view.sessionId !== sessionId) continue;
+        const previous = current[view.turnId];
+        // Native snapshots carry a storage revision. No Item/content reconciliation in Vue.
+        if (!previous || (view.source === "native_rebuilt" && previous.source === "native_rebuilt") || (view.source === "native_observed" && BigInt(view.revision) >= BigInt(previous.revision))) current[view.turnId] = view;
+      }
+      nativeViews.value = current;
+      if (result.remainingTurnIds.length >= pending.length) throw new Error("native-history-pagination-unavailable");
+      pending = result.remainingTurnIds;
       }
     }
 
@@ -2307,7 +2193,7 @@ export function createChatStoreDefinition(
 
     function terminalLocalHistoryStatus(
       sessionId: string,
-      state: ConversationState,
+      state: ConversationView,
     ): string | null {
       const turns = Object.values(state.turns).filter((turn) => turn.threadId === sessionId);
       const persisted = sessions.value.find((session) => session.sessionId === sessionId)
@@ -2366,10 +2252,9 @@ export function createChatStoreDefinition(
       ) return "superseded";
       if (!isHistoryV6(page)) throw approvalProtocolError();
 
-      const nextConversation = reconcileConversationSnapshot(
-        createConversationState(),
-        historyPageV6ToConversationSnapshot(sessionId, page),
-      );
+      await loadNativeViews(bound.contextId,sessionId,epoch,controller,page.turns.map(t => t.turnId));
+      if (!isCurrent(epoch,controller,sessionId)) return "superseded";
+      const nextConversation = composeConversationView(historyPageV6ToConversationSnapshot(sessionId,page),Object.values(nativeViews.value),Object.values(localSubmissions.value));
       if (nextConversation.syncStatus === "recovery_required") {
         throw approvalProtocolError();
       }
@@ -2602,6 +2487,8 @@ export function createChatStoreDefinition(
           nextSubscription,
           nextSubscriptionAuthority.pendingApprovalSnapshot,
         );
+        await loadNativeViews(bound.contextId, sessionId, epoch, controller, authoritativeHistory.turns.map(t => t.turnId));
+        if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
         applyResync(
           authoritativeProjection,
           authoritativeHistory,
@@ -2808,7 +2695,7 @@ export function createChatStoreDefinition(
         projection.session.sessionId,
         authoritativeHistory,
       );
-      const nextConversation = reconcileConversationSnapshot(conversationState.value, snapshot);
+      const nextConversation = composeConversationView(snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value));
       let nextApproval = streamingV6Enabled
         ? createConversationApprovalState()
         : conversationApprovalState.value;
@@ -2854,16 +2741,7 @@ export function createChatStoreDefinition(
       // the newer cleanup operation. Non-null cleanup authority is cleared only
       // by the cleanup completion path that also removes the selection.
       if (cleanupStatus.value === null) cleanupStatus.value = projection.cleanup;
-      const latestConversationTurn = Object.values(nextConversation.turns)
-        .filter((turn) => turn.threadId === projection.session.sessionId)
-        .sort((left, right) => right.ordinal - left.ordinal || right.turnId.localeCompare(left.turnId))[0];
-      const authoritativeLatestTurnStatus = latestConversationTurn === undefined
-        ? projection.session.latestTurnStatus
-        : compatibilityTurnStatus(
-            nextConversation,
-            projection.session.sessionId,
-            latestConversationTurn.turnId,
-          );
+      const authoritativeLatestTurnStatus = projection.session.latestTurnStatus;
       const authoritativeSession = Object.freeze({
         ...projection.session,
         latestTurnStatus: authoritativeLatestTurnStatus,
@@ -2912,6 +2790,7 @@ export function createChatStoreDefinition(
         return;
       }
       history.value = authoritativeHistory;
+      displayNativeViews();
     }
 
     async function resyncSelected(): Promise<void> {
@@ -3049,6 +2928,8 @@ export function createChatStoreDefinition(
             nextSubscription,
             nextSubscriptionAuthority.pendingApprovalSnapshot,
           );
+          await loadNativeViews(bound.contextId, sessionId, epoch, controller, authoritativeHistory.turns.map(t => t.turnId));
+          if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
           applyResync(
             authoritativeProjection,
             authoritativeHistory,
@@ -3245,6 +3126,8 @@ export function createChatStoreDefinition(
           controller.signal,
         );
         if (!isCurrent(epoch, controller, sessionId)) return;
+        await loadNativeViews(bound.contextId, sessionId, epoch, controller, page.turns.map(t => t.turnId));
+        if (!isCurrent(epoch, controller, sessionId)) return;
         const currentHistory = history.value;
         if (currentHistory === null) throw new ChatClientError({
           schemaVersion: streamingV6Enabled ? 6 : streamingV5Enabled ? 5 : streamingV4Enabled ? 4 : 1,
@@ -3296,9 +3179,8 @@ export function createChatStoreDefinition(
                   turns: Object.freeze([...currentHistory.turns, ...page.turns]),
                   nextCursor: page.nextCursor,
                 });
-        const appended = appendOlderConversationSnapshot(
-          conversationState.value,
-          conversationSnapshotFromHistory(sessionId, page),
+        const appended = composeConversationView(
+          conversationSnapshotFromHistory(sessionId, mergedHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value),
         );
         if (appended.syncStatus === "recovery_required") {
           conversationState.value = appended;
@@ -3729,9 +3611,8 @@ export function createChatStoreDefinition(
         });
       }
       history.value = nextHistory;
-      conversationState.value = reconcileConversationSnapshot(
-        conversationState.value,
-        conversationSnapshotFromHistory(sessionId, nextHistory),
+      conversationState.value = composeConversationView(
+        conversationSnapshotFromHistory(sessionId, nextHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value),
       );
       liveTurnStatus.value = "queued";
       sessions.value = Object.freeze(sessions.value.map((session) =>

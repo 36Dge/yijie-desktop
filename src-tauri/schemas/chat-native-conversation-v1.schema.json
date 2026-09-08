@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NativeConversationPrivate",
+  "$ref": "#/definitions/NativeConversationViewEvent",
+  "definitions": {
+    "NativeDisplayItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "$ref": "#/definitions/NativeItem"
+        },
+        "lastMethod": {
+          "type": "string",
+          "enum": [
+            "item/started",
+            "item/completed",
+            "thread/read"
+          ]
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "item",
+        "lastMethod",
+        "ordinal"
+      ]
+    },
+    "NativeViewCursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "eventId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId",
+        "sequence",
+        "eventId"
+      ]
+    },
+    "NativeConversationView": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "runtimeThreadId": {
+          "type": "string"
+        },
+        "runtimeTurnId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "native_observed",
+            "native_rebuilt",
+            "legacy_archive"
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "inProgress",
+            "completed",
+            "interrupted",
+            "failed"
+          ],
+          "nullable": true
+        },
+        "terminalObserved": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NativeDisplayItem"
+          },
+          "maxItems": 512
+        },
+        "plan": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NativePlanStep"
+          },
+          "nullable": true
+        },
+        "explanation": {
+          "type": "string",
+          "nullable": true
+        },
+        "diagnostic": {
+          "type": "string",
+          "nullable": true
+        },
+        "cursor": {
+          "$ref": "#/definitions/NativeViewCursor",
+          "nullable": true
+        },
+        "terminalErrorCode": {
+          "type": "string",
+          "nullable": true
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "statusSource": {
+          "type": "string",
+          "enum": [
+            "runtime_notification",
+            "runtime_read"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "turnId",
+        "runtimeThreadId",
+        "runtimeTurnId",
+        "source",
+        "revision",
+        "availability",
+        "terminalObserved",
+        "items"
+      ]
+    },
+    "NativeConversationViewEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "contextId": {
+          "type": "string"
+        },
+        "subscriptionId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "view": {
+          "$ref": "#/definitions/NativeConversationView"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "contextId",
+        "subscriptionId",
+        "sessionId",
+        "view"
+      ]
+    },
+    "NativeConversationHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "historyAvailability",
+        "submissions",
+        "remainingTurnIds"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          },
+          "maxItems": 50
+        },
+        "historyAvailability": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "unavailable"
+          ]
+        },
+        "submissions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/LocalSubmissionView"
+          }
+        },
+        "remainingTurnIds": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "NativeHistoryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "turnIds"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turnIds": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    "LocalSubmissionView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turnId",
+        "operationId",
+        "status"
+      ],
+      "properties": {
+        "turnId": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "submitted",
+            "failed",
+            "uncertain",
+            "cancelled"
+          ]
+        }
+      }
+    }
+  }
+}

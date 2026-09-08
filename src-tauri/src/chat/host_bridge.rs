@@ -109,6 +109,7 @@ impl Debug for HostEventStream {
 impl HostEventStream {
     pub async fn next_event(&mut self) -> Result<Option<HostEvent>, HostBridgeError> {
         match self.next_stream_event().await? {
+            Some(HostStreamEvent::Native(_)) => Err(protocol_error()),
             Some(HostStreamEvent::Ordinary(event)) => Ok(Some(event)),
             Some(HostStreamEvent::Artifact(_)) => Err(protocol_error()),
             None => Ok(None),
@@ -389,6 +390,35 @@ impl Debug for HostToken {
 }
 
 impl HostBridge {
+    pub async fn read_native_thread(
+        &self,
+        session_id: Uuid,
+    ) -> Result<super::native_conversation_generated::NativeThreadSnapshot, HostBridgeError> {
+        require_non_nil(session_id)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v1/agent-sessions/{session_id}/native-thread"),
+            )
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        validate_no_store(response.headers())?;
+        let bytes = read_limited(response, 8 * 1024 * 1024).await?;
+        serde_json::from_slice(&bytes).map_err(|_| protocol_error())
+    }
+    pub async fn open_native_event_stream(
+        &self,
+        session_id: Uuid,
+        cursor: Option<HostEventCursor>,
+    ) -> Result<HostEventStream, HostBridgeError> {
+        self.open_event_stream(session_id, cursor, 7).await
+    }
     pub(super) fn from_connection(connection: HostConnection) -> Result<Self, HostBridgeError> {
         if connection.port == 0
             || !connection.token_path.is_absolute()
@@ -734,17 +764,16 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=6) {
+        if !matches!(schema_version, 2..=7) {
             return Err(protocol_error());
         }
-        let mut request = self
-            .authorized_request(
-                Method::GET,
-                &format!(
-                    "/v{schema_version}/agent-sessions/{session_id}/events?event_schema_version={schema_version}"
-                ),
-            )
-            .await?;
+        let path = format!("/v{schema_version}/agent-sessions/{session_id}/events");
+        let path = if schema_version == 7 {
+            path
+        } else {
+            format!("{path}?event_schema_version={schema_version}")
+        };
+        let mut request = self.authorized_request(Method::GET, &path).await?;
         if let Some(cursor) = cursor {
             let value = HeaderValue::from_str(&format!("{}:{}", cursor.stream_id, cursor.sequence))
                 .map_err(|_| protocol_error())?;

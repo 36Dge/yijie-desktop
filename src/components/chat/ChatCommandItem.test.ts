@@ -1,17 +1,17 @@
 // @vitest-environment happy-dom
 
+import { flushPromises,mount } from "@vue/test-utils";
 import axe from "axe-core";
-import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import type { ConversationApproval } from "../../domain/conversation-approval";
-import type {
-  ConversationCommandExecution,
-  ConversationCommandOutput,
-  ConversationSafeText,
-  ConversationSourceFact,
-} from "../../domain/conversation-state";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
+import type {
+ConversationCommandExecution,
+ConversationCommandOutput,
+ConversationSafeText,
+ConversationSourceFact,
+} from "../../domain/conversation-view";
 import ChatCommandItem from "./ChatCommandItem.vue";
 
 const RAW_COMMAND_CANARY = "RAW_COMMAND_MUST_NOT_RENDER --token=private";

@@ -1,27 +1,27 @@
 // @vitest-environment happy-dom
 
-import axe from "axe-core";
 import { mount } from "@vue/test-utils";
+import axe from "axe-core";
 import { readFileSync } from "node:fs";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import { h } from "vue";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationApproval } from "../../domain/conversation-approval";
 import {
-  hydrateConversationState,
-  type ConversationItemSnapshot,
-  type ConversationNotice,
-  type ConversationPlanSnapshot,
-  type ConversationTurnStatus,
-} from "../../domain/conversation-state";
-import {
-  selectConversationTimeline,
-  type ConversationTimelineArtifactReferenceContentBlock,
-  type ConversationTimelineAttachmentReferenceContentBlock,
-  type ConversationTimelineItemViewModel,
-  type ConversationTimelineTurnViewModel,
+selectConversationTimeline,
+type ConversationTimelineArtifactReferenceContentBlock,
+type ConversationTimelineAttachmentReferenceContentBlock,
+type ConversationTimelineItemViewModel,
+type ConversationTimelineTurnViewModel,
 } from "../../domain/conversation-timeline";
-import ChatTurnGroup from "./ChatTurnGroup.vue";
+import {
+viewFromLegacySnapshot,
+type ConversationItemSnapshot,
+type ConversationNotice,
+type ConversationPlanSnapshot,
+type ConversationTurnStatus,
+} from "../../domain/conversation-view";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
+import ChatTurnGroup from "./ChatTurnGroup.vue";
 
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";
@@ -46,7 +46,7 @@ function projectedTurn(options: {
   const terminalStatus = status === "completed" || status === "failed" || status === "interrupted"
     ? status
     : null;
-  const timeline = selectConversationTimeline(hydrateConversationState({
+  const timeline = selectConversationTimeline(viewFromLegacySnapshot({
     threads: [{ threadId: THREAD_ID, status: status === "completed" ? "ready" : "active" }],
     turns: [{
       threadId: THREAD_ID,

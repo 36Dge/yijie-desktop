@@ -32,6 +32,7 @@ const emit = defineEmits<{
 }>();
 
 const slots = defineSlots<{
+  "legacy-records"(props: {turnId: string}): unknown;
   "artifact-reference"(props: {
     item: ConversationTimelineItemViewModel;
     block: ConversationTimelineArtifactReferenceContentBlock;
@@ -156,6 +157,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
           @disclosure-change="forwardDisclosure"
           @approval-decision="forwardApprovalDecision"
         >
+          <template v-if="slots['legacy-records']" #legacy-records="{ turnId }"><slot name="legacy-records" :turn-id="turnId" /></template>
           <template
             v-if="slots['artifact-reference']"
             #artifact-reference="{ item, block }"

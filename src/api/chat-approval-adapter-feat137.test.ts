@@ -1,22 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe,expect,it } from "vitest";
 import {
-  parseChatProjectionEventV6,
-  parseHistoryPageResponseV6,
-  parsePendingApprovalSnapshotResponseV6,
+parseChatProjectionEventV6,
+parseHistoryPageResponseV6,
+parsePendingApprovalSnapshotResponseV6,
 } from "../domain/chat-ipc";
 import {
-  createConversationApprovalState,
-  reconcileConversationApprovalSnapshot,
-  reduceConversationApprovalEvent,
+createConversationApprovalState,
+reconcileConversationApprovalSnapshot,
+reduceConversationApprovalEvent,
 } from "../domain/conversation-approval";
-import { hydrateConversationState } from "../domain/conversation-state";
 import { selectConversationTimeline } from "../domain/conversation-timeline";
+import { viewFromLegacySnapshot } from "../domain/conversation-view";
 import {
-  approvalDecisionResultV6ToDomain,
-  createApprovalDecisionIntentV6,
-  historyPageV6ToApprovalEvents,
-  historyPageV6ToConversationSnapshot,
-  projectionEventV6ToDomain,
+approvalDecisionResultV6ToDomain,
+createApprovalDecisionIntentV6,
+historyPageV6ToApprovalEvents,
+historyPageV6ToConversationSnapshot,
+projectionEventV6ToDomain,
 } from "./chat-approval-adapter";
 
 const REQUEST_ID = "30000000-0000-4000-8000-000000000001";
@@ -160,7 +160,7 @@ function pendingSnapshot() {
 }
 
 describe("FEAT-137 v6 conversation approval adapter", () => {
-  it("maps approval events separately and keeps inherited v5 items on the existing adapter", () => {
+  it("maps archived approval events separately and ignores retired content notifications", () => {
     expect(projectionEventV6ToDomain(approvalEvent())).toMatchObject({
       kind: "approval_event",
       event: {
@@ -190,15 +190,12 @@ describe("FEAT-137 v6 conversation approval adapter", () => {
         cwd,
       },
     });
-    expect(projectionEventV6ToDomain(inherited)).toMatchObject({
-      kind: "domain_event",
-      event: { threadId: THREAD_ID, turnId: TURN_ID, itemId: ITEM_ID },
-    });
+    expect(projectionEventV6ToDomain(inherited)).toEqual({kind: "ignored"});
   });
 
   it("hydrates durable lifecycle, then attaches realtime authority only to its command", () => {
     const page = historyPage();
-    const conversation = hydrateConversationState(
+    const conversation = viewFromLegacySnapshot(
       historyPageV6ToConversationSnapshot(THREAD_ID, page),
     );
     const approvalEvents = historyPageV6ToApprovalEvents(THREAD_ID, STREAM_ID, page);

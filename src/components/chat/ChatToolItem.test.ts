@@ -1,16 +1,16 @@
 // @vitest-environment happy-dom
 
+import { flushPromises,mount } from "@vue/test-utils";
 import axe from "axe-core";
-import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  ConversationSafeText,
-  ConversationSourceFact,
-  ConversationToolExecution,
-  ConversationToolProgress,
-} from "../../domain/conversation-state";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
+import type {
+ConversationSafeText,
+ConversationSourceFact,
+ConversationToolExecution,
+ConversationToolProgress,
+} from "../../domain/conversation-view";
 import ChatToolItem from "./ChatToolItem.vue";
 
 function deepFreeze<T>(value: T): T {

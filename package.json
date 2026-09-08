@@ -17,8 +17,8 @@
     "test": "pnpm test:demo-fast",
     "test:demo-fast": "pnpm generate:check && vitest run --maxWorkers=4 --exclude '**/.contracts-source/**' --exclude '**/.agent-host-source/**' --exclude '**/.skills-source/**' --exclude '**/.local/**' --exclude 'scripts/check-feat128-s10d-h.test.mjs'",
     "test:production-hardened": "pnpm generate:check && vitest run --maxWorkers=4 --exclude '**/.contracts-source/**' --exclude '**/.agent-host-source/**' --exclude '**/.skills-source/**' --exclude '**/.local/**'",
-    "generate": "node scripts/generate-public-api.mjs && node scripts/check-agent-host-contract.mjs && node scripts/check-agent-host-v3-contract.mjs && node scripts/check-agent-host-skills-contract.mjs && node scripts/check-agent-host-v4-contract.mjs",
-    "generate:check": "node scripts/generate-public-api.mjs --check && node scripts/check-agent-host-contract.mjs --check && node scripts/check-agent-host-v3-contract.mjs && node scripts/check-agent-host-skills-contract.mjs && node scripts/check-agent-host-v4-contract.mjs",
+    "generate": "node scripts/generate-public-api.mjs && node scripts/check-agent-host-contract.mjs && node scripts/check-agent-host-v3-contract.mjs && node scripts/check-agent-host-skills-contract.mjs && node scripts/check-agent-host-v4-contract.mjs && pnpm generate:native",
+    "generate:check": "node scripts/generate-public-api.mjs --check && node scripts/check-agent-host-contract.mjs --check && node scripts/check-agent-host-v3-contract.mjs && node scripts/check-agent-host-skills-contract.mjs && node scripts/check-agent-host-v4-contract.mjs && pnpm check:native",
     "skills:sync:local": "node scripts/sync-desktop-skill-resources.mjs --channel local-development",
     "skills:sync:release": "node scripts/sync-desktop-skill-resources.mjs --channel desktop-release",
     "skills:sync:all": "node scripts/sync-desktop-skill-resources.mjs --all-channels",
@@ -38,7 +38,10 @@
     "tauri:build": "env -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED node scripts/run-tauri-build.mjs",
     "tauri:build:demo-fast": "env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true pnpm skills:sync:local && env -u YIJIE_FEAT134_STREAMING_ENABLED -u VITE_YIJIE_FEAT134_STREAMING_ENABLED -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.demo-fast.conf.json",
     "tauri:build:demo-fast:stable": "env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true node scripts/check-agent-host-v4-contract.mjs && node scripts/check-approval-retirement.mjs && env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true pnpm skills:sync:local && env -u YIJIE_FEAT134_STREAMING_ENABLED -u VITE_YIJIE_FEAT134_STREAMING_ENABLED -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED VITE_YIJIE_FEAT134_STREAMING_ENABLED=true VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.feat131-stable.conf.json",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "generate:native": "node scripts/generate-native-conversation.mjs",
+    "check:native": "node scripts/generate-native-conversation.mjs --check && node scripts/check-native-conversation.mjs",
+    "check:native-integration": "node scripts/check-native-conversation-integration.mjs"
   },
   "dependencies": {
     "@lucide/vue": "1.27.0",

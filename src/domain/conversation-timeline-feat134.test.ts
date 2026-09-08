@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { hydrateConversationState, type ConversationSnapshot } from "./conversation-state";
+import { describe,expect,it } from "vitest";
 import { selectConversationTimeline } from "./conversation-timeline";
+import { viewFromLegacySnapshot,type ConversationSnapshot } from "./conversation-view";
 
 const THREAD_ID = "thread-feat134-timeline";
 const TURN_ID = "turn-feat134-timeline";
@@ -78,7 +78,7 @@ function snapshot(): ConversationSnapshot {
 describe("FEAT-134 conversation timeline selector", () => {
   it("projects explicit phase, plan, reasoning and thread notice without positional inference", () => {
     const timeline = selectConversationTimeline(
-      hydrateConversationState(snapshot()),
+      viewFromLegacySnapshot(snapshot()),
       THREAD_ID,
     )!;
     const turn = timeline.turns[0]!;
@@ -160,9 +160,9 @@ describe("FEAT-134 conversation timeline selector", () => {
   });
 
   it("keeps plan and step identities stable across equivalent hydration", () => {
-    const first = selectConversationTimeline(hydrateConversationState(snapshot()), THREAD_ID)!;
+    const first = selectConversationTimeline(viewFromLegacySnapshot(snapshot()), THREAD_ID)!;
     const updated = snapshot();
-    const second = selectConversationTimeline(hydrateConversationState({
+    const second = selectConversationTimeline(viewFromLegacySnapshot({
       ...updated,
       turns: [{
         ...updated.turns[0]!,
@@ -190,7 +190,7 @@ describe("FEAT-134 conversation timeline selector", () => {
 
   it("never infers a final answer from text or position and expands only live process entries", () => {
     const input = snapshot();
-    const state = hydrateConversationState({
+    const state = viewFromLegacySnapshot({
       ...input,
       threads: [{ ...input.threads[0]!, status: "active" }],
       turns: [{
@@ -235,7 +235,7 @@ describe("FEAT-134 conversation timeline selector", () => {
 
   it("maps a missing assistant phase to unclassified instead of guessing final", () => {
     const input = snapshot();
-    const state = hydrateConversationState({
+    const state = viewFromLegacySnapshot({
       ...input,
       items: [{
         threadId: THREAD_ID,
@@ -269,7 +269,7 @@ describe("FEAT-134 conversation timeline selector", () => {
 
   it("treats an empty stable plan snapshot as cleared", () => {
     const input = snapshot();
-    const timeline = selectConversationTimeline(hydrateConversationState({
+    const timeline = selectConversationTimeline(viewFromLegacySnapshot({
       ...input,
       turns: [{
         ...input.turns[0]!,

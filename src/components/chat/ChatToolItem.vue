@@ -5,7 +5,7 @@ import type {
   ConversationSafeText,
   ConversationToolExecution,
   ConversationTruncationReason,
-} from "../../domain/conversation-state";
+} from "../../domain/conversation-view";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";

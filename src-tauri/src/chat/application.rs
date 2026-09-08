@@ -1,169 +1,46 @@
 use super::artifact::{
-    decode_artifact_event_envelope_v3, ArtifactEventV3, ArtifactProjection,
-    ArtifactTransferService, ReadyFileContent, ReadyFileReadError, ReadyImageContent,
-    ReadyImageReadError, ReadyReportContent, ReadyReportReadError, ReadyVideoContent,
-    ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError,
+    decode_artifact_event_envelope_v3, ArtifactProjection, ArtifactTransferService,
+    ReadyFileContent, ReadyFileReadError, ReadyImageContent, ReadyImageReadError,
+    ReadyReportContent, ReadyReportReadError, ReadyVideoContent, ReadyVideoRangeContent,
+    ReadyVideoRangeRequest, ReadyVideoReadError,
 };
 use super::attachment::PreparedAttachment;
 use super::authorization::{ChatAction, ChatAuthorizationManager};
 use super::database::{
-    feat134_projection_requires_limit_terminal, ActiveTurnContext, AttachmentSummary,
-    ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState, DeletionStatus, DraftContentBlock,
-    DraftTarget, Feat134HistorySnapshot, Feat136ObservedEventDisposition, HistoryPage,
+    ActiveTurnContext, AttachmentSummary, ClaimedDeletion, ClaimedOutbox, CleanupSurfaceState,
+    DeletionStatus, DraftContentBlock, DraftTarget, Feat134HistorySnapshot, HistoryPage,
     MessageContentBlockProjection, OutboxKind, PendingConversation, ProjectSummary,
     PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, ReasoningPart,
     ReasoningStatus, RecoverySnapshot, SessionPage, SessionPageCursor, SessionSummary,
-    StartTurnDispatchV2, StoredEventCursor, TerminalTurnCommit, TurnProgress, OUTBOX_MAX_ATTEMPTS,
+    StartTurnDispatchV2, OUTBOX_MAX_ATTEMPTS,
 };
 use super::error::ChatError;
-use super::feat134::{
-    Feat134HistoryProjection, Feat134Hydration, Feat134Projection, Feat134ProjectionFailure,
-    Feat134ProjectionFailureKind, Feat134TurnReducer, TimelineReasoningStatus,
-};
-use super::feat136::{ExecutionProjection, Feat136TurnReducer};
+use super::feat134::{Feat134HistoryProjection, Feat134Hydration, Feat134Projection};
+use super::feat136::ExecutionProjection;
 use super::feat137::{
-    protect_process_projection, require_pending_decision_authority, ApprovalDecisionFailure,
-    ApprovalDecisionIdentity, ApprovalDecisionResult, ApprovalProjection,
-    HostPendingApprovalSnapshot, PendingApproval, PendingApprovalSnapshot,
+    require_pending_decision_authority, ApprovalDecisionFailure, ApprovalDecisionIdentity,
+    ApprovalDecisionResult, ApprovalProjection, HostPendingApprovalSnapshot, PendingApproval,
+    PendingApprovalSnapshot,
 };
 use super::host_bridge::{HostBridge, HostTrace};
 use super::host_domain::{
-    HostApprovalDecision, HostArtifactEventV3, HostBridgeError, HostBridgeErrorKind,
-    HostCleanupOutcome, HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEvent,
-    HostEventCursor, HostEventKind, HostReasoningPart, HostReasoningReason, HostReasoningStatus,
-    HostSessionState, HostStreamEvent, HostTurnStatus,
+    HostApprovalDecision, HostBridgeError, HostBridgeErrorKind, HostCleanupOutcome,
+    HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEventCursor, HostSessionState,
+    HostStreamEvent,
 };
 use super::native_project;
 use super::public_tasks::{
     PublicTaskControlPlane, PublicTaskCreateIntent, PublicTaskCreateOutcome, PublicTaskIssueCode,
 };
 use super::worker::DatabaseWorker;
-#[cfg(feature = "feat128-s10-runtime")]
-use crate::feat128_s10d_runtime::{feat128_s10d_record_native_artifact, Feat128S10dArtifactStage};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use uuid::Uuid;
 
-const ORPHANED_TERMINAL_REPLAY_GRACE: Duration = Duration::from_secs(2);
-
-fn feat136_active_turn_stream_schema(
-    persisted_schema_version: Option<u8>,
-) -> Result<u8, ChatError> {
-    match persisted_schema_version {
-        Some(4) => Ok(4),
-        None | Some(5) => Ok(5),
-        Some(_) => Err(ChatError::DatabaseUnavailable),
-    }
-}
-
-fn feat137_active_turn_stream_schema(
-    persisted_schema_version: Option<u8>,
-) -> Result<u8, ChatError> {
-    match persisted_schema_version {
-        Some(4) => Ok(4),
-        Some(5) => Ok(5),
-        None | Some(6) => Ok(6),
-        Some(_) => Err(ChatError::DatabaseUnavailable),
-    }
-}
-
-#[cfg(feature = "feat126-s10-driver")]
-pub(crate) fn run_r8_reducer_probe() -> Result<u64, ChatError> {
-    let identity = ProbeEventIdentity {
-        stream_id: Uuid::from_u128(0x7000),
-        task_id: Uuid::from_u128(0x7001),
-        agent_session_id: Uuid::from_u128(0x7002),
-        thread_id: Uuid::from_u128(0x7003),
-        turn_id: Uuid::from_u128(0x7004),
-    };
-    let context = ActiveTurnContext {
-        session_id: identity.task_id,
-        task_id: identity.task_id,
-        turn_id: Uuid::from_u128(0x7005),
-        turn_operation_id: Uuid::from_u128(0x7006),
-        agent_session_id: identity.agent_session_id,
-        codex_thread_id: identity.thread_id,
-        runtime_turn_id: identity.turn_id,
-        assistant_text: String::new(),
-        cursor: None,
-    };
-    let mut reducer = TurnEventReducer::new(context)?;
-    let mut last_event_id = None;
-    for sequence in 1..=5_000_u64 {
-        let event_id = Uuid::from_u128(0x8000 + u128::from(sequence));
-        let event = HostEvent {
-            cursor: HostEventCursor::new(identity.stream_id, sequence)
-                .map_err(|_| ChatError::DatabaseUnavailable)?,
-            event_type: "synthetic".to_owned(),
-            event_id,
-            task_id: identity.task_id,
-            agent_session_id: identity.agent_session_id,
-            codex_thread_id: identity.thread_id,
-            turn_id: Some(identity.turn_id),
-            item_id: Some("synthetic".to_owned()),
-            occurred_at: "2026-08-13T00:00:00Z".to_owned(),
-            encoded_bytes: 1,
-            kind: HostEventKind::AgentMessageDelta {
-                delta: "x".to_owned(),
-            },
-        };
-        if !matches!(
-            reducer.apply(
-                event,
-                i64::try_from(sequence).map_err(|_| ChatError::InvalidInput)?
-            )?,
-            ReducerOutcome::Progress
-        ) {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        last_event_id = Some(event_id);
-    }
-    let Some(last_event_id) = last_event_id else {
-        return Err(ChatError::DatabaseUnavailable);
-    };
-    for _ in 0..5_000_u64 {
-        let event = HostEvent {
-            cursor: HostEventCursor::new(identity.stream_id, 5_000)
-                .map_err(|_| ChatError::DatabaseUnavailable)?,
-            event_type: "synthetic".to_owned(),
-            event_id: last_event_id,
-            task_id: identity.task_id,
-            agent_session_id: identity.agent_session_id,
-            codex_thread_id: identity.thread_id,
-            turn_id: Some(identity.turn_id),
-            item_id: Some("synthetic".to_owned()),
-            occurred_at: "2026-08-13T00:00:00Z".to_owned(),
-            encoded_bytes: 1,
-            kind: HostEventKind::AgentMessageDelta {
-                delta: "x".to_owned(),
-            },
-        };
-        if !matches!(reducer.apply(event, 1)?, ReducerOutcome::Duplicate) {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-    }
-    Ok(10_000)
-}
-
-#[cfg(feature = "feat126-s10-driver")]
-struct ProbeEventIdentity {
-    stream_id: Uuid,
-    task_id: Uuid,
-    agent_session_id: Uuid,
-    thread_id: Uuid,
-    turn_id: Uuid,
-}
-
 const OUTBOX_LEASE_SECONDS: i64 = 30;
 const RETRY_DELAY_SECONDS: i64 = 5;
-const MAX_ASSISTANT_BYTES: usize = 1024 * 1024;
-const MAX_REASONING_ITEMS: usize = 8;
-const MAX_REASONING_PARTS: usize = 8;
-const MAX_REASONING_PART_BYTES: usize = 64 * 1024;
-const MAX_REASONING_ITEM_BYTES: usize = 128 * 1024;
-const MAX_REASONING_TURN_BYTES: usize = 256 * 1024;
 const PROGRESS_FLUSH_EVENT_COUNT: usize = 16;
 const PROGRESS_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -173,8 +50,6 @@ pub struct ConversationApplication {
     host: Option<Arc<HostBridge>>,
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
     artifact_transfers: Option<ArtifactTransferService>,
-    feat134_streaming_enabled: bool,
-    feat136_streaming_enabled: bool,
     feat137_streaming_enabled: bool,
 }
 
@@ -195,6 +70,20 @@ impl Debug for AuthorizedConversationApplication {
 }
 
 impl AuthorizedConversationApplication {
+    pub async fn native_history(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<super::native_conversation_generated::NativeConversationHistory, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        let result = self
+            .application
+            .native_history(session_id, turn_ids)
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(result)
+    }
     pub fn new(
         application: ConversationApplication,
         authorization: ChatAuthorizationManager,
@@ -620,12 +509,12 @@ pub enum DispatchOutcome {
     TurnAccepted {
         session_id: Uuid,
     },
-    TurnFailedSafely {
+    TurnSubmissionFailed {
         operation_id: Uuid,
         session_id: Uuid,
         turn_id: Uuid,
     },
-    TurnReconciliationRequired {
+    TurnSubmissionUncertain {
         operation_id: Uuid,
         session_id: Uuid,
         turn_id: Uuid,
@@ -819,6 +708,12 @@ impl Debug for LiveTurnProjection {
 }
 
 pub trait TurnProjectionSink: Send + Sync {
+    fn publish_native(
+        &self,
+        _view: super::native_conversation_generated::NativeConversationView,
+    ) -> Result<(), ChatError> {
+        Ok(())
+    }
     fn publish(&self, projection: LiveTurnProjection) -> Result<(), ChatError>;
 
     fn publish_feat134(&self, _projection: Feat134Projection) -> Result<(), ChatError> {
@@ -871,38 +766,6 @@ struct NoopProjectionSink;
 impl TurnProjectionSink for NoopProjectionSink {
     fn publish(&self, _projection: LiveTurnProjection) -> Result<(), ChatError> {
         Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReducerOutcomeKind {
-    Duplicate,
-    Progress,
-    Terminal,
-}
-
-pub enum ReducerOutcome {
-    Duplicate,
-    Progress,
-    Terminal(TerminalTurnCommit),
-}
-
-impl ReducerOutcome {
-    pub fn kind(&self) -> ReducerOutcomeKind {
-        match self {
-            Self::Duplicate => ReducerOutcomeKind::Duplicate,
-            Self::Progress => ReducerOutcomeKind::Progress,
-            Self::Terminal(_) => ReducerOutcomeKind::Terminal,
-        }
-    }
-}
-
-impl Debug for ReducerOutcome {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ReducerOutcome")
-            .field("kind", &self.kind())
-            .finish()
     }
 }
 
@@ -995,6 +858,60 @@ fn project_pending_approval_snapshot(
 }
 
 impl ConversationApplication {
+    pub(crate) fn with_history_host(mut self, host: Option<Arc<HostBridge>>) -> Self {
+        self.host = host;
+        self
+    }
+    pub async fn native_history(
+        &self,
+        session_id: Uuid,
+        turn_ids: Vec<Uuid>,
+    ) -> Result<super::native_conversation_generated::NativeConversationHistory, ChatError> {
+        if turn_ids.len() > 50 {
+            return Err(ChatError::InvalidInput);
+        }
+        let binding = self.database.native_thread_binding(session_id).await?;
+        let snapshot = match (&self.host, binding) {
+            (Some(host), Some(id)) => host.read_native_thread(id).await.ok().map(Arc::new),
+            _ => None,
+        };
+        let submissions = self
+            .database
+            .local_submissions(session_id, turn_ids.clone())
+            .await?;
+        let mut views = Vec::new();
+        let mut bytes = 0_usize;
+        let mut remaining_turn_ids = Vec::new();
+        for (index, id) in turn_ids.iter().enumerate() {
+            let candidates = self
+                .database
+                .native_recovery_views(session_id, vec![*id], snapshot.clone(), false)
+                .await?;
+            let size = serde_json::to_vec(&candidates)
+                .map_err(|_| ChatError::DatabaseUnavailable)?
+                .len();
+            if bytes.saturating_add(size) > 7 * 1024 * 1024 {
+                remaining_turn_ids = turn_ids[index..].iter().map(Uuid::to_string).collect();
+                break;
+            }
+            bytes += size;
+            views.extend(candidates);
+        }
+        Ok(
+            super::native_conversation_generated::NativeConversationHistory {
+                submissions,
+                views,
+                remaining_turn_ids,
+                history_availability: if snapshot.is_some() {
+                    "partial"
+                } else {
+                    "unavailable"
+                }
+                .into(),
+            },
+        )
+    }
+
     pub fn new(
         database: DatabaseWorker,
         host: Arc<HostBridge>,
@@ -1005,8 +922,7 @@ impl ConversationApplication {
             host: Some(host),
             public_tasks: Some(public_tasks),
             artifact_transfers: None,
-            feat134_streaming_enabled: false,
-            feat136_streaming_enabled: false,
+
             feat137_streaming_enabled: false,
         }
     }
@@ -1018,8 +934,7 @@ impl ConversationApplication {
     ) -> Self {
         Self {
             artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
-            feat134_streaming_enabled: false,
-            feat136_streaming_enabled: false,
+
             feat137_streaming_enabled: false,
             database,
             host: Some(host),
@@ -1037,8 +952,7 @@ impl ConversationApplication {
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
-            feat134_streaming_enabled: true,
-            feat136_streaming_enabled: false,
+
             feat137_streaming_enabled: false,
         }
     }
@@ -1053,8 +967,7 @@ impl ConversationApplication {
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
-            feat134_streaming_enabled: true,
-            feat136_streaming_enabled: true,
+
             feat137_streaming_enabled: false,
         }
     }
@@ -1069,8 +982,7 @@ impl ConversationApplication {
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
-            feat134_streaming_enabled: true,
-            feat136_streaming_enabled: true,
+
             feat137_streaming_enabled: true,
         }
     }
@@ -1081,8 +993,7 @@ impl ConversationApplication {
             host: None,
             public_tasks: None,
             artifact_transfers: None,
-            feat134_streaming_enabled: false,
-            feat136_streaming_enabled: false,
+
             feat137_streaming_enabled: false,
         }
     }
@@ -1932,7 +1843,6 @@ impl ConversationApplication {
                     1,
                     dispatch.operation_id,
                     dispatch.session_id,
-                    dispatch.agent_session_id,
                     result,
                 )
                 .await
@@ -1944,16 +1854,10 @@ impl ConversationApplication {
                     .await
                 {
                     Ok(dispatch) => dispatch,
-                    Err(ChatError::NotFound) if self.feat134_streaming_enabled => {
-                        return self
-                            .finalize_failed_feat134_turn_dispatch(claimed.operation_id, now)
-                            .await;
-                    }
                     Err(ChatError::NotFound) => {
-                        self.database.fail_outbox(claimed.operation_id).await?;
-                        return Ok(DispatchOutcome::FailedSafely {
-                            operation_id: claimed.operation_id,
-                        });
+                        return self
+                            .record_failed_turn_submission(claimed.operation_id, now)
+                            .await;
                     }
                     Err(error) => return Err(error),
                 };
@@ -1986,25 +1890,23 @@ impl ConversationApplication {
                         )
                         .await
                 };
-                if self.feat134_streaming_enabled
-                    && result.as_ref().is_err_and(|error| {
-                        matches!(
-                            error.kind(),
-                            HostBridgeErrorKind::Transport
-                                | HostBridgeErrorKind::AcceptedResponseInvalid
-                        ) || error.code() == Some(HostErrorCode::SessionNotUsable)
-                    })
-                {
-                    return self
-                        .suspend_uncertain_feat134_turn_dispatch(&dispatch)
-                        .await;
+                if result.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.kind(),
+                        HostBridgeErrorKind::Transport
+                            | HostBridgeErrorKind::AcceptedResponseInvalid
+                    ) || matches!(
+                        error.code(),
+                        Some(HostErrorCode::SessionNotUsable | HostErrorCode::RuntimeRequestFailed)
+                    )
+                }) {
+                    return self.record_uncertain_turn_submission(&dispatch).await;
                 }
                 self.finish_turn_dispatch(
                     now,
                     2,
                     dispatch.operation_id,
                     dispatch.session_id,
-                    dispatch.agent_session_id,
                     result,
                 )
                 .await
@@ -2024,81 +1926,51 @@ impl ConversationApplication {
         payload_version: i64,
         operation_id: Uuid,
         session_id: Uuid,
-        agent_session_id: Uuid,
         result: Result<Uuid, HostBridgeError>,
     ) -> Result<DispatchOutcome, ChatError> {
         let runtime_turn_id = match result {
             Ok(turn_id) => turn_id,
-            Err(error)
-                if payload_version == 1 && error.code() == Some(HostErrorCode::TurnActive) =>
-            {
-                match self.host()?.get_session(agent_session_id).await {
-                    Ok(session) if session.active_turn_id.is_some() => {
-                        session.active_turn_id.expect("checked above")
-                    }
-                    _ => {
-                        self.database.fail_outbox(operation_id).await?;
-                        return Ok(DispatchOutcome::FailedSafely { operation_id });
-                    }
-                }
-            }
-            Err(error)
-                if payload_version == 2
-                    && !self.feat134_streaming_enabled
-                    && matches!(
-                        error.kind(),
-                        HostBridgeErrorKind::Transport
-                            | HostBridgeErrorKind::AcceptedResponseInvalid
-                    ) =>
-            {
-                self.database
-                    .reschedule_outbox(
-                        operation_id,
-                        now.checked_add(RETRY_DELAY_SECONDS)
-                            .ok_or(ChatError::InvalidInput)?,
-                    )
-                    .await?;
-                return Ok(DispatchOutcome::RetryScheduled { operation_id });
-            }
-            Err(_) if self.feat134_streaming_enabled && payload_version == 2 => {
-                return self
-                    .finalize_failed_feat134_turn_dispatch(operation_id, now)
-                    .await;
+            Err(_) if payload_version == 2 => {
+                return self.record_failed_turn_submission(operation_id, now).await;
             }
             Err(error) => {
                 return self.handle_dispatch_error(operation_id, now, error).await;
             }
         };
         self.database
-            .suspend_started_turn_retry(operation_id, runtime_turn_id)
+            .accept_native_turn(
+                operation_id,
+                runtime_turn_id,
+                self.host()?.instance_nonce().to_owned(),
+            )
             .await?;
         Ok(DispatchOutcome::TurnAccepted { session_id })
     }
 
-    async fn suspend_uncertain_feat134_turn_dispatch(
+    async fn record_uncertain_turn_submission(
         &self,
         dispatch: &StartTurnDispatchV2,
     ) -> Result<DispatchOutcome, ChatError> {
         self.database
             .suspend_uncertain_start_turn(dispatch.operation_id)
             .await?;
-        Ok(DispatchOutcome::TurnReconciliationRequired {
+        Ok(DispatchOutcome::TurnSubmissionUncertain {
             operation_id: dispatch.operation_id,
             session_id: dispatch.session_id,
             turn_id: dispatch.turn_id,
         })
     }
 
-    async fn finalize_failed_feat134_turn_dispatch(
+    async fn record_failed_turn_submission(
         &self,
         operation_id: Uuid,
         terminal_at: i64,
     ) -> Result<DispatchOutcome, ChatError> {
         let projection = self
             .database
-            .finalize_failed_start_turn_dispatch(operation_id, terminal_at)
+            .record_failed_start_turn_submission(operation_id, terminal_at)
             .await?;
-        Ok(DispatchOutcome::TurnFailedSafely {
+        Ok(DispatchOutcome::TurnSubmissionFailed {
             operation_id: projection.operation_id,
             session_id: projection.session_id,
             turn_id: projection.turn_id,
@@ -2135,7 +2007,7 @@ impl ConversationApplication {
                 match self.host()?.get_session(dispatch.agent_session_id).await {
                     Ok(session) if session.active_turn_id.is_none() => {
                         self.database
-                            .finalize_interrupted_without_stream(dispatch.operation_id, now)
+                            .complete_interrupt(dispatch.operation_id)
                             .await?;
                         Ok(DispatchOutcome::InterruptAccepted {
                             session_id: dispatch.session_id,
@@ -2188,22 +2060,6 @@ impl ConversationApplication {
             artifact_transfers
                 .recover_pending_acknowledgements()
                 .await?;
-        }
-        if self.feat134_streaming_enabled {
-            let now = unix_seconds()?;
-            if let Some(projection) = self
-                .database
-                .recover_next_failed_start_turn_projection(now)
-                .await?
-            {
-                return Ok(CoordinatorOutcome::Dispatched(
-                    DispatchOutcome::TurnFailedSafely {
-                        operation_id: projection.operation_id,
-                        session_id: projection.session_id,
-                        turn_id: projection.turn_id,
-                    },
-                ));
-            }
         }
         let dispatch = self.dispatch_next().await?;
         if dispatch != DispatchOutcome::Idle {
@@ -2367,1849 +2223,243 @@ impl ConversationApplication {
             .await
     }
 
+    async fn flush_native_buffer(
+        &self,
+        buffer: &mut super::native_conversation::NativeDisplayBuffer,
+        event: Option<super::native_conversation_generated::NativeEvent>,
+        sink: &dyn TurnProjectionSink,
+    ) -> Result<(), ChatError> {
+        // The coordinator owns writes. UI history reads cannot replace this buffer.
+        buffer.view = self
+            .database
+            .commit_native_view(
+                buffer.context().clone(),
+                buffer.view.clone(),
+                event,
+                unix_seconds()?,
+            )
+            .await?;
+        sink.publish_native(buffer.view.clone())
+    }
+
+    async fn stream_native_conversation(
+        &self,
+        session_id: Uuid,
+        sink: &dyn TurnProjectionSink,
+    ) -> Result<(), ChatError> {
+        use super::native_conversation::NativeDisplayBuffer;
+        let context = self.database.active_turn_context(session_id).await?;
+        let saved = self
+            .database
+            .native_views(session_id, vec![context.turn_id])
+            .await?
+            .into_iter()
+            .find(|v| v.turn_id == context.turn_id.to_string());
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), saved)?;
+        let cursor = buffer
+            .view
+            .cursor
+            .as_ref()
+            .map(|c| {
+                HostEventCursor::new(
+                    Uuid::parse_str(&c.stream_id).map_err(|_| ChatError::DatabaseUnavailable)?,
+                    c.sequence
+                        .parse()
+                        .map_err(|_| ChatError::DatabaseUnavailable)?,
+                )
+                .map_err(map_host_error)
+            })
+            .transpose()?;
+        let host = self.host()?;
+        let origin = self
+            .database
+            .native_host_origin(session_id, context.turn_id)
+            .await?;
+        // Old rows are archives even when they contain Runtime IDs. They must
+        // finish in the old app before cutover; never promote them by guessing.
+        if origin.is_none() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let generation_changed = origin
+            .as_deref()
+            .is_some_and(|nonce| nonce != host.instance_nonce());
+        if generation_changed {
+            let snapshot = host
+                .read_native_thread(context.agent_session_id)
+                .await
+                .map_err(map_host_error)?;
+            let restored = self
+                .database
+                .native_recovery_views(
+                    session_id,
+                    vec![context.turn_id],
+                    Some(Arc::new(snapshot)),
+                    true,
+                )
+                .await?;
+            if let Some(view) = restored.into_iter().next() {
+                let ended = view.status_source.as_deref() == Some("runtime_read")
+                    && view
+                        .status
+                        .as_deref()
+                        .is_some_and(|s| matches!(s, "completed" | "failed" | "interrupted"));
+                sink.publish_native(view.clone())?;
+                if ended {
+                    sink.publish_artifact_resync_required(
+                        session_id,
+                        context.turn_id,
+                        ArtifactResyncReason::ProtocolError,
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
+        let mut stream = match host
+            .open_native_event_stream(context.agent_session_id, cursor)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(error)
+                if matches!(
+                    error.code(),
+                    Some(HostErrorCode::EventStreamChanged | HostErrorCode::EventReplayUnavailable)
+                ) =>
+            {
+                // Native history is a separate source, never merged by Item ID
+                // with the observed display copy. No turn submission is retried.
+                if error.code() == Some(HostErrorCode::EventStreamChanged) {
+                    if let Ok(snapshot) = host.read_native_thread(context.agent_session_id).await {
+                        let views = self
+                            .database
+                            .native_recovery_views(
+                                session_id,
+                                vec![context.turn_id],
+                                Some(Arc::new(snapshot)),
+                                true,
+                            )
+                            .await?;
+                        if let Some(view) = views
+                            .into_iter()
+                            .find(|v| v.turn_id == context.turn_id.to_string())
+                        {
+                            let ended = view.status_source.as_deref() == Some("runtime_read")
+                                && view.status.as_deref().is_some_and(|s| {
+                                    matches!(s, "completed" | "failed" | "interrupted")
+                                });
+                            sink.publish_native(view.clone())?;
+                            if ended {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                buffer.mark_unavailable("stream_changed");
+                host.open_native_event_stream(context.agent_session_id, None)
+                    .await
+                    .map_err(map_host_error)?
+            }
+            Err(error) => return Err(map_host_error(error)),
+        };
+        // Artifact transport remains owned by FEAT-128. No ordinary v3 event
+        // enters the native conversation display buffer or changes its result.
+        let mut artifacts = if self.artifact_transfers.is_some() {
+            match host
+                .open_event_stream_v3(context.agent_session_id, None)
+                .await
+            {
+                Ok(stream) => Some(stream),
+                Err(_) => {
+                    sink.publish_artifact_resync_required(
+                        session_id,
+                        context.turn_id,
+                        ArtifactResyncReason::ProtocolError,
+                    )?;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let mut artifact_delivery_done = artifacts.is_none();
+        let mut artifact_sequence = 0_u64;
+        let mut dirty = 0_usize;
+        let mut flush = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
+        flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            if buffer.view.terminal_observed && artifact_delivery_done {
+                return Ok(());
+            }
+            tokio::select! {
+                value=stream.next_stream_event(),if !buffer.view.terminal_observed=>{
+                    let event=match value {
+                        Ok(Some(HostStreamEvent::Native(event)))=>event,
+                        _=>{
+                            buffer.mark_unavailable("native_stream_unavailable");
+                            self.flush_native_buffer(&mut buffer,None,sink).await?;
+                            return Err(ChatError::OrchestrationUnavailable)
+                        }
+                    };
+                    match buffer.observe(&event) {
+                        Ok(false)=>continue,
+                        Err(_)=>{
+                            buffer.mark_unavailable("native_projection_unavailable");
+                            self.flush_native_buffer(&mut buffer,None,sink).await?;continue
+                        },
+                        Ok(true)=>{}
+                    }
+                    dirty+=1;
+                    // Native snapshots/plans/terminals are facts and commit immediately.
+                    // Deltas only modify this disposable display copy, flushed at 50 ms/16 events.
+                    if !event.payload.native.method.ends_with("Delta")&&!event.payload.native.method.ends_with("/delta") || dirty>=PROGRESS_FLUSH_EVENT_COUNT {
+                        self.flush_native_buffer(&mut buffer,Some(*event),sink).await?;dirty=0;
+                    }
+                }
+                _=flush.tick(),if dirty>0=>{
+                    self.flush_native_buffer(&mut buffer,None,sink).await?;dirty=0;
+                }
+                value=async {match artifacts.as_mut(){Some(stream)=>stream.next_stream_event().await,None=>std::future::pending().await}},if !artifact_delivery_done=>{
+                    match value {
+                        Ok(Some(HostStreamEvent::Ordinary(event)))=>{
+                            if event.turn_id==Some(context.runtime_turn_id)&&event.event_type=="turn.completed"{artifact_delivery_done=true}
+                        }
+                        Ok(Some(HostStreamEvent::Artifact(envelope)))=>{
+                            if envelope.turn_id!=context.runtime_turn_id||envelope.cursor.sequence<=artifact_sequence{continue}
+                            artifact_sequence=envelope.cursor.sequence;
+                            let delivered=async {
+                                let artifact=decode_artifact_event_envelope_v3(&envelope,context.agent_session_id,context.runtime_turn_id,context.session_id,context.turn_id)?;
+                                #[cfg(feature="feat128-s10-runtime")]
+                                let measure=match &artifact {
+                                    super::artifact::ArtifactEventV3::Started(id)=>Some((id.artifact_id,id.kind,id.ordinal,crate::feat128_s10d_runtime::Feat128S10dArtifactStage::Announced)),
+                                    super::artifact::ArtifactEventV3::Progress{identity:id,..}=>Some((id.artifact_id,id.kind,id.ordinal,crate::feat128_s10d_runtime::Feat128S10dArtifactStage::Progress)),
+                                    super::artifact::ArtifactEventV3::Completed(m)=>Some((m.artifact_id,m.kind,m.ordinal,crate::feat128_s10d_runtime::Feat128S10dArtifactStage::Ready)),
+                                    _=>None,
+                                };
+                                self.artifact_transfers.as_ref().ok_or(ChatError::InvalidConfiguration)?.ingest_event(artifact).await?;
+                                #[cfg(feature="feat128-s10-runtime")]
+                                if let Some((id,kind,ordinal,stage))=measure{crate::feat128_s10d_runtime::feat128_s10d_record_native_artifact(id,kind,ordinal,stage).map_err(|_|ChatError::OrchestrationUnavailable)?;}
+
+                                sink.publish_artifact_changed(session_id,context.turn_id,envelope.event_id)
+                            }.await;
+                            if delivered.is_err(){sink.publish_artifact_resync_required(session_id,context.turn_id,ArtifactResyncReason::ProtocolError)?;}
+                        }
+                        _=>{artifact_delivery_done=true;sink.publish_artifact_resync_required(session_id,context.turn_id,ArtifactResyncReason::ProtocolError)?;}
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn stream_active_turn_with_projection_sink(
         &self,
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
     ) -> Result<(), ChatError> {
-        if self.feat134_streaming_enabled {
-            let artifact_transfers = self
-                .artifact_transfers
-                .as_ref()
-                .ok_or(ChatError::InvalidConfiguration)?;
-            return if self.feat137_streaming_enabled {
-                let turn_id = self.database.active_turn_context(session_id).await?.turn_id;
-                match feat137_active_turn_stream_schema(
-                    self.database
-                        .turn_projection_schema_version(turn_id)
-                        .await?,
-                )? {
-                    4 => {
-                        self.stream_active_turn_v4(session_id, sink, artifact_transfers)
-                            .await
-                    }
-                    5 => {
-                        self.stream_active_turn_v5(session_id, sink, artifact_transfers)
-                            .await
-                    }
-                    6 => {
-                        self.stream_active_turn_v6(session_id, sink, artifact_transfers)
-                            .await
-                    }
-                    _ => Err(ChatError::DatabaseUnavailable),
-                }
-            } else if self.feat136_streaming_enabled {
-                let turn_id = self.database.active_turn_context(session_id).await?.turn_id;
-                match feat136_active_turn_stream_schema(
-                    self.database
-                        .turn_projection_schema_version(turn_id)
-                        .await?,
-                )? {
-                    4 => {
-                        self.stream_active_turn_v4(session_id, sink, artifact_transfers)
-                            .await
-                    }
-                    5 => {
-                        self.stream_active_turn_v5(session_id, sink, artifact_transfers)
-                            .await
-                    }
-                    _ => Err(ChatError::DatabaseUnavailable),
-                }
-            } else {
-                self.stream_active_turn_v4(session_id, sink, artifact_transfers)
-                    .await
-            };
-        }
-        if let Some(artifact_transfers) = &self.artifact_transfers {
-            return self
-                .stream_active_turn_v3(session_id, sink, artifact_transfers)
-                .await;
-        }
-        let mut context = self.database.active_turn_context(session_id).await?;
-        let cursor = context
-            .cursor
-            .as_ref()
-            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
-            .transpose()
-            .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        let host = self.host()?;
-        let mut stream = match host
-            .open_event_stream_v2(context.agent_session_id, cursor)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(error)
-                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
-            {
-                let stream = host
-                    .open_event_stream_v2(context.agent_session_id, None)
-                    .await
-                    .map_err(map_host_error)?;
-                let expected = context
-                    .cursor
-                    .take()
-                    .ok_or(ChatError::ConversationConflict)?;
-                self.database
-                    .clear_event_cursor_after_stream_change(session_id, expected)
-                    .await?;
-                stream
-            }
-            Err(error) => return Err(map_host_error(error)),
-        };
-        let mut reducer = TurnEventReducer::new(context)?;
-        let mut progress_dirty = false;
-        let mut unflushed_events = 0_usize;
-        let mut last_flush = Instant::now();
-        loop {
-            let event = match stream.next_event().await {
-                Ok(Some(event)) => event,
-                Ok(None) => {
-                    if progress_dirty {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                    }
-                    return Err(ChatError::OrchestrationUnavailable);
-                }
-                Err(error) => {
-                    if progress_dirty {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                    }
-                    return Err(map_host_error(error));
-                }
-            };
-            match reducer.apply(event, unix_millis()?)? {
-                ReducerOutcome::Duplicate => {}
-                ReducerOutcome::Progress => {
-                    progress_dirty = true;
-                    unflushed_events += 1;
-                    if unflushed_events >= PROGRESS_FLUSH_EVENT_COUNT
-                        || last_flush.elapsed() >= PROGRESS_FLUSH_INTERVAL
-                    {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                        progress_dirty = false;
-                        unflushed_events = 0;
-                        last_flush = Instant::now();
-                    }
-                }
-                ReducerOutcome::Terminal(terminal) => {
-                    self.database.commit_terminal_turn(terminal).await?;
-                    sink.publish(reducer.projection(true)?)?;
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    async fn stream_active_turn_v3(
-        &self,
-        session_id: Uuid,
-        sink: &dyn TurnProjectionSink,
-        artifact_transfers: &ArtifactTransferService,
-    ) -> Result<(), ChatError> {
-        artifact_transfers
-            .recover_pending_acknowledgements()
-            .await?;
-        let mut context = self.database.active_turn_context(session_id).await?;
-        let cursor = context
-            .cursor
-            .as_ref()
-            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
-            .transpose()
-            .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        let host = self.host()?;
-        let host_snapshot = host
-            .get_session(context.agent_session_id)
-            .await
-            .map_err(map_host_error)?;
-        if host_snapshot.task_id != context.task_id
-            || host_snapshot.agent_session_id != context.agent_session_id
-            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let replay_must_supply_terminal = matches!(
-            host_snapshot.state,
-            HostSessionState::Idle | HostSessionState::Failed
-        ) && host_snapshot.active_turn_id.is_none();
-        let mut stream = match host
-            .open_event_stream_v3(context.agent_session_id, cursor)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(error)
-                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
-            {
-                let stream = host
-                    .open_event_stream_v3(context.agent_session_id, None)
-                    .await
-                    .map_err(map_host_error)?;
-                let expected = context
-                    .cursor
-                    .take()
-                    .ok_or(ChatError::ConversationConflict)?;
-                self.database
-                    .clear_event_cursor_after_stream_change(session_id, expected)
-                    .await?;
-                sink.publish_artifact_resync_required(
-                    session_id,
-                    context.turn_id,
-                    ArtifactResyncReason::SequenceGap,
-                )?;
-                stream
-            }
-            Err(error) => return Err(map_host_error(error)),
-        };
-        let mut reducer = TurnEventReducer::new(context)?;
-        let mut progress_dirty = false;
-        let mut unflushed_events = 0_usize;
-        let mut last_flush = Instant::now();
-        loop {
-            let next_event = if replay_must_supply_terminal {
-                match tokio::time::timeout(
-                    ORPHANED_TERMINAL_REPLAY_GRACE,
-                    stream.next_stream_event(),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        if progress_dirty {
-                            self.database
-                                .persist_turn_progress(reducer.progress()?)
-                                .await?;
-                            sink.publish(reducer.projection(false)?)?;
-                        }
-                        self.database
-                            .finalize_orphaned_turn_without_stream(
-                                reducer.session_id,
-                                reducer.local_turn_id,
-                                reducer.runtime_turn_id,
-                                unix_seconds()?,
-                            )
-                            .await?;
-                        sink.publish_artifact_resync_required(
-                            reducer.session_id,
-                            reducer.local_turn_id,
-                            ArtifactResyncReason::ProtocolError,
-                        )?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                stream.next_stream_event().await
-            };
-            let event = match next_event {
-                Ok(Some(event)) => event,
-                Ok(None) => {
-                    if progress_dirty {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                    }
-                    return Err(ChatError::OrchestrationUnavailable);
-                }
-                Err(error) => {
-                    if progress_dirty {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                    }
-                    sink.publish_artifact_resync_required(
-                        session_id,
-                        reducer.local_turn_id,
-                        ArtifactResyncReason::ProtocolError,
-                    )?;
-                    return Err(map_host_error(error));
-                }
-            };
-            match event {
-                HostStreamEvent::Ordinary(event) => {
-                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
-                    let reduced = reducer.apply(event, unix_millis()?).inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id,
-                            resync_reason,
-                        );
-                    })?;
-                    match reduced {
-                        ReducerOutcome::Duplicate => {}
-                        ReducerOutcome::Progress => {
-                            progress_dirty = true;
-                            unflushed_events += 1;
-                            if unflushed_events >= PROGRESS_FLUSH_EVENT_COUNT
-                                || last_flush.elapsed() >= PROGRESS_FLUSH_INTERVAL
-                            {
-                                self.database
-                                    .persist_turn_progress(reducer.progress()?)
-                                    .await?;
-                                sink.publish(reducer.projection(false)?)?;
-                                progress_dirty = false;
-                                unflushed_events = 0;
-                                last_flush = Instant::now();
-                            }
-                        }
-                        ReducerOutcome::Terminal(terminal) => {
-                            self.database.commit_terminal_turn(terminal).await?;
-                            sink.publish(reducer.projection(true)?)?;
-                            return Ok(());
-                        }
-                    }
-                }
-                HostStreamEvent::Artifact(envelope) => {
-                    let artifact = decode_artifact_event_envelope_v3(
-                        &envelope,
-                        reducer.agent_session_id,
-                        reducer.runtime_turn_id,
-                        reducer.session_id,
-                        reducer.local_turn_id,
-                    )
-                    .inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id,
-                            ArtifactResyncReason::ProtocolError,
-                        );
-                    })?;
-                    if matches!(artifact, ArtifactEventV3::Completed(_)) && progress_dirty {
-                        self.database
-                            .persist_turn_progress(reducer.progress()?)
-                            .await?;
-                        sink.publish(reducer.projection(false)?)?;
-                        progress_dirty = false;
-                        unflushed_events = 0;
-                        last_flush = Instant::now();
-                    }
-                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
-                    let observed = reducer.observe_artifact(&envelope).inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id,
-                            resync_reason,
-                        );
-                    })?;
-                    match observed {
-                        ReducerOutcome::Duplicate => continue,
-                        ReducerOutcome::Terminal(_) => return Err(ChatError::ConversationConflict),
-                        ReducerOutcome::Progress => {}
-                    }
-                    let cursor_progress = reducer.progress()?;
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    let runtime_transition = match &artifact {
-                        ArtifactEventV3::Started(identity) => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Announced,
-                        ),
-                        ArtifactEventV3::Progress { identity, .. } => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Progress,
-                        ),
-                        ArtifactEventV3::Completed(manifest) => (
-                            manifest.artifact_id,
-                            manifest.kind,
-                            manifest.ordinal,
-                            Feat128S10dArtifactStage::Ready,
-                        ),
-                        ArtifactEventV3::Failed { .. } => {
-                            return Err(ChatError::ConversationConflict)
-                        }
-                    };
-                    match artifact {
-                        ArtifactEventV3::Completed(manifest) => {
-                            if let Err(error) = artifact_transfers
-                                .transfer_completed_with_cursor(manifest, cursor_progress)
-                                .await
-                            {
-                                sink.publish_artifact_changed(
-                                    session_id,
-                                    reducer.local_turn_id,
-                                    envelope.event_id,
-                                )?;
-                                return Err(error);
-                            }
-                        }
-                        artifact => {
-                            self.database
-                                .commit_artifact_event_progress(cursor_progress, artifact)
-                                .await?;
-                        }
-                    }
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    feat128_s10d_record_native_artifact(
-                        runtime_transition.0,
-                        runtime_transition.1,
-                        runtime_transition.2,
-                        runtime_transition.3,
-                    )
-                    .map_err(|_| ChatError::ConversationConflict)?;
-                    if progress_dirty {
-                        sink.publish(reducer.projection(false)?)?;
-                    }
-                    progress_dirty = false;
-                    unflushed_events = 0;
-                    last_flush = Instant::now();
-                    sink.publish_artifact_changed(
-                        session_id,
-                        reducer.local_turn_id,
-                        envelope.event_id,
-                    )?;
-                }
-            }
-        }
-    }
-
-    /// Reduces one ordinary Host v4 event and commits the resulting private projection before it
-    /// can be published. A Desktop projection limit is closed atomically from the confirmed
-    /// durable prefix; the offending text never crosses this application boundary into storage.
-    async fn reduce_and_persist_feat134_event(
-        &self,
-        reducer: &mut Feat134TurnReducer,
-        event: HostEvent,
-        observed_at_ms: i64,
-    ) -> Result<Option<(Feat134Projection, bool)>, ChatError> {
-        let mut failure = Feat134ProjectionFailure {
-            session_id: reducer.session_id(),
-            turn_id: reducer.local_turn_id(),
-            cursor: StoredEventCursor {
-                stream_id: event.cursor.stream_id,
-                sequence: event.cursor.sequence,
-                event_id: event.event_id,
-            },
-            source_event_type: event.event_type.clone(),
-            source_turn_id: event.turn_id,
-            source_occurred_at: event.occurred_at.clone(),
-            source_event_bytes: event.encoded_bytes,
-            observed_at_ms,
-            kind: Feat134ProjectionFailureKind::LimitExceeded,
-        };
-        let projection = match reducer.apply(event, observed_at_ms) {
-            Ok(None) => return Ok(None),
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat134_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(ChatError::ProjectionReconciliationFailed) => {
-                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
-                return self
-                    .database
-                    .commit_feat134_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(error) => return Err(error),
-            Ok(Some(projection)) => projection,
-        };
-        if feat134_projection_requires_limit_terminal(&projection)? {
-            // This is a Desktop-derived terminal, not a Host terminal fact. The DB atomically
-            // consumes the offending cursor while retaining only the confirmed prefix, preventing
-            // an infinite replay of the event.
-            return self
-                .database
-                .commit_feat134_projection_failure(failure)
-                .await
-                .map(|projection| Some((projection, true)));
-        }
-        let mut projection = projection;
-        let persisted = if projection.terminal.is_some() {
-            self.database
-                .commit_feat134_terminal(projection.clone())
-                .await
-        } else {
-            self.database
-                .persist_feat134_projection(projection.clone())
-                .await
-        };
-        let durable_sequence = match persisted {
-            Ok(durable_sequence) => durable_sequence,
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat134_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(error) => return Err(error),
-        };
-        projection.durable_sequence = Some(durable_sequence);
-        Ok(Some((projection, false)))
-    }
-
-    async fn reduce_and_persist_feat136_event(
-        &self,
-        reducer: &mut Feat136TurnReducer,
-        event: HostEvent,
-        observed_at_ms: i64,
-    ) -> Result<Option<(Feat134Projection, bool)>, ChatError> {
-        let mut failure = Feat134ProjectionFailure {
-            session_id: reducer.session_id(),
-            turn_id: reducer.local_turn_id(),
-            cursor: StoredEventCursor {
-                stream_id: event.cursor.stream_id,
-                sequence: event.cursor.sequence,
-                event_id: event.event_id,
-            },
-            source_event_type: event.event_type.clone(),
-            source_turn_id: event.turn_id,
-            source_occurred_at: event.occurred_at.clone(),
-            source_event_bytes: event.encoded_bytes,
-            observed_at_ms,
-            kind: Feat134ProjectionFailureKind::LimitExceeded,
-        };
-        let projection = match reducer.apply(event, observed_at_ms) {
-            Ok(None) => return Ok(None),
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat136_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(ChatError::ProjectionReconciliationFailed) => {
-                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
-                return self
-                    .database
-                    .commit_feat136_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(error) => return Err(error),
-            Ok(Some(projection)) => projection,
-        };
-        if feat134_projection_requires_limit_terminal(&projection)? {
-            return self
-                .database
-                .commit_feat136_projection_failure(failure)
-                .await
-                .map(|projection| Some((projection, true)));
-        }
-        let mut projection = projection;
-        let persisted = if projection.terminal.is_some() {
-            self.database
-                .commit_feat136_terminal(projection.clone())
-                .await
-        } else {
-            self.database
-                .persist_feat136_projection(projection.clone())
-                .await
-        };
-        let durable_sequence = match persisted {
-            Ok(durable_sequence) => durable_sequence,
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat136_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, true)));
-            }
-            Err(error) => return Err(error),
-        };
-        projection.durable_sequence = Some(durable_sequence);
-        Ok(Some((projection, false)))
-    }
-
-    async fn reduce_and_persist_feat137_event(
-        &self,
-        reducer: &mut Feat136TurnReducer,
-        event: HostEvent,
-        approval: Option<ApprovalProjection>,
-        observed_at_ms: i64,
-    ) -> Result<Option<(Feat134Projection, Option<ApprovalProjection>, bool)>, ChatError> {
-        let mut failure = Feat134ProjectionFailure {
-            session_id: reducer.session_id(),
-            turn_id: reducer.local_turn_id(),
-            cursor: StoredEventCursor {
-                stream_id: event.cursor.stream_id,
-                sequence: event.cursor.sequence,
-                event_id: event.event_id,
-            },
-            source_event_type: event.event_type.clone(),
-            source_turn_id: event.turn_id,
-            source_occurred_at: event.occurred_at.clone(),
-            source_event_bytes: event.encoded_bytes,
-            observed_at_ms,
-            kind: Feat134ProjectionFailureKind::LimitExceeded,
-        };
-        let projection = match reducer.apply(event, observed_at_ms) {
-            Ok(None) => return Ok(None),
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat137_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, None, true)));
-            }
-            Err(ChatError::ProjectionReconciliationFailed) => {
-                failure.kind = Feat134ProjectionFailureKind::ProtocolConflict;
-                return self
-                    .database
-                    .commit_feat137_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, None, true)));
-            }
-            Err(error) => return Err(error),
-            Ok(Some(projection)) => projection,
-        };
-        let projection = protect_process_projection(projection)?;
-        if feat134_projection_requires_limit_terminal(&projection)? {
-            return self
-                .database
-                .commit_feat137_projection_failure(failure)
-                .await
-                .map(|projection| Some((projection, None, true)));
-        }
-        let mut projection = projection;
-        let persisted = if projection.terminal.is_some() {
-            if approval.is_some() {
-                return Err(ChatError::OrchestrationUnavailable);
-            }
-            self.database
-                .commit_feat137_terminal(projection.clone())
-                .await
-        } else {
-            self.database
-                .persist_feat137_projection(projection.clone(), approval.clone())
-                .await
-        };
-        let durable_sequence = match persisted {
-            Ok(durable_sequence) => durable_sequence,
-            Err(ChatError::ProjectionLimitExceeded) => {
-                return self
-                    .database
-                    .commit_feat137_projection_failure(failure)
-                    .await
-                    .map(|projection| Some((projection, None, true)));
-            }
-            Err(error) => return Err(error),
-        };
-        projection.durable_sequence = Some(durable_sequence);
-        let approval = approval
-            .map(|approval| approval.with_durable_sequence(durable_sequence))
-            .transpose()?;
-        Ok(Some((projection, approval, false)))
-    }
-
-    async fn stream_active_turn_v4(
-        &self,
-        session_id: Uuid,
-        sink: &dyn TurnProjectionSink,
-        artifact_transfers: &ArtifactTransferService,
-    ) -> Result<(), ChatError> {
-        artifact_transfers
-            .recover_pending_acknowledgements()
-            .await?;
-        let mut context = self.database.active_turn_context(session_id).await?;
-        let hydration = self
-            .database
-            .load_feat134_hydration(context.turn_id)
-            .await?;
-        let cursor = context
-            .cursor
-            .as_ref()
-            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
-            .transpose()
-            .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        let agent_session_id = context.agent_session_id;
-        let runtime_turn_id = context.runtime_turn_id;
-        let host = self.host()?;
-        let host_snapshot = host
-            .get_session(context.agent_session_id)
-            .await
-            .map_err(map_host_error)?;
-        if host_snapshot.task_id != context.task_id
-            || host_snapshot.agent_session_id != context.agent_session_id
-            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let replay_must_supply_terminal = matches!(
-            host_snapshot.state,
-            HostSessionState::Idle | HostSessionState::Failed
-        ) && host_snapshot.active_turn_id.is_none();
-        let mut stream = match host
-            .open_event_stream_v4(context.agent_session_id, cursor)
-            .await
-        {
-            Ok(stream) => stream,
-            Err(error)
-                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
-            {
-                let stream = host
-                    .open_event_stream_v4(context.agent_session_id, None)
-                    .await
-                    .map_err(map_host_error)?;
-                let expected = context
-                    .cursor
-                    .take()
-                    .ok_or(ChatError::ConversationConflict)?;
-                self.database
-                    .reset_feat134_after_stream_change(session_id, context.turn_id, expected)
-                    .await?;
-                sink.publish_artifact_resync_required(
-                    session_id,
-                    context.turn_id,
-                    ArtifactResyncReason::SequenceGap,
-                )?;
-                stream
-            }
-            Err(error) => return Err(map_host_error(error)),
-        };
-        let hydration = if context.cursor.is_some() {
-            Some(hydration)
-        } else {
-            None
-        };
-        let mut reducer = Feat134TurnReducer::new(context, hydration)?;
-        loop {
-            let next_event = if replay_must_supply_terminal {
-                match tokio::time::timeout(
-                    ORPHANED_TERMINAL_REPLAY_GRACE,
-                    stream.next_stream_event(),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        self.database
-                            .finalize_orphaned_turn_without_stream(
-                                reducer.session_id(),
-                                reducer.local_turn_id(),
-                                reducer.runtime_turn_id(),
-                                unix_seconds()?,
-                            )
-                            .await?;
-                        sink.publish_artifact_resync_required(
-                            reducer.session_id(),
-                            reducer.local_turn_id(),
-                            ArtifactResyncReason::ProtocolError,
-                        )?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                stream.next_stream_event().await
-            };
-            let event = next_event.map_err(map_host_error)?.ok_or_else(|| {
-                let _ = sink.publish_artifact_resync_required(
-                    session_id,
-                    reducer.local_turn_id(),
-                    ArtifactResyncReason::ProtocolError,
-                );
-                ChatError::OrchestrationUnavailable
-            })?;
-            match event {
-                HostStreamEvent::Ordinary(event) => {
-                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
-                    let observed_at_ms = unix_millis()?;
-                    let (projection, projection_limit) = match self
-                        .reduce_and_persist_feat134_event(&mut reducer, event, observed_at_ms)
-                        .await
-                    {
-                        Ok(None) => continue,
-                        Ok(Some(result)) => result,
-                        Err(error) => {
-                            let _ = sink.publish_artifact_resync_required(
-                                session_id,
-                                reducer.local_turn_id(),
-                                resync_reason,
-                            );
-                            return Err(error);
-                        }
-                    };
-                    sink.publish_feat134(projection.clone())?;
-                    sink.publish(feat134_legacy_projection(&projection))?;
-                    if projection.terminal.is_some() {
-                        if projection_limit {
-                            // Best-effort normal Host control; local fail-closed state is already
-                            // durable and never depends on this request succeeding.
-                            let _ = host
-                                .interrupt_turn(
-                                    agent_session_id,
-                                    runtime_turn_id,
-                                    &HostTrace {
-                                        request_id: Some(projection.cursor.event_id),
-                                        ..HostTrace::default()
-                                    },
-                                )
-                                .await;
-                        }
-                        return Ok(());
-                    }
-                }
-                HostStreamEvent::Artifact(envelope) => {
-                    let artifact = decode_artifact_event_envelope_v3(
-                        &envelope,
-                        reducer.agent_session_id(),
-                        reducer.runtime_turn_id(),
-                        reducer.session_id(),
-                        reducer.local_turn_id(),
-                    )
-                    .inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id(),
-                            ArtifactResyncReason::ProtocolError,
-                        );
-                    })?;
-                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
-                    if !reducer.observe_artifact(&envelope).inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id(),
-                            resync_reason,
-                        );
-                    })? {
-                        continue;
-                    }
-                    let cursor_progress = reducer.progress()?;
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    let runtime_transition = match &artifact {
-                        ArtifactEventV3::Started(identity) => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Announced,
-                        ),
-                        ArtifactEventV3::Progress { identity, .. } => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Progress,
-                        ),
-                        ArtifactEventV3::Completed(manifest) => (
-                            manifest.artifact_id,
-                            manifest.kind,
-                            manifest.ordinal,
-                            Feat128S10dArtifactStage::Ready,
-                        ),
-                        ArtifactEventV3::Failed { .. } => {
-                            return Err(ChatError::ConversationConflict)
-                        }
-                    };
-                    match artifact {
-                        ArtifactEventV3::Completed(manifest) => {
-                            artifact_transfers
-                                .transfer_completed_with_cursor(manifest, cursor_progress)
-                                .await?;
-                        }
-                        artifact => {
-                            self.database
-                                .commit_artifact_event_progress(cursor_progress, artifact)
-                                .await?;
-                        }
-                    }
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    feat128_s10d_record_native_artifact(
-                        runtime_transition.0,
-                        runtime_transition.1,
-                        runtime_transition.2,
-                        runtime_transition.3,
-                    )
-                    .map_err(|_| ChatError::ConversationConflict)?;
-                    sink.publish_artifact_changed(
-                        session_id,
-                        reducer.local_turn_id(),
-                        envelope.event_id,
-                    )?;
-                }
-            }
-        }
-    }
-
-    async fn stream_active_turn_v5(
-        &self,
-        session_id: Uuid,
-        sink: &dyn TurnProjectionSink,
-        artifact_transfers: &ArtifactTransferService,
-    ) -> Result<(), ChatError> {
-        self.stream_active_turn_v5_or_v6(session_id, sink, artifact_transfers, 5)
-            .await
-    }
-
-    async fn stream_active_turn_v6(
-        &self,
-        session_id: Uuid,
-        sink: &dyn TurnProjectionSink,
-        artifact_transfers: &ArtifactTransferService,
-    ) -> Result<(), ChatError> {
-        self.stream_active_turn_v5_or_v6(session_id, sink, artifact_transfers, 6)
-            .await
-    }
-
-    async fn stream_active_turn_v5_or_v6(
-        &self,
-        session_id: Uuid,
-        sink: &dyn TurnProjectionSink,
-        artifact_transfers: &ArtifactTransferService,
-        schema_version: u8,
-    ) -> Result<(), ChatError> {
-        if !matches!(schema_version, 5 | 6) {
-            return Err(ChatError::InvalidConfiguration);
-        }
-        artifact_transfers
-            .recover_pending_acknowledgements()
-            .await?;
-        let mut context = self.database.active_turn_context(session_id).await?;
-        let hydration = if schema_version == 6 {
-            self.database
-                .load_feat137_hydration(context.turn_id)
-                .await?
-        } else {
-            self.database
-                .load_feat136_hydration(context.turn_id)
-                .await?
-        };
-        let cursor = context
-            .cursor
-            .as_ref()
-            .map(|cursor| HostEventCursor::new(cursor.stream_id, cursor.sequence))
-            .transpose()
-            .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        let agent_session_id = context.agent_session_id;
-        let runtime_turn_id = context.runtime_turn_id;
-        let host = self.host()?;
-        let host_snapshot = host
-            .get_session(context.agent_session_id)
-            .await
-            .map_err(map_host_error)?;
-        if host_snapshot.task_id != context.task_id
-            || host_snapshot.agent_session_id != context.agent_session_id
-            || host_snapshot.codex_thread_id != Some(context.codex_thread_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let replay_must_supply_terminal = matches!(
-            host_snapshot.state,
-            HostSessionState::Idle | HostSessionState::Failed
-        ) && host_snapshot.active_turn_id.is_none();
-        let open_stream = async {
-            if schema_version == 6 {
-                host.open_event_stream_v6(context.agent_session_id, cursor)
-                    .await
-            } else {
-                host.open_event_stream_v5(context.agent_session_id, cursor)
-                    .await
-            }
-        };
-        let mut stream = match open_stream.await {
-            Ok(stream) => stream,
-            Err(error)
-                if cursor.is_some() && error.code() == Some(HostErrorCode::EventStreamChanged) =>
-            {
-                let stream = if schema_version == 6 {
-                    host.open_event_stream_v6(context.agent_session_id, None)
-                        .await
-                } else {
-                    host.open_event_stream_v5(context.agent_session_id, None)
-                        .await
-                }
-                .map_err(map_host_error)?;
-                let expected = context
-                    .cursor
-                    .take()
-                    .ok_or(ChatError::ConversationConflict)?;
-                self.database
-                    .reset_feat134_after_stream_change(session_id, context.turn_id, expected)
-                    .await?;
-                sink.publish_artifact_resync_required(
-                    session_id,
-                    context.turn_id,
-                    ArtifactResyncReason::SequenceGap,
-                )?;
-                stream
-            }
-            Err(error) => return Err(map_host_error(error)),
-        };
-        let hydration = if context.cursor.is_some() {
-            Some(hydration)
-        } else {
-            None
-        };
-        let mut reducer = Feat136TurnReducer::new(context, hydration)?;
-        loop {
-            let next_event = if replay_must_supply_terminal {
-                match tokio::time::timeout(
-                    ORPHANED_TERMINAL_REPLAY_GRACE,
-                    stream.next_stream_event(),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        self.database
-                            .finalize_orphaned_turn_without_stream(
-                                reducer.session_id(),
-                                reducer.local_turn_id(),
-                                reducer.runtime_turn_id(),
-                                unix_seconds()?,
-                            )
-                            .await?;
-                        sink.publish_artifact_resync_required(
-                            reducer.session_id(),
-                            reducer.local_turn_id(),
-                            ArtifactResyncReason::ProtocolError,
-                        )?;
-                        return Ok(());
-                    }
-                }
-            } else {
-                stream.next_stream_event().await
-            };
-            let event = feat136_stream_event_or_resync(
-                next_event,
-                sink,
-                session_id,
-                reducer.local_turn_id(),
-            )?;
-            match event {
-                HostStreamEvent::Ordinary(event) => {
-                    let observed_cursor = StoredEventCursor {
-                        stream_id: event.cursor.stream_id,
-                        sequence: event.cursor.sequence,
-                        event_id: event.event_id,
-                    };
-                    match self
-                        .database
-                        .classify_feat136_observed_event(
-                            session_id,
-                            reducer.local_turn_id(),
-                            observed_cursor,
-                            event.event_type.clone(),
-                            event.turn_id.is_some(),
-                        )
-                        .await?
-                    {
-                        Feat136ObservedEventDisposition::Duplicate => continue,
-                        Feat136ObservedEventDisposition::Conflict => {
-                            sink.publish_artifact_resync_required(
-                                session_id,
-                                reducer.local_turn_id(),
-                                ArtifactResyncReason::ProtocolError,
-                            )?;
-                            return Err(ChatError::OrchestrationUnavailable);
-                        }
-                        Feat136ObservedEventDisposition::New => {}
-                    }
-                    let resync_reason = reducer.resync_reason(event.cursor, event.event_id);
-                    let observed_at_ms = unix_millis()?;
-                    let approval = if schema_version == 6 {
-                        ApprovalProjection::from_event(
-                            &event,
-                            session_id,
-                            reducer.local_turn_id(),
-                            reducer.runtime_turn_id(),
-                        )?
-                    } else {
-                        None
-                    };
-                    let (projection, approval, projection_limit) = if schema_version == 6 {
-                        match self
-                            .reduce_and_persist_feat137_event(
-                                &mut reducer,
-                                event,
-                                approval,
-                                observed_at_ms,
-                            )
-                            .await
-                        {
-                            Ok(None) => continue,
-                            Ok(Some(result)) => result,
-                            Err(error) => {
-                                let _ = sink.publish_artifact_resync_required(
-                                    session_id,
-                                    reducer.local_turn_id(),
-                                    resync_reason,
-                                );
-                                return Err(error);
-                            }
-                        }
-                    } else {
-                        match self
-                            .reduce_and_persist_feat136_event(&mut reducer, event, observed_at_ms)
-                            .await
-                        {
-                            Ok(None) => continue,
-                            Ok(Some((projection, projection_limit))) => {
-                                (projection, None, projection_limit)
-                            }
-                            Err(error) => {
-                                let _ = sink.publish_artifact_resync_required(
-                                    session_id,
-                                    reducer.local_turn_id(),
-                                    resync_reason,
-                                );
-                                return Err(error);
-                            }
-                        }
-                    };
-                    if schema_version == 6 {
-                        sink.publish_feat137(projection.clone(), approval)?;
-                    } else {
-                        sink.publish_feat136(projection.clone())?;
-                    }
-                    sink.publish(feat134_legacy_projection(&projection))?;
-                    if projection.terminal.is_some() {
-                        if projection_limit {
-                            // Best-effort normal Host control; local fail-closed state is already
-                            // durable and never depends on this request succeeding.
-                            let _ = host
-                                .interrupt_turn(
-                                    agent_session_id,
-                                    runtime_turn_id,
-                                    &HostTrace {
-                                        request_id: Some(projection.cursor.event_id),
-                                        ..HostTrace::default()
-                                    },
-                                )
-                                .await;
-                        }
-                        return Ok(());
-                    }
-                }
-                HostStreamEvent::Artifact(envelope) => {
-                    let artifact = decode_artifact_event_envelope_v3(
-                        &envelope,
-                        reducer.agent_session_id(),
-                        reducer.runtime_turn_id(),
-                        reducer.session_id(),
-                        reducer.local_turn_id(),
-                    )
-                    .inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id(),
-                            ArtifactResyncReason::ProtocolError,
-                        );
-                    })?;
-                    let resync_reason = reducer.resync_reason(envelope.cursor, envelope.event_id);
-                    if !reducer.observe_artifact(&envelope).inspect_err(|_| {
-                        let _ = sink.publish_artifact_resync_required(
-                            session_id,
-                            reducer.local_turn_id(),
-                            resync_reason,
-                        );
-                    })? {
-                        continue;
-                    }
-                    let cursor_progress = reducer.progress()?;
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    let runtime_transition = match &artifact {
-                        ArtifactEventV3::Started(identity) => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Announced,
-                        ),
-                        ArtifactEventV3::Progress { identity, .. } => (
-                            identity.artifact_id,
-                            identity.kind,
-                            identity.ordinal,
-                            Feat128S10dArtifactStage::Progress,
-                        ),
-                        ArtifactEventV3::Completed(manifest) => (
-                            manifest.artifact_id,
-                            manifest.kind,
-                            manifest.ordinal,
-                            Feat128S10dArtifactStage::Ready,
-                        ),
-                        ArtifactEventV3::Failed { .. } => {
-                            return Err(ChatError::ConversationConflict)
-                        }
-                    };
-                    match artifact {
-                        ArtifactEventV3::Completed(manifest) => {
-                            artifact_transfers
-                                .transfer_completed_with_cursor(manifest, cursor_progress)
-                                .await?;
-                        }
-                        artifact => {
-                            self.database
-                                .commit_artifact_event_progress(cursor_progress, artifact)
-                                .await?;
-                        }
-                    }
-                    #[cfg(feature = "feat128-s10-runtime")]
-                    feat128_s10d_record_native_artifact(
-                        runtime_transition.0,
-                        runtime_transition.1,
-                        runtime_transition.2,
-                        runtime_transition.3,
-                    )
-                    .map_err(|_| ChatError::ConversationConflict)?;
-                    sink.publish_artifact_changed(
-                        session_id,
-                        reducer.local_turn_id(),
-                        envelope.event_id,
-                    )?;
-                }
-            }
-        }
-    }
-}
-
-fn feat134_legacy_projection(projection: &Feat134Projection) -> LiveTurnProjection {
-    let reasoning = projection
-        .items
-        .iter()
-        .filter(|item| item.item_type == "reasoning")
-        .map(|item| LiveReasoningProjection {
-            item_id: item.item_id.clone(),
-            status: item.reasoning_status.map(|status| match status {
-                TimelineReasoningStatus::Complete => ReasoningStatus::Complete,
-                TimelineReasoningStatus::Incomplete => ReasoningStatus::Incomplete,
-                TimelineReasoningStatus::Unavailable => ReasoningStatus::Unavailable,
-            }),
-            parts: item
-                .reasoning_parts
-                .iter()
-                .map(|part| ReasoningPart {
-                    content_index: part.content_index,
-                    text: part.text.clone(),
-                })
-                .collect(),
-        })
-        .collect();
-    LiveTurnProjection {
-        session_id: projection.session_id,
-        turn_id: projection.turn_id,
-        assistant_text: projection.assistant_text.clone(),
-        reasoning,
-        terminal: projection.terminal.is_some(),
-        terminal_status: projection
-            .terminal
-            .as_ref()
-            .map(|terminal| terminal.status.to_owned()),
-    }
-}
-
-struct ReasoningAccumulator {
-    item_id: String,
-    item_ordinal: usize,
-    parts: Vec<String>,
-    finalized: Option<FinalizedReasoning>,
-    finalized_at_ms: i64,
-}
-
-struct FinalizedReasoning {
-    status: ReasoningStatus,
-    reason_code: Option<String>,
-    parts: Vec<ReasoningPart>,
-}
-
-pub struct TurnEventReducer {
-    session_id: Uuid,
-    local_turn_id: Uuid,
-    task_id: Uuid,
-    agent_session_id: Uuid,
-    codex_thread_id: Uuid,
-    runtime_turn_id: Uuid,
-    expected_stream: Option<Uuid>,
-    last_sequence: u64,
-    last_event_id: Option<Uuid>,
-    assistant_item_id: Option<String>,
-    assistant_text: String,
-    reasoning: Vec<ReasoningAccumulator>,
-    terminal: bool,
-    terminal_status: Option<String>,
-}
-
-impl Debug for TurnEventReducer {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("TurnEventReducer")
-            .field("session_id", &self.session_id)
-            .field("local_turn_id", &self.local_turn_id)
-            .field("task_id", &self.task_id)
-            .field("agent_session_id", &self.agent_session_id)
-            .field("codex_thread_id", &self.codex_thread_id)
-            .field("runtime_turn_id", &self.runtime_turn_id)
-            .field("expected_stream", &self.expected_stream)
-            .field("last_sequence", &self.last_sequence)
-            .field("assistant_utf8_bytes", &self.assistant_text.len())
-            .field("reasoning_item_count", &self.reasoning.len())
-            .field("terminal", &self.terminal)
-            .finish()
-    }
-}
-
-impl TurnEventReducer {
-    pub fn new(context: ActiveTurnContext) -> Result<Self, ChatError> {
-        if context.assistant_text.len() > MAX_ASSISTANT_BYTES
-            || context.assistant_text.contains('\0')
-        {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        let (expected_stream, last_sequence, last_event_id) = match context.cursor {
-            Some(cursor) => (
-                Some(cursor.stream_id),
-                cursor.sequence,
-                Some(cursor.event_id),
-            ),
-            None => (None, 0, None),
-        };
-        Ok(Self {
-            session_id: context.session_id,
-            local_turn_id: context.turn_id,
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            codex_thread_id: context.codex_thread_id,
-            runtime_turn_id: context.runtime_turn_id,
-            expected_stream,
-            last_sequence,
-            last_event_id,
-            assistant_item_id: None,
-            assistant_text: context.assistant_text,
-            reasoning: Vec::new(),
-            terminal: false,
-            terminal_status: None,
-        })
-    }
-
-    pub fn apply(
-        &mut self,
-        event: HostEvent,
-        observed_at_ms: i64,
-    ) -> Result<ReducerOutcome, ChatError> {
-        if observed_at_ms < 0 || self.terminal {
-            return Err(ChatError::ConversationConflict);
-        }
-        if event.task_id != self.task_id
-            || event.agent_session_id != self.agent_session_id
-            || event.codex_thread_id != self.codex_thread_id
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        if event.cursor.sequence == self.last_sequence
-            && self.last_event_id == Some(event.event_id)
-            && self.expected_stream == Some(event.cursor.stream_id)
-        {
-            return Ok(ReducerOutcome::Duplicate);
-        }
-        let expected_sequence = self
-            .last_sequence
-            .checked_add(1)
-            .ok_or(ChatError::OrchestrationUnavailable)?;
-        if event.cursor.sequence != expected_sequence
-            || self
-                .expected_stream
-                .is_some_and(|stream| stream != event.cursor.stream_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        if requires_current_turn(&event.kind) && event.turn_id != Some(self.runtime_turn_id) {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        match event.kind {
-            HostEventKind::AgentMessageDelta { delta } => {
-                self.bind_assistant_item(event.item_id)?;
-                let new_len = self
-                    .assistant_text
-                    .len()
-                    .checked_add(delta.len())
-                    .ok_or(ChatError::OrchestrationUnavailable)?;
-                if new_len > MAX_ASSISTANT_BYTES || delta.contains('\0') {
-                    return Err(ChatError::OrchestrationUnavailable);
-                }
-                self.assistant_text.push_str(&delta);
-            }
-            HostEventKind::ItemCompleted {
-                item_type, text, ..
-            } if item_type == "agent_message" => {
-                self.bind_assistant_item(event.item_id)?;
-                if let Some(text) = text {
-                    if text.len() > MAX_ASSISTANT_BYTES || text.contains('\0') {
-                        return Err(ChatError::OrchestrationUnavailable);
-                    }
-                    if self.assistant_text.is_empty() {
-                        self.assistant_text = text;
-                    } else if self.assistant_text != text {
-                        return Err(ChatError::OrchestrationUnavailable);
-                    }
-                }
-            }
-            HostEventKind::ReasoningTextDelta {
-                content_index,
-                delta,
-            } => {
-                let item_id = event.item_id.ok_or(ChatError::OrchestrationUnavailable)?;
-                self.append_reasoning_delta(item_id, content_index, delta)?;
-            }
-            HostEventKind::ReasoningTextFinalized {
-                status,
-                contents,
-                reason,
-            } => {
-                let item_id = event.item_id.ok_or(ChatError::OrchestrationUnavailable)?;
-                self.finalize_reasoning(item_id, status, contents, reason, observed_at_ms)?;
-            }
-            HostEventKind::TurnCompleted { status, .. } => {
-                let cursor = StoredEventCursor {
-                    stream_id: event.cursor.stream_id,
-                    sequence: event.cursor.sequence,
-                    event_id: event.event_id,
-                };
-                let (reasoning_status, reasoning_reason_code, reasoning_items) =
-                    self.finish_reasoning(status, observed_at_ms)?;
-                self.terminal = true;
-                self.terminal_status = Some(turn_status_text(status).to_owned());
-                self.expected_stream = Some(event.cursor.stream_id);
-                self.last_sequence = event.cursor.sequence;
-                self.last_event_id = Some(event.event_id);
-                return Ok(ReducerOutcome::Terminal(TerminalTurnCommit {
-                    local_turn_id: self.local_turn_id,
-                    terminal_status: turn_status_text(status).to_owned(),
-                    terminal_at: observed_at_ms / 1000,
-                    assistant_text: self.assistant_text.clone(),
-                    cursor,
-                    reasoning_status,
-                    reasoning_reason_code,
-                    reasoning_items,
-                }));
-            }
-            HostEventKind::ThreadStarted { .. }
-            | HostEventKind::TurnStarted
-            | HostEventKind::TurnPlanUpdated { .. }
-            | HostEventKind::ItemStarted { .. }
-            | HostEventKind::ItemCompleted { .. }
-            | HostEventKind::CommandStarted { .. }
-            | HostEventKind::CommandOutputDelta { .. }
-            | HostEventKind::CommandCompleted { .. }
-            | HostEventKind::ToolStarted { .. }
-            | HostEventKind::ToolProgress { .. }
-            | HostEventKind::ToolCompleted { .. }
-            | HostEventKind::ApprovalRequested(_)
-            | HostEventKind::ApprovalResolved(_)
-            | HostEventKind::Error { .. }
-            | HostEventKind::Warning { .. }
-            | HostEventKind::Unknown => {}
-        }
-        self.expected_stream = Some(event.cursor.stream_id);
-        self.last_sequence = event.cursor.sequence;
-        self.last_event_id = Some(event.event_id);
-        Ok(ReducerOutcome::Progress)
-    }
-
-    pub fn observe_artifact(
-        &mut self,
-        event: &HostArtifactEventV3,
-    ) -> Result<ReducerOutcome, ChatError> {
-        if self.terminal {
-            return Err(ChatError::ConversationConflict);
-        }
-        if event.task_id != self.task_id
-            || event.agent_session_id != self.agent_session_id
-            || event.codex_thread_id != self.codex_thread_id
-            || event.turn_id != self.runtime_turn_id
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        if event.cursor.sequence == self.last_sequence
-            && self.last_event_id == Some(event.event_id)
-            && self.expected_stream == Some(event.cursor.stream_id)
-        {
-            return Ok(ReducerOutcome::Duplicate);
-        }
-        let expected_sequence = self
-            .last_sequence
-            .checked_add(1)
-            .ok_or(ChatError::OrchestrationUnavailable)?;
-        if event.cursor.sequence != expected_sequence
-            || self
-                .expected_stream
-                .is_some_and(|stream| stream != event.cursor.stream_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        self.expected_stream = Some(event.cursor.stream_id);
-        self.last_sequence = event.cursor.sequence;
-        self.last_event_id = Some(event.event_id);
-        Ok(ReducerOutcome::Progress)
-    }
-
-    fn resync_reason(&self, cursor: HostEventCursor, event_id: Uuid) -> ArtifactResyncReason {
-        if cursor.sequence == self.last_sequence
-            && self.last_event_id == Some(event_id)
-            && self.expected_stream == Some(cursor.stream_id)
-        {
-            return ArtifactResyncReason::ProtocolError;
-        }
-        if cursor.sequence != self.last_sequence.checked_add(1).unwrap_or_default()
-            || self
-                .expected_stream
-                .is_some_and(|stream| stream != cursor.stream_id)
-        {
-            ArtifactResyncReason::SequenceGap
-        } else {
-            ArtifactResyncReason::ProtocolError
-        }
-    }
-
-    pub fn progress(&self) -> Result<TurnProgress, ChatError> {
-        Ok(TurnProgress {
-            local_turn_id: self.local_turn_id,
-            assistant_text: self.assistant_text.clone(),
-            cursor: StoredEventCursor {
-                stream_id: self
-                    .expected_stream
-                    .ok_or(ChatError::ConversationConflict)?,
-                sequence: self.last_sequence,
-                event_id: self.last_event_id.ok_or(ChatError::ConversationConflict)?,
-            },
-        })
-    }
-
-    pub fn projection(&self, terminal: bool) -> Result<LiveTurnProjection, ChatError> {
-        if terminal != self.terminal {
-            return Err(ChatError::ConversationConflict);
-        }
-        let reasoning = self
-            .reasoning
-            .iter()
-            .map(|item| {
-                let (status, parts) = match &item.finalized {
-                    Some(finalized) => (Some(finalized.status), finalized.parts.clone()),
-                    None => (
-                        None,
-                        item.parts
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, text)| !text.is_empty())
-                            .map(|(content_index, text)| ReasoningPart {
-                                content_index,
-                                text: text.clone(),
-                            })
-                            .collect(),
-                    ),
-                };
-                LiveReasoningProjection {
-                    item_id: item.item_id.clone(),
-                    status,
-                    parts,
-                }
-            })
-            .collect();
-        Ok(LiveTurnProjection {
-            session_id: self.session_id,
-            turn_id: self.local_turn_id,
-            assistant_text: self.assistant_text.clone(),
-            reasoning,
-            terminal,
-            terminal_status: self.terminal_status.clone(),
-        })
-    }
-
-    fn bind_assistant_item(&mut self, item_id: Option<String>) -> Result<(), ChatError> {
-        let item_id = item_id.ok_or(ChatError::OrchestrationUnavailable)?;
-        if self
-            .assistant_item_id
-            .as_ref()
-            .is_some_and(|existing| existing != &item_id)
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        self.assistant_item_id = Some(item_id);
-        Ok(())
-    }
-
-    fn append_reasoning_delta(
-        &mut self,
-        item_id: String,
-        content_index: usize,
-        delta: String,
-    ) -> Result<(), ChatError> {
-        if delta.is_empty()
-            || delta.contains('\0')
-            || content_index >= MAX_REASONING_PARTS
-            || delta.len() > 16 * 1024
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let item = self.reasoning_item(item_id)?;
-        if item.finalized.is_some() || content_index > item.parts.len() {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        if content_index == item.parts.len() {
-            item.parts.push(String::new());
-        }
-        let current_part_len = item
-            .parts
-            .get(content_index)
-            .ok_or(ChatError::OrchestrationUnavailable)?
-            .len();
-        let current_item_len = item.parts.iter().map(String::len).sum::<usize>();
-        let new_part_len = current_part_len
-            .checked_add(delta.len())
-            .ok_or(ChatError::OrchestrationUnavailable)?;
-        let new_item_len = current_item_len
-            .checked_add(delta.len())
-            .ok_or(ChatError::OrchestrationUnavailable)?;
-        if new_part_len > MAX_REASONING_PART_BYTES || new_item_len > MAX_REASONING_ITEM_BYTES {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let part = item
-            .parts
-            .get_mut(content_index)
-            .ok_or(ChatError::OrchestrationUnavailable)?;
-        part.push_str(&delta);
-        Ok(())
-    }
-
-    fn finalize_reasoning(
-        &mut self,
-        item_id: String,
-        status: HostReasoningStatus,
-        contents: Vec<HostReasoningPart>,
-        reason: Option<HostReasoningReason>,
-        observed_at_ms: i64,
-    ) -> Result<(), ChatError> {
-        let item = self.reasoning_item(item_id)?;
-        if item.finalized.is_some() {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let snapshot = contents
-            .into_iter()
-            .map(|part| ReasoningPart {
-                content_index: part.content_index,
-                text: part.text,
-            })
-            .collect::<Vec<_>>();
-        let snapshot_bytes = snapshot.iter().map(|part| part.text.len()).sum::<usize>();
-        if snapshot.len() > MAX_REASONING_PARTS || snapshot_bytes > MAX_REASONING_ITEM_BYTES {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let buffered = item
-            .parts
-            .iter()
-            .enumerate()
-            .map(|(content_index, text)| ReasoningPart {
-                content_index,
-                text: text.clone(),
-            })
-            .collect::<Vec<_>>();
-        let reconciled = buffered.is_empty() || buffered == snapshot;
-        let (status, reason_code) = match status {
-            HostReasoningStatus::Complete if reconciled => (ReasoningStatus::Complete, None),
-            HostReasoningStatus::Complete => (
-                ReasoningStatus::Incomplete,
-                Some("protocol_error".to_owned()),
-            ),
-            HostReasoningStatus::Incomplete => (
-                ReasoningStatus::Incomplete,
-                Some(reason_text(reason.ok_or(ChatError::OrchestrationUnavailable)?).to_owned()),
-            ),
-            HostReasoningStatus::Unavailable => (
-                ReasoningStatus::Unavailable,
-                Some(reason_text(reason.ok_or(ChatError::OrchestrationUnavailable)?).to_owned()),
-            ),
-        };
-        item.finalized = Some(FinalizedReasoning {
-            status,
-            reason_code,
-            parts: snapshot,
-        });
-        item.finalized_at_ms = observed_at_ms;
-        Ok(())
-    }
-
-    fn reasoning_item(&mut self, item_id: String) -> Result<&mut ReasoningAccumulator, ChatError> {
-        if let Some(index) = self
-            .reasoning
-            .iter()
-            .position(|item| item.item_id == item_id)
-        {
-            return self
-                .reasoning
-                .get_mut(index)
-                .ok_or(ChatError::OrchestrationUnavailable);
-        }
-        if self.reasoning.len() >= MAX_REASONING_ITEMS {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let item_ordinal = self.reasoning.len();
-        self.reasoning.push(ReasoningAccumulator {
-            item_id,
-            item_ordinal,
-            parts: Vec::new(),
-            finalized: None,
-            finalized_at_ms: 0,
-        });
-        self.reasoning
-            .last_mut()
-            .ok_or(ChatError::OrchestrationUnavailable)
-    }
-
-    fn finish_reasoning(
-        &mut self,
-        terminal_status: HostTurnStatus,
-        observed_at_ms: i64,
-    ) -> Result<(ReasoningStatus, Option<String>, Vec<ReasoningItem>), ChatError> {
-        if self.reasoning.is_empty() {
-            return Ok((
-                ReasoningStatus::Unavailable,
-                Some("reasoning_not_emitted".to_owned()),
-                Vec::new(),
-            ));
-        }
-        let missing_reason = match terminal_status {
-            HostTurnStatus::Completed => "protocol_error",
-            HostTurnStatus::Interrupted => "turn_interrupted",
-            HostTurnStatus::Failed => "runtime_error",
-        };
-        let mut items = Vec::with_capacity(self.reasoning.len());
-        for accumulator in &mut self.reasoning {
-            let finalized = match accumulator.finalized.take() {
-                Some(mut finalized) => {
-                    if terminal_status != HostTurnStatus::Completed
-                        && finalized.status == ReasoningStatus::Complete
-                    {
-                        finalized.status = ReasoningStatus::Incomplete;
-                        finalized.reason_code = Some(missing_reason.to_owned());
-                    }
-                    finalized
-                }
-                None if terminal_status == HostTurnStatus::Interrupted
-                    && !accumulator.parts.is_empty() =>
-                {
-                    FinalizedReasoning {
-                        status: ReasoningStatus::Incomplete,
-                        reason_code: Some("turn_interrupted".to_owned()),
-                        parts: accumulator
-                            .parts
-                            .iter()
-                            .enumerate()
-                            .map(|(content_index, text)| ReasoningPart {
-                                content_index,
-                                text: text.clone(),
-                            })
-                            .collect(),
-                    }
-                }
-                None => FinalizedReasoning {
-                    status: ReasoningStatus::Unavailable,
-                    reason_code: Some(missing_reason.to_owned()),
-                    parts: Vec::new(),
-                },
-            };
-            let finalized_at_ms = if accumulator.finalized_at_ms == 0 {
-                observed_at_ms
-            } else {
-                accumulator.finalized_at_ms
-            };
-            items.push(ReasoningItem {
-                item_id: accumulator.item_id.clone(),
-                item_ordinal: accumulator.item_ordinal,
-                status: finalized.status,
-                reason_code: finalized.reason_code,
-                finalized_at_ms,
-                parts: finalized.parts,
-            });
-        }
-        let total_bytes = items
-            .iter()
-            .flat_map(|item| &item.parts)
-            .map(|part| part.text.len())
-            .sum::<usize>();
-        if total_bytes > MAX_REASONING_TURN_BYTES {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        let (status, reason) = if let Some(item) = items
-            .iter()
-            .find(|item| item.status == ReasoningStatus::Unavailable)
-        {
-            (ReasoningStatus::Unavailable, item.reason_code.clone())
-        } else if let Some(item) = items
-            .iter()
-            .find(|item| item.status == ReasoningStatus::Incomplete)
-        {
-            (ReasoningStatus::Incomplete, item.reason_code.clone())
-        } else {
-            (ReasoningStatus::Complete, None)
-        };
-        Ok((status, reason, items))
-    }
-}
-
-fn requires_current_turn(kind: &HostEventKind) -> bool {
-    matches!(
-        kind,
-        HostEventKind::TurnStarted
-            | HostEventKind::ItemStarted { .. }
-            | HostEventKind::AgentMessageDelta { .. }
-            | HostEventKind::ReasoningTextDelta { .. }
-            | HostEventKind::ReasoningTextFinalized { .. }
-            | HostEventKind::ItemCompleted { .. }
-            | HostEventKind::ApprovalRequested(_)
-            | HostEventKind::ApprovalResolved(_)
-            | HostEventKind::TurnCompleted { .. }
-            | HostEventKind::Error { .. }
-    )
-}
-
-fn reason_text(reason: HostReasoningReason) -> &'static str {
-    match reason {
-        HostReasoningReason::ReasoningNotEmitted => "reasoning_not_emitted",
-        HostReasoningReason::TurnInterrupted => "turn_interrupted",
-        HostReasoningReason::StreamGap => "stream_gap",
-        HostReasoningReason::RuntimeError => "runtime_error",
-        HostReasoningReason::LimitExceeded => "limit_exceeded",
-        HostReasoningReason::ProtocolError => "protocol_error",
-        HostReasoningReason::HostShutdown => "host_shutdown",
-    }
-}
-
-fn turn_status_text(status: HostTurnStatus) -> &'static str {
-    match status {
-        HostTurnStatus::Completed => "completed",
-        HostTurnStatus::Interrupted => "interrupted",
-        HostTurnStatus::Failed => "failed",
+        self.stream_native_conversation(session_id, sink).await
     }
 }
 
 fn map_host_error(_error: HostBridgeError) -> ChatError {
     ChatError::OrchestrationUnavailable
-}
-
-fn feat136_stream_event_or_resync(
-    next_event: Result<Option<HostStreamEvent>, HostBridgeError>,
-    sink: &dyn TurnProjectionSink,
-    session_id: Uuid,
-    turn_id: Uuid,
-) -> Result<HostStreamEvent, ChatError> {
-    match next_event {
-        Ok(Some(event)) => Ok(event),
-        Ok(None) => {
-            sink.publish_artifact_resync_required(
-                session_id,
-                turn_id,
-                ArtifactResyncReason::ProtocolError,
-            )?;
-            Err(ChatError::OrchestrationUnavailable)
-        }
-        Err(error) => {
-            sink.publish_artifact_resync_required(
-                session_id,
-                turn_id,
-                ArtifactResyncReason::ProtocolError,
-            )?;
-            Err(map_host_error(error))
-        }
-    }
 }
 
 fn map_cleanup_surface(status: HostCleanupSurfaceStatus) -> CleanupSurfaceState {
@@ -4256,13 +2506,6 @@ fn unix_seconds() -> Result<i64, ChatError> {
         .map_err(|_| ChatError::OrchestrationUnavailable)
 }
 
-fn unix_millis() -> Result<i64, ChatError> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| ChatError::OrchestrationUnavailable)?;
-    i64::try_from(duration.as_millis()).map_err(|_| ChatError::OrchestrationUnavailable)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4277,12 +2520,10 @@ mod tests {
         synthetic_authorization_code_tokens, NativeAuthConfig, NativeAuthRuntime, OidcClient,
     };
     #[cfg(target_os = "macos")]
-    use sha2::Digest;
-    #[cfg(target_os = "macos")]
     use std::fs;
     #[cfg(target_os = "macos")]
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+
     #[cfg(target_os = "macos")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     #[cfg(target_os = "macos")]
@@ -4307,674 +2548,6 @@ mod tests {
         assert!(coordinator.is_finished());
         assert!(format!("{coordinator:?}").contains("running: false"));
         coordinator.stop().await.expect("finished task is reaped");
-    }
-
-    struct EventIdentity {
-        stream_id: Uuid,
-        task_id: Uuid,
-        agent_session_id: Uuid,
-        thread_id: Uuid,
-        turn_id: Uuid,
-    }
-
-    fn context() -> (ActiveTurnContext, EventIdentity) {
-        let identity = EventIdentity {
-            stream_id: Uuid::now_v7(),
-            task_id: Uuid::now_v7(),
-            agent_session_id: Uuid::now_v7(),
-            thread_id: Uuid::now_v7(),
-            turn_id: Uuid::now_v7(),
-        };
-        (
-            ActiveTurnContext {
-                session_id: identity.task_id,
-                task_id: identity.task_id,
-                turn_id: Uuid::now_v7(),
-                turn_operation_id: Uuid::now_v7(),
-                agent_session_id: identity.agent_session_id,
-                codex_thread_id: identity.thread_id,
-                runtime_turn_id: identity.turn_id,
-                assistant_text: String::new(),
-                cursor: None,
-            },
-            identity,
-        )
-    }
-
-    struct Feat136ResyncSink(AtomicUsize);
-
-    impl TurnProjectionSink for Feat136ResyncSink {
-        fn publish(&self, _projection: LiveTurnProjection) -> Result<(), ChatError> {
-            Ok(())
-        }
-
-        fn publish_artifact_resync_required(
-            &self,
-            _session_id: Uuid,
-            _turn_id: Uuid,
-            reason: ArtifactResyncReason,
-        ) -> Result<(), ChatError> {
-            assert_eq!(reason, ArtifactResyncReason::ProtocolError);
-            self.0.fetch_add(1, Ordering::Relaxed);
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn feat136_protocol_decoder_failure_requests_conservative_resync() {
-        let sink = Feat136ResyncSink(AtomicUsize::new(0));
-        let result = feat136_stream_event_or_resync(
-            Err(HostBridgeError::new(HostBridgeErrorKind::Protocol)),
-            &sink,
-            Uuid::now_v7(),
-            Uuid::now_v7(),
-        );
-        assert!(matches!(result, Err(ChatError::OrchestrationUnavailable)));
-        assert_eq!(sink.0.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn feat136_active_turn_stream_version_is_sticky_at_the_turn_boundary() {
-        assert_eq!(feat136_active_turn_stream_schema(None), Ok(5));
-        assert_eq!(feat136_active_turn_stream_schema(Some(4)), Ok(4));
-        assert_eq!(feat136_active_turn_stream_schema(Some(5)), Ok(5));
-        assert_eq!(
-            feat136_active_turn_stream_schema(Some(6)),
-            Err(ChatError::DatabaseUnavailable)
-        );
-    }
-
-    #[test]
-    fn feat137_active_turn_stream_version_is_sticky_at_the_turn_boundary() {
-        assert_eq!(feat137_active_turn_stream_schema(None), Ok(6));
-        assert_eq!(feat137_active_turn_stream_schema(Some(4)), Ok(4));
-        assert_eq!(feat137_active_turn_stream_schema(Some(5)), Ok(5));
-        assert_eq!(feat137_active_turn_stream_schema(Some(6)), Ok(6));
-        assert_eq!(
-            feat137_active_turn_stream_schema(Some(7)),
-            Err(ChatError::DatabaseUnavailable)
-        );
-    }
-
-    #[test]
-    fn feat137_subscription_snapshot_fails_closed_only_for_local_command_hydration_lag() {
-        let (context, identity) = context();
-        let approval_request_id = Uuid::now_v7();
-        let item_id = "command-approval";
-        let snapshot = HostPendingApprovalSnapshot {
-            stream_id: identity.stream_id,
-            snapshot_at: "2026-08-31T01:00:01Z".to_owned(),
-            pending: vec![crate::chat::feat137::HostPendingApproval {
-                approval_request_id,
-                task_id: identity.task_id,
-                agent_session_id: identity.agent_session_id,
-                codex_thread_id: identity.thread_id,
-                turn_id: identity.turn_id,
-                item_id: item_id.to_owned(),
-                requested_at: "2026-08-31T01:00:00Z".to_owned(),
-                expires_at: "2026-08-31T01:02:00Z".to_owned(),
-            }],
-        };
-
-        assert_eq!(
-            project_pending_approval_snapshot(
-                snapshot.clone(),
-                identity.agent_session_id,
-                Some((&context, &Feat134Hydration::default())),
-                PendingApprovalProjectionMode::Strict,
-            ),
-            Err(ChatError::OrchestrationUnavailable),
-        );
-        let lagged = project_pending_approval_snapshot(
-            snapshot.clone(),
-            identity.agent_session_id,
-            Some((&context, &Feat134Hydration::default())),
-            PendingApprovalProjectionMode::SubscriptionHandshake,
-        )
-        .unwrap();
-        assert_eq!(lagged.stream_id, identity.stream_id);
-        assert!(lagged.pending.is_empty());
-
-        let pre_context = project_pending_approval_snapshot(
-            snapshot.clone(),
-            identity.agent_session_id,
-            None,
-            PendingApprovalProjectionMode::SubscriptionHandshake,
-        )
-        .unwrap();
-        assert!(pre_context.pending.is_empty());
-        assert_eq!(
-            project_pending_approval_snapshot(
-                snapshot.clone(),
-                identity.agent_session_id,
-                None,
-                PendingApprovalProjectionMode::Strict,
-            ),
-            Err(ChatError::OrchestrationUnavailable),
-        );
-
-        let mut mismatched = snapshot.clone();
-        mismatched.pending[0].task_id = Uuid::now_v7();
-        assert_eq!(
-            project_pending_approval_snapshot(
-                mismatched,
-                identity.agent_session_id,
-                Some((&context, &Feat134Hydration::default())),
-                PendingApprovalProjectionMode::SubscriptionHandshake,
-            ),
-            Err(ChatError::OrchestrationUnavailable),
-        );
-        let mut mismatched_agent = snapshot.clone();
-        mismatched_agent.pending[0].agent_session_id = Uuid::now_v7();
-        assert_eq!(
-            project_pending_approval_snapshot(
-                mismatched_agent,
-                identity.agent_session_id,
-                None,
-                PendingApprovalProjectionMode::SubscriptionHandshake,
-            ),
-            Err(ChatError::OrchestrationUnavailable),
-        );
-
-        let mut reducer = Feat136TurnReducer::new(context.clone(), None).unwrap();
-        let command = reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    Some(item_id),
-                    HostEventKind::CommandStarted {
-                        command_summary: crate::chat::host_domain::HostSafeText {
-                            text: "Inspect repository state".to_owned(),
-                            truncated: false,
-                            truncation_reason: None,
-                        },
-                        cwd: crate::chat::host_domain::HostCommandCwd::WorkspaceRoot,
-                    },
-                ),
-                1,
-            )
-            .unwrap()
-            .unwrap();
-        let hydrated = Feat134Hydration {
-            items: command.items,
-            plan: command.plan,
-            turn_notices: command.turn_notices,
-        };
-        let projected = project_pending_approval_snapshot(
-            snapshot,
-            identity.agent_session_id,
-            Some((&context, &hydrated)),
-            PendingApprovalProjectionMode::SubscriptionHandshake,
-        )
-        .unwrap();
-        assert_eq!(projected.pending.len(), 1);
-        assert_eq!(
-            projected.pending[0].approval_request_id,
-            approval_request_id
-        );
-        assert_eq!(projected.pending[0].turn_id, context.turn_id);
-    }
-
-    #[test]
-    fn feat137_projection_is_durable_before_its_live_approval_event_is_published() {
-        let source = include_str!("application.rs");
-        let reduce_start = source
-            .find("async fn reduce_and_persist_feat137_event(")
-            .unwrap();
-        let stream_start = source[reduce_start..]
-            .find("async fn stream_active_turn_v4(")
-            .map(|offset| reduce_start + offset)
-            .unwrap();
-        let reducer = &source[reduce_start..stream_start];
-        assert!(
-            reducer
-                .find("protect_process_projection(projection)?")
-                .unwrap()
-                < reducer
-                    .find("persist_feat137_projection(projection.clone(), approval.clone())")
-                    .unwrap()
-        );
-
-        let stream = &source[stream_start..];
-        assert!(
-            stream.find("reduce_and_persist_feat137_event(").unwrap()
-                < stream
-                    .find("sink.publish_feat137(projection.clone(), approval)?")
-                    .unwrap()
-        );
-    }
-
-    fn event(
-        identity: &EventIdentity,
-        sequence: u64,
-        item_id: Option<&str>,
-        kind: HostEventKind,
-    ) -> HostEvent {
-        HostEvent {
-            cursor: HostEventCursor::new(identity.stream_id, sequence).unwrap(),
-            event_type: "synthetic".to_owned(),
-            event_id: Uuid::now_v7(),
-            task_id: identity.task_id,
-            agent_session_id: identity.agent_session_id,
-            codex_thread_id: identity.thread_id,
-            turn_id: if matches!(kind, HostEventKind::Warning { .. }) {
-                None
-            } else {
-                Some(identity.turn_id)
-            },
-            item_id: item_id.map(str::to_owned),
-            occurred_at: "2026-08-03T00:00:00Z".to_owned(),
-            encoded_bytes: 1,
-            kind,
-        }
-    }
-
-    #[test]
-    fn reducer_reconciles_answer_and_reasoning_into_one_terminal_commit() {
-        let (context, identity) = context();
-        let local_turn_id = context.turn_id;
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        let events = [
-            event(
-                &identity,
-                1,
-                Some("reason-1"),
-                HostEventKind::ReasoningTextDelta {
-                    content_index: 0,
-                    delta: "分析".to_owned(),
-                },
-            ),
-            event(
-                &identity,
-                2,
-                Some("reason-1"),
-                HostEventKind::ReasoningTextFinalized {
-                    status: HostReasoningStatus::Complete,
-                    contents: vec![HostReasoningPart {
-                        content_index: 0,
-                        text: "分析".to_owned(),
-                    }],
-                    reason: None,
-                },
-            ),
-            event(
-                &identity,
-                3,
-                Some("answer-1"),
-                HostEventKind::AgentMessageDelta {
-                    delta: "完成".to_owned(),
-                },
-            ),
-            event(
-                &identity,
-                4,
-                Some("answer-1"),
-                HostEventKind::ItemCompleted {
-                    item_type: "agent_message".to_owned(),
-                    text: Some("完成".to_owned()),
-                    phase: None,
-                },
-            ),
-        ];
-        for (index, event) in events.into_iter().enumerate() {
-            assert_eq!(
-                reducer.apply(event, index as i64 + 1).unwrap().kind(),
-                ReducerOutcomeKind::Progress
-            );
-        }
-        let terminal = event(
-            &identity,
-            5,
-            None,
-            HostEventKind::TurnCompleted {
-                status: HostTurnStatus::Completed,
-                code: None,
-                message: None,
-            },
-        );
-        let ReducerOutcome::Terminal(commit) = reducer.apply(terminal, 5).unwrap() else {
-            panic!("terminal commit expected");
-        };
-        assert_eq!(commit.local_turn_id, local_turn_id);
-        assert_eq!(commit.assistant_text, "完成");
-        assert_eq!(commit.reasoning_status, ReasoningStatus::Complete);
-        assert_eq!(commit.reasoning_items[0].parts[0].text, "分析");
-    }
-
-    #[test]
-    fn reducer_ignores_exact_duplicate_but_rejects_gap_and_identity_mixup() {
-        let (context, identity) = context();
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        let first = event(
-            &identity,
-            1,
-            Some("answer"),
-            HostEventKind::AgentMessageDelta {
-                delta: "a".to_owned(),
-            },
-        );
-        let duplicate_id = first.event_id;
-        reducer.apply(first, 1).unwrap();
-        let mut duplicate = event(
-            &identity,
-            1,
-            Some("answer"),
-            HostEventKind::AgentMessageDelta {
-                delta: "a".to_owned(),
-            },
-        );
-        duplicate.event_id = duplicate_id;
-        assert_eq!(
-            reducer.apply(duplicate, 2).unwrap().kind(),
-            ReducerOutcomeKind::Duplicate
-        );
-        assert!(matches!(
-            reducer.apply(
-                event(
-                    &identity,
-                    3,
-                    Some("answer"),
-                    HostEventKind::AgentMessageDelta {
-                        delta: "b".to_owned(),
-                    },
-                ),
-                3,
-            ),
-            Err(ChatError::OrchestrationUnavailable)
-        ));
-    }
-
-    #[test]
-    fn artifact_observation_shares_the_ordinary_cursor_domain_and_is_idempotent() {
-        let (context, identity) = context();
-        let local_turn_id = context.turn_id;
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    Some("answer"),
-                    HostEventKind::AgentMessageDelta {
-                        delta: "a".to_owned(),
-                    },
-                ),
-                1,
-            )
-            .unwrap();
-        let artifact = HostArtifactEventV3 {
-            schema_version: 3,
-            cursor: HostEventCursor::new(identity.stream_id, 2).unwrap(),
-            event_type: "item.artifact.started".to_owned(),
-            event_id: Uuid::now_v7(),
-            task_id: identity.task_id,
-            agent_session_id: identity.agent_session_id,
-            codex_thread_id: identity.thread_id,
-            turn_id: identity.turn_id,
-            occurred_at: "2026-08-20T00:00:00Z".to_owned(),
-            payload: serde_json::json!({}),
-        };
-        assert_eq!(
-            reducer.observe_artifact(&artifact).unwrap().kind(),
-            ReducerOutcomeKind::Progress
-        );
-        assert_eq!(reducer.progress().unwrap().cursor.sequence, 2);
-        assert_eq!(reducer.progress().unwrap().local_turn_id, local_turn_id);
-        assert_eq!(
-            reducer.observe_artifact(&artifact).unwrap().kind(),
-            ReducerOutcomeKind::Duplicate
-        );
-        let mut gap = artifact;
-        gap.cursor.sequence = 4;
-        gap.event_id = Uuid::now_v7();
-        assert!(matches!(
-            reducer.observe_artifact(&gap),
-            Err(ChatError::OrchestrationUnavailable)
-        ));
-    }
-
-    #[test]
-    fn completed_snapshot_conflict_is_explicit_incomplete_not_silent_complete() {
-        let (context, identity) = context();
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    Some("reason"),
-                    HostEventKind::ReasoningTextDelta {
-                        content_index: 0,
-                        delta: "prefix".to_owned(),
-                    },
-                ),
-                1,
-            )
-            .unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    2,
-                    Some("reason"),
-                    HostEventKind::ReasoningTextFinalized {
-                        status: HostReasoningStatus::Complete,
-                        contents: vec![HostReasoningPart {
-                            content_index: 0,
-                            text: "different".to_owned(),
-                        }],
-                        reason: None,
-                    },
-                ),
-                2,
-            )
-            .unwrap();
-        let ReducerOutcome::Terminal(commit) = reducer
-            .apply(
-                event(
-                    &identity,
-                    3,
-                    None,
-                    HostEventKind::TurnCompleted {
-                        status: HostTurnStatus::Completed,
-                        code: None,
-                        message: None,
-                    },
-                ),
-                3,
-            )
-            .unwrap()
-        else {
-            panic!("terminal expected");
-        };
-        assert_eq!(commit.reasoning_status, ReasoningStatus::Incomplete);
-        assert_eq!(
-            commit.reasoning_reason_code.as_deref(),
-            Some("protocol_error")
-        );
-        assert_eq!(commit.reasoning_items[0].parts[0].text, "different");
-    }
-
-    #[test]
-    fn missing_reasoning_is_unavailable_without_fabricated_item_or_answer() {
-        let (context, identity) = context();
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        let ReducerOutcome::Terminal(commit) = reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    None,
-                    HostEventKind::TurnCompleted {
-                        status: HostTurnStatus::Completed,
-                        code: None,
-                        message: None,
-                    },
-                ),
-                1,
-            )
-            .unwrap()
-        else {
-            panic!("terminal expected");
-        };
-        assert_eq!(commit.reasoning_status, ReasoningStatus::Unavailable);
-        assert_eq!(
-            commit.reasoning_reason_code.as_deref(),
-            Some("reasoning_not_emitted")
-        );
-        assert!(commit.reasoning_items.is_empty());
-        assert!(commit.assistant_text.is_empty());
-    }
-
-    #[test]
-    fn rust_projection_source_exposes_bounded_live_reasoning_but_redacts_debug() {
-        let canary = "S7C-LIVE-RAW-CANARY";
-        let (context, identity) = context();
-        let session_id = context.session_id;
-        let turn_id = context.turn_id;
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    Some("reason"),
-                    HostEventKind::ReasoningTextDelta {
-                        content_index: 0,
-                        delta: canary.to_owned(),
-                    },
-                ),
-                1,
-            )
-            .unwrap();
-        let projection = reducer.projection(false).unwrap();
-        assert_eq!(projection.session_id, session_id);
-        assert_eq!(projection.turn_id, turn_id);
-        assert_eq!(projection.reasoning[0].parts[0].text, canary);
-        assert!(!format!("{projection:?}").contains(canary));
-        assert_eq!(
-            reducer.projection(true),
-            Err(ChatError::ConversationConflict)
-        );
-    }
-
-    #[test]
-    fn reducer_restart_continues_after_durable_cursor_without_repeating_answer() {
-        let (mut context, identity) = context();
-        let prior_event_id = Uuid::now_v7();
-        context.assistant_text = "已保存".to_owned();
-        context.cursor = Some(StoredEventCursor {
-            stream_id: identity.stream_id,
-            sequence: 2,
-            event_id: prior_event_id,
-        });
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    3,
-                    Some("answer"),
-                    HostEventKind::AgentMessageDelta {
-                        delta: "增量".to_owned(),
-                    },
-                ),
-                3,
-            )
-            .unwrap();
-        let ReducerOutcome::Terminal(commit) = reducer
-            .apply(
-                event(
-                    &identity,
-                    4,
-                    None,
-                    HostEventKind::TurnCompleted {
-                        status: HostTurnStatus::Completed,
-                        code: None,
-                        message: None,
-                    },
-                ),
-                4,
-            )
-            .unwrap()
-        else {
-            panic!("terminal expected");
-        };
-        assert_eq!(commit.assistant_text, "已保存增量");
-        assert_eq!(commit.cursor.sequence, 4);
-    }
-
-    #[test]
-    fn reducer_processes_ten_thousand_ordered_deltas_without_snapshot_per_event() {
-        let (context, identity) = context();
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        for sequence in 1..=10_000 {
-            assert_eq!(
-                reducer
-                    .apply(
-                        event(
-                            &identity,
-                            sequence,
-                            Some("answer"),
-                            HostEventKind::AgentMessageDelta {
-                                delta: "x".to_owned(),
-                            },
-                        ),
-                        sequence as i64,
-                    )
-                    .unwrap()
-                    .kind(),
-                ReducerOutcomeKind::Progress
-            );
-        }
-        let progress = reducer.progress().unwrap();
-        assert_eq!(progress.assistant_text.len(), 10_000);
-        assert_eq!(progress.cursor.sequence, 10_000);
-    }
-
-    #[test]
-    fn controlled_interrupt_persists_only_validated_reasoning_prefix_as_incomplete() {
-        let (context, identity) = context();
-        let mut reducer = TurnEventReducer::new(context).unwrap();
-        reducer
-            .apply(
-                event(
-                    &identity,
-                    1,
-                    Some("reason"),
-                    HostEventKind::ReasoningTextDelta {
-                        content_index: 0,
-                        delta: "已验证前缀".to_owned(),
-                    },
-                ),
-                1,
-            )
-            .unwrap();
-        let ReducerOutcome::Terminal(commit) = reducer
-            .apply(
-                event(
-                    &identity,
-                    2,
-                    None,
-                    HostEventKind::TurnCompleted {
-                        status: HostTurnStatus::Interrupted,
-                        code: None,
-                        message: None,
-                    },
-                ),
-                2,
-            )
-            .unwrap()
-        else {
-            panic!("terminal expected");
-        };
-        assert_eq!(commit.reasoning_status, ReasoningStatus::Incomplete);
-        assert_eq!(
-            commit.reasoning_reason_code.as_deref(),
-            Some("turn_interrupted")
-        );
-        assert_eq!(commit.reasoning_items[0].parts[0].text, "已验证前缀");
     }
 
     #[cfg(target_os = "macos")]
@@ -5093,207 +2666,16 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn feat137_decision_rebinds_local_identity_then_posts_once() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f72";
-        const TOKEN: &str = "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG";
-        let (root, database, pending_conversation, turn, agent_session_id) =
-            prepare_v2_turn_outbox("feat137-decision-binding").await;
-        let runtime_turn_id = Uuid::now_v7();
-        database
-            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
-            .await
-            .unwrap();
-        let context = database
-            .active_turn_context(pending_conversation.session_id)
-            .await
-            .unwrap();
-        let stream_id = Uuid::now_v7();
-        let item_id = "command-approval";
-        let mut reducer = Feat136TurnReducer::new(context.clone(), None).unwrap();
-        let projection = reducer
-            .apply(
-                HostEvent {
-                    cursor: HostEventCursor::new(stream_id, 1).unwrap(),
-                    event_type: "item.started".to_owned(),
-                    event_id: Uuid::now_v7(),
-                    task_id: context.task_id,
-                    agent_session_id,
-                    codex_thread_id: context.codex_thread_id,
-                    turn_id: Some(runtime_turn_id),
-                    item_id: Some(item_id.to_owned()),
-                    occurred_at: "2026-08-30T12:00:00Z".to_owned(),
-                    encoded_bytes: 1,
-                    kind: HostEventKind::CommandStarted {
-                        command_summary: crate::chat::host_domain::HostSafeText {
-                            text: "Inspect repository state".to_owned(),
-                            truncated: false,
-                            truncation_reason: None,
-                        },
-                        cwd: crate::chat::host_domain::HostCommandCwd::WorkspaceRoot,
-                    },
-                },
-                1,
-            )
-            .unwrap()
-            .unwrap();
-        database
-            .persist_feat137_projection(projection, None)
-            .await
-            .unwrap();
-
-        let approval_request_id = Uuid::now_v7();
-        let pending_body = serde_json::json!({
-            "schema_version": 6,
-            "stream_id": stream_id,
-            "snapshot_at": "2026-08-30T12:00:10Z",
-            "pending": [{
-                "approval_request_id": approval_request_id,
-                "revision": 1,
-                "task_id": context.task_id,
-                "agent_session_id": agent_session_id,
-                "codex_thread_id": context.codex_thread_id,
-                "turn_id": runtime_turn_id,
-                "item_id": item_id,
-                "action_id": "git_repository_check",
-                "workspace_scope": "current_workspace",
-                "decisions": {
-                    "primary": "accept_once",
-                    "secondary": "cancel_current_turn"
-                },
-                "requested_at": "2026-08-30T12:00:00Z",
-                "expires_at": "2026-08-30T12:02:00Z",
-                "ttl_seconds": 120
-            }]
-        })
-        .to_string();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = tokio::spawn(async move {
-            let mut requests = Vec::with_capacity(4);
-            for response in [
-                ready_response(NONCE),
-                json_response("200 OK", &pending_body),
-            ] {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                requests.push(read_request(&mut stream).await);
-                stream.write_all(response.as_bytes()).await.unwrap();
-                stream.shutdown().await.unwrap();
-            }
-            let (mut ready, _) = listener.accept().await.unwrap();
-            requests.push(read_request(&mut ready).await);
-            ready
-                .write_all(ready_response(NONCE).as_bytes())
-                .await
-                .unwrap();
-            ready.shutdown().await.unwrap();
-
-            let (mut decision_stream, _) = listener.accept().await.unwrap();
-            let decision_request = read_request(&mut decision_stream).await;
-            let encoded = decision_request
-                .split_once("\r\n\r\n")
-                .map(|(_, body)| body)
-                .unwrap();
-            let request: serde_json::Value = serde_json::from_str(encoded).unwrap();
-            let decision_id = request["decision_id"].as_str().unwrap();
-            let response = serde_json::json!({
-                "schema_version": 6,
-                "approval_request_id": approval_request_id,
-                "decision_id": decision_id,
-                "stream_id": stream_id,
-                "revision": 2,
-                "decision": "accept_once",
-                "outcome": "accepted_once",
-                "resolved_at": "2026-08-30T12:00:30Z",
-            })
-            .to_string();
-            requests.push(decision_request);
-            decision_stream
-                .write_all(json_response("200 OK", &response).as_bytes())
-                .await
-                .unwrap();
-            decision_stream.shutdown().await.unwrap();
-            requests
-        });
-
-        let token_directory = root.join("host");
-        fs::create_dir(&token_directory).unwrap();
-        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
-        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let application = ConversationApplication::new_with_artifacts_v6(
-            database.clone(),
-            Arc::new(
-                HostBridge::from_connection(HostConnection {
-                    port,
-                    token_path,
-                    instance_nonce: NONCE.to_owned(),
-                })
-                .unwrap(),
-            ),
-            Arc::new(FixedPublicTaskControlPlane::new([])),
-        );
-
-        assert_eq!(
-            application
-                .decide_approval_v6(
-                    pending_conversation.session_id,
-                    context.turn_id,
-                    "different-command",
-                    approval_request_id,
-                    HostApprovalDecision::AcceptOnce,
-                )
-                .await
-                .unwrap_err()
-                .issue(),
-            super::super::feat137::ApprovalIssue::ApprovalStale
-        );
-        let result = application
-            .decide_approval_v6(
-                pending_conversation.session_id,
-                context.turn_id,
-                item_id,
-                approval_request_id,
-                HostApprovalDecision::AcceptOnce,
-            )
-            .await
-            .unwrap();
-        assert_eq!(result.approval_request_id, approval_request_id);
-        assert_eq!(result.stream_id, stream_id);
-
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 4);
-        assert!(requests[1].starts_with(&format!(
-            "GET /v6/agent-sessions/{agent_session_id}/approvals/pending HTTP/1.1"
-        )));
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.starts_with("POST "))
-                .count(),
-            1
-        );
-        assert!(!requests[3].contains(&context.turn_id.to_string()));
-        assert!(!requests[3].contains(item_id));
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
     async fn feat134_background_recovery_terminalizes_preexisting_failed_turn_projection() {
         let (root, database, pending, turn, _agent_session_id) =
             prepare_v2_turn_outbox("feat134-failed-turn-recovery").await;
         database.fail_outbox(turn.operation_id).await.unwrap();
-        let mut application = ConversationApplication::new_offline(database.clone());
-        application.feat134_streaming_enabled = true;
+        let application = ConversationApplication::new_offline(database.clone());
 
         let outcome = application.run_background_once().await.unwrap();
         assert_eq!(
             outcome,
-            CoordinatorOutcome::Dispatched(DispatchOutcome::TurnFailedSafely {
+            CoordinatorOutcome::Dispatched(DispatchOutcome::TurnSubmissionFailed {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -5351,319 +2733,6 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn feat134_application_consumes_one_overflow_event_and_reopens_confirmed_prefix() {
-        let (root, database, pending, turn, _agent_session_id) =
-            prepare_v2_turn_outbox("feat134-application-projection-limit").await;
-        let runtime_turn_id = Uuid::now_v7();
-        database
-            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
-            .await
-            .unwrap();
-        let context = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-        let identity = EventIdentity {
-            stream_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            thread_id: context.codex_thread_id,
-            turn_id: runtime_turn_id,
-        };
-        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
-        let application = ConversationApplication::new_offline(database.clone());
-        let confirmed_canary = "C".repeat(600 * 1024);
-        let offending_canary = "O".repeat(600 * 1024);
-
-        let mut confirmed = event(
-            &identity,
-            1,
-            Some("answer-confirmed"),
-            HostEventKind::ItemCompleted {
-                item_type: "agentMessage".to_owned(),
-                text: Some(confirmed_canary.clone()),
-                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
-            },
-        );
-        confirmed.event_type = "item.completed".to_owned();
-        let (confirmed_projection, projection_limit) = application
-            .reduce_and_persist_feat134_event(&mut reducer, confirmed, 1_000)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(!projection_limit);
-        assert_eq!(confirmed_projection.durable_sequence, Some(1));
-        assert_eq!(confirmed_projection.items.len(), 1);
-
-        // Two individually legal final-answer items exceed the Desktop's joined-answer boundary.
-        // The second body must never be persisted even though its source cursor is consumed once.
-        let mut overflow = event(
-            &identity,
-            2,
-            Some("answer-overflow"),
-            HostEventKind::ItemCompleted {
-                item_type: "agentMessage".to_owned(),
-                text: Some(offending_canary),
-                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
-            },
-        );
-        overflow.event_type = "item.completed".to_owned();
-        let (failed_projection, projection_limit) = application
-            .reduce_and_persist_feat134_event(&mut reducer, overflow, 2_000)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(projection_limit);
-        assert_eq!(failed_projection.durable_sequence, Some(2));
-        assert_eq!(failed_projection.items.len(), 1);
-        assert_eq!(failed_projection.items[0].text, confirmed_canary);
-        assert_eq!(
-            failed_projection
-                .terminal
-                .as_ref()
-                .and_then(|terminal| terminal.code.as_deref()),
-            Some("projection_limit_exceeded")
-        );
-
-        let snapshot = application
-            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
-            .await
-            .unwrap();
-        assert_eq!(snapshot.feat134.durable_sequence_cut, 2);
-        assert_eq!(snapshot.history.turns[0].status, "failed");
-        assert_eq!(snapshot.feat134.turns[0].items.len(), 1);
-        assert_eq!(snapshot.feat134.turns[0].items[0].text, confirmed_canary);
-        assert_eq!(
-            snapshot.feat134.turns[0].terminal_code.as_deref(),
-            Some("projection_limit_exceeded")
-        );
-        assert_eq!(
-            database.active_turn_context(pending.session_id).await,
-            Err(ChatError::NotFound)
-        );
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn feat134_application_terminalizes_snapshot_conflict_from_confirmed_prefix() {
-        let (root, database, pending, turn, _agent_session_id) =
-            prepare_v2_turn_outbox("feat134-application-projection-conflict").await;
-        let runtime_turn_id = Uuid::now_v7();
-        database
-            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
-            .await
-            .unwrap();
-        let context = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-        let identity = EventIdentity {
-            stream_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            thread_id: context.codex_thread_id,
-            turn_id: runtime_turn_id,
-        };
-        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
-        let application = ConversationApplication::new_offline(database.clone());
-
-        for (sequence, kind) in [
-            (
-                1,
-                HostEventKind::ItemStarted {
-                    item_type: "agentMessage".to_owned(),
-                    text: Some(String::new()),
-                    phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
-                },
-            ),
-            (
-                2,
-                HostEventKind::AgentMessageDelta {
-                    delta: "confirmed prefix".to_owned(),
-                },
-            ),
-        ] {
-            let mut source = event(&identity, sequence, Some("answer"), kind);
-            source.event_type = if sequence == 1 {
-                "item.started".to_owned()
-            } else {
-                "item.agent_message.delta".to_owned()
-            };
-            let (projection, projection_failure) = application
-                .reduce_and_persist_feat134_event(
-                    &mut reducer,
-                    source,
-                    i64::try_from(sequence).unwrap(),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(!projection_failure);
-            assert_eq!(projection.durable_sequence, Some(sequence));
-        }
-
-        let mut conflicting = event(
-            &identity,
-            3,
-            Some("answer"),
-            HostEventKind::ItemCompleted {
-                item_type: "agentMessage".to_owned(),
-                text: Some("divergent body".to_owned()),
-                phase: Some(super::super::host_domain::HostAgentMessagePhase::FinalAnswer),
-            },
-        );
-        conflicting.event_type = "item.completed".to_owned();
-        let (failed, projection_failure) = application
-            .reduce_and_persist_feat134_event(&mut reducer, conflicting, 3)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(projection_failure);
-        assert_eq!(failed.durable_sequence, Some(3));
-        assert_eq!(failed.assistant_text, "confirmed prefix");
-        assert_eq!(failed.items[0].text, "confirmed prefix");
-        assert_eq!(failed.items[0].status.as_str(), "incomplete");
-        assert_eq!(
-            failed
-                .terminal
-                .as_ref()
-                .and_then(|terminal| terminal.code.as_deref()),
-            Some("projection_conflict")
-        );
-        assert!(!format!("{failed:?}").contains("divergent body"));
-
-        let snapshot = application
-            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
-            .await
-            .unwrap();
-        assert_eq!(snapshot.feat134.durable_sequence_cut, 3);
-        assert_eq!(snapshot.feat134.turns[0].items[0].text, "confirmed prefix");
-        assert_eq!(
-            snapshot.feat134.turns[0].terminal_code.as_deref(),
-            Some("projection_conflict")
-        );
-        assert_eq!(
-            snapshot.history.turns[0].reasoning_reason_code.as_deref(),
-            Some("protocol_error")
-        );
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn feat134_application_bounds_repeated_replacement_event_bytes() {
-        const ONE_MIB: usize = 1024 * 1024;
-        const BYTE_BUDGET_EVENTS: u64 = 16;
-        let (root, database, pending, turn, _agent_session_id) =
-            prepare_v2_turn_outbox("feat134-application-event-byte-budget").await;
-        let runtime_turn_id = Uuid::now_v7();
-        database
-            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
-            .await
-            .unwrap();
-        let context = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-        let identity = EventIdentity {
-            stream_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            thread_id: context.codex_thread_id,
-            turn_id: runtime_turn_id,
-        };
-        let mut reducer = Feat134TurnReducer::new(context, None).unwrap();
-        let application = ConversationApplication::new_offline(database.clone());
-
-        for sequence in 1..=BYTE_BUDGET_EVENTS {
-            let mut source = event(
-                &identity,
-                sequence,
-                None,
-                HostEventKind::TurnPlanUpdated {
-                    explanation: None,
-                    steps: vec![super::super::host_domain::HostPlanStep {
-                        step: format!("confirmed replacement {sequence}"),
-                        status: super::super::host_domain::HostPlanStepStatus::InProgress,
-                    }],
-                },
-            );
-            source.event_type = "turn.plan.updated".to_owned();
-            source.encoded_bytes = ONE_MIB;
-            let (projection, projection_failure) = application
-                .reduce_and_persist_feat134_event(
-                    &mut reducer,
-                    source,
-                    i64::try_from(sequence).unwrap(),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(!projection_failure);
-            assert_eq!(projection.durable_sequence, Some(sequence));
-        }
-
-        let sequence = BYTE_BUDGET_EVENTS + 1;
-        let mut overflow = event(
-            &identity,
-            sequence,
-            None,
-            HostEventKind::TurnPlanUpdated {
-                explanation: None,
-                steps: vec![super::super::host_domain::HostPlanStep {
-                    step: "offending replacement".to_owned(),
-                    status: super::super::host_domain::HostPlanStepStatus::InProgress,
-                }],
-            },
-        );
-        overflow.event_type = "turn.plan.updated".to_owned();
-        overflow.encoded_bytes = ONE_MIB;
-        let (failed, projection_failure) = application
-            .reduce_and_persist_feat134_event(
-                &mut reducer,
-                overflow,
-                i64::try_from(sequence).unwrap(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(projection_failure);
-        assert_eq!(failed.durable_sequence, Some(sequence));
-        assert_eq!(
-            failed.plan.as_ref().unwrap().steps[0].step,
-            "confirmed replacement 16"
-        );
-        assert_eq!(
-            failed
-                .terminal
-                .as_ref()
-                .and_then(|terminal| terminal.code.as_deref()),
-            Some("projection_limit_exceeded")
-        );
-        assert!(!format!("{failed:?}").contains("offending replacement"));
-        let snapshot = application
-            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
-            .await
-            .unwrap();
-        assert_eq!(
-            snapshot.feat134.turns[0].plan.as_ref().unwrap().steps[0].step,
-            "confirmed replacement 16"
-        );
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
     fn http_response(status: &str, headers: &[(&str, &str)], body: &str) -> String {
         let mut response = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -5677,24 +2746,6 @@ mod tests {
         }
         response.push_str("\r\n");
         response.push_str(body);
-        response
-    }
-
-    #[cfg(target_os = "macos")]
-    fn http_response_bytes(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
-        let mut response = format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
-            body.len()
-        )
-        .into_bytes();
-        for (name, value) in headers {
-            response.extend_from_slice(name.as_bytes());
-            response.extend_from_slice(b": ");
-            response.extend_from_slice(value.as_bytes());
-            response.extend_from_slice(b"\r\n");
-        }
-        response.extend_from_slice(b"\r\n");
-        response.extend_from_slice(body);
         response
     }
 
@@ -5897,7 +2948,7 @@ mod tests {
                 .dispatch_turn(claimed, unix_seconds().unwrap())
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnFailedSafely {
+            DispatchOutcome::TurnSubmissionFailed {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -5977,7 +3028,7 @@ mod tests {
                 .dispatch_turn(claimed, unix_seconds().unwrap())
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnReconciliationRequired {
+            DispatchOutcome::TurnSubmissionUncertain {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -6100,7 +3151,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn feat134_invalid_accepted_response_suspends_without_binding_or_replay() {
+    async fn feat132_invalid_accepted_response_suspends_without_binding_or_replay() {
         const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa4";
         const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
         let (root, database, pending, claimed, agent_session_id) =
@@ -6134,7 +3185,7 @@ mod tests {
                 .dispatch_turn(claimed, unix_seconds().unwrap())
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnReconciliationRequired {
+            DispatchOutcome::TurnSubmissionUncertain {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -6206,7 +3257,7 @@ mod tests {
                 .dispatch_turn(claimed, unix_seconds().unwrap())
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnReconciliationRequired {
+            DispatchOutcome::TurnSubmissionUncertain {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -6279,7 +3330,7 @@ mod tests {
                 .dispatch_turn(claimed, unix_seconds().unwrap())
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnFailedSafely {
+            DispatchOutcome::TurnSubmissionFailed {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -6360,7 +3411,7 @@ mod tests {
                 .dispatch_turn(reclaimed, reclaim_at)
                 .await
                 .unwrap(),
-            DispatchOutcome::TurnReconciliationRequired {
+            DispatchOutcome::TurnSubmissionUncertain {
                 operation_id: pending.turn_operation_id,
                 session_id: pending.session_id,
                 turn_id: pending.turn_id,
@@ -6406,225 +3457,56 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    async fn serve_orphaned_v4_session(
-        nonce: &'static str,
-        session_body: String,
-        stream_id: Uuid,
-    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let task = tokio::spawn(async move {
-            let mut requests = Vec::with_capacity(4);
-            for response in [
-                ready_response(nonce),
-                json_response("200 OK", &session_body),
-                ready_response(nonce),
-            ] {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                requests.push(read_request(&mut stream).await);
-                stream.write_all(response.as_bytes()).await.unwrap();
-                stream.shutdown().await.unwrap();
-            }
-
-            let (mut stream, _) = listener.accept().await.unwrap();
-            requests.push(read_request(&mut stream).await);
-            let headers = format!(
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: text/event-stream\r\n\
-                 Cache-Control: no-store\r\n\
-                 X-Accel-Buffering: no\r\n\
-                 X-Yijie-Event-Schema-Version: 4\r\n\
-                 X-Yijie-Event-Stream-ID: {stream_id}\r\n\
-                 Connection: close\r\n\r\n"
-            );
-            stream.write_all(headers.as_bytes()).await.unwrap();
-            for _ in 0..50 {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                if stream.write_all(b": heartbeat\n\n").await.is_err() {
-                    break;
-                }
-            }
-            let _ = stream.shutdown().await;
-            requests
-        });
-        (port, task)
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn serve_http_bytes(
-        responses: Vec<Vec<u8>>,
-    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let task = tokio::spawn(async move {
-            let mut requests = Vec::with_capacity(responses.len());
-            for response in responses {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                requests.push(read_request(&mut stream).await);
-                stream.write_all(&response).await.unwrap();
-                stream.shutdown().await.unwrap();
-            }
-            requests
-        });
-        (port, task)
-    }
-
-    #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn feat134_idle_host_without_terminal_replay_closes_orphan_without_duplicate_post() {
+    async fn feat132_legacy_active_row_cannot_be_promoted_or_closed_by_missing_stream() {
         const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa4";
         const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
-        let (root, database, pending, turn, agent_session_id) =
-            prepare_v2_turn_outbox("feat134-orphan-terminal-replay").await;
+        let (root, database, pending, turn, _) =
+            prepare_v2_turn_outbox("feat132-legacy-active").await;
         let runtime_turn_id = Uuid::now_v7();
         database
             .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
             .await
             .unwrap();
-        let context = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-
         let token_directory = root.join("host");
         fs::create_dir(&token_directory).unwrap();
         fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
         let token_path = token_directory.join("api-token");
         fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let session_body = serde_json::json!({
-            "session": {
-                "task_id": context.task_id,
-                "agent_session_id": agent_session_id,
-                "codex_thread_id": context.codex_thread_id,
-                "active_turn_id": "",
-                "state": "idle",
-                "cwd": root.join("project"),
-                "model": "MiniMax-M3",
-                "model_provider": "minimax",
-                "failure_code": "",
-                "created_at": "2026-08-28T00:00:00Z",
-                "updated_at": "2026-08-28T00:00:01Z"
-            }
-        })
-        .to_string();
-        let (port, server) = serve_orphaned_v4_session(NONCE, session_body, Uuid::now_v7()).await;
-        let bridge = Arc::new(
-            HostBridge::from_connection(HostConnection {
-                port,
-                token_path,
-                instance_nonce: NONCE.to_owned(),
-            })
-            .unwrap(),
-        );
         let application = ConversationApplication::new_with_artifacts_v4(
-            database.clone(),
-            bridge,
-            Arc::new(FixedPublicTaskControlPlane::new([])),
-        );
-
-        application
-            .stream_active_turn(pending.session_id)
-            .await
-            .unwrap();
-        assert_eq!(
-            database.outbox_state(turn.operation_id).await.unwrap(),
-            super::super::database::OutboxState::Done
-        );
-        assert_eq!(
-            database.active_turn_context(pending.session_id).await,
-            Err(ChatError::NotFound)
-        );
-        let history = application
-            .load_history(pending.session_id, None, None)
-            .await
-            .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
-        assert_eq!(
-            history.turns[0].reasoning_reason_code.as_deref(),
-            Some("host_shutdown")
-        );
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 4);
-        assert!(requests[1].starts_with(&format!(
-            "GET /v1/agent-sessions/{agent_session_id} HTTP/1.1"
-        )));
-        assert!(requests[3].starts_with(&format!(
-            "GET /v4/agent-sessions/{agent_session_id}/events?event_schema_version=4 HTTP/1.1"
-        )));
-        assert!(!requests.iter().any(|request| request.starts_with("POST ")));
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn v2_transport_loss_retries_same_operation_and_accepts_idempotent_replay() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fb0";
-        const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
-        let (root, database, pending, claimed, _agent_session_id) =
-            prepare_v2_turn_outbox("feat127-lost-response").await;
-        let token_directory = root.join("host");
-        fs::create_dir(&token_directory).unwrap();
-        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
-        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let runtime_turn_id = Uuid::now_v7();
-        let (port, server) = serve_http(vec![
-            ready_response(NONCE),
-            String::new(),
-            ready_response(NONCE),
-            json_response(
-                "202 Accepted",
-                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
-            ),
-        ])
-        .await;
-        let application = ConversationApplication::new(
             database.clone(),
             Arc::new(
                 HostBridge::from_connection(HostConnection {
-                    port,
+                    port: 9,
                     token_path,
-                    instance_nonce: NONCE.to_owned(),
+                    instance_nonce: NONCE.into(),
                 })
                 .unwrap(),
             ),
             Arc::new(FixedPublicTaskControlPlane::new([])),
         );
-
-        database
-            .reschedule_outbox(claimed.operation_id, unix_seconds().unwrap())
+        assert_eq!(
+            application.stream_active_turn(pending.session_id).await,
+            Err(ChatError::OrchestrationUnavailable)
+        );
+        assert_eq!(
+            database
+                .active_turn_context(pending.session_id)
+                .await
+                .unwrap()
+                .runtime_turn_id,
+            runtime_turn_id
+        );
+        assert_eq!(
+            database.outbox_state(turn.operation_id).await.unwrap(),
+            super::super::database::OutboxState::Inflight
+        );
+        assert!(database
+            .native_views(pending.session_id, vec![pending.turn_id])
             .await
-            .unwrap();
-        assert_eq!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::RetryScheduled {
-                operation_id: pending.turn_operation_id
-            }
-        );
-        tokio::time::sleep(Duration::from_secs(RETRY_DELAY_SECONDS as u64)).await;
-        assert_eq!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::TurnAccepted {
-                session_id: pending.session_id
-            }
-        );
-
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 4);
-        let first_body = requests[1].split("\r\n\r\n").nth(1).unwrap();
-        let second_body = requests[3].split("\r\n\r\n").nth(1).unwrap();
-        assert_eq!(first_body, second_body);
-        let payload: serde_json::Value = serde_json::from_str(first_body).unwrap();
-        assert_eq!(
-            payload["operation_id"],
-            pending.turn_operation_id.to_string()
-        );
-
+            .unwrap()
+            .is_empty());
         drop(application);
         drop(database);
         fs::remove_dir_all(root).unwrap();
@@ -6702,7 +3584,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn v2_turn_operation_conflict_is_not_retried() {
-        let (root, database, pending, _claimed, agent_session_id) =
+        let (root, database, pending, _claimed, _agent_session_id) =
             prepare_v2_turn_outbox("feat127-turn-operation-conflict").await;
         let application = ConversationApplication::new_offline(database.clone());
         assert_eq!(
@@ -6712,15 +3594,16 @@ mod tests {
                     2,
                     pending.turn_operation_id,
                     pending.session_id,
-                    agent_session_id,
                     Err(HostBridgeError::rejected(
                         HostErrorCode::TurnOperationConflict,
                     )),
                 )
                 .await
                 .unwrap(),
-            DispatchOutcome::FailedSafely {
-                operation_id: pending.turn_operation_id
+            DispatchOutcome::TurnSubmissionFailed {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
             }
         );
         assert_eq!(
@@ -6739,7 +3622,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn v2_turn_active_never_binds_an_unrelated_runtime_turn() {
-        let (root, database, pending, _claimed, agent_session_id) =
+        let (root, database, pending, _claimed, _agent_session_id) =
             prepare_v2_turn_outbox("feat127-turn-active").await;
         let application = ConversationApplication::new_offline(database.clone());
         assert_eq!(
@@ -6749,13 +3632,14 @@ mod tests {
                     2,
                     pending.turn_operation_id,
                     pending.session_id,
-                    agent_session_id,
                     Err(HostBridgeError::rejected(HostErrorCode::TurnActive)),
                 )
                 .await
                 .unwrap(),
-            DispatchOutcome::FailedSafely {
-                operation_id: pending.turn_operation_id
+            DispatchOutcome::TurnSubmissionFailed {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
             }
         );
         assert_eq!(
@@ -6961,761 +3845,53 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    fn sse_event(
-        stream_id: Uuid,
-        sequence: u64,
-        identity: &EventIdentity,
-        item_id: Option<&str>,
-        event_type: &str,
-        terminal: bool,
-        payload: serde_json::Value,
-    ) -> String {
-        let event_id = Uuid::now_v7();
-        let body = serde_json::json!({
-            "schema_version": 2,
-            "event_id": event_id,
-            "stream_id": stream_id,
-            "sequence": sequence,
-            "occurred_at": "2026-08-03T00:00:00Z",
-            "task_id": identity.task_id,
-            "agent_session_id": identity.agent_session_id,
-            "codex_thread_id": identity.thread_id,
-            "turn_id": identity.turn_id,
-            "item_id": item_id,
-            "event_type": event_type,
-            "terminal": terminal,
-            "payload": payload,
-        });
-        format!("id: {stream_id}:{sequence}\nevent: {event_type}\ndata: {body}\n\n")
-    }
-
-    #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn fake_host_application_dispatches_and_persists_complete_local_history() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f90";
-        const TOKEN: &str = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-        let root = std::env::temp_dir().join(format!("yijie-s7b-app-{}", Uuid::now_v7()));
-        let project_path = root.join("project");
+    async fn feat132_native_sse_commits_final_objects_without_legacy_body_reconciliation() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        const TOKEN: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+        let (root, database, pending, _claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat132-native-stream").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .accept_native_turn(pending.turn_operation_id, runtime_turn_id, NONCE.into())
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let stream_id = Uuid::now_v7();
+        let mut sse = String::new();
+        for (index,(method,payload)) in [
+            ("turn/started",serde_json::json!({"turn":{"id":runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}})),
+            ("item/started",serde_json::json!({"item":{"id":"agent-native","type":"agentMessage","text":"","phase":"commentary","availability":"available"}})),
+            ("item/agentMessage/delta",serde_json::json!({"itemId":"agent-native","delta":"draft"})),
+            ("item/completed",serde_json::json!({"item":{"id":"agent-native","type":"agentMessage","text":"revised native final","phase":"final_answer","availability":"available"}})),
+            ("turn/completed",serde_json::json!({"turn":{"id":runtime_turn_id,"status":"failed","errorCode":"usageLimitExceeded","items":[],"itemsComplete":false}})),
+        ].into_iter().enumerate(){
+            let sequence=index+1;let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available"});for(k,v)in payload.as_object().unwrap(){n[k]=v.clone();}
+            let event=serde_json::json!({"schema_version":7,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+            sse.push_str(&format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n"));
+        }
         let token_directory = root.join("host");
-        fs::create_dir_all(&project_path).unwrap();
         fs::create_dir(&token_directory).unwrap();
         fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
         let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
+        fs::write(&token_path, TOKEN).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let selection = native_project::create_selection(&project_path)
-            .unwrap()
-            .unwrap();
-        let database = DatabaseWorker::start(
-            root.join("chat"),
-            super::super::database::ChatScope::new(
-                Uuid::now_v7().to_string(),
-                Uuid::now_v7().to_string(),
-            )
-            .unwrap(),
-            Box::new(TestKeyStore),
-            Box::new(TestKeyStore),
-        )
-        .unwrap();
-        let project = database
-            .register_project(selection.canonical_path, selection.bookmark)
-            .await
-            .unwrap();
-        let project_id = Uuid::parse_str(&project.id).unwrap();
-        let create_operation_id = Uuid::now_v7();
-        let pending = database
-            .create_session_and_enqueue(project_id, "首条消息".to_owned(), create_operation_id)
-            .await
-            .unwrap();
-        let task_id = Uuid::now_v7();
-        let agent_session_id = Uuid::now_v7();
-        let thread_id = Uuid::now_v7();
-        let runtime_turn_id = Uuid::now_v7();
-        let stream_id = Uuid::now_v7();
-        let identity = EventIdentity {
-            stream_id,
-            task_id,
-            agent_session_id,
-            thread_id,
-            turn_id: runtime_turn_id,
-        };
-        let session_body = serde_json::json!({
-            "session": {
-                "task_id": task_id,
-                "agent_session_id": agent_session_id,
-                "codex_thread_id": thread_id,
-                "active_turn_id": "",
-                "state": "idle",
-                "cwd": project_path,
-                "model": "MiniMax-M3",
-                "model_provider": "minimax",
-                "failure_code": "",
-                "created_at": "2026-08-03T00:00:00Z",
-                "updated_at": "2026-08-03T00:00:01Z"
-            }
-        })
-        .to_string();
-        let mut sse_body = String::new();
-        sse_body.push_str(&sse_event(
-            stream_id,
-            1,
-            &identity,
-            Some("reasoning-1"),
-            "item.reasoning_text.delta",
-            false,
-            serde_json::json!({"content_index": 0, "delta": "合成推理"}),
-        ));
-        sse_body.push_str(&sse_event(
-            stream_id,
-            2,
-            &identity,
-            Some("reasoning-1"),
-            "item.reasoning_text.finalized",
-            false,
-            serde_json::json!({
-                "status": "complete",
-                "contents": [{"content_index": 0, "text": "合成推理"}]
-            }),
-        ));
-        sse_body.push_str(&sse_event(
-            stream_id,
-            3,
-            &identity,
-            Some("answer-1"),
-            "item.agent_message.delta",
-            false,
-            serde_json::json!({"delta": "合成回答"}),
-        ));
-        sse_body.push_str(&sse_event(
-            stream_id,
-            4,
-            &identity,
-            None,
-            "turn.completed",
-            true,
-            serde_json::json!({"status": "completed"}),
-        ));
-        let stream_id_header = stream_id.to_string();
-        let stream_response = http_response(
-            "200 OK",
-            &[
-                ("Content-Type", "text/event-stream"),
-                ("Cache-Control", "no-store"),
-                ("X-Accel-Buffering", "no"),
-                ("X-Yijie-Event-Schema-Version", "2"),
-                ("X-Yijie-Event-Stream-ID", &stream_id_header),
-            ],
-            &sse_body,
-        );
         let (port, server) = serve_http(vec![
             ready_response(NONCE),
-            json_response("201 Created", &session_body),
-            ready_response(NONCE),
-            json_response(
-                "202 Accepted",
-                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
-            ),
-            ready_response(NONCE),
-            stream_response,
-        ])
-        .await;
-        let bridge = Arc::new(
-            HostBridge::from_connection(HostConnection {
-                port,
-                token_path,
-                instance_nonce: NONCE.to_owned(),
-            })
-            .unwrap(),
-        );
-        let public_tasks = Arc::new(FixedPublicTaskControlPlane::new([
-            PublicTaskCreateOutcome::Bound {
-                public_task_id: task_id,
-            },
-        ]));
-        let application =
-            ConversationApplication::new(database.clone(), bridge, public_tasks.clone());
-        assert_eq!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::ControlPlaneChanged(PublicTaskControlPlaneStatus {
-                session_id: pending.session_id,
-                state: PublicTaskBindingState::Bound,
-                issue_code: None,
-                host_session_bound: false,
-            })
-        );
-        let public_calls = public_tasks.calls();
-        assert_eq!(public_calls.len(), 1);
-        assert_eq!(public_calls[0].operation_id, create_operation_id);
-        assert_eq!(public_calls[0].authorization_revision, 1);
-        assert_ne!(public_calls[0].client_reference_id, pending.session_id);
-        assert_eq!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::SessionBound {
-                session_id: pending.session_id,
-            }
-        );
-        assert_eq!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::TurnAccepted {
-                session_id: pending.session_id
-            }
-        );
-        application
-            .stream_active_turn(pending.session_id)
-            .await
-            .unwrap();
-        let history = application
-            .load_history(pending.session_id, None, None)
-            .await
-            .unwrap();
-        assert_eq!(history.turns.len(), 1);
-        assert_eq!(history.turns[0].messages[0].content, "首条消息");
-        assert_eq!(history.turns[0].messages[1].content, "合成回答");
-        assert_eq!(history.turns[0].reasoning[0].total_bytes, "合成推理".len());
-        assert_eq!(
-            database
-                .outbox_state(pending.turn_operation_id)
-                .await
-                .unwrap(),
-            super::super::database::OutboxState::Done
-        );
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 6);
-        assert!(requests[1].contains(&format!("POST /v1/tasks/{task_id}/agent-sessions")));
-        assert!(requests[3].contains(r#""input":"首条消息""#));
-        assert!(!requests[3].contains("model"));
-        assert!(!requests[3].contains("reasoning_effort"));
-        assert!(requests[5].contains("event_schema_version=2"));
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn v3_coordinator_uses_one_mixed_stream_and_commits_artifact_before_terminal_cursor() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
-        const TOKEN: &str = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
-        let root = std::env::temp_dir().join(format!("yijie-s10b-v3-app-{}", Uuid::now_v7()));
-        let project_path = root.join("project");
-        let token_directory = root.join("host");
-        fs::create_dir_all(&project_path).unwrap();
-        fs::create_dir(&token_directory).unwrap();
-        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
-        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let selection = native_project::create_selection(&project_path)
-            .unwrap()
-            .unwrap();
-        let database = DatabaseWorker::start(
-            root.join("chat"),
-            super::super::database::ChatScope::new(
-                Uuid::now_v7().to_string(),
-                Uuid::now_v7().to_string(),
-            )
-            .unwrap(),
-            Box::new(TestKeyStore),
-            Box::new(TestKeyStore),
-        )
-        .unwrap();
-        let project = database
-            .register_project(selection.canonical_path, selection.bookmark)
-            .await
-            .unwrap();
-        let pending = database
-            .create_session_and_enqueue(
-                Uuid::parse_str(&project.id).unwrap(),
-                "v3 input".to_owned(),
-                Uuid::now_v7(),
-            )
-            .await
-            .unwrap();
-        let identity = EventIdentity {
-            stream_id: Uuid::now_v7(),
-            task_id: Uuid::now_v7(),
-            agent_session_id: Uuid::now_v7(),
-            thread_id: Uuid::now_v7(),
-            turn_id: Uuid::now_v7(),
-        };
-        struct MixedArtifact<'a> {
-            id: Uuid,
-            kind: &'a str,
-            display_name: &'a str,
-            media_type: &'a str,
-            content: Vec<u8>,
-        }
-        let mixed_artifacts = [
-            MixedArtifact {
-                id: Uuid::now_v7(),
-                kind: "image",
-                display_name: "synthetic.png",
-                media_type: "image/png",
-                content: include_bytes!("../../icons/32x32.png").to_vec(),
-            },
-            MixedArtifact {
-                id: Uuid::now_v7(),
-                kind: "video",
-                display_name: "synthetic.mp4",
-                media_type: "video/mp4",
-                content: b"\0\0\0\x0cftypisom".to_vec(),
-            },
-            MixedArtifact {
-                id: Uuid::now_v7(),
-                kind: "file",
-                display_name: "synthetic.csv",
-                media_type: "text/csv",
-                content: b"name,value\nlocal,4\n".to_vec(),
-            },
-            MixedArtifact {
-                id: Uuid::now_v7(),
-                kind: "report",
-                display_name: "synthetic-report.json",
-                media_type: "application/vnd.yijie.report+json;version=1",
-                content: br#"{"schema_version":1,"title":"Synthetic","generated_at":"2026-08-20T00:00:00Z","sections":[]}"#.to_vec(),
-            },
-        ];
-        let session_body = serde_json::json!({
-            "session": {
-                "task_id": identity.task_id,
-                "agent_session_id": identity.agent_session_id,
-                "codex_thread_id": identity.thread_id,
-                "active_turn_id": "",
-                "state": "idle",
-                "cwd": project_path,
-                "model": "MiniMax-M3",
-                "model_provider": "minimax",
-                "failure_code": "",
-                "created_at": "2026-08-20T00:00:00Z",
-                "updated_at": "2026-08-20T00:00:01Z"
-            }
-        })
-        .to_string();
-        let active_session_body = serde_json::json!({
-            "session": {
-                "task_id": identity.task_id,
-                "agent_session_id": identity.agent_session_id,
-                "codex_thread_id": identity.thread_id,
-                "active_turn_id": identity.turn_id,
-                "state": "active",
-                "cwd": project_path,
-                "model": "MiniMax-M3",
-                "model_provider": "minimax",
-                "failure_code": "",
-                "created_at": "2026-08-20T00:00:00Z",
-                "updated_at": "2026-08-20T00:00:02Z"
-            }
-        })
-        .to_string();
-        let frame = |sequence: u64,
-                     item_id: Option<&str>,
-                     event_type: &str,
-                     terminal: bool,
-                     payload: serde_json::Value| {
-            let event_id = Uuid::now_v7();
-            let mut body = serde_json::json!({
-                "schema_version": 3,
-                "event_id": event_id,
-                "stream_id": identity.stream_id,
-                "sequence": sequence,
-                "occurred_at": "2026-08-20T00:00:02Z",
-                "task_id": identity.task_id,
-                "agent_session_id": identity.agent_session_id,
-                "codex_thread_id": identity.thread_id,
-                "turn_id": identity.turn_id,
-                "event_type": event_type,
-                "terminal": terminal,
-                "payload": payload
-            });
-            if let Some(item_id) = item_id {
-                body["item_id"] = serde_json::json!(item_id);
-            }
-            format!(
-                "id: {}:{sequence}\nevent: {event_type}\ndata: {body}\n\n",
-                identity.stream_id
-            )
-        };
-        let mut sse_body = String::new();
-        sse_body.push_str(&frame(
-            1,
-            Some("answer"),
-            "item.agent_message.delta",
-            false,
-            serde_json::json!({"delta":"v3 answer"}),
-        ));
-        let mut sequence = 2_u64;
-        for (ordinal, artifact) in mixed_artifacts.iter().enumerate() {
-            let item_id = format!("artifact-{}", artifact.id);
-            let base_payload = |status: &str| {
-                serde_json::json!({
-                    "artifact_id": artifact.id,
-                    "kind": artifact.kind,
-                    "provenance": "synthetic",
-                    "status": status,
-                    "ordinal": ordinal
-                })
-            };
-            let mut started = base_payload("in_progress");
-            started["display_name"] = serde_json::json!(artifact.display_name);
-            sse_body.push_str(&frame(
-                sequence,
-                Some(&item_id),
-                "item.artifact.started",
-                false,
-                started,
-            ));
-            sequence += 1;
-            let mut progress = base_payload("in_progress");
-            progress["stage"] = serde_json::json!("generating");
-            progress["progress_percent"] = serde_json::json!(50.0);
-            sse_body.push_str(&frame(
-                sequence,
-                Some(&item_id),
-                "item.artifact.progress",
-                false,
-                progress,
-            ));
-            sequence += 1;
-            let mut completed = base_payload("ready");
-            completed["display_name"] = serde_json::json!(artifact.display_name);
-            completed["media_type"] = serde_json::json!(artifact.media_type);
-            completed["size_bytes"] = serde_json::json!(artifact.content.len());
-            completed["sha256"] =
-                serde_json::json!(format!("{:x}", sha2::Sha256::digest(&artifact.content)));
-            completed["content_href"] = serde_json::json!(format!(
-                "/v3/agent-sessions/{}/artifacts/{}/content",
-                identity.agent_session_id, artifact.id
-            ));
-            sse_body.push_str(&frame(
-                sequence,
-                Some(&item_id),
-                "item.artifact.completed",
-                false,
-                completed,
-            ));
-            sequence += 1;
-        }
-        sse_body.push_str(&frame(
-            sequence,
-            None,
-            "turn.completed",
-            true,
-            serde_json::json!({"status":"completed"}),
-        ));
-        let stream_header = identity.stream_id.to_string();
-        let stream_response = http_response(
-            "200 OK",
-            &[
-                ("Content-Type", "text/event-stream"),
-                ("Cache-Control", "no-store"),
-                ("X-Accel-Buffering", "no"),
-                ("X-Yijie-Event-Schema-Version", "3"),
-                ("X-Yijie-Event-Stream-ID", &stream_header),
-            ],
-            &sse_body,
-        );
-        let mut responses = vec![
-            ready_response(NONCE).into_bytes(),
-            json_response("201 Created", &session_body).into_bytes(),
-            ready_response(NONCE).into_bytes(),
-            json_response(
-                "202 Accepted",
-                &serde_json::json!({"turn_id": identity.turn_id}).to_string(),
-            )
-            .into_bytes(),
-            ready_response(NONCE).into_bytes(),
-            json_response("200 OK", &active_session_body).into_bytes(),
-            ready_response(NONCE).into_bytes(),
-            stream_response.into_bytes(),
-        ];
-        for artifact in &mixed_artifacts {
-            let digest = format!("{:x}", sha2::Sha256::digest(&artifact.content));
-            let etag = format!("\"{digest}\"");
-            let disposition = format!("attachment; filename={}", artifact.display_name);
-            responses.push(ready_response(NONCE).into_bytes());
-            responses.push(http_response_bytes(
+            http_response(
                 "200 OK",
                 &[
-                    ("Content-Type", artifact.media_type),
+                    ("Content-Type", "text/event-stream"),
                     ("Cache-Control", "no-store"),
-                    ("ETag", &etag),
-                    ("Content-Disposition", &disposition),
-                    ("Accept-Ranges", "bytes"),
-                    ("X-Content-Type-Options", "nosniff"),
+                    ("X-Accel-Buffering", "no"),
+                    ("X-Yijie-Event-Schema-Version", "7"),
+                    ("X-Yijie-Event-Stream-ID", &stream_id.to_string()),
                 ],
-                &artifact.content,
-            ));
-            responses.push(ready_response(NONCE).into_bytes());
-            responses.push(
-                json_response(
-                    "500 Internal Server Error",
-                    r#"{"error":{"code":"internal_error","message":"synthetic"}}"#,
-                )
-                .into_bytes(),
-            );
-        }
-        let (port, server) = serve_http_bytes(responses).await;
-        let bridge = Arc::new(
-            HostBridge::from_connection(HostConnection {
-                port,
-                token_path: token_path.clone(),
-                instance_nonce: NONCE.to_owned(),
-            })
-            .unwrap(),
-        );
-        let public_tasks = Arc::new(FixedPublicTaskControlPlane::new([
-            PublicTaskCreateOutcome::Bound {
-                public_task_id: identity.task_id,
-            },
-        ]));
-        let application =
-            ConversationApplication::new_with_artifacts_v3(database.clone(), bridge, public_tasks);
-        assert!(matches!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::ControlPlaneChanged(_)
-        ));
-        assert!(matches!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::SessionBound { .. }
-        ));
-        assert!(matches!(
-            application.dispatch_next().await.unwrap(),
-            DispatchOutcome::TurnAccepted { .. }
-        ));
-        application
-            .stream_active_turn(pending.session_id)
-            .await
-            .unwrap();
-        let artifacts = database
-            .load_artifacts_for_turns(vec![pending.turn_id])
-            .await
-            .unwrap();
-        assert_eq!(artifacts.len(), 4);
-        assert_eq!(
-            artifacts
-                .iter()
-                .map(|artifact| (
-                    artifact.ordinal,
-                    artifact.kind.as_str(),
-                    artifact.state.as_str()
-                ))
-                .collect::<Vec<_>>(),
-            vec![
-                (0, "image", "ready"),
-                (1, "video", "ready"),
-                (2, "file", "ready"),
-                (3, "report", "ready"),
-            ]
-        );
-        let pending_acks = database.pending_artifact_acknowledgements().await.unwrap();
-        assert_eq!(pending_acks.len(), 4);
-        let history = application
-            .load_history(pending.session_id, None, None)
-            .await
-            .unwrap();
-        assert_eq!(history.turns[0].messages[1].content, "v3 answer");
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 24);
-        assert!(requests[7].contains(&format!(
-            "/v3/agent-sessions/{}/events?event_schema_version=3",
-            identity.agent_session_id
-        )));
-        assert!(!requests
-            .iter()
-            .any(|request| request.contains("/v2/agent-sessions")));
-        for (index, artifact) in mixed_artifacts.iter().enumerate() {
-            assert!(requests[9 + (index * 4)].contains(&format!(
-                "/v3/agent-sessions/{}/artifacts/{}/content",
-                identity.agent_session_id, artifact.id
-            )));
-            assert!(requests[11 + (index * 4)].contains(&format!(
-                "/v3/agent-sessions/{}/artifacts/{}/ack",
-                identity.agent_session_id, artifact.id
-            )));
-        }
-        drop(application);
-        let mut recovery_responses = Vec::with_capacity(8);
-        for pending_ack in &pending_acks {
-            let recovery_body = serde_json::json!({
-                "artifact_id": pending_ack.manifest.artifact_id,
-                "ack_id": pending_ack.commit.ack_id,
-                "status": "acknowledged",
-                "cleanup_status": "completed",
-                "acknowledged_at": "2026-08-20T00:00:06Z"
-            })
-            .to_string();
-            recovery_responses.push(ready_response(NONCE));
-            recovery_responses.push(json_response("200 OK", &recovery_body));
-        }
-        let (recovery_port, recovery_server) = serve_http(recovery_responses).await;
-        let recovery_host = Arc::new(
-            HostBridge::from_connection(HostConnection {
-                port: recovery_port,
-                token_path,
-                instance_nonce: NONCE.to_owned(),
-            })
-            .unwrap(),
-        );
-        let recovery = ArtifactTransferService::new(recovery_host, database.clone());
-        assert_eq!(
-            recovery.recover_pending_acknowledgements().await.unwrap(),
-            4
-        );
-        assert!(database
-            .pending_artifact_acknowledgements()
-            .await
-            .unwrap()
-            .is_empty());
-        let recovery_requests = recovery_server.await.unwrap();
-        assert_eq!(recovery_requests.len(), 8);
-        for (index, pending_ack) in pending_acks.iter().enumerate() {
-            assert!(recovery_requests[1 + (index * 2)].contains(&format!(
-                "/v3/agent-sessions/{}/artifacts/{}/ack",
-                identity.agent_session_id, pending_ack.manifest.artifact_id
-            )));
-        }
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn host_restart_rebases_one_stale_stream_cursor_and_commits_failed_terminal() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa0";
-        const TOKEN: &str = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
-        let root = std::env::temp_dir().join(format!("yijie-r8-stream-rebase-{}", Uuid::now_v7()));
-        let project_path = root.join("project");
-        let token_directory = root.join("host");
-        fs::create_dir_all(&project_path).unwrap();
-        fs::create_dir(&token_directory).unwrap();
-        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
-        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let selection = native_project::create_selection(&project_path)
-            .unwrap()
-            .unwrap();
-        let database = DatabaseWorker::start(
-            root.join("chat"),
-            super::super::database::ChatScope::new(
-                Uuid::now_v7().to_string(),
-                Uuid::now_v7().to_string(),
-            )
-            .unwrap(),
-            Box::new(TestKeyStore),
-            Box::new(TestKeyStore),
-        )
-        .unwrap();
-        let project = database
-            .register_project(selection.canonical_path, selection.bookmark)
-            .await
-            .unwrap();
-        let pending = database
-            .create_session_and_enqueue(
-                Uuid::parse_str(&project.id).unwrap(),
-                "synthetic restart turn".to_owned(),
-                Uuid::now_v7(),
-            )
-            .await
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let create = database
-            .claim_next_conversation_outbox(now, 30)
-            .await
-            .unwrap()
-            .unwrap();
-        let task_id = Uuid::now_v7();
-        database
-            .bind_public_task(create.operation_id, task_id, now)
-            .await
-            .unwrap();
-        database
-            .reschedule_outbox(create.operation_id, now)
-            .await
-            .unwrap();
-        let create = database
-            .claim_next_conversation_outbox(now, 30)
-            .await
-            .unwrap()
-            .unwrap();
-        let agent_session_id = Uuid::now_v7();
-        let thread_id = Uuid::now_v7();
-        database
-            .bind_host_session_and_enqueue_turn(
-                create.operation_id,
-                task_id,
-                agent_session_id,
-                thread_id,
-            )
-            .await
-            .unwrap();
-        let turn = database
-            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
-            .await
-            .unwrap()
-            .unwrap();
-        let runtime_turn_id = Uuid::now_v7();
-        database
-            .suspend_started_turn_retry(turn.operation_id, runtime_turn_id)
-            .await
-            .unwrap();
-        let active = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-        let old_cursor = StoredEventCursor {
-            stream_id: Uuid::now_v7(),
-            sequence: 9,
-            event_id: Uuid::now_v7(),
-        };
-        database
-            .persist_turn_progress(TurnProgress {
-                local_turn_id: active.turn_id,
-                assistant_text: "synthetic partial".to_owned(),
-                cursor: old_cursor.clone(),
-            })
-            .await
-            .unwrap();
-
-        let new_stream_id = Uuid::now_v7();
-        let identity = EventIdentity {
-            stream_id: new_stream_id,
-            task_id,
-            agent_session_id,
-            thread_id,
-            turn_id: runtime_turn_id,
-        };
-        let sse_body = sse_event(
-            new_stream_id,
-            1,
-            &identity,
-            None,
-            "turn.completed",
-            true,
-            serde_json::json!({"status": "failed"}),
-        );
-        let stream_id_header = new_stream_id.to_string();
-        let stream_response = http_response(
-            "200 OK",
-            &[
-                ("Content-Type", "text/event-stream"),
-                ("Cache-Control", "no-store"),
-                ("X-Accel-Buffering", "no"),
-                ("X-Yijie-Event-Schema-Version", "2"),
-                ("X-Yijie-Event-Stream-ID", &stream_id_header),
-            ],
-            &sse_body,
-        );
-        let changed_response = json_response(
-            "409 Conflict",
-            r#"{"error":{"code":"event_stream_changed","message":"event stream changed after Host restart"}}"#,
-        );
-        let (port, server) = serve_http(vec![
-            ready_response(NONCE),
-            changed_response,
-            ready_response(NONCE),
-            stream_response,
+                &sse,
+            ),
         ])
         .await;
         let application = ConversationApplication::new(
@@ -7724,205 +3900,109 @@ mod tests {
                 HostBridge::from_connection(HostConnection {
                     port,
                     token_path,
-                    instance_nonce: NONCE.to_owned(),
+                    instance_nonce: NONCE.into(),
                 })
                 .unwrap(),
             ),
             Arc::new(FixedPublicTaskControlPlane::new([])),
         );
-
         application
             .stream_active_turn(pending.session_id)
             .await
             .unwrap();
+        let views = database
+            .native_views(pending.session_id, vec![pending.turn_id])
+            .await
+            .unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].items[0].item.id, "agent-native");
         assert_eq!(
-            database.outbox_state(turn.operation_id).await.unwrap(),
-            super::super::database::OutboxState::Done
+            views[0].items[0].item.text.as_deref(),
+            Some("revised native final")
         );
+        assert_eq!(views[0].status.as_deref(), Some("failed"));
         assert_eq!(
-            database.active_turn_context(pending.session_id).await,
-            Err(ChatError::NotFound)
+            views[0].terminal_error_code.as_deref(),
+            Some("usageLimitExceeded")
         );
-        let history = application
-            .load_history(pending.session_id, None, None)
-            .await
-            .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
-        assert_eq!(history.turns[0].messages[1].content, "synthetic partial");
-
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 4);
-        let stale_request = requests[1].to_ascii_lowercase();
-        let fresh_request = requests[3].to_ascii_lowercase();
-        assert!(stale_request.contains(&format!(
-            "last-event-id: {}:{}",
-            old_cursor.stream_id, old_cursor.sequence
-        )));
-        assert!(!fresh_request.contains("last-event-id:"));
-        assert!(
-            requests[1].starts_with(&format!("GET /v2/agent-sessions/{agent_session_id}/events"))
-        );
-        assert!(
-            requests[3].starts_with(&format!("GET /v2/agent-sessions/{agent_session_id}/events"))
-        );
-
-        drop(application);
-        drop(database);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn fake_host_coordinator_finishes_durable_content_free_cleanup() {
-        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693f91";
-        const TOKEN: &str = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
-        let root = std::env::temp_dir().join(format!("yijie-s7c-cleanup-{}", Uuid::now_v7()));
-        let project_path = root.join("project");
-        let token_directory = root.join("host");
-        fs::create_dir_all(&project_path).unwrap();
-        fs::create_dir(&token_directory).unwrap();
-        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
-        let token_path = token_directory.join("api-token");
-        fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
-        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let selection = native_project::create_selection(&project_path)
-            .unwrap()
-            .unwrap();
-        let database = DatabaseWorker::start(
-            root.join("chat"),
-            super::super::database::ChatScope::new(
-                Uuid::now_v7().to_string(),
-                Uuid::now_v7().to_string(),
-            )
-            .unwrap(),
-            Box::new(TestKeyStore),
-            Box::new(TestKeyStore),
-        )
-        .unwrap();
-        let project = database
-            .register_project(selection.canonical_path, selection.bookmark)
-            .await
-            .unwrap();
-        let pending = database
-            .create_session_and_enqueue(
-                Uuid::parse_str(&project.id).unwrap(),
-                "cleanup canary prompt".to_owned(),
-                Uuid::now_v7(),
-            )
-            .await
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let create = database
-            .claim_next_conversation_outbox(now, 30)
-            .await
-            .unwrap()
-            .unwrap();
-        let public_task_id = Uuid::now_v7();
-        database
-            .bind_public_task(create.operation_id, public_task_id, now)
-            .await
-            .unwrap();
-        database
-            .reschedule_outbox(create.operation_id, now)
-            .await
-            .unwrap();
-        let create = database
-            .claim_next_conversation_outbox(now, 30)
-            .await
-            .unwrap()
-            .unwrap();
-        let agent_session_id = Uuid::now_v7();
-        database
-            .bind_host_session_and_enqueue_turn(
-                create.operation_id,
-                public_task_id,
-                agent_session_id,
-                Uuid::now_v7(),
-            )
-            .await
-            .unwrap();
-        let turn = database
-            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
-            .await
-            .unwrap()
-            .unwrap();
-        database
-            .suspend_started_turn_retry(turn.operation_id, Uuid::now_v7())
-            .await
-            .unwrap();
-        let active = database
-            .active_turn_context(pending.session_id)
-            .await
-            .unwrap();
-        database
-            .commit_terminal_turn(TerminalTurnCommit {
-                local_turn_id: active.turn_id,
-                terminal_status: "completed".to_owned(),
-                terminal_at: now,
-                assistant_text: "cleanup canary answer".to_owned(),
-                cursor: StoredEventCursor {
-                    stream_id: Uuid::now_v7(),
-                    sequence: 1,
-                    event_id: Uuid::now_v7(),
-                },
-                reasoning_status: ReasoningStatus::Unavailable,
-                reasoning_reason_code: Some("reasoning_not_emitted".to_owned()),
-                reasoning_items: Vec::new(),
-            })
-            .await
-            .unwrap();
-        let operation_id = Uuid::now_v7();
-        let cleanup_body = serde_json::json!({
-            "operation_id": operation_id,
-            "outcome": "complete",
-            "surfaces": {
-                "runtime_thread_tree": "complete",
-                "host_mapping": "complete",
-                "host_replay": "complete"
-            }
-        })
-        .to_string();
-        let (port, server) = serve_http(vec![
-            ready_response(NONCE),
-            json_response("200 OK", &cleanup_body),
-        ])
-        .await;
-        let application = ConversationApplication::new(
-            database.clone(),
-            Arc::new(
-                HostBridge::from_connection(HostConnection {
-                    port,
-                    token_path,
-                    instance_nonce: NONCE.to_owned(),
-                })
-                .unwrap(),
-            ),
-            Arc::new(FixedPublicTaskControlPlane::new([])),
-        );
-        application
-            .begin_session_deletion(pending.session_id, operation_id)
-            .await
-            .unwrap();
-        let outcome = application.run_background_once().await.unwrap();
-        let CoordinatorOutcome::CleanupComplete(receipt) = outcome else {
-            panic!("cleanup must finish through the coordinator");
-        };
-        assert_eq!(receipt.operation_id, operation_id);
-        assert_eq!(receipt.outcome_code, "cleanup_complete");
-        assert!(application
-            .list_sessions(None, None)
-            .await
-            .unwrap()
-            .sessions
-            .is_empty());
+        assert!(views[0].terminal_observed);
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
-        assert!(requests[1].contains(&format!(
-            "POST /v2/agent-sessions/{agent_session_id}/cleanup-operations"
+        assert!(requests[1].starts_with(&format!(
+            "GET /v7/agent-sessions/{agent_session_id}/events HTTP/1.1"
         )));
-        assert!(!requests[1].contains("cleanup canary"));
-        assert!(!format!("{receipt:?}").contains("cleanup canary"));
-
+        assert!(requests.iter().all(|r| !r.starts_with("POST ")));
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat132_coordinator_recovers_missing_cursor_from_confirmed_previous_host() {
+        const OLD: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa5";
+        const CURRENT: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        const TOKEN: &str = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+        let (root, database, pending, _claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat132-recover-without-ui").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .accept_native_turn(pending.turn_operation_id, runtime_turn_id, OLD.into())
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, TOKEN).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let snapshot = serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
+        let (port, server) = serve_http(vec![
+            ready_response(CURRENT),
+            json_response("200 OK", &snapshot.to_string()),
+        ])
+        .await;
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: CURRENT.into(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+        application
+            .stream_active_turn(pending.session_id)
+            .await
+            .unwrap();
+        let views = database
+            .native_views(pending.session_id, vec![pending.turn_id])
+            .await
+            .unwrap();
+        assert_eq!(views[0].status_source.as_deref(), Some("runtime_read"));
+        assert!(!views[0].terminal_observed);
+        assert_eq!(views[0].items[0].item.id, "item-0");
+        assert_eq!(
+            database
+                .load_history(pending.session_id, None, Some(20))
+                .await
+                .unwrap()
+                .turns[0]
+                .status,
+            "completed"
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with(&format!(
+            "GET /v1/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
+        )));
+        assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);
         drop(database);
         fs::remove_dir_all(root).unwrap();

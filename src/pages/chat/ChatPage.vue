@@ -16,11 +16,8 @@ import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
 import type {
-  ChatAttachment,
   ChatDraftTarget,
   ChatHistoryTurn,
-  ChatMessage,
-  ChatMessageContentBlock,
   ChatReasoningItem,
 } from "../../domain/chat-ipc";
 import { ChatClientError } from "../../domain/chat-ipc";
@@ -44,7 +41,7 @@ import {
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";
-import type { ConversationState } from "../../domain/conversation-state";
+import type { ConversationView } from "../../domain/conversation-view";
 import {
   browserFrameProjectionScheduler,
   createFrameBatchedProjection,
@@ -63,20 +60,14 @@ import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-nat
 import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
-import {
-  LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
-  legacyChatTimelineRollbackEnabled as configuredLegacyChatTimelineRollbackEnabled,
-} from "../../authorization/chat-timeline-ui-config";
+
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
 const artifactStore = useArtifactStore();
-const legacyChatTimelineRollbackEnabled = inject(
-  LEGACY_CHAT_TIMELINE_ROLLBACK_KEY,
-  configuredLegacyChatTimelineRollbackEnabled,
-);
+
 const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const composerDrafts = shallowRef(createChatComposerDrafts());
 const routeSessionId = computed(() => typeof route.params.sessionId === "string"
@@ -108,7 +99,7 @@ const reasoningItems = ref<Readonly<Record<string, readonly ChatReasoningItem[]>
 const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
-const renderedConversationState = shallowRef(chatStore.conversationState);
+const renderedConversationView = shallowRef(chatStore.conversationState);
 let dragDropUnlisten: UnlistenFn | null = null;
 let dragDropDisposed = false;
 const {
@@ -136,7 +127,7 @@ function timelineSelectionActive(): boolean {
 }
 
 const timelineFrameProjection = createFrameBatchedProjection(
-  (state: ConversationState) => { renderedConversationState.value = state; },
+  (state: ConversationView) => { renderedConversationView.value = state; },
   browserFrameProjectionScheduler(),
   () => !timelineSelectionActive(),
 );
@@ -145,7 +136,7 @@ const conversationTimeline = computed(() => {
   return sessionId === null
     ? null
     : selectConversationTimeline(
-        renderedConversationState.value,
+        renderedConversationView.value,
         sessionId,
         chatStore.conversationApprovalState,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled },
@@ -234,7 +225,7 @@ watch(
   () => chatStore.selectedSessionId,
   () => {
     // Replace any presentation frame queued for the previous session. The
-    // semantic ConversationState remains synchronous; only its DOM projection
+    // native view remains synchronous; only its DOM projection
     // is frame-batched.
     timelineFrameProjection.push(chatStore.conversationState, false);
     reasoningItems.value = {};
@@ -254,15 +245,7 @@ watch(
   },
 );
 
-const presentedConversationChange = computed(() => legacyChatTimelineRollbackEnabled
-  ? [
-      chatStore.history?.turns.length ?? 0,
-      chatStore.liveAssistantText,
-      chatStore.liveReasoning.length,
-      chatStore.liveTurnStatus,
-    ]
-  : [renderedConversationState.value, chatStore.conversationApprovalState],
-);
+const presentedConversationChange = computed(() => [renderedConversationView.value, chatStore.conversationApprovalState]);
 
 watch(
   presentedConversationChange,
@@ -491,22 +474,8 @@ function showUnsupportedInput(message: string): void {
   transientNotice.value = message;
 }
 
-function messageTime(epoch: number): string {
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(epoch);
-}
 
-function messageBlocks(message: ChatMessage): readonly ChatMessageContentBlock[] {
-  if (message.contentBlocks && message.contentBlocks.length > 0) return message.contentBlocks;
-  return message.content.length > 0
-    ? Object.freeze([{ type: "text", text: message.content } as const])
-    : Object.freeze([]);
-}
 
-function historyAttachmentStatus(attachment: ChatAttachment): string {
-  if (attachment.status === "expired") return "已过期";
-  if (attachment.status === "error_terminal") return "处理失败";
-  return attachment.type === "image" ? "图片" : "文件";
-}
 
 function attachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -685,13 +654,19 @@ onBeforeUnmount(() => {
           </div>
 
           <ChatTimeline
-            v-if="!legacyChatTimelineRollbackEnabled && conversationTimeline"
+            v-if="conversationTimeline"
             :timeline="conversationTimeline"
             :can-decide-approvals="chatStore.canDecideApprovals"
             :approval-authority-revision="chatStore.approvalAuthorityRevision"
             :approval-transients="chatStore.approvalTransients"
             @approval-decision="decideApproval"
           >
+            <template #legacy-records="{ turnId }">
+              <template v-for="turn in displayTurns.filter(t => t.turnId === turnId && (!('projectionAuthority' in t) || t.projectionAuthority === 'legacy'))" :key="turn.turnId">
+                <ChatReasoningDisclosure v-if="turn.reasoning.length > 0" :disclosure-id="`legacy-reasoning-${turn.turnId}`" :metadata="turn.reasoning" :items="reasoningItems[turn.turnId] ?? []" :loading="reasoningLoading.has(turn.turnId)" @load="loadReasoning(turn)" />
+                <p v-if="reasoningFailed.has(turn.turnId)" role="alert">旧版推理记录读取失败，请重新展开后再试。</p>
+              </template>
+            </template>
             <template #item-actions="{ item }">
               <ChatCopyAction
                 v-if="itemCopyText(item)"
@@ -742,124 +717,11 @@ onBeforeUnmount(() => {
             </template>
           </ChatTimeline>
 
-          <template v-else-if="legacyChatTimelineRollbackEnabled">
-            <div v-if="isHistoryLoading" class="chat-empty" role="status">
-              <span class="chat-empty__loader" aria-hidden="true" />
-              <strong>正在读取本地对话</strong>
-              <span>只会加载当前任务的历史记录。</span>
-            </div>
-
-            <div v-else-if="stableError && !permissionDenied && displayTurns.length === 0" class="chat-notice chat-notice--error" role="alert">
-              <YjIcon name="warning" size="lg" tone="error" />
-              <div class="chat-notice__copy">
-                <strong>{{ stableError.title }}</strong>
-                <span>{{ stableError.detail }}</span>
-              </div>
-              <button v-if="stableError.actionLabel" class="chat-notice__action yj-control" type="button" @click="handleStableErrorAction">
-                {{ stableError.actionLabel }}
-              </button>
-            </div>
-
-            <div v-else-if="displayTurns.length === 0 && !isStreaming" class="chat-empty">
-              <YjIcon name="assistant" size="xl" tone="muted" />
-              <strong>对话正在准备</strong>
-              <span>第一条任务已保存到本机，模型输出会显示在这里。</span>
-            </div>
-
-            <article v-for="turn in displayTurns" :key="turn.turnId" class="chat-turn">
-              <div
-                v-for="message in turn.messages.filter((entry) => entry.role === 'user')"
-                :key="message.messageId"
-                class="chat-message chat-message--user"
-                aria-label="用户消息"
-              >
-                <div class="chat-message__label"><YjIcon name="user" size="xs" />你</div>
-                <div class="chat-message__blocks">
-                  <template v-for="(block, blockIndex) in messageBlocks(message)" :key="`${message.messageId}-${blockIndex}`">
-                    <div v-if="block.type === 'text'" class="chat-message__body">{{ block.text }}</div>
-                    <div
-                      v-else
-                      class="chat-message__attachment"
-                      :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
-                    >
-                      <span class="chat-message__attachment-icon" aria-hidden="true">
-                        <YjIcon :name="block.type === 'image' ? 'image' : 'file'" size="sm" />
-                      </span>
-                      <span class="chat-message__attachment-copy">
-                        <strong :title="block.name">{{ block.name }}</strong>
-                        <span>{{ historyAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
-                      </span>
-                    </div>
-                  </template>
-                </div>
-                <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
-              </div>
-
-              <ChatReasoningDisclosure
-                v-if="turn.reasoning.length > 0"
-                :disclosure-id="`reasoning-${turn.turnId}`"
-                :metadata="turn.reasoning"
-                :items="reasoningItems[turn.turnId] ?? []"
-                :loading="reasoningLoading.has(turn.turnId)"
-                @load="loadReasoning(turn)"
-              />
-              <p v-if="reasoningFailed.has(turn.turnId)" class="chat-turn__reasoning-error" role="alert">
-                推理记录读取失败，请重新展开后再试。
-              </p>
-
-              <div
-                v-for="message in turn.messages.filter((entry) => entry.role === 'assistant')"
-                :key="message.messageId"
-                class="chat-message chat-message--assistant"
-                aria-label="模型回答"
-              >
-                <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
-                <div class="chat-message__body">{{ message.content }}</div>
-                <time class="chat-message__time">{{ messageTime(message.createdAt) }}</time>
-              </div>
-
-              <ChatArtifactList
-                v-if="chatStore.context && chatStore.selectedSessionId === artifactStore.authority?.sessionId"
-                :artifacts="artifactStore.artifactsForTurn(chatStore.selectedSessionId, turn.turnId)"
-                :context-id="chatStore.context.contextId"
-                :native-client="chatArtifactNativeClient"
-                :video-native-client="chatArtifactVideoNativeClient"
-                :file-native-client="chatArtifactFileNativeClient"
-                :report-native-client="chatArtifactReportNativeClient"
-              />
-
-              <p v-if="turn.status === 'interrupted'" class="chat-turn__terminal">本轮生成已停止</p>
-              <p v-else-if="turn.status === 'failed'" class="chat-turn__terminal chat-turn__terminal--error">本轮生成失败，请重新提交</p>
-            </article>
-
-            <ChatReasoningDisclosure
-              v-if="chatStore.liveReasoning.length > 0 || isStreaming"
-              disclosure-id="reasoning-live"
-              :live-parts="chatStore.liveReasoning"
-              live
-              default-expanded
-            />
-
-            <article
-              v-if="chatStore.liveAssistantText"
-              class="chat-message chat-message--assistant"
-              :aria-label="isStreaming ? '模型回答，正在生成' : '模型回答'"
-            >
-              <div class="chat-message__label"><YjIcon name="assistant" size="xs" />易界AI</div>
-              <div class="chat-message__body">{{ chatStore.liveAssistantText }}</div>
-              <span v-if="isStreaming" class="chat-message__streaming" aria-hidden="true" />
-            </article>
-            <div v-else-if="isStreaming" class="chat-streaming" role="status">
-              <span class="chat-empty__loader" aria-hidden="true" />
-              正在生成回答…
-            </div>
-          </template>
-
           <template v-else>
             <div v-if="isHistoryLoading" class="chat-empty" role="status">
               <span class="chat-empty__loader" aria-hidden="true" />
               <strong>正在读取本地对话</strong>
-              <span>只会加载当前任务的领域状态。</span>
+              <span>只会加载当前任务的对话记录。</span>
             </div>
 
             <div v-else-if="stableError && !permissionDenied" class="chat-notice chat-notice--error" role="alert">

@@ -1,9 +1,9 @@
 use super::artifact::{
-    ArtifactCommit, ArtifactEventV3, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage,
-    ArtifactProjection, DownloadedArtifact, PendingArtifactAcknowledgement, ReadyFileContent,
-    ReadyFileReadError, ReadyImageContent, ReadyImageReadError, ReadyReportContent,
-    ReadyReportReadError, ReadyVideoContent, ReadyVideoRangeContent, ReadyVideoRangeRequest,
-    ReadyVideoReadError, StoredArtifactCommit, TransferDisposition,
+    ArtifactCommit, ArtifactIdentity, ArtifactManifest, ArtifactProgressStage, ArtifactProjection,
+    DownloadedArtifact, PendingArtifactAcknowledgement, ReadyFileContent, ReadyFileReadError,
+    ReadyImageContent, ReadyImageReadError, ReadyReportContent, ReadyReportReadError,
+    ReadyVideoContent, ReadyVideoRangeContent, ReadyVideoRangeRequest, ReadyVideoReadError,
+    StoredArtifactCommit, TransferDisposition,
 };
 use super::attachment::PreparedAttachment;
 use super::database::Feat126ResumeCandidate;
@@ -14,13 +14,9 @@ use super::database::{
     MessageContentBlockProjection, OutboxState, PendingConversation, ProjectSummary,
     PublicTaskBindingState, PublicTaskControlPlaneStatus, ReasoningItem, RecoverySnapshot,
     SessionPage, SessionPageCursor, SessionSummary, StartTurnDispatch, StartTurnDispatchV2,
-    TerminalTurnCommit, TurnProgress,
 };
 use super::error::ChatError;
-use super::feat134::{
-    Feat134HistoryProjection, Feat134Hydration, Feat134Projection, Feat134ProjectionFailure,
-};
-use super::feat137::ApprovalProjection;
+use super::feat134::{Feat134HistoryProjection, Feat134Hydration};
 use super::keychain::{DatabaseKeyStore, ReceiptKeyStore};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -54,6 +50,55 @@ impl Drop for DatabaseWorkerInner {
 }
 
 impl DatabaseWorker {
+    pub async fn native_thread_binding(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> Result<Option<uuid::Uuid>, ChatError> {
+        self.call(move |r| r.native_thread_binding(session_id))
+            .await
+    }
+
+    pub async fn local_submissions(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+    ) -> Result<Vec<super::native_conversation_generated::LocalSubmissionView>, ChatError> {
+        self.call(move |r| r.local_submissions(session_id, &turn_ids))
+            .await
+    }
+    pub async fn native_views(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+    ) -> Result<Vec<super::native_conversation_generated::NativeConversationView>, ChatError> {
+        self.call(move |r| r.native_views(session_id, &turn_ids))
+            .await
+    }
+    pub async fn native_recovery_views(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+        snapshot: Option<
+            std::sync::Arc<super::native_conversation_generated::NativeThreadSnapshot>,
+        >,
+        recover: bool,
+    ) -> Result<Vec<super::native_conversation_generated::NativeConversationView>, ChatError> {
+        self.call(move |r| {
+            r.native_recovery_views(session_id, &turn_ids, snapshot.as_deref(), recover)
+        })
+        .await
+    }
+    pub async fn commit_native_view(
+        &self,
+        context: ActiveTurnContext,
+        view: super::native_conversation_generated::NativeConversationView,
+        event: Option<super::native_conversation_generated::NativeEvent>,
+        now: i64,
+    ) -> Result<super::native_conversation_generated::NativeConversationView, ChatError> {
+        self.call(move |r| r.commit_native_view(&context, view, event.as_ref(), now))
+            .await
+    }
+
     pub fn start(
         chat_directory: PathBuf,
         scope: ChatScope,
@@ -242,33 +287,6 @@ impl DatabaseWorker {
             .await
     }
 
-    pub async fn commit_artifact_event_progress(
-        &self,
-        progress: TurnProgress,
-        event: ArtifactEventV3,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| repository.commit_artifact_event_progress(&progress, &event))
-            .await
-    }
-
-    pub async fn commit_artifact_failure_with_cursor(
-        &self,
-        progress: TurnProgress,
-        identity: ArtifactIdentity,
-        error_code: String,
-        retryable: bool,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| {
-            repository.commit_artifact_failure_with_cursor(
-                &progress,
-                &identity,
-                &error_code,
-                retryable,
-            )
-        })
-        .await
-    }
-
     pub async fn record_artifact_progress(
         &self,
         identity: ArtifactIdentity,
@@ -315,43 +333,12 @@ impl DatabaseWorker {
         .await
     }
 
-    pub async fn commit_artifact_with_cursor(
-        &self,
-        manifest: ArtifactManifest,
-        downloaded: DownloadedArtifact,
-        local_committed_at: i64,
-        ack_id: uuid::Uuid,
-        progress: TurnProgress,
-    ) -> Result<ArtifactCommit, ChatError> {
-        self.call(move |repository| {
-            repository.commit_artifact_with_cursor(
-                &manifest,
-                &downloaded,
-                local_committed_at,
-                ack_id,
-                &progress,
-            )
-        })
-        .await
-    }
-
     pub async fn artifact_commit(
         &self,
         manifest: ArtifactManifest,
     ) -> Result<StoredArtifactCommit, ChatError> {
         self.call(move |repository| repository.artifact_commit(&manifest))
             .await
-    }
-
-    pub async fn commit_existing_artifact_cursor(
-        &self,
-        progress: TurnProgress,
-        manifest: ArtifactManifest,
-    ) -> Result<StoredArtifactCommit, ChatError> {
-        self.call(move |repository| {
-            repository.commit_existing_artifact_cursor(&progress, &manifest)
-        })
-        .await
     }
 
     pub async fn pending_artifact_acknowledgements(
@@ -668,53 +655,26 @@ impl DatabaseWorker {
             .await
     }
 
-    pub async fn finalize_interrupted_without_stream(
+    pub async fn accept_native_turn(
         &self,
         operation_id: uuid::Uuid,
-        terminal_at: i64,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| {
-            repository.finalize_interrupted_without_stream(operation_id, terminal_at)
-        })
-        .await
-    }
-
-    pub async fn finalize_orphaned_turn_without_stream(
-        &self,
-        session_id: uuid::Uuid,
-        turn_id: uuid::Uuid,
         runtime_turn_id: uuid::Uuid,
-        terminal_at: i64,
+        host_instance_nonce: String,
     ) -> Result<(), ChatError> {
-        self.call(move |repository| {
-            repository.finalize_orphaned_turn_without_stream(
-                session_id,
-                turn_id,
-                runtime_turn_id,
-                terminal_at,
-            )
+        self.call(move |r| {
+            r.accept_native_turn(operation_id, runtime_turn_id, &host_instance_nonce)
         })
         .await
     }
-
-    pub async fn finalize_orphaned_queued_turn_without_host(
+    pub async fn native_host_origin(
         &self,
         session_id: uuid::Uuid,
         turn_id: uuid::Uuid,
-        operation_id: uuid::Uuid,
-        terminal_at: i64,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| {
-            repository.finalize_orphaned_queued_turn_without_host(
-                session_id,
-                turn_id,
-                operation_id,
-                terminal_at,
-            )
-        })
-        .await
+    ) -> Result<Option<String>, ChatError> {
+        self.call(move |r| r.native_host_origin(session_id, turn_id))
+            .await
     }
-
+    #[cfg(test)]
     pub async fn suspend_started_turn_retry(
         &self,
         operation_id: uuid::Uuid,
@@ -748,23 +708,13 @@ impl DatabaseWorker {
             .await
     }
 
-    pub async fn finalize_failed_start_turn_dispatch(
+    pub async fn record_failed_start_turn_submission(
         &self,
         operation_id: uuid::Uuid,
         terminal_at: i64,
     ) -> Result<super::database::FailedStartTurnProjection, ChatError> {
         self.call(move |repository| {
-            repository.finalize_failed_start_turn_dispatch(operation_id, terminal_at)
-        })
-        .await
-    }
-
-    pub async fn recover_next_failed_start_turn_projection(
-        &self,
-        terminal_at: i64,
-    ) -> Result<Option<super::database::FailedStartTurnProjection>, ChatError> {
-        self.call(move |repository| {
-            repository.recover_next_failed_start_turn_projection(terminal_at)
+            repository.record_failed_start_turn_submission(operation_id, terminal_at)
         })
         .await
     }
@@ -821,93 +771,6 @@ impl DatabaseWorker {
         .await
     }
 
-    pub async fn reset_feat134_after_stream_change(
-        &self,
-        session_id: uuid::Uuid,
-        turn_id: uuid::Uuid,
-        expected: super::database::StoredEventCursor,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| {
-            repository.reset_feat134_after_stream_change(session_id, turn_id, &expected)
-        })
-        .await
-    }
-
-    pub async fn persist_feat134_projection(
-        &self,
-        projection: Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| repository.persist_feat134_projection(&projection))
-            .await
-    }
-
-    pub async fn persist_feat136_projection(
-        &self,
-        projection: Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| repository.persist_feat136_projection(&projection))
-            .await
-    }
-
-    pub async fn persist_feat137_projection(
-        &self,
-        projection: Feat134Projection,
-        approval: Option<ApprovalProjection>,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| {
-            repository.persist_feat137_projection(&projection, approval.as_ref())
-        })
-        .await
-    }
-
-    pub async fn commit_feat134_terminal(
-        &self,
-        projection: Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| repository.commit_feat134_terminal(&projection))
-            .await
-    }
-
-    pub async fn commit_feat136_terminal(
-        &self,
-        projection: Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| repository.commit_feat136_terminal(&projection))
-            .await
-    }
-
-    pub async fn commit_feat137_terminal(
-        &self,
-        projection: Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.call(move |repository| repository.commit_feat137_terminal(&projection))
-            .await
-    }
-
-    pub async fn commit_feat134_projection_failure(
-        &self,
-        failure: Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.call(move |repository| repository.commit_feat134_projection_failure(&failure))
-            .await
-    }
-
-    pub async fn commit_feat136_projection_failure(
-        &self,
-        failure: Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.call(move |repository| repository.commit_feat136_projection_failure(&failure))
-            .await
-    }
-
-    pub async fn commit_feat137_projection_failure(
-        &self,
-        failure: Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.call(move |repository| repository.commit_feat137_projection_failure(&failure))
-            .await
-    }
-
     pub async fn load_feat134_hydration(
         &self,
         turn_id: uuid::Uuid,
@@ -938,26 +801,6 @@ impl DatabaseWorker {
     ) -> Result<Feat134Hydration, ChatError> {
         self.call(move |repository| repository.load_feat137_hydration(turn_id))
             .await
-    }
-
-    pub async fn classify_feat136_observed_event(
-        &self,
-        session_id: uuid::Uuid,
-        turn_id: uuid::Uuid,
-        cursor: super::database::StoredEventCursor,
-        event_type: String,
-        source_turn_scoped: bool,
-    ) -> Result<super::database::Feat136ObservedEventDisposition, ChatError> {
-        self.call(move |repository| {
-            repository.classify_feat136_observed_event(
-                session_id,
-                turn_id,
-                &cursor,
-                &event_type,
-                source_turn_scoped,
-            )
-        })
-        .await
     }
 
     pub async fn load_feat134_history_projection(
@@ -1016,19 +859,6 @@ impl DatabaseWorker {
             repository.load_feat137_history_snapshot(session_id, before_ordinal, limit)
         })
         .await
-    }
-
-    pub async fn persist_turn_progress(&self, progress: TurnProgress) -> Result<(), ChatError> {
-        self.call(move |repository| repository.persist_turn_progress(&progress))
-            .await
-    }
-
-    pub async fn commit_terminal_turn(
-        &self,
-        terminal: TerminalTurnCommit,
-    ) -> Result<(), ChatError> {
-        self.call(move |repository| repository.commit_terminal_turn(&terminal))
-            .await
     }
 
     pub async fn list_sessions(

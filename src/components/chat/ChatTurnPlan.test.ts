@@ -1,18 +1,18 @@
 // @vitest-environment happy-dom
 
-import axe from "axe-core";
 import { mount } from "@vue/test-utils";
+import axe from "axe-core";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { hydrateConversationState, type ConversationTurnStatus } from "../../domain/conversation-state";
-import { selectConversationTimeline, type ConversationTimelinePlanViewModel } from "../../domain/conversation-timeline";
+import { describe,expect,it } from "vitest";
+import { selectConversationTimeline,type ConversationTimelinePlanViewModel } from "../../domain/conversation-timeline";
+import { viewFromLegacySnapshot,type ConversationTurnStatus } from "../../domain/conversation-view";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
 
 function projectedPlan(status: ConversationTurnStatus): ConversationTimelinePlanViewModel {
   const terminalStatus = status === "completed" || status === "failed" || status === "interrupted"
     ? status
     : null;
-  const timeline = selectConversationTimeline(hydrateConversationState({
+  const timeline = selectConversationTimeline(viewFromLegacySnapshot({
     threads: [{
       threadId: "thread-plan",
       status: status === "completed" ? "ready" : "active",

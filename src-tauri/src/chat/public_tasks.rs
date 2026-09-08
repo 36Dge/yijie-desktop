@@ -127,10 +127,6 @@ impl FixedPublicTaskControlPlane {
             calls: std::sync::Mutex::new(Vec::new()),
         }
     }
-
-    pub(crate) fn calls(&self) -> Vec<PublicTaskCreateIntent> {
-        self.calls.lock().expect("public task calls").clone()
-    }
 }
 
 #[cfg(test)]

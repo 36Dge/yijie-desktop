@@ -1,25 +1,25 @@
 // @vitest-environment happy-dom
 
-import axe from "axe-core";
 import { mount } from "@vue/test-utils";
+import axe from "axe-core";
 import { readFileSync } from "node:fs";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import { h } from "vue";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationApproval } from "../../domain/conversation-approval";
 import {
-  hydrateConversationState,
-  type ConversationItemSnapshot,
-  type ConversationNotice,
-  type ConversationThreadStatus,
-  type ConversationTurnSnapshot,
-} from "../../domain/conversation-state";
-import {
-  selectConversationTimeline,
-  type ConversationTimelineArtifactReferenceContentBlock,
-  type ConversationTimelineAttachmentReferenceContentBlock,
-  type ConversationTimelineItemViewModel,
-  type ConversationTimelineViewModel,
+selectConversationTimeline,
+type ConversationTimelineArtifactReferenceContentBlock,
+type ConversationTimelineAttachmentReferenceContentBlock,
+type ConversationTimelineItemViewModel,
+type ConversationTimelineViewModel,
 } from "../../domain/conversation-timeline";
+import {
+viewFromLegacySnapshot,
+type ConversationItemSnapshot,
+type ConversationNotice,
+type ConversationThreadStatus,
+type ConversationTurnSnapshot,
+} from "../../domain/conversation-view";
 import ChatTimeline from "./ChatTimeline.vue";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
@@ -41,7 +41,7 @@ function projectedTimeline(options: {
   turns?: readonly ConversationTurnSnapshot[];
   items?: readonly ConversationItemSnapshot[];
 } = {}): ConversationTimelineViewModel {
-  const timeline = selectConversationTimeline(hydrateConversationState({
+  const timeline = selectConversationTimeline(viewFromLegacySnapshot({
     threads: [{
       threadId: THREAD_ID,
       status: options.threadStatus ?? "ready",
@@ -568,7 +568,7 @@ describe("ChatTimeline", () => {
     wrapper.unmount();
 
     const source = readFileSync("src/components/chat/ChatTimeline.vue", "utf8");
-    expect(source).not.toMatch(/ChatPage|conversation-state|store|adapter|wire|\/api\/|@tauri-apps|fetch\(|invoke\(|router|client/i);
+    expect(source).not.toMatch(/ChatPage|conversation-view|store|adapter|wire|\/api\/|@tauri-apps|fetch\(|invoke\(|router|client/i);
     expect(source).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     expect(source).toContain("ConversationTimelineViewModel");
     expect(source).toContain("ChatTurnGroup");

@@ -71,6 +71,7 @@ export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 # FEAT-134 first verifies its exact Contracts/Host v4 authority. The Skill
 # resource chain then retains its independent legacy immutable pins.
 cd "$desktop_root"
+node scripts/check-native-conversation.mjs --require-committed
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs

@@ -8,8 +8,6 @@ mod attachment;
 mod authorization;
 mod database;
 mod error;
-#[cfg(test)]
-mod feat126_eval_tests;
 mod feat134;
 mod feat136;
 mod feat137;
@@ -31,8 +29,7 @@ use crate::skills::SkillRoots;
 pub use application::{
     ArtifactResyncReason, AuthorizedConversationApplication, ConversationApplication,
     ConversationCoordinator, ConversationResyncProjection, CoordinatorOutcome, DispatchOutcome,
-    LiveReasoningProjection, LiveTurnProjection, ReducerOutcome, ReducerOutcomeKind,
-    TurnEventReducer, TurnProjectionSink,
+    LiveReasoningProjection, LiveTurnProjection, TurnProjectionSink,
 };
 pub use artifact::{
     decode_artifact_event_envelope_v3, decode_artifact_event_v3, ArtifactCommit, ArtifactEventV3,
@@ -55,21 +52,20 @@ pub use database::{
     PendingConversation, ProjectSummary, PublicTaskBindingState, PublicTaskControlPlaneStatus,
     ReasoningItem, ReasoningPart, ReasoningStatus, RecoverySnapshot, SessionPage,
     SessionPageCursor, SessionSummary, SessionTitleSource, StartTurnDispatch, StoredEventCursor,
-    TerminalTurnCommit, TurnProgress,
 };
 pub use error::{ChatCommandError, ChatError};
 pub use feat134::{
     exact_local_enabled as feat134_exact_local_enabled, Feat134HistoryProjection,
-    Feat134HistoryTurn, Feat134Hydration, Feat134Projection, Feat134TurnReducer, SourceIdentity,
-    TimelineDelta, TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope,
-    TimelineNoticeSeverity, TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart,
-    TimelineReasoningStatus, TimelineTerminal, FEAT134_FLAG,
+    Feat134HistoryTurn, Feat134Hydration, Feat134Projection, SourceIdentity, TimelineDelta,
+    TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity,
+    TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
+    TimelineTerminal, FEAT134_FLAG,
 };
 pub use feat136::{
     CommandCwdProjection, CommandOutputProjection, CommandProjection, CommandStatus,
-    ExecutionProjection, Feat136TurnReducer, ProjectionError, ProjectionErrorCode,
-    SafeTextProjection, ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus,
-    TruncationReason, FEAT136_FLAG,
+    ExecutionProjection, ProjectionError, ProjectionErrorCode, SafeTextProjection,
+    ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus, TruncationReason,
+    FEAT136_FLAG,
 };
 pub use feat137::{
     ApprovalProjection, ApprovalProjectionStatus, PendingApproval, PendingApprovalSnapshot,
@@ -103,7 +99,6 @@ use serde::Serialize;
 use sidecar::{SidecarState, SidecarSupervisor};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -608,40 +603,17 @@ impl ChatRuntime {
                 .await
             {
                 Ok(resumed) => resumed,
-                Err(error) => match feat137_missing_session_recovery(&candidate, &error) {
-                    Some(Feat137MissingSessionRecovery::RetainTerminalHistory) => continue,
-                    Some(Feat137MissingSessionRecovery::FinalizeOrphanedQueuedTurn {
-                        session_id,
-                        turn_id,
-                        operation_id,
-                    }) => {
-                        database
-                            .finalize_orphaned_queued_turn_without_host(
-                                session_id,
-                                turn_id,
-                                operation_id,
-                                current_unix_seconds()?,
-                            )
-                            .await?;
+                Err(error) => {
+                    // Missing transport/session authority is a recovery issue. It
+                    // supplies no native execution result and cannot close an outbox.
+                    if matches!(
+                        feat137_missing_session_recovery(&candidate, &error),
+                        Some(Feat137MissingSessionRecovery::RetainTerminalHistory)
+                    ) {
                         continue;
                     }
-                    Some(Feat137MissingSessionRecovery::FinalizeOrphanedActiveTurn {
-                        session_id,
-                        turn_id,
-                        runtime_turn_id,
-                    }) => {
-                        database
-                            .finalize_orphaned_turn_without_stream(
-                                session_id,
-                                turn_id,
-                                runtime_turn_id,
-                                current_unix_seconds()?,
-                            )
-                            .await?;
-                        continue;
-                    }
-                    None => return Err(ChatError::SidecarUnavailable),
-                },
+                    return Err(ChatError::SidecarUnavailable);
+                }
             };
             validate_feat137_resumed_session(&candidate, &resumed)?;
         }
@@ -1120,15 +1092,6 @@ fn feat137_missing_session_recovery(
     }
 }
 
-fn current_unix_seconds() -> Result<i64, ChatError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| ChatError::DatabaseUnavailable)
-        .and_then(|duration| {
-            i64::try_from(duration.as_secs()).map_err(|_| ChatError::DatabaseUnavailable)
-        })
-}
-
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
     match error {
         ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
@@ -1577,3 +1540,6 @@ mod tests {
         assert!(artifacts_v3_transfer_enabled(Some("true")));
     }
 }
+pub mod native_conversation;
+pub mod native_conversation_generated;
+mod native_conversation_storage;

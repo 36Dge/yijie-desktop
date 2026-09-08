@@ -1,35 +1,32 @@
+// Readonly legacy archive adapter. Never used for native streaming or native identity.
 import type {
-  ChatArtifact,
-  ChatAttachment,
-  ChatHistoryPage,
-  ChatHistoryPageV4,
-  ChatHistoryPageV5,
-  ChatHistoryTurn,
-  ChatHistoryTurnV4,
-  ChatHistoryTurnV5,
-  ChatMessage,
-  ChatMessageContentBlock,
-  ChatProjectionEvent,
-  ChatProjectionEventV4,
-  ChatProjectionEventV5,
-  ChatTimelineItemV4,
-  ChatTimelineItemV5,
+ChatArtifact,
+ChatAttachment,
+ChatHistoryPage,
+ChatHistoryPageV4,
+ChatHistoryPageV5,
+ChatHistoryTurn,
+ChatHistoryTurnV4,
+ChatHistoryTurnV5,
+ChatMessage,
+ChatMessageContentBlock,
+ChatTimelineItemV4,
+ChatTimelineItemV5,
 } from "../domain/chat-ipc";
 import type {
-  ConversationAgentMessagePhase,
-  ConversationContentBlock,
-  ConversationExecution,
-  ConversationEvent,
-  ConversationItemSnapshot,
-  ConversationSnapshot,
-  ConversationTerminalStatus,
-  ConversationTurnSnapshot,
-  ConversationTurnStatus,
-} from "../domain/conversation-state";
+ConversationAgentMessagePhase,
+ConversationContentBlock,
+ConversationExecution,
+ConversationItemSnapshot,
+ConversationSnapshot,
+ConversationTerminalStatus,
+ConversationTurnSnapshot,
+ConversationTurnStatus,
+} from "../domain/conversation-view";
 import {
-  conversationAgentMessagePhase,
-  conversationReasoningReasonCode,
-} from "../domain/conversation-state";
+conversationAgentMessagePhase,
+conversationReasoningReasonCode,
+} from "../domain/conversation-view";
 
 const USER_ITEM_ORDINAL = 0;
 const REASONING_ITEM_ORDINAL_BASE = 100;
@@ -37,12 +34,6 @@ const ASSISTANT_ITEM_ORDINAL = 200;
 // v4 Runtime Items occupy 1..512. Keep synthetic FEAT-128 Artifact shells in
 // their own deterministic range without colliding with source ordinals.
 const ARTIFACT_ITEM_ORDINAL_BASE = 1000;
-
-export type ConversationProjectionAdaptation =
-  | Readonly<{ kind: "domain_event"; event: ConversationEvent }>
-  | Readonly<{ kind: "cleanup_state"; event: ConversationEvent }>
-  | Readonly<{ kind: "resync_required"; reason: "projection_gap" | "invalid_projection" }>
-  | Readonly<{ kind: "context_invalidated" }>;
 
 export function conversationMessageItemId(
   turnId: string,
@@ -524,325 +515,4 @@ export function historyPageToConversationSnapshot(
     turns: Object.freeze(turns),
     items: Object.freeze(orderedTurns.flatMap((turn) => historyItems(threadId, turn))),
   });
-}
-
-function eventCursor(event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5) {
-  return {
-    eventId: event.eventId,
-    streamId: event.subscriptionId,
-    sequence: event.projectionSequence,
-    threadId: event.sessionId,
-  } as const;
-}
-
-function domainCursor(
-  event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5,
-  turnId: string,
-) {
-  return {
-    ...eventCursor(event),
-    turnId,
-  } as const;
-}
-
-function lifecycleBlocksV4(
-  itemType: string,
-  text: string | null,
-): readonly ConversationContentBlock[] {
-  return itemType === "agentMessage" && text !== null && text.length > 0
-    ? Object.freeze([{ blockIndex: 0, type: "text", text }])
-    : Object.freeze([]);
-}
-
-function projectionEventV4ToConversation(
-  event: ChatProjectionEventV4,
-): ConversationProjectionAdaptation {
-  if (event.kind === "context_invalidated") {
-    return Object.freeze({ kind: "context_invalidated" });
-  }
-  if (event.kind === "resync_required") {
-    return Object.freeze({ kind: "resync_required", reason: "projection_gap" });
-  }
-  if (event.kind === "notice" && event.payload.scope === "session") {
-    return Object.freeze({
-      kind: "domain_event",
-      event: Object.freeze({
-        ...eventCursor(event),
-        kind: "thread.notice",
-        severity: "warning",
-      }),
-    });
-  }
-  if (event.turnId === undefined) {
-    return Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
-  }
-  const cursor = domainCursor(event, event.turnId);
-  switch (event.kind) {
-    case "turn_started":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({ ...cursor, kind: "turn.started", ordinal: null }),
-      });
-    case "plan_updated":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "turn.plan.updated",
-          explanation: event.payload.explanation,
-          steps: Object.freeze(event.payload.steps.map((step) => Object.freeze({
-            text: step.step,
-            status: step.status,
-          }))),
-        }),
-      });
-    case "item_started": {
-      const itemKind = itemKindV4(event.payload.itemType);
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.started",
-          itemId: event.payload.itemId,
-          ordinal: event.payload.itemOrdinal,
-          itemKind,
-          agentMessagePhase: assistantPhaseV4(event.payload.itemType, event.payload.phase),
-          initialBlocks: lifecycleBlocksV4(event.payload.itemType, event.payload.text),
-        }),
-      });
-    }
-    case "item_completed": {
-      const itemKind = itemKindV4(event.payload.itemType);
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.completed",
-          itemId: event.payload.itemId,
-          ordinal: event.payload.itemOrdinal,
-          itemKind,
-          agentMessagePhase: assistantPhaseV4(event.payload.itemType, event.payload.phase),
-          ...(event.payload.itemType === "agentMessage"
-            ? { finalBlocks: lifecycleBlocksV4(event.payload.itemType, event.payload.text) }
-            : {}),
-        }),
-      });
-    }
-    case "agent_message_append":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.delta",
-          itemId: event.payload.itemId,
-          ordinal: event.payload.itemOrdinal,
-          itemKind: "assistant_message",
-          agentMessagePhase: conversationAgentMessagePhase(event.payload.phase),
-          blockIndex: 0,
-          blockType: "text",
-          delta: event.payload.text,
-        }),
-      });
-    case "reasoning_append":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.delta",
-          itemId: event.payload.itemId,
-          ordinal: event.payload.itemOrdinal,
-          itemKind: "reasoning",
-          blockIndex: event.payload.contentIndex,
-          blockType: "text",
-          delta: event.payload.text,
-        }),
-      });
-    case "reasoning_finalized":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "reasoning.finalized",
-          itemId: event.payload.itemId,
-          ordinal: event.payload.itemOrdinal,
-          status: event.payload.status,
-          reasonCode: conversationReasoningReasonCode(event.payload.reasonCode),
-          finalBlocks: Object.freeze([...event.payload.parts]
-            .sort((left, right) => left.contentIndex - right.contentIndex)
-            .map((part) => Object.freeze({
-              blockIndex: part.contentIndex,
-              type: "text" as const,
-              text: part.text,
-            }))),
-        }),
-      });
-    case "notice":
-      return event.payload.scope === "turn"
-        ? Object.freeze({
-            kind: "domain_event" as const,
-            event: Object.freeze({
-              ...cursor,
-              kind: "notice" as const,
-              severity: event.payload.severity,
-            }),
-          })
-        : Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
-    case "turn_terminal":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "turn.completed",
-          terminalStatus: event.payload.status,
-          terminalCode: event.payload.code,
-          unfinishedItemStatus: "incomplete",
-          unfinishedReasoningReasonCode: conversationReasoningReasonCode(
-            event.payload.unfinishedReasoningReasonCode,
-          ),
-        }),
-      });
-  }
-}
-
-function projectionEventV5ToConversation(
-  event: ChatProjectionEventV5,
-): ConversationProjectionAdaptation {
-  const cursor = domainCursor(event, event.turnId ?? "");
-  switch (event.kind) {
-    case "command_started":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "command.started",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    case "command_output_append":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "command.output.delta",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    case "command_completed":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "command.completed",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    case "tool_started":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "tool.started",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    case "tool_progress":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "tool.progress",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    case "tool_completed":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          ...event.payload,
-          kind: "tool.completed",
-          ordinal: event.payload.itemOrdinal,
-        }),
-      });
-    default:
-      return projectionEventV4ToConversation(Object.freeze({
-        ...event,
-        schemaVersion: 4,
-      }) as ChatProjectionEventV4);
-  }
-}
-
-export function projectionEventToConversation(
-  event: ChatProjectionEvent | ChatProjectionEventV4 | ChatProjectionEventV5,
-): ConversationProjectionAdaptation {
-  if (event.schemaVersion === 5) return projectionEventV5ToConversation(event);
-  if (event.schemaVersion === 4) return projectionEventV4ToConversation(event);
-  if (event.kind === "context_invalidated") return Object.freeze({ kind: "context_invalidated" });
-  if (event.kind === "cleanup_state") {
-    return Object.freeze({
-      kind: "cleanup_state",
-      event: Object.freeze({ ...eventCursor(event), kind: "auxiliary" }),
-    });
-  }
-  if (event.kind === "resync_required") {
-    return Object.freeze({ kind: "resync_required", reason: "projection_gap" });
-  }
-  if (event.turnId === undefined) {
-    return Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
-  }
-  const cursor = domainCursor(event, event.turnId);
-  switch (event.kind) {
-    case "assistant_append":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.delta",
-          itemId: conversationMessageItemId(event.turnId, "assistant"),
-          ordinal: ASSISTANT_ITEM_ORDINAL,
-          itemKind: "assistant_message",
-          blockIndex: 0,
-          blockType: "text",
-          delta: event.payload.text,
-        }),
-      });
-    case "reasoning_append":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "item.delta",
-          itemId: conversationReasoningItemId(event.turnId, event.payload.itemOrdinal),
-          ordinal: REASONING_ITEM_ORDINAL_BASE + event.payload.itemOrdinal,
-          itemKind: "reasoning",
-          blockIndex: event.payload.contentIndex,
-          blockType: "text",
-          delta: event.payload.text,
-        }),
-      });
-    case "turn_state":
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({ ...cursor, kind: "turn.started", ordinal: null }),
-      });
-    case "turn_terminal": {
-      const projectedTerminal = terminalStatus(event.payload.status);
-      if (projectedTerminal === null) {
-        return Object.freeze({ kind: "resync_required", reason: "invalid_projection" });
-      }
-      return Object.freeze({
-        kind: "domain_event",
-        event: Object.freeze({
-          ...cursor,
-          kind: "turn.completed",
-          terminalStatus: projectedTerminal,
-        }),
-      });
-    }
-  }
 }

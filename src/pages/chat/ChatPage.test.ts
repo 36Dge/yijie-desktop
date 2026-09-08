@@ -1,44 +1,42 @@
 // @vitest-environment happy-dom
 
+import { flushPromises,mount } from "@vue/test-utils";
 import axe from "axe-core";
-import { flushPromises, mount } from "@vue/test-utils";
-import { createPinia, setActivePinia } from "pinia";
-import { createMemoryHistory, createRouter } from "vue-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createPinia,setActivePinia } from "pinia";
+import { afterEach,describe,expect,it,vi } from "vitest";
+import { createMemoryHistory,createRouter } from "vue-router";
+import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
+import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
+import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
+import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
+import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
+import { runtimePermissionClient } from "../../api/runtime-permission-client";
+import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
+import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
+import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import {
-  CHAT_NEW_DRAFT_TARGET,
-  ChatClientError,
-  chatSessionDraftTarget,
-  type ChatAttachment,
-  type ChatAttachmentImportEvent,
-  type ChatHistoryPage,
-  type ChatProject,
-  type ChatSession,
+CHAT_NEW_DRAFT_TARGET,
+ChatClientError,
+chatSessionDraftTarget,
+type ChatAttachment,
+type ChatAttachmentImportEvent,
+type ChatHistoryPage,
+type ChatProject,
+type ChatSession,
 } from "../../domain/chat-ipc";
-import {
-  createConversationState,
-  hydrateConversationState,
-  reconcileConversationSnapshot,
-} from "../../domain/conversation-state";
 import { hydrateConversationApprovalState } from "../../domain/conversation-approval";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
-import { historyPageToConversationSnapshot } from "../../api/chat-conversation-adapter";
 import {
-  useChatStore,
-  type ChatSubmissionResult,
-} from "../../stores/chat.store";
+emptyConversationView,
+viewFromLegacySnapshot
+} from "../../domain/conversation-view";
 import { useArtifactStore } from "../../stores/artifact.store";
-import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
-import ChatTimeline from "../../components/chat/ChatTimeline.vue";
-import ChatComposer from "../../components/chat/ChatComposer.vue";
-import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
-import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
-import { chatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
-import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-native-client";
-import { LEGACY_CHAT_TIMELINE_ROLLBACK_KEY } from "../../authorization/chat-timeline-ui-config";
-import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
+import {
+useChatStore,
+type ChatSubmissionResult,
+} from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
-import { runtimePermissionClient } from "../../api/runtime-permission-client";
 
 type MockDragDropPayload =
   | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
@@ -154,8 +152,7 @@ function setHistoryProjection(
   history: ChatHistoryPage,
 ): void {
   store.history = history;
-  store.conversationState = reconcileConversationSnapshot(
-    createConversationState(),
+  store.conversationState = viewFromLegacySnapshot(
     historyPageToConversationSnapshot(SESSION_ID, history),
   );
 }
@@ -198,7 +195,6 @@ async function mountPage(
   path: string,
   active = false,
   activeHistory: ChatHistoryPage = HISTORY,
-  legacyTimelineRollback = false,
   retryChatAuthority: () => Promise<boolean> = async () => false,
 ) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
@@ -242,7 +238,6 @@ async function mountPage(
     global: {
       plugins: [pinia, router],
       provide: {
-        [LEGACY_CHAT_TIMELINE_ROLLBACK_KEY as symbol]: legacyTimelineRollback,
         [CHAT_AUTHORITY_RETRY_KEY as symbol]: retryChatAuthority,
       },
     },
@@ -394,7 +389,7 @@ describe("FEAT-126 ChatPage", () => {
       sourceSequence: "41",
       sourceOccurredAt: "2026-08-30T14:28:00Z",
     });
-    store.conversationState = hydrateConversationState({
+    store.conversationState = viewFromLegacySnapshot({
       threads: [{ threadId: SESSION_ID, status: "active" }],
       turns: [{
         threadId: SESSION_ID,
@@ -508,10 +503,7 @@ describe("FEAT-126 ChatPage", () => {
     for (let revision = 1; revision <= 100; revision += 1) {
       store.conversationState = {
         ...store.conversationState,
-        diagnostics: Object.freeze(Array.from(
-          { length: Math.min(revision, 64) },
-          () => Object.freeze({ code: "unsupported_event" as const }),
-        )),
+
       };
     }
     await flushPromises();
@@ -555,7 +547,7 @@ describe("FEAT-126 ChatPage", () => {
       sessionId: secondSessionId,
       title: "第二个本地任务",
     }];
-    store.conversationState = hydrateConversationState({
+    store.conversationState = viewFromLegacySnapshot({
       threads: [
         { threadId: SESSION_ID, status: "ready" },
         { threadId: secondSessionId, status: "ready" },
@@ -644,7 +636,7 @@ describe("FEAT-126 ChatPage", () => {
       HISTORY_WITHOUT_REASONING,
     );
 
-    store.conversationState = createConversationState();
+    store.conversationState = emptyConversationView();
     await flushPromises();
 
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(false);
@@ -659,7 +651,7 @@ describe("FEAT-126 ChatPage", () => {
       true,
       HISTORY_WITHOUT_REASONING,
     );
-    store.conversationState = hydrateConversationState({
+    store.conversationState = viewFromLegacySnapshot({
       threads: [{ threadId: SESSION_ID, status: "active" }],
       turns: [{
         threadId: SESSION_ID,
@@ -914,7 +906,6 @@ describe("FEAT-126 ChatPage", () => {
       "/chat",
       false,
       HISTORY,
-      false,
       retryChatAuthority,
     );
     storeAtRetry = store;
@@ -942,33 +933,13 @@ describe("FEAT-126 ChatPage", () => {
     expect(refreshLocalReadiness).not.toHaveBeenCalled();
   });
 
-  it("uses the legacy renderer only through the explicit rollback boundary", async () => {
-    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true, HISTORY, true);
-    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(false);
-    expect(wrapper.find(".chat-turn").exists()).toBe(true);
+  it("keeps old records readable in the single timeline", async () => {
+    const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true, HISTORY);
+    expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
     expect(wrapper.text()).toContain("检查标题");
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
-    expect(wrapper.text()).toContain("文件 · 4 KB");
     expect(wrapper.text()).toContain("模型推理记录");
-    expect(wrapper.find('[aria-label="复制"]').exists()).toBe(false);
-    expect(wrapper.find('[aria-label*="赞"]').exists()).toBe(false);
-
-    store.phase = "streaming";
-    store.liveReasoning = [{ itemOrdinal: 0, contentIndex: 0, text: "<script>not executable</script>" }];
-    store.liveAssistantText = "正在生成的回答";
-    await flushPromises();
-    expect(wrapper.text()).toContain("<script>not executable</script>");
-    expect(wrapper.find("script").exists()).toBe(false);
-    expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
-    expect(wrapper.find('[aria-label="模型回答，正在生成"]').exists()).toBe(true);
-    expect(wrapper.find(".chat-message__streaming").exists()).toBe(true);
-
-    store.phase = "ready";
-    await flushPromises();
-    expect(wrapper.find('[aria-label="模型回答"]').exists()).toBe(true);
-    expect(wrapper.find('[aria-label="模型回答，正在生成"]').exists()).toBe(false);
-    expect(wrapper.find(".chat-message__streaming").exists()).toBe(false);
   });
 
   it("selects through the unified plus entry and permits an attachment-only task", async () => {

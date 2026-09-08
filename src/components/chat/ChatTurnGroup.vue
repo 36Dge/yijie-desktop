@@ -39,6 +39,7 @@ const emit = defineEmits<{
 }>();
 
 const slots = defineSlots<{
+  "legacy-records"(props: {turnId: string}): unknown;
   "artifact-reference"(props: {
     item: ConversationTimelineItemViewModel;
     block: ConversationTimelineArtifactReferenceContentBlock;
@@ -135,7 +136,20 @@ function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
 }
 
 function turnStatusLabel(turn: ConversationTimelineTurnViewModel): string {
+  if (turn.source === "local_submission") {
+    if (turn.submissionStatus === "failed") return "提交失败";
+    if (turn.submissionStatus === "uncertain") return "提交结果待确认";
+    if (turn.submissionStatus === "cancelled") return "提交已取消";
+    return "等待提交";
+  }
+  if (turn.statusSource === "runtime_read") {
+    if (turn.domainStatus === "failed") return "历史记录显示失败，详情不完整";
+    if (turn.domainStatus === "interrupted") return "历史记录显示已中断";
+    if (turn.domainStatus === "completed") return "历史已结束，结果信息不完整";
+  }
   switch (turn.domainStatus) {
+    case "unknown":
+      return "执行状态待确认";
     case "queued":
       return "等待处理";
     case "in_progress":
@@ -272,6 +286,9 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
           :tone="turn.phase === 'failed' || turn.phase === 'recovery_required' ? 'warning' : 'muted'"
         />
         {{ turnStatusLabel(turn) }}
+        <span v-if="turn.source === 'legacy_archive'"> · 旧版记录</span>
+        <span v-else-if="turn.source === 'native_rebuilt'"> · 历史恢复，内容可能不完整</span>
+        <span v-else-if="turn.source === 'native_observed' && turn.availability !== 'available'"> · 显示内容不完整</span>
       </span>
     </header>
 
@@ -290,6 +307,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
       {{ turnStateMessage(turn) }}
     </p>
 
+    <slot v-if="turn.source === 'legacy_archive'" name="legacy-records" :turn-id="turn.turnId" />
     <ChatTurnPlan v-if="turn.plan" :key="turn.plan.identity" :plan="turn.plan" />
 
     <ol v-if="turn.items.length > 0" class="chat-turn-group__items" aria-label="本轮对话内容">

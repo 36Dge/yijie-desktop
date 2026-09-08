@@ -1,26 +1,26 @@
-import type {
-  ConversationAgentMessagePhase,
-  ConversationContentBlock,
-  ConversationExecution,
-  ConversationItem,
-  ConversationItemKind,
-  ConversationItemStatus,
-  ConversationNotice,
-  ConversationPlanSnapshot,
-  ConversationReasoningState,
-  ConversationState,
-  ConversationTerminalStatus,
-  ConversationThread,
-  ConversationThreadStatus,
-  ConversationTurn,
-  ConversationTurnStatus,
-  ReconciliationStatus,
-} from "./conversation-state";
 import {
-  selectConversationApprovalForCommand,
-  type ConversationApproval,
-  type ConversationApprovalState,
+selectConversationApprovalForCommand,
+type ConversationApproval,
+type ConversationApprovalState,
 } from "./conversation-approval";
+import type {
+ConversationAgentMessagePhase,
+ConversationContentBlock,
+ConversationExecution,
+ConversationItem,
+ConversationItemKind,
+ConversationItemStatus,
+ConversationNotice,
+ConversationPlanSnapshot,
+ConversationReasoningState,
+ConversationTerminalStatus,
+ConversationThread,
+ConversationThreadStatus,
+ConversationTurn,
+ConversationTurnStatus,
+ConversationView,
+ReconciliationStatus,
+} from "./conversation-view";
 
 export type ConversationTimelineRole = "user" | "assistant" | "process" | "system";
 export type ConversationTimelineThreadPhase =
@@ -172,6 +172,10 @@ export type ConversationTimelineItemViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineTurnViewModel = Readonly<{
+  source?: ConversationTurn["source"];
+  statusSource?: ConversationTurn["statusSource"];
+  availability?: ConversationTurn["availability"];
+  submissionStatus?: ConversationTurn["submissionStatus"];
   identity: string;
   threadId: string;
   turnId: string;
@@ -191,7 +195,7 @@ export type ConversationTimelineViewModel = Readonly<{
   threadId: string;
   domainStatus: ConversationThreadStatus;
   phase: ConversationTimelineThreadPhase;
-  syncStatus: ConversationState["syncStatus"];
+  syncStatus: ConversationView["syncStatus"];
   notices: readonly ConversationTimelineNoticeViewModel[];
   turns: readonly ConversationTimelineTurnViewModel[];
   isReadyEmpty: boolean;
@@ -213,6 +217,7 @@ const TURN_PHASES: Readonly<Record<
   ConversationTimelineTurnPhase
 >> = Object.freeze({
   queued: "pending",
+  unknown: "pending",
   in_progress: "active",
   waiting_approval: "waiting",
   completed: "complete",
@@ -353,7 +358,7 @@ function protectedProcessContentBlock(
 }
 
 function relatedTurns(
-  state: ConversationState,
+  state: ConversationView,
   thread: ConversationThread,
 ): readonly ConversationTurn[] {
   const seen = new Set<string>();
@@ -369,7 +374,7 @@ function relatedTurns(
 }
 
 function relatedItems(
-  state: ConversationState,
+  state: ConversationView,
   turn: ConversationTurn,
 ): readonly ConversationItem[] {
   const seen = new Set<string>();
@@ -506,7 +511,7 @@ function projectPlan(
   turn: ConversationTurn,
   policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelinePlanViewModel | null {
-  if (turn.plan === null) return null;
+  if (turn.plan === null || turn.plan.steps.length === 0) return null;
   const identity = stableIdentity("timeline-plan", turn.threadId, turn.turnId);
   const protectProcessContent = policy?.protectApprovalProcessContent === true;
   return Object.freeze({
@@ -627,12 +632,13 @@ function projectThreadNotices(
 }
 
 function projectTurn(
-  state: ConversationState,
+  state: ConversationView,
   turn: ConversationTurn,
   approvalState?: ConversationApprovalState,
   policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
+    source: turn.source, statusSource: turn.statusSource, availability: turn.availability, submissionStatus: turn.submissionStatus,
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
     threadId: turn.threadId,
     turnId: turn.turnId,
@@ -650,7 +656,7 @@ function projectTurn(
 }
 
 export function selectConversationTimeline(
-  state: ConversationState,
+  state: ConversationView,
   threadId: string,
   approvalState?: ConversationApprovalState,
   policy?: ConversationTimelineProjectionPolicy,

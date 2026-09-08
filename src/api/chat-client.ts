@@ -1,87 +1,90 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen,type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
-  CHAT_EVENT_CHANNEL,
-  CHAT_CONTROL_PLANE_EVENT_CHANNEL,
-  CHAT_IPC_SCHEMA_VERSION,
-  CHAT_IPC_V2_SCHEMA_VERSION,
-  CHAT_IPC_V3_SCHEMA_VERSION,
-  CHAT_IPC_V4_SCHEMA_VERSION,
-  CHAT_IPC_V5_SCHEMA_VERSION,
-  CHAT_IPC_V6_SCHEMA_VERSION,
-  ChatClientError,
-  ChatContractError,
-  parseBoundContextResponse,
-  parseAttachmentListResponse,
-  parseAttachmentImportEvent,
-  parseApprovalDecisionResponseV6,
-  parseCancelledResponse,
-  parseChatIpcError,
-  parseChatProjectionEvent,
-  parseChatProjectionEventV4,
-  parseChatProjectionEventV5,
-  parseChatProjectionEventV6,
-  parseCleanupResponse,
-  parseControlPlaneEvent,
-  parseControlPlaneEventV6,
-  parseCreatedTurnResponse,
-  parseCreatedTurnResponseV2,
-  parseHistoryPageResponse,
-  parseHistoryPageResponseV2,
-  parseHistoryPageResponseV3,
-  parseHistoryPageResponseV4,
-  parseHistoryPageResponseV5,
-  parseHistoryPageResponseV6,
-  parseLocalReadinessResponse,
-  parseOperationResponse,
-  parseOperationResponseV2,
-  parseOptionalCleanupResponse,
-  parseOptionalProjectResponse,
-  parseProjectListResponse,
-  parseProjectResponse,
-  parseReasoningResponse,
-  parseResyncResponse,
-  parseResyncResponseV2,
-  parseResyncResponseV4,
-  parseResyncResponseV5,
-  parseResyncResponseV6,
-  parseSessionPageResponse,
-  parseSessionControlPlaneResponse,
-  parseSessionControlPlaneResponseV6,
-  parseSubscriptionResponse,
-  parseSubscriptionResponseV4,
-  parseSubscriptionResponseV5,
-  parseSubscriptionResponseV6,
-  type BoundChatContext,
-  type ChatAttachment,
-  type ChatAttachmentImportEvent,
-  type ChatApprovalDecisionResultV6,
-  type ChatApprovalDecisionV6,
-  type ChatCleanupStatus,
-  type ChatControlPlaneEvent,
-  type ChatCreatedTurn,
-  type ChatDraftTarget,
-  type ChatHistoryPage,
-  type ChatHistoryPageV4,
-  type ChatHistoryPageV5,
-  type ChatHistoryPageV6,
-  type ChatLocalReadiness,
-  type ChatProjectionEvent,
-  type ChatProjectionEventV4,
-  type ChatProjectionEventV5,
-  type ChatProjectionEventV6,
-  type ChatProject,
-  type ChatReasoningItem,
-  type ChatResyncProjection,
-  type ChatResyncProjectionV4,
-  type ChatResyncProjectionV5,
-  type ChatResyncProjectionV6,
-  type ChatSessionPage,
-  type ChatSessionControlPlane,
-  type ChatSubscriptionV6,
-  type ChatTurnContentBlock,
+CHAT_ATTACHMENT_IMPORT_EVENT_CHANNEL,
+CHAT_CONTROL_PLANE_EVENT_CHANNEL,
+CHAT_EVENT_CHANNEL,
+CHAT_IPC_SCHEMA_VERSION,
+CHAT_IPC_V2_SCHEMA_VERSION,
+CHAT_IPC_V3_SCHEMA_VERSION,
+CHAT_IPC_V4_SCHEMA_VERSION,
+CHAT_IPC_V5_SCHEMA_VERSION,
+CHAT_IPC_V6_SCHEMA_VERSION,
+ChatClientError,
+ChatContractError,
+parseApprovalDecisionResponseV6,
+parseAttachmentImportEvent,
+parseAttachmentListResponse,
+parseBoundContextResponse,
+parseCancelledResponse,
+parseChatIpcError,
+parseChatProjectionEvent,
+parseChatProjectionEventV4,
+parseChatProjectionEventV5,
+parseChatProjectionEventV6,
+parseCleanupResponse,
+parseControlPlaneEvent,
+parseControlPlaneEventV6,
+parseCreatedTurnResponse,
+parseCreatedTurnResponseV2,
+parseHistoryPageResponse,
+parseHistoryPageResponseV2,
+parseHistoryPageResponseV3,
+parseHistoryPageResponseV4,
+parseHistoryPageResponseV5,
+parseHistoryPageResponseV6,
+parseLocalReadinessResponse,
+parseOperationResponse,
+parseOperationResponseV2,
+parseOptionalCleanupResponse,
+parseOptionalProjectResponse,
+parseProjectListResponse,
+parseProjectResponse,
+parseReasoningResponse,
+parseResyncResponse,
+parseResyncResponseV2,
+parseResyncResponseV4,
+parseResyncResponseV5,
+parseResyncResponseV6,
+parseSessionControlPlaneResponse,
+parseSessionControlPlaneResponseV6,
+parseSessionPageResponse,
+parseSubscriptionResponse,
+parseSubscriptionResponseV4,
+parseSubscriptionResponseV5,
+parseSubscriptionResponseV6,
+type BoundChatContext,
+type ChatApprovalDecisionResultV6,
+type ChatApprovalDecisionV6,
+type ChatAttachment,
+type ChatAttachmentImportEvent,
+type ChatCleanupStatus,
+type ChatControlPlaneEvent,
+type ChatCreatedTurn,
+type ChatDraftTarget,
+type ChatHistoryPage,
+type ChatHistoryPageV4,
+type ChatHistoryPageV5,
+type ChatHistoryPageV6,
+type ChatLocalReadiness,
+type ChatProject,
+type ChatProjectionEvent,
+type ChatProjectionEventV4,
+type ChatProjectionEventV5,
+type ChatProjectionEventV6,
+type ChatReasoningItem,
+type ChatResyncProjection,
+type ChatResyncProjectionV4,
+type ChatResyncProjectionV5,
+type ChatResyncProjectionV6,
+type ChatSessionControlPlane,
+type ChatSessionPage,
+type ChatSubscriptionV6,
+type ChatTurnContentBlock,
 } from "../domain/chat-ipc";
+import type { NativeConversationHistory } from "./generated/native-conversation-history.gen";
+import type { NativeConversationViewEvent } from "./generated/native-conversation-private.gen";
+import { validateNativeHistory,validateNativeViewEvent } from "./generated/native-conversation-validator.gen.js";
 
 type InvokeFn = (command: string, arguments_?: Record<string, unknown>) => Promise<unknown>;
 type ListenFn = (
@@ -101,6 +104,9 @@ export interface ChatInvalidEventScope {
 }
 
 export interface ChatClient {
+  loadNativeHistory(contextId: string, sessionId: string, turnIds: readonly string[], signal?: AbortSignal): Promise<NativeConversationHistory>;
+  onNativeView(handler: (event: NativeConversationViewEvent) => void, onInvalid?: (scope?: ChatInvalidEventScope | null) => void): Promise<UnlistenFn>;
+
   bindContext(tenantSelector: string): Promise<BoundChatContext>;
   listProjects(contextId: string, signal?: AbortSignal): Promise<readonly ChatProject[]>;
   pickProject(contextId: string, operationId: string): Promise<ChatProject | null>;
@@ -693,6 +699,20 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     cancelRequest(contextId, targetRequestId) {
       const envelope = operationEnvelope(contextId, { targetRequestId });
       return run("chat_cancel_request_v1", envelope.request, parseCancelledResponse);
+    },
+    async loadNativeHistory(contextId, sessionId, turnIds, signal) {
+      return runRead("chat_load_native_history_v1", contextId, {sessionId, turnIds}, value => {
+        if (typeof value !== "object" || value === null || !("schemaVersion" in value) || value.schemaVersion !== 1 || !("data" in value) || !validateNativeHistory(value.data)) {
+          throw new ChatClientError({schemaVersion: 1, code: "chat_protocol_error", retryable: false, recovery: "resync"});
+        }
+        return value.data;
+      }, signal);
+    },
+    async onNativeView(handler, onInvalid) {
+      return transport.listen("chat:native-view:v1", payload => {
+        if (validateNativeViewEvent(payload) && payload.view.sessionId === payload.sessionId) handler(payload);
+        else onInvalid?.(invalidEventScope(payload));
+      });
     },
     async onEvent(handler, onInvalid) {
       return transport.listen(CHAT_EVENT_CHANNEL, (payload) => {

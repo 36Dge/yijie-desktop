@@ -2,11 +2,9 @@ use super::artifact::{load_artifacts_for_turns_from_connection, ArtifactProjecti
 use super::attachment::{PreparedAttachment, MAX_ATTACHMENTS_PER_MESSAGE, MAX_FILE_CONTEXT_BYTES};
 use super::error::{map_sqlite_error, ChatError};
 use super::feat134::{
-    Feat134HistoryProjection, Feat134HistoryTurn, Feat134Hydration, Feat134Projection,
-    Feat134ProjectionFailure, Feat134ProjectionFailureKind, SourceIdentity, TimelineDelta,
-    TimelineItem, TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity,
-    TimelinePhase, TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
-    TimelineTerminal, PROJECTION_CONFLICT_CODE, PROJECTION_LIMIT_EXCEEDED_CODE,
+    Feat134HistoryProjection, Feat134HistoryTurn, Feat134Hydration, SourceIdentity, TimelineItem,
+    TimelineItemStatus, TimelineNotice, TimelineNoticeScope, TimelineNoticeSeverity, TimelinePhase,
+    TimelinePlan, TimelinePlanStep, TimelineReasoningPart, TimelineReasoningStatus,
 };
 use super::feat136::{
     CommandCwdProjection, CommandOutputProjection, CommandProjection, CommandStatus,
@@ -14,10 +12,7 @@ use super::feat136::{
     ToolIdentityProjection, ToolProgressProjection, ToolProjection, ToolStatus, TruncationReason,
     SOURCE_SCHEMA_VERSION as FEAT136_SOURCE_SCHEMA_VERSION,
 };
-use super::feat137::{
-    validate_process_projection, validate_process_state, ApprovalProjection,
-    ApprovalProjectionStatus,
-};
+use super::feat137::{validate_process_state, ApprovalProjection, ApprovalProjectionStatus};
 use super::host_domain::{HostApprovalDecision, HostApprovalOutcome};
 use super::keychain::{DatabaseKey, ReceiptKey};
 use super::migrations;
@@ -46,13 +41,8 @@ const MAX_REASONING_TURN_BYTES: usize = 256 * 1024;
 const MAX_REASONING_ITEMS: usize = 8;
 const MAX_REASONING_PARTS: usize = 8;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
-const MAX_FEAT134_HISTORY_TURN_JSON_BYTES: usize = 3 * 1024 * 1024;
 const MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE: usize = 64;
-const MAX_FEAT134_OBSERVED_EVENTS_PER_TURN: usize = 10_000;
-const MAX_FEAT134_OBSERVED_EVENT_BYTES: usize = 1024 * 1024;
-const MAX_FEAT134_OBSERVED_BYTES_PER_TURN: usize = 16 * 1024 * 1024;
 const MAX_FEAT137_APPROVALS_PER_SESSION: usize = 128;
-const FEAT134_LIMIT_REASON_CODE: &str = "limit_exceeded";
 const FEAT134_SOURCE_SCHEMA_VERSION: u8 = 4;
 const DEFAULT_PAGE_SIZE: usize = 20;
 const MAX_PAGE_SIZE: usize = 50;
@@ -76,13 +66,6 @@ const R8_IDEMPOTENCY_RETRY_DELAY: Duration = Duration::from_micros(100);
 pub struct ChatScope {
     pub(super) owner_user_id: String,
     pub(super) tenant_id: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Feat136ObservedEventDisposition {
-    New,
-    Duplicate,
-    Conflict,
 }
 
 impl ChatScope {
@@ -598,52 +581,6 @@ pub struct Feat134HistorySnapshot {
     pub approvals: Vec<ApprovalProjection>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct TurnProgress {
-    pub local_turn_id: Uuid,
-    pub assistant_text: String,
-    pub cursor: StoredEventCursor,
-}
-
-impl std::fmt::Debug for TurnProgress {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("TurnProgress")
-            .field("local_turn_id", &self.local_turn_id)
-            .field("assistant_utf8_bytes", &self.assistant_text.len())
-            .field("cursor", &self.cursor)
-            .finish()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct TerminalTurnCommit {
-    pub local_turn_id: Uuid,
-    pub terminal_status: String,
-    pub terminal_at: i64,
-    pub assistant_text: String,
-    pub cursor: StoredEventCursor,
-    pub reasoning_status: ReasoningStatus,
-    pub reasoning_reason_code: Option<String>,
-    pub reasoning_items: Vec<ReasoningItem>,
-}
-
-impl std::fmt::Debug for TerminalTurnCommit {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("TerminalTurnCommit")
-            .field("local_turn_id", &self.local_turn_id)
-            .field("terminal_status", &self.terminal_status)
-            .field("terminal_at", &self.terminal_at)
-            .field("assistant_utf8_bytes", &self.assistant_text.len())
-            .field("cursor", &self.cursor)
-            .field("reasoning_status", &self.reasoning_status)
-            .field("reasoning_reason_code", &self.reasoning_reason_code)
-            .field("reasoning_item_count", &self.reasoning_items.len())
-            .finish()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateSessionPayloadV1 {
@@ -915,7 +852,7 @@ impl ChatRepository {
             )?;
             let scale_projection = scale.run_r8_scale_probe()?;
             let duplicate_count = idempotency.run_r8_idempotency_probe()?;
-            let reducer_observations = super::application::run_r8_reducer_probe()?;
+            let reducer_observations = super::native_conversation::run_r8_native_display_probe()?;
             let session_count = scale
                 .connection
                 .query_row("SELECT count(*) FROM chat_sessions", [], |row| {
@@ -3565,276 +3502,6 @@ impl ChatRepository {
         Ok(())
     }
 
-    pub fn finalize_interrupted_without_stream(
-        &mut self,
-        operation_id: Uuid,
-        terminal_at: i64,
-    ) -> Result<(), ChatError> {
-        validate_non_nil(operation_id)?;
-        if terminal_at < 0 {
-            return Err(ChatError::InvalidInput);
-        }
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let row: Option<(String, i64, Vec<u8>)> = transaction
-            .query_row(
-                "SELECT o.session_id, o.payload_version, o.encrypted_payload
-                 FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
-                 WHERE o.operation_id=?1 AND o.kind='interrupt_turn'
-                   AND o.state IN ('inflight', 'done')
-                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    operation_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let (session_id, version, payload) = row.ok_or(ChatError::NotFound)?;
-        if version != OUTBOX_PAYLOAD_VERSION {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        let payload: InterruptTurnPayloadV1 = decode_payload(&payload)?;
-        transaction
-            .execute(
-                "UPDATE chat_messages SET status='committed'
-                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
-                [payload.turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let changed = transaction
-            .execute(
-                "UPDATE chat_turns SET status='interrupted', terminal_at=?1,
-                   reasoning_status='unavailable', reasoning_reason_code='turn_interrupted'
-                 WHERE id=?2 AND runtime_turn_id=?3 AND status IN ('streaming', 'stopping')",
-                params![
-                    terminal_at,
-                    payload.turn_id.to_string(),
-                    payload.runtime_turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id IN (?1, (
-                   SELECT operation_id FROM chat_turns WHERE id=?2
-                 ))",
-                params![operation_id.to_string(), payload.turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
-                params![terminal_at, session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
-    }
-
-    pub fn finalize_orphaned_turn_without_stream(
-        &mut self,
-        session_id: Uuid,
-        turn_id: Uuid,
-        runtime_turn_id: Uuid,
-        terminal_at: i64,
-    ) -> Result<(), ChatError> {
-        for value in [session_id, turn_id, runtime_turn_id] {
-            validate_non_nil(value)?;
-        }
-        if terminal_at < 0 {
-            return Err(ChatError::InvalidInput);
-        }
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let operation_id: String = transaction
-            .query_row(
-                "SELECT t.operation_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                 WHERE s.id=?1 AND t.id=?2 AND t.runtime_turn_id=?3
-                   AND t.status IN ('streaming', 'stopping')
-                   AND s.owner_user_id=?4 AND s.tenant_id=?5",
-                params![
-                    session_id.to_string(),
-                    turn_id.to_string(),
-                    runtime_turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::NotFound)?;
-        transaction
-            .execute(
-                "UPDATE chat_messages SET status='failed'
-                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let changed = transaction
-            .execute(
-                "UPDATE chat_turns SET status='failed', terminal_at=?1,
-                   reasoning_status='unavailable', reasoning_reason_code='host_shutdown'
-                 WHERE id=?2 AND runtime_turn_id=?3 AND status IN ('streaming', 'stopping')",
-                params![
-                    terminal_at,
-                    turn_id.to_string(),
-                    runtime_turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND kind='start_turn' AND state IN ('inflight', 'done')",
-                [operation_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE session_id=?1 AND kind='interrupt_turn'
-                   AND state IN ('pending', 'inflight')",
-                [session_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "UPDATE chat_output_artifacts SET state='failed', content_blob=NULL, poster_blob=NULL,
-                   progress_stage=NULL, progress_percent=NULL, local_committed_at=NULL,
-                   expires_at=NULL, ack_id=NULL, ack_state=NULL, acknowledged_at=NULL,
-                   error_code='host_shutdown', retryable=1
-                 WHERE session_id=?1 AND turn_id=?2 AND owner_user_id=?3 AND tenant_id=?4
-                   AND state IN ('announced', 'generating', 'processing', 'transferring')",
-                params![
-                    session_id.to_string(),
-                    turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
-                params![terminal_at, session_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
-    }
-
-    pub fn finalize_orphaned_queued_turn_without_host(
-        &mut self,
-        session_id: Uuid,
-        turn_id: Uuid,
-        operation_id: Uuid,
-        terminal_at: i64,
-    ) -> Result<(), ChatError> {
-        for value in [session_id, turn_id, operation_id] {
-            validate_non_nil(value)?;
-        }
-        if terminal_at < 0 {
-            return Err(ChatError::InvalidInput);
-        }
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let owned: bool = transaction
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1
-                   FROM chat_turns t
-                   JOIN chat_sessions s ON s.id=t.session_id
-                   JOIN chat_outbox o ON o.operation_id=t.operation_id
-                   WHERE s.id=?1 AND t.id=?2 AND t.operation_id=?3
-                     AND t.status='queued' AND t.runtime_turn_id IS NULL
-                     AND o.session_id=s.id AND o.kind='start_turn'
-                     AND o.state IN ('pending', 'inflight', 'failed')
-                     AND s.owner_user_id=?4 AND s.tenant_id=?5
-                 )",
-                params![
-                    session_id.to_string(),
-                    turn_id.to_string(),
-                    operation_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| row.get(0),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if !owned {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_messages SET status='failed'
-                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let turn_changed = transaction
-            .execute(
-                "UPDATE chat_turns SET status='failed', terminal_at=?1,
-                   reasoning_status='unavailable', reasoning_reason_code='host_shutdown'
-                 WHERE id=?2 AND session_id=?3 AND operation_id=?4
-                   AND status='queued' AND runtime_turn_id IS NULL",
-                params![
-                    terminal_at,
-                    turn_id.to_string(),
-                    session_id.to_string(),
-                    operation_id.to_string()
-                ],
-            )
-            .map_err(map_constraint_or_database)?;
-        let outbox_changed = transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND session_id=?2 AND kind='start_turn'
-                   AND state IN ('pending', 'inflight', 'failed')",
-                params![operation_id.to_string(), session_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if turn_changed != 1 || outbox_changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        let session_changed = transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=MAX(last_activity_at, ?1)
-                 WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4",
-                params![
-                    terminal_at,
-                    session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if session_changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
-    }
-
     pub fn suspend_uncertain_start_turn(&mut self, operation_id: Uuid) -> Result<(), ChatError> {
         validate_non_nil(operation_id)?;
         let changed = self
@@ -3866,13 +3533,34 @@ impl ChatRepository {
         if changed != 1 {
             return Err(ChatError::ConversationConflict);
         }
+        self.connection.execute("UPDATE chat_turns SET submission_status='uncertain' WHERE operation_id=?1 AND runtime_turn_id IS NULL",[operation_id.to_string()]).map_err(map_constraint_or_database)?;
         Ok(())
     }
 
+    pub fn accept_native_turn(
+        &mut self,
+        operation_id: Uuid,
+        runtime_turn_id: Uuid,
+        host_instance_nonce: &str,
+    ) -> Result<(), ChatError> {
+        let nonce = Uuid::parse_str(host_instance_nonce).map_err(|_| ChatError::InvalidInput)?;
+        validate_non_nil(nonce)?;
+        self.bind_started_turn_with_origin(operation_id, runtime_turn_id, Some(host_instance_nonce))
+    }
+    #[cfg(test)]
     pub fn suspend_started_turn_retry(
         &mut self,
         operation_id: Uuid,
         runtime_turn_id: Uuid,
+    ) -> Result<(), ChatError> {
+        self.bind_started_turn_with_origin(operation_id, runtime_turn_id, None)
+    }
+
+    fn bind_started_turn_with_origin(
+        &mut self,
+        operation_id: Uuid,
+        runtime_turn_id: Uuid,
+        host_instance_nonce: Option<&str>,
     ) -> Result<(), ChatError> {
         validate_non_nil(operation_id)?;
         validate_non_nil(runtime_turn_id)?;
@@ -3906,7 +3594,7 @@ impl ChatRepository {
         }
         transaction
             .execute(
-                "UPDATE chat_turns SET runtime_turn_id=?1, status='streaming' WHERE id=?2",
+                "UPDATE chat_turns SET runtime_turn_id=?1, status='streaming',submission_status='submitted' WHERE id=?2",
                 params![runtime_turn_id.to_string(), turn_id],
             )
             .map_err(map_constraint_or_database)?;
@@ -3954,6 +3642,7 @@ impl ChatRepository {
                 )
                 .map_err(map_constraint_or_database)?;
         }
+        transaction.execute("INSERT OR IGNORE INTO chat_native_bindings(turn_id,session_id,runtime_thread_id,runtime_turn_id,host_instance_nonce) SELECT t.id,t.session_id,s.runtime_thread_id,t.runtime_turn_id,?2 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id WHERE t.id=?1",params![turn_id,host_instance_nonce]).map_err(|_|ChatError::DatabaseUnavailable)?;
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)
@@ -4018,7 +3707,7 @@ impl ChatRepository {
         Ok(())
     }
 
-    pub fn finalize_failed_start_turn_dispatch(
+    pub fn record_failed_start_turn_submission(
         &mut self,
         operation_id: Uuid,
         terminal_at: i64,
@@ -4055,15 +3744,7 @@ impl ChatRepository {
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let (turn_id, session_id) = row.ok_or(ChatError::ConversationConflict)?;
-        let turn_changed = transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET status='failed', terminal_at=?1,
-                     reasoning_status='unavailable', reasoning_reason_code='reasoning_not_emitted'
-                 WHERE id=?2 AND status='queued' AND runtime_turn_id IS NULL",
-                params![terminal_at, turn_id],
-            )
-            .map_err(map_constraint_or_database)?;
+        transaction.execute("UPDATE chat_turns SET submission_status='failed' WHERE id=?1 AND runtime_turn_id IS NULL",[&turn_id]).map_err(map_constraint_or_database)?;
         let outbox_changed = transaction
             .execute(
                 "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
@@ -4072,7 +3753,7 @@ impl ChatRepository {
                 [operation_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if turn_changed != 1 || outbox_changed != 1 {
+        if outbox_changed != 1 {
             return Err(ChatError::ConversationConflict);
         }
         let session_changed = transaction
@@ -4101,95 +3782,6 @@ impl ChatRepository {
             session_id,
             turn_id,
         })
-    }
-
-    pub fn recover_next_failed_start_turn_projection(
-        &mut self,
-        terminal_at: i64,
-    ) -> Result<Option<FailedStartTurnProjection>, ChatError> {
-        if terminal_at < 0 {
-            return Err(ChatError::InvalidInput);
-        }
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let row: Option<(String, String, String)> = transaction
-            .query_row(
-                "SELECT t.operation_id, t.id, t.session_id
-                 FROM chat_turns t
-                 JOIN chat_sessions s ON s.id=t.session_id
-                 JOIN chat_outbox o ON o.operation_id=t.operation_id
-                 WHERE o.kind='start_turn' AND o.payload_version=2
-                   AND o.session_id=t.session_id
-                   AND o.state='failed' AND t.status='queued'
-                   AND t.runtime_turn_id IS NULL
-                   AND NOT EXISTS(
-                     SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=t.id
-                   )
-                   AND s.owner_user_id=?1 AND s.tenant_id=?2
-                 ORDER BY t.id ASC LIMIT 1",
-                params![self.scope.owner_user_id, self.scope.tenant_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let Some((operation_id, turn_id, session_id)) = row else {
-            transaction
-                .commit()
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            return Ok(None);
-        };
-        let changed = transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET status='failed', terminal_at=?1,
-                     reasoning_status='unavailable', reasoning_reason_code='reasoning_not_emitted'
-                 WHERE id=?2 AND status='queued' AND runtime_turn_id IS NULL",
-                params![terminal_at, turn_id],
-            )
-            .map_err(map_constraint_or_database)?;
-        if changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        let outbox_changed = transaction
-            .execute(
-                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND session_id=?2 AND kind='start_turn'
-                   AND payload_version=2 AND state='failed'",
-                params![operation_id, session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if outbox_changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        let session_changed = transaction
-            .execute(
-                "UPDATE chat_sessions
-                 SET last_activity_at=MAX(last_activity_at, ?1)
-                 WHERE id=?2 AND owner_user_id=?3 AND tenant_id=?4",
-                params![
-                    terminal_at,
-                    session_id,
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if session_changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        let operation_id = parse_uuid_value(&operation_id)?;
-        let session_id = parse_uuid_value(&session_id)?;
-        let turn_id = parse_uuid_value(&turn_id)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(Some(FailedStartTurnProjection {
-            operation_id,
-            session_id,
-            turn_id,
-        }))
     }
 
     pub fn active_turn_context(&self, session_id: Uuid) -> Result<ActiveTurnContext, ChatError> {
@@ -4395,765 +3987,6 @@ impl ChatRepository {
             return Err(ChatError::ConversationConflict);
         }
         Ok(())
-    }
-
-    pub fn reset_feat134_after_stream_change(
-        &mut self,
-        session_id: Uuid,
-        turn_id: Uuid,
-        expected: &StoredEventCursor,
-    ) -> Result<(), ChatError> {
-        validate_non_nil(session_id)?;
-        validate_non_nil(turn_id)?;
-        validate_cursor(expected)?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let active: bool = transaction
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                   WHERE t.id=?1 AND t.session_id=?2 AND t.status IN ('streaming', 'stopping')
-                     AND s.owner_user_id=?3 AND s.tenant_id=?4
-                 )",
-                params![
-                    turn_id.to_string(),
-                    session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id,
-                ],
-                |row| row.get(0),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if !active {
-            return Err(ChatError::ConversationConflict);
-        }
-        let changed = transaction
-            .execute(
-                "DELETE FROM chat_event_cursors
-                 WHERE session_id=?1 AND stream_id=?2 AND sequence=?3 AND event_id=?4",
-                params![
-                    session_id.to_string(),
-                    expected.stream_id.to_string(),
-                    i64::try_from(expected.sequence).map_err(|_| ChatError::InvalidInput)?,
-                    expected.event_id.to_string(),
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "DELETE FROM chat_observed_events_v4 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_turn_stream_versions_v6 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_timeline_items_v4 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_turn_plans_v4 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_timeline_notices_v4 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_turn_terminals_v4 WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_reasoning_items WHERE turn_id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let message_changed = transaction
-            .execute(
-                "UPDATE chat_messages SET content=''
-                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if message_changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET reasoning_status='pending', reasoning_reason_code=NULL, terminal_code=NULL
-                 WHERE id=?1",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
-    }
-
-    pub fn persist_turn_progress(&mut self, progress: &TurnProgress) -> Result<(), ChatError> {
-        validate_non_nil(progress.local_turn_id)?;
-        validate_message_output(&progress.assistant_text)?;
-        validate_cursor(&progress.cursor)?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let session_id: String = transaction
-            .query_row(
-                "SELECT t.session_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                 WHERE t.id=?1 AND t.status IN ('streaming', 'stopping')
-                   AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    progress.local_turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::ConversationConflict)?;
-        let changed = transaction
-            .execute(
-                "UPDATE chat_messages SET content=?1
-                 WHERE turn_id=?2 AND role='assistant' AND status='pending'",
-                params![progress.assistant_text, progress.local_turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        advance_cursor(&transaction, &session_id, &progress.cursor)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
-    }
-
-    pub fn persist_feat134_projection(
-        &mut self,
-        projection: &Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        if projection.terminal.is_some() {
-            return Err(ChatError::InvalidInput);
-        }
-        validate_projection_for_schema(projection, FEAT134_SOURCE_SCHEMA_VERSION)?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let durable_sequence = persist_feat134_projection_transaction(
-            &transaction,
-            &self.scope,
-            projection,
-            true,
-            FEAT134_SOURCE_SCHEMA_VERSION,
-        )?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(durable_sequence)
-    }
-
-    pub fn persist_feat136_projection(
-        &mut self,
-        projection: &Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        if projection.terminal.is_some() {
-            return Err(ChatError::InvalidInput);
-        }
-        validate_projection_for_schema(projection, FEAT136_SOURCE_SCHEMA_VERSION)?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let durable_sequence = persist_feat134_projection_transaction(
-            &transaction,
-            &self.scope,
-            projection,
-            true,
-            FEAT136_SOURCE_SCHEMA_VERSION,
-        )?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(durable_sequence)
-    }
-
-    pub fn persist_feat137_projection(
-        &mut self,
-        projection: &Feat134Projection,
-        approval: Option<&ApprovalProjection>,
-    ) -> Result<u64, ChatError> {
-        if projection.terminal.is_some() {
-            return Err(ChatError::InvalidInput);
-        }
-        validate_projection_for_schema(projection, FEAT136_SOURCE_SCHEMA_VERSION)?;
-        validate_process_projection(projection)?;
-        validate_feat137_projection_pair(projection, approval)?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        mark_feat137_turn_stream(&transaction, projection.turn_id)?;
-        let durable_sequence = persist_feat134_projection_transaction(
-            &transaction,
-            &self.scope,
-            projection,
-            true,
-            FEAT136_SOURCE_SCHEMA_VERSION,
-        )?;
-        if let Some(approval) = approval {
-            persist_feat137_approval(&transaction, approval, durable_sequence)?;
-        }
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(durable_sequence)
-    }
-
-    pub fn commit_feat134_terminal(
-        &mut self,
-        projection: &Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.commit_projection_terminal(projection, FEAT134_SOURCE_SCHEMA_VERSION, false)
-    }
-
-    pub fn commit_feat136_terminal(
-        &mut self,
-        projection: &Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION, false)
-    }
-
-    pub fn commit_feat137_terminal(
-        &mut self,
-        projection: &Feat134Projection,
-    ) -> Result<u64, ChatError> {
-        self.commit_projection_terminal(projection, FEAT136_SOURCE_SCHEMA_VERSION, true)
-    }
-
-    fn commit_projection_terminal(
-        &mut self,
-        projection: &Feat134Projection,
-        source_schema_version: u8,
-        feat137_stream: bool,
-    ) -> Result<u64, ChatError> {
-        validate_projection_for_schema(projection, source_schema_version)?;
-        if feat137_stream {
-            validate_process_projection(projection)?;
-        }
-        let terminal = projection
-            .terminal
-            .as_ref()
-            .ok_or(ChatError::InvalidInput)?;
-        let terminal_at = terminal.observed_at_ms / 1000;
-        let reasoning_items = projection.legacy_reasoning();
-        let (reasoning_status, reasoning_reason_code) =
-            aggregate_feat134_reasoning(terminal.status, &reasoning_items);
-        validate_reasoning(
-            reasoning_status,
-            reasoning_reason_code.as_deref(),
-            &reasoning_items,
-        )?;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if feat137_stream {
-            mark_feat137_turn_stream(&transaction, projection.turn_id)?;
-        }
-        let (session_id, operation_id, current_status): (String, String, String) = transaction
-            .query_row(
-                "SELECT t.session_id, t.operation_id, t.status
-                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    projection.turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::NotFound)?;
-        if !matches!(current_status.as_str(), "streaming" | "stopping") {
-            return Err(ChatError::ConversationConflict);
-        }
-        let durable_sequence = persist_feat134_projection_transaction(
-            &transaction,
-            &self.scope,
-            projection,
-            false,
-            source_schema_version,
-        )?;
-        let message_status = if terminal.status == "failed" {
-            "failed"
-        } else {
-            "committed"
-        };
-        let changed = transaction
-            .execute(
-                "UPDATE chat_messages SET content=?1, status=?2
-                 WHERE turn_id=?3 AND role='assistant' AND status='pending'",
-                params![
-                    projection.assistant_text,
-                    message_status,
-                    projection.turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET status=?1, terminal_at=?2, terminal_code=?3,
-                     reasoning_status=?4, reasoning_reason_code=?5
-                 WHERE id=?6",
-                params![
-                    terminal.status,
-                    terminal_at,
-                    terminal.code,
-                    reasoning_status.as_str(),
-                    reasoning_reason_code,
-                    projection.turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        replace_reasoning(
-            &transaction,
-            &projection.turn_id.to_string(),
-            &reasoning_items,
-        )?;
-        let closed = transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",
-                [&operation_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if closed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
-                params![terminal_at, session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(durable_sequence)
-    }
-
-    /// Closes a locally unrepresentable v4 Turn without persisting the offending snapshot.
-    ///
-    /// The Host event cursor is consumed atomically with a content-free failed terminal so the
-    /// same legal Host event cannot replay forever. Only the previously committed timeline prefix
-    /// is retained; any lifecycle/reasoning still in progress in that prefix becomes incomplete.
-    pub fn commit_feat134_projection_failure(
-        &mut self,
-        failure: &Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.commit_projection_failure(failure, FEAT134_SOURCE_SCHEMA_VERSION, false)
-    }
-
-    pub fn commit_feat136_projection_failure(
-        &mut self,
-        failure: &Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION, false)
-    }
-
-    pub fn commit_feat137_projection_failure(
-        &mut self,
-        failure: &Feat134ProjectionFailure,
-    ) -> Result<Feat134Projection, ChatError> {
-        self.commit_projection_failure(failure, FEAT136_SOURCE_SCHEMA_VERSION, true)
-    }
-
-    fn commit_projection_failure(
-        &mut self,
-        failure: &Feat134ProjectionFailure,
-        source_schema_version: u8,
-        feat137_stream: bool,
-    ) -> Result<Feat134Projection, ChatError> {
-        if !matches!(source_schema_version, 4 | 5) {
-            return Err(ChatError::InvalidInput);
-        }
-        validate_non_nil(failure.session_id)?;
-        validate_non_nil(failure.turn_id)?;
-        validate_cursor(&failure.cursor)?;
-        if failure.source_event_type.is_empty()
-            || failure.source_event_type.len() > 128
-            || failure.source_occurred_at.is_empty()
-            || failure.source_occurred_at.len() > 64
-            || failure.source_event_bytes == 0
-            || failure.source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES
-            || failure.observed_at_ms < 0
-        {
-            return Err(ChatError::InvalidInput);
-        }
-        let (terminal_code, reasoning_reason_code, source_event_type) = match failure.kind {
-            Feat134ProjectionFailureKind::LimitExceeded => (
-                PROJECTION_LIMIT_EXCEEDED_CODE,
-                FEAT134_LIMIT_REASON_CODE,
-                "projection.limit_exceeded",
-            ),
-            Feat134ProjectionFailureKind::ProtocolConflict => (
-                PROJECTION_CONFLICT_CODE,
-                "protocol_error",
-                "projection.protocol_conflict",
-            ),
-        };
-        let terminal_at = failure.observed_at_ms / 1000;
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if feat137_stream {
-            mark_feat137_turn_stream(&transaction, failure.turn_id)?;
-        }
-        let (session_id, operation_id, current_status, runtime_turn_id): (
-            String,
-            String,
-            String,
-            String,
-        ) = transaction
-            .query_row(
-                "SELECT t.session_id, t.operation_id, t.status, t.runtime_turn_id
-                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    failure.turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::NotFound)?;
-        if session_id != failure.session_id.to_string()
-            || !matches!(current_status.as_str(), "streaming" | "stopping")
-        {
-            return Err(ChatError::ConversationConflict);
-        }
-        let runtime_turn_id = parse_uuid_value(&runtime_turn_id)?;
-        let durable_sequence = next_feat134_durable_sequence(&transaction, &session_id)?;
-        transaction
-            .execute(
-                "INSERT INTO chat_observed_events_v4(
-                   event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
-                   event_type, source_occurred_at, observed_at_ms, source_schema_version
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    failure.cursor.event_id.to_string(),
-                    session_id,
-                    failure.turn_id.to_string(),
-                    failure.cursor.stream_id.to_string(),
-                    i64::try_from(failure.cursor.sequence).map_err(|_| ChatError::InvalidInput)?,
-                    i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?,
-                    failure.source_event_type,
-                    failure.source_occurred_at,
-                    failure.observed_at_ms,
-                    i64::from(source_schema_version),
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-
-        // Preserve only the confirmed durable prefix and make its unfinished state explicit.
-        transaction
-            .execute(
-                "UPDATE chat_timeline_items_v4
-                 SET status='incomplete',
-                     completed_at_ms=COALESCE(completed_at_ms, MAX(started_at_ms, ?1))
-                 WHERE turn_id=?2 AND status='in_progress'",
-                params![failure.observed_at_ms, failure.turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if source_schema_version == FEAT136_SOURCE_SCHEMA_VERSION {
-            transaction
-                .execute(
-                    "UPDATE chat_command_items_v5 SET status='incomplete'
-                     WHERE turn_id=?1 AND status='running'",
-                    [failure.turn_id.to_string()],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            transaction
-                .execute(
-                    "UPDATE chat_tool_items_v5 SET status='incomplete'
-                     WHERE turn_id=?1 AND status='in_progress'",
-                    [failure.turn_id.to_string()],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-        }
-        let unfinished_reasoning_count = transaction
-            .execute(
-                "UPDATE chat_timeline_items_v4
-                 SET reasoning_status='incomplete',
-                     reasoning_reason_code=?1,
-                     reasoning_finalized_at_ms=MAX(started_at_ms, ?2)
-                 WHERE turn_id=?3 AND item_type='reasoning' AND reasoning_status IS NULL
-                   AND EXISTS(
-                     SELECT 1 FROM chat_timeline_reasoning_parts_v4 p
-                     WHERE p.turn_id=chat_timeline_items_v4.turn_id
-                       AND p.item_id=chat_timeline_items_v4.item_id
-                   )",
-                params![
-                    reasoning_reason_code,
-                    failure.observed_at_ms,
-                    failure.turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-
-        let notice = TimelineNotice {
-            source_event_id: failure.cursor.event_id,
-            source_sequence: failure.cursor.sequence,
-            source_occurred_at: failure.source_occurred_at.clone(),
-            scope: TimelineNoticeScope::Turn,
-            severity: TimelineNoticeSeverity::Error,
-            code: Some(terminal_code.to_owned()),
-            will_retry: false,
-            observed_at_ms: failure.observed_at_ms,
-        };
-        persist_feat134_notice(&transaction, &session_id, failure.turn_id, &notice)?;
-        let terminal = TimelineTerminal {
-            source_event_id: failure.cursor.event_id,
-            source_sequence: failure.cursor.sequence,
-            source_occurred_at: failure.source_occurred_at.clone(),
-            status: "failed",
-            code: Some(terminal_code.to_owned()),
-            unfinished_reasoning_reason_code: (unfinished_reasoning_count > 0)
-                .then(|| reasoning_reason_code.to_owned()),
-            observed_at_ms: failure.observed_at_ms,
-        };
-        transaction
-            .execute(
-                "INSERT INTO chat_turn_terminals_v4(
-                   turn_id, source_event_id, source_sequence, source_occurred_at,
-                   status, code, observed_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, 'failed', ?5, ?6)",
-                params![
-                    failure.turn_id.to_string(),
-                    terminal.source_event_id.to_string(),
-                    i64::try_from(terminal.source_sequence).map_err(|_| ChatError::InvalidInput)?,
-                    terminal.source_occurred_at,
-                    terminal_code,
-                    terminal.observed_at_ms,
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let changed = transaction
-            .execute(
-                "UPDATE chat_messages SET status='failed'
-                 WHERE turn_id=?1 AND role='assistant' AND status='pending'",
-                [failure.turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET status='failed', terminal_at=?1, terminal_code=?2,
-                     reasoning_status='unavailable', reasoning_reason_code=?3
-                 WHERE id=?4",
-                params![
-                    terminal_at,
-                    terminal_code,
-                    reasoning_reason_code,
-                    failure.turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let closed = transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",
-                [&operation_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if closed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
-                params![terminal_at, session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        advance_cursor(&transaction, &session_id, &failure.cursor)?;
-
-        let assistant_text: String = transaction
-            .query_row(
-                "SELECT content FROM chat_messages
-                 WHERE turn_id=?1 AND role='assistant' AND status='failed'",
-                [failure.turn_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let items = load_timeline_items(&transaction, failure.turn_id, source_schema_version)?;
-        let plan = load_feat134_plan(&transaction, failure.turn_id)?;
-        let turn_notices = load_feat134_notices(
-            &transaction,
-            None,
-            Some(failure.turn_id),
-            TimelineNoticeScope::Turn,
-        )?;
-        let projection = Feat134Projection {
-            session_id: failure.session_id,
-            turn_id: failure.turn_id,
-            cursor: failure.cursor.clone(),
-            source_event_type: source_event_type.to_owned(),
-            source_turn_id: Some(runtime_turn_id),
-            source_occurred_at: failure.source_occurred_at.clone(),
-            source_event_bytes: failure.source_event_bytes,
-            observed_at_ms: failure.observed_at_ms,
-            durable_sequence: Some(durable_sequence),
-            assistant_text,
-            items,
-            plan,
-            turn_notices,
-            session_notice: None,
-            terminal: Some(terminal.clone()),
-            delta: TimelineDelta::TurnTerminal(terminal),
-        };
-        if feat137_stream {
-            validate_process_projection(&projection)?;
-        }
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        Ok(projection)
-    }
-
-    pub fn commit_terminal_turn(&mut self, terminal: &TerminalTurnCommit) -> Result<(), ChatError> {
-        validate_non_nil(terminal.local_turn_id)?;
-        validate_message_output(&terminal.assistant_text)?;
-        validate_cursor(&terminal.cursor)?;
-        if terminal.terminal_at < 0
-            || !matches!(
-                terminal.terminal_status.as_str(),
-                "completed" | "interrupted" | "failed"
-            )
-        {
-            return Err(ChatError::InvalidInput);
-        }
-        validate_reasoning(
-            terminal.reasoning_status,
-            terminal.reasoning_reason_code.as_deref(),
-            &terminal.reasoning_items,
-        )?;
-        if terminal.terminal_status != "completed"
-            && terminal.reasoning_status == ReasoningStatus::Complete
-        {
-            return Err(ChatError::InvalidInput);
-        }
-        let transaction = self
-            .connection
-            .transaction()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let (session_id, operation_id, current_status): (String, String, String) = transaction
-            .query_row(
-                "SELECT t.session_id, t.operation_id, t.status
-                 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                 WHERE t.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
-                params![
-                    terminal.local_turn_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?
-            .ok_or(ChatError::NotFound)?;
-        if !matches!(current_status.as_str(), "streaming" | "stopping") {
-            return Err(ChatError::ConversationConflict);
-        }
-        let message_status = if terminal.terminal_status == "failed" {
-            "failed"
-        } else {
-            "committed"
-        };
-        let changed = transaction
-            .execute(
-                "UPDATE chat_messages SET content=?1, status=?2
-                 WHERE turn_id=?3 AND role='assistant' AND status='pending'",
-                params![
-                    terminal.assistant_text,
-                    message_status,
-                    terminal.local_turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_turns
-                 SET status=?1, terminal_at=?2, reasoning_status=?3, reasoning_reason_code=?4
-                 WHERE id=?5",
-                params![
-                    terminal.terminal_status,
-                    terminal.terminal_at,
-                    terminal.reasoning_status.as_str(),
-                    terminal.reasoning_reason_code,
-                    terminal.local_turn_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        replace_reasoning(
-            &transaction,
-            &terminal.local_turn_id.to_string(),
-            &terminal.reasoning_items,
-        )?;
-        advance_cursor(&transaction, &session_id, &terminal.cursor)?;
-        let closed = transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",
-                [&operation_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if closed != 1 {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_sessions SET last_activity_at=?1 WHERE id=?2",
-                params![terminal.terminal_at, session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
     }
 
     pub fn list_sessions(
@@ -5559,80 +4392,6 @@ impl ChatRepository {
         validate_process_state(&hydration.items, hydration.plan.as_ref())
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         Ok(hydration)
-    }
-
-    pub fn classify_feat136_observed_event(
-        &self,
-        session_id: Uuid,
-        turn_id: Uuid,
-        cursor: &StoredEventCursor,
-        event_type: &str,
-        source_turn_scoped: bool,
-    ) -> Result<Feat136ObservedEventDisposition, ChatError> {
-        validate_non_nil(session_id)?;
-        validate_non_nil(turn_id)?;
-        validate_cursor(cursor)?;
-        if event_type.is_empty() || event_type.len() > 128 {
-            return Err(ChatError::InvalidInput);
-        }
-        let owned: bool = self
-            .connection
-            .query_row(
-                "SELECT EXISTS(
-                   SELECT 1 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-                   WHERE t.id=?1 AND t.session_id=?2
-                     AND s.owner_user_id=?3 AND s.tenant_id=?4
-                 )",
-                params![
-                    turn_id.to_string(),
-                    session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id,
-                ],
-                |row| row.get(0),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if !owned {
-            return Err(ChatError::NotFound);
-        }
-        let observed = self
-            .connection
-            .query_row(
-                "SELECT session_id, turn_id, stream_id, sequence, event_type,
-                        source_schema_version
-                 FROM chat_observed_events_v4 WHERE event_id=?1",
-                [cursor.event_id.to_string()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let Some((stored_session, stored_turn, stream, sequence, stored_type, schema)) = observed
-        else {
-            return Ok(Feat136ObservedEventDisposition::New);
-        };
-        let expected_session = session_id.to_string();
-        let expected_turn = turn_id.to_string();
-        let expected_stored_turn = source_turn_scoped.then_some(expected_turn.as_str());
-        let exact = stored_session == expected_session
-            && stored_turn.as_deref() == expected_stored_turn
-            && stream == cursor.stream_id.to_string()
-            && u64::try_from(sequence).ok() == Some(cursor.sequence)
-            && stored_type == event_type
-            && schema == i64::from(FEAT136_SOURCE_SCHEMA_VERSION);
-        Ok(if exact {
-            Feat136ObservedEventDisposition::Duplicate
-        } else {
-            Feat136ObservedEventDisposition::Conflict
-        })
     }
 
     pub fn load_feat134_history_projection(
@@ -6198,9 +4957,8 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             transaction
                 .execute(
-                    "UPDATE chat_turns SET status='interrupted', terminal_at=?1,
-                       reasoning_status='unavailable', reasoning_reason_code='turn_interrupted'
-                     WHERE session_id=?2 AND status='queued'",
+                    "UPDATE chat_turns SET submission_status='cancelled'
+                     WHERE session_id=?2 AND status='queued' AND ?1>=0",
                     params![now, session_id.to_string()],
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -7003,35 +5761,6 @@ impl ChatRepository {
             )
             .unwrap();
     }
-}
-
-fn mark_feat137_turn_stream(transaction: &Transaction<'_>, turn_id: Uuid) -> Result<(), ChatError> {
-    let marked: bool = transaction
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM chat_turn_stream_versions_v6 WHERE turn_id=?1)",
-            [turn_id.to_string()],
-            |row| row.get(0),
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if !marked {
-        let observed: bool = transaction
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM chat_observed_events_v4 WHERE turn_id=?1)",
-                [turn_id.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if observed {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "INSERT INTO chat_turn_stream_versions_v6(turn_id, schema_version) VALUES (?1, 6)",
-                [turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-    }
-    Ok(())
 }
 
 fn validate_reasoning(
@@ -7844,13 +6573,6 @@ fn page_size(requested: Option<usize>) -> Result<usize, ChatError> {
 
 fn validate_message(value: &str) -> Result<(), ChatError> {
     if value.trim().is_empty() || value.len() > MAX_MESSAGE_BYTES || value.contains('\0') {
-        return Err(ChatError::InvalidInput);
-    }
-    Ok(())
-}
-
-pub(super) fn validate_message_output(value: &str) -> Result<(), ChatError> {
-    if value.len() > MAX_MESSAGE_BYTES || value.contains('\0') {
         return Err(ChatError::InvalidInput);
     }
     Ok(())
@@ -8913,1253 +7635,11 @@ fn parse_timeline_reasoning_status(value: &str) -> Result<TimelineReasoningStatu
     }
 }
 
-fn validate_projection_for_schema(
-    projection: &Feat134Projection,
-    source_schema_version: u8,
-) -> Result<(), ChatError> {
-    if !matches!(source_schema_version, 4 | 5) {
-        return Err(ChatError::InvalidInput);
-    }
-    match validate_feat134_projection_shape(projection) {
-        Err(ChatError::ProjectionLimitExceeded) => return Err(ChatError::InvalidInput),
-        result => result?,
-    }
-    if feat134_projection_requires_limit_terminal(projection)? {
-        return Err(ChatError::InvalidInput);
-    }
-    for item in &projection.items {
-        match (
-            source_schema_version,
-            item.item_type.as_str(),
-            item.execution.as_ref(),
-        ) {
-            (4, _, None) => {}
-            (5, "command", Some(ExecutionProjection::Command(command))) => {
-                validate_command_projection(item, command)?;
-            }
-            (5, "tool", Some(ExecutionProjection::Tool(tool))) => {
-                validate_tool_projection(item, tool)?;
-            }
-            (5, item_type, None) if !matches!(item_type, "command" | "tool") => {}
-            _ => return Err(ChatError::InvalidInput),
-        }
-    }
-    Ok(())
-}
-
-fn validate_command_projection(
-    item: &TimelineItem,
-    command: &CommandProjection,
-) -> Result<(), ChatError> {
-    validate_safe_text_projection(&command.command_summary, 4096)?;
-    if command.started_source.sequence > command.last_source.sequence
-        || command.last_source.event_id != item.source_event_id
-        || command.last_source.sequence != item.source_sequence
-        || command.last_source.occurred_at != item.source_occurred_at
-        || command.cwd.segments().len() > 128
-        || command
-            .cwd
-            .segments()
-            .iter()
-            .try_fold(
-                command.cwd.segments().len().saturating_sub(1),
-                |total, segment| total.checked_add(segment.len()),
-            )
-            .is_none_or(|total| total > 1024)
-        || command
-            .cwd
-            .segments()
-            .iter()
-            .any(|segment| segment.is_empty() || segment.len() > 255)
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    if let Some(live) = command.live_output.as_ref() {
-        validate_safe_text_projection(live, 256 * 1024)?;
-    }
-    if let Some(output) = command.output.as_ref() {
-        match output {
-            CommandOutputProjection::Complete { text } if text.len() <= 256 * 1024 => {}
-            CommandOutputProjection::HeadTail { head, tail, .. }
-                if head.len() <= 128 * 1024
-                    && tail.len() <= 128 * 1024
-                    && head.len().saturating_add(tail.len()) <= 256 * 1024 => {}
-            CommandOutputProjection::Unavailable => {}
-            _ => return Err(ChatError::InvalidInput),
-        }
-    }
-    if command
-        .error
-        .as_ref()
-        .is_some_and(|error| error.summary.len() > 4096)
-        || command
-            .duration_ms
-            .is_some_and(|value| value > 9_007_199_254_740_991)
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    let expected_item_status = match command.status {
-        CommandStatus::Running => TimelineItemStatus::InProgress,
-        CommandStatus::Completed | CommandStatus::Failed | CommandStatus::Declined => {
-            TimelineItemStatus::Completed
-        }
-        CommandStatus::Incomplete => TimelineItemStatus::Incomplete,
-    };
-    if item.status != expected_item_status {
-        return Err(ChatError::InvalidInput);
-    }
-    match command.status {
-        CommandStatus::Running
-            if command.output.is_none()
-                && command.duration_ms.is_none()
-                && command.exit_code.is_none()
-                && command.error.is_none() => {}
-        CommandStatus::Completed if command.output.is_some() && command.error.is_none() => {}
-        CommandStatus::Failed
-            if command.output.is_some()
-                && command.error.as_ref().is_some_and(|error| {
-                    matches!(
-                        error.code,
-                        ProjectionErrorCode::CommandFailed
-                            | ProjectionErrorCode::ProjectionLimitExceeded
-                            | ProjectionErrorCode::ProjectionRedactionFailed
-                            | ProjectionErrorCode::ProtocolError
-                    )
-                }) => {}
-        CommandStatus::Declined
-            if command.output.is_some()
-                && command
-                    .error
-                    .as_ref()
-                    .is_some_and(|error| error.code == ProjectionErrorCode::CommandDeclined) => {}
-        CommandStatus::Incomplete => {}
-        _ => return Err(ChatError::InvalidInput),
-    }
-    Ok(())
-}
-
-fn validate_tool_projection(item: &TimelineItem, tool: &ToolProjection) -> Result<(), ChatError> {
-    validate_safe_text_projection(&tool.arguments_summary, 8192)?;
-    if tool.started_source.sequence > tool.last_source.sequence
-        || tool.last_source.event_id != item.source_event_id
-        || tool.last_source.sequence != item.source_sequence
-        || tool.last_source.occurred_at != item.source_occurred_at
-        || tool.progress.len() > 32
-        || tool
-            .progress
-            .iter()
-            .enumerate()
-            .any(|(index, progress)| progress.progress_index != index)
-        || tool
-            .progress
-            .iter()
-            .try_fold(0_usize, |total, progress| {
-                total.checked_add(progress.summary.text.len())
-            })
-            .is_none_or(|total| total > 64 * 1024)
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    for progress in &tool.progress {
-        validate_safe_text_projection(&progress.summary, 4096)?;
-    }
-    if let Some(result) = tool.result_summary.as_ref() {
-        validate_safe_text_projection(result, 64 * 1024)?;
-    }
-    if tool
-        .error
-        .as_ref()
-        .is_some_and(|error| error.summary.len() > 4096)
-        || tool
-            .duration_ms
-            .is_some_and(|value| value > 9_007_199_254_740_991)
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    match &tool.identity {
-        ToolIdentityProjection::Known {
-            server_name,
-            tool_name,
-        } if !server_name.is_empty()
-            && server_name.len() <= 256
-            && !tool_name.is_empty()
-            && tool_name.len() <= 256 => {}
-        ToolIdentityProjection::Unknown => {}
-        _ => return Err(ChatError::InvalidInput),
-    }
-    let expected_item_status = match tool.status {
-        ToolStatus::InProgress => TimelineItemStatus::InProgress,
-        ToolStatus::Completed | ToolStatus::Failed | ToolStatus::Declined => {
-            TimelineItemStatus::Completed
-        }
-        ToolStatus::Incomplete => TimelineItemStatus::Incomplete,
-    };
-    if item.status != expected_item_status {
-        return Err(ChatError::InvalidInput);
-    }
-    match tool.status {
-        ToolStatus::InProgress
-            if tool.duration_ms.is_none()
-                && tool.result_summary.is_none()
-                && tool.error.is_none() => {}
-        ToolStatus::Completed if tool.result_summary.is_some() && tool.error.is_none() => {}
-        ToolStatus::Failed
-            if tool.error.as_ref().is_some_and(|error| {
-                matches!(
-                    error.code,
-                    ProjectionErrorCode::ToolFailed
-                        | ProjectionErrorCode::UnknownTool
-                        | ProjectionErrorCode::ProjectionLimitExceeded
-                        | ProjectionErrorCode::ProjectionRedactionFailed
-                        | ProjectionErrorCode::ProtocolError
-                )
-            }) => {}
-        ToolStatus::Declined
-            if tool.result_summary.is_none()
-                && tool
-                    .error
-                    .as_ref()
-                    .is_some_and(|error| error.code == ProjectionErrorCode::ToolDeclined) => {}
-        ToolStatus::Incomplete => {}
-        _ => return Err(ChatError::InvalidInput),
-    }
-    Ok(())
-}
-
-fn validate_safe_text_projection(
-    value: &SafeTextProjection,
-    max_bytes: usize,
-) -> Result<(), ChatError> {
-    if value.text.len() > max_bytes
-        || value.text.contains('\0')
-        || (value.truncated != value.truncation_reason.is_some())
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    Ok(())
-}
-
-fn validate_feat134_projection_shape(projection: &Feat134Projection) -> Result<(), ChatError> {
-    validate_non_nil(projection.session_id)?;
-    if projection.durable_sequence.is_some() {
-        return Err(ChatError::InvalidInput);
-    }
-    validate_non_nil(projection.turn_id)?;
-    validate_cursor(&projection.cursor)?;
-    validate_message_output(&projection.assistant_text)?;
-    super::feat134::validate_reasoning_turn(&projection.items)?;
-    if projection.source_event_type.is_empty()
-        || projection.source_event_type.len() > 128
-        || projection.source_occurred_at.is_empty()
-        || projection.source_occurred_at.len() > 64
-        || projection.source_event_bytes == 0
-        || projection.source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES
-        || projection.observed_at_ms < 0
-        || projection.items.len() > 512
-        || projection.turn_notices.len() > 512
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    for (index, item) in projection.items.iter().enumerate() {
-        if item.item_ordinal != index + 1
-            || item.item_id.is_empty()
-            || item.item_id.chars().count() > 256
-            || item.item_type.is_empty()
-            || item.item_type.chars().count() > 256
-            || item.text.len() > MAX_MESSAGE_BYTES
-            || item.started_at_ms < 0
-            || item
-                .completed_at_ms
-                .is_some_and(|value| value < item.started_at_ms)
-            || item
-                .reasoning_finalized_at_ms
-                .is_some_and(|value| value < item.started_at_ms)
-            || (item.reasoning_status.is_some() != item.reasoning_finalized_at_ms.is_some())
-            || item.source_sequence == 0
-            || item.source_occurred_at.is_empty()
-            || item.source_occurred_at.len() > 64
-        {
-            return Err(ChatError::InvalidInput);
-        }
-    }
-    if projection
-        .turn_notices
-        .iter()
-        .any(|notice| notice.scope != TimelineNoticeScope::Turn)
-        || projection
-            .session_notice
-            .as_ref()
-            .is_some_and(|notice| notice.scope != TimelineNoticeScope::Session)
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    Ok(())
-}
-
-pub(crate) fn feat134_projection_requires_limit_terminal(
-    projection: &Feat134Projection,
-) -> Result<bool, ChatError> {
-    if projection.assistant_text.len() > MAX_MESSAGE_BYTES
-        || projection.items.len() > 512
-        || projection.turn_notices.len() > 512
-    {
-        return Ok(true);
-    }
-    match super::feat134::validate_reasoning_turn(&projection.items) {
-        Err(ChatError::ProjectionLimitExceeded) => return Ok(true),
-        result => result?,
-    }
-    feat134_history_turn_json_bytes(projection)
-        .map(|bytes| bytes > MAX_FEAT134_HISTORY_TURN_JSON_BYTES)
-}
-
-fn feat134_history_turn_json_bytes(projection: &Feat134Projection) -> Result<usize, ChatError> {
-    let timeline_items = projection
-        .items
-        .iter()
-        .map(|item| {
-            serde_json::json!({
-                "sourceEventId": item.source_event_id.to_string(),
-                "sourceSequence": item.source_sequence.to_string(),
-                "sourceOccurredAt": item.source_occurred_at,
-                "itemId": item.item_id,
-                "itemOrdinal": item.item_ordinal,
-                "itemType": item.item_type,
-                "phase": item.phase.map(TimelinePhase::as_str),
-                "status": item.status.as_str(),
-                "text": item.text,
-                "reasoningStatus": item.reasoning_status.map(TimelineReasoningStatus::as_str),
-                "reasoningReasonCode": item.reasoning_reason_code,
-                "reasoningParts": item.reasoning_parts.iter().map(|part| serde_json::json!({
-                    "contentIndex": part.content_index,
-                    "text": part.text,
-                })).collect::<Vec<_>>(),
-                "startedAtMs": item.started_at_ms,
-                "completedAtMs": item.completed_at_ms,
-            })
-        })
-        .collect::<Vec<_>>();
-    let plan = projection.plan.as_ref().map(|plan| {
-        serde_json::json!({
-            "sourceEventId": plan.source_event_id.to_string(),
-            "sourceSequence": plan.source_sequence.to_string(),
-            "sourceOccurredAt": plan.source_occurred_at,
-            "explanation": plan.explanation,
-            "steps": plan.steps.iter().map(|step| serde_json::json!({
-                "ordinal": step.ordinal,
-                "step": step.step,
-                "status": step.status,
-            })).collect::<Vec<_>>(),
-        })
-    });
-    let notices = projection
-        .turn_notices
-        .iter()
-        .rev()
-        .take(MAX_FEAT134_HISTORY_NOTICES_PER_SCOPE)
-        .map(|notice| {
-            serde_json::json!({
-                "sourceEventId": notice.source_event_id.to_string(),
-                "sourceSequence": notice.source_sequence.to_string(),
-                "sourceOccurredAt": notice.source_occurred_at,
-                "scope": notice.scope.as_str(),
-                "severity": notice.severity.as_str(),
-                "code": notice.code,
-                "willRetry": notice.will_retry,
-                "observedAtMs": notice.observed_at_ms,
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::to_vec(&serde_json::json!({
-        "terminalCode": projection.terminal.as_ref().and_then(|terminal| terminal.code.as_ref()),
-        "timelineItems": timeline_items,
-        "plan": plan,
-        "notices": notices,
-    }))
-    .map(|encoded| encoded.len())
-    .map_err(|_| ChatError::InvalidInput)
-}
-
-fn validate_feat137_projection_pair(
-    projection: &Feat134Projection,
-    approval: Option<&ApprovalProjection>,
-) -> Result<(), ChatError> {
-    let approval_event = matches!(
-        projection.source_event_type.as_str(),
-        "approval.requested" | "approval.resolved"
-    );
-    if approval_event != approval.is_some() {
-        return Err(ChatError::InvalidInput);
-    }
-    let Some(approval) = approval else {
-        return Ok(());
-    };
-    if approval.session_id != projection.session_id
-        || approval.turn_id != projection.turn_id
-        || approval.source_event_id != projection.cursor.event_id
-        || approval.source_sequence != projection.cursor.sequence
-        || approval.source_occurred_at != projection.source_occurred_at
-        || approval.durable_sequence.is_some()
-        || approval.item_id.is_empty()
-        || approval.item_id.len() > 1024
-        || !projection.items.iter().any(|item| {
-            item.item_id == approval.item_id
-                && item.item_type == "command"
-                && matches!(item.execution, Some(ExecutionProjection::Command(_)))
-        })
-        || approval.requested_at.len() > 64
-        || approval.expires_at.len() > 64
-    {
-        return Err(ChatError::InvalidInput);
-    }
-    match (
-        projection.source_event_type.as_str(),
-        approval.status,
-        approval.revision,
-        approval.outcome,
-        approval.decision_id,
-        approval.decision,
-        approval.resolved_at.as_deref(),
-    ) {
-        ("approval.requested", ApprovalProjectionStatus::Pending, 1, None, None, None, None) => {}
-        (
-            "approval.resolved",
-            ApprovalProjectionStatus::Resolved,
-            2,
-            Some(HostApprovalOutcome::AcceptedOnce),
-            Some(_),
-            Some(HostApprovalDecision::AcceptOnce),
-            Some(_),
-        )
-        | (
-            "approval.resolved",
-            ApprovalProjectionStatus::Resolved,
-            2,
-            Some(HostApprovalOutcome::CancelledCurrentTurn),
-            Some(_),
-            Some(HostApprovalDecision::CancelCurrentTurn),
-            Some(_),
-        )
-        | (
-            "approval.resolved",
-            ApprovalProjectionStatus::Resolved,
-            2,
-            Some(HostApprovalOutcome::Expired | HostApprovalOutcome::ResolvedElsewhere),
-            None,
-            None,
-            Some(_),
-        ) => {}
-        _ => return Err(ChatError::InvalidInput),
-    }
-    Ok(())
-}
-
-fn persist_feat137_approval(
-    transaction: &Transaction<'_>,
-    approval: &ApprovalProjection,
-    durable_sequence: u64,
-) -> Result<(), ChatError> {
-    let durable_sequence = i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?;
-    let source_sequence =
-        i64::try_from(approval.source_sequence).map_err(|_| ChatError::InvalidInput)?;
-    match approval.status {
-        ApprovalProjectionStatus::Pending => {
-            let count: i64 = transaction
-                .query_row(
-                    "SELECT count(*) FROM chat_approval_items_v6 WHERE session_id=?1",
-                    [approval.session_id.to_string()],
-                    |row| row.get(0),
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            if count >= MAX_FEAT137_APPROVALS_PER_SESSION as i64 {
-                let remove = count - MAX_FEAT137_APPROVALS_PER_SESSION as i64 + 1;
-                let deleted = transaction
-                    .execute(
-                        "DELETE FROM chat_approval_items_v6
-                         WHERE approval_request_id IN (
-                           SELECT approval_request_id FROM chat_approval_items_v6
-                           WHERE session_id=?1 AND status='resolved'
-                           ORDER BY durable_sequence, approval_request_id LIMIT ?2
-                         )",
-                        params![approval.session_id.to_string(), remove],
-                    )
-                    .map_err(|_| ChatError::DatabaseUnavailable)?;
-                if i64::try_from(deleted).ok() != Some(remove) {
-                    return Err(ChatError::DatabaseUnavailable);
-                }
-            }
-            transaction
-                .execute(
-                    "INSERT INTO chat_approval_items_v6(
-                       approval_request_id, session_id, turn_id, item_id, status, revision,
-                       requested_at, expires_at, outcome, decision_id, decision, resolved_at,
-                       source_event_id, source_sequence, source_occurred_at, durable_sequence
-                     ) VALUES (?1, ?2, ?3, ?4, 'pending', 1, ?5, ?6, NULL, NULL, NULL, NULL,
-                               ?7, ?8, ?9, ?10)",
-                    params![
-                        approval.approval_request_id.to_string(),
-                        approval.session_id.to_string(),
-                        approval.turn_id.to_string(),
-                        approval.item_id,
-                        approval.requested_at,
-                        approval.expires_at,
-                        approval.source_event_id.to_string(),
-                        source_sequence,
-                        approval.source_occurred_at,
-                        durable_sequence,
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-        }
-        ApprovalProjectionStatus::Resolved => {
-            let outcome = approval.outcome.ok_or(ChatError::InvalidInput)?.as_str();
-            let changed = transaction
-                .execute(
-                    "UPDATE chat_approval_items_v6
-                     SET status='resolved', revision=2, outcome=?1, decision_id=?2, decision=?3,
-                         resolved_at=?4, source_event_id=?5, source_sequence=?6,
-                         source_occurred_at=?7, durable_sequence=?8
-                     WHERE approval_request_id=?9 AND session_id=?10 AND turn_id=?11 AND item_id=?12
-                       AND status='pending' AND revision=1 AND requested_at=?13 AND expires_at=?14",
-                    params![
-                        outcome,
-                        approval.decision_id.map(|value| value.to_string()),
-                        approval.decision.map(HostApprovalDecision::as_str),
-                        approval.resolved_at,
-                        approval.source_event_id.to_string(),
-                        source_sequence,
-                        approval.source_occurred_at,
-                        durable_sequence,
-                        approval.approval_request_id.to_string(),
-                        approval.session_id.to_string(),
-                        approval.turn_id.to_string(),
-                        approval.item_id,
-                        approval.requested_at,
-                        approval.expires_at,
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            if changed != 1 {
-                return Err(ChatError::ConversationConflict);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn persist_feat134_projection_transaction(
-    transaction: &Transaction<'_>,
-    scope: &ChatScope,
-    projection: &Feat134Projection,
-    update_assistant: bool,
-    source_schema_version: u8,
-) -> Result<u64, ChatError> {
-    if !matches!(source_schema_version, 4 | 5) {
-        return Err(ChatError::InvalidInput);
-    }
-    let session_id: String = transaction
-        .query_row(
-            "SELECT t.session_id FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
-             WHERE t.id=?1 AND t.status IN ('streaming', 'stopping')
-               AND s.owner_user_id=?2 AND s.tenant_id=?3",
-            params![
-                projection.turn_id.to_string(),
-                scope.owner_user_id,
-                scope.tenant_id
-            ],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|_| ChatError::DatabaseUnavailable)?
-        .ok_or(ChatError::ConversationConflict)?;
-    if session_id != projection.session_id.to_string() {
-        return Err(ChatError::ConversationConflict);
-    }
-    reserve_feat134_turn_event(
-        transaction,
-        projection.turn_id,
-        projection.source_event_bytes,
-    )?;
-    let durable_sequence = next_feat134_durable_sequence(transaction, &session_id)?;
-    transaction
-        .execute(
-            "INSERT INTO chat_observed_events_v4(
-               event_id, session_id, turn_id, stream_id, sequence, durable_sequence,
-               event_type, source_occurred_at, observed_at_ms, source_schema_version
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                projection.cursor.event_id.to_string(),
-                session_id,
-                projection
-                    .source_turn_id
-                    .map(|_| projection.turn_id.to_string()),
-                projection.cursor.stream_id.to_string(),
-                i64::try_from(projection.cursor.sequence).map_err(|_| ChatError::InvalidInput)?,
-                i64::try_from(durable_sequence).map_err(|_| ChatError::InvalidInput)?,
-                projection.source_event_type,
-                projection.source_occurred_at,
-                projection.observed_at_ms,
-                i64::from(source_schema_version),
-            ],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if update_assistant {
-        let changed = transaction
-            .execute(
-                "UPDATE chat_messages SET content=?1
-                 WHERE turn_id=?2 AND role='assistant' AND status='pending'",
-                params![projection.assistant_text, projection.turn_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if changed != 1 {
-            return Err(ChatError::DatabaseUnavailable);
-        }
-    }
-    for item in &projection.items {
-        transaction
-            .execute(
-                "INSERT INTO chat_timeline_items_v4(
-                   turn_id, item_id, item_ordinal, item_type, phase, status, text,
-                   reasoning_status, reasoning_reason_code, reasoning_finalized_at_ms,
-                   started_at_ms, completed_at_ms, source_event_id, source_sequence,
-                   source_occurred_at, source_schema_version
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-                 ON CONFLICT(turn_id, item_id) DO UPDATE SET
-                   item_ordinal=excluded.item_ordinal, item_type=excluded.item_type,
-                   phase=excluded.phase, status=excluded.status, text=excluded.text,
-                   reasoning_status=excluded.reasoning_status,
-                   reasoning_reason_code=excluded.reasoning_reason_code,
-                   reasoning_finalized_at_ms=excluded.reasoning_finalized_at_ms,
-                   started_at_ms=excluded.started_at_ms,
-                   completed_at_ms=excluded.completed_at_ms,
-                   source_event_id=excluded.source_event_id,
-                   source_sequence=excluded.source_sequence,
-                   source_occurred_at=excluded.source_occurred_at,
-                   source_schema_version=excluded.source_schema_version",
-                params![
-                    projection.turn_id.to_string(),
-                    item.item_id,
-                    i64::try_from(item.item_ordinal).map_err(|_| ChatError::InvalidInput)?,
-                    item.item_type,
-                    item.phase.map(TimelinePhase::as_str),
-                    item.status.as_str(),
-                    item.text,
-                    item.reasoning_status.map(TimelineReasoningStatus::as_str),
-                    item.reasoning_reason_code,
-                    item.reasoning_finalized_at_ms,
-                    item.started_at_ms,
-                    item.completed_at_ms,
-                    item.source_event_id.to_string(),
-                    i64::try_from(item.source_sequence).map_err(|_| ChatError::InvalidInput)?,
-                    item.source_occurred_at,
-                    i64::from(source_schema_version),
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_timeline_reasoning_parts_v4 WHERE turn_id=?1 AND item_id=?2",
-                params![projection.turn_id.to_string(), item.item_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        for part in &item.reasoning_parts {
-            transaction
-                .execute(
-                    "INSERT INTO chat_timeline_reasoning_parts_v4(
-                       turn_id, item_id, content_index, text, byte_count
-                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        projection.turn_id.to_string(),
-                        item.item_id,
-                        i64::try_from(part.content_index).map_err(|_| ChatError::InvalidInput)?,
-                        part.text,
-                        i64::try_from(part.text.len()).map_err(|_| ChatError::InvalidInput)?,
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-        }
-        transaction
-            .execute(
-                "DELETE FROM chat_command_items_v5 WHERE turn_id=?1 AND item_id=?2",
-                params![projection.turn_id.to_string(), item.item_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        transaction
-            .execute(
-                "DELETE FROM chat_tool_items_v5 WHERE turn_id=?1 AND item_id=?2",
-                params![projection.turn_id.to_string(), item.item_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        if let Some(execution) = &item.execution {
-            if source_schema_version != FEAT136_SOURCE_SCHEMA_VERSION {
-                return Err(ChatError::InvalidInput);
-            }
-            persist_feat136_execution(transaction, projection.turn_id, &item.item_id, execution)?;
-        }
-    }
-    transaction
-        .execute(
-            "DELETE FROM chat_turn_plans_v4 WHERE turn_id=?1",
-            [projection.turn_id.to_string()],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if let Some(plan) = &projection.plan {
-        transaction
-            .execute(
-                "INSERT INTO chat_turn_plans_v4(
-                   turn_id, source_event_id, source_sequence, source_occurred_at,
-                   explanation, observed_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    projection.turn_id.to_string(),
-                    plan.source_event_id.to_string(),
-                    i64::try_from(plan.source_sequence).map_err(|_| ChatError::InvalidInput)?,
-                    plan.source_occurred_at,
-                    plan.explanation,
-                    plan.observed_at_ms,
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        for step in &plan.steps {
-            transaction
-                .execute(
-                    "INSERT INTO chat_turn_plan_steps_v4(turn_id, ordinal, step, status)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![
-                        projection.turn_id.to_string(),
-                        i64::try_from(step.ordinal).map_err(|_| ChatError::InvalidInput)?,
-                        step.step,
-                        step.status,
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-        }
-    }
-    for notice in projection
-        .turn_notices
-        .iter()
-        .chain(projection.session_notice.iter())
-    {
-        persist_feat134_notice(transaction, &session_id, projection.turn_id, notice)?;
-    }
-    if let Some(terminal) = &projection.terminal {
-        transaction
-            .execute(
-                "INSERT INTO chat_turn_terminals_v4(
-                   turn_id, source_event_id, source_sequence, source_occurred_at,
-                   status, code, observed_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    projection.turn_id.to_string(),
-                    terminal.source_event_id.to_string(),
-                    i64::try_from(terminal.source_sequence).map_err(|_| ChatError::InvalidInput)?,
-                    terminal.source_occurred_at,
-                    terminal.status,
-                    terminal.code,
-                    terminal.observed_at_ms,
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-    }
-    advance_cursor(transaction, &session_id, &projection.cursor)?;
-    Ok(durable_sequence)
-}
-
-fn persist_feat136_execution(
-    transaction: &Transaction<'_>,
-    turn_id: Uuid,
-    item_id: &str,
-    execution: &ExecutionProjection,
-) -> Result<(), ChatError> {
-    match execution {
-        ExecutionProjection::Command(command) => {
-            let (
-                output_retention,
-                output_text,
-                output_head,
-                output_tail,
-                output_reason,
-                output_truncated,
-                output_truncation_reason,
-            ) = match command.output.as_ref() {
-                None => (None, None, None, None, None, None, None),
-                Some(CommandOutputProjection::Complete { text }) => (
-                    Some("complete"),
-                    Some(text.as_str()),
-                    None,
-                    None,
-                    None,
-                    Some(false),
-                    None,
-                ),
-                Some(CommandOutputProjection::HeadTail { head, tail, reason }) => (
-                    Some("head_tail"),
-                    None,
-                    Some(head.as_str()),
-                    Some(tail.as_str()),
-                    None,
-                    Some(true),
-                    Some(reason.as_str()),
-                ),
-                Some(CommandOutputProjection::Unavailable) => (
-                    Some("unavailable"),
-                    None,
-                    None,
-                    None,
-                    Some("not_available"),
-                    Some(false),
-                    None,
-                ),
-            };
-            let (
-                live_output,
-                live_output_bytes,
-                live_output_truncated,
-                live_output_truncation_reason,
-            ) = safe_text_columns(command.live_output.as_ref())?;
-            transaction
-                .execute(
-                    "INSERT INTO chat_command_items_v5(
-                       turn_id, item_id, status,
-                       started_source_event_id, started_source_sequence, started_source_occurred_at,
-                       last_source_event_id, last_source_sequence, last_source_occurred_at,
-                       command_summary, command_summary_bytes, command_summary_truncated,
-                       command_summary_truncation_reason, cwd_kind,
-                       live_output, live_output_bytes, live_output_truncated,
-                       live_output_truncation_reason, output_retention, output_text, output_head,
-                       output_tail, output_reason, output_truncated, output_truncation_reason,
-                       duration_ms, exit_code, error_code, error_summary
-                     ) VALUES (
-                       ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                       ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26,
-                       ?27, ?28, ?29
-                     )",
-                    params![
-                        turn_id.to_string(),
-                        item_id,
-                        command.status.as_str(),
-                        command.started_source.event_id.to_string(),
-                        i64::try_from(command.started_source.sequence)
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        command.started_source.occurred_at,
-                        command.last_source.event_id.to_string(),
-                        i64::try_from(command.last_source.sequence)
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        command.last_source.occurred_at,
-                        command.command_summary.text,
-                        i64::try_from(command.command_summary.text.len())
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        command.command_summary.truncated,
-                        command
-                            .command_summary
-                            .truncation_reason
-                            .map(TruncationReason::as_str),
-                        command.cwd.kind(),
-                        live_output,
-                        live_output_bytes,
-                        live_output_truncated,
-                        live_output_truncation_reason,
-                        output_retention,
-                        output_text,
-                        output_head,
-                        output_tail,
-                        output_reason,
-                        output_truncated,
-                        output_truncation_reason,
-                        command
-                            .duration_ms
-                            .map(i64::try_from)
-                            .transpose()
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        command.exit_code,
-                        command.error.as_ref().map(|error| error.code.as_str()),
-                        command.error.as_ref().map(|error| error.summary.as_str()),
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            for (ordinal, segment) in command.cwd.segments().iter().enumerate() {
-                transaction
-                    .execute(
-                        "INSERT INTO chat_command_cwd_segments_v5(
-                           turn_id, item_id, ordinal, segment, byte_count
-                         ) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![
-                            turn_id.to_string(),
-                            item_id,
-                            i64::try_from(ordinal).map_err(|_| ChatError::InvalidInput)?,
-                            segment,
-                            i64::try_from(segment.len()).map_err(|_| ChatError::InvalidInput)?,
-                        ],
-                    )
-                    .map_err(|_| ChatError::DatabaseUnavailable)?;
-            }
-        }
-        ExecutionProjection::Tool(tool) => {
-            let (server_name, tool_name) = tool.identity.names();
-            let (
-                result_summary,
-                result_summary_bytes,
-                result_summary_truncated,
-                result_summary_truncation_reason,
-            ) = safe_text_columns(tool.result_summary.as_ref())?;
-            transaction
-                .execute(
-                    "INSERT INTO chat_tool_items_v5(
-                       turn_id, item_id, status,
-                       started_source_event_id, started_source_sequence, started_source_occurred_at,
-                       last_source_event_id, last_source_sequence, last_source_occurred_at,
-                       identity_resolution, server_name, tool_name,
-                       arguments_summary, arguments_summary_bytes, arguments_summary_truncated,
-                       arguments_summary_truncation_reason, duration_ms,
-                       result_summary, result_summary_bytes, result_summary_truncated,
-                       result_summary_truncation_reason, error_code, error_summary
-                     ) VALUES (
-                       ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                       ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
-                     )",
-                    params![
-                        turn_id.to_string(),
-                        item_id,
-                        tool.status.as_str(),
-                        tool.started_source.event_id.to_string(),
-                        i64::try_from(tool.started_source.sequence)
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        tool.started_source.occurred_at,
-                        tool.last_source.event_id.to_string(),
-                        i64::try_from(tool.last_source.sequence)
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        tool.last_source.occurred_at,
-                        tool.identity.resolution(),
-                        server_name,
-                        tool_name,
-                        tool.arguments_summary.text,
-                        i64::try_from(tool.arguments_summary.text.len())
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        tool.arguments_summary.truncated,
-                        tool.arguments_summary
-                            .truncation_reason
-                            .map(TruncationReason::as_str),
-                        tool.duration_ms
-                            .map(i64::try_from)
-                            .transpose()
-                            .map_err(|_| ChatError::InvalidInput)?,
-                        result_summary,
-                        result_summary_bytes,
-                        result_summary_truncated,
-                        result_summary_truncation_reason,
-                        tool.error.as_ref().map(|error| error.code.as_str()),
-                        tool.error.as_ref().map(|error| error.summary.as_str()),
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            for progress in &tool.progress {
-                transaction
-                    .execute(
-                        "INSERT INTO chat_tool_progress_v5(
-                           turn_id, item_id, progress_index, source_event_id, source_sequence,
-                           source_occurred_at, summary, summary_bytes, summary_truncated,
-                           summary_truncation_reason
-                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![
-                            turn_id.to_string(),
-                            item_id,
-                            i64::try_from(progress.progress_index)
-                                .map_err(|_| ChatError::InvalidInput)?,
-                            progress.source.event_id.to_string(),
-                            i64::try_from(progress.source.sequence)
-                                .map_err(|_| ChatError::InvalidInput)?,
-                            progress.source.occurred_at,
-                            progress.summary.text,
-                            i64::try_from(progress.summary.text.len())
-                                .map_err(|_| ChatError::InvalidInput)?,
-                            progress.summary.truncated,
-                            progress
-                                .summary
-                                .truncation_reason
-                                .map(TruncationReason::as_str),
-                        ],
-                    )
-                    .map_err(|_| ChatError::DatabaseUnavailable)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-type SafeTextColumns<'a> = (
-    Option<&'a str>,
-    Option<i64>,
-    Option<bool>,
-    Option<&'static str>,
-);
-
-fn safe_text_columns(value: Option<&SafeTextProjection>) -> Result<SafeTextColumns<'_>, ChatError> {
-    match value {
-        None => Ok((None, None, None, None)),
-        Some(value) => Ok((
-            Some(value.text.as_str()),
-            Some(i64::try_from(value.text.len()).map_err(|_| ChatError::InvalidInput)?),
-            Some(value.truncated),
-            value.truncation_reason.map(TruncationReason::as_str),
-        )),
-    }
-}
-
-fn reserve_feat134_turn_event(
-    transaction: &Transaction<'_>,
-    turn_id: Uuid,
-    source_event_bytes: usize,
-) -> Result<(), ChatError> {
-    if source_event_bytes == 0 || source_event_bytes > MAX_FEAT134_OBSERVED_EVENT_BYTES {
-        return Err(ChatError::InvalidInput);
-    }
-    transaction
-        .execute(
-            "INSERT OR IGNORE INTO chat_turn_projection_counters_v4(
-               turn_id, observed_event_count, observed_event_bytes
-             ) VALUES (?1, 0, 0)",
-            [turn_id.to_string()],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    let (current_count, current_bytes): (i64, i64) = transaction
-        .query_row(
-            "SELECT observed_event_count, observed_event_bytes
-             FROM chat_turn_projection_counters_v4 WHERE turn_id=?1",
-            [turn_id.to_string()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    let current_count =
-        usize::try_from(current_count).map_err(|_| ChatError::DatabaseUnavailable)?;
-    let current_bytes =
-        usize::try_from(current_bytes).map_err(|_| ChatError::DatabaseUnavailable)?;
-    let next_bytes = current_bytes
-        .checked_add(source_event_bytes)
-        .ok_or(ChatError::ProjectionLimitExceeded)?;
-    if current_count >= MAX_FEAT134_OBSERVED_EVENTS_PER_TURN
-        || next_bytes > MAX_FEAT134_OBSERVED_BYTES_PER_TURN
-    {
-        return Err(ChatError::ProjectionLimitExceeded);
-    }
-    let next_count = current_count
-        .checked_add(1)
-        .ok_or(ChatError::ProjectionLimitExceeded)?;
-    let changed = transaction
-        .execute(
-            "UPDATE chat_turn_projection_counters_v4
-             SET observed_event_count=?1, observed_event_bytes=?2
-             WHERE turn_id=?3 AND observed_event_count=?4 AND observed_event_bytes=?5",
-            params![
-                i64::try_from(next_count).map_err(|_| ChatError::DatabaseUnavailable)?,
-                i64::try_from(next_bytes).map_err(|_| ChatError::DatabaseUnavailable)?,
-                turn_id.to_string(),
-                i64::try_from(current_count).map_err(|_| ChatError::DatabaseUnavailable)?,
-                i64::try_from(current_bytes).map_err(|_| ChatError::DatabaseUnavailable)?,
-            ],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if changed != 1 {
-        return Err(ChatError::ConversationConflict);
-    }
-    Ok(())
-}
-
-fn next_feat134_durable_sequence(
-    transaction: &Transaction<'_>,
-    session_id: &str,
-) -> Result<u64, ChatError> {
-    transaction
-        .execute(
-            "INSERT OR IGNORE INTO chat_projection_counters_v4(session_id, last_sequence)
-             VALUES (?1, 0)",
-            [session_id],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    let current: i64 = transaction
-        .query_row(
-            "SELECT last_sequence FROM chat_projection_counters_v4 WHERE session_id=?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    let next = current
-        .checked_add(1)
-        .ok_or(ChatError::DatabaseUnavailable)?;
-    let changed = transaction
-        .execute(
-            "UPDATE chat_projection_counters_v4 SET last_sequence=?1
-             WHERE session_id=?2 AND last_sequence=?3",
-            params![next, session_id, current],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if changed != 1 {
-        return Err(ChatError::ConversationConflict);
-    }
-    u64::try_from(next).map_err(|_| ChatError::DatabaseUnavailable)
-}
-
-fn persist_feat134_notice(
-    transaction: &Transaction<'_>,
-    session_id: &str,
-    local_turn_id: Uuid,
-    notice: &TimelineNotice,
-) -> Result<(), ChatError> {
-    let turn_id = match notice.scope {
-        TimelineNoticeScope::Session => None,
-        TimelineNoticeScope::Turn => Some(local_turn_id.to_string()),
-    };
-    transaction
-        .execute(
-            "INSERT OR IGNORE INTO chat_timeline_notices_v4(
-               source_event_id, session_id, turn_id, source_sequence, source_occurred_at,
-               scope, severity, code, will_retry, observed_at_ms
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                notice.source_event_id.to_string(),
-                session_id,
-                turn_id,
-                i64::try_from(notice.source_sequence).map_err(|_| ChatError::InvalidInput)?,
-                notice.source_occurred_at,
-                notice.scope.as_str(),
-                notice.severity.as_str(),
-                notice.code,
-                notice.will_retry,
-                notice.observed_at_ms,
-            ],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    Ok(())
-}
-
-fn aggregate_feat134_reasoning(
-    terminal_status: &str,
-    items: &[ReasoningItem],
-) -> (ReasoningStatus, Option<String>) {
-    if let Some(item) = items
-        .iter()
-        .find(|item| item.status == ReasoningStatus::Incomplete)
-    {
-        return (ReasoningStatus::Incomplete, item.reason_code.clone());
-    }
-    if let Some(item) = items
-        .iter()
-        .find(|item| item.status == ReasoningStatus::Unavailable)
-    {
-        return (ReasoningStatus::Unavailable, item.reason_code.clone());
-    }
-    if !items.is_empty() {
-        return (ReasoningStatus::Complete, None);
-    }
-    let reason = match terminal_status {
-        "interrupted" => "turn_interrupted",
-        "failed" => "runtime_error",
-        _ => "reasoning_not_emitted",
-    };
-    (ReasoningStatus::Unavailable, Some(reason.to_owned()))
-}
-
 pub(super) fn validate_cursor(cursor: &StoredEventCursor) -> Result<(), ChatError> {
     validate_non_nil(cursor.stream_id)?;
     validate_non_nil(cursor.event_id)?;
     if cursor.sequence == 0 || cursor.sequence > i64::MAX as u64 {
         return Err(ChatError::InvalidInput);
-    }
-    Ok(())
-}
-
-pub(super) fn advance_cursor(
-    transaction: &rusqlite::Connection,
-    session_id: &str,
-    cursor: &StoredEventCursor,
-) -> Result<(), ChatError> {
-    let existing: Option<(String, i64, String)> = transaction
-        .query_row(
-            "SELECT stream_id, sequence, event_id FROM chat_event_cursors WHERE session_id=?1",
-            [session_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .optional()
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    if let Some((stream_id, sequence, event_id)) = existing {
-        if stream_id != cursor.stream_id.to_string() {
-            return Err(ChatError::ConversationConflict);
-        }
-        let cursor_sequence =
-            i64::try_from(cursor.sequence).map_err(|_| ChatError::InvalidInput)?;
-        if sequence == cursor_sequence && event_id == cursor.event_id.to_string() {
-            return Ok(());
-        }
-        if cursor_sequence <= sequence {
-            return Err(ChatError::ConversationConflict);
-        }
-        transaction
-            .execute(
-                "UPDATE chat_event_cursors SET sequence=?1, event_id=?2 WHERE session_id=?3",
-                params![cursor_sequence, cursor.event_id.to_string(), session_id],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-    } else {
-        transaction
-            .execute(
-                "INSERT INTO chat_event_cursors(session_id, stream_id, sequence, event_id)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    session_id,
-                    cursor.stream_id.to_string(),
-                    i64::try_from(cursor.sequence).map_err(|_| ChatError::InvalidInput)?,
-                    cursor.event_id.to_string()
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-    }
-    Ok(())
-}
-
-fn replace_reasoning(
-    transaction: &rusqlite::Transaction<'_>,
-    turn_id: &str,
-    items: &[ReasoningItem],
-) -> Result<(), ChatError> {
-    transaction
-        .execute(
-            "DELETE FROM chat_reasoning_items WHERE turn_id=?1",
-            [turn_id],
-        )
-        .map_err(|_| ChatError::DatabaseUnavailable)?;
-    for item in items {
-        let total_bytes: usize = item.parts.iter().map(|part| part.text.len()).sum();
-        transaction
-            .execute(
-                "INSERT INTO chat_reasoning_items(
-                   turn_id, item_id, item_ordinal, status, reason_code, total_bytes, finalized_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    turn_id,
-                    item.item_id,
-                    item.item_ordinal as i64,
-                    item.status.as_str(),
-                    item.reason_code,
-                    total_bytes as i64,
-                    item.finalized_at_ms
-                ],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
-        for part in &item.parts {
-            transaction
-                .execute(
-                    "INSERT INTO chat_reasoning_parts(
-                       turn_id, item_id, content_index, text, byte_count
-                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        turn_id,
-                        item.item_id,
-                        part.content_index as i64,
-                        part.text,
-                        part.text.len() as i64
-                    ],
-                )
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-        }
     }
     Ok(())
 }
@@ -10738,13 +8218,7 @@ fn persist_new_task_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::feat137::{protect_process_projection, PROCESS_CONTENT_PROTECTED_MESSAGE};
-    use crate::chat::host_domain::{
-        HostAgentMessagePhase, HostApprovalRequested, HostCommandCwd, HostCommandErrorCode,
-        HostCommandOutput, HostCommandStatus, HostEvent, HostEventCursor, HostEventKind,
-        HostPlanStep, HostPlanStepStatus, HostProjectionError, HostSafeText, HostTurnStatus,
-    };
-    use crate::chat::{Feat134TurnReducer, SourceIdentity, TimelineDelta, TimelineTerminal};
+
     use std::os::unix::fs::symlink;
 
     fn scope() -> ChatScope {
@@ -10873,43 +8347,6 @@ mod tests {
             .expect("turn outbox")
     }
 
-    fn commit_synthetic_terminal(
-        repository: &mut ChatRepository,
-        session_id: Uuid,
-        stream_id: Uuid,
-        sequence: u64,
-        answer: &str,
-    ) {
-        let context = repository.active_turn_context(session_id).unwrap();
-        repository
-            .persist_turn_progress(&TurnProgress {
-                local_turn_id: context.turn_id,
-                assistant_text: answer.to_owned(),
-                cursor: StoredEventCursor {
-                    stream_id,
-                    sequence,
-                    event_id: Uuid::now_v7(),
-                },
-            })
-            .unwrap();
-        repository
-            .commit_terminal_turn(&TerminalTurnCommit {
-                local_turn_id: context.turn_id,
-                terminal_status: "completed".to_owned(),
-                terminal_at: unix_seconds().unwrap(),
-                assistant_text: answer.to_owned(),
-                cursor: StoredEventCursor {
-                    stream_id,
-                    sequence: sequence + 1,
-                    event_id: Uuid::now_v7(),
-                },
-                reasoning_status: ReasoningStatus::Unavailable,
-                reasoning_reason_code: Some("reasoning_not_emitted".to_owned()),
-                reasoning_items: Vec::new(),
-            })
-            .unwrap();
-    }
-
     #[test]
     fn sqlcipher_file_permissions_pragmas_and_wrong_key_fail_closed() {
         let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
@@ -10954,7 +8391,7 @@ mod tests {
         assert_eq!(claimed.operation_id, pending.turn_operation_id);
 
         let projection = repository
-            .finalize_failed_start_turn_dispatch(pending.turn_operation_id, now + 1)
+            .record_failed_start_turn_submission(pending.turn_operation_id, now + 1)
             .unwrap();
         assert_eq!(projection.operation_id, pending.turn_operation_id);
         assert_eq!(projection.session_id, pending.session_id);
@@ -11017,7 +8454,7 @@ mod tests {
         );
 
         assert_eq!(
-            repository.finalize_failed_start_turn_dispatch(claimed.operation_id, now + 1),
+            repository.record_failed_start_turn_submission(claimed.operation_id, now + 1),
             Err(ChatError::ConversationConflict)
         );
         assert_eq!(
@@ -11042,160 +8479,6 @@ mod tests {
             .unwrap();
         assert_eq!(history.turns[0].status, "queued");
         assert_eq!(history.turns[0].terminal_at, None);
-
-        drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn uncertain_v2_start_is_neither_reclaimed_nor_failed_start_recovered() {
-        let root = std::env::temp_dir().join(format!(
-            "yijie-feat134-uncertain-v2-start-{}",
-            Uuid::now_v7()
-        ));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 53);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue_multimodal(
-                project_id,
-                &[DraftContentBlock::Text("uncertain safe fixture".to_owned())],
-                Uuid::now_v7(),
-                1,
-            )
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
-        assert_eq!(
-            repository.start_turn_payload_version(claimed.operation_id),
-            Ok(2)
-        );
-
-        repository
-            .suspend_uncertain_start_turn(claimed.operation_id)
-            .unwrap();
-        let outbox: (String, Option<i64>, i64) = repository
-            .connection
-            .query_row(
-                "SELECT state, next_attempt_at, payload_version
-                 FROM chat_outbox WHERE operation_id=?1",
-                [claimed.operation_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(outbox, ("inflight".to_owned(), None, 2));
-        assert!(repository
-            .claim_next_conversation_outbox(now + 301, 30)
-            .unwrap()
-            .is_none());
-        assert!(repository
-            .recover_next_failed_start_turn_projection(now + 302)
-            .unwrap()
-            .is_none());
-        assert_eq!(
-            repository.outbox_state(claimed.operation_id).unwrap(),
-            OutboxState::Inflight
-        );
-        let history = repository
-            .load_history(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(history.turns[0].status, "queued");
-        assert_eq!(history.turns[0].runtime_turn_id, None);
-        assert_eq!(history.turns[0].terminal_at, None);
-
-        drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn exact_local_recovery_repairs_v2_and_ignores_failed_v1_with_queued_turn() {
-        let root =
-            std::env::temp_dir().join(format!("yijie-feat134-turn-recovery-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 54);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let legacy = repository
-            .create_session_and_enqueue(project_id, "legacy recovery fixture", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let legacy_claimed = bind_and_claim_first_turn(&mut repository, &legacy, now);
-        assert_eq!(
-            repository.start_turn_payload_version(legacy_claimed.operation_id),
-            Ok(1)
-        );
-        repository.fail_outbox(legacy_claimed.operation_id).unwrap();
-        assert_eq!(
-            repository
-                .load_history(legacy.session_id, None, Some(20))
-                .unwrap()
-                .turns[0]
-                .status,
-            "queued"
-        );
-
-        let pending = repository
-            .create_session_and_enqueue_multimodal(
-                project_id,
-                &[DraftContentBlock::Text("safe recovery fixture".to_owned())],
-                Uuid::now_v7(),
-                1,
-            )
-            .unwrap();
-        let claimed = bind_and_claim_first_turn(&mut repository, &pending, now);
-        assert_eq!(
-            repository.start_turn_payload_version(claimed.operation_id),
-            Ok(2)
-        );
-        repository.fail_outbox(claimed.operation_id).unwrap();
-
-        let create_only = repository
-            .create_session_and_enqueue(project_id, "ignored create fixture", Uuid::now_v7())
-            .unwrap();
-        let claimed_create = repository
-            .claim_next_conversation_outbox(now.max(unix_seconds().unwrap()), 30)
-            .unwrap()
-            .expect("create-only outbox");
-        assert_eq!(claimed_create.operation_id, create_only.create_operation_id);
-        repository.fail_outbox(claimed_create.operation_id).unwrap();
-
-        let recovered = repository
-            .recover_next_failed_start_turn_projection(now + 1)
-            .unwrap()
-            .expect("failed start-turn projection");
-        assert_eq!(recovered.operation_id, pending.turn_operation_id);
-        assert_eq!(recovered.session_id, pending.session_id);
-        assert_eq!(recovered.turn_id, pending.turn_id);
-        assert!(repository
-            .recover_next_failed_start_turn_projection(now + 2)
-            .unwrap()
-            .is_none());
-        assert_eq!(
-            repository.outbox_state(legacy.turn_operation_id).unwrap(),
-            OutboxState::Failed
-        );
-        assert_eq!(
-            repository
-                .outbox_state(create_only.create_operation_id)
-                .unwrap(),
-            OutboxState::Failed
-        );
-        let legacy_history = repository
-            .load_history(legacy.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(legacy_history.turns[0].status, "queued");
-        assert_eq!(legacy_history.turns[0].terminal_at, None);
-        let history = repository
-            .load_history(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
-        assert_eq!(history.turns[0].terminal_at, Some(now + 1));
-        assert_eq!(
-            history.turns[0].reasoning_reason_code.as_deref(),
-            Some("reasoning_not_emitted")
-        );
-        assert!(repository
-            .enqueue_turn(pending.session_id, "next safe fixture", Uuid::now_v7())
-            .is_ok());
 
         drop(repository);
         fs::remove_dir_all(root).unwrap();
@@ -11361,285 +8644,6 @@ mod tests {
         assert_eq!(
             fs::read_to_string(project_path.join("keep.txt")).unwrap(),
             "keep"
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn session_outbox_is_idempotent_recoverable_and_terminal_commit_is_atomic() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 17);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let create_operation_id = Uuid::now_v7();
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", create_operation_id)
-            .unwrap();
-        assert_eq!(
-            repository
-                .create_session_and_enqueue(project_id, "首条消息", create_operation_id)
-                .unwrap(),
-            pending
-        );
-        assert_eq!(
-            repository.create_session_and_enqueue(
-                project_id,
-                "同一幂等键的不同正文",
-                create_operation_id
-            ),
-            Err(ChatError::ConversationConflict)
-        );
-        assert_eq!(
-            repository
-                .connection
-                .query_row("SELECT count(*) FROM chat_sessions", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let persisted_public_task_id: String = repository
-            .connection
-            .query_row(
-                "SELECT public_task_id FROM chat_public_task_bindings WHERE session_id=?1",
-                [pending.session_id.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(context.task_id.to_string(), persisted_public_task_id);
-        assert_ne!(context.task_id, pending.session_id);
-        assert!(context.assistant_text.is_empty());
-        assert_eq!(
-            repository.outbox_state(pending.turn_operation_id).unwrap(),
-            OutboxState::Inflight
-        );
-        let stream_id = Uuid::now_v7();
-        let reasoning = vec![ReasoningItem {
-            item_id: "reasoning-1".to_owned(),
-            item_ordinal: 0,
-            status: ReasoningStatus::Complete,
-            reason_code: None,
-            finalized_at_ms: 1,
-            parts: vec![ReasoningPart {
-                content_index: 0,
-                text: "合成推理".to_owned(),
-            }],
-        }];
-        repository
-            .persist_turn_progress(&TurnProgress {
-                local_turn_id: pending.turn_id,
-                assistant_text: "合成回答".to_owned(),
-                cursor: StoredEventCursor {
-                    stream_id,
-                    sequence: 1,
-                    event_id: Uuid::now_v7(),
-                },
-            })
-            .unwrap();
-        repository
-            .commit_terminal_turn(&TerminalTurnCommit {
-                local_turn_id: pending.turn_id,
-                terminal_status: "completed".to_owned(),
-                terminal_at: now,
-                assistant_text: "合成回答".to_owned(),
-                cursor: StoredEventCursor {
-                    stream_id,
-                    sequence: 2,
-                    event_id: Uuid::now_v7(),
-                },
-                reasoning_status: ReasoningStatus::Complete,
-                reasoning_reason_code: None,
-                reasoning_items: reasoning.clone(),
-            })
-            .unwrap();
-        assert_eq!(
-            repository.outbox_state(pending.turn_operation_id).unwrap(),
-            OutboxState::Done
-        );
-        assert_eq!(
-            repository
-                .load_reasoning(&pending.turn_id.to_string())
-                .unwrap(),
-            reasoning
-        );
-        let history = repository
-            .load_history(pending.session_id, None, None)
-            .unwrap();
-        assert_eq!(history.turns.len(), 1);
-        assert_eq!(history.turns[0].messages.len(), 2);
-        assert_eq!(history.turns[0].messages[1].content, "合成回答");
-        assert_eq!(history.turns[0].reasoning[0].total_bytes, "合成推理".len());
-        let sessions = repository.list_sessions(None, None).unwrap();
-        assert_eq!(sessions.sessions.len(), 1);
-        assert_eq!(
-            sessions.sessions[0].latest_turn_status.as_deref(),
-            Some("completed")
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn orphaned_host_terminal_fails_closed_and_releases_recovery_queue() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 18);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        let next_pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &next_pending, now);
-        let before = repository.recovery_snapshot().unwrap().active_session_ids;
-        assert_eq!(before.len(), 2);
-        let orphan_session_id = before[0];
-        let next_session_id = before[1];
-        let context = repository.active_turn_context(orphan_session_id).unwrap();
-        let next_context = repository.active_turn_context(next_session_id).unwrap();
-        let inflight_interrupt = Uuid::now_v7();
-        repository
-            .enqueue_interrupt(orphan_session_id, inflight_interrupt)
-            .unwrap();
-        let claimed_interrupt = repository
-            .claim_next_conversation_outbox(now, 30)
-            .unwrap()
-            .unwrap();
-        assert_eq!(claimed_interrupt.operation_id, inflight_interrupt);
-        assert_eq!(claimed_interrupt.kind, OutboxKind::InterruptTurn);
-        let pending_interrupt = Uuid::now_v7();
-        repository
-            .enqueue_interrupt(orphan_session_id, pending_interrupt)
-            .unwrap();
-
-        repository
-            .finalize_orphaned_turn_without_stream(
-                context.session_id,
-                context.turn_id,
-                context.runtime_turn_id,
-                now + 1,
-            )
-            .unwrap();
-
-        let after = repository.recovery_snapshot().unwrap().active_session_ids;
-        assert_eq!(after, vec![next_session_id]);
-        assert_eq!(after.first(), Some(&next_session_id));
-        assert_eq!(
-            repository.outbox_state(context.turn_operation_id).unwrap(),
-            OutboxState::Done
-        );
-        assert_eq!(
-            repository.outbox_state(inflight_interrupt).unwrap(),
-            OutboxState::Done
-        );
-        assert_eq!(
-            repository.outbox_state(pending_interrupt).unwrap(),
-            OutboxState::Done
-        );
-        assert_eq!(
-            repository
-                .outbox_state(next_context.turn_operation_id)
-                .unwrap(),
-            OutboxState::Inflight
-        );
-        let history = repository
-            .load_history(context.session_id, None, None)
-            .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
-        assert_eq!(
-            history.turns[0].reasoning_reason_code.as_deref(),
-            Some("host_shutdown")
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn missing_host_queued_turn_is_not_terminal_history_and_is_finalized_without_dispatch() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 19);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let create = repository
-            .claim_next_conversation_outbox(now, 30)
-            .unwrap()
-            .unwrap();
-        let task_id = Uuid::now_v7();
-        repository
-            .bind_public_task(create.operation_id, task_id, now)
-            .unwrap();
-        repository
-            .reschedule_outbox(create.operation_id, now)
-            .unwrap();
-        let create = repository
-            .claim_next_conversation_outbox(now, 30)
-            .unwrap()
-            .unwrap();
-        let agent_session_id = Uuid::now_v7();
-        let codex_thread_id = Uuid::now_v7();
-        repository
-            .bind_host_session_and_enqueue_turn(
-                create.operation_id,
-                task_id,
-                agent_session_id,
-                codex_thread_id,
-            )
-            .unwrap();
-
-        assert_eq!(
-            repository.feat126_resume_candidates().unwrap(),
-            vec![Feat126ResumeCandidate {
-                task_id,
-                session_id: pending.session_id,
-                agent_session_id,
-                codex_thread_id,
-                active_local_turn_id: Some(pending.turn_id),
-                active_runtime_turn_id: None,
-                active_turn_operation_id: Some(pending.turn_operation_id),
-            }]
-        );
-
-        repository
-            .finalize_orphaned_queued_turn_without_host(
-                pending.session_id,
-                pending.turn_id,
-                pending.turn_operation_id,
-                now + 1,
-            )
-            .unwrap();
-
-        assert_eq!(
-            repository.feat126_resume_candidates().unwrap(),
-            vec![Feat126ResumeCandidate {
-                task_id,
-                session_id: pending.session_id,
-                agent_session_id,
-                codex_thread_id,
-                active_local_turn_id: None,
-                active_runtime_turn_id: None,
-                active_turn_operation_id: None,
-            }]
-        );
-        assert_eq!(
-            repository.outbox_state(pending.turn_operation_id).unwrap(),
-            OutboxState::Done
-        );
-        let history = repository
-            .load_history(pending.session_id, None, None)
-            .unwrap();
-        assert_eq!(history.turns.len(), 1);
-        assert_eq!(history.turns[0].status, "failed");
-        assert_eq!(history.turns[0].reasoning_status, "unavailable");
-        assert_eq!(
-            history.turns[0].reasoning_reason_code.as_deref(),
-            Some("host_shutdown")
         );
         fs::remove_dir_all(root).unwrap();
     }
@@ -11907,511 +8911,6 @@ mod tests {
     }
 
     #[test]
-    fn history_pages_by_turn_and_user_title_wins_every_late_model_result() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 23);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        let stream_id = Uuid::now_v7();
-        commit_synthetic_terminal(&mut repository, pending.session_id, stream_id, 1, "回答一");
-        for (index, input) in ["第二条", "第三条"].into_iter().enumerate() {
-            let operation_id = Uuid::now_v7();
-            repository
-                .enqueue_turn(pending.session_id, input, operation_id)
-                .unwrap();
-            let claimed = repository
-                .claim_next_conversation_outbox(unix_seconds().unwrap(), 30)
-                .unwrap()
-                .unwrap();
-            assert_eq!(claimed.operation_id, operation_id);
-            repository
-                .suspend_started_turn_retry(operation_id, Uuid::now_v7())
-                .unwrap();
-            commit_synthetic_terminal(
-                &mut repository,
-                pending.session_id,
-                stream_id,
-                3 + (index as u64 * 2),
-                if index == 0 { "回答二" } else { "回答三" },
-            );
-        }
-        let first = repository
-            .load_history(pending.session_id, None, Some(2))
-            .unwrap();
-        assert_eq!(first.turns.len(), 2);
-        assert_eq!(first.turns[0].messages[0].content, "第二条");
-        assert_eq!(first.turns[1].messages[0].content, "第三条");
-        let second = repository
-            .load_history(pending.session_id, first.next_before_ordinal, Some(2))
-            .unwrap();
-        assert_eq!(second.turns.len(), 1);
-        assert_eq!(second.turns[0].messages[0].content, "首条消息");
-        assert_eq!(
-            repository.load_history(pending.session_id, None, Some(51)),
-            Err(ChatError::InvalidInput)
-        );
-
-        let activity_before_rename = repository
-            .session_summary(pending.session_id)
-            .unwrap()
-            .last_activity_at;
-        let title_operation = Uuid::now_v7();
-        assert!(repository
-            .enqueue_title_job(pending.session_id, title_operation)
-            .unwrap());
-        repository
-            .rename_session(pending.session_id, "  人工标题  ")
-            .unwrap();
-        assert!(!repository
-            .apply_model_title(pending.session_id, title_operation, "迟到模型标题")
-            .unwrap());
-        let session = repository
-            .list_sessions(None, None)
-            .unwrap()
-            .sessions
-            .remove(0);
-        assert_eq!(session.title, "人工标题");
-        assert_eq!(session.title_source, SessionTitleSource::User);
-        assert_eq!(
-            session.last_activity_at, activity_before_rename,
-            "rename must not change activity ordering"
-        );
-
-        let model_pending = repository
-            .create_session_and_enqueue(project_id, "模型标题会话", Uuid::now_v7())
-            .unwrap();
-        let model_operation = Uuid::now_v7();
-        assert!(repository
-            .enqueue_title_job(model_pending.session_id, model_operation)
-            .unwrap());
-        assert_eq!(
-            repository.apply_model_title(
-                model_pending.session_id,
-                model_operation,
-                "<script>unsafe</script>"
-            ),
-            Err(ChatError::InvalidInput)
-        );
-        assert!(repository
-            .apply_model_title(model_pending.session_id, model_operation, "安全模型标题")
-            .unwrap());
-        assert!(repository
-            .apply_model_title(model_pending.session_id, model_operation, "安全模型标题")
-            .unwrap());
-        repository
-            .rename_session(model_pending.session_id, "最终人工标题")
-            .unwrap();
-        assert!(!repository
-            .apply_model_title(model_pending.session_id, model_operation, "安全模型标题")
-            .unwrap());
-
-        let capped_pending = repository
-            .create_session_and_enqueue(project_id, "标题调用上限", Uuid::now_v7())
-            .unwrap();
-        for _ in 0..2 {
-            let operation = Uuid::now_v7();
-            assert!(repository
-                .enqueue_title_job(capped_pending.session_id, operation)
-                .unwrap());
-            repository.fail_outbox(operation).unwrap();
-        }
-        assert_eq!(
-            repository.enqueue_title_job(capped_pending.session_id, Uuid::now_v7()),
-            Err(ChatError::ConversationConflict)
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn session_project_actions_are_idempotent_and_remove_blocks_new_turns() {
-        let root = std::env::temp_dir().join(format!("yijie-s7c-actions-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 27);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        commit_synthetic_terminal(
-            &mut repository,
-            pending.session_id,
-            Uuid::now_v7(),
-            1,
-            "回答",
-        );
-
-        repository
-            .set_project_pinned(project_id, true, now + 1)
-            .unwrap();
-        repository
-            .set_project_pinned(project_id, true, now + 2)
-            .unwrap();
-        assert_eq!(
-            repository.list_projects().unwrap()[0].pinned_at,
-            Some(now + 1)
-        );
-        repository
-            .set_session_pinned(pending.session_id, true, now + 3)
-            .unwrap();
-        repository
-            .set_session_pinned(pending.session_id, true, now + 4)
-            .unwrap();
-        assert_eq!(
-            repository
-                .session_summary(pending.session_id)
-                .unwrap()
-                .pinned_at,
-            Some(now + 3)
-        );
-        repository.remove_project(&project_id.to_string()).unwrap();
-        assert_eq!(
-            repository.enqueue_turn(pending.session_id, "被移除后发送", Uuid::now_v7()),
-            Err(ChatError::ConversationConflict)
-        );
-        assert_eq!(
-            repository.set_project_pinned(project_id, true, now + 5),
-            Err(ChatError::NotFound)
-        );
-        assert!(root
-            .join(format!("project-{project_id}"))
-            .parent()
-            .is_some());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn interrupt_is_operation_idempotent_and_restart_recovery_is_explicit() {
-        let root = std::env::temp_dir().join(format!("yijie-s7c-interrupt-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let chat_scope = scope();
-        let mut repository = open_repository_for_scope(&root, 28, chat_scope.clone());
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        let operation_id = Uuid::now_v7();
-        let turn_id = repository
-            .enqueue_interrupt(pending.session_id, operation_id)
-            .unwrap();
-        assert_eq!(
-            repository
-                .enqueue_interrupt(pending.session_id, operation_id)
-                .unwrap(),
-            turn_id
-        );
-        let claimed = repository
-            .claim_next_conversation_outbox(unix_seconds().unwrap(), 30)
-            .unwrap()
-            .unwrap();
-        assert_eq!(claimed.kind, OutboxKind::InterruptTurn);
-        let dispatch = repository.load_interrupt_dispatch(operation_id).unwrap();
-        assert_eq!(dispatch.turn_id, turn_id);
-        drop(repository);
-
-        let mut reopened = open_repository_for_scope(&root, 28, chat_scope);
-        let recovery = reopened.recovery_snapshot().unwrap();
-        assert_eq!(recovery.active_session_ids, vec![pending.session_id]);
-        reopened
-            .finalize_interrupted_without_stream(operation_id, now + 1)
-            .unwrap();
-        assert!(reopened
-            .recovery_snapshot()
-            .unwrap()
-            .active_session_ids
-            .is_empty());
-        assert_eq!(
-            reopened.outbox_state(operation_id).unwrap(),
-            OutboxState::Done
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn deletion_and_start_turn_share_one_atomic_session_lease() {
-        let root = std::env::temp_dir().join(format!("yijie-s7c-lease-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 30);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        let delete_operation = Uuid::now_v7();
-        repository
-            .begin_session_deletion(pending.session_id, delete_operation, now)
-            .unwrap();
-        assert!(repository.claim_next_deletion(now, 30).unwrap().is_none());
-        assert_eq!(
-            repository.enqueue_turn(pending.session_id, "竞态发送", Uuid::now_v7()),
-            Err(ChatError::ConversationConflict)
-        );
-        let interrupt = repository
-            .claim_next_conversation_outbox(now, 30)
-            .unwrap()
-            .unwrap();
-        assert_eq!(interrupt.operation_id, delete_operation);
-        assert_eq!(interrupt.kind, OutboxKind::InterruptTurn);
-        repository
-            .finalize_interrupted_without_stream(delete_operation, now + 1)
-            .unwrap();
-        assert_eq!(
-            repository
-                .claim_next_deletion(now + 1, 30)
-                .unwrap()
-                .unwrap()
-                .operation_id,
-            delete_operation
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn explicit_deletion_retry_reuses_and_rearms_the_durable_operation() {
-        let root = std::env::temp_dir().join(format!("yijie-s7c-delete-retry-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 34);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, now);
-        commit_synthetic_terminal(
-            &mut repository,
-            pending.session_id,
-            Uuid::now_v7(),
-            1,
-            "retry answer",
-        );
-
-        let original_operation = Uuid::now_v7();
-        let original = repository
-            .begin_session_deletion(pending.session_id, original_operation, now + 1)
-            .unwrap();
-        repository
-            .connection
-            .execute(
-                "UPDATE chat_deletion_jobs SET attempt_count=5 WHERE operation_id=?1",
-                [original_operation.to_string()],
-            )
-            .unwrap();
-        let duplicate_confirmation = repository
-            .begin_session_deletion(pending.session_id, Uuid::now_v7(), now + 2)
-            .unwrap();
-        assert_eq!(duplicate_confirmation.operation_id, original_operation);
-        assert_eq!(duplicate_confirmation, original);
-        assert_eq!(
-            repository
-                .connection
-                .query_row("SELECT count(*) FROM chat_deletion_jobs", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            repository
-                .connection
-                .query_row(
-                    "SELECT attempt_count FROM chat_deletion_jobs WHERE operation_id=?1",
-                    [original_operation.to_string()],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap(),
-            5
-        );
-
-        repository
-            .connection
-            .execute(
-                "UPDATE chat_deletion_jobs
-                 SET host_state='complete', attempt_count=?1,
-                     next_attempt_at=?2, lease_expires_at=0
-                 WHERE operation_id=?3",
-                params![OUTBOX_MAX_ATTEMPTS, now + 3, original_operation.to_string()],
-            )
-            .unwrap();
-        assert!(repository
-            .claim_next_deletion(now + 3, 30)
-            .unwrap()
-            .is_none());
-        let exhausted = repository
-            .deletion_status(original_operation)
-            .unwrap()
-            .unwrap();
-        assert_eq!(exhausted.outcome_code, "retry_limit_exceeded");
-        assert_eq!(exhausted.desktop_state, CleanupSurfaceState::Incomplete);
-        assert_eq!(exhausted.host_state, CleanupSurfaceState::Complete);
-        assert_eq!(exhausted.runtime_state, CleanupSurfaceState::Incomplete);
-
-        let resumed = repository
-            .begin_session_deletion(pending.session_id, Uuid::now_v7(), now + 4)
-            .unwrap();
-        assert_eq!(resumed.operation_id, original_operation);
-        assert_eq!(resumed.outcome_code, "pending");
-        assert_eq!(resumed.desktop_state, CleanupSurfaceState::Pending);
-        assert_eq!(resumed.host_state, CleanupSurfaceState::Complete);
-        assert_eq!(resumed.runtime_state, CleanupSurfaceState::Pending);
-        assert_eq!(
-            repository
-                .connection
-                .query_row(
-                    "SELECT attempt_count FROM chat_deletion_jobs WHERE operation_id=?1",
-                    [original_operation.to_string()],
-                    |row| row.get::<_, i64>(0),
-                )
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            repository
-                .claim_next_deletion(now + 4, 30)
-                .unwrap()
-                .unwrap()
-                .operation_id,
-            original_operation
-        );
-
-        let other = repository
-            .create_session_and_enqueue(project_id, "other", Uuid::now_v7())
-            .unwrap();
-        assert_eq!(
-            repository.begin_session_deletion(other.session_id, original_operation, now + 5),
-            Err(ChatError::ConversationConflict)
-        );
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn deletion_saga_recovers_and_leaves_only_content_free_expiring_receipt() {
-        let root = std::env::temp_dir().join(format!("yijie-s7c-delete-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let chat_scope = scope();
-        let mut repository = open_repository_for_scope(&root, 29, chat_scope.clone());
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let (agent_session_id, _) = bind_and_accept_first_turn(&mut repository, &pending, now);
-        commit_synthetic_terminal(
-            &mut repository,
-            pending.session_id,
-            Uuid::now_v7(),
-            1,
-            "删除回答 canary",
-        );
-        let operation_id = Uuid::now_v7();
-        let status = repository
-            .begin_session_deletion(pending.session_id, operation_id, now + 1)
-            .unwrap();
-        assert_eq!(status.desktop_state, CleanupSurfaceState::Pending);
-        assert_eq!(status.host_state, CleanupSurfaceState::Pending);
-        assert_eq!(
-            repository
-                .deletion_status_for_session(pending.session_id)
-                .unwrap(),
-            Some(status.clone())
-        );
-        let claimed = repository
-            .claim_next_deletion(now + 1, 30)
-            .unwrap()
-            .unwrap();
-        assert_eq!(claimed.agent_session_id, Some(agent_session_id));
-        repository
-            .record_cleanup_surfaces(
-                operation_id,
-                CleanupSurfaceState::Complete,
-                CleanupSurfaceState::Complete,
-                "cleanup_complete",
-                now + 1,
-            )
-            .unwrap();
-        repository.complete_local_deletion(operation_id).unwrap();
-        drop(repository);
-        assert!(ChatRepository::deletion_identity_exists(
-            &root.join("chat"),
-            &DatabaseKey::from_bytes([29; 32])
-        )
-        .unwrap());
-
-        let mut reopened = open_repository_for_scope(&root, 29, chat_scope);
-        let recovery = reopened.recovery_snapshot().unwrap();
-        assert!(recovery.active_session_ids.is_empty());
-        assert_eq!(recovery.deletions.len(), 1);
-        assert_eq!(
-            reopened
-                .deletion_status_for_session(pending.session_id)
-                .unwrap()
-                .map(|status| status.operation_id),
-            Some(operation_id)
-        );
-        let receipt = reopened
-            .finalize_deletion_receipt(operation_id, now + 2)
-            .unwrap();
-        assert_eq!(receipt.outcome_code, "cleanup_complete");
-        assert_eq!(receipt.completed_at, Some(now + 2));
-        assert_eq!(
-            receipt.expires_at,
-            Some(now + 2 + DELETION_RECEIPT_TTL_SECONDS)
-        );
-        assert!(reopened.recovery_snapshot().unwrap().deletions.is_empty());
-        assert_eq!(
-            reopened
-                .deletion_status_for_session(pending.session_id)
-                .unwrap(),
-            Some(receipt.clone())
-        );
-        assert_eq!(
-            reopened
-                .connection
-                .query_row("SELECT count(*) FROM chat_sessions", [], |row| row
-                    .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        let receipt_columns = reopened
-            .connection
-            .prepare("PRAGMA table_info(chat_deletion_receipts)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(!receipt_columns.iter().any(|column| column == "session_id"));
-        assert!(!format!("{receipt:?}").contains(&pending.session_id.to_string()));
-        assert_eq!(
-            reopened
-                .purge_expired_deletion_receipts(now + 2 + DELETION_RECEIPT_TTL_SECONDS)
-                .unwrap(),
-            1
-        );
-        assert_eq!(reopened.deletion_status(operation_id).unwrap(), None);
-        assert_eq!(
-            reopened
-                .deletion_status_for_session(pending.session_id)
-                .unwrap(),
-            None
-        );
-        drop(reopened);
-        assert!(!ChatRepository::deletion_identity_exists(
-            &root.join("chat"),
-            &DatabaseKey::from_bytes([29; 32])
-        )
-        .unwrap());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn ready_attachment_removal_is_scoped_idempotent_and_cascades_chunks() {
         let root = std::env::temp_dir().join(format!("yijie-feat127-remove-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -12582,219 +9081,6 @@ mod tests {
         );
 
         drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn draft_attachment_targets_survive_reopen_and_bind_only_to_their_composer() {
-        let root =
-            std::env::temp_dir().join(format!("yijie-feat127-draft-targets-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let primary_scope = scope();
-        let mut repository = open_repository_for_scope(&root, 49, primary_scope.clone());
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let seed = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        bind_and_accept_first_turn(&mut repository, &seed, now);
-        commit_synthetic_terminal(
-            &mut repository,
-            seed.session_id,
-            Uuid::now_v7(),
-            1,
-            "seed complete",
-        );
-
-        let imported_at = unix_seconds().unwrap();
-        let new_draft = crate::chat::attachment::prepare_bytes(
-            "new-draft.txt".to_owned(),
-            b"new composer context".to_vec(),
-            imported_at,
-        )
-        .unwrap();
-        let new_draft_id = new_draft.id;
-        repository
-            .store_attachment(new_draft, DraftTarget::New)
-            .unwrap();
-        let session_draft = crate::chat::attachment::prepare_bytes(
-            "session-draft.txt".to_owned(),
-            b"session composer context".to_vec(),
-            imported_at,
-        )
-        .unwrap();
-        let session_draft_id = session_draft.id;
-        repository
-            .store_attachment(session_draft, DraftTarget::Session(seed.session_id))
-            .unwrap();
-        drop(repository);
-
-        let mut reopened = open_repository_for_scope(&root, 49, primary_scope.clone());
-        assert_eq!(
-            reopened
-                .list_ready_attachments(DraftTarget::New)
-                .unwrap()
-                .into_iter()
-                .map(|attachment| attachment.attachment_id)
-                .collect::<Vec<_>>(),
-            vec![new_draft_id]
-        );
-        assert_eq!(
-            reopened
-                .list_ready_attachments(DraftTarget::Session(seed.session_id))
-                .unwrap()
-                .into_iter()
-                .map(|attachment| attachment.attachment_id)
-                .collect::<Vec<_>>(),
-            vec![session_draft_id]
-        );
-        assert_eq!(
-            reopened.remove_ready_attachment(new_draft_id, DraftTarget::Session(seed.session_id),),
-            Err(ChatError::ConversationConflict)
-        );
-        assert_eq!(
-            reopened.remove_ready_attachment(session_draft_id, DraftTarget::New),
-            Err(ChatError::ConversationConflict)
-        );
-
-        let mut foreign = open_repository_for_scope(&root, 49, scope());
-        assert!(foreign
-            .list_ready_attachments(DraftTarget::New)
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            foreign.list_ready_attachments(DraftTarget::Session(seed.session_id)),
-            Err(ChatError::NotFound)
-        );
-        drop(foreign);
-
-        assert_eq!(
-            reopened.create_session_and_enqueue_multimodal(
-                project_id,
-                &[DraftContentBlock::File(session_draft_id)],
-                Uuid::now_v7(),
-                1,
-            ),
-            Err(ChatError::NotFound)
-        );
-        assert_eq!(
-            reopened.enqueue_turn_multimodal(
-                seed.session_id,
-                &[DraftContentBlock::File(new_draft_id)],
-                Uuid::now_v7(),
-            ),
-            Err(ChatError::NotFound)
-        );
-
-        let attachment_only = reopened
-            .create_session_and_enqueue_multimodal(
-                project_id,
-                &[DraftContentBlock::File(new_draft_id)],
-                Uuid::now_v7(),
-                1,
-            )
-            .unwrap();
-        reopened
-            .enqueue_turn_multimodal(
-                seed.session_id,
-                &[DraftContentBlock::File(session_draft_id)],
-                Uuid::now_v7(),
-            )
-            .unwrap();
-        for attachment_id in [new_draft_id, session_draft_id] {
-            let state = reopened
-                .connection
-                .query_row(
-                    "SELECT state, message_id IS NOT NULL,
-                       draft_target_kind IS NULL, draft_session_id IS NULL
-                     FROM chat_attachments WHERE id=?1",
-                    [attachment_id.to_string()],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, bool>(2)?,
-                            row.get::<_, bool>(3)?,
-                        ))
-                    },
-                )
-                .unwrap();
-            assert_eq!(state, ("bound".to_owned(), true, true, true));
-        }
-        assert!(reopened
-            .list_ready_attachments(DraftTarget::New)
-            .unwrap()
-            .is_empty());
-        assert!(reopened
-            .list_ready_attachments(DraftTarget::Session(seed.session_id))
-            .unwrap()
-            .is_empty());
-
-        drop(reopened);
-        let mut reopened = open_repository_for_scope(&root, 49, primary_scope);
-        let attachment_only_summary = reopened
-            .session_summary(attachment_only.session_id)
-            .unwrap();
-        assert_eq!(attachment_only_summary.title, "new-draft.txt");
-        assert_eq!(
-            attachment_only_summary.title_source,
-            SessionTitleSource::Fallback
-        );
-
-        for (session_id, attachment_id, safe_name) in [
-            (attachment_only.session_id, new_draft_id, "new-draft.txt"),
-            (seed.session_id, session_draft_id, "session-draft.txt"),
-        ] {
-            let message_id = reopened
-                .connection
-                .query_row(
-                    "SELECT message_id FROM chat_attachments WHERE id=?1",
-                    [attachment_id.to_string()],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap();
-            let message_id = Uuid::parse_str(&message_id).unwrap();
-            let history = reopened.load_history(session_id, None, Some(20)).unwrap();
-            assert!(history
-                .turns
-                .iter()
-                .flat_map(|turn| turn.messages.iter())
-                .any(|message| message.message_id == message_id));
-            let blocks = reopened
-                .load_message_content_blocks(vec![message_id])
-                .unwrap();
-            assert!(matches!(
-                blocks.as_slice(),
-                [(projected_message_id, projected_blocks)]
-                    if *projected_message_id == message_id
-                        && matches!(projected_blocks.as_slice(), [
-                            MessageContentBlockProjection::Attachment { ordinal: 0, attachment }
-                        ] if attachment.attachment_id == attachment_id
-                            && attachment.safe_name == safe_name
-                            && attachment.state == "bound")
-            ));
-        }
-
-        reopened
-            .delete_session_local(&seed.session_id.to_string())
-            .unwrap();
-        reopened
-            .delete_session_local(&attachment_only.session_id.to_string())
-            .unwrap();
-        for table in [
-            "chat_attachments",
-            "chat_attachment_chunks",
-            "chat_message_content_blocks",
-        ] {
-            let count = reopened
-                .connection
-                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap();
-            assert_eq!(count, 0, "{table} must cascade on permanent deletion");
-        }
-        drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -13567,65 +9853,6 @@ mod tests {
 
     #[cfg(feature = "feat126-s10-driver")]
     #[test]
-    fn r8_restart_candidates_preserve_exact_persisted_host_identity_after_terminal_turn() {
-        let root = std::env::temp_dir().join(format!("feat126-r8-resume-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 42);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let (agent_session_id, codex_thread_id) =
-            bind_and_accept_first_turn(&mut repository, &pending, now);
-        let active = repository.active_turn_context(pending.session_id).unwrap();
-        let task_id = active.task_id;
-        assert_eq!(
-            repository.feat126_resume_candidates().unwrap(),
-            vec![Feat126ResumeCandidate {
-                task_id,
-                session_id: pending.session_id,
-                agent_session_id,
-                codex_thread_id,
-                active_local_turn_id: Some(pending.turn_id),
-                active_runtime_turn_id: Some(active.runtime_turn_id),
-                active_turn_operation_id: Some(pending.turn_operation_id),
-            }]
-        );
-        repository
-            .commit_terminal_turn(&TerminalTurnCommit {
-                local_turn_id: pending.turn_id,
-                terminal_status: "failed".to_owned(),
-                terminal_at: now,
-                assistant_text: String::new(),
-                cursor: StoredEventCursor {
-                    stream_id: Uuid::now_v7(),
-                    sequence: 1,
-                    event_id: Uuid::now_v7(),
-                },
-                reasoning_status: ReasoningStatus::Unavailable,
-                reasoning_reason_code: Some("reasoning_not_emitted".to_owned()),
-                reasoning_items: Vec::new(),
-            })
-            .unwrap();
-
-        assert_eq!(
-            repository.feat126_resume_candidates().unwrap(),
-            vec![Feat126ResumeCandidate {
-                task_id,
-                session_id: pending.session_id,
-                agent_session_id,
-                codex_thread_id,
-                active_local_turn_id: None,
-                active_runtime_turn_id: None,
-                active_turn_operation_id: None,
-            }]
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(feature = "feat126-s10-driver")]
-    #[test]
     fn r8_database_retry_uses_busy_taxonomy_and_one_monotonic_deadline() {
         use std::cell::Cell;
 
@@ -13700,518 +9927,6 @@ mod tests {
         );
         assert_eq!(result, Err(ChatError::DatabaseBusy));
         assert_eq!(calls.get(), 1);
-    }
-
-    #[test]
-    fn feat136_failed_nonzero_command_survives_native_reducer_and_sqlcipher_reopen() {
-        let root = std::env::temp_dir().join(format!("yijie-feat136-failed-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 136);
-        let repository_scope = repository.scope.clone();
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        let now = unix_seconds().unwrap();
-        let (agent_session_id, codex_thread_id) =
-            bind_and_accept_first_turn(&mut repository, &pending, now);
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        assert_eq!(context.agent_session_id, agent_session_id);
-        assert_eq!(context.codex_thread_id, codex_thread_id);
-
-        let stream_id = Uuid::now_v7();
-        let started_event_id = Uuid::now_v7();
-        let completed_event_id = Uuid::now_v7();
-        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
-        let started = reducer
-            .apply(
-                HostEvent {
-                    cursor: HostEventCursor::new(stream_id, 1).unwrap(),
-                    event_type: "item.started".to_owned(),
-                    event_id: started_event_id,
-                    task_id: context.task_id,
-                    agent_session_id: context.agent_session_id,
-                    codex_thread_id: context.codex_thread_id,
-                    turn_id: Some(context.runtime_turn_id),
-                    item_id: Some("command-failed".to_owned()),
-                    occurred_at: "2026-08-30T00:00:00Z".to_owned(),
-                    encoded_bytes: 1,
-                    kind: HostEventKind::CommandStarted {
-                        command_summary: HostSafeText {
-                            text: "Inspect a missing reference".to_owned(),
-                            truncated: false,
-                            truncation_reason: None,
-                        },
-                        cwd: HostCommandCwd::WorkspaceRoot,
-                    },
-                },
-                1_000,
-            )
-            .unwrap()
-            .unwrap();
-        assert!(matches!(started.delta, TimelineDelta::CommandStarted(_)));
-        let Some(ExecutionProjection::Command(command)) = started.items[0].execution.as_ref()
-        else {
-            panic!("started Command projection expected");
-        };
-        assert_eq!(command.started_source.event_id, started_event_id);
-        assert_eq!(command.last_source.event_id, started_event_id);
-        assert_eq!(command.live_output, None);
-        repository.persist_feat136_projection(&started).unwrap();
-
-        let completed = reducer
-            .apply(
-                HostEvent {
-                    cursor: HostEventCursor::new(stream_id, 2).unwrap(),
-                    event_type: "item.completed".to_owned(),
-                    event_id: completed_event_id,
-                    task_id: context.task_id,
-                    agent_session_id: context.agent_session_id,
-                    codex_thread_id: context.codex_thread_id,
-                    turn_id: Some(context.runtime_turn_id),
-                    item_id: Some("command-failed".to_owned()),
-                    occurred_at: "2026-08-30T00:00:00.014Z".to_owned(),
-                    encoded_bytes: 1,
-                    kind: HostEventKind::CommandCompleted {
-                        status: HostCommandStatus::Failed,
-                        command_summary: HostSafeText {
-                            text: "Inspect a missing reference".to_owned(),
-                            truncated: false,
-                            truncation_reason: None,
-                        },
-                        cwd: HostCommandCwd::WorkspaceRoot,
-                        duration_ms: Some(14),
-                        exit_code: Some(9),
-                        output: HostCommandOutput::Complete {
-                            text: "reference unavailable\n".to_owned(),
-                        },
-                        error: Some(HostProjectionError {
-                            code: HostCommandErrorCode::CommandFailed,
-                            summary: "command exited with a non-zero status".to_owned(),
-                        }),
-                    },
-                },
-                1_014,
-            )
-            .unwrap()
-            .unwrap();
-        assert!(matches!(
-            completed.delta,
-            TimelineDelta::CommandCompleted(_)
-        ));
-        let Some(ExecutionProjection::Command(command)) = completed.items[0].execution.as_ref()
-        else {
-            panic!("failed Command projection expected");
-        };
-        assert_eq!(command.status, CommandStatus::Failed);
-        assert_eq!(command.started_source.event_id, started_event_id);
-        assert_eq!(command.last_source.event_id, completed_event_id);
-        assert_eq!(command.duration_ms, Some(14));
-        assert_eq!(command.exit_code, Some(9));
-        assert_eq!(
-            command.error.as_ref().map(|error| error.code),
-            Some(ProjectionErrorCode::CommandFailed)
-        );
-        repository.persist_feat136_projection(&completed).unwrap();
-
-        drop(repository);
-        let repository = open_repository_for_scope(&root, 136, repository_scope);
-        let reopened_context = repository.active_turn_context(pending.session_id).unwrap();
-        assert_eq!(
-            reopened_context.cursor.as_ref().map(|cursor| (
-                cursor.stream_id,
-                cursor.sequence,
-                cursor.event_id,
-            )),
-            Some((stream_id, 2, completed_event_id))
-        );
-        let hydration = repository
-            .load_feat136_hydration(reopened_context.turn_id)
-            .unwrap();
-        assert_eq!(hydration.items.len(), 1);
-        assert_eq!(hydration.items[0].item_id, "command-failed");
-        assert_eq!(hydration.items[0].status, TimelineItemStatus::Completed);
-        let Some(ExecutionProjection::Command(command)) = hydration.items[0].execution.as_ref()
-        else {
-            panic!("hydrated failed Command expected");
-        };
-        assert_eq!(command.status, CommandStatus::Failed);
-        assert_eq!(command.started_source.event_id, started_event_id);
-        assert_eq!(command.last_source.event_id, completed_event_id);
-        assert_eq!(command.live_output, None);
-        assert_eq!(command.duration_ms, Some(14));
-        assert_eq!(command.exit_code, Some(9));
-        assert_eq!(
-            command.output,
-            Some(CommandOutputProjection::Complete {
-                text: "reference unavailable\n".to_owned(),
-            })
-        );
-        assert_eq!(
-            command
-                .error
-                .as_ref()
-                .map(|error| (error.code, error.summary.as_str(),)),
-            Some((
-                ProjectionErrorCode::CommandFailed,
-                "command exited with a non-zero status",
-            ))
-        );
-        Feat134TurnReducer::new_v5(reopened_context, Some(hydration))
-            .expect("reopened failed Command hydration must remain valid");
-        drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat137_safe_approval_survives_sqlcipher_reopen() {
-        let root = std::env::temp_dir().join(format!("yijie-feat137-safe-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 137);
-        let repository_scope = repository.scope.clone();
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let stream_id = Uuid::now_v7();
-        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
-        let started_event = HostEvent {
-            cursor: HostEventCursor::new(stream_id, 1).unwrap(),
-            event_type: "item.started".to_owned(),
-            event_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            codex_thread_id: context.codex_thread_id,
-            turn_id: Some(context.runtime_turn_id),
-            item_id: Some("command-approval".to_owned()),
-            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
-            encoded_bytes: 1,
-            kind: HostEventKind::CommandStarted {
-                command_summary: HostSafeText {
-                    text: "Inspect repository state".to_owned(),
-                    truncated: false,
-                    truncation_reason: None,
-                },
-                cwd: HostCommandCwd::WorkspaceRoot,
-            },
-        };
-        let started = reducer.apply(started_event, 1_000).unwrap().unwrap();
-        assert_eq!(
-            repository
-                .persist_feat137_projection(&started, None)
-                .unwrap(),
-            1
-        );
-
-        let approval_request_id = Uuid::now_v7();
-        let approval_event = HostEvent {
-            cursor: HostEventCursor::new(stream_id, 2).unwrap(),
-            event_type: "approval.requested".to_owned(),
-            event_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            codex_thread_id: context.codex_thread_id,
-            turn_id: Some(context.runtime_turn_id),
-            item_id: Some("command-approval".to_owned()),
-            occurred_at: "2026-08-30T00:00:01Z".to_owned(),
-            encoded_bytes: 1,
-            kind: HostEventKind::ApprovalRequested(HostApprovalRequested {
-                approval_request_id,
-                requested_at: "2026-08-30T00:00:01Z".to_owned(),
-                expires_at: "2026-08-30T00:02:01Z".to_owned(),
-            }),
-        };
-        let approval = ApprovalProjection::from_event(
-            &approval_event,
-            pending.session_id,
-            context.turn_id,
-            context.runtime_turn_id,
-        )
-        .unwrap()
-        .unwrap();
-        let projection = reducer.apply(approval_event, 1_001).unwrap().unwrap();
-        assert_eq!(
-            repository
-                .persist_feat137_projection(&projection, Some(&approval))
-                .unwrap(),
-            2
-        );
-
-        drop(repository);
-        let mut repository = open_repository_for_scope(&root, 137, repository_scope);
-        let snapshot = repository
-            .load_feat137_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(snapshot.approvals.len(), 1);
-        assert_eq!(snapshot.approvals[0].turn_id, context.turn_id);
-        assert_eq!(
-            snapshot.approvals[0].approval_request_id,
-            approval_request_id
-        );
-        assert_eq!(
-            snapshot.approvals[0].status,
-            ApprovalProjectionStatus::Pending
-        );
-
-        drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat137_native_boundary_rejects_raw_process_and_reopens_content_free() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/feat-137/native-boundary-canary.json"
-        ))
-        .unwrap();
-        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
-        let safe_final_answer = fixture["safeFinalAnswer"].as_str().unwrap();
-
-        let root = std::env::temp_dir().join(format!("yijie-feat137-process-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 138);
-        let repository_scope = repository.scope.clone();
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let stream_id = Uuid::now_v7();
-        let mut reducer = Feat134TurnReducer::new_v5(context.clone(), None).unwrap();
-        let event = |sequence: u64, item_id: Option<&str>, kind: HostEventKind| HostEvent {
-            cursor: HostEventCursor::new(stream_id, sequence).unwrap(),
-            event_type: "synthetic.process".to_owned(),
-            event_id: Uuid::now_v7(),
-            task_id: context.task_id,
-            agent_session_id: context.agent_session_id,
-            codex_thread_id: context.codex_thread_id,
-            turn_id: Some(context.runtime_turn_id),
-            item_id: item_id.map(str::to_owned),
-            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
-            encoded_bytes: 64,
-            kind,
-        };
-
-        let raw_commentary = reducer
-            .apply(
-                event(
-                    1,
-                    Some("commentary"),
-                    HostEventKind::ItemStarted {
-                        item_type: "agentMessage".to_owned(),
-                        text: Some(forbidden_canary.to_owned()),
-                        phase: Some(HostAgentMessagePhase::Commentary),
-                    },
-                ),
-                1,
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            repository.persist_feat137_projection(&raw_commentary, None),
-            Err(ChatError::InvalidInput)
-        );
-        let commentary = protect_process_projection(raw_commentary).unwrap();
-        assert_eq!(
-            repository.persist_feat137_projection(&commentary, None),
-            Ok(1)
-        );
-
-        let reasoning = reducer
-            .apply(
-                event(
-                    2,
-                    Some("reasoning"),
-                    HostEventKind::ReasoningTextDelta {
-                        content_index: 0,
-                        delta: forbidden_canary.to_owned(),
-                    },
-                ),
-                2,
-            )
-            .unwrap()
-            .unwrap();
-        let reasoning = protect_process_projection(reasoning).unwrap();
-        let TimelineDelta::ReasoningAppend { ref text, .. } = reasoning.delta else {
-            panic!("protected reasoning append expected");
-        };
-        assert_eq!(text, PROCESS_CONTENT_PROTECTED_MESSAGE);
-        assert_eq!(
-            repository.persist_feat137_projection(&reasoning, None),
-            Ok(2)
-        );
-
-        let plan = reducer
-            .apply(
-                event(
-                    3,
-                    None,
-                    HostEventKind::TurnPlanUpdated {
-                        explanation: Some(forbidden_canary.to_owned()),
-                        steps: vec![HostPlanStep {
-                            step: forbidden_canary.to_owned(),
-                            status: HostPlanStepStatus::InProgress,
-                        }],
-                    },
-                ),
-                3,
-            )
-            .unwrap()
-            .unwrap();
-        let plan = protect_process_projection(plan).unwrap();
-        assert_eq!(repository.persist_feat137_projection(&plan, None), Ok(3));
-
-        let final_started = reducer
-            .apply(
-                event(
-                    4,
-                    Some("final"),
-                    HostEventKind::ItemStarted {
-                        item_type: "agentMessage".to_owned(),
-                        text: Some(safe_final_answer.to_owned()),
-                        phase: Some(HostAgentMessagePhase::FinalAnswer),
-                    },
-                ),
-                4,
-            )
-            .unwrap()
-            .unwrap();
-        let final_started_cursor = final_started.cursor.clone();
-        let final_started_count = final_started.items.len();
-        let final_started = protect_process_projection(final_started).unwrap();
-        assert_eq!(final_started.cursor, final_started_cursor);
-        assert_eq!(final_started.items.len(), final_started_count);
-        assert_eq!(final_started.items.last().unwrap().text, safe_final_answer);
-        assert_eq!(
-            repository.persist_feat137_projection(&final_started, None),
-            Ok(4)
-        );
-
-        let final_completed = reducer
-            .apply(
-                event(
-                    5,
-                    Some("final"),
-                    HostEventKind::ItemCompleted {
-                        item_type: "agentMessage".to_owned(),
-                        text: Some(safe_final_answer.to_owned()),
-                        phase: Some(HostAgentMessagePhase::FinalAnswer),
-                    },
-                ),
-                5,
-            )
-            .unwrap()
-            .unwrap();
-        let final_completed = protect_process_projection(final_completed).unwrap();
-        assert_eq!(final_completed.assistant_text, safe_final_answer);
-        assert_eq!(
-            repository.persist_feat137_projection(&final_completed, None),
-            Ok(5)
-        );
-
-        let terminal = reducer
-            .apply(
-                event(
-                    6,
-                    None,
-                    HostEventKind::TurnCompleted {
-                        status: HostTurnStatus::Completed,
-                        code: None,
-                        message: None,
-                    },
-                ),
-                6,
-            )
-            .unwrap()
-            .unwrap();
-        let terminal_cursor = terminal.cursor.clone();
-        let terminal_item_count = terminal.items.len();
-        let terminal = protect_process_projection(terminal).unwrap();
-        assert_eq!(terminal.cursor, terminal_cursor);
-        assert_eq!(terminal.items.len(), terminal_item_count);
-        assert_eq!(terminal.assistant_text, safe_final_answer);
-        assert!(matches!(terminal.delta, TimelineDelta::TurnTerminal(_)));
-        assert_eq!(usize::from(terminal.terminal.is_some()), 1);
-        assert_eq!(repository.commit_feat137_terminal(&terminal), Ok(6));
-
-        drop(repository);
-        let mut repository = open_repository_for_scope(&root, 138, repository_scope);
-        let hydration = repository.load_feat137_hydration(context.turn_id).unwrap();
-        assert_eq!(hydration.items[0].text, PROCESS_CONTENT_PROTECTED_MESSAGE);
-        assert_eq!(hydration.items[1].reasoning_parts.len(), 1);
-        assert_eq!(
-            hydration.items[1].reasoning_parts[0].text,
-            PROCESS_CONTENT_PROTECTED_MESSAGE
-        );
-        assert_eq!(
-            hydration
-                .plan
-                .as_ref()
-                .and_then(|plan| plan.explanation.as_deref()),
-            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
-        );
-        let history = repository
-            .load_feat137_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(history.feat134.durable_sequence_cut, 6);
-        let turn = history
-            .feat134
-            .turns
-            .iter()
-            .find(|turn| turn.turn_id == context.turn_id)
-            .unwrap();
-        validate_process_state(&turn.items, turn.plan.as_ref()).unwrap();
-        assert_eq!(turn.items.len(), terminal_item_count);
-        assert_eq!(turn.items.last().unwrap().text, safe_final_answer);
-        assert_eq!(
-            history
-                .history
-                .turns
-                .iter()
-                .find(|turn| turn.turn_id == context.turn_id)
-                .and_then(|turn| turn
-                    .messages
-                    .iter()
-                    .find(|message| message.role == "assistant"))
-                .map(|message| message.content.as_str()),
-            Some(safe_final_answer)
-        );
-
-        let forbidden_hits: i64 = repository
-            .connection
-            .query_row(
-                "SELECT
-                   (SELECT count(*) FROM chat_timeline_items_v4
-                    WHERE turn_id=?1 AND instr(text, ?2) > 0)
-                 + (SELECT count(*) FROM chat_timeline_reasoning_parts_v4
-                    WHERE turn_id=?1 AND instr(text, ?2) > 0)
-                 + (SELECT count(*) FROM chat_turn_plans_v4
-                    WHERE turn_id=?1 AND instr(COALESCE(explanation, ''), ?2) > 0)
-                 + (SELECT count(*) FROM chat_turn_plan_steps_v4
-                    WHERE turn_id=?1 AND instr(step, ?2) > 0)
-                 + (SELECT count(*) FROM chat_messages
-                    WHERE turn_id=?1 AND instr(content, ?2) > 0)
-                 + (SELECT count(*) FROM chat_reasoning_parts
-                    WHERE turn_id=?1 AND instr(text, ?2) > 0)",
-                params![context.turn_id.to_string(), forbidden_canary],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(forbidden_hits, 0);
-        let terminal_cardinality: i64 = repository
-            .connection
-            .query_row(
-                "SELECT count(*) FROM chat_turn_terminals_v4 WHERE turn_id=?1",
-                [context.turn_id.to_string()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(terminal_cardinality, 1);
-
-        drop(repository);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -14346,729 +10061,6 @@ mod tests {
             Err(ChatError::DatabaseUnavailable)
         );
         drop(repository);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat134_history_snapshot_cannot_straddle_terminal_commit_and_durable_cut() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut reader = open_repository(&root, 93);
-        let shared_scope = reader.scope.clone();
-        let project_id = register_synthetic_project(&mut reader, &root);
-        let pending = reader
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut reader, &pending, unix_seconds().unwrap());
-        let context = reader.active_turn_context(pending.session_id).unwrap();
-        let stream_id = Uuid::now_v7();
-        let started_source = SourceIdentity {
-            event_id: Uuid::now_v7(),
-            sequence: 1,
-            occurred_at: "2026-08-28T06:00:00Z".to_owned(),
-        };
-        let first_sequence = reader
-            .persist_feat134_projection(&Feat134Projection {
-                session_id: pending.session_id,
-                turn_id: context.turn_id,
-                cursor: StoredEventCursor {
-                    stream_id,
-                    sequence: 1,
-                    event_id: started_source.event_id,
-                },
-                source_event_type: "turn.started".to_owned(),
-                source_turn_id: Some(context.runtime_turn_id),
-                source_occurred_at: started_source.occurred_at.clone(),
-                source_event_bytes: 1,
-                observed_at_ms: 1_000,
-                durable_sequence: None,
-                assistant_text: String::new(),
-                items: Vec::new(),
-                plan: None,
-                turn_notices: Vec::new(),
-                session_notice: None,
-                terminal: None,
-                delta: TimelineDelta::TurnStarted(started_source),
-            })
-            .unwrap();
-        assert_eq!(first_sequence, 1);
-
-        let terminal_source = SourceIdentity {
-            event_id: Uuid::now_v7(),
-            sequence: 2,
-            occurred_at: "2026-08-28T06:00:01Z".to_owned(),
-        };
-        let terminal = TimelineTerminal {
-            source_event_id: terminal_source.event_id,
-            source_sequence: terminal_source.sequence,
-            source_occurred_at: terminal_source.occurred_at.clone(),
-            status: "completed",
-            code: Some("bounded_terminal".to_owned()),
-            unfinished_reasoning_reason_code: None,
-            observed_at_ms: 2_000,
-        };
-        let terminal_projection = Feat134Projection {
-            session_id: pending.session_id,
-            turn_id: context.turn_id,
-            cursor: StoredEventCursor {
-                stream_id,
-                sequence: 2,
-                event_id: terminal_source.event_id,
-            },
-            source_event_type: "turn.completed".to_owned(),
-            source_turn_id: Some(context.runtime_turn_id),
-            source_occurred_at: terminal_source.occurred_at,
-            source_event_bytes: 1,
-            observed_at_ms: 2_000,
-            durable_sequence: None,
-            assistant_text: "done".to_owned(),
-            items: Vec::new(),
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: Some(terminal.clone()),
-            delta: TimelineDelta::TurnTerminal(terminal),
-        };
-        let mut writer = open_repository_for_scope(&root, 93, shared_scope);
-        let straddled = reader
-            .load_feat134_history_snapshot_with_hook(pending.session_id, None, Some(20), || {
-                assert_eq!(writer.commit_feat134_terminal(&terminal_projection)?, 2);
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(
-            straddled.session.latest_turn_status.as_deref(),
-            Some("streaming")
-        );
-        assert_eq!(straddled.history.turns[0].status, "streaming");
-        assert_eq!(straddled.history.turns[0].terminal_at, None);
-        assert_eq!(straddled.feat134.turns[0].terminal_code, None);
-        assert_eq!(straddled.feat134.durable_sequence_cut, 1);
-
-        let current = reader
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(
-            current.session.latest_turn_status.as_deref(),
-            Some("completed")
-        );
-        assert_eq!(current.history.turns[0].status, "completed");
-        assert!(current.history.turns[0].terminal_at.is_some());
-        assert_eq!(
-            current.feat134.turns[0].terminal_code.as_deref(),
-            Some("bounded_terminal")
-        );
-        assert_eq!(current.feat134.durable_sequence_cut, 2);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat134_durable_cut_is_zero_then_monotonic_across_ignored_and_stream_reset() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 94);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let initial = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(initial.feat134.durable_sequence_cut, 0);
-        assert!(!initial.feat134.turns[0].v4_authority);
-
-        let first_stream = Uuid::now_v7();
-        let ignored_event_id = Uuid::now_v7();
-        assert_eq!(
-            repository
-                .persist_feat134_projection(&Feat134Projection {
-                    session_id: pending.session_id,
-                    turn_id: context.turn_id,
-                    cursor: StoredEventCursor {
-                        stream_id: first_stream,
-                        sequence: 1,
-                        event_id: ignored_event_id,
-                    },
-                    source_event_type: "thread.started".to_owned(),
-                    source_turn_id: None,
-                    source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
-                    source_event_bytes: 1,
-                    observed_at_ms: 1,
-                    durable_sequence: None,
-                    assistant_text: String::new(),
-                    items: Vec::new(),
-                    plan: None,
-                    turn_notices: Vec::new(),
-                    session_notice: None,
-                    terminal: None,
-                    delta: TimelineDelta::Ignored,
-                })
-                .unwrap(),
-            1
-        );
-        let after_ignored = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(after_ignored.feat134.durable_sequence_cut, 1);
-        assert!(!after_ignored.feat134.turns[0].v4_authority);
-
-        let started_event_id = Uuid::now_v7();
-        let started_source = SourceIdentity {
-            event_id: started_event_id,
-            sequence: 2,
-            occurred_at: "2026-08-28T06:00:01Z".to_owned(),
-        };
-        let expected = StoredEventCursor {
-            stream_id: first_stream,
-            sequence: 2,
-            event_id: started_event_id,
-        };
-        assert_eq!(
-            repository
-                .persist_feat134_projection(&Feat134Projection {
-                    session_id: pending.session_id,
-                    turn_id: context.turn_id,
-                    cursor: expected.clone(),
-                    source_event_type: "turn.started".to_owned(),
-                    source_turn_id: Some(context.runtime_turn_id),
-                    source_occurred_at: started_source.occurred_at.clone(),
-                    source_event_bytes: 1,
-                    observed_at_ms: 2,
-                    durable_sequence: None,
-                    assistant_text: String::new(),
-                    items: Vec::new(),
-                    plan: None,
-                    turn_notices: Vec::new(),
-                    session_notice: None,
-                    terminal: None,
-                    delta: TimelineDelta::TurnStarted(started_source),
-                })
-                .unwrap(),
-            2
-        );
-        repository
-            .reset_feat134_after_stream_change(pending.session_id, context.turn_id, &expected)
-            .unwrap();
-        let after_reset = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(after_reset.feat134.durable_sequence_cut, 2);
-        assert!(!after_reset.feat134.turns[0].v4_authority);
-
-        let second_stream = Uuid::now_v7();
-        let replayed_source = SourceIdentity {
-            event_id: Uuid::now_v7(),
-            sequence: 1,
-            occurred_at: "2026-08-28T06:00:02Z".to_owned(),
-        };
-        assert_eq!(
-            repository
-                .persist_feat134_projection(&Feat134Projection {
-                    session_id: pending.session_id,
-                    turn_id: context.turn_id,
-                    cursor: StoredEventCursor {
-                        stream_id: second_stream,
-                        sequence: 1,
-                        event_id: replayed_source.event_id,
-                    },
-                    source_event_type: "turn.started".to_owned(),
-                    source_turn_id: Some(context.runtime_turn_id),
-                    source_occurred_at: replayed_source.occurred_at.clone(),
-                    source_event_bytes: 1,
-                    observed_at_ms: 3,
-                    durable_sequence: None,
-                    assistant_text: String::new(),
-                    items: Vec::new(),
-                    plan: None,
-                    turn_notices: Vec::new(),
-                    session_notice: None,
-                    terminal: None,
-                    delta: TimelineDelta::TurnStarted(replayed_source),
-                })
-                .unwrap(),
-            3
-        );
-        let current = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
-            .unwrap();
-        assert_eq!(current.feat134.durable_sequence_cut, 3);
-        assert!(current.feat134.turns[0].v4_authority);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat134_oversized_history_turn_rolls_back_before_durable_sequence_or_cursor() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 95);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let event_id = Uuid::now_v7();
-        let items = (1..=3)
-            .map(|item_ordinal| TimelineItem {
-                item_id: format!("commentary-{item_ordinal}"),
-                item_ordinal,
-                item_type: "agentMessage".to_owned(),
-                phase: Some(TimelinePhase::Commentary),
-                status: TimelineItemStatus::Completed,
-                text: "x".repeat(MAX_MESSAGE_BYTES),
-                reasoning_status: None,
-                reasoning_reason_code: None,
-                reasoning_parts: Vec::new(),
-                reasoning_finalized_at_ms: None,
-                started_at_ms: 1,
-                completed_at_ms: Some(2),
-                source_event_id: event_id,
-                source_sequence: 1,
-                source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
-                execution: None,
-            })
-            .collect::<Vec<_>>();
-        let rejected = Feat134Projection {
-            session_id: pending.session_id,
-            turn_id: context.turn_id,
-            cursor: StoredEventCursor {
-                stream_id: Uuid::now_v7(),
-                sequence: 1,
-                event_id,
-            },
-            source_event_type: "item.completed".to_owned(),
-            source_turn_id: Some(context.runtime_turn_id),
-            source_occurred_at: "2026-08-28T06:00:00Z".to_owned(),
-            source_event_bytes: 1,
-            observed_at_ms: 2,
-            durable_sequence: None,
-            assistant_text: String::new(),
-            items: items.clone(),
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: None,
-            delta: TimelineDelta::ItemCompleted(items[2].clone()),
-        };
-        assert!(
-            feat134_history_turn_json_bytes(&rejected).unwrap()
-                > MAX_FEAT134_HISTORY_TURN_JSON_BYTES
-        );
-        assert_eq!(
-            repository.persist_feat134_projection(&rejected),
-            Err(ChatError::InvalidInput)
-        );
-        for table in [
-            "chat_projection_counters_v4",
-            "chat_observed_events_v4",
-            "chat_timeline_items_v4",
-            "chat_event_cursors",
-        ] {
-            let count: i64 = repository
-                .connection
-                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert_eq!(count, 0, "oversized projection mutated {table}");
-        }
-
-        let accepted_event_id = Uuid::now_v7();
-        let mut accepted_items = items[..2].to_vec();
-        for item in &mut accepted_items {
-            item.source_event_id = accepted_event_id;
-        }
-        let accepted = Feat134Projection {
-            cursor: StoredEventCursor {
-                stream_id: Uuid::now_v7(),
-                sequence: 1,
-                event_id: accepted_event_id,
-            },
-            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
-            items: accepted_items.clone(),
-            delta: TimelineDelta::ItemCompleted(accepted_items[1].clone()),
-            ..rejected
-        };
-        assert!(
-            feat134_history_turn_json_bytes(&accepted).unwrap()
-                <= MAX_FEAT134_HISTORY_TURN_JSON_BYTES
-        );
-        assert_eq!(repository.persist_feat134_projection(&accepted).unwrap(), 1);
-        let snapshot = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
-            .unwrap();
-        assert_eq!(snapshot.feat134.durable_sequence_cut, 1);
-        assert_eq!(snapshot.feat134.turns[0].items.len(), 2);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat134_projection_limit_consumes_cursor_and_reopens_only_incomplete_confirmed_prefix() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let mut repository = open_repository(&root, 96);
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let stream_id = Uuid::now_v7();
-        let accepted_event_id = Uuid::now_v7();
-        let source_occurred_at = "2026-08-28T06:00:00Z".to_owned();
-        let confirmed_items = vec![
-            TimelineItem {
-                item_id: "confirmed-completed".to_owned(),
-                item_ordinal: 1,
-                item_type: "agentMessage".to_owned(),
-                phase: Some(TimelinePhase::Commentary),
-                status: TimelineItemStatus::Completed,
-                text: "a".repeat(MAX_MESSAGE_BYTES),
-                reasoning_status: None,
-                reasoning_reason_code: None,
-                reasoning_parts: Vec::new(),
-                reasoning_finalized_at_ms: None,
-                started_at_ms: 1,
-                completed_at_ms: Some(2),
-                source_event_id: accepted_event_id,
-                source_sequence: 1,
-                source_occurred_at: source_occurred_at.clone(),
-                execution: None,
-            },
-            TimelineItem {
-                item_id: "confirmed-streaming".to_owned(),
-                item_ordinal: 2,
-                item_type: "agentMessage".to_owned(),
-                phase: Some(TimelinePhase::Commentary),
-                status: TimelineItemStatus::InProgress,
-                text: "b".repeat(MAX_MESSAGE_BYTES),
-                reasoning_status: None,
-                reasoning_reason_code: None,
-                reasoning_parts: Vec::new(),
-                reasoning_finalized_at_ms: None,
-                started_at_ms: 2,
-                completed_at_ms: None,
-                source_event_id: accepted_event_id,
-                source_sequence: 1,
-                source_occurred_at: source_occurred_at.clone(),
-                execution: None,
-            },
-            TimelineItem {
-                item_id: "confirmed-reasoning".to_owned(),
-                item_ordinal: 3,
-                item_type: "reasoning".to_owned(),
-                phase: None,
-                status: TimelineItemStatus::InProgress,
-                text: String::new(),
-                reasoning_status: None,
-                reasoning_reason_code: None,
-                reasoning_parts: (0..2)
-                    .map(|content_index| TimelineReasoningPart {
-                        content_index,
-                        text: "r".repeat(MAX_REASONING_PART_BYTES),
-                    })
-                    .collect(),
-                reasoning_finalized_at_ms: None,
-                started_at_ms: 3,
-                completed_at_ms: None,
-                source_event_id: accepted_event_id,
-                source_sequence: 1,
-                source_occurred_at: source_occurred_at.clone(),
-                execution: None,
-            },
-        ];
-        let confirmed = Feat134Projection {
-            session_id: pending.session_id,
-            turn_id: context.turn_id,
-            cursor: StoredEventCursor {
-                stream_id,
-                sequence: 1,
-                event_id: accepted_event_id,
-            },
-            source_event_type: "item.reasoning_text.delta".to_owned(),
-            source_turn_id: Some(context.runtime_turn_id),
-            source_occurred_at: source_occurred_at.clone(),
-            source_event_bytes: 1,
-            observed_at_ms: 3,
-            durable_sequence: None,
-            assistant_text: String::new(),
-            items: confirmed_items.clone(),
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: None,
-            delta: TimelineDelta::ReasoningAppend {
-                source: SourceIdentity {
-                    event_id: accepted_event_id,
-                    sequence: 1,
-                    occurred_at: source_occurred_at.clone(),
-                },
-                item_id: "confirmed-reasoning".to_owned(),
-                item_ordinal: 3,
-                content_index: 0,
-                text: "r".repeat(MAX_REASONING_PART_BYTES),
-            },
-        };
-        assert!(!feat134_projection_requires_limit_terminal(&confirmed).unwrap());
-        assert_eq!(
-            repository.persist_feat134_projection(&confirmed).unwrap(),
-            1
-        );
-
-        let overflow_event_id = Uuid::now_v7();
-        let mut overflow_items = confirmed_items;
-        overflow_items.push(TimelineItem {
-            item_id: "offending-never-persisted".to_owned(),
-            item_ordinal: 4,
-            item_type: "agentMessage".to_owned(),
-            phase: Some(TimelinePhase::Commentary),
-            status: TimelineItemStatus::Completed,
-            text: "z".repeat(MAX_MESSAGE_BYTES),
-            reasoning_status: None,
-            reasoning_reason_code: None,
-            reasoning_parts: Vec::new(),
-            reasoning_finalized_at_ms: None,
-            started_at_ms: 4,
-            completed_at_ms: Some(4),
-            source_event_id: overflow_event_id,
-            source_sequence: 2,
-            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
-            execution: None,
-        });
-        let overflow = Feat134Projection {
-            cursor: StoredEventCursor {
-                stream_id,
-                sequence: 2,
-                event_id: overflow_event_id,
-            },
-            source_event_type: "item.completed".to_owned(),
-            source_occurred_at: "2026-08-28T06:00:01Z".to_owned(),
-            observed_at_ms: 4,
-            items: overflow_items.clone(),
-            delta: TimelineDelta::ItemCompleted(overflow_items[3].clone()),
-            ..confirmed
-        };
-        assert!(feat134_projection_requires_limit_terminal(&overflow).unwrap());
-        let overflow_limit = Feat134ProjectionFailure::from_projection(&overflow);
-        let recovered = repository
-            .commit_feat134_projection_failure(&overflow_limit)
-            .unwrap();
-        assert_eq!(recovered.durable_sequence, Some(2));
-        assert_eq!(recovered.items.len(), 3);
-        assert_eq!(recovered.items[0].status, TimelineItemStatus::Completed);
-        assert_eq!(recovered.items[1].status, TimelineItemStatus::Incomplete);
-        assert_eq!(recovered.items[2].status, TimelineItemStatus::Incomplete);
-        assert_eq!(
-            recovered.items[2].reasoning_status,
-            Some(TimelineReasoningStatus::Incomplete)
-        );
-        assert_eq!(
-            recovered.items[2].reasoning_reason_code.as_deref(),
-            Some(FEAT134_LIMIT_REASON_CODE)
-        );
-        assert_eq!(
-            recovered.items[2]
-                .reasoning_parts
-                .iter()
-                .map(|part| part.text.len())
-                .sum::<usize>(),
-            MAX_REASONING_ITEM_BYTES
-        );
-        assert_eq!(
-            recovered.terminal.as_ref().unwrap().code.as_deref(),
-            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
-        );
-        assert_eq!(
-            recovered
-                .terminal
-                .as_ref()
-                .unwrap()
-                .unfinished_reasoning_reason_code
-                .as_deref(),
-            Some(FEAT134_LIMIT_REASON_CODE)
-        );
-        assert_eq!(
-            recovered.turn_notices.last().unwrap().code.as_deref(),
-            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
-        );
-        assert!(!recovered
-            .items
-            .iter()
-            .any(|item| item.item_id == "offending-never-persisted"));
-
-        let snapshot = repository
-            .load_feat134_history_snapshot(pending.session_id, None, Some(1))
-            .unwrap();
-        assert_eq!(snapshot.feat134.durable_sequence_cut, 2);
-        assert_eq!(snapshot.history.turns[0].status, "failed");
-        assert_eq!(
-            snapshot.history.turns[0].reasoning_reason_code.as_deref(),
-            Some(FEAT134_LIMIT_REASON_CODE)
-        );
-        assert_eq!(
-            snapshot.feat134.turns[0].terminal_code.as_deref(),
-            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
-        );
-        assert_eq!(snapshot.feat134.turns[0].items, recovered.items);
-        assert!(!snapshot.feat134.turns[0]
-            .items
-            .iter()
-            .any(|item| item.text.contains('z')));
-        assert_eq!(
-            repository.active_turn_context(pending.session_id),
-            Err(ChatError::NotFound)
-        );
-        assert_eq!(
-            repository.commit_feat134_projection_failure(&overflow_limit),
-            Err(ChatError::ConversationConflict),
-            "the consumed offending event cannot advance the durable cut twice"
-        );
-        let cursor: (i64, String) = repository
-            .connection
-            .query_row(
-                "SELECT sequence, event_id FROM chat_event_cursors WHERE session_id=?1",
-                [pending.session_id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(cursor, (2, overflow_event_id.to_string()));
-        assert_eq!(
-            repository
-                .connection
-                .query_row("SELECT count(*) FROM chat_observed_events_v4", [], |row| {
-                    row.get::<_, i64>(0)
-                })
-                .unwrap(),
-            2
-        );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn feat134_event_count_limit_survives_restart_and_stream_reset() {
-        let root = std::env::temp_dir().join(format!("yijie-chat-{}", Uuid::now_v7()));
-        fs::create_dir(&root).unwrap();
-        let chat_scope = scope();
-        let mut repository = open_repository_for_scope(&root, 97, chat_scope.clone());
-        let project_id = register_synthetic_project(&mut repository, &root);
-        let pending = repository
-            .create_session_and_enqueue(project_id, "首条消息", Uuid::now_v7())
-            .unwrap();
-        bind_and_accept_first_turn(&mut repository, &pending, unix_seconds().unwrap());
-        let context = repository.active_turn_context(pending.session_id).unwrap();
-        let first_stream = Uuid::now_v7();
-        let first_event_id = Uuid::now_v7();
-        let first = Feat134Projection {
-            session_id: pending.session_id,
-            turn_id: context.turn_id,
-            cursor: StoredEventCursor {
-                stream_id: first_stream,
-                sequence: 1,
-                event_id: first_event_id,
-            },
-            source_event_type: "turn.started".to_owned(),
-            source_turn_id: Some(context.runtime_turn_id),
-            source_occurred_at: "2026-08-28T08:00:00Z".to_owned(),
-            source_event_bytes: 1,
-            observed_at_ms: 1,
-            durable_sequence: None,
-            assistant_text: String::new(),
-            items: Vec::new(),
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: None,
-            delta: TimelineDelta::TurnStarted(SourceIdentity {
-                event_id: first_event_id,
-                sequence: 1,
-                occurred_at: "2026-08-28T08:00:00Z".to_owned(),
-            }),
-        };
-        assert_eq!(repository.persist_feat134_projection(&first).unwrap(), 1);
-        repository
-            .connection
-            .execute(
-                "UPDATE chat_turn_projection_counters_v4
-                 SET observed_event_count=?1, observed_event_bytes=1 WHERE turn_id=?2",
-                params![
-                    i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap(),
-                    context.turn_id.to_string()
-                ],
-            )
-            .unwrap();
-        drop(repository);
-
-        let mut repository = open_repository_for_scope(&root, 97, chat_scope);
-        assert_eq!(
-            repository
-                .connection
-                .query_row(
-                    "SELECT observed_event_count FROM chat_turn_projection_counters_v4
-                     WHERE turn_id=?1",
-                    [context.turn_id.to_string()],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap()
-        );
-        repository
-            .reset_feat134_after_stream_change(pending.session_id, context.turn_id, &first.cursor)
-            .unwrap();
-        assert_eq!(
-            repository
-                .connection
-                .query_row(
-                    "SELECT observed_event_count FROM chat_turn_projection_counters_v4
-                     WHERE turn_id=?1",
-                    [context.turn_id.to_string()],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            i64::try_from(MAX_FEAT134_OBSERVED_EVENTS_PER_TURN).unwrap()
-        );
-
-        let second_event_id = Uuid::now_v7();
-        let second = Feat134Projection {
-            cursor: StoredEventCursor {
-                stream_id: Uuid::now_v7(),
-                sequence: 1,
-                event_id: second_event_id,
-            },
-            source_occurred_at: "2026-08-28T08:00:01Z".to_owned(),
-            observed_at_ms: 2,
-            delta: TimelineDelta::TurnStarted(SourceIdentity {
-                event_id: second_event_id,
-                sequence: 1,
-                occurred_at: "2026-08-28T08:00:01Z".to_owned(),
-            }),
-            ..first
-        };
-        assert_eq!(
-            repository.persist_feat134_projection(&second),
-            Err(ChatError::ProjectionLimitExceeded)
-        );
-        assert_eq!(
-            repository
-                .connection
-                .query_row(
-                    "SELECT last_sequence FROM chat_projection_counters_v4 WHERE session_id=?1",
-                    [pending.session_id.to_string()],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-            1,
-            "rejected event must not advance the durable sequence"
-        );
-        let recovered = repository
-            .commit_feat134_projection_failure(&Feat134ProjectionFailure::from_projection(&second))
-            .unwrap();
-        assert_eq!(recovered.durable_sequence, Some(2));
-        assert_eq!(
-            recovered.terminal.unwrap().code.as_deref(),
-            Some(PROJECTION_LIMIT_EXCEEDED_CODE)
-        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -15244,5 +10236,386 @@ mod tests {
         assert!(!root.exists());
         let encoded = serde_json::to_string(&projection).unwrap();
         assert!(!encoded.contains("synthetic idempotency probe"));
+    }
+    fn native_test_event(
+        context: &ActiveTurnContext,
+        sequence: i64,
+        method: &str,
+        payload: serde_json::Value,
+    ) -> crate::chat::native_conversation_generated::NativeEvent {
+        let mut native = serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":context.runtime_turn_id,"availability":"available"});
+        for (k, v) in payload.as_object().unwrap() {
+            native[k] = v.clone();
+        }
+        serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(90),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":native}})).unwrap()
+    }
+
+    #[test]
+    fn feat132_native_facts_survive_normal_reopen_and_cold_history_conflict() {
+        use crate::chat::native_conversation::NativeDisplayBuffer;
+        use crate::chat::native_conversation_generated::NativeThreadSnapshot;
+        let root = std::env::temp_dir().join(format!("feat132-native-reopen-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 45, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        let context = repo.active_turn_context(pending.session_id).unwrap();
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
+        for event in [
+            native_test_event(
+                &context,
+                1,
+                "item/started",
+                serde_json::json!({"item":{"id":"live-r","type":"reasoning","content":["unfinished"],"availability":"available"}}),
+            ),
+            native_test_event(
+                &context,
+                2,
+                "item/completed",
+                serde_json::json!({"item":{"id":"live-a","type":"agentMessage","text":"native final answer","phase":"final_answer","availability":"available"}}),
+            ),
+            native_test_event(
+                &context,
+                3,
+                "turn/plan/updated",
+                serde_json::json!({"plan":[{"step":"Review","status":"completed"}]}),
+            ),
+            native_test_event(
+                &context,
+                4,
+                "turn/completed",
+                serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"failed","errorCode":"runtime_error","items":[],"itemsComplete":false}}),
+            ),
+        ] {
+            assert!(buffer.observe(&event).unwrap());
+            buffer.view = repo
+                .commit_native_view(
+                    &context,
+                    buffer.view.clone(),
+                    Some(&event),
+                    unix_seconds().unwrap(),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM chat_native_facts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        let history = repo
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.turns[0].status, "failed");
+        // Native persistence does not write a second aggregate assistant body.
+        assert!(history.turns[0]
+            .messages
+            .iter()
+            .filter(|m| m.role == "assistant")
+            .all(|m| m.content.is_empty()));
+        drop(repo);
+        let mut reopened = open_repository_for_scope(&root, 45, owner.clone());
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":context.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
+        let views = reopened
+            .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), true)
+            .unwrap();
+        assert_eq!(views[0].source, "native_observed");
+        assert_eq!(views[0].status.as_deref(), Some("failed"));
+        assert_eq!(views[0].items[0].last_method, "item/started");
+        assert_eq!(views[0].items[1].item.id, "live-a");
+        assert_eq!(views[0].plan.as_ref().unwrap()[0].step, "Review");
+        assert_eq!(views[0].items.len(), 2);
+        let other = open_repository_for_scope(&root, 45, scope());
+        assert!(other
+            .native_views(pending.session_id, &[pending.turn_id])
+            .is_err());
+        drop(other);
+        reopened
+            .delete_session_local(&pending.session_id.to_string())
+            .unwrap();
+        assert_eq!(
+            reopened
+                .connection
+                .query_row("SELECT count(*) FROM chat_native_facts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat132_native_read_never_promotes_legacy_runtime_ids() {
+        use crate::chat::native_conversation_generated::NativeThreadSnapshot;
+        let root = std::env::temp_dir().join(format!("feat132-native-source-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repo = open_repository(&root, 46);
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        let c = repo.active_turn_context(pending.session_id).unwrap();
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"cold answer","availability":"partial"}]}]})).unwrap();
+        let views = repo
+            .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), true)
+            .unwrap();
+        assert_eq!(views[0].source, "native_rebuilt");
+        assert_eq!(views[0].items[0].last_method, "thread/read");
+        assert!(!views[0].terminal_observed);
+        // Represents a pre-migration row: the ID remains, but no native provenance exists.
+        repo.connection
+            .execute(
+                "DELETE FROM chat_native_bindings WHERE turn_id=?1",
+                [pending.turn_id.to_string()],
+            )
+            .unwrap();
+        repo.connection
+            .execute(
+                "DELETE FROM chat_native_views WHERE turn_id=?1",
+                [pending.turn_id.to_string()],
+            )
+            .unwrap();
+        repo.connection
+            .execute(
+                "DELETE FROM chat_native_facts WHERE turn_id=?1",
+                [pending.turn_id.to_string()],
+            )
+            .unwrap();
+        assert!(repo
+            .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), true)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            repo.load_history(pending.session_id, None, Some(20))
+                .unwrap()
+                .turns[0]
+                .messages[0]
+                .content,
+            "首条消息"
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat132_submission_failure_stays_local_and_allows_a_new_operation() {
+        let root = std::env::temp_dir().join(format!("feat132-submission-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repo = open_repository(&root, 47);
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue_multimodal(
+                project,
+                &[DraftContentBlock::Text("local request".into())],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        bind_and_claim_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        repo.record_failed_start_turn_submission(
+            pending.turn_operation_id,
+            unix_seconds().unwrap(),
+        )
+        .unwrap();
+        let history = repo
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.turns[0].status, "queued");
+        assert!(history.turns[0].terminal_at.is_none());
+        assert!(history.turns[0].runtime_turn_id.is_none());
+        let local = repo
+            .local_submissions(pending.session_id, &[pending.turn_id])
+            .unwrap();
+        assert_eq!(local[0].status, "failed");
+        assert!(repo
+            .native_views(pending.session_id, &[pending.turn_id])
+            .unwrap()
+            .is_empty());
+        repo.enqueue_turn(pending.session_id, "a new request", Uuid::now_v7())
+            .unwrap();
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat132_ui_history_read_is_readonly_and_cannot_close_a_live_stream() {
+        use crate::chat::native_conversation::NativeDisplayBuffer;
+        use crate::chat::native_conversation_generated::NativeThreadSnapshot;
+        let root = std::env::temp_dir().join(format!("feat132-readonly-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repo = open_repository(&root, 48);
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        let c = repo.active_turn_context(pending.session_id).unwrap();
+        let mut b = NativeDisplayBuffer::new(c.clone(), None).unwrap();
+        let start = native_test_event(
+            &c,
+            1,
+            "turn/started",
+            serde_json::json!({"turn":{"id":c.runtime_turn_id,"status":"inProgress","items":[],"itemsComplete":false}}),
+        );
+        b.observe(&start).unwrap();
+        b.view = repo
+            .commit_native_view(&c, b.view, Some(&start), unix_seconds().unwrap())
+            .unwrap();
+        let revision = b.view.revision.clone();
+        let cold:NativeThreadSnapshot=serde_json::from_value(serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":c.codex_thread_id,"availability":"partial","turns":[{"id":c.runtime_turn_id,"status":"completed","itemsComplete":false,"items":[]}]})).unwrap();
+        let views = repo
+            .native_recovery_views(pending.session_id, &[pending.turn_id], Some(&cold), false)
+            .unwrap();
+        assert_eq!(views[0].revision, revision);
+        assert_eq!(views[0].status.as_deref(), Some("inProgress"));
+        assert_eq!(
+            repo.load_history(pending.session_id, None, Some(20))
+                .unwrap()
+                .turns[0]
+                .status,
+            "streaming"
+        );
+        // A different Turn can advance the session cursor, but never pollute these facts.
+        let mut other = native_test_event(
+            &c,
+            2,
+            "item/completed",
+            serde_json::json!({"item":{"id":"another-turn-item","type":"agentMessage","text":"elsewhere","availability":"available"}}),
+        );
+        other.payload.native.turn_id = Some(Uuid::now_v7().to_string());
+        b.observe(&other).unwrap();
+        repo.commit_native_view(&c, b.view, Some(&other), unix_seconds().unwrap())
+            .unwrap();
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM chat_native_facts", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    #[ignore = "Run pnpm check:native-integration with actual Host projection output"]
+    fn feat132_cross_repo_host_bytes_reach_native_storage_without_identity_rewriting() {
+        use crate::chat::host_domain::{HostStreamEvent, SseDecoder};
+        use crate::chat::native_conversation::NativeDisplayBuffer;
+        use crate::chat::native_conversation_generated::{NativeEvent, NativeThreadSnapshot};
+        #[derive(serde::Deserialize)]
+        struct Exchange {
+            events: Vec<serde_json::Value>,
+            history: NativeThreadSnapshot,
+        }
+        let path = std::env::var("YIJIE_FEAT132_TEST_EXCHANGE").unwrap();
+        let exchange: Exchange = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let first: NativeEvent = serde_json::from_value(exchange.events[0].clone()).unwrap();
+        let task = Uuid::parse_str(&first.task_id).unwrap();
+        let agent = Uuid::parse_str(&first.agent_session_id).unwrap();
+        let thread = Uuid::parse_str(&first.codex_thread_id).unwrap();
+        let turn = Uuid::parse_str(first.payload.native.turn_id.as_ref().unwrap()).unwrap();
+        let root = std::env::temp_dir().join(format!("feat132-cross-repo-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 49, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "普通联调样本", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let create = repo
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        repo.bind_public_task(create.operation_id, task, now)
+            .unwrap();
+        repo.reschedule_outbox(create.operation_id, now).unwrap();
+        let create = repo
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        repo.bind_host_session_and_enqueue_turn(create.operation_id, task, agent, thread)
+            .unwrap();
+        let claimed = repo
+            .claim_next_conversation_outbox(now, 30)
+            .unwrap()
+            .unwrap();
+        repo.accept_native_turn(claimed.operation_id, turn, &Uuid::now_v7().to_string())
+            .unwrap();
+        let context = repo.active_turn_context(pending.session_id).unwrap();
+        let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
+        let mut decoder = SseDecoder::new(Uuid::parse_str(&first.stream_id).unwrap(), 0, 7);
+        for raw in exchange.events {
+            let frame = format!(
+                "id: {}:{}\nevent: native.notification\ndata: {}\n\n",
+                raw["stream_id"].as_str().unwrap(),
+                raw["sequence"],
+                raw
+            );
+            // Fragment only transport bytes; all Host IDs/fields remain untouched.
+            for chunk in frame.as_bytes().chunks(7) {
+                decoder.push(chunk).unwrap();
+            }
+            while let Some(value) = decoder.next() {
+                let HostStreamEvent::Native(event) = value else {
+                    panic!("unexpected event family")
+                };
+                assert!(buffer.observe(&event).unwrap());
+                buffer.view = repo
+                    .commit_native_view(&context, buffer.view.clone(), Some(&event), now)
+                    .unwrap();
+                assert!(!buffer.observe(&event).unwrap());
+            }
+        }
+        decoder.finish().unwrap();
+        let final_item = buffer
+            .view
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-agent")
+            .unwrap();
+        assert_eq!(
+            final_item.item.text.as_deref(),
+            Some("来自 Host 的原生最终值")
+        );
+        assert_eq!(final_item.item.phase.as_deref(), Some("final_answer"));
+        let reason = buffer
+            .view
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-reason")
+            .unwrap();
+        assert_eq!(reason.last_method, "item/started");
+        assert_eq!(reason.item.summary.as_ref().unwrap()[1], "公开摘要");
+        assert_eq!(buffer.view.status.as_deref(), Some("failed"));
+        assert_eq!(
+            buffer.view.terminal_error_code.as_deref(),
+            Some("usageLimitExceeded")
+        );
+        drop(repo);
+        let mut reopened = open_repository_for_scope(&root, 49, owner);
+        let views = reopened
+            .native_recovery_views(
+                pending.session_id,
+                &[pending.turn_id],
+                Some(&exchange.history),
+                true,
+            )
+            .unwrap();
+        assert_eq!(views[0].status.as_deref(), Some("failed"));
+        assert!(!views[0].items.iter().any(|i| i.item.id == "item-0"));
+        assert_eq!(
+            views[0].diagnostic.as_deref(),
+            Some("history_source_conflict")
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
     }
 }

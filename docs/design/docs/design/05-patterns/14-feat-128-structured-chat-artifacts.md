@@ -599,7 +599,7 @@ vertical 仍 `NOT RUN`；G3 保持 S3/S4/S5，G4 pending。
 - Host v3 hub 是普通 turn/reasoning 事件与四类 Artifact 事件的同一有序超集。Artifact producer flag 开启时，
   Desktop active turn 必须只消费 `/v3/agent-sessions/{id}/events?event_schema_version=3`；禁止并跑不具原子同步
   证明的 v2/v3 双流，也禁止把 v2 pagination cursor 交给 `chat_load_history_v3`。
-- v3 decoder 必须一次解析 common envelope/stream cursor，再把普通事件交给既有 turn reducer、Artifact 事件交给
+- v3 decoder 必须一次解析 common envelope/stream cursor；FEAT-132 原生调整后，普通对话正文走独立 v7 Native 显示缓冲，v3 仅保留资源交付屏障，Artifact 事件交给
   strict artifact decoder。所有事件继续按同一 `stream_id/sequence/event_id` 连续域 fail closed；gap、stream change、
   identity mismatch、unknown required shape 或 terminal regression 触发 bounded resync，不得跳过或降低单调检查。
 - ordinary progress 可按既有阈值合并，但在 Artifact 事件前必须把此前 ordinary projection 一起提交。started、progress、

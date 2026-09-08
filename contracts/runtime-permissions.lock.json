@@ -4,34 +4,34 @@
   "contract_family_version": "0.1.0",
   "contracts": {
     "repository": "https://github.com/36Dge/yijie-contracts.git",
-    "full_commit": "0bdef80491db8263bad4d54cfe1d1950785a6b64",
+    "full_commit": "6f632f155eacdaf93df0e0b00b5dab9e369c5442",
     "sources": {
       "openapi/runtime-permissions/runtime-permissions.yaml": "0cd99d5ee3f7035bf43c0996648dc855f71a447595dcb61d903232d81b602a99",
       "sdks/go/openapi/runtime-permissions/source.bundle.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
       "sdks/go/openapi/runtime-permissions/client.gen.go": "e1129eeb3eb1985a5be8f95aa2e4cca1a4c211fe96f3fefcc8ae1f7d8433bc2b",
       "sdks/typescript/src/openapi/runtime-permissions.gen.ts": "70cc7af6c1102b813ef3aa501ffa86a49891194dcbf9cd3445b39d1e33167bd8",
-      "scripts/generate.mjs": "3c0cc0d335367e0f65a590bfd07f3c41abeee9939255534524c6f5d9e108e6e0"
+      "scripts/generate.mjs": "684fbfc59a94ce3475a8fc30242bf2f7a7a2bf031eccbf9c9bb0b2bb1f850463"
     }
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "af8d370277569cb5a9b6a229f10386690aaebb0f",
+    "full_commit": "9e9d317f7e4ecff5f8aeec94fa467f9bede32139",
     "sources": {
       "api/openapi/runtime-permissions.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
-      "api/runtime-permissions.lock.json": "afd33f7324e5c9811b0908b0ac424649f97b0c0f25e2b98127933ef659e08933",
+      "api/runtime-permissions.lock.json": "e77e19cb7b020ab4f98c02d9f977813e87f102a1461d8a774b211f94770ae7aa",
       "go.mod": "7a360b4877255da78e522fae2de8c165c965eb6f546b023883aba6dd1c631f3f",
       "go.sum": "f4a3ff159e90d65c0db8336657a2634a3932c7db8e0a5ac415fc3dae017f3d3c",
-      "internal/app/app.go": "9ee3ff13583d0e05d4d71cbd8347fb0335bff88c86de70dfe2785bb4bd9ef233",
+      "internal/app/app.go": "f8f43c4b6981a762e6ef56157c3a3e2809e68898bf253d6e07dd21aeb5ae8ae7",
       "internal/app/runtime_permission_verification.go": "1309dc277590710819a7565d8af3e89bc22bbdcd5421c46d874993ea830d61c4",
       "internal/app/runtime_permissions.go": "6476b42ec0240f21bc8e3209cf78135f21552559ba69f84ce2d4ca2de6e5abab",
       "internal/codex/runtime.go": "51c3cce114ad69dff1c52aebcc2a4d30b8f8df31efd2e43bdef8d5e85c3d9a25",
       "internal/codex/runtime_permissions.go": "b653057920f12aff6208743523802f51596bc311c7453d5cf89a77efae53f27f",
-      "internal/codex/session_protocol.go": "873ef373273cc47f7902fd25138b60034730da17c5373d781153fd4e3121edad",
+      "internal/codex/session_protocol.go": "111b88829d9eeea371b7ae898b1be5af00c188de6d7f2bc78cce515677e3d0e2",
       "internal/contracts/runtimepermissions/types.gen.go": "6f26e5e2d6b9b27b9af010021854431066de2eb35ef5f172d031c30b343934ef",
-      "internal/session/multimodal.go": "b6a7f4f74963d81874c95dfd216673f35d1dad0ad4c4077d4710e881bc95c4bd",
+      "internal/session/multimodal.go": "1eecd7ac35cc5bcfb20d6e03771dd319c9013a0d0151b3aa40fbd05c1bee5741",
       "internal/session/runtime_permissions.go": "f09ef504cfe6e1ebfdcdbfaaaec382d6c40bd60f57ef253964ab163b50b8c358",
-      "internal/session/service.go": "7667d17c38be577c7e66b77a602449c9205ecdad9db108abfad899db9e178554",
-      "internal/session/store.go": "fc964299413374cbdd3c1376bbbb341b9c68479ed69ec8c4cd1949316f751ac4"
+      "internal/session/service.go": "a2c882db2cf18a5ba122cd0622b9b538992880223c0b26611b07106fa354a35f",
+      "internal/session/store.go": "ab934f9c22c1a9af723fde46bedb2c07681faab548346127d8f0ff66906dcc38"
     }
   },
   "local_scope": "Exact local/demo_fast. Retained v4, Skills and Runtime locks remain authoritative for their own surfaces."

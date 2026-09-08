@@ -900,6 +900,57 @@ fn emit_artifact_events(app: &AppHandle, events: &[ArtifactLiveEventDto]) -> boo
 }
 
 impl TurnProjectionSink for ChatEventBridge {
+    fn publish_native(
+        &self,
+        view: super::native_conversation_generated::NativeConversationView,
+    ) -> Result<(), ChatError> {
+        let session_id =
+            Uuid::parse_str(&view.session_id).map_err(|_| ChatError::OrchestrationUnavailable)?;
+        let now = unix_seconds()?;
+        let (app, events) = {
+            let state = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let app = state
+                .app
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let authorization = state
+                .authorization
+                .clone()
+                .ok_or(ChatError::OrchestrationUnavailable)?;
+            let events = state
+                .subscriptions
+                .iter()
+                .filter(|(_, record)| record.session_id == session_id && !record.blocked)
+                .filter(|(_, record)| {
+                    authorization
+                        .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
+                        .is_ok()
+                })
+                .map(|(id, record)| {
+                    super::native_conversation_generated::NativeConversationViewEvent {
+                        schema_version: 1,
+                        context_id: record.context_id.to_string(),
+                        subscription_id: id.to_string(),
+                        session_id: session_id.to_string(),
+                        view: view.clone(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            (app, events)
+        };
+        let window = app
+            .get_webview_window("main")
+            .ok_or(ChatError::OrchestrationUnavailable)?;
+        for event in events {
+            window
+                .emit("chat:native-view:v1", event)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        }
+        Ok(())
+    }
     fn publish(&self, projection: LiveTurnProjection) -> Result<(), ChatError> {
         let now = unix_seconds()?;
         let (app, events) = {
@@ -1471,12 +1522,12 @@ impl TurnProjectionSink for ChatEventBridge {
 
 fn turn_resync_target(outcome: &CoordinatorOutcome) -> Option<(Uuid, Uuid)> {
     match outcome {
-        CoordinatorOutcome::Dispatched(DispatchOutcome::TurnFailedSafely {
+        CoordinatorOutcome::Dispatched(DispatchOutcome::TurnSubmissionFailed {
             session_id,
             turn_id,
             ..
         })
-        | CoordinatorOutcome::Dispatched(DispatchOutcome::TurnReconciliationRequired {
+        | CoordinatorOutcome::Dispatched(DispatchOutcome::TurnSubmissionUncertain {
             session_id,
             turn_id,
             ..
@@ -4600,10 +4651,10 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::feat137::{protect_process_projection, PROCESS_CONTENT_PROTECTED_MESSAGE};
+
     use crate::chat::{
         CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
-        ProjectionErrorCode, ReasoningPart, TimelineItemStatus, TimelinePhase,
+        ProjectionErrorCode, ReasoningPart, TimelineItemStatus,
     };
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tokio::sync::Notify;
@@ -6151,111 +6202,6 @@ mod tests {
     }
 
     #[test]
-    fn feat137_live_ipc_accepts_only_native_protected_process_projection() {
-        let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/feat-137/native-boundary-canary.json"
-        ))
-        .unwrap();
-        let forbidden_canary = fixture["forbiddenCanary"].as_str().unwrap();
-        assert_eq!(
-            fixture["protectedMessage"].as_str(),
-            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
-        );
-        let session_id = Uuid::now_v7();
-        let turn_id = Uuid::now_v7();
-        let source = SourceIdentity {
-            event_id: Uuid::now_v7(),
-            sequence: 1,
-            occurred_at: "2026-08-30T00:00:00Z".to_owned(),
-        };
-        let item = TimelineItem {
-            item_id: "commentary".to_owned(),
-            item_ordinal: 1,
-            item_type: "agentMessage".to_owned(),
-            phase: Some(TimelinePhase::Commentary),
-            status: TimelineItemStatus::InProgress,
-            text: forbidden_canary.to_owned(),
-            reasoning_status: None,
-            reasoning_reason_code: None,
-            reasoning_parts: Vec::new(),
-            reasoning_finalized_at_ms: None,
-            execution: None,
-            started_at_ms: 1,
-            completed_at_ms: None,
-            source_event_id: source.event_id,
-            source_sequence: source.sequence,
-            source_occurred_at: source.occurred_at.clone(),
-        };
-        let raw = Feat134Projection {
-            session_id,
-            turn_id,
-            cursor: crate::chat::StoredEventCursor {
-                stream_id: Uuid::now_v7(),
-                sequence: source.sequence,
-                event_id: source.event_id,
-            },
-            source_event_type: "item.started".to_owned(),
-            source_turn_id: Some(Uuid::now_v7()),
-            source_occurred_at: source.occurred_at.clone(),
-            source_event_bytes: 64,
-            observed_at_ms: 1,
-            durable_sequence: None,
-            assistant_text: String::new(),
-            items: vec![item.clone()],
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: None,
-            delta: TimelineDelta::ItemStarted(item),
-        };
-        assert_eq!(
-            validate_process_projection(&raw),
-            Err(ChatError::InvalidInput)
-        );
-
-        let original_cursor = raw.cursor.clone();
-        let original_item_count = raw.items.len();
-        let mut protected = protect_process_projection(raw).unwrap();
-        protected.durable_sequence = Some(1);
-        validate_process_projection(&protected).unwrap();
-        assert_eq!(protected.cursor, original_cursor);
-        assert_eq!(protected.items.len(), original_item_count);
-        assert_eq!(
-            format!("{:?}", protected.items)
-                .matches(forbidden_canary)
-                .count(),
-            0
-        );
-        let (_, kind, payload, _) = feat136_event_payload(&protected).unwrap().unwrap();
-        assert_eq!(kind, "item_started");
-        assert_eq!(
-            payload["text"].as_str(),
-            Some(PROCESS_CONTENT_PROTECTED_MESSAGE)
-        );
-        let encoded = serde_json::to_string(&payload).unwrap();
-        assert_eq!(encoded.matches(forbidden_canary).count(), 0);
-
-        let mut raw_append = protected.clone();
-        raw_append.durable_sequence = None;
-        raw_append.delta = TimelineDelta::AgentMessageAppend {
-            source,
-            item_id: "commentary".to_owned(),
-            item_ordinal: 1,
-            phase: Some(TimelinePhase::Commentary),
-            text: forbidden_canary.to_owned(),
-        };
-        raw_append.items[0].text = forbidden_canary.to_owned();
-        let mut protected_append = protect_process_projection(raw_append).unwrap();
-        protected_append.durable_sequence = Some(2);
-        let (_, kind, payload, _) = feat134_event_payload(&protected_append)
-            .unwrap()
-            .expect("protected live append");
-        assert_eq!(kind, "agent_message_append");
-        assert_eq!(payload["text"], PROCESS_CONTENT_PROTECTED_MESSAGE);
-        assert_eq!(payload.to_string().matches(forbidden_canary).count(), 0);
-    }
-
-    #[test]
     fn feat134_live_warning_is_thread_scoped_and_provider_message_cannot_cross_ipc() {
         let source_event_id = Uuid::now_v7();
         let stream_id = Uuid::now_v7();
@@ -6459,7 +6405,7 @@ mod tests {
         let turn_id = Uuid::from_u128(0x402);
         let subscription_id = Uuid::from_u128(0x403);
         let context_id = Uuid::from_u128(0x404);
-        let outcome = CoordinatorOutcome::Dispatched(DispatchOutcome::TurnReconciliationRequired {
+        let outcome = CoordinatorOutcome::Dispatched(DispatchOutcome::TurnSubmissionUncertain {
             operation_id,
             session_id,
             turn_id,
@@ -8574,6 +8520,51 @@ pub async fn chat_list_sessions_v1(
     };
     enforce_response_limit(&data, MAX_SESSION_PAGE_BYTES, request.request_id)?;
     Ok(CommandResponse::new(request.request_id, data))
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let request: CommandRequest<super::native_conversation_generated::NativeHistoryRequest> =
+        decode_request(request)?;
+    let (application, _, manager) = offline_applications(&chat_runtime, request.request_id).await?;
+    let existing_host = chat_runtime.host_bridge.lock().await.clone();
+    let authorized = AuthorizedConversationApplication::new(
+        application.with_history_host(existing_host),
+        manager.clone(),
+    );
+    authorize(
+        &manager,
+        request.context_id,
+        ChatAction::ReadSessions,
+        request.request_id,
+    )?;
+    let session_id = Uuid::parse_str(&request.payload.session_id)
+        .map_err(|_| ChatIpcError::request_invalid(Some(request.request_id)))?;
+    if request.payload.turn_ids.len() > 50 {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)));
+    }
+    let turn_ids = request
+        .payload
+        .turn_ids
+        .iter()
+        .map(|id| {
+            Uuid::parse_str(id).map_err(|_| ChatIpcError::request_invalid(Some(request.request_id)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    ipc_runtime.begin_read(request.request_id)?;
+    let result = authorized
+        .native_history(request.context_id, session_id, turn_ids)
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let data = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    finished?;
+    enforce_response_limit(&data, 8 * 1024 * 1024, request.request_id)?;
+    serde_json::to_value(CommandResponse::new(request.request_id, data))
+        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))
 }
 
 #[tauri::command]

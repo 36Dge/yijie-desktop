@@ -668,6 +668,7 @@ impl Debug for HostArtifactEventV3 {
 }
 
 pub enum HostStreamEvent {
+    Native(Box<super::native_conversation_generated::NativeEvent>),
     Ordinary(HostEvent),
     Artifact(HostArtifactEventV3),
 }
@@ -675,6 +676,7 @@ pub enum HostStreamEvent {
 impl Debug for HostStreamEvent {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Native(event) => event.fmt(formatter),
             Self::Ordinary(event) => event.fmt(formatter),
             Self::Artifact(event) => event.fmt(formatter),
         }
@@ -1098,6 +1100,13 @@ fn parse_sse_frame(
     }
     let parsed = parse_event_json(data, expected_stream, schema_version)?;
     let (parsed_cursor, parsed_event_type) = match &parsed {
+        HostStreamEvent::Native(event) => (
+            HostEventCursor::new(
+                parse_uuid(&event.stream_id)?,
+                u64::try_from(event.sequence).map_err(|_| protocol_error())?,
+            )?,
+            event.event_type.as_str(),
+        ),
         HostStreamEvent::Ordinary(event) => (event.cursor, event.event_type.as_str()),
         HostStreamEvent::Artifact(event) => (event.cursor, event.event_type.as_str()),
     };
@@ -1135,6 +1144,27 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let raw: Value = serde_json::from_str(data).map_err(|_| protocol_error())?;
+    if schema_version == 7 {
+        let event: super::native_conversation_generated::NativeEvent =
+            serde_json::from_value(raw).map_err(|_| protocol_error())?;
+        if event.schema_version != 7
+            || event.event_type != "native.notification"
+            || parse_uuid(&event.stream_id)? != expected_stream
+            || event.sequence <= 0
+            || !valid_rfc3339(&event.occurred_at)
+        {
+            return Err(protocol_error());
+        }
+        for id in [
+            &event.event_id,
+            &event.task_id,
+            &event.agent_session_id,
+            &event.codex_thread_id,
+        ] {
+            parse_uuid(id)?;
+        }
+        return Ok(HostStreamEvent::Native(Box::new(event)));
+    }
     if schema_version >= 5 {
         validate_v5_explicit_nulls(&raw)?;
     }

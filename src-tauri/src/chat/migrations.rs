@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 13] = [
+const CATALOG: [CatalogEntry; 14] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -96,6 +96,11 @@ const CATALOG: [CatalogEntry; 13] = [
         version: 13,
         name: "0013_chat_permission_modes",
         sql: include_str!("../../migrations/chat/0013_chat_permission_modes.sql"),
+    },
+    CatalogEntry {
+        version: 14,
+        name: "0014_chat_native_conversation",
+        sql: include_str!("../../migrations/chat/0014_chat_native_conversation.sql"),
     },
 ];
 
@@ -1362,6 +1367,89 @@ mod tests {
         let mut corrupt = Connection::open(&corrupt_path).unwrap();
         assert_eq!(migrate(&mut corrupt), Err(ChatError::DatabaseCorrupt));
         drop(corrupt);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn feat132_populated_schema13_migrates_forward_without_native_backfill() {
+        let root = std::env::temp_dir().join(format!("feat132-schema13-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let file = root.join("ordinary-fixture.db");
+        let mut connection = Connection::open(&file).unwrap();
+        connection
+            .execute_batch("PRAGMA key='public-native-migration-fixture'; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        let cipher: String = connection
+            .query_row("PRAGMA cipher_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(!cipher.is_empty());
+        migrations().to_version(&mut connection, 13).unwrap();
+        let project = Uuid::now_v7().to_string();
+        let session = Uuid::now_v7().to_string();
+        let completed = Uuid::now_v7().to_string();
+        let queued = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        connection.execute("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES(?1,?2,?3,'Fixture',?4,X'01',1)",params![project,owner,tenant,"a".repeat(64)]).unwrap();
+        connection.execute("INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at,runtime_thread_id) VALUES(?1,?2,?3,?4,'Old history','fallback','cancelled',1,1,?5)",params![session,owner,tenant,project,Uuid::now_v7().to_string()]).unwrap();
+        connection.execute("INSERT INTO chat_turns(id,session_id,operation_id,runtime_turn_id,status,terminal_at) VALUES(?1,?2,?3,?4,'failed',2)",params![completed,session,Uuid::now_v7().to_string(),Uuid::now_v7().to_string()]).unwrap();
+        connection.execute("INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES(?1,?2,?3,'queued')",params![queued,session,Uuid::now_v7().to_string()]).unwrap();
+        connection.execute("INSERT INTO chat_messages(id,session_id,turn_id,role,content,status,ordinal,created_at) VALUES(?1,?2,?3,'assistant','Old body retained','committed',0,1)",params![Uuid::now_v7().to_string(),session,completed]).unwrap();
+        connection
+            .execute(
+                "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,'auto')",
+                [&session],
+            )
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), 14);
+        verify_ledger(&connection, 14).unwrap();
+        let counts:(i64,i64,i64)=connection.query_row("SELECT (SELECT count(*) FROM chat_native_bindings),(SELECT count(*) FROM chat_native_facts),(SELECT count(*) FROM chat_native_views)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(counts, (0, 0, 0));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM chat_turns WHERE submission_status IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT mode FROM chat_task_permissions WHERE session_id=?1",
+                    [&session],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "auto"
+        );
+        drop(connection);
+        assert_ne!(&fs::read(&file).unwrap()[..16], b"SQLite format 3\0");
+        let reopened = Connection::open(&file).unwrap();
+        reopened
+            .execute_batch("PRAGMA key='public-native-migration-fixture';")
+            .unwrap();
+        assert_eq!(
+            reopened
+                .query_row("SELECT content FROM chat_messages", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "Old body retained"
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT status FROM chat_turns WHERE id=?1",
+                    [&queued],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "queued"
+        );
+        drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
 }

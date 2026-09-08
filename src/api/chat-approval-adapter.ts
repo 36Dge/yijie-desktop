@@ -1,29 +1,26 @@
 import {
-  createApprovalDecisionRequestV6,
-  type ChatApprovalDecisionResultV6,
-  type ChatApprovalDecisionV6,
-  type ChatHistoryPageV5,
-  type ChatHistoryPageV6,
-  type ChatProjectionEventV5,
-  type ChatProjectionEventV6,
+createApprovalDecisionRequestV6,
+type ChatApprovalDecisionResultV6,
+type ChatApprovalDecisionV6,
+type ChatHistoryPageV5,
+type ChatHistoryPageV6,
+type ChatProjectionEventV6,
 } from "../domain/chat-ipc";
 import {
-  applyConversationApprovalDecisionResult,
-  requireConversationApprovalReconciliation,
-  selectConversationApproval,
-  type ConversationApproval,
-  type ConversationApprovalEvent,
-  type ConversationApprovalState,
+applyConversationApprovalDecisionResult,
+requireConversationApprovalReconciliation,
+selectConversationApproval,
+type ConversationApproval,
+type ConversationApprovalEvent,
+type ConversationApprovalState,
 } from "../domain/conversation-approval";
-import type { ConversationSnapshot } from "../domain/conversation-state";
+import type { ConversationSnapshot } from "../domain/conversation-view";
 import {
-  historyPageV5ToConversationSnapshot,
-  projectionEventToConversation,
-  type ConversationProjectionAdaptation,
+historyPageV5ToConversationSnapshot,
 } from "./chat-conversation-adapter";
 
 export type ChatProjectionV6Adaptation =
-  | ConversationProjectionAdaptation
+  | Readonly<{kind: "ignored"}>
   | Readonly<{
       kind: "approval_event";
       event: ConversationApprovalEvent;
@@ -121,24 +118,11 @@ export function approvalDecisionResultV6ToDomain(
   });
 }
 
-function inheritedV6AsV5(event: ChatProjectionEventV6): ChatProjectionEventV5 {
-  const sourceSchemaVersion = "sourceSchemaVersion" in event
-    ? event.sourceSchemaVersion
-    : undefined;
-  const inherited = Object.fromEntries(Object.entries(event)
-    .filter(([key]) => key !== "sourceSchemaVersion"));
-  return Object.freeze({
-    ...inherited,
-    schemaVersion: 5 as const,
-    ...(sourceSchemaVersion === 4 ? { sourceSchemaVersion: 4 as const } : {}),
-  }) as ChatProjectionEventV5;
-}
-
 export function projectionEventV6ToDomain(
   event: ChatProjectionEventV6,
 ): ChatProjectionV6Adaptation {
   if (event.kind !== "approval_changed") {
-    return projectionEventToConversation(inheritedV6AsV5(event));
+    return Object.freeze({kind: "ignored"});
   }
   return Object.freeze({
     kind: "approval_event" as const,

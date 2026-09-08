@@ -1,24 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe,expect,it } from "vitest";
 import {
-  parseChatProjectionEventV5,
-  type ChatHistoryPageV5,
-  type ChatProjectionEventV5,
+type ChatHistoryPageV5
 } from "../domain/chat-ipc";
 import {
-  createConversationState,
-  hydrateConversationState,
-  reduceConversationEvent,
-  selectConversationItem,
-} from "../domain/conversation-state";
+selectConversationItem,
+viewFromLegacySnapshot
+} from "../domain/conversation-view";
 import {
-  historyPageV5ToConversationSnapshot,
-  projectionEventToConversation,
+historyPageV5ToConversationSnapshot
 } from "./chat-conversation-adapter";
 
-const CONTEXT_ID = "019fbf59-3000-7000-8000-000000000001";
 const SESSION_ID = "019fbf59-3000-7000-8000-000000000002";
 const TURN_ID = "019fbf59-3000-7000-8000-000000000003";
-const SUBSCRIPTION_ID = "019fbf59-3000-7000-8000-000000000004";
 const LEGACY_TURN_ID = "019fbf59-3000-7000-8000-000000000005";
 const V4_TURN_ID = "019fbf59-3000-7000-8000-000000000006";
 
@@ -30,25 +23,6 @@ function source(sequence: number) {
   });
 }
 
-function event(
-  sequence: number,
-  kind: ChatProjectionEventV5["kind"],
-  payload: ChatProjectionEventV5["payload"],
-): ChatProjectionEventV5 {
-  return {
-    schemaVersion: 5,
-    subscriptionId: SUBSCRIPTION_ID,
-    contextId: CONTEXT_ID,
-    sessionId: SESSION_ID,
-    turnId: TURN_ID,
-    projectionSequence: String(sequence),
-    eventId: `019fbf59-3000-7000-8000-${String(sequence).padStart(12, "0")}`,
-    durableSequence: String(sequence),
-    kind,
-    payload,
-  } as ChatProjectionEventV5;
-}
-
 const commandSummary = Object.freeze({
   text: "Inspect repository status",
   truncated: false,
@@ -56,165 +30,7 @@ const commandSummary = Object.freeze({
 });
 const cwd = Object.freeze({ kind: "workspace_root" as const, segments: Object.freeze([]) });
 
-function reduceV5(events: readonly ChatProjectionEventV5[]) {
-  return events.reduce((state, input) => {
-    const adapted = projectionEventToConversation(input);
-    expect(adapted.kind).toBe("domain_event");
-    return adapted.kind === "domain_event"
-      ? reduceConversationEvent(state, adapted.event)
-      : state;
-  }, createConversationState());
-}
-
 describe("FEAT-136 v5 conversation adapter", () => {
-  it("maps Command lifecycle into the typed execution model", () => {
-    const state = reduceV5([
-      event(1, "command_started", {
-        ...source(1),
-        itemId: "command-1",
-        itemOrdinal: 1,
-        status: "running",
-        commandSummary,
-        cwd,
-      }),
-      event(2, "command_output_append", {
-        ...source(2),
-        itemId: "command-1",
-        itemOrdinal: 1,
-        text: "working tree clean\n",
-        truncated: false,
-        truncationReason: null,
-      }),
-      event(3, "command_completed", {
-        ...source(3),
-        itemId: "command-1",
-        itemOrdinal: 1,
-        status: "completed",
-        commandSummary,
-        cwd,
-        durationMs: 9,
-        exitCode: 0,
-        output: {
-          retention: "complete",
-          text: "working tree clean\n",
-          head: null,
-          tail: null,
-          reason: null,
-          truncated: false,
-          truncationReason: null,
-        },
-        error: null,
-      }),
-    ]);
-
-    expect(selectConversationItem(state, SESSION_ID, TURN_ID, "command-1"))
-      .toMatchObject({
-        kind: "command",
-        status: "completed",
-        execution: {
-          kind: "command",
-          status: "completed",
-          liveOutput: { text: "working tree clean\n" },
-          output: { retention: "complete", text: "working tree clean\n" },
-        },
-      });
-  });
-
-  it("keeps a live failed nonzero Command through the closed parser, adapter, and store", () => {
-    const parsed = [
-      event(1, "command_started", {
-        ...source(1),
-        itemId: "command-failed",
-        itemOrdinal: 1,
-        status: "running",
-        commandSummary,
-        cwd,
-      }),
-      event(2, "command_completed", {
-        ...source(2),
-        itemId: "command-failed",
-        itemOrdinal: 1,
-        status: "failed",
-        commandSummary,
-        cwd,
-        durationMs: 14,
-        exitCode: 9,
-        output: {
-          retention: "complete",
-          text: "reference unavailable\n",
-          head: null,
-          tail: null,
-          reason: null,
-          truncated: false,
-          truncationReason: null,
-        },
-        error: {
-          code: "command_failed",
-          summary: "command exited with a non-zero status",
-        },
-      }),
-    ].map((input) => parseChatProjectionEventV5(input));
-    const state = reduceV5(parsed);
-
-    expect(selectConversationItem(state, SESSION_ID, TURN_ID, "command-failed"))
-      .toMatchObject({
-        kind: "command",
-        status: "completed",
-        execution: {
-          kind: "command",
-          status: "failed",
-          liveOutput: null,
-          output: { retention: "complete", text: "reference unavailable\n" },
-          durationMs: 14,
-          exitCode: 9,
-          error: {
-            code: "command_failed",
-            summary: "command exited with a non-zero status",
-          },
-        },
-      });
-    expect(state.recovery).toBeNull();
-  });
-
-  it("keeps an unknown Tool as a Tool card model", () => {
-    const identity = Object.freeze({
-      resolution: "unknown" as const,
-      serverName: "unknown",
-      toolName: "unknown",
-    });
-    const argumentsSummary = Object.freeze({
-      text: "request metadata unavailable",
-      truncated: false,
-      truncationReason: null,
-    });
-    const state = reduceV5([
-      event(1, "tool_started", {
-        ...source(1),
-        itemId: "tool-unknown",
-        itemOrdinal: 1,
-        status: "in_progress",
-        identity,
-        argumentsSummary,
-      }),
-      event(2, "tool_completed", {
-        ...source(2),
-        itemId: "tool-unknown",
-        itemOrdinal: 1,
-        status: "failed",
-        identity,
-        argumentsSummary,
-        durationMs: null,
-        resultSummary: null,
-        error: { code: "unknown_tool", summary: "tool is not registered" },
-      }),
-    ]);
-
-    expect(selectConversationItem(state, SESSION_ID, TURN_ID, "tool-unknown"))
-      .toMatchObject({
-        kind: "tool",
-        execution: { kind: "tool", identity, status: "failed" },
-      });
-  });
 
   it("hydrates mixed legacy/v4/v5 authority without disguising older Turns", () => {
     const page: ChatHistoryPageV5 = Object.freeze({
@@ -326,7 +142,7 @@ describe("FEAT-136 v5 conversation adapter", () => {
       durableSequenceCut: "3",
     });
     const snapshot = historyPageV5ToConversationSnapshot(SESSION_ID, page);
-    const state = hydrateConversationState(snapshot);
+    const state = viewFromLegacySnapshot(snapshot);
 
     expect(snapshot.schemaVersion).toBe(3);
     expect(state.schemaVersion).toBe(3);
@@ -351,44 +167,5 @@ describe("FEAT-136 v5 conversation adapter", () => {
         status: "failed",
         output: { retention: "unavailable", reason: "not_available" },
       });
-  });
-
-  it("maps allowlisted generic v5 Items to inert unknown presentation", () => {
-    const adapted = projectionEventToConversation(event(1, "item_started", {
-      ...source(1),
-      itemId: "web-search-1",
-      itemOrdinal: 1,
-      itemType: "webSearch",
-      phase: null,
-      text: null,
-    }));
-    expect(adapted).toMatchObject({
-      kind: "domain_event",
-      event: { kind: "item.started", itemKind: "unknown" },
-    });
-  });
-
-  it("maps sticky v4 generic Command/Tool Items to unknown without execution", () => {
-    for (const [index, itemType] of ["commandExecution", "mcpToolCall"].entries()) {
-      const parsed = parseChatProjectionEventV5({
-        ...event(index + 1, "item_started", {
-          ...source(index + 1),
-          itemId: `sticky-${index}`,
-          itemOrdinal: index + 1,
-          itemType,
-          phase: null,
-          text: null,
-        }),
-        sourceSchemaVersion: 4,
-      });
-      const adapted = projectionEventToConversation(parsed);
-      expect(adapted).toMatchObject({
-        kind: "domain_event",
-        event: { kind: "item.started", itemKind: "unknown" },
-      });
-      if (adapted.kind === "domain_event") {
-        expect(adapted.event).not.toHaveProperty("execution");
-      }
-    }
   });
 });

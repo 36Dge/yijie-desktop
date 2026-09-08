@@ -14,6 +14,7 @@ export default tseslint.config(
       "src-tauri/target",
       "**/.vitepress/**",
       "**/*.d.ts",
+      "src/api/generated/native-conversation-validator.gen.js",
     ],
   },
   {

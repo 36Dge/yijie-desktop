@@ -23,6 +23,31 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it("loads versioned native history and validates its generated response", async () => {
+    vi.stubGlobal("crypto", {randomUUID: () => REQUEST_ID});
+    const data = {views: [], submissions: [], remainingTurnIds: [], historyAvailability: "partial"};
+    const invoke = vi.fn(async () => ({schemaVersion: 1, requestId: REQUEST_ID, data}));
+    const client = createChatClient(transport(invoke));
+    await expect(client.loadNativeHistory(CONTEXT_ID, SESSION_ID, [TURN_ID])).resolves.toEqual(data);
+    expect(invoke).toHaveBeenCalledWith("chat_load_native_history_v1", {request: {schemaVersion: 1, requestId: REQUEST_ID, contextId: CONTEXT_ID, payload: {sessionId: SESSION_ID, turnIds: [TURN_ID]}}});
+    invoke.mockResolvedValueOnce({schemaVersion: 9, requestId: REQUEST_ID, data});
+    await expect(client.loadNativeHistory(CONTEXT_ID, SESSION_ID, [TURN_ID])).rejects.toBeDefined();
+  });
+
+  it("accepts only a complete native view in its declared session", async () => {
+    let deliver: (value: unknown) => void = () => undefined;
+    const client = createChatClient({invoke: async () => ({}), listen: async (channel, handler) => {
+      expect(channel).toBe("chat:native-view:v1"); deliver=handler; return () => undefined;
+    }});
+    const receive=vi.fn(); const invalid=vi.fn();
+    await client.onNativeView(receive, invalid);
+    const event={schemaVersion:1,contextId:CONTEXT_ID,subscriptionId:SUBSCRIPTION_ID,sessionId:SESSION_ID,
+      view:{sessionId:SESSION_ID,turnId:TURN_ID,runtimeThreadId:"native-thread",runtimeTurnId:"native-turn",source:"native_observed",revision:"2",availability:"partial",status:"failed",statusSource:"runtime_notification",terminalObserved:true,items:[]}};
+    deliver(event); expect(receive).toHaveBeenCalledWith(event);
+    deliver({...event,view:{...event.view,sessionId:"different-session"}});
+    expect(receive).toHaveBeenCalledTimes(1); expect(invalid).toHaveBeenCalledOnce();
+  });
+
   it("negotiates v6 approval subscription through the existing closed command", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => REQUEST_ID });
     const nativeInvoke = vi.fn(async () => ({

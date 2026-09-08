@@ -1,31 +1,31 @@
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { describe,expect,it } from "vitest";
 import {
-  hydrateConversationState,
-  type ConversationContentBlock,
-  type ConversationItemKind,
-  type ConversationItemStatus,
-  type ConversationSnapshot,
-  type ConversationState,
-  type ConversationThreadStatus,
-  type ConversationTurnStatus,
-} from "./conversation-state";
-import {
-  APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
-  selectConversationTimeline,
-  type ConversationTimelineItemKind,
-  type ConversationTimelineItemPhase,
-  type ConversationTimelineRole,
-  type ConversationTimelineThreadPhase,
-  type ConversationTimelineTurnPhase,
+APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE,
+selectConversationTimeline,
+type ConversationTimelineItemKind,
+type ConversationTimelineItemPhase,
+type ConversationTimelineRole,
+type ConversationTimelineThreadPhase,
+type ConversationTimelineTurnPhase,
 } from "./conversation-timeline";
 import { copyableTimelineItemText } from "./conversation-timeline-copy";
+import {
+viewFromLegacySnapshot,
+type ConversationContentBlock,
+type ConversationItemKind,
+type ConversationItemStatus,
+type ConversationSnapshot,
+type ConversationThreadStatus,
+type ConversationTurnStatus,
+type ConversationView,
+} from "./conversation-view";
 
 const THREAD_ID = "thread-main";
 const TURN_ID = "turn-main";
 
-function hydrate(snapshot: ConversationSnapshot): ConversationState {
-  return hydrateConversationState(snapshot);
+function hydrate(snapshot: ConversationSnapshot): ConversationView {
+  return viewFromLegacySnapshot(snapshot);
 }
 
 function deepFreeze<T>(value: T): T {
@@ -37,7 +37,7 @@ function deepFreeze<T>(value: T): T {
 function singleTurnState(
   status: ConversationTurnStatus,
   terminalStatus: "completed" | "failed" | "interrupted" | null = null,
-): ConversationState {
+): ConversationView {
   return hydrate({
     threads: [{ threadId: THREAD_ID, status: status === "completed" ? "ready" : "active" }],
     turns: [{
@@ -51,7 +51,7 @@ function singleTurnState(
   });
 }
 
-function singleItemState(status: ConversationItemStatus = "completed"): ConversationState {
+function singleItemState(status: ConversationItemStatus = "completed"): ConversationView {
   return hydrate({
     threads: [{ threadId: THREAD_ID, status: "active" }],
     turns: [{
@@ -236,7 +236,7 @@ describe("selectConversationTimeline", () => {
       ],
     });
     const thread = normalized.threads[THREAD_ID]!;
-    const reordered: ConversationState = {
+    const reordered: ConversationView = {
       ...normalized,
       threads: {
         ...normalized.threads,
@@ -302,7 +302,7 @@ describe("selectConversationTimeline", () => {
     });
     const original = selectConversationTimeline(normalized, "ab")!;
     const other = selectConversationTimeline(normalized, "a")!;
-    const moved: ConversationState = {
+    const moved: ConversationView = {
       ...normalized,
       turns: Object.fromEntries(Object.entries(normalized.turns).reverse().map(([key, turn]) => [
         key,
@@ -379,7 +379,7 @@ describe("selectConversationTimeline", () => {
     }
 
     const completed = singleTurnState("completed", "completed");
-    const recovered: ConversationState = {
+    const recovered: ConversationView = {
       ...completed,
       turns: Object.fromEntries(Object.entries(completed.turns).map(([key, turn]) => [
         key,
@@ -436,7 +436,7 @@ describe("selectConversationTimeline", () => {
         contentBlocks: [],
       })),
     });
-    const withKinds: ConversationState = {
+    const withKinds: ConversationView = {
       ...normalized,
       items: Object.fromEntries(Object.entries(normalized.items).map(([key, item]) => [
         key,
@@ -474,7 +474,7 @@ describe("selectConversationTimeline", () => {
 
     for (const [reconciliation, syncStatus] of cases) {
       const normalized = singleItemState();
-      const state: ConversationState = {
+      const state: ConversationView = {
         ...normalized,
         syncStatus,
         items: Object.fromEntries(Object.entries(normalized.items).map(([key, item]) => [
@@ -527,7 +527,7 @@ describe("selectConversationTimeline", () => {
         contentBlocks: blocks,
       }],
     });
-    const reversed: ConversationState = {
+    const reversed: ConversationView = {
       ...normalized,
       items: Object.fromEntries(Object.entries(normalized.items).map(([key, item]) => [
         key,
@@ -657,7 +657,7 @@ describe("selectConversationTimeline", () => {
       ],
     });
     const canary = "RAW_PAYLOAD_CANARY";
-    const poisoned: ConversationState = {
+    const poisoned: ConversationView = {
       ...normalized,
       items: Object.fromEntries(Object.entries(normalized.items).map(([key, item]) => [
         key,
@@ -684,7 +684,7 @@ describe("selectConversationTimeline", () => {
     expect(JSON.stringify(timeline)).not.toContain(canary);
   });
 
-  it("does not mutate ConversationState and returns deeply frozen nullable/empty models", () => {
+  it("does not mutate ConversationView and returns deeply frozen nullable/empty models", () => {
     const normalized = hydrate({
       threads: [{ threadId: THREAD_ID, status: "active" }],
       turns: [
@@ -732,7 +732,7 @@ describe("selectConversationTimeline", () => {
       ],
     });
     const thread = normalized.threads[THREAD_ID]!;
-    const state = deepFreeze<ConversationState>({
+    const state = deepFreeze<ConversationView>({
       ...normalized,
       threads: {
         ...normalized.threads,
