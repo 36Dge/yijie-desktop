@@ -13,3 +13,5 @@
 正常切换前必须在旧版正常结束活跃 Turn 并退出；无新 Host nonce 来源的旧活跃行拒绝猜测接管。本次未迁移用户运行中的 DB。schema 14 不兼容旧版本写入，禁止降级迁移、静默复制 DB 或自动启动旧 reducer。
 
 Contracts 已固定 6f632f155eacdaf93df0e0b00b5dab9e369c5442；Host 已固定 9e9d317f7e4ecff5f8aeec94fa467f9bede32139。原生来源使用 native-conversation.lock.json，FEAT-152 既有整体 Host 来源校验保留并更新真实 SHA/digest。canonical runner 强制原生 committed pin，未放宽来源或权限门禁。真实 Tauri/D4 待执行，本次 paid budget 尚为 0。
+
+隔离源码验证可通过 canonical runner 的 `YIJIE_DEMO_FAST_RUNTIME_ROOT` / `YIJIE_DEMO_FAST_PROVIDER_KEY_FILE` 指向同一份已有 Runtime 产物和凭据文件，不复制密钥、不替换产物。两者必须绝对路径，原有 binary/manifest SHA-256、普通文件、非符号链接和 Native owner-only 校验保持；默认路径不变。

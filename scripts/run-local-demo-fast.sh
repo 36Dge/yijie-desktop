@@ -4,13 +4,13 @@ set -euo pipefail
 desktop_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workspace_root="$(cd "$desktop_root/.." && pwd -P)"
 host_root="$workspace_root/yijie-agent-host"
-codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"
+codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0}"
 host_binary="$host_root/.local/bin/yijie-agent-host"
 codex_binary="$codex_runtime_root/codex"
 codex_manifest="$codex_runtime_root/runtime-manifest.json"
 runtime_binary_sha256="4efe16d2848680752cf9aacf4c17741ab2eeb7415894a66c2bb03652b00a322d"
 runtime_manifest_sha256="1cfa2e0a139b2213f4d29b1efeed71d4810110ac865f0bcbd931ff33b0062c1b"
-provider_key_file="$host_root/.local/secrets/minimax-api-key"
+provider_key_file="${YIJIE_DEMO_FAST_PROVIDER_KEY_FILE:-$host_root/.local/secrets/minimax-api-key}"
 runtime_root="$desktop_root/.local/demo-fast"
 host_home="$runtime_root/host-home"
 codex_home="$runtime_root/codex-home"
@@ -60,6 +60,9 @@ export YIJIE_LOCAL_PROFILE=demo_fast
 export YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 
+# Detached source verification may reuse the same existing audited Runtime and
+# provider key by absolute path. All original hash/type/protection checks remain.
+[[ "$codex_runtime_root" == /* && "$provider_key_file" == /* ]] || fail "Runtime and provider key sources must be absolute paths"
 [[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]] || fail "Codex Runtime binary is missing"
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ "$(sha256_file "$codex_binary")" == "$runtime_binary_sha256" ]] ||
