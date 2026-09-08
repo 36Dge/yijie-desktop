@@ -3550,6 +3550,17 @@ fn history_dto_v2(
             let stored = projections
                 .remove(&message.message_id)
                 .ok_or(ChatError::DatabaseUnavailable)?;
+            // The outbox retains an empty local assistant scaffold. Native
+            // Items own new answer content, so this record never acquires a
+            // legacy body. Do not fabricate a space or expose the scaffold as
+            // a message; retain all stored text and attachment records.
+            if message.role == "assistant"
+                && message.status == "pending"
+                && message.content.is_empty()
+                && stored.is_empty()
+            {
+                continue;
+            }
             let content_blocks = if stored.is_empty() {
                 vec![MessageContentBlockDto::Text {
                     text: if message.content.is_empty() {
@@ -4651,6 +4662,73 @@ fn unix_seconds() -> Result<i64, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feat132_history_omits_only_empty_outbox_scaffolds() {
+        let user_id = Uuid::now_v7();
+        let scaffold_id = Uuid::now_v7();
+        let legacy_id = Uuid::now_v7();
+        let page = HistoryPage {
+            turns: vec![crate::chat::HistoryTurn {
+                turn_id: Uuid::now_v7(),
+                runtime_turn_id: Some(Uuid::now_v7()),
+                status: "completed".into(),
+                terminal_at: Some(10),
+                reasoning_status: "unavailable".into(),
+                reasoning_reason_code: None,
+                reasoning: vec![],
+                messages: vec![
+                    crate::chat::HistoryMessage {
+                        message_id: user_id,
+                        role: "user".into(),
+                        content: "question".into(),
+                        status: "committed".into(),
+                        ordinal: 0,
+                        created_at: 1,
+                    },
+                    crate::chat::HistoryMessage {
+                        message_id: scaffold_id,
+                        role: "assistant".into(),
+                        content: String::new(),
+                        status: "pending".into(),
+                        ordinal: 1,
+                        created_at: 1,
+                    },
+                    crate::chat::HistoryMessage {
+                        message_id: legacy_id,
+                        role: "assistant".into(),
+                        content: "saved answer".into(),
+                        status: "pending".into(),
+                        ordinal: 2,
+                        created_at: 1,
+                    },
+                ],
+            }],
+            next_before_ordinal: None,
+        };
+        let original = page.clone();
+        let dto = history_dto_v2(
+            page,
+            None,
+            vec![
+                (user_id, vec![]),
+                (scaffold_id, vec![]),
+                (legacy_id, vec![]),
+            ],
+        )
+        .unwrap();
+        let json = serde_json::to_value(dto).unwrap();
+        let messages = json["turns"][0]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["messageId"], user_id.to_string());
+        assert_eq!(messages[1]["messageId"], legacy_id.to_string());
+        for message in messages {
+            assert_eq!(message["content"], message["contentBlocks"][0]["text"]);
+        }
+        // This is a readonly projection; no legacy data or native fact is rewritten.
+        assert_eq!(original.turns[0].messages.len(), 3);
+        assert_eq!(original.turns[0].messages[2].content, "saved answer");
+    }
 
     use crate::chat::{
         CommandProjection, CommandStatus, LiveReasoningProjection, ProjectionError,
