@@ -65,7 +65,7 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
       v-for="(item, index) in items"
       :key="item.key"
       ref="tabElements"
-      class="yj-tabs__tab"
+      class="yj-tabs__tab yj-control yj-control--pill"
       :class="{ 'yj-tabs__tab--selected': item.key === modelValue }"
       type="button"
       role="tab"
@@ -90,14 +90,9 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
 }
 
 .yj-tabs__tab {
-  min-height: var(--yj-space-8);
-  padding: var(--yj-space-1) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  font-size: var(--yj-font-size-body);
-  line-height: var(--yj-line-height-body);
   transition:
     color var(--yj-motion-fast) var(--yj-ease-standard),
     border-color var(--yj-motion-fast) var(--yj-ease-standard),

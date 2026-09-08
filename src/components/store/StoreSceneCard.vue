@@ -32,7 +32,7 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
       <li
         v-for="badge in scene.badges"
         :key="badge"
-        class="store-scene-card__badge"
+        class="store-scene-card__badge yj-badge"
         :class="`store-scene-card__badge--${badgeTone(badge)}`"
       >
         {{ badge }}
@@ -73,21 +73,9 @@ function badgeTone(badge: StoreSceneBadge): "brand" | "warning" | "error" | "neu
 }
 
 .store-scene-card__badge {
-  display: inline-flex;
-  min-width: var(--yj-space-12);
-  height: var(--yj-space-8);
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  padding: var(--yj-space-1) var(--yj-space-3);
   border: 0;
-  border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-control-hover);
-  font-size: var(--yj-font-size-caption);
-  font-weight: var(--yj-font-weight-semibold);
-  line-height: var(--yj-line-height-caption);
-  white-space: nowrap;
 }
 
 .store-scene-card__badge--warning {

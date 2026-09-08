@@ -295,7 +295,7 @@ function handlePaste(event: ClipboardEvent): void {
       </span>
       <button
         v-if="recoveryAvailable && readiness.actionLabel"
-        class="chat-composer__recovery"
+        class="chat-composer__recovery yj-control"
         type="button"
         :disabled="submissionBusy"
         @click="emit('recover')"
@@ -400,7 +400,7 @@ function handlePaste(event: ClipboardEvent): void {
           </button>
           <slot name="permission-control">
           <button
-            class="chat-composer__permission"
+            class="chat-composer__permission yj-control"
             type="button"
             aria-label="查看权限审批：只读访问，禁止写入"
             title="权限审批：只读访问，禁止写入"
@@ -556,19 +556,10 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__permission,
 .chat-composer__recovery {
-  display: inline-flex;
   flex: none;
-  min-height: var(--yj-space-8);
-  align-items: center;
-  gap: var(--yj-space-2);
-  padding: var(--yj-space-1) var(--yj-space-3);
   border: var(--yj-border-width) solid transparent;
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: transparent;
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-  white-space: nowrap;
 }
 
 .chat-composer__add,
@@ -680,14 +671,14 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__field:hover {
-  border-color: var(--yj-color-border-control-hover);
+  border-color: var(--yj-color-text-primary);
 }
 
 .chat-composer__readiness + .chat-composer__field { margin-top: var(--yj-space-2); }
 
 .chat-composer__field:focus-within,
 .chat-composer__field--drag-active {
-  border-color: var(--yj-color-brand-primary);
+  border-color: var(--yj-color-text-primary);
 }
 
 .chat-composer__attachments {

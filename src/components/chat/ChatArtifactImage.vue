@@ -384,7 +384,7 @@ onBeforeUnmount(() => {
   >
     <button
       v-if="inlineLease"
-      class="artifact-image__preview"
+      class="artifact-image__preview yj-control"
       data-testid="artifact-image-preview"
       type="button"
       :disabled="inlinePhase !== 'ready'"
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
     <div v-else-if="inlineError" class="artifact-image__error" role="alert">
       <YjIcon name="warning" size="lg" tone="error" />
       <span>{{ inlineError.message }}</span>
-      <button
+      <button class="yj-control"
         v-if="inlineError.retryable"
         data-testid="artifact-image-retry"
         type="button"
@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="artifact-image__actions">
-      <button
+      <button class="yj-control"
         data-testid="artifact-image-save"
         type="button"
         :disabled="saving || inlinePhase !== 'ready'"
@@ -463,7 +463,7 @@ onBeforeUnmount(() => {
       >
         <header class="artifact-image__dialog-header">
           <strong :id="`artifact-image-dialog-${artifact.artifactId}`">{{ displayName }}</strong>
-          <button
+          <button class="yj-control"
             ref="closeButton"
             data-testid="artifact-image-close"
             type="button"
@@ -489,12 +489,12 @@ onBeforeUnmount(() => {
           </div>
           <div v-else-if="lightboxError" class="artifact-image__dialog-status" role="alert">
             <span>{{ lightboxError.message }}</span>
-            <button v-if="lightboxError.retryable" type="button" @click="retryLightbox">重新加载</button>
+            <button class="yj-control" v-if="lightboxError.retryable" type="button" @click="retryLightbox">重新加载</button>
           </div>
         </div>
 
         <footer class="artifact-image__toolbar" aria-label="图片预览工具栏">
-          <button
+          <button class="yj-control"
             data-testid="artifact-image-zoom-out"
             type="button"
             :disabled="!canZoomOut"
@@ -503,7 +503,7 @@ onBeforeUnmount(() => {
             @click="zoomOut"
           ><YjIcon name="zoomOut" size="sm" /></button>
           <span data-testid="artifact-image-zoom-value" aria-live="polite">{{ zoomLabel }}</span>
-          <button
+          <button class="yj-control"
             data-testid="artifact-image-zoom-in"
             type="button"
             :disabled="!canZoomIn"
@@ -511,7 +511,7 @@ onBeforeUnmount(() => {
             title="放大"
             @click="zoomIn"
           ><YjIcon name="zoomIn" size="sm" /></button>
-          <button
+          <button class="yj-control"
             data-testid="artifact-image-reset"
             type="button"
             :disabled="zoomIndex === 0"
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
             title="重置缩放"
             @click="resetZoom"
           ><YjIcon name="refresh" size="sm" /></button>
-          <button
+          <button class="yj-control"
             data-testid="artifact-image-dialog-save"
             type="button"
             :disabled="saving"
@@ -603,17 +603,9 @@ onBeforeUnmount(() => {
 }
 
 .artifact-image button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--yj-space-2);
-  min-height: var(--yj-space-10);
-  padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  font: inherit;
 }
 
 .artifact-image button:hover:not(:disabled) {

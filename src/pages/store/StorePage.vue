@@ -64,6 +64,7 @@ function updateRoleFilter(value: string): void {
       <div class="store-page__module store-page__module--brief">
         <YjSection
           title="经营快报"
+          actions-placement="below"
           description="最近 7 天 · 固定演示口径 · 无店铺数据连接"
           icon="workspace"
         >
@@ -89,7 +90,7 @@ function updateRoleFilter(value: string): void {
                 <h3 class="store-page__brief-title">{{ currentBrief.title }}</h3>
                 <p class="store-page__brief-description">{{ currentBrief.description }}</p>
               </div>
-              <span class="store-page__source-label">本地合成</span>
+              <span class="store-page__source-label yj-badge">本地合成</span>
             </div>
 
             <ul class="store-page__metric-grid" aria-label="经营快报指标">
@@ -113,6 +114,7 @@ function updateRoleFilter(value: string): void {
       <div class="store-page__module">
         <YjSection
           title="精选场景"
+          actions-placement="below"
           description="按经营目标查看适合当前问题的分析方向。"
           icon="skillResearch"
         >
@@ -154,6 +156,7 @@ function updateRoleFilter(value: string): void {
       <div class="store-page__module">
         <YjSection
           title="角色场景推荐"
+          actions-placement="below"
           description="按岗位聚合日常关注点，帮助团队更快进入工作。"
           icon="user"
         >
@@ -251,19 +254,9 @@ function updateRoleFilter(value: string): void {
 }
 
 .store-page__source-label {
-  display: inline-flex;
-  min-width: var(--yj-space-12);
-  height: var(--yj-space-8);
   flex: none;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  padding: var(--yj-space-1) var(--yj-space-3);
-  border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-control-hover);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
 }
 
 .store-page__metric-grid,

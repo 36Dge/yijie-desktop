@@ -3,6 +3,7 @@ import { useData, type Theme } from 'vitepress'
 import { watch } from 'vue'
 import '../../../exports/src/styles/variables.css'
 import '../../../exports/src/styles/component-colors.css'
+import '../../../exports/src/styles/component-metrics.css'
 import './style.css'
 import ColorBrandPreview from './components/ColorBrandPreview.vue'
 

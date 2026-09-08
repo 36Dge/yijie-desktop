@@ -74,8 +74,7 @@ const accessibleLabel = computed(() =>
 
 .yj-nav-item--selected {
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-nav);
-  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
+  background: var(--yj-color-control-hover);
 }
 
 .yj-nav-item:not(.yj-nav-item--disabled):active {

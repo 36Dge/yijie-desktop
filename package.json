@@ -9,6 +9,8 @@
     "pnpm": ">=11 <12"
   },
   "scripts": {
+    "icons:sync": "node scripts/sync-app-icons.mjs",
+    "icons:check": "node scripts/sync-app-icons.mjs --check",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "lint": "eslint . --max-warnings 0 && vue-tsc --noEmit",

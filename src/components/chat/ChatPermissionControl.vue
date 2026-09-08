@@ -43,7 +43,7 @@ function navigate(event: KeyboardEvent): void {
 <template>
   <NPopover v-model:show="open" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="triggerElement" class="permission-trigger" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
+      <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
         <YjIcon :name="selected.icon" size="sm" />
         <span>{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
       </button>
@@ -59,13 +59,13 @@ function navigate(event: KeyboardEvent): void {
   <NModal v-model:show="confirm" :mask-closable="true">
     <NCard class="permission-confirm" title="开启完全访问权限" role="dialog" aria-modal="true" aria-label="开启完全访问权限" :bordered="false">
       <p>此任务将可以访问互联网、修改项目外的文件并运行命令，无需逐次请求批准。</p>
-      <div class="permission-confirm-actions"><button type="button" @click="confirm = false">取消</button><button type="button" class="is-full" @click="approveFull">确认开启</button></div>
+      <div class="permission-confirm-actions"><button type="button" class="yj-control yj-control--regular" @click="confirm = false">取消</button><button type="button" class="is-full yj-control yj-control--regular" @click="approveFull">确认开启</button></div>
     </NCard>
   </NModal>
 </template>
 
 <style scoped>
-.permission-trigger { display:inline-flex; align-items:center; gap:var(--yj-space-2); border:0; border-radius:var(--yj-radius-full); padding:var(--yj-space-2) var(--yj-space-3); background:var(--yj-color-control-hover); color:var(--yj-color-text-secondary); font:inherit; cursor:pointer; white-space:nowrap; }
+.permission-trigger { border:0; background:var(--yj-color-control-hover); color:var(--yj-color-text-secondary); cursor:pointer; }
 .permission-trigger:disabled { opacity:.6; cursor:default; }
 .is-full { color:var(--yj-color-semantic-warning-ink) !important; }
 .permission-menu { width:min(520px,calc(100vw - 40px)); padding:var(--yj-space-2); background:var(--yj-color-bg-elevated); border:1px solid var(--yj-color-border-default); border-radius:var(--yj-radius-xl); box-shadow:var(--yj-shadow-popover); }
@@ -77,6 +77,6 @@ function navigate(event: KeyboardEvent): void {
 .is-full .permission-option-copy > span { color:inherit; }
 .permission-confirm { width:min(460px,calc(100vw - 40px)); }
 .permission-confirm-actions { display:flex; justify-content:flex-end; gap:var(--yj-space-3); margin-top:var(--yj-space-5); }
-.permission-confirm-actions button { font:inherit; border:1px solid var(--yj-color-border-default); border-radius:var(--yj-radius-md); padding:var(--yj-space-2) var(--yj-space-4); background:var(--yj-color-bg-card); cursor:pointer; }
+.permission-confirm-actions button { border:1px solid var(--yj-color-border-default); background:var(--yj-color-bg-card); cursor:pointer; }
 button:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:2px; }
 </style>

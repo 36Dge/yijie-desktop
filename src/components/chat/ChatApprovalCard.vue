@@ -343,7 +343,7 @@ function decide(decision: ChatApprovalDecision): void {
 
       <div class="chat-approval-card__actions" role="group" aria-label="确认决定">
         <button
-          class="chat-approval-card__button chat-approval-card__button--primary"
+          class="chat-approval-card__button chat-approval-card__button--primary yj-control yj-control--regular"
           type="button"
           :disabled="!decisionEnabled"
           @click="decide('accept_once')"
@@ -351,7 +351,7 @@ function decide(decision: ChatApprovalDecision): void {
           允许一次
         </button>
         <button
-          class="chat-approval-card__button chat-approval-card__button--secondary"
+          class="chat-approval-card__button chat-approval-card__button--secondary yj-control yj-control--regular"
           type="button"
           :disabled="!decisionEnabled"
           @click="decide('cancel_current_turn')"
@@ -517,14 +517,7 @@ function decide(decision: ChatApprovalDecision): void {
 }
 
 .chat-approval-card__button {
-  min-width: calc(var(--yj-space-16) * 2);
-  min-height: var(--yj-space-10);
-  padding: var(--yj-space-2) var(--yj-space-4);
   border: var(--yj-border-width) solid transparent;
-  border-radius: var(--yj-radius-md);
-  font-size: var(--yj-font-size-body);
-  font-weight: var(--yj-font-weight-semibold);
-  line-height: var(--yj-line-height-body);
 }
 
 .chat-approval-card__button--primary {

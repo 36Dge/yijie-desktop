@@ -280,7 +280,7 @@ onBeforeUnmount(() => {
     <div v-else-if="previewError" class="artifact-video__error" role="alert">
       <YjIcon name="warning" size="lg" tone="error" />
       <span>{{ previewError.message }}</span>
-      <button
+      <button class="yj-control"
         v-if="previewError.retryable"
         data-testid="artifact-video-retry"
         type="button"
@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
         aria-live="polite"
         aria-atomic="true"
       >{{ stateMessage }}</span>
-      <button
+      <button class="yj-control"
         data-testid="artifact-video-save"
         type="button"
         :disabled="saving || phase !== 'ready'"
@@ -395,17 +395,9 @@ onBeforeUnmount(() => {
 .artifact-video__feedback--error { color: var(--yj-color-semantic-error-ink); }
 
 .artifact-video button {
-  display: inline-flex;
-  min-height: var(--yj-space-10);
-  align-items: center;
-  justify-content: center;
-  gap: var(--yj-space-2);
-  padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  font: inherit;
 }
 
 .artifact-video button:hover:not(:disabled) {

@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
     :aria-busy="busy ? 'true' : 'false'"
   >
     <div v-if="available" class="artifact-report__actions">
-      <button
+      <button class="yj-control"
         ref="previewTrigger"
         data-testid="artifact-report-open"
         type="button"
@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
         <YjIcon name="file" size="sm" />
         {{ busy ? "预览中" : "预览报告" }}
       </button>
-      <button
+      <button class="yj-control"
         data-testid="artifact-report-save"
         type="button"
         :disabled="saving"
@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
     <div v-else-if="previewError" class="artifact-report__error" role="alert">
       <YjIcon name="warning" size="sm" tone="error" />
       <span>{{ previewError.message }}</span>
-      <button
+      <button class="yj-control"
         v-if="previewError.retryable"
         data-testid="artifact-report-retry"
         type="button"
@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
     >
       <header class="artifact-report__preview-header">
         <h3 :id="previewTitleId">{{ projection.title }}</h3>
-        <button
+        <button class="yj-control"
           data-testid="artifact-report-close"
           type="button"
           aria-label="关闭报告预览"
@@ -491,14 +491,7 @@ onBeforeUnmount(() => {
 .artifact-report__actions { flex-wrap: wrap; }
 
 .artifact-report button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--yj-space-2);
-  min-height: var(--yj-space-10);
-  padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
 }

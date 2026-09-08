@@ -110,7 +110,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
           <span>{{ identityState }}</span>
           <strong>{{ identityLabel }}</strong>
         </div>
-        <span class="chat-tool-item__identity-badge">
+        <span class="chat-tool-item__identity-badge yj-badge">
           <YjIcon
             :name="execution.identity.resolution === 'known' ? 'check' : 'warning'"
             size="xs"
@@ -265,7 +265,6 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
   overflow-wrap: anywhere;
 }
 
-.chat-tool-item__identity-badge,
 .chat-tool-item__section-header,
 .chat-tool-item__notice,
 .chat-tool-item__error,
@@ -278,10 +277,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
 
 .chat-tool-item__identity-badge {
   flex: 0 0 auto;
-  align-items: center;
-  padding: var(--yj-space-1) var(--yj-space-2);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-bg-subtle);
 }

@@ -352,8 +352,8 @@ async function confirmRemoveProject(): Promise<void> {
         <n-input v-model:value="renameValue" autofocus maxlength="80" @keydown.enter.prevent="confirmRename" />
         <p v-if="renameValue && !validRename(renameValue)" class="chat-tree__dialog-error">请输入 1–40 个字符</p>
         <div class="chat-tree__dialog-actions">
-          <button class="chat-tree__dialog-button" type="button" @click="renameSession = null; restoreDialogTrigger()">取消</button>
-          <button class="chat-tree__dialog-button chat-tree__dialog-button--primary" type="button" :disabled="!validRename(renameValue) || actionPending" @click="confirmRename">保存</button>
+          <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="renameSession = null; restoreDialogTrigger()">取消</button>
+          <button class="chat-tree__dialog-button chat-tree__dialog-button--primary yj-control yj-control--regular" type="button" :disabled="!validRename(renameValue) || actionPending" @click="confirmRename">保存</button>
         </div>
       </n-card>
     </n-modal>
@@ -368,8 +368,8 @@ async function confirmRemoveProject(): Promise<void> {
           将删除“{{ deleteSession?.title }}”的本地对话，并启动 Host 与 Runtime 清理。此操作不能撤销。
         </p>
         <div class="chat-tree__dialog-actions">
-          <button class="chat-tree__dialog-button" type="button" @click="deleteSession = null; restoreDialogTrigger()">取消</button>
-          <button class="chat-tree__dialog-button chat-tree__dialog-button--danger" type="button" :disabled="actionPending" @click="confirmDelete">永久删除</button>
+          <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="deleteSession = null; restoreDialogTrigger()">取消</button>
+          <button class="chat-tree__dialog-button chat-tree__dialog-button--danger yj-control yj-control--regular" type="button" :disabled="actionPending" @click="confirmDelete">永久删除</button>
         </div>
       </n-card>
     </n-modal>
@@ -384,8 +384,8 @@ async function confirmRemoveProject(): Promise<void> {
           只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。
         </p>
         <div class="chat-tree__dialog-actions">
-          <button class="chat-tree__dialog-button" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>
-          <button class="chat-tree__dialog-button chat-tree__dialog-button--danger" type="button" :disabled="actionPending" @click="confirmRemoveProject">移除</button>
+          <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>
+          <button class="chat-tree__dialog-button chat-tree__dialog-button--danger yj-control yj-control--regular" type="button" :disabled="actionPending" @click="confirmRemoveProject">移除</button>
         </div>
       </n-card>
     </n-modal>
@@ -519,10 +519,7 @@ async function confirmRemoveProject(): Promise<void> {
 .chat-tree__dialog-error { margin: var(--yj-space-2) 0 0; color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
 .chat-tree__dialog-actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); margin-top: var(--yj-space-5); }
 .chat-tree__dialog-button {
-  min-height: var(--yj-space-10);
-  padding: var(--yj-space-2) var(--yj-space-4);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
 }

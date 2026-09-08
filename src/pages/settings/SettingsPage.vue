@@ -200,7 +200,7 @@ async function selectTenant(tenantId: string): Promise<void> {
           </p>
           <div class="access-state__actions">
             <button
-              class="button button--primary"
+              class="button button--primary yj-control yj-control--regular"
               type="button"
               :disabled="operationPending"
               @click="login"
@@ -208,7 +208,7 @@ async function selectTenant(tenantId: string): Promise<void> {
               登录或更换账户
             </button>
             <button
-              class="button"
+              class="button yj-control yj-control--regular"
               type="button"
               :disabled="operationPending"
               @click="logout"
@@ -259,7 +259,7 @@ async function selectTenant(tenantId: string): Promise<void> {
 
           <div class="access-state__actions">
             <button
-              class="button button--primary"
+              class="button button--primary yj-control yj-control--regular"
               type="button"
               :disabled="operationPending"
               @click="retry"
@@ -268,7 +268,7 @@ async function selectTenant(tenantId: string): Promise<void> {
             </button>
             <button
               v-if="signedOut || permissionStore.phase === 'unauthorized' || permissionStore.phase === 'recovery'"
-              class="button"
+              class="button yj-control yj-control--regular"
               type="button"
               :disabled="operationPending"
               @click="login"
@@ -276,7 +276,7 @@ async function selectTenant(tenantId: string): Promise<void> {
               登录或更换账户
             </button>
             <button
-              class="button"
+              class="button yj-control yj-control--regular"
               type="button"
               :disabled="operationPending"
               @click="logout"
@@ -343,7 +343,7 @@ async function selectTenant(tenantId: string): Promise<void> {
           </div>
           <div class="access-state__actions">
             <button
-              class="button button--primary"
+              class="button button--primary yj-control yj-control--regular"
               type="submit"
               :disabled="operationPending"
             >
@@ -435,8 +435,6 @@ async function selectTenant(tenantId: string): Promise<void> {
 
 .tenant-selector__option,
 .button {
-  min-height: var(--yj-space-10);
-  padding: var(--yj-space-2) var(--yj-space-4);
   border: 1px solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
@@ -445,6 +443,8 @@ async function selectTenant(tenantId: string): Promise<void> {
 }
 
 .tenant-selector__option {
+  min-height: var(--yj-control-height-lg);
+  padding: var(--yj-space-2) var(--yj-space-4);
   text-align: left;
 }
 

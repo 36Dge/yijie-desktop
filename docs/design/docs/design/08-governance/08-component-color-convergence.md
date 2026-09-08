@@ -13,10 +13,12 @@
 ## 已批准依据
 
 - [用户确认的组件矩阵原文（冻结副本）](/reviews/2026-09-06-component-colors.txt)
-- 原候选：`docs/design/proposals/2026-09-06-component-colors/02-component-color-matrix.md`
+- 原候选矩阵及评审资料保存在 Git 提交 `e6bf08f655f3b7f123405575bb62a4aad7adc89b` 的历史目录 `docs/design/proposals/2026-09-06-component-colors/` 中，可按该提交查阅或恢复。
 - 原矩阵 SHA-256：`3f9e9617a8c070b1a8090cfcdc847d58aa361350e3a31e74c7a9cb45c76dfef8`
-- 原审计、状态图谱、三页 Chrome 对照、离线评审与验证记录继续冻结在 `docs/design/proposals/2026-09-06-component-colors/`；不覆盖这些历史证据。
+- 用户随后授权删除工作区的 `proposals/` 目录；原审计、状态图谱、三页 Chrome 对照、离线评审与验证记录由上述 Git 历史保留。文档站的矩阵冻结副本、正式规范与最终验收记录继续保留。
 - 冻结文本保留当时的 Proposed 字样，表示审查时状态；本 ADR 记录之后发生的用户确认，不倒改原文件。
+
+本次候选目录清理的 `contract-impact = none`：只移除历史评审文件并更新文档引用，Desktop 运行实现、API / Agent Host 交互及本地持久状态均无可观察变化。
 
 ## 决策
 

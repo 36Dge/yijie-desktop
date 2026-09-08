@@ -111,20 +111,20 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 
 ### 3.3 主导航、标签页与筛选
 
-| 状态 | 主导航项 | 小型筛选 / 可选芯片 | 内容标签页（线形 Tabs） |
+| 状态 | 侧栏主导航项（YjNavItem） | 小型筛选 / 可选芯片 | 内容标签页（线形 Tabs） |
 |---|---|---|---|
 | default | `P / N / 无` | `P / C / B` | `S / C / 无` |
 | hover | `P / H / 无`，仅该项局部 | `P / H / BH` | `P / C / 无`，可用中性下划线 |
 | pressed | `P / A / 无`，仅该项局部 | `P / A / BH` | `P / C / 无` |
-| selected | `P / N / 无` + **内侧 3 px L 标记** | `ON / L / ON` | `P / C / 无` + 中性可见下划线 |
-| selected + hover/pressed | hover 用 H、pressed 用 A，均限当前小项并保留 3 px L | hover=`ON/LH/ON`；pressed=`ON/LA/ON` | 维持选中下划线与可读 P |
-| focus | 当前状态 `＋F`；不抹掉 L 标记 | 当前状态 `＋F` | 当前状态 `＋F` |
+| selected | `P / H / 无`，浅灰底且无青柠标记 | `ON / L / ON` | `P / C / 无` + 中性可见下划线 |
+| selected + hover/pressed | hover 用 H、pressed 用 A，均限当前小项 | hover=`ON/LH/ON`；pressed=`ON/LA/ON` | 维持选中下划线与可读 P |
+| focus | 当前状态 `＋F`；保留选中语义 | 当前状态 `＋F` | 当前状态 `＋F` |
 | readonly | N/A：导航行为不以 readonly 表达 | 展示当前值时使用非交互文本/标签，保留正常 P；不伪造可切换项 | 不可切换但需展示当前分类时按静态标题，不称 disabled 内容 |
 | disabled | `D / N / 无`，无 hover/pressed | `D / DB / B`，已选值可保留标记但不使用亮色填充 | `D / C / 无`；当前内容不因此变灰 |
 | loading | 导航本身不染色；子项 loading 由内容说明；正在导航可同色 busy | 当前状态 `＋Busy` | 当前状态 `＋Busy` |
 | error | 当前项颜色不替换；错误放内容区/可访问描述 | 错误信息独立，保留筛选值 | 错误由面板内显示，tab 的 selected 仍保留 |
 
-3 px 导航标记表达位置，2 px F 表达键盘焦点，二者必须共存。选择导航只改变路由状态；颜色规范不改变权限过滤、disabled、当前路由或导航顺序。可见 selected 文案与 `aria-current` / `aria-selected` 仍是状态依据，不只依靠青柠。
+2026-09-08 用户调整：侧栏以中性灰底表达位置，2 px F 表达键盘焦点，二者必须共存。选择导航只改变路由状态；颜色规范不改变权限过滤、disabled、当前路由或导航顺序。可见 selected 文案与 `aria-current` / `aria-selected` 仍是状态依据，不只依靠颜色。
 
 ### 3.4 Checkbox、Radio、Switch、Select
 
@@ -183,7 +183,7 @@ Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅
 
 1. **能力与交互边界先确定**：hidden 不渲染；真正 disabled 阻止动作与 hover/pressed。只读只限制编辑，保留正常内容和可复制性。不要为颜色调整新增权限或持久化逻辑。
 2. **确定真实 selected/checked 值**：只有真实当前路由、选择或已提交开关值才显示选中。loading/error 不清空选值，取消选择也不能由 hover 色暗示。
-3. **在可操作控件上叠加 hover/pressed**：pressed 优先于 hover。已选导航 default 保持白/石墨原背景；hover/pressed 仅当前小项使用 H/A，L 标记始终保留。小筛选 selected 的 hover/pressed 使用 LH/LA。
+3. **在可操作控件上叠加 hover/pressed**：pressed 优先于 hover。已选侧栏导航 default 使用浅灰底 H；hover/pressed 仅当前小项使用 H/A，不使用 L 标记。小筛选 selected 的 hover/pressed 使用 LH/LA。
 4. **错误语义独立叠加**：错误边框 E 和消息保留正常正文。错误既不清除选中，也不覆盖全部标签/内容；危险动作使用已有独立语义。
 5. **键盘 focus 始终可见**：对实际可聚焦元素叠 2 px F；selected+focus 保留 L 标记，error+focus 保留 E 边框及 F 外环。原生 disabled 不参与键盘 focus；若既有 aria-disabled 控件可聚焦以解释原因，仍保留 F 且不执行动作。
 6. **loading 保持原角色并标记 busy**：spinner 使用当前可读前景；仅防重复提交不应把 pending 操作变成一片低对比灰。真正能力 disabled 与 busy 同时存在时，操作仍不可用，但原因与进度文本不使用 D。
@@ -203,7 +203,7 @@ Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅
 
 | 颜色角色 | 允许 | 不允许 |
 |---|---|---|
-| 品牌青柠 L/LH/LA | 已批准 Logo 折角；主按钮；小型筛选/标签选中；checkbox/radio/switch 选中；导航 3 px 标记；原生文本选区底色 | 白底正文、普通线性图标、权限说明、焦点环、整页/整卡背景 |
+| 品牌青柠 L/LH/LA | 已批准 Logo 折角；主按钮；小型筛选/标签选中；checkbox/radio/switch 选中；原生文本选区底色 | 白底正文、普通线性图标、权限说明、焦点环、整页/整卡背景 |
 | 旧浅绿 / 深绿 soft | 不用于普通 UI；旧 token 只作为兼容槽位并映射到中性表面 | 普通导航选中底、hover、标签、图标底板、消息/附件默认底 |
 | 深绿 `#4B651D` | 图表专用首序列，保留原信息可读性 | brand-text、普通正文、普通操作图标、焦点 |
 | 真正 success 语义绿 | 已确认的成功、完成、健康状态，文字/图标使用 SI；原状态主色不变 | 普通按钮、所有“积极”标签、把“本地合成”冒充成功状态 |

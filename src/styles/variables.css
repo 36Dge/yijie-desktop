@@ -90,6 +90,14 @@
   --yj-font-weight-regular: 400;
   --yj-font-weight-semibold: 600;
 
+  /* Shared component geometry; independent of the theme's color roles. */
+  --yj-control-height-sm: 32px;
+  --yj-control-height-md: 36px;
+  --yj-control-height-lg: 40px;
+  --yj-control-line-height: 20px;
+  --yj-badge-height: 24px;
+  --yj-badge-line-height: 16px;
+
   --yj-space-0: 0;
   --yj-space-1: 4px;
   --yj-space-2: 8px;

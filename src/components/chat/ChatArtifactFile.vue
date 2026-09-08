@@ -282,7 +282,7 @@ onBeforeUnmount(() => {
     :aria-busy="busy ? 'true' : 'false'"
   >
     <div class="artifact-file__actions">
-      <button
+      <button class="yj-control"
         v-if="canPreview"
         ref="previewTrigger"
         data-testid="artifact-file-open"
@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
       </span>
       <span v-else class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
 
-      <button
+      <button class="yj-control"
         v-if="canSave"
         data-testid="artifact-file-save"
         type="button"
@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
     <div v-else-if="previewError" class="artifact-file__error" role="alert">
       <YjIcon name="warning" size="sm" tone="error" />
       <span>{{ previewError.message }}</span>
-      <button
+      <button class="yj-control"
         v-if="previewError.retryable"
         data-testid="artifact-file-retry"
         type="button"
@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
     >
       <header class="artifact-file__preview-header">
         <h3 :id="previewTitleId">{{ displayName }} 预览</h3>
-        <button
+        <button class="yj-control"
           data-testid="artifact-file-close"
           type="button"
           aria-label="关闭文件预览"
@@ -440,17 +440,9 @@ onBeforeUnmount(() => {
 }
 
 .artifact-file button {
-  display: inline-flex;
-  min-height: var(--yj-space-10);
-  align-items: center;
-  justify-content: center;
-  gap: var(--yj-space-2);
-  padding: var(--yj-space-2) var(--yj-space-3);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
-  font: inherit;
 }
 
 .artifact-file button:hover:not(:disabled) {

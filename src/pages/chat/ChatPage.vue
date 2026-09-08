@@ -599,7 +599,7 @@ onBeforeUnmount(() => {
           <strong>{{ stableError.title }}</strong>
           <span>{{ stableError.detail }}</span>
         </div>
-        <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
+        <button v-if="stableError.actionLabel" class="chat-notice__action yj-control" type="button" @click="handleStableErrorAction">
           {{ stableError.actionLabel }}
         </button>
       </div>
@@ -755,7 +755,7 @@ onBeforeUnmount(() => {
                 <strong>{{ stableError.title }}</strong>
                 <span>{{ stableError.detail }}</span>
               </div>
-              <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
+              <button v-if="stableError.actionLabel" class="chat-notice__action yj-control" type="button" @click="handleStableErrorAction">
                 {{ stableError.actionLabel }}
               </button>
             </div>
@@ -868,7 +868,7 @@ onBeforeUnmount(() => {
                 <strong>{{ stableError.title }}</strong>
                 <span>{{ stableError.detail }}</span>
               </div>
-              <button v-if="stableError.actionLabel" class="chat-notice__action" type="button" @click="handleStableErrorAction">
+              <button v-if="stableError.actionLabel" class="chat-notice__action yj-control" type="button" @click="handleStableErrorAction">
                 {{ stableError.actionLabel }}
               </button>
             </div>
@@ -886,7 +886,7 @@ onBeforeUnmount(() => {
               <strong>{{ cleanup.title }}</strong>
               <span>{{ cleanup.detail }}</span>
             </div>
-            <button v-if="cleanup.actionLabel" class="chat-notice__action" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
+            <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
           <RuntimeApprovalList v-if="runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
         </div>
@@ -968,7 +968,7 @@ onBeforeUnmount(() => {
       </dl>
       <p class="permission-dialog__note">本入口只展示已生效策略，不能在页面中提升权限。</p>
       <div class="permission-dialog__actions">
-        <button type="button" @click="permissionDialogOpen = false">知道了</button>
+        <button type="button" class="yj-control yj-control--regular" @click="permissionDialogOpen = false">知道了</button>
       </div>
     </n-card>
   </n-modal>
@@ -1134,7 +1134,7 @@ onBeforeUnmount(() => {
 .chat-notice__copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .chat-notice__copy strong { color: var(--yj-color-text-primary); }
 .chat-notice__copy span { font-size: var(--yj-font-size-caption); }
-.chat-notice__action { flex: none; padding: var(--yj-space-2) var(--yj-space-3); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
+.chat-notice__action { flex: none; border: var(--yj-border-width) solid var(--yj-color-border-default); color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
 
 .permission-dialog { width: min(480px, calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-12))); }
 .permission-dialog__status { display: flex; gap: var(--yj-space-3); color: var(--yj-color-text-primary); }
@@ -1145,7 +1145,7 @@ onBeforeUnmount(() => {
 .permission-dialog__list dd { margin: 0; color: var(--yj-color-text-primary); font-weight: var(--yj-font-weight-semibold); }
 .permission-dialog__note { color: var(--yj-color-text-body); font-size: var(--yj-font-size-caption); }
 .permission-dialog__actions { display: flex; justify-content: flex-end; margin-top: var(--yj-space-5); }
-.permission-dialog__actions button { min-height: var(--yj-space-10); padding: var(--yj-space-2) var(--yj-space-5); border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-on-accent); background: var(--yj-color-brand-primary); }
+.permission-dialog__actions button { border: 0; color: var(--yj-color-text-on-accent); background: var(--yj-color-brand-primary); }
 .permission-dialog__actions button:hover { background: var(--yj-color-brand-hover); }
 .permission-dialog__actions button:active { background: var(--yj-color-brand-active); }
 

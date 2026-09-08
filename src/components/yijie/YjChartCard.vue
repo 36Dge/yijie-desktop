@@ -214,7 +214,7 @@ onBeforeUnmount(() => {
         <h3 :id="titleId" class="yj-chart-card__title">{{ model.title }}</h3>
         <p :id="descriptionId" class="yj-chart-card__description">{{ model.description }}</p>
       </div>
-      <span class="yj-chart-card__mode">图表增强</span>
+      <span class="yj-chart-card__mode yj-badge">图表增强</span>
     </header>
 
     <p
@@ -301,12 +301,8 @@ onBeforeUnmount(() => {
 
 .yj-chart-card__mode {
   flex: 0 0 auto;
-  padding: var(--yj-space-1) var(--yj-space-2);
-  border-radius: var(--yj-radius-full);
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-bg-card);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
 }
 
 .yj-chart-card__legend {
