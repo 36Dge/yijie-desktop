@@ -3414,7 +3414,8 @@ impl ChatRepository {
         transaction
             .execute(
                 "UPDATE chat_turns SET status='stopping'
-                 WHERE id=?1 AND status IN ('streaming', 'stopping')",
+                 WHERE id=?1 AND status IN ('streaming', 'stopping')
+                   AND NOT EXISTS (SELECT 1 FROM chat_native_bindings b WHERE b.turn_id=chat_turns.id)",
                 [turn_id.to_string()],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;

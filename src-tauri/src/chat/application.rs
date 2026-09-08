@@ -2385,11 +2385,24 @@ impl ConversationApplication {
         let mut dirty = 0_usize;
         let mut flush = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut dispatch = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
+        dispatch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             if buffer.view.terminal_observed && artifact_delivery_done {
                 return Ok(());
             }
             tokio::select! {
+                _=dispatch.tick()=>{
+                    // SSE can stay open for the whole Turn. Keep the existing
+                    // outbox dispatcher responsive to native interrupt requests
+                    // and ordinary submissions while receiving notifications.
+                    // Dispatch errors do not change the observed execution state.
+                    if let Ok(outcome)=self.dispatch_next().await {
+                        if outcome!=DispatchOutcome::Idle {
+                            sink.publish_coordinator(&CoordinatorOutcome::Dispatched(outcome))?;
+                        }
+                    }
+                }
                 value=stream.next_stream_event(),if !buffer.view.terminal_observed=>{
                     let event=match value {
                         Ok(Some(HostStreamEvent::Native(event)))=>event,
@@ -3839,6 +3852,126 @@ mod tests {
             Err(ChatError::NotFound)
         );
 
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat132_open_native_stream_dispatches_interrupt_before_terminal() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        let (root, database, pending, _claimed, agent_session_id) =
+            prepare_v2_turn_outbox("feat132-responsive-interrupt").await;
+        let runtime_turn_id = Uuid::now_v7();
+        database
+            .accept_native_turn(pending.turn_operation_id, runtime_turn_id, NONCE.into())
+            .await
+            .unwrap();
+        let context = database
+            .active_turn_context(pending.session_id)
+            .await
+            .unwrap();
+        let stream_id = Uuid::now_v7();
+        let event = |sequence, method: &str, status: &str| {
+            let e = serde_json::json!({"schema_version":7,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
+            format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {e}\n\n")
+        };
+        let started = event(1, "turn/started", "inProgress");
+        let ended = event(2, "turn/completed", "interrupted");
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (opened, ready) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut readiness, _) = listener.accept().await.unwrap();
+            assert!(read_request(&mut readiness)
+                .await
+                .starts_with("GET /readyz "));
+            readiness
+                .write_all(ready_response(NONCE).as_bytes())
+                .await
+                .unwrap();
+            readiness.shutdown().await.unwrap();
+            let (mut sse, _) = listener.accept().await.unwrap();
+            assert!(read_request(&mut sse)
+                .await
+                .starts_with("GET /v7/agent-sessions/"));
+            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 7\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
+            sse.write_all(format!("{headers}{started}").as_bytes())
+                .await
+                .unwrap();
+            opened.send(()).unwrap();
+            let received=tokio::time::timeout(Duration::from_secs(2),async {
+                loop {
+                    let (mut connection, _)=listener.accept().await.unwrap();
+                    let request=read_request(&mut connection).await;
+                    if request.starts_with("GET /readyz ") {
+                        connection.write_all(ready_response(NONCE).as_bytes()).await.unwrap();
+                    } else {
+                        assert!(request.starts_with(&format!("POST /v1/agent-sessions/{agent_session_id}/turns/{runtime_turn_id}/interrupt HTTP/1.1")));
+                        connection.write_all(http_response("204 No Content",&[("Cache-Control","no-store")],"").as_bytes()).await.unwrap();
+                        connection.shutdown().await.unwrap();
+                        return;
+                    }
+                    connection.shutdown().await.unwrap();
+                }
+            }).await.is_ok();
+            // Always finish the ordinary fixture response, including on a test
+            // failure. No process kill or broken transport is used as a signal.
+            sse.write_all(ended.as_bytes()).await.unwrap();
+            sse.shutdown().await.unwrap();
+            received
+        });
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.into(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+        let worker = application.clone();
+        let streaming =
+            tokio::spawn(async move { worker.stream_active_turn(pending.session_id).await });
+        ready.await.unwrap();
+        let operation_id = Uuid::now_v7();
+        application
+            .interrupt_turn(pending.session_id, operation_id)
+            .await
+            .unwrap();
+        let history = database
+            .load_history(pending.session_id, None, Some(20))
+            .await
+            .unwrap();
+        assert_ne!(
+            history.turns[0].status, "stopping",
+            "an outbox request cannot change native execution truth"
+        );
+        streaming.await.unwrap().unwrap();
+        assert!(
+            server.await.unwrap(),
+            "interrupt must reach Host while SSE is still open"
+        );
+        let views = database
+            .native_views(pending.session_id, vec![pending.turn_id])
+            .await
+            .unwrap();
+        assert_eq!(views[0].status.as_deref(), Some("interrupted"));
+        assert!(views[0].terminal_observed);
+        assert_eq!(
+            database.outbox_state(operation_id).await.unwrap(),
+            super::super::database::OutboxState::Done
+        );
         drop(application);
         drop(database);
         fs::remove_dir_all(root).unwrap();
