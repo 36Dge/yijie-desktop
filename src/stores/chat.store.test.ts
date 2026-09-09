@@ -1661,6 +1661,69 @@ describe("chat view-model store", () => {
     expect(store.phase).toBe("signed-out");
   });
 
+  it("reads retained cleanup history when Native refuses its draft target", async () => {
+    const cleanup = {
+      operationId: "019c1a00-0000-7000-8000-000000000011",
+      desktopState: "incomplete" as const,
+      hostState: "incomplete" as const,
+      runtimeState: "incomplete" as const,
+      outcomeCode: "retry_limit_exceeded",
+      lastErrorCode: "cleanup_protocol_failure",
+      requestedAt: 1,
+      completedAt: null,
+      expiresAt: null,
+    };
+    const listDraftAttachments = vi.fn<ChatClient["listDraftAttachments"]>(async (_context, target) => {
+      if (target.type === "session" && target.sessionId === SESSION_A) {
+        throw new ChatClientError({schemaVersion: 2, code: "chat_resource_not_found", retryable: false, recovery: "none"});
+      }
+      return [];
+    });
+    const deleteSession = vi.fn<ChatClient["deleteSession"]>();
+    const store = createStore(fakeClient({
+      listDraftAttachments,
+      deleteSession,
+      resyncSession: async (_context, sessionId) => Object.freeze({
+        ...projection(sessionId, "Retained archive"),
+        history: sessionId === SESSION_A ? artifactHistory() : projection(sessionId).history,
+        cleanup: sessionId === SESSION_A ? cleanup : null,
+      }),
+    }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+
+    expect(store.lastErrorCode).toBeNull();
+    expect(store.history).toEqual(artifactHistory());
+    expect(store.cleanupStatus).toEqual(cleanup);
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+    expect(listDraftAttachments.mock.calls.filter(([, target]) => target.type === "session" && target.sessionId === SESSION_A)).toHaveLength(1);
+    expect(deleteSession).not.toHaveBeenCalled();
+
+    await store.selectSession(SESSION_B);
+    expect(store.cleanupStatus).toBeNull();
+    expect(store.draftTarget).toEqual(chatSessionDraftTarget(SESSION_B));
+    expect(store.draftTargetReady).toBe(true);
+  });
+
+  it("keeps a missing draft target denied when resync does not prove cleanup", async () => {
+    const store = createStore(fakeClient({
+      listDraftAttachments: async (_context, target) => {
+        if (target.type === "session") {
+          throw new ChatClientError({schemaVersion: 2, code: "chat_resource_not_found", retryable: false, recovery: "none"});
+        }
+        return [];
+      },
+    }).client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.lastErrorCode).toBe("chat_resource_not_found");
+    expect(store.history).toBeNull();
+    expect(store.cleanupStatus).toBeNull();
+    expect(store.canSend).toBe(false);
+    expect(store.canAttach).toBe(false);
+  });
+
   it("restores persisted cleanup state through a new store resync after restart", async () => {
     const cleanup = {
       operationId: "019c1a00-0000-7000-8000-000000000011",

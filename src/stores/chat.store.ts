@@ -2406,9 +2406,15 @@ export function createChatStoreDefinition(
             return;
           }
         }
+        let missingDraftTarget: ChatClientError | null = null;
         await Promise.all([
           canSyncDraftTarget
-            ? switchDraftTarget(chatSessionDraftTarget(sessionId))
+            ? switchDraftTarget(chatSessionDraftTarget(sessionId)).catch((error: unknown) => {
+                if (!(error instanceof ChatClientError) || error.shape.code !== "chat_resource_not_found") throw error;
+                // Native also rejects draft access for retained cleanup records.
+                // Only an authorized resync proving cleanup may permit history.
+                missingDraftTarget = error;
+              })
             : Promise.resolve(),
           ensureSessionEventListeners(),
         ]);
@@ -2436,6 +2442,8 @@ export function createChatStoreDefinition(
         );
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
         assertSelectionActivationAllowed(sessionId);
+        if (missingDraftTarget !== null && projection.cleanup === null) throw missingDraftTarget;
+        if (projection.cleanup !== null) clearDraftTargetState();
         activationStage = "projection";
         const authoritativeProjection = streamingV6Enabled &&
           nextSubscriptionAuthority.pendingApprovalSnapshot !== null &&
@@ -2494,6 +2502,10 @@ export function createChatStoreDefinition(
           authoritativeHistory,
           !approvalSnapshotRaced,
         );
+        if (cleanupStatus.value !== null) {
+          revokeSelectedRealtimeAuthorityForCleanup(bound, sessionId);
+          return;
+        }
         if (approvalSnapshotRaced) resyncTrailingRequested = true;
         const refreshedControlPlane = await refreshControlPlaneGuarded();
         if (!isCurrent(epoch, controller, sessionId) || subscriptionId !== nextSubscription) return;
