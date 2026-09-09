@@ -1,6 +1,6 @@
 # FEAT-132 Native Conversation 接入
 
-2026-09-09 本地开发候选，未发布。原生协议 → Host 安全投影 → Native 单一显示缓冲及 SQLCipher → Vue 完整视图。详见元仓 FEAT-132 的 03-native-protocol-adjustment.md。
+2026-09-09 已通过local/demo_fast D4，十项Must AC全部通过；仅本地提交，未发布。原生协议 → Host 安全投影 → Native 单一显示缓冲及 SQLCipher → Vue 完整视图。最终证据见元仓 FEAT-132 的 02-verification.md，机制与边界见 03-native-protocol-adjustment.md。
 
 权威源为 `src-tauri/contracts/native-conversation.json` 的精确 Contracts 快照，以及私有 `src-tauri/schemas/chat-native-conversation-v1.schema.json`。运行 `pnpm generate:native` 生成 Rust/TS/AJV，`pnpm check:native` 校验生成物、跨仓来源和旧引擎删除。没有新增依赖。
 
@@ -10,8 +10,10 @@
 
 唯一 NativeDisplayBuffer 按原生 Item/segment 追加 delta、按 cursor 去重。final 对象整体替换，无前缀对账、自动封口或客户端事件历史重建。Vue 只替换完整 view，保留选择 epoch 和 subscription 隔离。旧全局 timeline fallback 已删除，旧 reasoning/附件/Artifact 仍通过同一 timeline 只读可见。
 
-正常切换前必须在旧版正常结束活跃 Turn 并退出；无新 Host nonce 来源的旧活跃行拒绝猜测接管。本次未迁移用户运行中的 DB。schema 14 不兼容旧版本写入，禁止降级迁移、静默复制 DB 或自动启动旧 reducer。
+正常切换前必须在旧版正常结束活跃 Turn 并退出；无新 Host nonce 来源的旧活跃行拒绝猜测接管。D4在旧应用正常退出后，以固定提交的隔离构建读取现有app-data，未复制用户数据库或凭据；Host Home隔离，未证明原Host全部运行映射已完成日常接管。schema 14 不兼容旧版本写入，禁止降级迁移、静默复制 DB 或自动启动旧 reducer。
 
-Contracts 已固定 6f632f155eacdaf93df0e0b00b5dab9e369c5442；Host 已固定 9e9d317f7e4ecff5f8aeec94fa467f9bede32139。原生来源使用 native-conversation.lock.json，FEAT-152 既有整体 Host 来源校验保留并更新真实 SHA/digest。canonical runner 强制原生 committed pin，未放宽来源或权限门禁。真实 Tauri/D4 待执行，本次 paid budget 尚为 0。
+Contracts 已固定 6f632f155eacdaf93df0e0b00b5dab9e369c5442；Host 已固定 9e9d317f7e4ecff5f8aeec94fa467f9bede32139。原生来源使用 native-conversation.lock.json，FEAT-152 既有整体 Host 来源校验保留并更新真实 SHA/digest。canonical runner 强制原生 committed pin，未放宽来源或权限门禁。本次独立授权累计上限25次文本、3次图片；D4实际使用19次文本、1次图片。
+
+固定Runtime可能缺少phase或部分冷历史，界面保留未分类/不完整提示。Host当前只传递Command输出的pending-final提示，原生completed后整体安全投影最终正文，不提供逐字流式Command输出。图片动态工具保留安全unknown展示，Artifact资源独立支持预览、保存与重开。
 
 隔离源码验证可通过 canonical runner 的 `YIJIE_DEMO_FAST_RUNTIME_ROOT` / `YIJIE_DEMO_FAST_PROVIDER_KEY_FILE` 指向同一份已有 Runtime 产物和凭据文件，不复制密钥、不替换产物。两者必须绝对路径，原有 binary/manifest SHA-256、普通文件、非符号链接和 Native owner-only 校验保持；默认路径不变。
