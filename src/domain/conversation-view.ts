@@ -1,5 +1,6 @@
 import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
+import { safeConversationDiagnostic } from "./conversation-diagnostics";
 
 export const CONVERSATION_ITEM_KINDS = Object.freeze([
   "user_message",
@@ -147,6 +148,7 @@ export interface ConversationReasoningState {
 }
 
 export interface TextContentBlock {
+  readonly reasoningSource?: "summary" | "content";
   readonly blockIndex: number;
   readonly type: "text";
   readonly text: string;
@@ -201,9 +203,11 @@ export interface ConversationThread {
 export interface ConversationNotice {
   readonly severity: "error" | "warning";
   readonly code: "conversation_error" | "conversation_warning";
+  readonly diagnostic?: string;
 }
 
 export interface ConversationTurn {
+  readonly diagnostic?: string;
   readonly source?: "native_observed" | "native_rebuilt" | "legacy_archive" | "local_submission";
   readonly submissionStatus?: LocalSubmissionView["status"];
   readonly availability?: "available" | "partial" | "unavailable";
@@ -221,6 +225,7 @@ export interface ConversationTurn {
 }
 
 export interface ConversationItem {
+  readonly availability?: NativeConversationView["availability"];
   readonly threadId: string;
   readonly turnId: string;
   readonly itemId: string;
@@ -387,27 +392,40 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
     const nativeItems: ConversationItem[] = view.items.map(entry => {
       const item = entry.item;
       const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : "unknown";
-      const textParts = item.type === "reasoning" ? [...(item.summary ?? []), ...(item.content ?? [])] : item.text == null ? [] : [item.text];
+      const contentBlocks: TextContentBlock[] = item.type === "reasoning"
+        ? (["summary", "content"] as const).flatMap(reasoningSource =>
+          (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
+        : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
       return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
+        availability: item.availability,
         status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
         agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,
         reasoning: item.type === "reasoning" ? {status: entry.lastMethod === "item/completed" ? "complete" : entry.lastMethod === "thread/read" ? "unknown" : "in_progress", reasonCode: null} : null,
         execution: nativeExecution(entry, view), reconciliation: "not_applicable",
-        contentBlocks: textParts.map((text, blockIndex) => ({type: "text", text, blockIndex})),
+        contentBlocks,
       };
     });
     for (const item of [...nativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
     const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
     turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
       source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource,
+      diagnostic: view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
       status: view.status === "inProgress" ? "in_progress" : view.status ?? "unknown",
       terminalStatus: terminal, terminalCode: view.terminalErrorCode ?? null,
       plan: view.plan == null ? null : {explanation: view.explanation ?? null, steps: view.plan.map((s, ordinal) => ({ordinal, text: s.step, status: s.status === "inProgress" ? "in_progress" : s.status}))},
-      notices: view.diagnostic ? [{severity: "warning", code: "conversation_warning"}] : [],
+      // The private view does not carry diagnostic scope. Do not assign a
+      // thread-only warning to the Turn whose stream happened to observe it.
+      notices: [],
       itemKeys: [...nativeItems, ...localReferences].map(item => itemKey(item.threadId, item.turnId, item.itemId)),
     };
     const thread = threads[view.sessionId];
-    if (thread && !thread.turnKeys.includes(key)) threads[view.sessionId] = {...thread, turnKeys: [...thread.turnKeys, key]};
+    const diagnostic = view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;
+    if (thread) threads[view.sessionId] = {...thread,
+      turnKeys: thread.turnKeys.includes(key) ? thread.turnKeys : [...thread.turnKeys, key],
+      notices: diagnostic && !thread.notices.some(n => n.diagnostic === diagnostic)
+        ? [...thread.notices, {severity: "warning", code: "conversation_warning", diagnostic}]
+        : thread.notices,
+    };
   }
   for (const submission of submissions) {
     const turn = Object.values(turns).find(t => t.turnId === submission.turnId);

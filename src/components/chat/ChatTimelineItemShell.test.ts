@@ -125,8 +125,8 @@ describe("ChatTimelineItemShell", () => {
 
   it("maps busy and role presentation without changing slotted content", () => {
     const cases: readonly [ConversationTimelineItemViewModel, boolean, string][] = [
-      [item({ role: "user", kind: "user_message", phase: "pending", domainStatus: "started" }), true, "user"],
-      [item({ role: "process", kind: "reasoning", phase: "active", domainStatus: "streaming" }), true, "process"],
+      [item({ role: "user", kind: "user_message", phase: "pending", domainStatus: "started", busy: true }), true, "user"],
+      [item({ role: "process", kind: "reasoning", phase: "active", domainStatus: "streaming", busy: true }), true, "process"],
       [item({ role: "system", kind: "unknown", phase: "complete" }), false, "system"],
     ];
 

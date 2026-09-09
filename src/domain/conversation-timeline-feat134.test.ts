@@ -188,7 +188,7 @@ describe("FEAT-134 conversation timeline selector", () => {
     });
   });
 
-  it("never infers a final answer from text or position and expands only live process entries", () => {
+  it("never infers final from text or treats archived activity as live", () => {
     const input = snapshot();
     const state = viewFromLegacySnapshot({
       ...input,
@@ -230,7 +230,7 @@ describe("FEAT-134 conversation timeline selector", () => {
       collapsible: false,
       defaultExpanded: true,
     });
-    expect(turn.progress).toMatchObject({ phase: "active" });
+    expect(turn.progress).toBeNull();
   });
 
   it("maps a missing assistant phase to unclassified instead of guessing final", () => {

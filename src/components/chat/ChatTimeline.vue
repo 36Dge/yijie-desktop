@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -59,6 +60,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 }
 
 function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): string {
+  if (notice.diagnostic) return conversationDiagnosticMessage(notice.diagnostic);
   const message = notice.severity === "error"
     ? "对话发生错误，已保留可用内容。"
     : "对话连接存在需要注意的信息，已确认的内容仍可阅读。";

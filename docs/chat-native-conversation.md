@@ -17,3 +17,13 @@ Contracts 已固定 6f632f155eacdaf93df0e0b00b5dab9e369c5442；Host 已固定 9e
 固定Runtime可能缺少phase或部分冷历史，界面保留未分类/不完整提示。Host当前只传递Command输出的pending-final提示，原生completed后整体安全投影最终正文，不提供逐字流式Command输出。图片动态工具保留安全unknown展示，Artifact资源独立支持预览、保存与重开。
 
 隔离源码验证可通过 canonical runner 的 `YIJIE_DEMO_FAST_RUNTIME_ROOT` / `YIJIE_DEMO_FAST_PROVIDER_KEY_FILE` 指向同一份已有 Runtime 产物和凭据文件，不复制密钥、不替换产物。两者必须绝对路径，原有 binary/manifest SHA-256、普通文件、非符号链接和 Native owner-only 校验保持；默认路径不变。
+
+## FEAT-134 原生展示调整（2026-09-09）
+
+本次只修改展示与无调用残留，继续复用相同 v7/NativeDisplayBuffer/private view/SQLCipher，未新增协议或迁移。原生 reasoning 的 summary/content 在界面按类别和原生索引分别展示，summary-only 不作为原始正文证据；原生完整对象继续直接替换草稿。
+
+UI busy 与执行事实分开：只有当前有效订阅观察到的活跃 Turn 才能显示忙碌；加载历史不建立 live 标记。原生 view 的 partial 初值不代表停止执行，需结合实际订阅、原生状态和明确缺失诊断；Item 缺 completed 时保留最后观察事实，Turn 结束后以独立文案提示缺结束记录，不封口、不回写状态。
+
+Item availability 原值传入卡片；现有 private view 没有 diagnostic scope，允许的诊断代码保守按会话展示，未知代码使用固定文案，不把提示猜测绑定到 Turn/Item。旧 v4/v5 DTO、历史 IPC/表、Artifact/Command 适配保留。无调用的 v4/v5 内容发布方法及专属辅助代码已删除，FEAT-137/152 语义与开关边界不变。
+
+本次新验收状态以元仓 FEAT-134 调整记录为准，不继承原 D4。CI 修复使用兄弟目录和真实固定来源，不减少校验；尚未实际运行的远端 CI 不写 PASS。

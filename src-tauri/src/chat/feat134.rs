@@ -1,4 +1,4 @@
-use super::database::{ReasoningItem, ReasoningPart, ReasoningStatus, StoredEventCursor};
+use super::database::StoredEventCursor;
 use super::error::ChatError;
 use super::feat136::{ExecutionProjection, SafeTextProjection, ToolProgressProjection};
 use super::host_domain::HostAgentMessagePhase;
@@ -74,14 +74,6 @@ impl TimelineReasoningStatus {
             Self::Complete => "complete",
             Self::Incomplete => "incomplete",
             Self::Unavailable => "unavailable",
-        }
-    }
-
-    fn legacy(self) -> ReasoningStatus {
-        match self {
-            Self::Complete => ReasoningStatus::Complete,
-            Self::Incomplete => ReasoningStatus::Incomplete,
-            Self::Unavailable => ReasoningStatus::Unavailable,
         }
     }
 }
@@ -375,36 +367,6 @@ impl Debug for Feat134Projection {
             .field("has_terminal", &self.terminal.is_some())
             .field("delta", &self.delta)
             .finish()
-    }
-}
-
-impl Feat134Projection {
-    pub fn legacy_reasoning(&self) -> Vec<ReasoningItem> {
-        self.items
-            .iter()
-            .filter_map(|item| {
-                Some(ReasoningItem {
-                    item_id: item.item_id.clone(),
-                    item_ordinal: 0,
-                    status: item.reasoning_status?.legacy(),
-                    reason_code: item.reasoning_reason_code.clone(),
-                    finalized_at_ms: item.reasoning_finalized_at_ms?,
-                    parts: item
-                        .reasoning_parts
-                        .iter()
-                        .map(|part| ReasoningPart {
-                            content_index: part.content_index,
-                            text: part.text.clone(),
-                        })
-                        .collect(),
-                })
-            })
-            .enumerate()
-            .map(|(ordinal, mut item)| {
-                item.item_ordinal = ordinal;
-                item
-            })
-            .collect()
     }
 }
 

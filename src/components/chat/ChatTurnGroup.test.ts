@@ -295,7 +295,7 @@ describe("ChatTurnGroup", () => {
     expect(wrapper.find(".chat-safe-content").exists()).toBe(false);
   });
 
-  it("keeps active empty reasoning expanded with an explicit waiting state", () => {
+  it("shows saved unfinished reasoning without claiming a live wait", () => {
     const turn = projectedTurn({
       status: "in_progress",
       items: [{
@@ -312,7 +312,8 @@ describe("ChatTurnGroup", () => {
     const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
 
     expect(wrapper.text()).toContain("过程记录");
-    expect(wrapper.text()).toContain("正在等待模型推理记录…");
+    expect(wrapper.text()).toContain("仅有已观察记录，当前进度待确认");
+    expect(wrapper.get("article").attributes("aria-busy")).toBe("false");
     expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
   });
 
@@ -416,20 +417,17 @@ describe("ChatTurnGroup", () => {
     expect(wrapper.find(".action-final").exists()).toBe(true);
   });
 
-  it("renders lifecycle progress, terminal notes, and aggregated notices outside the Item list", () => {
+  it("keeps archived activity idle and renders terminal notes and notices", () => {
     const activeCases: readonly [ConversationTurnStatus, string][] = [
       ["queued", "本轮正在等待处理"],
       ["in_progress", "本轮正在处理中"],
       ["waiting_approval", "本轮正在等待继续"],
     ];
-    for (const [status, label] of activeCases) {
+    for (const [status] of activeCases) {
       const wrapper = mount(ChatTurnGroup, {
         props: { turn: projectedTurn({ status }), position: 2 },
       });
-      const progress = wrapper.get("[role='status']");
-      expect(progress.text()).toContain(label);
-      expect(progress.attributes("aria-live")).toBe("polite");
-      expect(progress.attributes("aria-atomic")).toBe("true");
+      expect(wrapper.find("[role='status']").exists()).toBe(false);
       expect(wrapper.find("[role='progressbar']").exists()).toBe(false);
       expect(wrapper.find(".chat-turn-group__items").exists()).toBe(false);
     }

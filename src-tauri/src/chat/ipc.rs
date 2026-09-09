@@ -1031,206 +1031,6 @@ impl TurnProjectionSink for ChatEventBridge {
         Ok(())
     }
 
-    fn publish_feat134(&self, projection: Feat134Projection) -> Result<(), ChatError> {
-        let durable_sequence = projection
-            .durable_sequence
-            .filter(|sequence| *sequence > 0)
-            .ok_or(ChatError::DatabaseUnavailable)?;
-        let now = unix_seconds()?;
-        let (app, events) = {
-            let mut state = self
-                .inner
-                .lock()
-                .map_err(|_| ChatError::OrchestrationUnavailable)?;
-            let app = state
-                .app
-                .clone()
-                .ok_or(ChatError::OrchestrationUnavailable)?;
-            let authorization = state
-                .authorization
-                .clone()
-                .ok_or(ChatError::OrchestrationUnavailable)?;
-            let subscription_ids = state
-                .subscriptions
-                .iter()
-                .filter_map(|(id, record)| {
-                    feat134_subscription_matches(record, projection.session_id).then_some(*id)
-                })
-                .collect::<Vec<_>>();
-            let mut events = Vec::new();
-            for subscription_id in subscription_ids {
-                let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
-                    continue;
-                };
-                record.artifact_turn_id = Some(projection.turn_id);
-                if authorization
-                    .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
-                    .is_err()
-                {
-                    record.projection_sequence = record
-                        .projection_sequence
-                        .checked_add(1)
-                        .ok_or(ChatError::OrchestrationUnavailable)?;
-                    events.push(event_envelope(
-                        subscription_id,
-                        record,
-                        None,
-                        "context_invalidated",
-                        json!({"reason":"authority_changed"}),
-                    ));
-                    record.blocked = true;
-                    continue;
-                }
-                if record.blocked || record.terminal {
-                    continue;
-                }
-                let Some((turn_id, kind, payload, event_id)) = feat134_event_payload(&projection)?
-                else {
-                    continue;
-                };
-                record.projection_sequence = record
-                    .projection_sequence
-                    .checked_add(1)
-                    .ok_or(ChatError::OrchestrationUnavailable)?;
-                let event = feat134_source_event_envelope(
-                    subscription_id,
-                    record,
-                    turn_id,
-                    event_id,
-                    durable_sequence,
-                    kind,
-                    payload,
-                );
-                let event_bytes = serde_json::to_vec(&event)
-                    .map(|encoded| encoded.len())
-                    .unwrap_or(usize::MAX);
-                if event_bytes > MAX_V4_EVENT_BYTES {
-                    record.blocked = true;
-                    events.push(event_envelope(
-                        subscription_id,
-                        record,
-                        Some(projection.turn_id),
-                        "resync_required",
-                        json!({"reason":"backpressure"}),
-                    ));
-                } else {
-                    if matches!(projection.delta, TimelineDelta::TurnTerminal(_)) {
-                        record.terminal = true;
-                    }
-                    events.push(event);
-                }
-            }
-            (app, events)
-        };
-        for event in events {
-            app.emit(CHAT_EVENT_CHANNEL, event)
-                .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        }
-        Ok(())
-    }
-
-    fn publish_feat136(&self, projection: Feat134Projection) -> Result<(), ChatError> {
-        let durable_sequence = projection
-            .durable_sequence
-            .filter(|sequence| *sequence > 0)
-            .ok_or(ChatError::DatabaseUnavailable)?;
-        let now = unix_seconds()?;
-        let (app, events) = {
-            let mut state = self
-                .inner
-                .lock()
-                .map_err(|_| ChatError::OrchestrationUnavailable)?;
-            let app = state
-                .app
-                .clone()
-                .ok_or(ChatError::OrchestrationUnavailable)?;
-            let authorization = state
-                .authorization
-                .clone()
-                .ok_or(ChatError::OrchestrationUnavailable)?;
-            let subscription_ids = state
-                .subscriptions
-                .iter()
-                .filter_map(|(id, record)| {
-                    (matches!(
-                        record.schema_version,
-                        CHAT_IPC_V5_SCHEMA_VERSION | CHAT_IPC_V6_SCHEMA_VERSION
-                    ) && record.session_id == projection.session_id)
-                        .then_some(*id)
-                })
-                .collect::<Vec<_>>();
-            let mut events = Vec::new();
-            for subscription_id in subscription_ids {
-                let Some(record) = state.subscriptions.get_mut(&subscription_id) else {
-                    continue;
-                };
-                record.artifact_turn_id = Some(projection.turn_id);
-                if authorization
-                    .authorize_detailed(record.context_id, ChatAction::ReadSessions, now)
-                    .is_err()
-                {
-                    record.projection_sequence = record
-                        .projection_sequence
-                        .checked_add(1)
-                        .ok_or(ChatError::OrchestrationUnavailable)?;
-                    events.push(event_envelope(
-                        subscription_id,
-                        record,
-                        None,
-                        "context_invalidated",
-                        json!({"reason":"authority_changed"}),
-                    ));
-                    record.blocked = true;
-                    continue;
-                }
-                if record.blocked || record.terminal {
-                    continue;
-                }
-                let Some((turn_id, kind, payload, event_id)) = feat136_event_payload(&projection)?
-                else {
-                    continue;
-                };
-                record.projection_sequence = record
-                    .projection_sequence
-                    .checked_add(1)
-                    .ok_or(ChatError::OrchestrationUnavailable)?;
-                let event = feat136_source_event_envelope(
-                    subscription_id,
-                    record,
-                    turn_id,
-                    event_id,
-                    durable_sequence,
-                    kind,
-                    payload,
-                );
-                let event_bytes = serde_json::to_vec(&event)
-                    .map(|encoded| encoded.len())
-                    .unwrap_or(usize::MAX);
-                if event_bytes > MAX_V4_EVENT_BYTES {
-                    record.blocked = true;
-                    events.push(event_envelope(
-                        subscription_id,
-                        record,
-                        Some(projection.turn_id),
-                        "resync_required",
-                        json!({"reason":"backpressure"}),
-                    ));
-                } else {
-                    if matches!(projection.delta, TimelineDelta::TurnTerminal(_)) {
-                        record.terminal = true;
-                    }
-                    events.push(event);
-                }
-            }
-            (app, events)
-        };
-        for event in events {
-            app.emit(CHAT_EVENT_CHANNEL, event)
-                .map_err(|_| ChatError::OrchestrationUnavailable)?;
-        }
-        Ok(())
-    }
-
     fn publish_feat137(
         &self,
         projection: Feat134Projection,
@@ -1645,13 +1445,6 @@ fn event_envelope(
     }
 }
 
-fn feat134_subscription_matches(record: &SubscriptionRecord, session_id: Uuid) -> bool {
-    matches!(
-        record.schema_version,
-        CHAT_IPC_V4_SCHEMA_VERSION | CHAT_IPC_V5_SCHEMA_VERSION | CHAT_IPC_V6_SCHEMA_VERSION
-    ) && record.session_id == session_id
-}
-
 fn source_event_envelope(
     subscription_id: Uuid,
     record: &SubscriptionRecord,
@@ -1674,30 +1467,6 @@ fn source_event_envelope(
         kind,
         payload,
     }
-}
-
-fn feat134_source_event_envelope(
-    subscription_id: Uuid,
-    record: &SubscriptionRecord,
-    turn_id: Option<Uuid>,
-    event_id: Uuid,
-    durable_sequence: u64,
-    kind: &'static str,
-    payload: Value,
-) -> ChatEventEnvelope {
-    let mut envelope = source_event_envelope(
-        subscription_id,
-        record,
-        turn_id,
-        event_id,
-        durable_sequence,
-        kind,
-        payload,
-    );
-    if record.schema_version >= CHAT_IPC_V5_SCHEMA_VERSION {
-        envelope.source_schema_version = Some(CHAT_IPC_V4_SCHEMA_VERSION);
-    }
-    envelope
 }
 
 fn feat136_source_event_envelope(
@@ -5950,55 +5719,11 @@ mod tests {
     }
 
     #[test]
-    fn feat136_v5_subscription_receives_marked_inherited_v4_items_without_execution() {
-        let session_id = Uuid::now_v7();
-        let turn_id = Uuid::now_v7();
-        let runtime_turn_id = Uuid::now_v7();
-        let source_event_id = Uuid::now_v7();
-        let item = TimelineItem {
-            item_id: "assistant-v4".to_owned(),
-            item_ordinal: 1,
-            item_type: "agentMessage".to_owned(),
-            phase: Some(crate::chat::TimelinePhase::FinalAnswer),
-            status: crate::chat::TimelineItemStatus::InProgress,
-            text: String::new(),
-            reasoning_status: None,
-            reasoning_reason_code: None,
-            reasoning_parts: Vec::new(),
-            reasoning_finalized_at_ms: None,
-            execution: None,
-            started_at_ms: 1,
-            completed_at_ms: None,
-            source_event_id,
-            source_sequence: 1,
-            source_occurred_at: "2026-08-30T00:00:00Z".to_owned(),
-        };
-        let projection = Feat134Projection {
-            durable_sequence: Some(1),
-            session_id,
-            turn_id,
-            cursor: crate::chat::StoredEventCursor {
-                stream_id: Uuid::now_v7(),
-                sequence: 1,
-                event_id: source_event_id,
-            },
-            source_event_type: "item.started".to_owned(),
-            source_turn_id: Some(runtime_turn_id),
-            source_occurred_at: item.source_occurred_at.clone(),
-            source_event_bytes: 1,
-            observed_at_ms: 1,
-            assistant_text: String::new(),
-            items: vec![item.clone()],
-            plan: None,
-            turn_notices: Vec::new(),
-            session_notice: None,
-            terminal: None,
-            delta: TimelineDelta::ItemStarted(item),
-        };
-        let mut record = SubscriptionRecord {
-            schema_version: CHAT_IPC_V5_SCHEMA_VERSION,
+    fn feat136_retained_v5_envelope_preserves_source_version() {
+        let record = SubscriptionRecord {
+            schema_version: CHAT_IPC_V6_SCHEMA_VERSION,
             context_id: Uuid::now_v7(),
-            session_id,
+            session_id: Uuid::now_v7(),
             projection_sequence: 1,
             assistant_text: String::new(),
             reasoning: HashMap::new(),
@@ -6007,130 +5732,22 @@ mod tests {
             artifact_turn_id: None,
             artifact_notifications: ArtifactNotificationQueue::default(),
         };
-        assert!(feat134_subscription_matches(&record, session_id));
-        assert!(!feat134_subscription_matches(&record, Uuid::now_v7()));
-
-        let (event_turn_id, kind, payload, event_id) =
-            feat134_event_payload(&projection).unwrap().unwrap();
-        assert_eq!(kind, "item_started");
-        assert!(payload.get("execution").is_none());
-        let encoded = serde_json::to_value(feat134_source_event_envelope(
+        let event_id = Uuid::now_v7();
+        let envelope = feat136_source_event_envelope(
             Uuid::now_v7(),
             &record,
-            event_turn_id,
+            None,
             event_id,
-            1,
-            kind,
-            payload,
-        ))
-        .unwrap();
-        assert_eq!(encoded["schemaVersion"], CHAT_IPC_V5_SCHEMA_VERSION);
-        assert_eq!(encoded["sourceSchemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
-        assert_eq!(encoded["kind"], "item_started");
-        assert_eq!(encoded["turnId"], turn_id.to_string());
-        assert_eq!(encoded["eventId"], source_event_id.to_string());
-        assert_eq!(encoded["durableSequence"], "1");
-        assert!(encoded["payload"].get("execution").is_none());
-
-        let generic_event_id = Uuid::now_v7();
-        let mut generic_item = projection.items[0].clone();
-        generic_item.item_id = "command-v4".to_owned();
-        generic_item.item_type = "commandExecution".to_owned();
-        generic_item.phase = None;
-        generic_item.source_event_id = generic_event_id;
-        generic_item.source_sequence = 2;
-        let mut generic_projection = projection.clone();
-        generic_projection.cursor.sequence = 2;
-        generic_projection.cursor.event_id = generic_event_id;
-        generic_projection.items = vec![generic_item.clone()];
-        generic_projection.delta = TimelineDelta::ItemStarted(generic_item);
-        generic_projection.durable_sequence = Some(2);
-        let (generic_turn_id, generic_kind, generic_payload, generic_id) =
-            feat134_event_payload(&generic_projection).unwrap().unwrap();
-        let generic = serde_json::to_value(feat134_source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            generic_turn_id,
-            generic_id,
             2,
-            generic_kind,
-            generic_payload,
-        ))
-        .unwrap();
-        assert_eq!(generic["schemaVersion"], CHAT_IPC_V5_SCHEMA_VERSION);
-        assert_eq!(generic["sourceSchemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
-        assert_eq!(generic["payload"]["itemType"], "commandExecution");
-        assert!(generic["payload"].get("execution").is_none());
-
-        let native_v5 = serde_json::to_value(source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            generic_turn_id,
-            generic_id,
-            2,
-            generic_kind,
-            generic["payload"].clone(),
-        ))
-        .unwrap();
-        assert!(native_v5.get("sourceSchemaVersion").is_none());
-
-        record.schema_version = CHAT_IPC_V6_SCHEMA_VERSION;
-        assert!(feat134_subscription_matches(&record, session_id));
-        let sticky_v5_in_v6 = serde_json::to_value(feat136_source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            generic_turn_id,
-            generic_id,
-            2,
-            generic_kind,
-            generic["payload"].clone(),
-        ))
-        .unwrap();
-        assert_eq!(sticky_v5_in_v6["schemaVersion"], CHAT_IPC_V6_SCHEMA_VERSION);
-        assert_eq!(
-            sticky_v5_in_v6["sourceSchemaVersion"],
-            CHAT_IPC_V5_SCHEMA_VERSION
+            "item_started",
+            json!({}),
         );
-        let sticky_v4_in_v6 = serde_json::to_value(feat134_source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            event_turn_id,
-            event_id,
-            1,
-            kind,
-            encoded["payload"].clone(),
-        ))
-        .unwrap();
         assert_eq!(
-            sticky_v4_in_v6["sourceSchemaVersion"],
-            CHAT_IPC_V4_SCHEMA_VERSION
+            envelope.source_schema_version,
+            Some(CHAT_IPC_V5_SCHEMA_VERSION)
         );
-        let native_v6 = serde_json::to_value(source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            generic_turn_id,
-            generic_id,
-            2,
-            generic_kind,
-            generic["payload"].clone(),
-        ))
-        .unwrap();
-        assert!(native_v6.get("sourceSchemaVersion").is_none());
-
-        record.schema_version = CHAT_IPC_V4_SCHEMA_VERSION;
-        assert!(feat134_subscription_matches(&record, session_id));
-        let inherited_v4 = serde_json::to_value(feat134_source_event_envelope(
-            Uuid::now_v7(),
-            &record,
-            event_turn_id,
-            event_id,
-            1,
-            kind,
-            encoded["payload"].clone(),
-        ))
-        .unwrap();
-        assert_eq!(inherited_v4["schemaVersion"], CHAT_IPC_V4_SCHEMA_VERSION);
-        assert!(inherited_v4.get("sourceSchemaVersion").is_none());
+        assert_eq!(envelope.event_id, event_id.to_string());
+        assert_eq!(envelope.durable_sequence.as_deref(), Some("2"));
     }
 
     #[test]

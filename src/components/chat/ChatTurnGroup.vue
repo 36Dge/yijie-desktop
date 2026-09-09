@@ -72,7 +72,9 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
     case "artifact":
       return "生成内容";
     case "reasoning":
-      return "过程记录";
+      return item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "summary") &&
+        !item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "content" && b.text.length > 0)
+        ? "推理摘要" : "过程记录";
     case "command":
       return "命令执行";
     case "tool":
@@ -136,6 +138,8 @@ function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
 }
 
 function turnStatusLabel(turn: ConversationTimelineTurnViewModel): string {
+  if (["queued", "in_progress", "waiting_approval"].includes(turn.domainStatus) && turn.source === "legacy_archive") return "旧版记录，当前执行状态未确认";
+  if (turn.source === "native_observed" && turn.domainStatus === "in_progress" && !turn.liveObserved) return "上次记录为进行中，当前进度待确认";
   if (turn.source === "local_submission") {
     if (turn.submissionStatus === "failed") return "提交失败";
     if (turn.submissionStatus === "uncertain") return "提交结果待确认";
@@ -239,6 +243,9 @@ function reasoningReasonLabel(item: ConversationTimelineItemViewModel): string |
 
 function reasoningStateMessage(item: ConversationTimelineItemViewModel): string | null {
   if (item.presentation !== "reasoning") return null;
+  if (item.activityLabel) return item.activityLabel;
+  if (item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "summary") &&
+      !item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "content" && b.text.length > 0)) return "仅提供推理摘要，未提供原始模型推理正文。";
   const hasContent = item.contentBlocks.length > 0;
   if (item.reasoning === null) {
     if (item.domainStatus === "started" || item.domainStatus === "streaming") {
@@ -373,19 +380,25 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             {{ reasoningStateMessage(item) }}
           </p>
 
+          <div v-if="item.presentation === 'reasoning'" class="chat-turn-group__reasoning-segments">
+            <section v-for="block in item.contentBlocks" :key="block.identity" :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '推理摘要' : '模型推理记录'">
+              <strong class="chat-turn-group__segment-label">{{ block.type === "text" && block.reasoningSource === "summary" ? "推理摘要" : "模型推理记录" }}</strong>
+              <ChatSafeContent :blocks="[block]" mode="plain" />
+            </section>
+          </div>
           <ChatSafeContent
-            v-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
+            v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
             :blocks="item.contentBlocks"
             :mode="item.contentMode"
           >
             <template
-              v-if="item.presentation !== 'reasoning' && slots['artifact-reference']"
+              v-if="slots['artifact-reference']"
               #artifact-reference="{ block }"
             >
               <slot name="artifact-reference" :item="item" :block="block" />
             </template>
             <template
-              v-if="item.presentation !== 'reasoning' && slots['attachment-reference']"
+              v-if="slots['attachment-reference']"
               #attachment-reference="{ block }"
             >
               <slot name="attachment-reference" :item="item" :block="block" />
@@ -436,6 +449,12 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 </template>
 
 <style scoped>
+.chat-turn-group__reasoning-segments { display: grid; gap: var(--yj-space-3); }
+.chat-turn-group__segment-label {
+  display: block; margin-bottom: var(--yj-space-1);
+  color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption);
+}
+
 .chat-turn-group {
   display: grid;
   min-width: 0;

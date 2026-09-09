@@ -61,6 +61,7 @@ export type ConversationTimelineCopyPolicy = "text_and_code" | "none";
 
 export type ConversationTimelineProjectionPolicy = Readonly<{
   protectApprovalProcessContent: boolean;
+  liveTurnId?: string | null;
 }>;
 
 export const APPROVAL_PROCESS_CONTENT_PROTECTED_MESSAGE =
@@ -74,6 +75,7 @@ type TimelineContentBlockBase = Readonly<{
 export type ConversationTimelineTextContentBlock = TimelineContentBlockBase & Readonly<{
   type: "text";
   text: string;
+  reasoningSource?: "summary" | "content";
 }>;
 
 export type ConversationTimelineCodeContentBlock = TimelineContentBlockBase & Readonly<{
@@ -131,6 +133,7 @@ export type ConversationTimelineNoticeViewModel = Readonly<{
   severity: ConversationNotice["severity"];
   code: ConversationNotice["code"];
   count: number;
+  diagnostic?: string;
 }>;
 
 export type ConversationTimelinePlanStepViewModel = Readonly<{
@@ -157,6 +160,9 @@ export type ConversationTimelineItemViewModel = Readonly<{
   kind: ConversationTimelineItemKind;
   presentation: ConversationTimelineItemPresentation;
   role: ConversationTimelineRole;
+  busy?: boolean;
+  activityLabel?: string;
+  availability?: ConversationItem["availability"];
   domainStatus: ConversationItemStatus;
   phase: ConversationTimelineItemPhase;
   assistantPhase: ConversationAgentMessagePhase | null;
@@ -172,6 +178,7 @@ export type ConversationTimelineItemViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineTurnViewModel = Readonly<{
+  liveObserved?: boolean;
   source?: ConversationTurn["source"];
   statusSource?: ConversationTurn["statusSource"];
   availability?: ConversationTurn["availability"];
@@ -329,10 +336,11 @@ function projectReasoningContentBlock(
   const blockIndex = safeBlockIndex(block.blockIndex);
   if (block.type === "text" || block.type === "code") {
     return Object.freeze({
-      identity: blockIdentity(itemIdentity, blockIndex, "reasoning-text"),
+      identity: blockIdentity(itemIdentity, blockIndex, block.type === "text" && block.reasoningSource ? `reasoning-${block.reasoningSource}` : "reasoning-text"),
       blockIndex,
       type: "text" as const,
       text: block.text,
+      ...(block.type === "text" && block.reasoningSource ? {reasoningSource: block.reasoningSource} : {}),
     });
   }
   return unknownContentBlock(itemIdentity, blockIndex);
@@ -469,8 +477,17 @@ function projectItem(
     presentation === "assistant_unclassified" ||
     (presentation === "reasoning" && contentBlocks.length > 0);
 
+  const unfinished = item.status === "started" || item.status === "streaming";
+  const nativeLive = policy?.liveTurnId === turn.turnId && turn.source === "native_observed" &&
+    turn.statusSource === "runtime_notification" && turn.status === "in_progress" && turn.availability !== "unavailable" && !turn.diagnostic;
+  const busy = unfinished && nativeLive && item.availability === "available";
+  const ended = ["completed", "failed", "interrupted"].includes(turn.status);
+  const activityLabel = unfinished && !busy
+    ? ended ? "本轮已结束，未观察到该项结束记录" : "仅有已观察记录，当前进度待确认"
+    : undefined;
   return Object.freeze({
     identity,
+    busy, activityLabel, availability: item.availability,
     threadId: item.threadId,
     turnId: item.turnId,
     itemId: item.itemId,
@@ -534,7 +551,10 @@ function projectPlan(
 
 function projectProgress(
   turn: ConversationTurn,
+  policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineProgressViewModel | null {
+  if (turn.source === "legacy_archive" || turn.source === "native_rebuilt") return null;
+  if (turn.source === "native_observed" && (policy?.liveTurnId !== turn.turnId || turn.availability === "unavailable" || turn.diagnostic)) return null;
   const identity = stableIdentity("timeline-progress", turn.threadId, turn.turnId);
   switch (turn.status) {
     case "queued":
@@ -605,13 +625,14 @@ function projectThreadNotices(
     severity: ConversationNotice["severity"];
     code: ConversationNotice["code"];
     count: number;
+    diagnostic?: string;
   }>();
   for (const notice of thread.notices) {
     const severity = notice.severity === "error" ? "error" : "warning";
     const code = severity === "error" ? "conversation_error" : "conversation_warning";
-    const key = stableIdentity(severity, code);
+    const key = stableIdentity(severity, code, notice.diagnostic ?? "");
     const existing = grouped.get(key);
-    grouped.set(key, { severity, code, count: (existing?.count ?? 0) + 1 });
+    grouped.set(key, { severity, code, diagnostic: notice.diagnostic, count: (existing?.count ?? 0) + 1 });
   }
   return Object.freeze([...grouped.values()]
     .sort((left, right) =>
@@ -622,12 +643,14 @@ function projectThreadNotices(
         thread.threadId,
         notice.severity,
         notice.code,
+        notice.diagnostic ?? "",
       ),
       source: "thread_notice" as const,
       role: "system" as const,
       severity: notice.severity,
       code: notice.code,
       count: notice.count,
+      diagnostic: notice.diagnostic,
     })));
 }
 
@@ -638,6 +661,7 @@ function projectTurn(
   policy?: ConversationTimelineProjectionPolicy,
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
+    liveObserved: policy?.liveTurnId === turn.turnId,
     source: turn.source, statusSource: turn.statusSource, availability: turn.availability, submissionStatus: turn.submissionStatus,
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
     threadId: turn.threadId,
@@ -648,7 +672,7 @@ function projectTurn(
     terminalStatus: turn.terminalStatus,
     terminalCode: turn.terminalCode,
     plan: projectPlan(turn, policy),
-    progress: projectProgress(turn),
+    progress: projectProgress(turn, policy),
     notices: projectNotices(turn),
     items: Object.freeze(relatedItems(state, turn)
       .map((item) => projectItem(item, turn, approvalState, policy))),

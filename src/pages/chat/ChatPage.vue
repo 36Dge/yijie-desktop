@@ -139,7 +139,7 @@ const conversationTimeline = computed(() => {
         renderedConversationView.value,
         sessionId,
         chatStore.conversationApprovalState,
-        { protectApprovalProcessContent: feat137ApprovalUiEnabled },
+        { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       );
 });
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));

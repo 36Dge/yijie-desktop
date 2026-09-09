@@ -2394,6 +2394,26 @@ describe("chat view-model store", () => {
     expect(resyncSession).toHaveBeenCalledTimes(2);
   });
 
+  it("marks live display only from the current native subscription and clears it on selection", async () => {
+    const {client, emitNative} = fakeClient();
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    expect(store.nativeLiveTurnId).toBeNull();
+    const event: NativeConversationViewEvent = {schemaVersion:1, contextId:CONTEXT, sessionId:SESSION_A,
+      subscriptionId:"019c1a00-0000-7000-8000-00000000000a", view:{sessionId:SESSION_A, turnId:TURN_A,
+        runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
+        availability:"partial", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};
+    emitNative({...event, subscriptionId:"previous-subscription"});
+    expect(store.nativeLiveTurnId).toBeNull();
+    emitNative(event);
+    expect(store.nativeLiveTurnId).toBe(TURN_A);
+    await store.selectSession(SESSION_B);
+    expect(store.nativeLiveTurnId).toBeNull();
+    emitNative({...event, view:{...event.view, revision:"2"}});
+    expect(store.nativeLiveTurnId).toBeNull();
+  });
+
   it("ignores an accepted submit response after selecting B without clearing B's draft", async () => {
     const delayedSubmit = new Deferred<Awaited<ReturnType<ChatClient["submitTurn"]>>>();
     let submitOperationId: string | null = null;

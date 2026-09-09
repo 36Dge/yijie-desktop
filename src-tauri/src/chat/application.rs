@@ -716,14 +716,6 @@ pub trait TurnProjectionSink: Send + Sync {
     }
     fn publish(&self, projection: LiveTurnProjection) -> Result<(), ChatError>;
 
-    fn publish_feat134(&self, _projection: Feat134Projection) -> Result<(), ChatError> {
-        Ok(())
-    }
-
-    fn publish_feat136(&self, _projection: Feat134Projection) -> Result<(), ChatError> {
-        Ok(())
-    }
-
     fn publish_feat137(
         &self,
         _projection: Feat134Projection,

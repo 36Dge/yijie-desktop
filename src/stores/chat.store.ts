@@ -378,6 +378,9 @@ export function createChatStoreDefinition(
     const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
     const localSubmissions = shallowRef<Readonly<Record<string, LocalSubmissionView>>>({});
+    // Transport observation only; history loading never marks a Turn live.
+    const nativeLiveTurnId = ref<string | null>(null);
+    watch(phase, value => { if (value !== "streaming") nativeLiveTurnId.value = null; }, {flush: "sync"});
     const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
     const conversationState = shallowRef<ConversationView>(emptyConversationView());
     const conversationApprovalState = shallowRef<ConversationApprovalState>(
@@ -690,6 +693,7 @@ export function createChatStoreDefinition(
       history.value = null;
       conversationState.value = emptyConversationView();
       nativeViews.value = {};
+      nativeLiveTurnId.value = null;
       localSubmissions.value = {};
       conversationApprovalState.value = createConversationApprovalState();
       approvalTransients.value = Object.freeze({});
@@ -1750,7 +1754,10 @@ export function createChatStoreDefinition(
       if (submission) localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
       displayNativeViews();
       if (event.view.terminalObserved || event.view.statusSource === "runtime_read") void resyncSelected();
-      else if (event.view.status === "inProgress") phase.value = "streaming";
+      else if (event.view.status === "inProgress") {
+        phase.value = "streaming";
+        nativeLiveTurnId.value = event.view.turnId;
+      }
     }
 
     async function loadNativeViews(contextId: string, sessionId: string, epoch: number, controller: AbortController, turnIds: readonly string[]): Promise<void> {
@@ -4227,6 +4234,7 @@ export function createChatStoreDefinition(
       selectedAccessMode,
       history,
       conversationState,
+      nativeLiveTurnId,
       conversationApprovalState,
       approvalTransients,
       approvalAuthorityRevision,

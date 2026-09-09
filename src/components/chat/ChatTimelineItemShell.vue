@@ -38,10 +38,10 @@ const id = useId();
 const titleId = `${id}-title`;
 const statusId = `${id}-status`;
 const contentId = `${id}-content`;
-const busy = computed(() => props.item.phase === "pending" || props.item.phase === "active");
+const busy = computed(() => props.item.busy === true);
 const iconTone = computed(() => props.item.role === "system"
   ? "warning" as const
-  : props.item.phase === "active"
+  : busy.value
     ? "primary" as const
     : "muted" as const);
 
@@ -61,12 +61,15 @@ function toggle(): void {
     class="chat-timeline-item-shell"
     :class="[
       `chat-timeline-item-shell--${item.role}`,
-      `chat-timeline-item-shell--${item.phase}`,
+      `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
     ]"
     :aria-labelledby="titleId"
     :aria-describedby="statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
+    <p v-if="item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
+      {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项仅保留部分内容" }}；不代表执行失败。
+    </p>
     <header class="chat-timeline-item-shell__header">
       <button
         v-if="collapsible"
@@ -87,7 +90,7 @@ function toggle(): void {
             size="xs"
             :tone="statusTone"
           />
-          <span>{{ statusLabel }}</span>
+          <span>{{ item.activityLabel ?? statusLabel }}</span>
         </span>
         <YjIcon :name="expanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
       </button>
@@ -104,7 +107,7 @@ function toggle(): void {
             size="xs"
             :tone="statusTone"
           />
-          <span>{{ statusLabel }}</span>
+          <span>{{ item.activityLabel ?? statusLabel }}</span>
         </span>
       </div>
 
@@ -129,6 +132,12 @@ function toggle(): void {
 </template>
 
 <style scoped>
+.chat-timeline-item-shell__availability {
+  margin: var(--yj-space-0);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+}
+
 .chat-timeline-item-shell {
   min-width: 0;
   border: var(--yj-border-width) solid transparent;
