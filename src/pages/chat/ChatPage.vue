@@ -8,6 +8,7 @@ import ChatPermissionControl from "../../components/chat/ChatPermissionControl.v
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
@@ -87,6 +88,13 @@ const prompt = computed({
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
 const composer = ref<ChatComposerHandle | null>(null);
+const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
+function handleEntryFocus(event: FocusEvent): void {
+  // Route navigation focuses the heading for accessibility; only controls interrupt the opening.
+  if (event.target instanceof Element && event.target.closest("button, input, textarea, select, a[href], [contenteditable]")) {
+    homeOpening.value?.finish();
+  }
+}
 const composerSubmissionState = computed<ChatComposerSubmissionState>(() => {
   if (chatStore.submissionState !== "idle") return chatStore.submissionState;
   return submitting.value ? "submitting" : "idle";
@@ -557,10 +565,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section v-if="!isSessionRoute" class="chat-entry" aria-labelledby="new-task-title">
+  <section v-if="!isSessionRoute" class="chat-entry" aria-labelledby="new-task-title" @focusin="handleEntryFocus" @pointerdown="homeOpening?.finish()">
     <div class="chat-entry__content">
-      <h1 id="new-task-title" class="chat-entry__heading">易界AI</h1>
-      <p id="new-task-subtitle" class="chat-entry__subtitle">选择本地项目，用一句话开始任务。</p>
+      <ChatHomeOpening ref="homeOpening" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" />
 
       <div v-if="stableError" class="chat-notice" :class="`chat-notice--${stableError.tone}`" role="alert">
         <YjIcon :name="stableError.tone === 'error' ? 'warning' : 'pending'" size="lg" :tone="stableError.tone === 'error' ? 'error' : 'warning'" />
@@ -854,15 +861,12 @@ onBeforeUnmount(() => {
   margin: var(--yj-layout-chat-entry-top-offset) auto 0;
 }
 
-.chat-entry__heading,
 .chat-workspace__title {
   margin: 0;
   color: var(--yj-color-text-primary);
   font-weight: var(--yj-font-weight-semibold);
 }
 
-.chat-entry__heading { font-size: var(--yj-font-size-display); line-height: var(--yj-line-height-display); }
-.chat-entry__subtitle { margin: var(--yj-space-3) 0 var(--yj-space-8); color: var(--yj-color-text-body); font-size: var(--yj-font-size-body); }
 .chat-entry__unsupported { width: min(100%, var(--yj-layout-chat-composer-max)); margin: 0 0 var(--yj-space-3); color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
 
 .chat-workspace {

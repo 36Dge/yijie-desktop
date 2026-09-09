@@ -25,6 +25,8 @@
 
 ## 时长
 
+2026-09-10 用户确认的首页品牌开场为局部例外：`--yj-motion-home-opening` 2200ms，每次进入空白的“新建任务”首页播放一次，同页重复点击菜单不重播；打断收尾 `--yj-motion-home-opening-settle` 160ms。常规控件仍遵循下表，不把品牌时长扩展到弹窗或普通交互。详见 [Chat 工作区「开界」规范](../05-patterns/02-chat-workspace.md)。
+
 | Token | 值 | 用途 |
 |---|---|---|
 | `motion-fast` | 120ms | hover、focus、小反馈 |

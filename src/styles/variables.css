@@ -141,12 +141,28 @@
   --yj-layout-permission-menu-width: 380px;
   --yj-layout-permission-confirm-width: 420px;
 
+  /* Home brand opening on each page entry. */
+  --yj-motion-home-opening: 2200ms;
+  --yj-motion-home-opening-settle: 160ms;
+  --yj-home-opening-stage-width: 320px;
+  --yj-home-opening-stage-height: 136px;
+  --yj-home-opening-logo-peak: 80px;
+  --yj-home-opening-face: #25282b;
+  --yj-home-opening-edge: #131619;
+  --yj-home-opening-fold-edge: #799f30;
+  --yj-home-opening-shade: #000000;
+  --yj-home-opening-light: #ffffff;
+  --yj-home-opening-shadow: rgba(37, 40, 43, .20);
+
   --yj-logo-mark-sm: 24px;
   --yj-logo-mark-md: 32px;
   --yj-logo-mark-lg: 40px;
 }
 
 [data-theme="dark"] {
+  --yj-home-opening-face: #ffffff;
+  --yj-home-opening-edge: #a5adb5;
+  --yj-home-opening-shadow: rgba(0, 0, 0, .48);
   color-scheme: dark;
   --yj-brand-logo-light-display: none;
   --yj-brand-logo-dark-display: block;

@@ -375,7 +375,7 @@ function handlePaste(event: ClipboardEvent): void {
         class="chat-composer__textarea"
         :value="modelValue"
         :readonly="submissionBusy"
-        :placeholder="mode === 'new' ? '描述你希望易界 AI 完成的任务…' : '继续输入任务需求…'"
+        :placeholder="mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
         :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
         :aria-invalid="visibleValidationMessage ? 'true' : undefined"
         autocomplete="off"

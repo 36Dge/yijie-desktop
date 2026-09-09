@@ -256,6 +256,65 @@ afterEach(() => {
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("replays the opening after leaving a session but not on duplicate new-task navigation", async () => {
+    const { wrapper, router } = await mountPage("/chat");
+    let now = 0;
+    let sequence = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++sequence, callback);
+      return sequence;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+
+    await router.push(`/chat/${SESSION_ID}`);
+    await flushPromises();
+    expect(wrapper.find(".home-opening").exists()).toBe(false);
+    await router.push("/chat");
+    await flushPromises();
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("true");
+
+    const heading = wrapper.get<HTMLHeadingElement>("#new-task-title").element;
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+    now = 300;
+    const afterNavigation = [...frames.values()];
+    frames.clear();
+    afterNavigation.forEach(callback => callback(now));
+    await flushPromises();
+    expect(document.activeElement).toBe(heading);
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("true");
+
+    now = 2200;
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach(callback => callback(now));
+    await flushPromises();
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("false");
+    await router.push("/chat");
+    await flushPromises();
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("false");
+    expect(frames.size).toBe(0);
+
+    await router.push(`/chat/${SESSION_ID}`);
+    await router.push("/chat");
+    await flushPromises();
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("true");
+    wrapper.get<HTMLTextAreaElement>("textarea").element.focus();
+    now += 160;
+    const afterInput = [...frames.values()];
+    frames.clear();
+    afterInput.forEach(callback => callback(now));
+    await flushPromises();
+    expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("false");
+    wrapper.unmount();
+    expect(frames.size).toBe(0);
+  });
+
   it("announces Host identity binding without presenting a missing-resource failure", async () => {
     const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
 
