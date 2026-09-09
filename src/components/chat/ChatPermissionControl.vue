@@ -44,39 +44,117 @@ function navigate(event: KeyboardEvent): void {
   <NPopover v-model:show="open" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
       <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
-        <YjIcon :name="selected.icon" size="sm" />
+        <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" /></span>
         <span>{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
       </button>
     </template>
     <div ref="menuElement" class="permission-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">
       <button v-for="option in options" :key="option.mode" type="button" role="menuitemradio" :aria-checked="state?.mode === option.mode" :class="{ 'is-full': option.mode === 'full' }" @click="choose(option.mode)">
-        <YjIcon :name="option.icon" size="lg" />
+        <YjIcon :name="option.icon" size="md" :tone="option.mode === 'full' ? 'warning' : 'default'" />
         <span class="permission-option-copy"><strong>{{ option.label }}</strong><span>{{ option.description }}</span></span>
-        <YjIcon v-if="state?.mode === option.mode" name="permissionCheck" size="lg" />
+        <span class="permission-option-check" aria-hidden="true"><YjIcon v-if="state?.mode === option.mode" name="permissionCheck" size="xs" /></span>
       </button>
     </div>
   </NPopover>
   <NModal v-model:show="confirm" :mask-closable="true">
     <NCard class="permission-confirm" title="开启完全访问权限" role="dialog" aria-modal="true" aria-label="开启完全访问权限" :bordered="false">
       <p>此任务将可以访问互联网、修改项目外的文件并运行命令，无需逐次请求批准。</p>
-      <div class="permission-confirm-actions"><button type="button" class="yj-control yj-control--regular" @click="confirm = false">取消</button><button type="button" class="is-full yj-control yj-control--regular" @click="approveFull">确认开启</button></div>
+      <div class="permission-confirm-actions"><button type="button" class="yj-control yj-control--regular" @click="confirm = false">取消</button><button type="button" class="permission-confirm-primary yj-control yj-control--regular" @click="approveFull">确认开启</button></div>
     </NCard>
   </NModal>
 </template>
 
 <style scoped>
-.permission-trigger { border:0; background:var(--yj-color-control-hover); color:var(--yj-color-text-secondary); cursor:pointer; }
-.permission-trigger:disabled { opacity:.6; cursor:default; }
-.is-full { color:var(--yj-color-semantic-warning-ink) !important; }
-.permission-menu { width:min(520px,calc(100vw - 40px)); padding:var(--yj-space-2); background:var(--yj-color-bg-elevated); border:1px solid var(--yj-color-border-default); border-radius:var(--yj-radius-xl); box-shadow:var(--yj-shadow-popover); }
-.permission-menu button { display:flex; align-items:center; gap:var(--yj-space-3); width:100%; padding:var(--yj-space-3); border:0; border-radius:var(--yj-radius-lg); text-align:left; color:var(--yj-color-text-primary); background:transparent; font:inherit; cursor:pointer; }
-.permission-menu button:hover { background:var(--yj-color-control-hover); }
-.permission-option-copy { display:grid; flex:1; min-width:0; gap:var(--yj-space-1); }
-.permission-option-copy strong { font-weight:600; }
-.permission-option-copy > span { color:var(--yj-color-text-tertiary); font-size:var(--yj-font-size-caption); line-height:1.5; }
-.is-full .permission-option-copy > span { color:inherit; }
-.permission-confirm { width:min(460px,calc(100vw - 40px)); }
-.permission-confirm-actions { display:flex; justify-content:flex-end; gap:var(--yj-space-3); margin-top:var(--yj-space-5); }
-.permission-confirm-actions button { border:1px solid var(--yj-color-border-default); background:var(--yj-color-bg-card); cursor:pointer; }
-button:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:2px; }
+.permission-trigger {
+  padding-inline-start: var(--yj-space-1);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  background: var(--yj-color-bg-card);
+  color: var(--yj-color-text-primary);
+  cursor: pointer;
+}
+.permission-trigger-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--yj-space-6);
+  height: var(--yj-space-6);
+  border-radius: var(--yj-radius-full);
+  background: var(--yj-color-brand-primary);
+  color: var(--yj-color-on-brand);
+}
+.permission-trigger-icon .yj-icon { color: inherit; }
+.permission-trigger:hover:not(:disabled) { background: var(--yj-color-control-hover); }
+.permission-trigger:active:not(:disabled) { background: var(--yj-color-control-pressed); }
+.permission-trigger[aria-expanded="true"]:not(.is-full) {
+  background: var(--yj-color-brand-primary);
+  border-color: var(--yj-color-brand-primary);
+  color: var(--yj-color-on-brand);
+}
+.permission-trigger.is-full { color: var(--yj-color-semantic-warning-ink); }
+.permission-trigger.is-full .permission-trigger-icon {
+  background: var(--yj-color-warning-soft);
+  color: var(--yj-color-semantic-warning-ink);
+}
+.permission-trigger:disabled { color: var(--yj-color-text-disabled); cursor: default; }
+.permission-trigger:disabled .permission-trigger-icon {
+  background: var(--yj-color-control-disabled-bg);
+  color: var(--yj-color-text-disabled);
+}
+.permission-menu {
+  width: min(var(--yj-layout-permission-menu-width), calc(100vw - var(--yj-space-10)));
+  padding: var(--yj-space-2);
+  background: var(--yj-color-bg-elevated);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  border-radius: var(--yj-radius-lg);
+  box-shadow: var(--yj-shadow-popover);
+}
+.permission-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--yj-space-2);
+  width: 100%;
+  padding: var(--yj-space-2);
+  border: 0;
+  border-radius: var(--yj-radius-md);
+  text-align: left;
+  color: var(--yj-color-text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
+  cursor: pointer;
+}
+.permission-menu button:hover,
+.permission-menu button[aria-checked="true"] { background: var(--yj-color-control-hover); }
+.permission-menu button:active { background: var(--yj-color-control-pressed); }
+.permission-option-copy { display: grid; flex: 1; min-width: 0; }
+.permission-option-copy strong { font-weight: var(--yj-font-weight-semibold); }
+.permission-option-copy > span {
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+}
+.permission-menu .is-full strong { color: var(--yj-color-semantic-warning-ink); }
+.permission-option-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--yj-space-5);
+  height: var(--yj-space-5);
+  border-radius: var(--yj-radius-full);
+}
+[aria-checked="true"] .permission-option-check { background: var(--yj-color-brand-primary); }
+.permission-option-check .yj-icon { color: var(--yj-color-on-brand); }
+.permission-confirm { width: min(var(--yj-layout-permission-confirm-width), calc(100vw - var(--yj-space-10))); }
+.permission-confirm p { margin: 0; color: var(--yj-color-text-body); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
+.permission-confirm-actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); margin-top: var(--yj-space-5); }
+.permission-confirm-actions button { border: var(--yj-border-width) solid var(--yj-color-border-default); color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); cursor: pointer; }
+.permission-confirm-actions button:hover { background: var(--yj-color-control-hover); }
+.permission-confirm-actions button:active { background: var(--yj-color-control-pressed); }
+.permission-confirm-actions .permission-confirm-primary { border-color: var(--yj-color-brand-primary); background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); }
+.permission-confirm-actions .permission-confirm-primary:hover { border-color: var(--yj-color-brand-hover); background: var(--yj-color-brand-hover); }
+.permission-confirm-actions .permission-confirm-primary:active { border-color: var(--yj-color-brand-active); background: var(--yj-color-brand-active); }
+button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-focus-ring-width); }
 </style>

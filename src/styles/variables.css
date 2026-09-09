@@ -138,6 +138,8 @@
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-sidebar-indent: 28px;
+  --yj-layout-permission-menu-width: 380px;
+  --yj-layout-permission-confirm-width: 420px;
 
   --yj-logo-mark-sm: 24px;
   --yj-logo-mark-md: 32px;
