@@ -27,3 +27,13 @@ UI busy 与执行事实分开：只有当前有效订阅观察到的活跃 Turn 
 Item availability 原值传入卡片；现有 private view 没有 diagnostic scope，允许的诊断代码保守按会话展示，未知代码使用固定文案，不把提示猜测绑定到 Turn/Item。旧 v4/v5 DTO、历史 IPC/表、Artifact/Command 适配保留。无调用的 v4/v5 内容发布方法及专属辅助代码已删除，FEAT-137/152 语义与开关边界不变。
 
 本次新验收状态以元仓 FEAT-134 调整记录为准，不继承原 D4。CI 修复使用兄弟目录和真实固定来源，不减少校验；尚未实际运行的远端 CI 不写 PASS。
+
+## FEAT-136 原生 Command 展示调整（2026-09-09）
+
+Command 的进程内展示类型现在区分原生与旧档案。原生分支直接持有已有生成 Item 的只读引用、source 和 lastMethod，不再填造旧 startedSource、目录结构或 output.retention。cwdLabel、outputText、exitCode、durationMs 直接展示，0 值与合法空输出保留。
+
+failed/declined 的固定文案和 command_failed/command_declined 是显式原生 status 的产品展示映射，不是 Codex 原生 error 对象；不根据 exit、Turn 失败或 availability 改写执行结果。历史/缺结束记录沿用既有 busy/activityLabel，避免播报“正在执行”；Item partial 只说明信息不完整，不猜上游截断原因。
+
+Host 的最终安全输出策略、native v7、唯一缓冲及 SQLCipher 保存完全复用；会话级 pending-final 诊断说明曾观察到输出通知，不猜 Item 归属。旧 v4/v5 DTO、IPC、表、读取及安全投影有真实兼容依赖，未删除或恢复其为新对话引擎。真实 Tool 仍属 FEAT-144，未扩展 native Tool 能力。
+
+普通 canonical 验收另发现外壳没有消费已有的缩放视口宽度变量、长标题撑开 Chat Grid；最小修复为使用既有缩放宽度及 minmax(0, 1fr) 单列，不增加状态或权限。最终真实成功/失败两条 Command、200%、键盘复制和正常重开通过；本次独立请求累计3/10文本、0图片。本次八项 local D4 基于当时的工作区候选完成；验收时逐文件 SHA-256 及后续提交、推送状态分别以元仓 FEAT-136 验收和交付记录为准，提交或推送不表示重新运行 D4；原五项 Command D4 已完整归档。

@@ -7,7 +7,7 @@ import { afterEach,describe,expect,it,vi } from "vitest";
 import type { ConversationApproval } from "../../domain/conversation-approval";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type {
-ConversationCommandExecution,
+ConversationLegacyCommandExecution,
 ConversationCommandOutput,
 ConversationSafeText,
 ConversationSourceFact,
@@ -54,8 +54,8 @@ function completeOutput(text = "安全输出"): ConversationCommandOutput {
 }
 
 function execution(
-  overrides: Partial<ConversationCommandExecution> = {},
-): ConversationCommandExecution {
+  overrides: Partial<ConversationLegacyCommandExecution> = {},
+): ConversationLegacyCommandExecution {
   return deepFreeze({
     kind: "command",
     status: "completed",
@@ -102,7 +102,7 @@ function approval(
   });
 }
 
-function item(command: ConversationCommandExecution): ConversationTimelineItemViewModel {
+function item(command: ConversationLegacyCommandExecution): ConversationTimelineItemViewModel {
   const active = command.status === "running";
   const incomplete = command.status === "incomplete";
   return deepFreeze({

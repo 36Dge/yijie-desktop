@@ -12,7 +12,7 @@ const messages: Readonly<Record<string, string>> = Object.freeze({
   part_unavailable: "部分内容分段暂不可用。",
   plan_unavailable: "计划信息暂不可用，未生成替代步骤。",
   status_unavailable: "原生执行状态暂不可确认。",
-  command_output_pending_final: "命令输出将在收到原生最终结果后展示。",
+  command_output_pending_final: "曾观察到命令输出通知；安全输出以各命令的结束记录为准。",
   projection_unavailable: "部分信息暂时无法展示，已保留可用内容。",
   projection_limit_exceeded: "部分信息达到传输或显示限制。",
   unsupported_notification: "当前版本暂不支持部分原生通知。",

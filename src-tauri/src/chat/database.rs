@@ -10282,12 +10282,18 @@ mod tests {
             native_test_event(
                 &context,
                 3,
+                "item/completed",
+                serde_json::json!({"item":{"id":"live-command","type":"commandExecution","status":"failed","commandLabel":"检查项目","cwdLabel":"当前项目","outputText":"普通安全输出","exitCode":128,"durationMs":0,"availability":"partial"}}),
+            ),
+            native_test_event(
+                &context,
+                4,
                 "turn/plan/updated",
                 serde_json::json!({"plan":[{"step":"Review","status":"completed"}]}),
             ),
             native_test_event(
                 &context,
-                4,
+                5,
                 "turn/completed",
                 serde_json::json!({"turn":{"id":context.runtime_turn_id,"status":"failed","errorCode":"runtime_error","items":[],"itemsComplete":false}}),
             ),
@@ -10307,7 +10313,7 @@ mod tests {
                 .query_row("SELECT count(*) FROM chat_native_facts", [], |r| r
                     .get::<_, i64>(0))
                 .unwrap(),
-            4
+            5
         );
         let history = repo
             .load_history(pending.session_id, None, Some(20))
@@ -10330,7 +10336,16 @@ mod tests {
         assert_eq!(views[0].items[0].last_method, "item/started");
         assert_eq!(views[0].items[1].item.id, "live-a");
         assert_eq!(views[0].plan.as_ref().unwrap()[0].step, "Review");
-        assert_eq!(views[0].items.len(), 2);
+        assert_eq!(views[0].items.len(), 3);
+        let command = &views[0].items[2];
+        assert_eq!(command.last_method, "item/completed");
+        assert_eq!(command.item.id, "live-command");
+        assert_eq!(command.item.status.as_deref(), Some("failed"));
+        assert_eq!(command.item.cwd_label.as_deref(), Some("当前项目"));
+        assert_eq!(command.item.output_text.as_deref(), Some("普通安全输出"));
+        assert_eq!(command.item.exit_code, Some(128));
+        assert_eq!(command.item.duration_ms, Some(0));
+        assert_eq!(command.item.availability, "partial");
         let other = open_repository_for_scope(&root, 45, scope());
         assert!(other
             .native_views(pending.session_id, &[pending.turn_id])

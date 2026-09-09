@@ -871,6 +871,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--yj-color-bg-page);

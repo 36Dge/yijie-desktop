@@ -82,7 +82,7 @@ describe("FEAT-134 native streaming presentation", () => {
     expect(projected.notices[0]).toMatchObject({source: "thread_notice", diagnostic: "display_limit"});
     const wrapper = mount(ChatTimeline, {props: {timeline: projected}});
     expect(wrapper.text()).toContain("显示内容达到容量限制");
-    expect(wrapper.text()).toContain("此项仅保留部分内容");
+    expect(wrapper.text()).toContain("此项信息不完整");
     expect(wrapper.get('article').attributes('aria-busy')).toBe("false");
     const unknown = timeline({...base, diagnostic: "unrecognized-provider-detail"});
     expect(JSON.stringify(unknown)).not.toContain("unrecognized-provider-detail");

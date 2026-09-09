@@ -68,7 +68,7 @@ function toggle(): void {
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
-      {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项仅保留部分内容" }}；不代表执行失败。
+      {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整" }}；不代表执行失败。
     </p>
     <header class="chat-timeline-item-shell__header">
       <button

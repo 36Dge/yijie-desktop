@@ -78,7 +78,7 @@ function recoverCurrentNewTask(): void {
 <style scoped>
 .yj-app-shell {
   display: flex;
-  width: 100%;
+  width: var(--yj-ui-viewport-width, 100%);
   min-width: var(--yj-layout-window-min-width);
   min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
   height: var(--yj-ui-viewport-height, 100vh);

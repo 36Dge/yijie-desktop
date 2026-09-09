@@ -62,6 +62,23 @@ const emit = defineEmits<{
   "approval-decision": [change: ChatApprovalDecisionChange];
 }>();
 
+const native = computed(() => "native" in props.execution ? props.execution.native : null);
+const legacy = computed(() => "native" in props.execution ? null : props.execution);
+const commandSummary = computed(() => native.value
+  ? native.value.item.commandLabel ?? "命令信息不可用"
+  : legacy.value?.commandSummary.text ?? "命令执行");
+const summaryTruncation = computed(() => legacy.value
+  ? safeTextTruncation(legacy.value.commandSummary) : null);
+const exitCode = computed(() => native.value
+  ? native.value.item.exitCode ?? null : legacy.value?.exitCode ?? null);
+const executionError = computed(() => {
+  if (!native.value) return legacy.value?.error ?? null;
+  // These are product display codes for explicit native status, not Runtime errors.
+  if (native.value.item.status === "failed") return {code: "command_failed", summary: "命令执行失败"};
+  if (native.value.item.status === "declined") return {code: "command_declined", summary: "命令未获执行"};
+  return null;
+});
+
 const statusPresentation = computed<Readonly<{
   label: string;
   summary: string;
@@ -70,6 +87,9 @@ const statusPresentation = computed<Readonly<{
 }>>(() => {
   switch (props.execution.status) {
     case "running":
+      if (native.value && props.item.busy !== true) {
+        return { label: "最后观察到执行中", summary: props.item.activityLabel ?? "最后观察到命令执行中，当前执行状态未确认。", icon: "pending", tone: "muted" };
+      }
       return { label: "执行中", summary: "命令正在执行。", icon: "pending", tone: "primary" };
     case "completed":
       return { label: "已完成", summary: "命令已完成。", icon: "check", tone: "success" };
@@ -84,7 +104,7 @@ const statusPresentation = computed<Readonly<{
 });
 
 const defaultExpanded = computed(() =>
-  props.execution.status === "running" || props.approval?.status === "pending");
+  (native.value ? props.item.busy === true : props.execution.status === "running") || props.approval?.status === "pending");
 
 const approvalCardStatus = computed<ChatApprovalCardStatus | null>(() => {
   const approval = props.approval;
@@ -131,12 +151,14 @@ const approvalActionable = computed(() =>
   props.canDecideApproval && approvalCardStatus.value === "pending");
 
 const cwdLabel = computed(() => {
-  switch (props.execution.cwd.kind) {
+  if (native.value) return native.value.item.cwdLabel ?? "工作目录信息不可用";
+  const cwd = legacy.value?.cwd;
+  switch (cwd?.kind) {
     case "workspace_root":
       return "工作区根目录";
     case "workspace_relative":
-      return props.execution.cwd.segments.length > 0
-        ? props.execution.cwd.segments.join("/")
+      return cwd.segments.length > 0
+        ? cwd.segments.join("/")
         : "工作区相对目录";
     case "redacted":
     default:
@@ -145,9 +167,13 @@ const cwdLabel = computed(() => {
 });
 
 const outputSections = computed<readonly OutputSection[]>(() => {
-  const output = props.execution.output;
+  if (native.value) {
+    const text = native.value.item.outputText;
+    return text == null ? [] : [{key: "complete", label: "安全输出", text}];
+  }
+  const output = legacy.value?.output ?? null;
   if (output !== null) return completedOutputSections(output);
-  const live = props.execution.liveOutput?.text ?? "";
+  const live = legacy.value?.liveOutput?.text ?? "";
   if (live === "") return Object.freeze([]);
   return Object.freeze([{
     key: "live" as const,
@@ -164,13 +190,24 @@ const copyText = computed(() => {
 });
 
 const outputHeading = computed(() => {
-  if (props.execution.output?.retention === "head_tail") return "保留输出";
-  if (props.execution.output !== null) return "完成输出";
+  if (native.value) return "安全输出";
+  if (legacy.value?.output?.retention === "head_tail") return "保留输出";
+  if (legacy.value?.output != null) return "完成输出";
   return props.execution.status === "running" ? "实时输出" : "已保留输出";
 });
 
 const outputStateMessage = computed<string | null>(() => {
-  const output = props.execution.output;
+  if (native.value) {
+    const {item, lastMethod} = native.value;
+    if (item.outputText === "") return "已收到的安全输出为空。";
+    if (item.outputText != null) return null;
+    if (lastMethod === "thread/read") return "原生历史未提供可显示的输出。";
+    if (lastMethod === "item/completed") return "命令结束记录未提供可显示的输出。";
+    return props.item.busy === true
+      ? "输出将在收到命令结束记录后展示。"
+      : "未观察到命令结束记录，暂无结果输出。";
+  }
+  const output = legacy.value?.output ?? null;
   if (output?.retention === "unavailable") {
     return "运行时未提供可用的聚合输出。";
   }
@@ -180,7 +217,7 @@ const outputStateMessage = computed<string | null>(() => {
   if (output?.retention === "complete" && (output.text ?? "") === "") {
     return "命令已完成，没有输出内容。";
   }
-  if (output === null && props.execution.liveOutput === null) {
+  if (output === null && legacy.value?.liveOutput === null) {
     return props.execution.status === "running"
       ? "正在等待安全输出…"
       : "本次命令没有可显示的完成输出。";
@@ -192,19 +229,21 @@ const outputStateMessage = computed<string | null>(() => {
 });
 
 const outputTruncation = computed(() => {
-  if (props.execution.output?.retention === "head_tail") return null;
-  if (props.execution.output?.truncated) {
-    return `输出已截断；${truncationReasonLabel(props.execution.output.truncationReason)}。`;
+  if (native.value) return null; // Item availability does not identify an output truncation cause.
+  if (legacy.value?.output?.retention === "head_tail") return null;
+  if (legacy.value?.output?.truncated) {
+    return `输出已截断；${truncationReasonLabel(legacy.value.output.truncationReason)}。`;
   }
-  if (props.execution.output === null && props.execution.liveOutput?.truncated) {
-    return `实时输出已截断；${truncationReasonLabel(props.execution.liveOutput.truncationReason)}。`;
+  if (legacy.value?.output === null && legacy.value.liveOutput?.truncated) {
+    return `实时输出已截断；${truncationReasonLabel(legacy.value.liveOutput.truncationReason)}。`;
   }
   return null;
 });
 
-const durationLabel = computed(() => props.execution.durationMs === null
-  ? null
-  : formatDuration(props.execution.durationMs));
+const durationLabel = computed(() => {
+  const duration = native.value ? native.value.item.durationMs : legacy.value?.durationMs;
+  return duration == null ? null : formatDuration(duration);
+});
 
 function completedOutputSections(output: ConversationCommandOutput): readonly OutputSection[] {
   switch (output.retention) {
@@ -288,7 +327,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
       <dl class="chat-command-item__facts">
         <div>
           <dt>安全摘要</dt>
-          <dd>{{ execution.commandSummary.text || "命令执行" }}</dd>
+          <dd>{{ commandSummary || "命令执行" }}</dd>
         </div>
         <div>
           <dt>工作目录</dt>
@@ -298,19 +337,19 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
           <dt>耗时</dt>
           <dd>{{ durationLabel }}</dd>
         </div>
-        <div v-if="execution.exitCode !== null">
+        <div v-if="exitCode !== null">
           <dt>退出码</dt>
-          <dd>{{ execution.exitCode }}</dd>
+          <dd>{{ exitCode }}</dd>
         </div>
       </dl>
 
       <p
-        v-if="safeTextTruncation(execution.commandSummary)"
+        v-if="summaryTruncation"
         class="chat-command-item__notice"
         role="note"
       >
         <YjIcon name="warning" size="sm" tone="warning" />
-        <span>{{ safeTextTruncation(execution.commandSummary) }}</span>
+        <span>{{ summaryTruncation }}</span>
       </p>
 
       <section class="chat-command-item__output" aria-label="命令输出">
@@ -345,11 +384,11 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
         </p>
       </section>
 
-      <div v-if="execution.error" class="chat-command-item__error" role="note">
+      <div v-if="executionError" class="chat-command-item__error" role="note">
         <YjIcon name="warning" size="sm" tone="error" />
         <div>
-          <strong>{{ execution.error.summary }}</strong>
-          <code>{{ execution.error.code }}</code>
+          <strong>{{ executionError.summary }}</strong>
+          <code>{{ executionError.code }}</code>
         </div>
       </div>
     </div>

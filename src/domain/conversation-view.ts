@@ -91,7 +91,7 @@ export interface ConversationCommandOutput {
   readonly truncationReason: ConversationTruncationReason | null;
 }
 
-export interface ConversationCommandExecution {
+export interface ConversationLegacyCommandExecution {
   readonly kind: "command";
   readonly status: "running" | "completed" | "failed" | "declined" | "incomplete" | "unknown";
   readonly startedSource: ConversationSourceFact;
@@ -104,6 +104,19 @@ export interface ConversationCommandExecution {
   readonly exitCode: number | null;
   readonly error: ConversationExecutionError | null;
 }
+
+/** Native facts stay native; legacy retention and event identities do not apply. */
+export interface ConversationNativeCommandExecution {
+  readonly kind: "command";
+  readonly status: ConversationLegacyCommandExecution["status"];
+  readonly native: Readonly<{
+    source: NativeConversationView["source"];
+    lastMethod: NativeConversationView["items"][number]["lastMethod"];
+    item: NativeConversationView["items"][number]["item"];
+  }>;
+}
+
+export type ConversationCommandExecution = ConversationLegacyCommandExecution | ConversationNativeCommandExecution;
 
 export interface ConversationToolIdentity {
   readonly resolution: "known" | "unknown";
@@ -354,16 +367,13 @@ export function viewFromLegacySnapshot(snapshot: ConversationSnapshot): Conversa
 const safeText = (text: string): ConversationSafeText => ({text, truncated: false, truncationReason: null});
 function nativeExecution(entry: NativeConversationView["items"][number], view: NativeConversationView): ConversationExecution | null {
   const item = entry.item;
-  // Provenance stays on the native view; these fields only satisfy readonly legacy cards.
-  const source: ConversationSourceFact = {sourceEventId: view.cursor?.eventId ?? "", sourceSequence: view.cursor?.sequence ?? "0", sourceOccurredAt: ""};
   if (item.type === "commandExecution") return {
     kind: "command", status: item.status === "inProgress" ? "running" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
-    startedSource: source, lastSource: source, commandSummary: safeText(item.commandLabel ?? "命令信息不可用"),
-    cwd: {kind: "redacted", segments: []}, liveOutput: null,
-    output: item.outputText == null ? null : {retention: "complete", text: item.outputText, head: null, tail: null, reason: null, truncated: item.availability !== "available", truncationReason: item.availability !== "available" ? "upstream_truncated" : null},
-    durationMs: item.durationMs ?? null, exitCode: item.exitCode ?? null, error: null,
+    native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
+  // Tool is a partial compatibility display until FEAT-144 defines its product scope.
+  const source: ConversationSourceFact = {sourceEventId: view.cursor?.eventId ?? "", sourceSequence: view.cursor?.sequence ?? "0", sourceOccurredAt: ""};
   if (item.type === "mcpToolCall") return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
