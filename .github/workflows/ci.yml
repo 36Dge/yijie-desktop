@@ -32,13 +32,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: 36Dge/yijie-contracts
-          ref: 6f632f155eacdaf93df0e0b00b5dab9e369c5442
+          ref: 811f38d6b104fa18477107e7ac91a85e19c445d1
           path: yijie-contracts
           fetch-depth: 0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: 36Dge/yijie-agent-host
-          ref: f4cf01bd6f7e9f37792ef743d44f0ce10527c10b
+          ref: 0e47766f494977c94bfea0e89cfbdf45a7fafa2b
           path: yijie-agent-host
           fetch-depth: 0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
