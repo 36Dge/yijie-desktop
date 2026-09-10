@@ -1,4 +1,4 @@
-import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
+import type {LocalSubmissionView, NativeRecordDiagnostic} from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
 import { safeConversationDiagnostic } from "./conversation-diagnostics";
 
@@ -384,7 +384,7 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
   return null;
 }
 /** Select whole Item sets by documented source. Never match cold and live IDs or compare content. */
-export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = []): ConversationView {
+export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = []): ConversationView {
   const legacy = viewFromLegacySnapshot(snapshot);
   const turns = {...legacy.turns}; const items = {...legacy.items}; const threads = {...legacy.threads};
   for (const view of nativeViews) {
@@ -440,6 +440,13 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
   for (const submission of submissions) {
     const turn = Object.values(turns).find(t => t.turnId === submission.turnId);
     if (turn && turn.source === "legacy_archive") turns[turnKey(turn.threadId, turn.turnId)] = {...turn, source: "local_submission", submissionStatus: submission.status, status: "queued", terminalStatus: null};
+  }
+  // Local format diagnostics have an exact local record scope, not a guessed
+  // native Item/Turn identity. Keep any observed execution facts unchanged.
+  for (const record of recordDiagnostics) {
+    const key = turnKey(record.sessionId, record.turnId);
+    const turn = turns[key];
+    if (turn) turns[key] = {...turn, availability: "unavailable", diagnostic: "native_format_unsupported"};
   }
   return {...legacy, turns, items, threads};
 }

@@ -874,10 +874,11 @@ impl ConversationApplication {
         let mut views = Vec::new();
         let mut bytes = 0_usize;
         let mut remaining_turn_ids = Vec::new();
+        let mut record_diagnostics = Vec::new();
         for (index, id) in turn_ids.iter().enumerate() {
             let candidates = self
                 .database
-                .native_recovery_views(session_id, vec![*id], snapshot.clone(), false)
+                .native_recovery_records(session_id, vec![*id], snapshot.clone(), false)
                 .await?;
             let size = serde_json::to_vec(&candidates)
                 .map_err(|_| ChatError::DatabaseUnavailable)?
@@ -887,10 +888,12 @@ impl ConversationApplication {
                 break;
             }
             bytes += size;
-            views.extend(candidates);
+            views.extend(candidates.views);
+            record_diagnostics.extend(candidates.record_diagnostics);
         }
         Ok(
             super::native_conversation_generated::NativeConversationHistory {
+                record_diagnostics: Some(record_diagnostics),
                 submissions,
                 views,
                 remaining_turn_ids,

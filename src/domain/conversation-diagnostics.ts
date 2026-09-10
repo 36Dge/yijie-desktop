@@ -4,6 +4,7 @@ const messages: Readonly<Record<string, string>> = Object.freeze({
   history_display_limit: "本次历史显示达到容量限制，历史信息可能不完整。",
   stream_gap: "部分实时通知未被观察到，已保留收到的内容。",
   stream_changed: "实时连接已更换，部分记录需要重新读取。",
+  native_format_unsupported: "这条记录使用了较新的保存格式；原记录已保留，请使用兼容版本读取。",
   native_history_partial: "原生历史仅提供了部分信息。",
   history_source_conflict: "历史读取与已观察事实不同，已保留原先观察到的结果。",
   item_start_not_observed: "缺少部分内容的开始记录，未推测其身份或正文。",

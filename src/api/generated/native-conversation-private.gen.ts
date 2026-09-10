@@ -1,7 +1,7 @@
 /* Generated from native conversation source contracts. Do not edit. */
 
 export interface NativeConversationViewEvent {
-  schemaVersion: 1;
+  schemaVersion: 2;
   contextId: string;
   subscriptionId: string;
   sessionId: string;
@@ -79,6 +79,408 @@ export interface NativeItem {
    * Safe display label, not a registered tool identifier. Tool registration is outside FEAT-132.
    */
   toolLabel?: string;
+  mcp?: NativeMcpDisplay;
+}
+/**
+ * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
+ */
+export interface NativeMcpDisplay {
+  server?: string;
+  tool?: string;
+  resultKind: "absent" | "null" | "empty" | "text" | "unsupported" | "omitted";
+  /**
+   * @maxItems 32
+   */
+  texts: NativeMcpText[];
+  /**
+   * @maxItems 8
+   */
+  diagnostics:
+    | []
+    | [
+        | "identity_unavailable"
+        | "arguments_unavailable"
+        | "unsupported_content"
+        | "content_redacted"
+        | "content_truncated"
+        | "content_limit"
+        | "result_unavailable"
+        | "display_limit"
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ]
+    | [
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        ),
+        (
+          | "identity_unavailable"
+          | "arguments_unavailable"
+          | "unsupported_content"
+          | "content_redacted"
+          | "content_truncated"
+          | "content_limit"
+          | "result_unavailable"
+          | "display_limit"
+        )
+      ];
+}
+export interface NativeMcpText {
+  /**
+   * Original native content array index; never renumber after filtering.
+   */
+  index: number;
+  /**
+   * Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert.
+   */
+  text: string;
 }
 export interface NativePlanStep {
   step: string;

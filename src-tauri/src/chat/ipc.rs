@@ -931,7 +931,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 })
                 .map(|(id, record)| {
                     super::native_conversation_generated::NativeConversationViewEvent {
-                        schema_version: 1,
+                        schema_version: 2,
                         context_id: record.context_id.to_string(),
                         subscription_id: id.to_string(),
                         session_id: session_id.to_string(),
@@ -945,8 +945,17 @@ impl TurnProjectionSink for ChatEventBridge {
             .get_webview_window("main")
             .ok_or(ChatError::OrchestrationUnavailable)?;
         for event in events {
+            let mut legacy =
+                serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
+            legacy["schemaVersion"] = serde_json::json!(1);
+            strip_native_mcp_extension(&mut legacy["view"]);
+            let legacy: super::native_conversation_legacy_generated::NativeConversationViewEvent =
+                serde_json::from_value(legacy).map_err(|_| ChatError::OrchestrationUnavailable)?;
             window
-                .emit("chat:native-view:v1", event)
+                .emit("chat:native-view:v1", legacy)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            window
+                .emit("chat:native-view:v2", event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
         Ok(())
@@ -8219,6 +8228,46 @@ pub async fn chat_list_sessions_v1(
 
 #[tauri::command]
 pub async fn chat_load_native_history_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let mut response = chat_load_native_history_v2(request, chat_runtime, ipc_runtime).await?;
+    let data = response
+        .get_mut("data")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ChatIpcError::temporarily_unavailable(None))?;
+    if data
+        .remove("recordDiagnostics")
+        .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+        .unwrap_or(false)
+    {
+        // v1 has no per-record diagnostic carrier. Preserve its explicit failure
+        // boundary rather than returning a malformed or silently repaired view.
+        return Err(ChatIpcError::temporarily_unavailable(None));
+    }
+    if let Some(views) = data.get_mut("views").and_then(Value::as_array_mut) {
+        for view in views {
+            strip_native_mcp_extension(view);
+        }
+    }
+    Ok(response)
+}
+
+fn strip_native_mcp_extension(view: &mut Value) {
+    if let Some(items) = view.get_mut("items").and_then(Value::as_array_mut) {
+        for item in items {
+            if let Some(item) = item.get_mut("item").and_then(Value::as_object_mut) {
+                if item.remove("mcp").is_some() {
+                    item.insert("availability".into(), serde_json::json!("partial"));
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v2(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,

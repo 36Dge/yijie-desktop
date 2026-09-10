@@ -2380,7 +2380,7 @@ describe("chat view-model store", () => {
     }
     expect(submitTurnV2).toHaveBeenCalledOnce();
 
-    emitNative({schemaVersion:1,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
+    emitNative({schemaVersion:2,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
     expect(store.phase).toBe("streaming");
     expect(store.canSend).toBe(false);
     delayedSubmit.resolve({
@@ -2400,7 +2400,7 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     expect(store.nativeLiveTurnId).toBeNull();
-    const event: NativeConversationViewEvent = {schemaVersion:1, contextId:CONTEXT, sessionId:SESSION_A,
+    const event: NativeConversationViewEvent = {schemaVersion:2, contextId:CONTEXT, sessionId:SESSION_A,
       subscriptionId:"019c1a00-0000-7000-8000-00000000000a", view:{sessionId:SESSION_A, turnId:TURN_A,
         runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
         availability:"partial", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};

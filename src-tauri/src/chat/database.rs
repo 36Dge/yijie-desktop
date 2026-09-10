@@ -10252,6 +10252,101 @@ mod tests {
     }
 
     #[test]
+    fn feat144_native_formats_preserve_history_and_block_unsupported_recovery() {
+        use crate::chat::native_conversation::NativeDisplayBuffer;
+        let root = std::env::temp_dir().join(format!("feat144-reader-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 45, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        bind_and_accept_first_turn(&mut repo, &pending, unix_seconds().unwrap());
+        let context = repo.active_turn_context(pending.session_id).unwrap();
+        let mut view = NativeDisplayBuffer::new(context.clone(), None)
+            .unwrap()
+            .view;
+        view.revision = "1".into();
+        let old_json = serde_json::to_string(&view).unwrap();
+        repo.connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json) VALUES(?1,?2,'native_observed',1,?3)",params![pending.turn_id.to_string(),pending.session_id.to_string(),old_json]).unwrap();
+        assert_eq!(
+            repo.native_views(pending.session_id, &[pending.turn_id])
+                .unwrap(),
+            vec![view.clone()]
+        );
+        let version: i64 = repo
+            .connection
+            .query_row("SELECT format_version FROM chat_native_views", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 1);
+
+        let mut next = view.clone();
+        next.items.push(serde_json::from_value(serde_json::json!({"ordinal":0,"lastMethod":"item/completed","item":{"id":"native-mcp","type":"mcpToolCall","status":"completed","availability":"available","mcp":{"server":"sorftime","tool":"product_detail","resultKind":"text","texts":[{"index":1,"text":""},{"index":3,"text":"普通商品资料"}],"diagnostics":[]}}})).unwrap());
+        let next_json = serde_json::to_string(&next).unwrap();
+        repo.connection
+            .execute(
+                "UPDATE chat_native_views SET view_json=?1,format_version=2",
+                [&next_json],
+            )
+            .unwrap();
+        assert_eq!(
+            repo.native_views(pending.session_id, &[pending.turn_id])
+                .unwrap(),
+            vec![next]
+        );
+        drop(repo);
+        let mut repo = open_repository_for_scope(&root, 45, owner);
+        assert_eq!(
+            repo.native_views(pending.session_id, &[pending.turn_id])
+                .unwrap()[0]
+                .items[0]
+                .item
+                .mcp
+                .as_ref()
+                .unwrap()
+                .texts[0]
+                .index,
+            1
+        );
+        // An ordinary future-format record is retained, not interpreted as a
+        // missing snapshot or an invitation to reconstruct it from native history.
+        repo.connection
+            .execute("UPDATE chat_native_views SET format_version=3", [])
+            .unwrap();
+        let records = repo
+            .native_recovery_records(pending.session_id, &[pending.turn_id], None, true)
+            .unwrap();
+        assert!(records.views.is_empty());
+        assert_eq!(records.record_diagnostics.len(), 1);
+        assert_eq!(
+            records.record_diagnostics[0].turn_id,
+            pending.turn_id.to_string()
+        );
+        assert_eq!(records.record_diagnostics[0].format_version, 3);
+        assert!(repo
+            .native_views(pending.session_id, &[pending.turn_id])
+            .is_err());
+        assert!(repo
+            .commit_native_view(&context, view, None, unix_seconds().unwrap())
+            .is_err());
+        let retained: String = repo
+            .connection
+            .query_row("SELECT view_json FROM chat_native_views", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(retained, next_json);
+        let fact_count: i64 = repo
+            .connection
+            .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fact_count, 0);
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn feat132_native_facts_survive_normal_reopen_and_cold_history_conflict() {
         use crate::chat::native_conversation::NativeDisplayBuffer;
         use crate::chat::native_conversation_generated::NativeThreadSnapshot;

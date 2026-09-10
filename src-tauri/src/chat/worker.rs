@@ -24,6 +24,89 @@ use tokio::sync::oneshot;
 
 type DatabaseJob = Box<dyn FnOnce(&mut ChatRepository) + Send + 'static>;
 
+#[cfg(test)]
+mod feat144_reader_tests {
+    use super::super::keychain::{DatabaseKey, ReceiptKey};
+    use super::*;
+    use uuid::Uuid;
+
+    struct Keys;
+    impl DatabaseKeyStore for Keys {
+        fn load_or_create(&self, _: bool) -> Result<DatabaseKey, ChatError> {
+            Ok(DatabaseKey::from_bytes([44; 32]))
+        }
+    }
+    impl ReceiptKeyStore for Keys {
+        fn load_or_create(&self, _: bool) -> Result<ReceiptKey, ChatError> {
+            Ok(ReceiptKey::from_bytes([45; 32]))
+        }
+    }
+
+    #[tokio::test]
+    async fn feat144_unknown_format_crosses_worker_and_history_without_rebuilding() {
+        let root = std::env::temp_dir().join(format!("feat144-worker-{}", Uuid::now_v7()));
+        let project_path = root.join("project");
+        std::fs::create_dir_all(&project_path).unwrap();
+        let scope = ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap();
+        let worker =
+            DatabaseWorker::start(root.join("chat"), scope, Box::new(Keys), Box::new(Keys))
+                .unwrap();
+        let project = worker
+            .register_project(project_path, b"ordinary-bookmark".to_vec())
+            .await
+            .unwrap();
+        let pending = worker
+            .call(move |repo| {
+                repo.create_session_and_enqueue(
+                    Uuid::parse_str(&project.id).unwrap(),
+                    "首条消息",
+                    Uuid::now_v7(),
+                )
+            })
+            .await
+            .unwrap();
+        let session = pending.session_id;
+        let turn = pending.turn_id;
+        worker.call(move |repo| {
+            repo.connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES(?1,?2,'native_observed',1,?3,3)",rusqlite::params![turn.to_string(),session.to_string(),"{\"futureFormat\":true}"]).map_err(|_|ChatError::DatabaseUnavailable)?;
+            Ok(())
+        }).await.unwrap();
+        let app = super::super::application::ConversationApplication::new_offline(worker.clone());
+        let history = app.native_history(session, vec![turn]).await.unwrap();
+        assert!(history.views.is_empty());
+        assert!(history.remaining_turn_ids.is_empty());
+        let json = serde_json::to_value(history).unwrap();
+        assert_eq!(json["recordDiagnostics"][0]["turnId"], turn.to_string());
+        assert_eq!(json["recordDiagnostics"][0]["code"], "format_unsupported");
+        assert!(worker.native_views(session, vec![turn]).await.is_err());
+        worker
+            .call(|repo| {
+                let row: (String, i64) = repo
+                    .connection
+                    .query_row(
+                        "SELECT view_json,format_version FROM chat_native_views",
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(row, ("{\"futureFormat\":true}".into(), 3));
+                assert_eq!(
+                    repo.connection
+                        .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |r| r
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(app);
+        drop(worker);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 #[derive(Clone)]
 pub struct DatabaseWorker {
     inner: Arc<DatabaseWorkerInner>,
@@ -85,6 +168,20 @@ impl DatabaseWorker {
     ) -> Result<Vec<super::native_conversation_generated::NativeConversationView>, ChatError> {
         self.call(move |r| {
             r.native_recovery_views(session_id, &turn_ids, snapshot.as_deref(), recover)
+        })
+        .await
+    }
+    pub async fn native_recovery_records(
+        &self,
+        session_id: uuid::Uuid,
+        turn_ids: Vec<uuid::Uuid>,
+        snapshot: Option<
+            std::sync::Arc<super::native_conversation_generated::NativeThreadSnapshot>,
+        >,
+        recover: bool,
+    ) -> Result<super::native_conversation_generated::NativeViewRecords, ChatError> {
+        self.call(move |r| {
+            r.native_recovery_records(session_id, &turn_ids, snapshot.as_deref(), recover)
         })
         .await
     }

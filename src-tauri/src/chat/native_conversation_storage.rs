@@ -1,8 +1,30 @@
 use super::database::{ActiveTurnContext, ChatRepository};
 use super::error::ChatError;
-use super::native_conversation_generated::{NativeConversationView, NativeEvent};
+use super::native_conversation_generated::{
+    NativeConversationView, NativeEvent, NativeRecordDiagnostic, NativeViewRecords,
+};
 use rusqlite::{params, OptionalExtension};
 use uuid::Uuid;
+
+// Reader first: the compatible checkpoint keeps its writer at format1.
+// Raising this constant is a separate writer activation after that checkpoint.
+pub const NATIVE_WRITE_FORMAT: i64 = 1;
+const NATIVE_READ_FORMAT: i64 = 2;
+
+fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView, ChatError> {
+    match format {
+        1 => {
+            let old: super::native_conversation_legacy_generated::NativeConversationView =
+                serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
+            serde_json::from_value(
+                serde_json::to_value(old).map_err(|_| ChatError::DatabaseUnavailable)?,
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)
+        }
+        2 => serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable),
+        _ => Err(ChatError::DatabaseUnavailable),
+    }
+}
 
 impl ChatRepository {
     pub fn native_host_origin(
@@ -28,32 +50,55 @@ impl ChatRepository {
             .transpose()
     }
 
+    /// Active execution cannot treat an unsupported saved record as absent.
     pub fn native_views(
         &self,
         session_id: Uuid,
         turn_ids: &[Uuid],
     ) -> Result<Vec<NativeConversationView>, ChatError> {
+        let records = self.native_view_records(session_id, turn_ids)?;
+        if !records.record_diagnostics.is_empty() {
+            return Err(ChatError::ConversationConflict);
+        }
+        Ok(records.views)
+    }
+
+    pub fn native_view_records(
+        &self,
+        session_id: Uuid,
+        turn_ids: &[Uuid],
+    ) -> Result<NativeViewRecords, ChatError> {
         self.session_summary(session_id)?;
         if turn_ids.len() > 50 {
             return Err(ChatError::InvalidInput);
         }
-        let mut views = Vec::new();
+        let mut result = NativeViewRecords {
+            views: Vec::new(),
+            record_diagnostics: Vec::new(),
+        };
         for id in turn_ids {
-            let json: Option<String> = self
-                .connection
-                .query_row(
-                    "SELECT view_json FROM chat_native_views WHERE session_id=?1 AND turn_id=?2",
-                    params![session_id.to_string(), id.to_string()],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|_| ChatError::DatabaseUnavailable)?;
-            if let Some(json) = json {
-                views
-                    .push(serde_json::from_str(&json).map_err(|_| ChatError::DatabaseUnavailable)?);
+            let row: Option<(String, i64)> = self.connection.query_row(
+                "SELECT view_json,format_version FROM chat_native_views WHERE session_id=?1 AND turn_id=?2",
+                params![session_id.to_string(), id.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional().map_err(|_| ChatError::DatabaseUnavailable)?;
+            if let Some((json, version)) = row {
+                if version > NATIVE_READ_FORMAT {
+                    result.record_diagnostics.push(NativeRecordDiagnostic {
+                        session_id: session_id.to_string(),
+                        turn_id: id.to_string(),
+                        format_version: version,
+                        code: "format_unsupported".into(),
+                    });
+                    continue;
+                }
+                let view = decode_native_view(&json, version)?;
+                if view.session_id != session_id.to_string() || view.turn_id != id.to_string() {
+                    return Err(ChatError::ConversationConflict);
+                }
+                result.views.push(view);
             }
         }
-        Ok(views)
+        Ok(result)
     }
 
     pub fn local_submissions(
@@ -86,7 +131,23 @@ impl ChatRepository {
         snapshot: Option<&super::native_conversation_generated::NativeThreadSnapshot>,
         recover: bool,
     ) -> Result<Vec<NativeConversationView>, ChatError> {
-        let mut views = self.native_views(session_id, turn_ids)?;
+        let result = self.native_recovery_records(session_id, turn_ids, snapshot, recover)?;
+        if !result.record_diagnostics.is_empty() {
+            return Err(ChatError::ConversationConflict);
+        }
+        Ok(result.views)
+    }
+
+    pub fn native_recovery_records(
+        &mut self,
+        session_id: Uuid,
+        turn_ids: &[Uuid],
+        snapshot: Option<&super::native_conversation_generated::NativeThreadSnapshot>,
+        recover: bool,
+    ) -> Result<NativeViewRecords, ChatError> {
+        let records = self.native_view_records(session_id, turn_ids)?;
+        let mut views = records.views;
+        let record_diagnostics = records.record_diagnostics;
         for view in &mut views {
             let rebuilt = snapshot
                 .filter(|s| s.thread_id == view.runtime_thread_id)
@@ -117,7 +178,11 @@ impl ChatRepository {
             }
         }
         for id in turn_ids {
-            if views.iter().any(|v| v.turn_id == id.to_string()) {
+            if views.iter().any(|v| v.turn_id == id.to_string())
+                || record_diagnostics
+                    .iter()
+                    .any(|d| d.turn_id == id.to_string())
+            {
                 continue;
             }
             let binding:Option<(String,String,i64)>=self.connection.query_row("SELECT b.runtime_thread_id,b.runtime_turn_id,(SELECT COUNT(*) FROM chat_turns older WHERE older.session_id=b.session_id AND older.id<b.turn_id) FROM chat_native_bindings b WHERE b.session_id=?1 AND b.turn_id=?2",params![session_id.to_string(),id.to_string()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|_|ChatError::DatabaseUnavailable)?;
@@ -183,7 +248,10 @@ impl ChatRepository {
                 }
             }
         }
-        Ok(views)
+        Ok(NativeViewRecords {
+            views,
+            record_diagnostics,
+        })
     }
 
     fn persist_native_read_status(
@@ -207,14 +275,18 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let revision: Option<i64> = tx
+        let revision_row: Option<(i64, i64)> = tx
             .query_row(
-                "SELECT revision FROM chat_native_views WHERE turn_id=?1",
+                "SELECT revision,format_version FROM chat_native_views WHERE turn_id=?1",
                 [&view.turn_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if revision_row.is_some_and(|(_, v)| v > NATIVE_WRITE_FORMAT) {
+            return Err(ChatError::ConversationConflict);
+        }
+        let revision = revision_row.map(|(r, _)| r);
         let revision = revision
             .unwrap_or(0)
             .checked_add(1)
@@ -225,14 +297,14 @@ impl ChatRepository {
         fact_turn.items.clear();
         fact_turn.items_complete = false;
         let fact = super::native_conversation_generated::NativeThreadSnapshot {
-            schema_version: 1,
+            schema_version: NATIVE_WRITE_FORMAT,
             source: "runtime_read".into(),
             thread_id: view.runtime_thread_id.clone(),
             turns: vec![fact_turn],
             availability: "partial".into(),
         };
-        tx.execute("INSERT INTO chat_native_facts(turn_id,event_id,method,fact_json) VALUES(?1,?2,'thread/read',?3)",params![view.turn_id,format!("local-read:{}",Uuid::now_v7()),serde_json::to_string(&fact).map_err(|_|ChatError::DatabaseUnavailable)?]).map_err(|_|ChatError::DatabaseUnavailable)?;
-        tx.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(turn_id) DO UPDATE SET source=excluded.source,revision=excluded.revision,view_json=excluded.view_json",params![view.turn_id,view.session_id,view.source,revision,serde_json::to_string(view).map_err(|_|ChatError::DatabaseUnavailable)?]).map_err(|_|ChatError::DatabaseUnavailable)?;
+        tx.execute("INSERT INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES(?1,?2,'thread/read',?3,?4)",params![view.turn_id,format!("local-read:{}",Uuid::now_v7()),serde_json::to_string(&fact).map_err(|_|ChatError::DatabaseUnavailable)?,NATIVE_WRITE_FORMAT]).map_err(|_|ChatError::DatabaseUnavailable)?;
+        tx.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(turn_id) DO UPDATE SET source=excluded.source,revision=excluded.revision,view_json=excluded.view_json,format_version=excluded.format_version",params![view.turn_id,view.session_id,view.source,revision,serde_json::to_string(view).map_err(|_|ChatError::DatabaseUnavailable)?,NATIVE_WRITE_FORMAT]).map_err(|_|ChatError::DatabaseUnavailable)?;
         tx.execute(
             "UPDATE chat_turns SET status=?1 WHERE id=?2 AND runtime_turn_id=?3",
             params![status, view.turn_id, view.runtime_turn_id],
@@ -274,14 +346,24 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let revision: Option<i64> = tx
+        let revision_row: Option<(i64, i64)> = tx
             .query_row(
-                "SELECT revision FROM chat_native_views WHERE turn_id=?1",
+                "SELECT revision,format_version FROM chat_native_views WHERE turn_id=?1",
                 [&view.turn_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if revision_row.is_some_and(|(_, v)| v > NATIVE_WRITE_FORMAT) {
+            return Err(ChatError::ConversationConflict);
+        }
+        if NATIVE_WRITE_FORMAT == 1
+            && (view.items.iter().any(|i| i.item.mcp.is_some())
+                || event.is_some_and(|e| e.schema_version != 7))
+        {
+            return Err(ChatError::ConversationConflict);
+        }
+        let revision = revision_row.map(|(r, _)| r);
         if revision.unwrap_or(0).to_string() != view.revision {
             return Err(ChatError::ConversationConflict);
         }
@@ -305,11 +387,11 @@ impl ChatRepository {
                 )
             {
                 let fact = serde_json::to_string(n).map_err(|_| ChatError::DatabaseUnavailable)?;
-                tx.execute("INSERT OR IGNORE INTO chat_native_facts(turn_id,event_id,method,fact_json) VALUES (?1,?2,?3,?4)",params![view.turn_id,event.event_id,n.method,fact]).map_err(|_|ChatError::DatabaseUnavailable)?;
+                tx.execute("INSERT OR IGNORE INTO chat_native_facts(turn_id,event_id,method,fact_json,format_version) VALUES (?1,?2,?3,?4,?5)",params![view.turn_id,event.event_id,n.method,fact,NATIVE_WRITE_FORMAT]).map_err(|_|ChatError::DatabaseUnavailable)?;
             }
         }
         let json = serde_json::to_string(&view).map_err(|_| ChatError::DatabaseUnavailable)?;
-        tx.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(turn_id) DO UPDATE SET source=excluded.source,revision=excluded.revision,view_json=excluded.view_json",params![view.turn_id,view.session_id,view.source,revision,json]).map_err(|_|ChatError::DatabaseUnavailable)?;
+        tx.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(turn_id) DO UPDATE SET source=excluded.source,revision=excluded.revision,view_json=excluded.view_json,format_version=excluded.format_version",params![view.turn_id,view.session_id,view.source,revision,json,NATIVE_WRITE_FORMAT]).map_err(|_|ChatError::DatabaseUnavailable)?;
         // Only an actual native notification updates execution. Local errors do not.
         if let Some(n) = event.map(|e| &e.payload.native) {
             if n.source == "runtime_notification"

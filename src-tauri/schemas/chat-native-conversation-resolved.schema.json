@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "NativeConversationPrivate",
+  "title": "NativeConversationViewV2",
   "$ref": "#/definitions/NativeConversationViewEvent",
   "definitions": {
     "NativeItem": {
@@ -149,6 +149,9 @@
           "type": "string",
           "maxLength": 256,
           "description": "Safe display label, not a registered tool identifier. Tool registration is outside FEAT-132."
+        },
+        "mcp": {
+          "$ref": "#/definitions/NativeMcpDisplay"
         }
       }
     },
@@ -318,7 +321,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            1
+            2
           ]
         },
         "source": {
@@ -368,7 +371,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            7
+            8
           ]
         },
         "event_id": {
@@ -471,6 +474,85 @@
             "other"
           ],
           "description": "Allowlisted native discriminator. Unknown native details are omitted."
+        }
+      }
+    },
+    "NativeMcpText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "text"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "Original native content array index; never renumber after filtering."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 262144,
+          "description": "Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert."
+        }
+      }
+    },
+    "NativeMcpDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resultKind",
+        "texts",
+        "diagnostics"
+      ],
+      "description": "Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.",
+      "properties": {
+        "server": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "tool": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "resultKind": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "null",
+            "empty",
+            "text",
+            "unsupported",
+            "omitted"
+          ]
+        },
+        "texts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/NativeMcpText"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "identity_unavailable",
+              "arguments_unavailable",
+              "unsupported_content",
+              "content_redacted",
+              "content_truncated",
+              "content_limit",
+              "result_unavailable",
+              "display_limit"
+            ]
+          }
         }
       }
     },
@@ -667,7 +749,7 @@
         "schemaVersion": {
           "type": "integer",
           "enum": [
-            1
+            2
           ]
         },
         "contextId": {
@@ -728,6 +810,13 @@
           "items": {
             "type": "string"
           }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
         }
       }
     },
@@ -780,6 +869,61 @@
           ]
         }
       }
+    },
+    "NativeRecordDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "turnId",
+        "formatVersion",
+        "code"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turnId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "formatVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "format_unsupported"
+          ]
+        }
+      }
+    },
+    "NativeViewRecords": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "recordDiagnostics"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
+        }
+      }
     }
-  }
+  },
+  "$id": ""
 }

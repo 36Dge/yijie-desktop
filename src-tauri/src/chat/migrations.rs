@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 14] = [
+const CATALOG: [CatalogEntry; 15] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -101,6 +101,11 @@ const CATALOG: [CatalogEntry; 14] = [
         version: 14,
         name: "0014_chat_native_conversation",
         sql: include_str!("../../migrations/chat/0014_chat_native_conversation.sql"),
+    },
+    CatalogEntry {
+        version: 15,
+        name: "0015_chat_native_formats",
+        sql: include_str!("../../migrations/chat/0015_chat_native_formats.sql"),
     },
 ];
 
@@ -1370,6 +1375,47 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn feat144_schema14_adds_format_markers_without_rewriting_native_json() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch("PRAGMA key='public-format-migration-fixture'; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        migrations().to_version(&mut connection, 14).unwrap();
+        let project = Uuid::now_v7().to_string();
+        let session = Uuid::now_v7().to_string();
+        let turn = Uuid::now_v7().to_string();
+        let owner = Uuid::now_v7().to_string();
+        let tenant = Uuid::now_v7().to_string();
+        connection.execute("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES(?1,?2,?3,'Fixture',?4,X'01',1)",params![project,owner,tenant,"a".repeat(64)]).unwrap();
+        connection.execute("INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at) VALUES(?1,?2,?3,?4,'History','fallback','cancelled',1,1)",params![session,owner,tenant,project]).unwrap();
+        connection.execute("INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES(?1,?2,?3,'completed')",params![turn,session,Uuid::now_v7().to_string()]).unwrap();
+        let original = serde_json::to_string_pretty(&serde_json::json!({"sessionId":session,"turnId":turn,"runtimeThreadId":"native-thread","runtimeTurnId":"native-turn","source":"native_observed","revision":"1","availability":"partial","status":"completed","terminalObserved":true,"items":[]})).unwrap();
+        let fact = "{ \"method\": \"item/completed\", \"item\": {\"text\": \"普通历史\"} }";
+        connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json) VALUES(?1,?2,'native_observed',1,?3)",params![turn,session,original]).unwrap();
+        connection.execute("INSERT INTO chat_native_facts(turn_id,event_id,method,fact_json) VALUES(?1,'ordinary-event','item/completed',?2)",params![turn,fact]).unwrap();
+        migrate(&mut connection).unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), 15);
+        let saved: (String, i64) = connection
+            .query_row(
+                "SELECT view_json,format_version FROM chat_native_views",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let saved_fact: (String, i64) = connection
+            .query_row(
+                "SELECT fact_json,format_version FROM chat_native_facts",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, (original, 1));
+        assert_eq!(saved_fact, (fact.into(), 1));
+        verify_ledger(&connection, 15).unwrap();
+    }
+
+    #[test]
     fn feat132_populated_schema13_migrates_forward_without_native_backfill() {
         let root = std::env::temp_dir().join(format!("feat132-schema13-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -1402,8 +1448,8 @@ mod tests {
             .unwrap();
         migrate(&mut connection).unwrap();
         migrate(&mut connection).unwrap();
-        assert_eq!(user_version(&connection).unwrap(), 14);
-        verify_ledger(&connection, 14).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), LATEST_SCHEMA_VERSION);
+        verify_ledger(&connection, LATEST_SCHEMA_VERSION).unwrap();
         let counts:(i64,i64,i64)=connection.query_row("SELECT (SELECT count(*) FROM chat_native_bindings),(SELECT count(*) FROM chat_native_facts),(SELECT count(*) FROM chat_native_views)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(counts, (0, 0, 0));
         assert_eq!(

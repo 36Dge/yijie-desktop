@@ -24,6 +24,7 @@ import {
 historyPageToConversationSnapshot,
 historyPageV5ToConversationSnapshot,
 } from "../api/chat-conversation-adapter";
+import type { NativeRecordDiagnostic } from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView,NativeConversationViewEvent } from "../api/generated/native-conversation-private.gen";
 import { feat134StreamingUiEnabled } from "../authorization/feat134-streaming-ui-config";
 import { feat136ExecutionUiEnabled } from "../authorization/feat136-execution-ui-config";
@@ -382,6 +383,7 @@ export function createChatStoreDefinition(
     const nativeLiveTurnId = ref<string | null>(null);
     watch(phase, value => { if (value !== "streaming") nativeLiveTurnId.value = null; }, {flush: "sync"});
     const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
+    const nativeRecordDiagnostics = shallowRef<Readonly<Record<string, NativeRecordDiagnostic>>>({});
     const conversationState = shallowRef<ConversationView>(emptyConversationView());
     const conversationApprovalState = shallowRef<ConversationApprovalState>(
       createConversationApprovalState(),
@@ -693,6 +695,7 @@ export function createChatStoreDefinition(
       history.value = null;
       conversationState.value = emptyConversationView();
       nativeViews.value = {};
+      nativeRecordDiagnostics.value = {};
       nativeLiveTurnId.value = null;
       localSubmissions.value = {};
       conversationApprovalState.value = createConversationApprovalState();
@@ -1734,7 +1737,7 @@ export function createChatStoreDefinition(
     function displayNativeViews(): void {
       const sessionId = selectedSessionId.value;
       if (!sessionId || !history.value) return;
-      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value));
+      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
       const latest = Object.values(nativeViews.value).sort((a,b) => (b.ordinal ?? 0) - (a.ordinal ?? 0))[0];
       if (!latest) return;
       syncLiveProjection(liveProjection(conversationState.value, sessionId, latest.turnId));
@@ -1747,6 +1750,7 @@ export function createChatStoreDefinition(
 
     function applyNativeView(event: NativeConversationViewEvent): void {
       if (event.contextId !== context.value?.contextId || event.subscriptionId !== subscriptionId || event.sessionId !== selectedSessionId.value) return;
+      if (nativeRecordDiagnostics.value[event.view.turnId]) return;
       const previous = nativeViews.value[event.view.turnId];
       if (previous && BigInt(previous.revision) >= BigInt(event.view.revision)) return;
       nativeViews.value = {...nativeViews.value, [event.view.turnId]: event.view};
@@ -1777,6 +1781,10 @@ export function createChatStoreDefinition(
         if (!previous || (view.source === "native_rebuilt" && previous.source === "native_rebuilt") || (view.source === "native_observed" && BigInt(view.revision) >= BigInt(previous.revision))) current[view.turnId] = view;
       }
       nativeViews.value = current;
+      const diagnostics = {...nativeRecordDiagnostics.value};
+      for (const view of result.views) if (view.sessionId === sessionId) delete diagnostics[view.turnId];
+      for (const record of result.recordDiagnostics ?? []) if (record.sessionId === sessionId && pending.includes(record.turnId)) diagnostics[record.turnId] = record;
+      nativeRecordDiagnostics.value = diagnostics;
       if (result.remainingTurnIds.length >= pending.length) throw new Error("native-history-pagination-unavailable");
       pending = result.remainingTurnIds;
       }
@@ -2261,7 +2269,7 @@ export function createChatStoreDefinition(
 
       await loadNativeViews(bound.contextId,sessionId,epoch,controller,page.turns.map(t => t.turnId));
       if (!isCurrent(epoch,controller,sessionId)) return "superseded";
-      const nextConversation = composeConversationView(historyPageV6ToConversationSnapshot(sessionId,page),Object.values(nativeViews.value),Object.values(localSubmissions.value));
+      const nextConversation = composeConversationView(historyPageV6ToConversationSnapshot(sessionId,page),Object.values(nativeViews.value),Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
       if (nextConversation.syncStatus === "recovery_required") {
         throw approvalProtocolError();
       }
@@ -2714,7 +2722,7 @@ export function createChatStoreDefinition(
         projection.session.sessionId,
         authoritativeHistory,
       );
-      const nextConversation = composeConversationView(snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value));
+      const nextConversation = composeConversationView(snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
       let nextApproval = streamingV6Enabled
         ? createConversationApprovalState()
         : conversationApprovalState.value;
@@ -3199,7 +3207,7 @@ export function createChatStoreDefinition(
                   nextCursor: page.nextCursor,
                 });
         const appended = composeConversationView(
-          conversationSnapshotFromHistory(sessionId, mergedHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value),
+          conversationSnapshotFromHistory(sessionId, mergedHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value),
         );
         if (appended.syncStatus === "recovery_required") {
           conversationState.value = appended;
@@ -3631,7 +3639,7 @@ export function createChatStoreDefinition(
       }
       history.value = nextHistory;
       conversationState.value = composeConversationView(
-        conversationSnapshotFromHistory(sessionId, nextHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value),
+        conversationSnapshotFromHistory(sessionId, nextHistory), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value),
       );
       liveTurnStatus.value = "queued";
       sessions.value = Object.freeze(sessions.value.map((session) =>
