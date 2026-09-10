@@ -37,3 +37,16 @@ failed/declined 的固定文案和 command_failed/command_declined 是显式原�
 Host 的最终安全输出策略、native v7、唯一缓冲及 SQLCipher 保存完全复用；会话级 pending-final 诊断说明曾观察到输出通知，不猜 Item 归属。旧 v4/v5 DTO、IPC、表、读取及安全投影有真实兼容依赖，未删除或恢复其为新对话引擎。真实 Tool 仍属 FEAT-144，未扩展 native Tool 能力。
 
 普通 canonical 验收另发现外壳没有消费已有的缩放视口宽度变量、长标题撑开 Chat Grid；最小修复为使用既有缩放宽度及 minmax(0, 1fr) 单列，不增加状态或权限。最终真实成功/失败两条 Command、200%、键盘复制和正常重开通过；本次独立请求累计3/10文本、0图片。本次八项 local D4 基于当时的工作区候选完成；验收时逐文件 SHA-256 及后续提交、推送状态分别以元仓 FEAT-136 验收和交付记录为准，提交或推送不表示重新运行 D4；原五项 Command D4 已完整归档。
+
+
+## FEAT-144 原生实现（2026-09-10，尚未真实验收）
+
+当前工作树的新主源为`src-tauri/contracts/native-conversation-v2.json`和私有`chat-native-conversation-v2.schema.json`，使用native-thread v2、SSE v8、私有history/view v2及原有唯一缓冲。上文v1/v7与schema14段落保留各次历史交付范围。新增schema15只前向增加facts/views格式标记；旧JSON不改写，格式1/2分别读取，未知格式经recordDiagnostics传到历史/worker/IPC/前端，并阻止缺失记录补建和活跃缓冲启动。facts不回放。
+
+原生MCP结果保留安全server/tool、content原生索引和实际状态，空、缺失、未支持、容量及安全处理分开。新Tool不再使用旧DTO伪填，状态/来源/文本直接来自Item；旧Tool兼容renderer和v1出口保留。容量超限缩减正文而保留新Item原生头部；原生完成不由Turn完成或availability推演。复制只使用已有安全文本，链接不激活。
+
+Sorftime本地配置入口为`YIJIE_DEMO_FAST_SORFTIME_ENABLED=true pnpm tauri:demo-fast:app`，必须先通过全部真实来源检查。构建后由用户在系统隐藏输入框输入Account-SK；取消不启用。密钥仅经一次性受管进程环境交接，传给Host后清除Desktop保留副本，不进入WebView/argv/日志/数据库。沿用当前系统HTTPS代理和Codex原生Bearer/真实版本User-Agent；未验证的PAC/SOCKS入口停止。
+
+仅核实原生请求批准/user/workspaceWrite/Prompt、startup ready及实际工具schema后允许开始业务Turn。切换其它模式前，正常结束活跃Turn并经正常退出/清理/禁用MCP重启确认失效；回到请求批准不自动重连。FEAT-152权限含义及普通图片工具注册不改，FEAT-137不恢复。
+
+源契约 db54c617c65db5431b950eb297ba148a43a8e600、Host 31ee71889f83aff53dce6eeacd4b5ca4fd319c6b 已本地提交并固定消费者来源。最低兼容 reader 为 25b004fbd5a4dcf642a503d302c21a7d6e3b817f（writer=1）；其实际提交树通过生成、类型和3项正常格式/迁移检查。当前最终 writer=2 后于该基线。canonical 及 D4 仍待执行，9项活动 AC 未关闭，AC-004 业务失败场景用户排除。当前业务 0/10、元数据 8/10、模型 0/8，图片未授权；不得继承上文 FEAT-132/134/136 的调用额度或 PASS。

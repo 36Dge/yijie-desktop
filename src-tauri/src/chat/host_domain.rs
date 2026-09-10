@@ -1144,10 +1144,17 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let raw: Value = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if schema_version == 7 {
+    if matches!(schema_version, 7 | 8) {
+        let raw = if schema_version == 7 {
+            let legacy: super::native_conversation_legacy_generated::NativeEvent =
+                serde_json::from_value(raw).map_err(|_| protocol_error())?;
+            serde_json::to_value(legacy).map_err(|_| protocol_error())?
+        } else {
+            raw
+        };
         let event: super::native_conversation_generated::NativeEvent =
             serde_json::from_value(raw).map_err(|_| protocol_error())?;
-        if event.schema_version != 7
+        if event.schema_version != i64::from(schema_version)
             || event.event_type != "native.notification"
             || parse_uuid(&event.stream_id)? != expected_stream
             || event.sequence <= 0

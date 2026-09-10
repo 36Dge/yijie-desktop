@@ -4,7 +4,7 @@
 use super::database::ActiveTurnContext;
 use super::error::ChatError;
 use super::native_conversation_generated::{
-    NativeConversationView, NativeDisplayItem, NativeEvent, NativeViewCursor,
+    NativeConversationView, NativeDisplayItem, NativeEvent, NativeItem, NativeViewCursor,
 };
 
 const MAX_VIEW_BYTES: usize = 4 * 1024 * 1024 - 4096; // reserve room for cursor and availability diagnostics
@@ -22,6 +22,58 @@ pub fn bound_read_view(view: &mut NativeConversationView) -> Result<(), ChatErro
         }
         view.availability = "partial".into();
         view.diagnostic = Some("history_display_limit".into());
+    }
+    Ok(())
+}
+
+fn omit_display_content(item: &mut NativeItem) {
+    item.text = None;
+    item.content = None;
+    item.summary = None;
+    item.output_text = None;
+    item.arguments_summary = None;
+    item.result_summary = None;
+    item.command_label = None;
+    item.cwd_label = None;
+    item.availability = "partial".into();
+    if let Some(mcp) = &mut item.mcp {
+        if !mcp.texts.is_empty() {
+            mcp.texts.clear();
+            mcp.result_kind = "omitted".into();
+        }
+        if !mcp.diagnostics.iter().any(|v| v == "display_limit") {
+            mcp.diagnostics.push("display_limit".into());
+        }
+    }
+}
+
+fn bound_display_content(view: &mut NativeConversationView) -> Result<(), ChatError> {
+    // Trim display content only. Native IDs, actual status, exit/duration facts
+    // and last observed methods are retained. The full event remains encrypted.
+    for index in 0..view.items.len() {
+        if serde_json::to_vec(view)
+            .map_err(|_| ChatError::OrchestrationUnavailable)?
+            .len()
+            <= MAX_VIEW_BYTES
+        {
+            return Ok(());
+        }
+        omit_display_content(&mut view.items[index].item);
+    }
+    if serde_json::to_vec(view)
+        .map_err(|_| ChatError::OrchestrationUnavailable)?
+        .len()
+        > MAX_VIEW_BYTES
+    {
+        view.plan = None;
+        view.explanation = None;
+    }
+    if serde_json::to_vec(view)
+        .map_err(|_| ChatError::OrchestrationUnavailable)?
+        .len()
+        > MAX_VIEW_BYTES
+    {
+        return Err(ChatError::OrchestrationUnavailable);
     }
     Ok(())
 }
@@ -78,7 +130,7 @@ impl NativeDisplayBuffer {
     /// Transport ordering is checked exactly once here. It never changes the
     /// native execution status and never requests or retries a model operation.
     pub fn observe(&mut self, event: &NativeEvent) -> Result<bool, ChatError> {
-        if event.schema_version != 7
+        if !matches!(event.schema_version, 7 | 8)
             || event.event_type != "native.notification"
             || event.task_id != self.context.task_id.to_string()
             || event.agent_session_id != self.context.agent_session_id.to_string()
@@ -152,7 +204,6 @@ impl NativeDisplayBuffer {
                         ordinal,
                     };
                     // Capacity is a display concern, never an execution failure.
-                    let old = position.map(|i| self.view.items[i].clone());
                     if let Some(i) = position {
                         self.view.items[i] = value
                     } else if self.view.items.len() < 512 {
@@ -166,11 +217,11 @@ impl NativeDisplayBuffer {
                         .len()
                         > MAX_VIEW_BYTES
                     {
-                        if let Some(i) = position {
-                            self.view.items[i] = old.ok_or(ChatError::OrchestrationUnavailable)?;
-                        } else {
-                            self.view.items.pop();
-                        }
+                        // The newest native status and identity survive capacity
+                        // pressure. Never restore the preceding Item snapshot.
+                        let current = position.unwrap_or(self.view.items.len() - 1);
+                        omit_display_content(&mut self.view.items[current].item);
+                        bound_display_content(&mut self.view)?;
                         self.mark_unavailable("display_limit");
                     }
                 } else {
@@ -347,6 +398,48 @@ mod tests {
         }
         serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(99),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":c.task_id,"agent_session_id":c.agent_session_id,"codex_thread_id":c.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}})).unwrap()
     }
+    #[test]
+    fn feat144_native_tool_replacement_keeps_new_status_at_display_capacity() {
+        let mut buffer = NativeDisplayBuffer::new(context(), None).unwrap();
+        for index in 0..15 {
+            buffer.observe(&event(index+1,"item/completed",serde_json::json!({"item":{"id":format!("ordinary-{index}"),"type":"agentMessage","availability":"available","text":"a".repeat(256*1024)}}))).unwrap();
+        }
+        let item = |status: &str, text: String| serde_json::json!({"item":{"id":"native-tool","type":"mcpToolCall","availability":"available","status":status,"mcp":{"server":"sorftime","tool":"product_detail","resultKind":"text","texts":[{"index":2,"text":text}],"diagnostics":[]}}});
+        let mut started = event(16, "item/started", item("inProgress", String::new()));
+        started.schema_version = 8;
+        buffer.observe(&started).unwrap();
+        let mut completed = event(
+            17,
+            "item/completed",
+            item("completed", "b".repeat(256 * 1024)),
+        );
+        completed.schema_version = 8;
+        buffer.observe(&completed).unwrap();
+        let observed = buffer
+            .view
+            .items
+            .iter()
+            .find(|v| v.item.id == "native-tool")
+            .unwrap();
+        assert_eq!(observed.item.status.as_deref(), Some("completed"));
+        assert_eq!(observed.last_method, "item/completed");
+        assert_eq!(observed.item.mcp.as_ref().unwrap().result_kind, "omitted");
+        assert!(observed.item.mcp.as_ref().unwrap().texts.is_empty());
+        assert!(serde_json::to_vec(&buffer.view).unwrap().len() <= MAX_VIEW_BYTES);
+        let mut empty = event(18, "item/completed", item("completed", String::new()));
+        empty.schema_version = 8;
+        buffer.observe(&empty).unwrap();
+        let observed = buffer
+            .view
+            .items
+            .iter()
+            .find(|v| v.item.id == "native-tool")
+            .unwrap();
+        assert_eq!(observed.item.mcp.as_ref().unwrap().texts[0].index, 2);
+        assert_eq!(observed.item.mcp.as_ref().unwrap().texts[0].text, "");
+        assert!(observed.item.mcp.as_ref().unwrap().diagnostics.is_empty());
+    }
+
     #[test]
     fn native_final_replaces_delta_without_prefix_reconciliation() {
         let mut b = NativeDisplayBuffer::new(context(), None).unwrap();

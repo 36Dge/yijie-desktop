@@ -480,7 +480,9 @@ function projectItem(
   const unfinished = item.status === "started" || item.status === "streaming";
   const nativeLive = policy?.liveTurnId === turn.turnId && turn.source === "native_observed" &&
     turn.statusSource === "runtime_notification" && turn.status === "in_progress" && turn.availability !== "unavailable" && !turn.diagnostic;
-  const busy = unfinished && nativeLive && item.availability === "available";
+  const nativeExecutionActive = item.execution !== null && "native" in item.execution
+    ? item.execution.native.item.status === "inProgress" : true;
+  const busy = unfinished && nativeLive && nativeExecutionActive && item.availability === "available";
   const ended = ["completed", "failed", "interrupted"].includes(turn.status);
   const activityLabel = unfinished && !busy
     ? ended ? "本轮已结束，未观察到该项结束记录" : "仅有已观察记录，当前进度待确认"

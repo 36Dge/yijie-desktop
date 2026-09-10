@@ -398,7 +398,7 @@ impl HostBridge {
         let response = self
             .authorized_request(
                 Method::GET,
-                &format!("/v1/agent-sessions/{session_id}/native-thread"),
+                &format!("/v2/agent-sessions/{session_id}/native-thread"),
             )
             .await?
             .timeout(REQUEST_TIMEOUT)
@@ -410,14 +410,19 @@ impl HostBridge {
         }
         validate_no_store(response.headers())?;
         let bytes = read_limited(response, 8 * 1024 * 1024).await?;
-        serde_json::from_slice(&bytes).map_err(|_| protocol_error())
+        let value: super::native_conversation_generated::NativeThreadSnapshot =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        if value.schema_version != 2 || value.source != "runtime_read" {
+            return Err(protocol_error());
+        }
+        Ok(value)
     }
     pub async fn open_native_event_stream(
         &self,
         session_id: Uuid,
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
-        self.open_event_stream(session_id, cursor, 7).await
+        self.open_event_stream(session_id, cursor, 8).await
     }
     pub(super) fn from_connection(connection: HostConnection) -> Result<Self, HostBridgeError> {
         if connection.port == 0
@@ -603,6 +608,30 @@ impl HostBridge {
         parse_required_uuid(&wire.turn_id).map_err(|_| accepted_response_invalid())
     }
 
+    pub async fn prepare_mcp_permission_scope(
+        &self,
+        mode: super::runtime_permissions::PermissionMode,
+    ) -> Result<super::native_conversation_generated::McpPermissionScopeResult, HostBridgeError>
+    {
+        let response = self
+            .send_json(
+                Method::POST,
+                "/v2/runtime-mcp/permission-scope",
+                &serde_json::json!({"mode":mode}),
+            )
+            .await?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        let bytes = read_json_body(response).await?;
+        let result: super::native_conversation_generated::McpPermissionScopeResult =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        if mode != super::runtime_permissions::PermissionMode::Ask && result.active {
+            return Err(protocol_error());
+        }
+        Ok(result)
+    }
+
     pub async fn runtime_approvals(
         &self,
         session_id: Uuid,
@@ -611,7 +640,7 @@ impl HostBridge {
         let response = self
             .authorized_request(
                 Method::GET,
-                &format!("/v1/agent-sessions/{session_id}/runtime-approvals"),
+                &format!("/v2/agent-sessions/{session_id}/runtime-approvals"),
             )
             .await?
             .timeout(REQUEST_TIMEOUT)
@@ -636,13 +665,13 @@ impl HostBridge {
     ) -> Result<super::runtime_permissions::RuntimeApproval, HostBridgeError> {
         require_non_nil(session_id)?;
         require_non_nil(approval_id)?;
-        if !["approve_once", "reject"].contains(&decision) {
+        if !["approve_once", "reject", "cancel"].contains(&decision) {
             return Err(protocol_error());
         }
         let response = self
             .send_json(
                 Method::POST,
-                &format!("/v1/agent-sessions/{session_id}/runtime-approvals/{approval_id}"),
+                &format!("/v2/agent-sessions/{session_id}/runtime-approvals/{approval_id}"),
                 &serde_json::json!({"decision":decision}),
             )
             .await?;
@@ -764,11 +793,11 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=7) {
+        if !matches!(schema_version, 2..=8) {
             return Err(protocol_error());
         }
         let path = format!("/v{schema_version}/agent-sessions/{session_id}/events");
-        let path = if schema_version == 7 {
+        let path = if matches!(schema_version, 7 | 8) {
             path
         } else {
             format!("{path}?event_schema_version={schema_version}")

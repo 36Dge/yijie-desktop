@@ -142,7 +142,13 @@ export interface ConversationToolExecution {
   readonly error: ConversationExecutionError | null;
 }
 
-export type ConversationExecution = ConversationCommandExecution | ConversationToolExecution;
+export interface ConversationNativeToolExecution {
+  readonly kind: "tool";
+  readonly status: ConversationToolExecution["status"];
+  readonly native: ConversationNativeCommandExecution["native"];
+}
+
+export type ConversationExecution = ConversationCommandExecution | ConversationToolExecution | ConversationNativeToolExecution;
 
 export interface ConversationPlanStep {
   readonly ordinal: number;
@@ -364,7 +370,6 @@ export function viewFromLegacySnapshot(snapshot: ConversationSnapshot): Conversa
       turnKeys: Object.keys(turns).filter(key => turns[key]?.threadId === thread.threadId),
     }]))};
 }
-const safeText = (text: string): ConversationSafeText => ({text, truncated: false, truncationReason: null});
 function nativeExecution(entry: NativeConversationView["items"][number], view: NativeConversationView): ConversationExecution | null {
   const item = entry.item;
   if (item.type === "commandExecution") return {
@@ -372,14 +377,10 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
-  // Tool is a partial compatibility display until FEAT-144 defines its product scope.
-  const source: ConversationSourceFact = {sourceEventId: view.cursor?.eventId ?? "", sourceSequence: view.cursor?.sequence ?? "0", sourceOccurredAt: ""};
   if (item.type === "mcpToolCall") return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
-    startedSource: source, lastSource: source, identity: {resolution: "unknown", serverName: "", toolName: item.toolLabel ?? "工具信息不可用"},
-    argumentsSummary: safeText(item.argumentsSummary ?? "参数摘要不可用"), progress: [], durationMs: item.durationMs ?? null,
-    resultSummary: item.resultSummary == null ? null : safeText(item.resultSummary), error: null,
+    native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
   return null;
 }

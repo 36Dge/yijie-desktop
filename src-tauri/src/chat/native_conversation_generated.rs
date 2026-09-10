@@ -464,3 +464,35 @@ impl std::fmt::Debug for NativeViewRecords {
         f.write_str("NativeViewRecords([REDACTED])")
     }
 }
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpApprovalScope {
+    #[serde(rename = "server")]
+    pub server: String,
+    #[serde(rename = "tool")]
+    pub tool: String,
+    #[serde(rename = "asin")]
+    pub asin: String,
+    #[serde(rename = "marketplace")]
+    pub marketplace: String,
+}
+impl std::fmt::Debug for McpApprovalScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("McpApprovalScope([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct McpPermissionScopeResult {
+    #[serde(rename = "active")]
+    pub active: bool,
+    #[serde(rename = "runtimeRestarted")]
+    pub runtime_restarted: bool,
+}
+impl std::fmt::Debug for McpPermissionScopeResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("McpPermissionScopeResult([REDACTED])")
+    }
+}

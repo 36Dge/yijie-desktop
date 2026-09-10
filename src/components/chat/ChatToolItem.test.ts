@@ -97,7 +97,7 @@ afterEach(() => {
 
 describe("ChatToolItem", () => {
   it.each([
-    ["in_progress" as const, "执行中", true],
+    ["in_progress" as const, "最后观察：执行中", false],
     ["completed" as const, "已完成", false],
     ["failed" as const, "调用失败", false],
     ["declined" as const, "已拒绝", false],

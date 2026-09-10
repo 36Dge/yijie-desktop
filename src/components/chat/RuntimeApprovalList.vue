@@ -3,7 +3,7 @@ import type { RuntimeApproval, RuntimeApprovalDecision } from "../../api/runtime
 import YjIcon from "../yijie/YjIcon.vue";
 defineProps<{ requests: readonly RuntimeApproval[]; deciding: string | null; connected: boolean }>();
 defineEmits<{ decision: [id: string, decision: RuntimeApprovalDecision] }>();
-const labels = { pending: "需要你的批准", approved: "已批准本次", rejected: "已拒绝", unavailable: "请求已失效" };
+const labels = { pending: "需要你的批准", approved: "已批准本次", rejected: "已拒绝", unavailable: "请求已失效", cancelled: "已取消本次" };
 </script>
 <template>
   <section v-if="requests.length" class="runtime-approvals" aria-label="操作审批" aria-live="polite">
@@ -11,9 +11,11 @@ const labels = { pending: "需要你的批准", approved: "已批准本次", rej
       <header><YjIcon name="shield" size="md" /><strong>{{ labels[request.status] }}</strong><span v-if="request.kind === 'auto_review'">自动审核需人工确认</span></header>
       <p class="runtime-approval-summary">{{ request.summary }}</p>
       <div v-if="request.scope"><strong>{{ request.kind === 'command' ? '工作目录' : '影响范围' }}</strong><pre>{{ request.scope }}</pre></div>
+      <div v-if="request.mcp" aria-label="本次实际工具参数"><strong>{{ request.mcp.server }} / {{ request.mcp.tool }}</strong><pre>ASIN: {{ request.mcp.asin }}
+站点: {{ request.mcp.marketplace }}</pre></div>
       <p v-if="request.reason" class="runtime-approval-reason">{{ request.reason }}</p>
       <p v-if="request.kind === 'auto_review' && request.status === 'approved'" class="runtime-approval-reason">本次操作已获得批准；若当前轮已结束，可继续任务以执行。</p>
-      <footer v-if="request.status === 'pending'"><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'reject')">拒绝</button><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'approve_once')">{{ deciding === request.id ? '正在提交' : '批准本次' }}</button></footer>
+      <footer v-if="request.status === 'pending'"><button v-if="request.kind === 'mcp'" class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'cancel')">取消本次</button><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'reject')">拒绝</button><button class="yj-control yj-control--regular" type="button" :disabled="!!deciding || !connected" @click="$emit('decision', request.id, 'approve_once')">{{ deciding === request.id ? '正在提交' : '批准本次' }}</button></footer>
     </article>
   </section>
 </template>

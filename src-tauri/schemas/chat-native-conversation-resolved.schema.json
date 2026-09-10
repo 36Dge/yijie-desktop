@@ -923,6 +923,61 @@
           }
         }
       }
+    },
+    "McpApprovalScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server",
+        "tool",
+        "asin",
+        "marketplace"
+      ],
+      "description": "Validated bounded parameters from the actual native Prompt request; not an authorization or Tool Item binding. Only the configured sorftime/product_detail single US ASIN is supported.",
+      "properties": {
+        "server": {
+          "type": "string",
+          "enum": [
+            "sorftime"
+          ]
+        },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "product_detail"
+          ]
+        },
+        "asin": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{10}$",
+          "minLength": 10,
+          "maxLength": 10
+        },
+        "marketplace": {
+          "type": "string",
+          "enum": [
+            "US"
+          ]
+        }
+      }
+    },
+    "McpPermissionScopeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "runtimeRestarted"
+      ],
+      "properties": {
+        "active": {
+          "type": "boolean",
+          "description": "Whether the scoped Sorftime configuration remains enabled. Returning to ask does not silently reactivate it."
+        },
+        "runtimeRestarted": {
+          "type": "boolean",
+          "description": "True only after normal EOF exit, cleanup and source-verified restart without Sorftime."
+        }
+      }
     }
   },
   "$id": ""

@@ -9717,7 +9717,7 @@ pub async fn chat_set_permissions_v1(
 }
 
 #[tauri::command]
-pub async fn chat_runtime_approvals_v1(
+pub async fn chat_runtime_approvals_v2(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
 ) -> Result<CommandResponse<super::runtime_permissions::RuntimeApprovalSnapshot>, ChatIpcError> {
@@ -9753,6 +9753,17 @@ pub async fn chat_decide_runtime_approval_v1(
     if !["approve_once", "reject"].contains(&r.payload.decision.as_str()) {
         return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
     }
+    let existing = app
+        .runtime_approvals(r.payload.session_id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    if existing
+        .requests
+        .iter()
+        .any(|entry| entry.id == r.payload.approval_id && entry.kind == "mcp")
+    {
+        return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
+    }
     let value = app
         .decide_runtime_approval(
             r.payload.session_id,
@@ -9762,4 +9773,37 @@ pub async fn chat_decide_runtime_approval_v1(
         .await
         .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
     Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_decide_runtime_approval_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::RuntimeApproval>, ChatIpcError> {
+    let r: CommandRequest<RuntimeApprovalDecisionPayload> = decode_request(request)?;
+    require_runtime_permissions(r.request_id)?;
+    let (app, _, manager) = applications(&chat_runtime, r.request_id).await?;
+    authorize(&manager, r.context_id, ChatAction::SubmitTurn, r.request_id)?;
+    if !["approve_once", "reject", "cancel"].contains(&r.payload.decision.as_str()) {
+        return Err(map_chat_error(ChatError::InvalidInput, Some(r.request_id)));
+    }
+    let value = app
+        .decide_runtime_approval(
+            r.payload.session_id,
+            r.payload.approval_id,
+            &r.payload.decision,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(r.request_id)))?;
+    Ok(CommandResponse::new(r.request_id, value))
+}
+
+#[tauri::command]
+pub async fn chat_runtime_approvals_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::runtime_permissions::RuntimeApprovalSnapshot>, ChatIpcError> {
+    let mut result = chat_runtime_approvals_v2(request, chat_runtime).await?;
+    result.data.requests.retain(|r| r.kind != "mcp");
+    Ok(result)
 }

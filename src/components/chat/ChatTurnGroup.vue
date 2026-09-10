@@ -16,6 +16,7 @@ import ChatCommandItem, {
 } from "./ChatCommandItem.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatToolItem from "./ChatToolItem.vue";
+import ChatNativeToolItem from "./ChatNativeToolItem.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
 import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
@@ -338,8 +339,14 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
           @approval-decision="forwardApprovalDecision"
         />
 
+        <ChatNativeToolItem
+          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
+          :item="item"
+          :execution="item.execution"
+          @disclosure-change="forwardDisclosure"
+        />
         <ChatToolItem
-          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool'"
+          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && !('native' in item.execution)"
           :item="item"
           :execution="item.execution"
           @disclosure-change="forwardDisclosure"

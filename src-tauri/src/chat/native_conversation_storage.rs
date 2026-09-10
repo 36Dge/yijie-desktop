@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 // Reader first: the compatible checkpoint keeps its writer at format1.
 // Raising this constant is a separate writer activation after that checkpoint.
-pub const NATIVE_WRITE_FORMAT: i64 = 1;
+pub const NATIVE_WRITE_FORMAT: i64 = 2;
 const NATIVE_READ_FORMAT: i64 = 2;
 
 fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView, ChatError> {

@@ -47,6 +47,8 @@ pub struct RuntimeApproval {
     pub scope: String,
     pub reason: String,
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<super::native_conversation_generated::McpApprovalScope>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -62,12 +64,40 @@ impl RuntimeApprovalSnapshot {
             return Err(ChatError::OrchestrationUnavailable);
         }
         for item in &self.requests {
-            if item.id.is_nil()
+            let mcp_valid = match &item.mcp {
+                Some(scope) => {
+                    item.kind == "mcp"
+                        && scope.server == "sorftime"
+                        && scope.tool == "product_detail"
+                        && scope.marketplace == "US"
+                        && scope.asin.len() == 10
+                        && scope
+                            .asin
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                }
+                None => item.kind != "mcp",
+            };
+            if !mcp_valid
+                || (item.status == "cancelled" && item.kind != "mcp")
+                || item.id.is_nil()
                 || !ids.insert(item.id)
-                || !["command", "file_change", "permissions", "auto_review"]
-                    .contains(&item.kind.as_str())
-                || !["pending", "approved", "rejected", "unavailable"]
-                    .contains(&item.status.as_str())
+                || ![
+                    "command",
+                    "file_change",
+                    "permissions",
+                    "auto_review",
+                    "mcp",
+                ]
+                .contains(&item.kind.as_str())
+                || ![
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "unavailable",
+                    "cancelled",
+                ]
+                .contains(&item.status.as_str())
                 || [&item.summary, &item.scope, &item.reason]
                     .iter()
                     .any(|s| s.len() > 16384)

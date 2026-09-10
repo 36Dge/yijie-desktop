@@ -14,6 +14,10 @@ use tokio::task::JoinHandle;
 
 use crate::skills::SkillRoots;
 
+const SORFTIME_SECRET_ENV: &str = "YIJIE_FEAT144_SORFTIME_ACCOUNT_SK";
+const SORFTIME_PROXY_ENV: &str = "YIJIE_FEAT144_HTTPS_PROXY";
+const SORFTIME_ENABLED_ENV: &str = "YIJIE_FEAT144_SORFTIME_ENABLED";
+
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const FEAT126_FAKE_RESPONSES_BASE_URL: &str = "http://127.0.0.1:18082/v1";
 const FEAT126_DRIVER_NONCE_ENV: &str = "YIJIE_FEAT126_S10_DRIVER_NONCE";
@@ -77,10 +81,33 @@ pub struct SidecarConfig {
     feat136_command_tool_items_enabled: bool,
     feat137_command_approval_enabled: bool,
     minimax_api_key_file: Option<PathBuf>,
+    sorftime_token: std::sync::Arc<Mutex<Option<zeroize::Zeroizing<String>>>>,
+    sorftime_proxy: Option<String>,
 }
 
 impl SidecarConfig {
     pub fn from_environment() -> Result<Option<Self>, ChatError> {
+        let sorftime_token = std::env::var(SORFTIME_SECRET_ENV)
+            .ok()
+            .map(zeroize::Zeroizing::new);
+        std::env::remove_var(SORFTIME_SECRET_ENV);
+        let sorftime_requested = std::env::var(SORFTIME_ENABLED_ENV).ok();
+        let sorftime_proxy = std::env::var(SORFTIME_PROXY_ENV).ok();
+        std::env::remove_var(SORFTIME_PROXY_ENV);
+        if (sorftime_requested.is_some() || sorftime_token.is_some() || sorftime_proxy.is_some())
+            && (sorftime_requested.as_deref() != Some("true")
+                || !super::runtime_permissions::enabled()
+                || std::env::var("YIJIE_CHAT_LOCAL_HOST_ENABLED").as_deref() != Ok("true")
+                || std::env::var(MODEL_PROVIDER_ENV).as_deref() != Ok(MINIMAX_PROVIDER_ID)
+                || sorftime_token.as_ref().is_none_or(|token| {
+                    token.is_empty()
+                        || token.len() > 4096
+                        || token.bytes().any(|b| b.is_ascii_whitespace() || b == 0)
+                }))
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
+
         if std::env::var("YIJIE_CHAT_LOCAL_HOST_ENABLED").as_deref() != Ok("true") {
             if std::env::var("YIJIE_FEAT126_S10_TEST_PROFILE_ENABLED").as_deref() == Ok("true")
                 || std::env::var_os("YIJIE_FEAT126_S10_RUN_ID").is_some()
@@ -208,6 +235,8 @@ impl SidecarConfig {
             feat136_command_tool_items_enabled,
             feat137_command_approval_enabled,
             minimax_api_key_file,
+            sorftime_token: std::sync::Arc::new(Mutex::new(sorftime_token)),
+            sorftime_proxy,
         }))
     }
 
@@ -669,7 +698,26 @@ impl SidecarSupervisor {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
-        let mut child = match command.spawn() {
+        // One-time, explicit environment handoff after env_clear. Do not add
+        // the credential to the generic environment projection or log capture.
+        let mut sorftime_token = config.sorftime_token.lock().await;
+        if let Some(token) = sorftime_token.as_ref() {
+            if prepared.is_some() || !self.demo_fast || !config.minimax_provider_enabled {
+                return Err(ChatError::InvalidConfiguration);
+            }
+            command
+                .env(SORFTIME_ENABLED_ENV, "true")
+                .env(SORFTIME_SECRET_ENV, token.as_str());
+            if let Some(proxy) = &config.sorftime_proxy {
+                command.env(SORFTIME_PROXY_ENV, proxy);
+            }
+        }
+        let spawned = command.spawn();
+        sorftime_token.take();
+        drop(sorftime_token);
+        // Drop Command's transient environment copy promptly, before polling.
+        drop(command);
+        let mut child = match spawned {
             Ok(child) => child,
             Err(_) => {
                 if let Some(mut capture) = prepared {
@@ -1732,6 +1780,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let environment = config.environment(
             "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
@@ -1854,6 +1904,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let child_environment = |config: &SidecarConfig| {
             config.environment(
@@ -1939,6 +1991,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let roots = SkillRoots {
             bundle_root: PathBuf::from("/Applications/YiJie.app/Contents/Resources/skill-packages"),
@@ -1997,6 +2051,8 @@ mod tests {
             minimax_provider_enabled: true,
             image_generation_enabled: true,
             minimax_api_key_file: Some(canonical.clone()),
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         assert_eq!(config.validate_provider_key_file(), Ok(()));
         let environment = config.environment(
@@ -2214,6 +2270,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -2296,6 +2354,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let host_root = create_private_directory(&root.join("host")).unwrap();
         let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
@@ -2420,6 +2480,8 @@ mod tests {
                 minimax_provider_enabled: false,
                 image_generation_enabled: false,
                 minimax_api_key_file: None,
+                sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+                sorftime_proxy: None,
             };
             let supervisor = SidecarSupervisor {
                 config: Some(config),
@@ -2511,6 +2573,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let supervisor = SidecarSupervisor {
             config: Some(config),
@@ -2875,6 +2939,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

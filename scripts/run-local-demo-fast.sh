@@ -1,5 +1,8 @@
 #!/bin/bash
 set -euo pipefail
+# Secrets are collected only after builds and are never traced.
+set +x
+unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEAT144_HTTPS_PROXY
 
 desktop_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workspace_root="$(cd "$desktop_root/.." && pwd -P)"
@@ -29,6 +32,8 @@ image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
 feat134_environment=()
+sorftime_requested="${YIJIE_DEMO_FAST_SORFTIME_ENABLED:-false}"
+[[ "$sorftime_requested" == "true" || "$sorftime_requested" == "false" ]] || fail "invalid Sorftime opt-in"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" == "1" && "$1" == "--packaged" ]]; then
   packaged_app="true"
@@ -53,6 +58,10 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
+if [[ "$sorftime_requested" == "true" && "$packaged_app" != "true" && "$stable_api_only" != "true" ]]; then
+  fail "Sorftime hidden input requires a packaged canonical build"
+fi
+
 # FEAT-152 is part of the completed local Demo. Keep renderer/native admission
 # together, including the preflight source checks and the stable bundle build.
 export YIJIE_ENV=local
@@ -75,6 +84,7 @@ export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 # resource chain then retains its independent legacy immutable pins.
 cd "$desktop_root"
 node scripts/check-native-conversation.mjs --require-committed
+node scripts/check-native-mcp.mjs --require-committed
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs
@@ -116,6 +126,44 @@ fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
+fi
+
+# Public opt-in only; the credential never appears in shell arguments, files,
+# build/Vite processes, or WebView. A cancelled prompt leaves Sorftime disabled.
+if [[ "$sorftime_requested" == "true" ]]; then
+  # Reuse the current system HTTPS proxy, without PAC/auth URL forwarding or
+  # changing OS networking. No local proxy address is a product default.
+  sorftime_proxy_config="$(/usr/sbin/scutil --proxy)" || fail "system HTTPS proxy configuration is unavailable"
+  sorftime_proxy_enabled="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSEnable" {print $3}')"
+  sorftime_proxy_url=""
+  if [[ "$sorftime_proxy_enabled" == "1" ]]; then
+    sorftime_proxy_host="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSProxy" {print $3}')"
+    sorftime_proxy_port="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSPort" {print $3}')"
+    [[ "$sorftime_proxy_host" =~ ^[A-Za-z0-9.-]+$ && "$sorftime_proxy_port" =~ ^[0-9]+$ ]] || fail "unsupported system HTTPS proxy configuration"
+    [[ "$sorftime_proxy_port" -ge 1 && "$sorftime_proxy_port" -le 65535 ]] || fail "invalid system HTTPS proxy port"
+    sorftime_proxy_url="http://$sorftime_proxy_host:$sorftime_proxy_port"
+  elif [[ "$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "ProxyAutoConfigEnable" || $1 == "SOCKSEnable" {if ($3 == "1") print "unsupported"}')" == *unsupported* ]]; then
+    fail "current PAC or SOCKS proxy has not been verified for this native entry"
+  fi
+  unset sorftime_proxy_config sorftime_proxy_host sorftime_proxy_port sorftime_proxy_enabled
+  sorftime_input=""
+  if sorftime_input="$(/usr/bin/osascript 2>/dev/null <<'APPLESCRIPT'
+try
+  set result to display dialog "输入本次启动使用的 Sorftime MCP Account-SK（仅保存在内存，退出后需重新输入）" default answer "" with hidden answer with title "易界 AI · Sorftime" buttons {"暂不启用", "启用本次"} default button "启用本次" cancel button "暂不启用"
+  return text returned of result
+on error number -128
+  return ""
+end try
+APPLESCRIPT
+)"; then
+    if [[ -n "$sorftime_input" ]]; then
+      [[ "${#sorftime_input}" -le 4096 && ! "$sorftime_input" =~ [[:space:]] ]] || fail "invalid Sorftime credential input"
+      export YIJIE_FEAT144_SORFTIME_ACCOUNT_SK="$sorftime_input"
+      export YIJIE_FEAT144_SORFTIME_ENABLED=true
+      if [[ -n "$sorftime_proxy_url" ]]; then export YIJIE_FEAT144_HTTPS_PROXY="$sorftime_proxy_url"; fi
+    fi
+  fi
+  unset sorftime_input sorftime_proxy_url
 fi
 
 exec env \

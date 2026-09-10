@@ -1024,6 +1024,24 @@ impl ConversationApplication {
                 return Err(ChatError::ConversationConflict);
             }
         }
+        // Validate confirmation before touching native availability. The database
+        // remains the existing FEAT-152 authority for the selected UI mode.
+        if mode == super::runtime_permissions::PermissionMode::Full
+            && !confirm_full
+            && !self
+                .database
+                .permission_state(session_id)
+                .await?
+                .full_access_confirmed
+        {
+            return Err(ChatError::ScopeDenied);
+        }
+        if std::env::var("YIJIE_FEAT144_SORFTIME_ENABLED").as_deref() == Ok("true") {
+            self.host()?
+                .prepare_mcp_permission_scope(mode)
+                .await
+                .map_err(map_host_error)?;
+        }
         self.database
             .set_permission_mode(session_id, mode, confirm_full)
             .await

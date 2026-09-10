@@ -10,7 +10,8 @@ const publicSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contract
 const privateSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v2.schema.json"),"utf8"));
 const legacyPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation.json"),"utf8"));
 const legacyPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v1.schema.json"),"utf8"));
-const schemas={...publicSpec.components.schemas,...privateSpec.definitions};
+const permissionSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/runtime-permissions-v2.json"),"utf8"));
+const schemas={...publicSpec.components.schemas,...privateSpec.definitions,McpApprovalScope:permissionSpec.components.schemas.McpApprovalScope,McpPermissionScopeResult:permissionSpec.components.schemas.McpPermissionScopeResult};
 const snake=name=>name.replace(/([a-z0-9])([A-Z])/g,"$1_$2").toLowerCase();
 const pascal=name=>name.replace(/(^|[_-])([a-z])/g,(_,a,b)=>b.toUpperCase());
 const definitions=[];

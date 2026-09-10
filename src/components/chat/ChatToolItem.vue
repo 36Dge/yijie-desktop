@@ -37,7 +37,9 @@ const statusPresentation = computed<Readonly<{
 }>>(() => {
   switch (props.execution.status) {
     case "in_progress":
-      return { label: "执行中", summary: "工具正在执行。", icon: "pending", tone: "primary" };
+      return props.item.busy === true
+        ? { label: "执行中", summary: "工具正在执行。", icon: "pending", tone: "primary" }
+        : { label: "最后观察：执行中", summary: props.item.activityLabel ?? "仅有历史记录，当前进度待确认。", icon: "warning", tone: "muted" };
     case "completed":
       return { label: "已完成", summary: "工具调用已完成。", icon: "check", tone: "success" };
     case "failed":
@@ -50,7 +52,7 @@ const statusPresentation = computed<Readonly<{
   }
 });
 
-const defaultExpanded = computed(() => props.execution.status === "in_progress");
+const defaultExpanded = computed(() => props.item.busy === true);
 const identityLabel = computed(() => props.execution.identity.resolution === "known"
   ? `${props.execution.identity.serverName} · ${props.execution.identity.toolName}`
   : "未知工具");
@@ -62,7 +64,7 @@ const durationLabel = computed(() => props.execution.durationMs === null
   : formatDuration(props.execution.durationMs));
 const resultStateMessage = computed(() => {
   if (props.execution.resultSummary !== null) return "工具返回的结果摘要为空。";
-  return props.execution.status === "in_progress"
+  return props.item.busy === true
     ? "工具仍在执行，尚无结果摘要。"
     : "没有可显示的结果摘要。";
 });
