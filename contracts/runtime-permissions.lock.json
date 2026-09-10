@@ -4,21 +4,21 @@
   "contract_family_version": "0.1.0",
   "contracts": {
     "repository": "https://github.com/36Dge/yijie-contracts.git",
-    "full_commit": "db54c617c65db5431b950eb297ba148a43a8e600",
+    "full_commit": "811f38d6b104fa18477107e7ac91a85e19c445d1",
     "sources": {
       "openapi/runtime-permissions/runtime-permissions.yaml": "0cd99d5ee3f7035bf43c0996648dc855f71a447595dcb61d903232d81b602a99",
       "sdks/go/openapi/runtime-permissions/source.bundle.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
       "sdks/go/openapi/runtime-permissions/client.gen.go": "e1129eeb3eb1985a5be8f95aa2e4cca1a4c211fe96f3fefcc8ae1f7d8433bc2b",
       "sdks/typescript/src/openapi/runtime-permissions.gen.ts": "70cc7af6c1102b813ef3aa501ffa86a49891194dcbf9cd3445b39d1e33167bd8",
-      "scripts/generate.mjs": "711a529c8cd04f826c6f2db37892bd509004d1cfe078ecc78961761a8ab16a4a"
+      "scripts/generate.mjs": "b036f609bf63e97d34ad7a2d1e77dbfc1c40b42ba931b0c2f1c75e5ca74edf1d"
     }
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "ccd815ff63542674daa80172a1c71ac7478edd0f",
+    "full_commit": "0e47766f494977c94bfea0e89cfbdf45a7fafa2b",
     "sources": {
       "api/openapi/runtime-permissions.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
-      "api/runtime-permissions.lock.json": "1d138c13c9f292ec6d8fe824489a4a268ba14cb51bd1e4f050686498fa854326",
+      "api/runtime-permissions.lock.json": "6fde8a4201efa80808c37c5fff5259fcc6e2ffda0d015ab4411adf52721b07fa",
       "go.mod": "f47ba476ef396d83074df316e25ec9b2fe9323ca2925401fa5969e4a446de39d",
       "go.sum": "9644330cdaa7bbfc0137cd27ff32b189fcf6b4b1f3f74576f0f953a7ff960945",
       "internal/app/app.go": "2f2bed54023b31ccb11ef8c83fdab836e8bdb9a36a8a70cd1eff16b023fe61a0",
@@ -32,7 +32,10 @@
       "internal/session/runtime_permissions.go": "5c04bbd3e02cf4f8dcf9565bea95c4962ea438e0d9da3db9e94aba8ab9c68537",
       "internal/session/service.go": "c5570227c9526f24b7e0939b3d1897d074aa80a6bf9cc5ae9db39bd0686c5681",
       "internal/session/store.go": "ab934f9c22c1a9af723fde46bedb2c07681faab548346127d8f0ff66906dcc38",
-      "internal/codex/native_config_layers.go": "ff550d6bc26a073013eff46c44c6480ec1a74068ebda89a72b544661005f4322"
+      "internal/codex/native_config_layers.go": "ff550d6bc26a073013eff46c44c6480ec1a74068ebda89a72b544661005f4322",
+      "internal/codex/native_thread_status.go": "254e407dd91960c0c56e350a777944492137ec109ed713e434541e98f4b2df8b",
+      "internal/session/native_thread_status.go": "a41d8f3903c2febe2f3297cbc17ef83bbe75496b03b88181c8ae335b3551f6fc",
+      "internal/app/native_thread_status.go": "8bffa8e9cddcd9ad31e6eea4aa4d4bb7397ef5c448d7bb4baff3b6aab2648b8b"
     }
   },
   "local_scope": "Exact local/demo_fast. Retained v4, Skills and Runtime locks remain authoritative for their own surfaces."

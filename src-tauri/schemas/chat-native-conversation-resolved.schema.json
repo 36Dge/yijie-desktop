@@ -556,6 +556,57 @@
         }
       }
     },
+    "NativeThreadStatusSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Current thread/read(includeTurns=false) status only. This ephemeral observation has no history watermark and must not change saved Item or Turn facts, infer their completion, or be persisted as a history format.",
+      "required": [
+        "schema_version",
+        "source",
+        "thread_id",
+        "status"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            2
+          ],
+          "x-enum-varnames": [
+            "NativeThreadStatusSnapshotSchemaVersionN2"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "runtime_read"
+          ],
+          "x-enum-varnames": [
+            "NativeThreadStatusSnapshotSourceRuntimeRead"
+          ]
+        },
+        "thread_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "notLoaded",
+            "idle",
+            "systemError",
+            "active"
+          ],
+          "x-enum-varnames": [
+            "NativeThreadStatusSnapshotStatusNotLoaded",
+            "NativeThreadStatusSnapshotStatusIdle",
+            "NativeThreadStatusSnapshotStatusSystemError",
+            "NativeThreadStatusSnapshotStatusActive"
+          ],
+          "description": "Exact native thread.status.type. active remains active even when historical Turns appear completed; idle is not inferred from Turn status. notLoaded and systemError do not prove readiness or grant permission."
+        }
+      }
+    },
     "NativeDisplayItem": {
       "type": "object",
       "additionalProperties": false,

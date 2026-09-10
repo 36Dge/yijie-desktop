@@ -601,7 +601,31 @@ impl ChatRuntime {
             // Reading saved history must not initialize paid external tools for
             // every old thread. Existing active work must finish in its normal
             // profile before starting this explicitly opted-in MCP session.
-            return check_sorftime_startup_history(&candidates);
+            for candidate in &candidates {
+                if check_sorftime_startup_history(std::slice::from_ref(candidate)).is_ok() {
+                    continue;
+                }
+                if !database
+                    .sorftime_read_only_failed_submission(candidate.clone())
+                    .await?
+                {
+                    return Err(ChatError::SidecarUnavailable);
+                }
+                let status = host
+                    .read_native_thread_status(candidate.agent_session_id)
+                    .await
+                    .map_err(|_| ChatError::SidecarUnavailable)?;
+                check_sorftime_read_only_native_status(candidate, &status)?;
+                // Recheck after the native read's await: another local action
+                // must not make this submission dispatchable in that window.
+                if !database
+                    .sorftime_read_only_failed_submission(candidate.clone())
+                    .await?
+                {
+                    return Err(ChatError::SidecarUnavailable);
+                }
+            }
+            return Ok(());
         }
         for candidate in candidates {
             let resumed = match host
@@ -1112,6 +1136,25 @@ fn check_sorftime_startup_history(
     Ok(())
 }
 
+fn check_sorftime_read_only_native_status(
+    candidate: &database::Feat126ResumeCandidate,
+    status: &native_conversation_generated::NativeThreadStatusSnapshot,
+) -> Result<(), ChatError> {
+    if candidate.active_local_turn_id.is_none()
+        || candidate.active_turn_operation_id.is_none()
+        || candidate.active_runtime_turn_id.is_some()
+        || status.schema_version != 2
+        || status.source != "runtime_read"
+        || status.thread_id != candidate.codex_thread_id.to_string()
+        || !matches!(status.status.as_str(), "idle" | "notLoaded")
+    {
+        return Err(ChatError::SidecarUnavailable);
+    }
+    // notLoaded describes this Runtime only. Do not resume the old thread,
+    // conclude that its uncertain request never ran, or change saved facts.
+    Ok(())
+}
+
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
     match error {
         ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
@@ -1315,6 +1358,47 @@ mod tests {
             check_sorftime_startup_history(&[history, queued]),
             Err(ChatError::SidecarUnavailable)
         );
+    }
+
+    #[test]
+    fn feat144_read_only_startup_requires_exact_native_current_status() {
+        let candidate = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: Some(Uuid::now_v7()),
+            active_runtime_turn_id: None,
+            active_turn_operation_id: Some(Uuid::now_v7()),
+        };
+        let mut snapshot = native_conversation_generated::NativeThreadStatusSnapshot {
+            schema_version: 2,
+            source: "runtime_read".into(),
+            thread_id: candidate.codex_thread_id.to_string(),
+            status: "notLoaded".into(),
+        };
+        for status in ["notLoaded", "idle", "active", "systemError", "future", ""] {
+            snapshot.status = status.into();
+            assert_eq!(
+                check_sorftime_read_only_native_status(&candidate, &snapshot).is_ok(),
+                matches!(status, "notLoaded" | "idle")
+            );
+        }
+        snapshot.status = "idle".into();
+        snapshot.thread_id = Uuid::now_v7().to_string();
+        assert!(check_sorftime_read_only_native_status(&candidate, &snapshot).is_err());
+        snapshot.thread_id = candidate.codex_thread_id.to_string();
+        let active = database::Feat126ResumeCandidate {
+            active_runtime_turn_id: Some(Uuid::now_v7()),
+            ..candidate.clone()
+        };
+        assert!(check_sorftime_read_only_native_status(&active, &snapshot).is_err());
+        snapshot.source = "runtime_notification".into();
+        assert!(check_sorftime_read_only_native_status(&candidate, &snapshot).is_err());
+        snapshot.source = "runtime_read".into();
+        snapshot.schema_version = 1;
+        assert!(check_sorftime_read_only_native_status(&candidate, &snapshot).is_err());
+        assert!(candidate.active_runtime_turn_id.is_none());
     }
 
     #[test]

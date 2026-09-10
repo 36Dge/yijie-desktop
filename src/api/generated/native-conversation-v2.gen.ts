@@ -50,6 +50,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/agent-sessions/{agent_session_id}/native-thread-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_session_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the current native thread status without reading or changing history
+         * @description Owner-only local bearer access, with the same session binding as native-thread. Uses stable Codex thread/read with includeTurns=false; never resumes, executes, or reconciles a Turn. Only the current native thread.status.type is projected. Unknown or missing status and native read errors fail through the existing content-free error boundary; no status is inferred from saved Turns, Items, approvals, timestamps, or transport state. A successful response is an observation, not a lease or a replacement for native admission checks. All responses are Cache-Control: no-store.
+         */
+        get: operations["readNativeThreadStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -183,6 +205,19 @@ export interface components {
             texts: components["schemas"]["NativeMcpText"][];
             diagnostics: ("identity_unavailable" | "arguments_unavailable" | "unsupported_content" | "content_redacted" | "content_truncated" | "content_limit" | "result_unavailable" | "display_limit")[];
         };
+        /** @description Current thread/read(includeTurns=false) status only. This ephemeral observation has no history watermark and must not change saved Item or Turn facts, infer their completion, or be persisted as a history format. */
+        NativeThreadStatusSnapshot: {
+            /** @enum {integer} */
+            schema_version: 2;
+            /** @enum {string} */
+            source: "runtime_read";
+            thread_id: string;
+            /**
+             * @description Exact native thread.status.type. active remains active even when historical Turns appear completed; idle is not inferred from Turn status. notLoaded and systemError do not prove readiness or grant permission.
+             * @enum {string}
+             */
+            status: "notLoaded" | "idle" | "systemError" | "active";
+        };
     };
     responses: never;
     parameters: never;
@@ -263,6 +298,84 @@ export interface operations {
             /** @description Stream changed or replay unavailable */
             409: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    readNativeThreadStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current native thread status, independent of historical Turn snapshots */
+            200: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeThreadStatusSnapshot"];
+                };
+            };
+            /** @description Invalid existing session request; content-free error */
+            400: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid or missing existing local bearer; content-free error */
+            401: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found; existing owner-only session lookup semantics apply */
+            404: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Existing session conflict or native operation unavailable; content-free error */
+            409: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Existing internal session failure; content-free error */
+            500: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Native read failed or returned missing, unsupported, or mismatched status; content-free error */
+            502: {
+                headers: {
+                    /** @description Responses are not cached. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content?: never;

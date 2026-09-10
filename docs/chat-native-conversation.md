@@ -39,7 +39,7 @@ Host 的最终安全输出策略、native v7、唯一缓冲及 SQLCipher 保存�
 普通 canonical 验收另发现外壳没有消费已有的缩放视口宽度变量、长标题撑开 Chat Grid；最小修复为使用既有缩放宽度及 minmax(0, 1fr) 单列，不增加状态或权限。最终真实成功/失败两条 Command、200%、键盘复制和正常重开通过；本次独立请求累计3/10文本、0图片。本次八项 local D4 基于当时的工作区候选完成；验收时逐文件 SHA-256 及后续提交、推送状态分别以元仓 FEAT-136 验收和交付记录为准，提交或推送不表示重新运行 D4；原五项 Command D4 已完整归档。
 
 
-## FEAT-144 原生实现（2026-09-10，尚未真实验收）
+## FEAT-144 原生实现（2026-09-10，阶段记录）
 
 当前工作树的新主源为`src-tauri/contracts/native-conversation-v2.json`和私有`chat-native-conversation-v2.schema.json`，使用native-thread v2、SSE v8、私有history/view v2及原有唯一缓冲。上文v1/v7与schema14段落保留各次历史交付范围。新增schema15只前向增加facts/views格式标记；旧JSON不改写，格式1/2分别读取，未知格式经recordDiagnostics传到历史/worker/IPC/前端，并阻止缺失记录补建和活跃缓冲启动。facts不回放。
 
@@ -53,3 +53,14 @@ Sorftime本地配置入口为`YIJIE_DEMO_FAST_SORFTIME_ENABLED=true pnpm tauri:d
 
 
 FEAT-144 canonical 首次启动发现并修正：固定 Runtime 的 `config/read` 返回的是含默认值的有效配置，Host 现按真实原生序列化校验；不放宽未知字段、功能开关或秘密隔离要求。Sorftime 显式启用时，启动读取旧历史不再逐个恢复旧原生线程，避免仅打开应用就初始化外部服务。若旧记录仍含活跃 Turn 绑定，保持拒绝，须先在普通入口正常处理；不改写状态或猜测接管。未启用 Sorftime 的 FEAT-152 恢复路径保持原行为。新验证须从新会话发起；已有记录只读仍复用原生保存与读取。
+
+
+## FEAT-144 本地不确定投递与当前原生状态（2026-09-11）
+
+实际Sorftime成功、原生参数审批、业务返回独立对照、配置兼容后的权限切换及普通历史重开已完成；当前D4仍以元仓FEAT-144最新验收为准。上节实施前预算和来源保留当时范围，不代表当前调用台账。
+
+真实续验发现：一条已有Host会话的本地text v1提交被拒后，保留queued/no-native-Turn和failed outbox；它的历史执行结果不确定。旧Sorftime启动检查仅看本地queued就阻断整个界面。修复不改这条记录、不补造终态、不重发或恢复旧线程。
+
+新增独立native-thread-status读取使用Contracts生成DTO，Host直接调用原生thread/read(includeTurns=false)。旧native-thread响应、history格式、SQLCipher表及唯一缓冲均不变。只有本地queued、无原生Turn绑定、同scope/session/operation的失败出站且无可调度出站，结合精确原生idle或notLoaded，才允许保留旧记录并打开新任务。notLoaded仅说明当前Runtime未加载，绝不表示旧请求未执行或已完成。active/systemError/未知/缺失/读取失败或任何原生Turn绑定仍阻断。没有原生状态的新Host接口不能回退成历史猜测。
+
+这个状态读取不resume、不启动MCP、不授予原生verified scope、不写入事实或权限。旧任务仍不能自动续跑；未启用Sorftime的既有权限恢复路径保持原样。新HTTP操作遵守provider-first，实际Contracts→Host→Desktop pin按依赖固定；旧reader与schema15最低回滚基线不因临时状态DTO升级。

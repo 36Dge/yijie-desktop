@@ -1126,6 +1126,14 @@ impl DatabaseWorker {
             .await
     }
 
+    pub(crate) async fn sorftime_read_only_failed_submission(
+        &self,
+        candidate: super::database::Feat126ResumeCandidate,
+    ) -> Result<bool, ChatError> {
+        self.call(move |repository| repository.sorftime_read_only_failed_submission(&candidate))
+            .await
+    }
+
     pub async fn purge_expired_deletion_receipts(&self, now: i64) -> Result<usize, ChatError> {
         self.call(move |repository| repository.purge_expired_deletion_receipts(now))
             .await

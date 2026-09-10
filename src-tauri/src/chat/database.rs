@@ -5523,6 +5523,53 @@ impl ChatRepository {
         candidates
     }
 
+    pub(crate) fn sorftime_read_only_failed_submission(
+        &self,
+        candidate: &Feat126ResumeCandidate,
+    ) -> Result<bool, ChatError> {
+        let (Some(turn_id), Some(operation_id), None) = (
+            candidate.active_local_turn_id,
+            candidate.active_turn_operation_id,
+            candidate.active_runtime_turn_id,
+        ) else {
+            return Ok(false);
+        };
+        // This proves only that local dispatch has stopped. A failed outbox
+        // does not prove that the old native request never executed.
+        self.connection
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM chat_turns t
+                   JOIN chat_sessions s ON s.id=t.session_id
+                   JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
+                   JOIN chat_outbox o ON o.operation_id=t.operation_id
+                   WHERE s.id=?1 AND t.id=?2 AND t.operation_id=?3
+                     AND s.agent_session_id=?4 AND s.runtime_thread_id=?5
+                     AND s.owner_user_id=?6 AND s.tenant_id=?7
+                     AND b.public_task_id=?8
+                     AND t.status='queued' AND t.runtime_turn_id IS NULL
+                     AND o.session_id=s.id AND o.kind='start_turn' AND o.state='failed'
+                     AND NOT EXISTS(SELECT 1 FROM chat_native_bindings n WHERE n.turn_id=t.id)
+                     AND NOT EXISTS(
+                       SELECT 1 FROM chat_outbox pending
+                       WHERE pending.session_id=s.id AND pending.state IN ('pending','inflight')
+                     )
+                 )",
+                params![
+                    candidate.session_id.to_string(),
+                    turn_id.to_string(),
+                    operation_id.to_string(),
+                    candidate.agent_session_id.to_string(),
+                    candidate.codex_thread_id.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    candidate.task_id.to_string()
+                ],
+                |row| row.get(0),
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
     pub fn purge_expired_deletion_receipts(&mut self, now: i64) -> Result<usize, ChatError> {
         if now < 0 {
             return Err(ChatError::InvalidInput);
@@ -10249,6 +10296,105 @@ mod tests {
             native[k] = v.clone();
         }
         serde_json::from_value(serde_json::json!({"schema_version":7,"event_id":Uuid::from_u128(100+sequence as u128),"stream_id":Uuid::from_u128(90),"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":context.agent_session_id,"codex_thread_id":context.codex_thread_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":native}})).unwrap()
+    }
+
+    #[test]
+    fn feat144_stopped_local_submission_stays_read_only_and_cannot_dispatch() {
+        let root = std::env::temp_dir().join(format!("feat144-stopped-local-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 45, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let pending = repo
+            .create_session_and_enqueue(project, "普通待投递消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let claimed = bind_and_claim_first_turn(&mut repo, &pending, now);
+        let candidate = repo.feat126_resume_candidates().unwrap().remove(0);
+        assert!(!repo
+            .sorftime_read_only_failed_submission(&candidate)
+            .unwrap());
+        repo.fail_outbox(claimed.operation_id).unwrap();
+        let before: (String, Option<String>, String) = repo
+            .connection
+            .query_row(
+                "SELECT status,runtime_turn_id,submission_status FROM chat_turns WHERE id=?1",
+                [pending.turn_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(repo
+            .sorftime_read_only_failed_submission(&candidate)
+            .unwrap());
+        assert!(repo
+            .claim_next_conversation_outbox(now + 60, 30)
+            .unwrap()
+            .is_none());
+        assert!(repo
+            .recovery_snapshot()
+            .unwrap()
+            .active_session_ids
+            .is_empty());
+        repo.connection
+            .execute(
+                "UPDATE chat_outbox SET state='pending' WHERE operation_id=?1",
+                [pending.create_operation_id.to_string()],
+            )
+            .unwrap();
+        assert!(!repo
+            .sorftime_read_only_failed_submission(&candidate)
+            .unwrap());
+        repo.connection
+            .execute(
+                "UPDATE chat_outbox SET state='done' WHERE operation_id=?1",
+                [pending.create_operation_id.to_string()],
+            )
+            .unwrap();
+        let mismatched = Feat126ResumeCandidate {
+            agent_session_id: Uuid::now_v7(),
+            ..candidate.clone()
+        };
+        assert!(!repo
+            .sorftime_read_only_failed_submission(&mismatched)
+            .unwrap());
+        // Ordinary pending/inflight work still prevents MCP startup.
+        for state in ["pending", "inflight"] {
+            repo.connection
+                .execute(
+                    "UPDATE chat_outbox SET state=?1 WHERE operation_id=?2",
+                    params![state, claimed.operation_id.to_string()],
+                )
+                .unwrap();
+            assert!(!repo
+                .sorftime_read_only_failed_submission(&candidate)
+                .unwrap());
+        }
+        repo.connection
+            .execute(
+                "UPDATE chat_outbox SET state='failed' WHERE operation_id=?1",
+                [claimed.operation_id.to_string()],
+            )
+            .unwrap();
+        let after: (String, Option<String>, String) = repo
+            .connection
+            .query_row(
+                "SELECT status,runtime_turn_id,submission_status FROM chat_turns WHERE id=?1",
+                [pending.turn_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            repo.outbox_state(claimed.operation_id).unwrap(),
+            OutboxState::Failed
+        );
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 45, owner);
+        assert!(repo
+            .sorftime_read_only_failed_submission(&candidate)
+            .unwrap());
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

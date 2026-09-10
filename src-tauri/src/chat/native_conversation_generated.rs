@@ -269,6 +269,24 @@ impl std::fmt::Debug for NativeMcpDisplay {
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct NativeThreadStatusSnapshot {
+    #[serde(rename = "schema_version")]
+    pub schema_version: i64,
+    #[serde(rename = "source")]
+    pub source: String,
+    #[serde(rename = "thread_id")]
+    pub thread_id: String,
+    #[serde(rename = "status")]
+    pub status: String,
+}
+impl std::fmt::Debug for NativeThreadStatusSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeThreadStatusSnapshot([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeDisplayItem {
     #[serde(rename = "item")]
     pub item: NativeItem,

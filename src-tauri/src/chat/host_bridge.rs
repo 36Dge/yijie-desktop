@@ -390,6 +390,35 @@ impl Debug for HostToken {
 }
 
 impl HostBridge {
+    pub async fn read_native_thread_status(
+        &self,
+        session_id: Uuid,
+    ) -> Result<super::native_conversation_generated::NativeThreadStatusSnapshot, HostBridgeError>
+    {
+        require_non_nil(session_id)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v2/agent-sessions/{session_id}/native-thread-status"),
+            )
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        validate_no_store(response.headers())?;
+        let bytes = read_limited(response, 2048).await?;
+        let value: super::native_conversation_generated::NativeThreadStatusSnapshot =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        if value.schema_version != 2 || value.source != "runtime_read" {
+            return Err(protocol_error());
+        }
+        Ok(value)
+    }
+
     pub async fn read_native_thread(
         &self,
         session_id: Uuid,
