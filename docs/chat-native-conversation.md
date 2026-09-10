@@ -50,3 +50,6 @@ Sorftime本地配置入口为`YIJIE_DEMO_FAST_SORFTIME_ENABLED=true pnpm tauri:d
 仅核实原生请求批准/user/workspaceWrite/Prompt、startup ready及实际工具schema后允许开始业务Turn。切换其它模式前，正常结束活跃Turn并经正常退出/清理/禁用MCP重启确认失效；回到请求批准不自动重连。FEAT-152权限含义及普通图片工具注册不改，FEAT-137不恢复。
 
 源契约 db54c617c65db5431b950eb297ba148a43a8e600、Host 31ee71889f83aff53dce6eeacd4b5ca4fd319c6b 已本地提交并固定消费者来源。最低兼容 reader 为 25b004fbd5a4dcf642a503d302c21a7d6e3b817f（writer=1）；其实际提交树通过生成、类型和3项正常格式/迁移检查。当前最终 writer=2 后于该基线。canonical 及 D4 仍待执行，9项活动 AC 未关闭，AC-004 业务失败场景用户排除。当前业务 0/10、元数据 8/10、模型 0/8，图片未授权；不得继承上文 FEAT-132/134/136 的调用额度或 PASS。
+
+
+FEAT-144 canonical 首次启动发现并修正：固定 Runtime 的 `config/read` 返回的是含默认值的有效配置，Host 现按真实原生序列化校验；不放宽未知字段、功能开关或秘密隔离要求。Sorftime 显式启用时，启动读取旧历史不再逐个恢复旧原生线程，避免仅打开应用就初始化外部服务。若旧记录仍含活跃 Turn 绑定，保持拒绝，须先在普通入口正常处理；不改写状态或猜测接管。未启用 Sorftime 的 FEAT-152 恢复路径保持原行为。新验证须从新会话发起；已有记录只读仍复用原生保存与读取。

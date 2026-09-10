@@ -597,6 +597,12 @@ impl ChatRuntime {
     ) -> Result<(), ChatError> {
         let database = self.database().await?;
         let candidates = database.feat126_resume_candidates().await?;
+        if std::env::var("YIJIE_FEAT144_SORFTIME_ENABLED").as_deref() == Ok("true") {
+            // Reading saved history must not initialize paid external tools for
+            // every old thread. Existing active work must finish in its normal
+            // profile before starting this explicitly opted-in MCP session.
+            return check_sorftime_startup_history(&candidates);
+        }
         for candidate in candidates {
             let resumed = match host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
@@ -1092,6 +1098,20 @@ fn feat137_missing_session_recovery(
     }
 }
 
+fn check_sorftime_startup_history(
+    candidates: &[database::Feat126ResumeCandidate],
+) -> Result<(), ChatError> {
+    if candidates.iter().any(|candidate| {
+        candidate.active_local_turn_id.is_some()
+            || candidate.active_runtime_turn_id.is_some()
+            || candidate.active_turn_operation_id.is_some()
+    }) {
+        return Err(ChatError::SidecarUnavailable);
+    }
+    // No resume, dispatch, binding repair, or native status write occurs here.
+    Ok(())
+}
+
 fn storage_readiness_for_error(error: ChatError) -> ChatStorageReadiness {
     match error {
         ChatError::DatabaseReadOnly => ChatStorageReadiness::ReadOnly,
@@ -1270,6 +1290,29 @@ mod tests {
         exact_active.active_turn_id = Some(Uuid::now_v7());
         assert_eq!(
             validate_feat137_resumed_session(&active_candidate, &exact_active),
+            Err(ChatError::SidecarUnavailable)
+        );
+    }
+
+    #[test]
+    fn feat144_startup_keeps_saved_history_read_only_and_refuses_active_bindings() {
+        let history = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+        };
+        assert_eq!(check_sorftime_startup_history(&[history.clone()]), Ok(()));
+        let queued = database::Feat126ResumeCandidate {
+            active_local_turn_id: Some(Uuid::now_v7()),
+            active_turn_operation_id: Some(Uuid::now_v7()),
+            ..history.clone()
+        };
+        assert_eq!(
+            check_sorftime_startup_history(&[history, queued]),
             Err(ChatError::SidecarUnavailable)
         );
     }

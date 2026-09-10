@@ -15,7 +15,7 @@
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "31ee71889f83aff53dce6eeacd4b5ca4fd319c6b",
+    "full_commit": "635846f72ef4b0d940798215e7b79d58aed6c591",
     "sources": {
       "api/openapi/runtime-permissions.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
       "api/runtime-permissions.lock.json": "1d138c13c9f292ec6d8fe824489a4a268ba14cb51bd1e4f050686498fa854326",
