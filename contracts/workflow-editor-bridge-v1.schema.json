@@ -1,0 +1,171 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "connect",
+        "ready",
+        "request",
+        "response",
+        "dirty_changed",
+        "request_close"
+      ]
+    },
+    "bridge_id": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "request": {
+      "$ref": "https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeInput"
+    },
+    "response": {
+      "$ref": "https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeResult"
+    },
+    "error": {
+      "$ref": "https://schemas.yijie.ai/workflow-local/v1#/$defs/ErrorResponse"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "kind"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/workflow-editor/bridge-v1.schema.json",
+  "title": "WorkflowEditorBridgeV1",
+  "description": "Source MessageChannel envelope; data DTOs reference the authoritative workflow-local OpenAPI components.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "connect"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "ready"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation",
+          "request"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "response"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "response"
+            ],
+            "not": {
+              "required": [
+                "error"
+              ]
+            }
+          },
+          {
+            "required": [
+              "error"
+            ],
+            "not": {
+              "required": [
+                "response"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "dirty_changed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation",
+          "dirty"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "request_close"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation"
+        ]
+      }
+    }
+  ]
+}

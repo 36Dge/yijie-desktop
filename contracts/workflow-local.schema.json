@@ -1,0 +1,1229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/workflow-local/v1",
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "OperationId": {
+      "type": "string",
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "Version": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^v0[.]0[.][1-9][0-9]*$"
+    },
+    "RunEpoch": {
+      "$ref": "#/$defs/OperationId"
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "profile_disabled",
+        "service_unavailable",
+        "unauthorized",
+        "session_expired",
+        "resource_not_found",
+        "revision_conflict",
+        "operation_conflict",
+        "invalid_draft",
+        "input_too_large",
+        "run_busy",
+        "operation_unknown",
+        "protocol_mismatch",
+        "invalid_request",
+        "storage_unavailable",
+        "internal_error"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_bytes": {
+          "type": "integer",
+          "enum": [
+            4096
+          ]
+        },
+        "prefix_bytes": {
+          "type": "integer",
+          "enum": [
+            1024
+          ]
+        },
+        "output_bytes": {
+          "type": "integer",
+          "enum": [
+            5120
+          ]
+        },
+        "canvas_bytes": {
+          "type": "integer",
+          "enum": [
+            262144
+          ]
+        },
+        "message_bytes": {
+          "type": "integer",
+          "enum": [
+            524288
+          ]
+        },
+        "max_active_runs": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "execution_budget_seconds": {
+          "type": "integer",
+          "enum": [
+            30
+          ]
+        },
+        "editor_ttl_seconds": {
+          "type": "integer",
+          "enum": [
+            300
+          ]
+        }
+      },
+      "required": [
+        "input_bytes",
+        "prefix_bytes",
+        "output_bytes",
+        "canvas_bytes",
+        "message_bytes",
+        "max_active_runs",
+        "execution_budget_seconds",
+        "editor_ttl_seconds"
+      ]
+    },
+    "ServiceStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "run_epoch": {
+          "$ref": "#/$defs/RunEpoch"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable",
+            "disabled"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "run_epoch",
+        "ready",
+        "state",
+        "limits"
+      ]
+    },
+    "Principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owner_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tenant_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "space_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "owner_id",
+        "tenant_id",
+        "user_id",
+        "space_id"
+      ]
+    },
+    "Workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "canvas": {
+          "type": "string",
+          "maxLength": 262144,
+          "x-utf8-max-bytes": 262144
+        },
+        "runnable": {
+          "type": "boolean"
+        },
+        "published_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "updated_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "workflow_id",
+        "name",
+        "revision",
+        "canvas",
+        "runnable",
+        "updated_at_ms"
+      ],
+      "description": "Coze-owned graph and revision. Canvas is native JSON text; safe incomplete drafts may be saved. IDs are opaque strings, including decimal Coze IDs, never JS numbers."
+    },
+    "WorkflowList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkflowSummary"
+          },
+          "maxItems": 50
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "ListRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        }
+      },
+      "required": []
+    },
+    "CreateInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "CreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        }
+      },
+      "required": [
+        "name",
+        "operation_id"
+      ]
+    },
+    "TextInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf8-max-bytes": 4096
+        }
+      },
+      "required": [
+        "input"
+      ]
+    },
+    "SaveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "canvas": {
+          "type": "string",
+          "maxLength": 262144,
+          "x-utf8-max-bytes": 262144
+        }
+      },
+      "required": [
+        "operation_id",
+        "expected_revision",
+        "name",
+        "canvas"
+      ]
+    },
+    "TestRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "input": {
+          "$ref": "#/$defs/TextInput"
+        }
+      },
+      "required": [
+        "operation_id",
+        "expected_revision",
+        "input"
+      ]
+    },
+    "PublishRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "successful_test_run_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "operation_id",
+        "expected_revision",
+        "successful_test_run_id"
+      ]
+    },
+    "RunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "input": {
+          "$ref": "#/$defs/TextInput"
+        }
+      },
+      "required": [
+        "operation_id",
+        "version",
+        "input"
+      ]
+    },
+    "RunInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "input": {
+          "$ref": "#/$defs/TextInput"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "version",
+        "input"
+      ]
+    },
+    "RunMode": {
+      "type": "string",
+      "enum": [
+        "debug",
+        "release"
+      ]
+    },
+    "NodeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "output": {
+          "type": "string",
+          "maxLength": 5120,
+          "x-utf8-max-bytes": 5120
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      },
+      "required": [
+        "node_id",
+        "state"
+      ]
+    },
+    "Run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "mode": {
+          "$ref": "#/$defs/RunMode"
+        },
+        "revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Actual engine status; new values stay visible and never imply success."
+        },
+        "terminal": {
+          "type": "boolean"
+        },
+        "input": {
+          "$ref": "#/$defs/TextInput"
+        },
+        "output": {
+          "type": "string",
+          "maxLength": 5120,
+          "x-utf8-max-bytes": 5120
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NodeResult"
+          },
+          "maxItems": 3
+        },
+        "started_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finished_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      },
+      "required": [
+        "run_id",
+        "workflow_id",
+        "operation_id",
+        "mode",
+        "state",
+        "terminal",
+        "started_at_ms"
+      ]
+    },
+    "RunList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunSummary"
+          },
+          "maxItems": 50
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "OperationKind": {
+      "type": "string",
+      "enum": [
+        "create",
+        "save",
+        "test",
+        "publish",
+        "run"
+      ]
+    },
+    "OperationPhase": {
+      "type": "string",
+      "enum": [
+        "recorded",
+        "completed",
+        "unknown",
+        "rejected"
+      ]
+    },
+    "OperationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "kind": {
+          "$ref": "#/$defs/OperationKind"
+        },
+        "phase": {
+          "$ref": "#/$defs/OperationPhase"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/Version",
+          "description": "Version registered by this operation: the newly committed version for publish, or the selected published version for a release run. Omitted for create, save, and debug test operations; never copies Workflow.published_version as ambient resource metadata."
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      },
+      "required": [
+        "operation_id",
+        "kind",
+        "phase"
+      ],
+      "description": "Dispatch receipt, not engine status. completed identifies committed resource/execution registration, not successful workflow execution."
+    },
+    "EditorOpenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ]
+    },
+    "EditorSessionSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "secret": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Native/API only. Never serialize this response to renderer, URL, log or MessageChannel."
+        },
+        "run_epoch": {
+          "$ref": "#/$defs/RunEpoch"
+        },
+        "expires_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id",
+        "workflow_id",
+        "secret",
+        "run_epoch",
+        "expires_at_ms"
+      ]
+    },
+    "EditorOpenedView": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bridge_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow": {
+          "$ref": "#/$defs/Workflow"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expires_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "protocol_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        }
+      },
+      "required": [
+        "bridge_id",
+        "workflow",
+        "generation",
+        "expires_at_ms",
+        "protocol_version"
+      ]
+    },
+    "Bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow": {
+          "$ref": "#/$defs/Workflow"
+        },
+        "principal": {
+          "$ref": "#/$defs/Principal"
+        },
+        "node_types": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "enum": [
+              1,
+              15,
+              2
+            ]
+          },
+          "maxItems": 3
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        }
+      },
+      "required": [
+        "workflow",
+        "principal",
+        "node_types",
+        "limits"
+      ]
+    },
+    "EditorOperation": {
+      "type": "string",
+      "enum": [
+        "bootstrap",
+        "read_draft",
+        "save_draft",
+        "test_draft",
+        "publish_internal",
+        "read_run",
+        "read_operation"
+      ]
+    },
+    "EditorExchangeInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bridge_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "protocol_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation": {
+          "$ref": "#/$defs/EditorOperation"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "canvas": {
+          "type": "string",
+          "maxLength": 262144,
+          "x-utf8-max-bytes": 262144
+        },
+        "input": {
+          "$ref": "#/$defs/TextInput"
+        },
+        "successful_test_run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        }
+      },
+      "required": [
+        "bridge_id",
+        "generation",
+        "protocol_version",
+        "request_id",
+        "operation"
+      ],
+      "description": "Native generates write operation IDs. operation_id input is only a read_operation lookup. No actor, secret, URL, headers or arbitrary command.",
+      "x-operation-required": {
+        "save_draft": [
+          "expected_revision",
+          "name",
+          "canvas"
+        ],
+        "test_draft": [
+          "expected_revision",
+          "input"
+        ],
+        "publish_internal": [
+          "expected_revision",
+          "successful_test_run_id"
+        ],
+        "read_run": [
+          "run_id"
+        ],
+        "read_operation": [
+          "operation_id"
+        ]
+      },
+      "x-operation-restrict-fields": true,
+      "x-operation-optional": {},
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "bootstrap"
+              }
+            }
+          },
+          "then": {
+            "required": [],
+            "properties": {
+              "expected_revision": false,
+              "name": false,
+              "canvas": false,
+              "input": false,
+              "successful_test_run_id": false,
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "read_draft"
+              }
+            }
+          },
+          "then": {
+            "required": [],
+            "properties": {
+              "expected_revision": false,
+              "name": false,
+              "canvas": false,
+              "input": false,
+              "successful_test_run_id": false,
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "save_draft"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expected_revision",
+              "name",
+              "canvas"
+            ],
+            "properties": {
+              "input": false,
+              "successful_test_run_id": false,
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "test_draft"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expected_revision",
+              "input"
+            ],
+            "properties": {
+              "name": false,
+              "canvas": false,
+              "successful_test_run_id": false,
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "publish_internal"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expected_revision",
+              "successful_test_run_id"
+            ],
+            "properties": {
+              "name": false,
+              "canvas": false,
+              "input": false,
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "read_run"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "run_id"
+            ],
+            "properties": {
+              "expected_revision": false,
+              "name": false,
+              "canvas": false,
+              "input": false,
+              "successful_test_run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "read_operation"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "operation_id"
+            ],
+            "properties": {
+              "expected_revision": false,
+              "name": false,
+              "canvas": false,
+              "input": false,
+              "successful_test_run_id": false,
+              "run_id": false
+            }
+          }
+        }
+      ]
+    },
+    "EditorExchangeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "bootstrap": {
+          "$ref": "#/$defs/Bootstrap"
+        },
+        "workflow": {
+          "$ref": "#/$defs/Workflow"
+        },
+        "run": {
+          "$ref": "#/$defs/Run"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": [
+        "request_id"
+      ]
+    },
+    "EditorCloseInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bridge_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "bridge_id"
+      ]
+    },
+    "RunQueryKind": {
+      "type": "string",
+      "enum": [
+        "run",
+        "history",
+        "operation"
+      ]
+    },
+    "RunQueryInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RunQueryKind"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "x-operation-field": "kind",
+      "x-operation-required": {
+        "run": [
+          "workflow_id",
+          "run_id"
+        ],
+        "history": [
+          "workflow_id"
+        ],
+        "operation": [
+          "operation_id"
+        ]
+      },
+      "x-operation-restrict-fields": true,
+      "x-operation-optional": {
+        "history": [
+          "cursor",
+          "limit"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "run"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "workflow_id",
+              "run_id"
+            ],
+            "properties": {
+              "operation_id": false,
+              "cursor": false,
+              "limit": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "history"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "workflow_id"
+            ],
+            "properties": {
+              "run_id": false,
+              "operation_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "operation"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "operation_id"
+            ],
+            "properties": {
+              "workflow_id": false,
+              "run_id": false,
+              "cursor": false,
+              "limit": false
+            }
+          }
+        }
+      ]
+    },
+    "RunQueryResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "$ref": "#/$defs/Run"
+        },
+        "history": {
+          "$ref": "#/$defs/RunList"
+        },
+        "receipt": {
+          "$ref": "#/$defs/OperationReceipt"
+        }
+      },
+      "required": []
+    },
+    "CloseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "closed"
+      ]
+    },
+    "WorkflowSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runnable": {
+          "type": "boolean"
+        },
+        "published_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "updated_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "workflow_id",
+        "name",
+        "revision",
+        "runnable",
+        "updated_at_ms"
+      ],
+      "description": "Bounded list summary; read the detail endpoint for full content."
+    },
+    "RunSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/OperationId"
+        },
+        "mode": {
+          "$ref": "#/$defs/RunMode"
+        },
+        "revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Actual engine status; new values stay visible and never imply success."
+        },
+        "terminal": {
+          "type": "boolean"
+        },
+        "started_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finished_at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      },
+      "required": [
+        "run_id",
+        "workflow_id",
+        "operation_id",
+        "mode",
+        "state",
+        "terminal",
+        "started_at_ms"
+      ],
+      "description": "Bounded list summary; read the detail endpoint for full content."
+    }
+  }
+}

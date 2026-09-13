@@ -234,8 +234,8 @@ export function createAppRouter(
     return true;
   });
 
-  appRouter.afterEach((route) => {
-    if (typeof document === "undefined") {
+  appRouter.afterEach((route, _from, failure) => {
+    if (failure || typeof document === "undefined") {
       return;
     }
 

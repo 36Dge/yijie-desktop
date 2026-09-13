@@ -13,7 +13,7 @@ const titleId = useId();
   <header class="yj-page-header" :aria-labelledby="titleId">
     <div class="yj-page-header__copy">
       <h1 :id="titleId" class="yj-page-header__title">{{ title }}</h1>
-      <p v-if="description" class="yj-page-header__description">{{ description }}</p>
+      <p v-if="description || $slots.description" class="yj-page-header__description"><slot name="description">{{ description }}</slot></p>
     </div>
     <div v-if="$slots.actions" class="yj-page-header__actions">
       <slot name="actions" />

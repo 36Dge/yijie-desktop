@@ -292,6 +292,27 @@ impl NativeAuthRuntime {
             .await
     }
 
+    /// In-process authority for the separately gated local workflow service.
+    /// This neither contacts API/OIDC nor initializes Chat/Agent Host.
+    pub(crate) fn workflow_local_authority(
+        &self,
+    ) -> Result<(uuid::Uuid, uuid::Uuid, u64), NativeProjectionError> {
+        if !matches!(self.mode, RuntimeMode::DemoFast)
+            || !demo_fast_capabilities()
+                .iter()
+                .any(|capability| capability == "workspace.use")
+        {
+            return Err(NativeProjectionError::CapabilityDenied);
+        }
+        Ok((
+            uuid::Uuid::parse_str(DEMO_FAST_OWNER_USER_ID)
+                .map_err(|_| NativeProjectionError::Invalid)?,
+            uuid::Uuid::parse_str(DEMO_FAST_TENANT_ID)
+                .map_err(|_| NativeProjectionError::Invalid)?,
+            DEMO_FAST_AUTHORIZATION_REVISION,
+        ))
+    }
+
     pub(crate) async fn chat_projection(
         &self,
         tenant_selector: &str,

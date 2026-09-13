@@ -3,6 +3,12 @@ set -euo pipefail
 # Secrets are collected only after builds and are never traced.
 set +x
 unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEAT144_HTTPS_PROXY
+# Keep the workflow machine credential path out of the preparation processes.
+# This launcher never reads or places K_NA itself in an environment variable.
+workflow_requested="${YIJIE_WORKFLOW_ENABLED:-false}"
+workflow_credential_file="${YIJIE_WORKFLOW_CREDENTIAL_FILE:-}"
+unset YIJIE_WORKFLOW_ENABLED YIJIE_WORKFLOW_CREDENTIAL_FILE YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE
+unset VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE
 
 desktop_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 workspace_root="$(cd "$desktop_root/.." && pwd -P)"
@@ -57,6 +63,23 @@ case "$#" in
     ;;
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
+
+workflow_environment=()
+workflow_tauri_config=()
+[[ "$workflow_requested" == "true" || "$workflow_requested" == "false" ]] || fail "invalid workflow opt-in"
+# The renderer receives only this public opt-in, including packaged Vite builds.
+export VITE_YIJIE_WORKFLOW_ENABLED="$workflow_requested"
+if [[ "$workflow_requested" == "true" ]]; then
+  [[ -z "${TAURI_CONFIG:-}" ]] || fail "workflow entry does not accept an ambient Tauri config override"
+  [[ "$stable_api_only" != "true" ]] || fail "workflow uses the ordinary main App, not the separate stable entry"
+  [[ "$workflow_credential_file" == /* && -f "$workflow_credential_file" && ! -L "$workflow_credential_file" ]] || fail "workflow credential path must be an existing absolute regular file"
+  workflow_file_info="$(stat -f '%u:%Lp:%l:%z' "$workflow_credential_file")" || fail "workflow credential metadata is unavailable"
+  IFS=: read -r workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size <<< "$workflow_file_info"
+  [[ "$workflow_file_uid" == "$(id -u)" && ( "$workflow_file_mode" == "400" || "$workflow_file_mode" == "600" ) && "$workflow_file_links" == "1" && "$workflow_file_size" -gt 0 && "$workflow_file_size" -le 1024 ]] || fail "workflow credential file must be owner-only and bounded"
+  workflow_environment=(YIJIE_WORKFLOW_ENABLED=true "YIJIE_WORKFLOW_CREDENTIAL_FILE=$workflow_credential_file")
+  workflow_tauri_config=(--config src-tauri/tauri.workflow-local.conf.json)
+  unset workflow_file_info workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size
+fi
 
 if [[ "$sorftime_requested" == "true" && "$packaged_app" != "true" && "$stable_api_only" != "true" ]]; then
   fail "Sorftime hidden input requires a packaged canonical build"
@@ -116,12 +139,16 @@ if [[ "$stable_api_only" == "true" ]]; then
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "stable Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 elif [[ "$packaged_app" == "true" ]]; then
-  pnpm tauri:build:demo-fast
+  pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}"
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 else
-  launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)
+  if [[ "$workflow_requested" == "true" ]]; then
+    launch_command=(node scripts/run-workflow-dev.mjs)
+  else
+    launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)
+  fi
 fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -167,6 +194,11 @@ APPLESCRIPT
 fi
 
 exec env \
+  -u YIJIE_WORKFLOW_ENABLED \
+  -u YIJIE_WORKFLOW_CREDENTIAL_FILE \
+  -u YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE \
+  -u VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE \
+  -u VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE \
   -u YIJIE_DESKTOP_NATIVE_AUTH_ENABLED \
   -u YIJIE_DESKTOP_AUTH_ENVIRONMENT \
   -u YIJIE_DESKTOP_OIDC_ISSUER \
@@ -205,6 +237,7 @@ exec env \
   -u YIJIE_FEAT137_DETERMINISTIC_APPROVAL_PRODUCER \
   -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED \
   "${feat134_environment[@]+"${feat134_environment[@]}"}" \
+  "${workflow_environment[@]+"${workflow_environment[@]}"}" \
   VITE_FEAT126_S10_DRIVER=false \
   VITE_FEAT128_S7B_RUNTIME=false \
   VITE_FEAT128_S10D_RUNTIME=false \

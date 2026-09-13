@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import WorkflowLocalWorkspace from "../../components/workflows/WorkflowLocalWorkspace.vue";
+import { workflowLocalUiEnabled } from "../../authorization/workflow-local-ui-config";
+import "../../components/workflows/workflow-showcase.css";
 import RecommendedWorkflowCard from "../../components/workflows/RecommendedWorkflowCard.vue";
 import WorkflowSummaryCard from "../../components/workflows/WorkflowSummaryCard.vue";
 import YjIcon from "../../components/yijie/YjIcon.vue";
@@ -6,14 +10,18 @@ import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
 import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS, WORKFLOW_CATEGORIES } from "../../domain/workflow-showcase";
+
+const editing = ref(false);
 </script>
 
 <template>
   <YjPage>
     <div class="workflow-page">
-      <YjPageHeader title="工作流" description="集中查看常用自动化流程与推荐方案。当前内容仅供展示。" />
+      <YjPageHeader title="工作流" :description="workflowLocalUiEnabled ? undefined : '集中查看常用自动化流程与推荐方案。当前内容仅供展示。'">
+        <template v-if="workflowLocalUiEnabled" #description>集中管理和编排本地文本流程，点击<span class="workflow-page__create-highlight">创建工作流</span>开始。电商推荐方案仍为示意。</template>
+      </YjPageHeader>
 
-      <section class="workflow-page__categories" aria-label="工作流能力分类（仅展示）">
+      <section v-if="!editing" class="workflow-page__categories" aria-label="工作流能力分类（仅展示）">
         <ul class="workflow-page__category-list">
           <li v-for="category in WORKFLOW_CATEGORIES" :key="category.id">
             <span class="workflow-page__category yj-control yj-control--pill"
@@ -27,7 +35,8 @@ import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS, WORKFLOW_CATE
         </ul>
       </section>
 
-      <YjSection title="我的工作流">
+      <WorkflowLocalWorkspace v-if="workflowLocalUiEnabled" @editing="editing = $event" />
+      <YjSection v-else title="我的工作流">
         <template #actions>
           <span class="workflow-page__create-card yj-control" aria-label="创建工作流，仅展示" aria-disabled="true">
             <YjIcon name="plus" size="sm" tone="muted" />
@@ -61,7 +70,7 @@ import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS, WORKFLOW_CATE
         </ul>
       </YjSection>
 
-      <YjSection title="推荐工作流" icon="refresh">
+      <YjSection v-if="!editing" :title="workflowLocalUiEnabled ? '推荐工作流 · 方案示意' : '推荐工作流'" icon="refresh">
         <template #actions>
           <span class="workflow-page__view-all yj-control" aria-disabled="true">
             查看全部 <YjIcon name="chevronRight" size="sm" />
@@ -76,6 +85,12 @@ import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS, WORKFLOW_CATE
 </template>
 
 <style scoped>
+.workflow-page__create-highlight {
+  color: var(--yj-color-brand-primary);
+  font-weight: var(--yj-font-weight-semibold);
+  white-space: nowrap;
+}
+
 .workflow-page {
   display: grid;
   align-content: start;

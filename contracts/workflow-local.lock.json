@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "contract_version": "1.0.0-local-candidate",
+  "mode": "local_candidate",
+  "base_commit": "811f38d6b104fa18477107e7ac91a85e19c445d1",
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "sources": [
+    {
+      "path": "openapi/workflow-local/workflow-local.yaml",
+      "sha256": "90e13e8a386036ca09e19502204d629417c7b82fbd664d1d063d5cb846316a1c"
+    },
+    {
+      "path": "jsonschema/workflow-editor/bridge-v1.schema.json",
+      "sha256": "12731e0870e042a048063ff09d4de02a9304ac2f6e385eb25c572adb14bc9280"
+    },
+    {
+      "path": "scripts/generate-workflow-local.mjs",
+      "sha256": "cbea994d2e21251c29ffac10c1a52f8f21121d3a84862d045145ff966eb4990b"
+    },
+    {
+      "path": "scripts/generate-workflow-browser.mjs",
+      "sha256": "8122cc1aa2239e1af2530d18932af8e79b24470b7f6b0d17908a63806c09fad0"
+    },
+    {
+      "path": "scripts/sync-workflow-consumer.mjs",
+      "sha256": "1e2e8b85ba5c12582e8a14755b9e52cffb12dea4a7cda0d0e9c3d33cf1ce90ff"
+    }
+  ],
+  "generated": [
+    {
+      "path": "sdks/go/openapi/workflow-local/types.gen.go",
+      "sha256": "aea622412894575a1a2e2ee76192345bf1068c768a67f02cee4727f16fe836cd"
+    },
+    {
+      "path": "sdks/typescript/src/openapi/workflow-local.gen.ts",
+      "sha256": "db92537ea5e4de3747ff98b5b8029b6361e105a4037f5e467672c5c686a48dcb"
+    },
+    {
+      "path": "sdks/rust/workflow-local/types.gen.rs",
+      "sha256": "7fc8ff8f442b501fc40e692f45e0a9338b75c42b02d5da154cdb61daf86be132"
+    },
+    {
+      "path": "sdks/jsonschema/workflow-local.schema.json",
+      "sha256": "6739ca5e21e9ce7de2fe28744d89226e6980fa50c6e9e80f482cbec2a5beb9d4"
+    },
+    {
+      "path": "sdks/jsonschema/workflow-editor-bridge-v1.schema.json",
+      "sha256": "8dbb4c30c883fa677cf42068156c664c346845b1a2e1f940cc8ca4cec3c85bc7"
+    },
+    {
+      "path": "sdks/typescript/src/jsonschema/workflow-editor-bridge-v1.gen.ts",
+      "sha256": "669aafc90a483c776e8b1cd3de41bdb4dc1f067792f6e7433adb79f49478abd9"
+    },
+    {
+      "path": "sdks/typescript/src/browser/workflow-local-validator.gen.js",
+      "sha256": "70eb5c58eb4e1e9c59d08ffeb6390c717220490d8585fc2e45c93998b74cc70b"
+    },
+    {
+      "path": "sdks/typescript/src/browser/workflow-local-validator.gen.d.ts",
+      "sha256": "3bbbd5a1c452ff7e58dece7d8761c72b58783bd52624d40c1d1a5b83d21703b7"
+    },
+    {
+      "path": "sdks/openapi/workflow-internal.gen.json",
+      "sha256": "6f6000985cc7321dcaa645552ab0ece694f2de7ec470d0338b5e942ffd20e92b"
+    }
+  ],
+  "generators": {
+    "go": "oapi-codegen/v2@v2.7.2",
+    "typescript": "openapi-typescript@7.13.0; defaultNonNullable=false",
+    "rust": "source-local deterministic subset; existing serde",
+    "browser": "ajv@8.20.0 standalone ESM; TextEncoder UTF8; inlined locked Unicode helper"
+  },
+  "release": false,
+  "source_commit": "32dd76298fd5ba2346fe2429f78b2b3e2f32a7e4",
+  "consumer": "yijie-desktop",
+  "consumed": [
+    {
+      "source": "sdks/rust/workflow-local/types.gen.rs",
+      "path": "src-tauri/src/workflows/generated.rs",
+      "sha256": "7fc8ff8f442b501fc40e692f45e0a9338b75c42b02d5da154cdb61daf86be132"
+    },
+    {
+      "source": "sdks/typescript/src/openapi/workflow-local.gen.ts",
+      "path": "src/domain/workflow-local.generated.ts",
+      "sha256": "db92537ea5e4de3747ff98b5b8029b6361e105a4037f5e467672c5c686a48dcb"
+    },
+    {
+      "source": "sdks/jsonschema/workflow-local.schema.json",
+      "path": "contracts/workflow-local.schema.json",
+      "sha256": "6739ca5e21e9ce7de2fe28744d89226e6980fa50c6e9e80f482cbec2a5beb9d4"
+    },
+    {
+      "source": "sdks/jsonschema/workflow-editor-bridge-v1.schema.json",
+      "path": "contracts/workflow-editor-bridge-v1.schema.json",
+      "sha256": "8dbb4c30c883fa677cf42068156c664c346845b1a2e1f940cc8ca4cec3c85bc7"
+    },
+    {
+      "source": "sdks/typescript/src/jsonschema/workflow-editor-bridge-v1.gen.ts",
+      "path": "src/domain/workflow-editor-bridge.generated.ts",
+      "sha256": "0ac77519c393e9281a9e5fcee3ba5239d668fd30465b4e9f30964bf47654b7a9",
+      "projection": "typescript-imports-v1",
+      "source_sha256": "669aafc90a483c776e8b1cd3de41bdb4dc1f067792f6e7433adb79f49478abd9",
+      "imports": {
+        "../openapi/workflow-local.gen.js": "./workflow-local.generated.js"
+      }
+    },
+    {
+      "source": "sdks/typescript/src/browser/workflow-local-validator.gen.js",
+      "path": "src/api/generated/workflow-local-validator.gen.js",
+      "sha256": "70eb5c58eb4e1e9c59d08ffeb6390c717220490d8585fc2e45c93998b74cc70b"
+    },
+    {
+      "source": "sdks/typescript/src/browser/workflow-local-validator.gen.d.ts",
+      "path": "src/api/generated/workflow-local-validator.gen.d.ts",
+      "sha256": "2dcf54b09556e76de80c157d9329e25a164e3f4f3867ebe91190e02cdd81df85",
+      "projection": "typescript-imports-v1",
+      "source_sha256": "3bbbd5a1c452ff7e58dece7d8761c72b58783bd52624d40c1d1a5b83d21703b7",
+      "imports": {
+        "../openapi/workflow-local.gen.js": "../../domain/workflow-local.generated.js",
+        "../jsonschema/workflow-editor-bridge-v1.gen.js": "../../domain/workflow-editor-bridge.generated.js"
+      }
+    }
+  ]
+}

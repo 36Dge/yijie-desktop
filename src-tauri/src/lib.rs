@@ -11,6 +11,8 @@ mod native_auth;
 #[cfg(target_os = "macos")]
 mod single_instance;
 mod skills;
+#[cfg(not(feature = "feat126-s10-driver"))]
+mod workflows;
 
 pub use feat126_secure_storage::feat126_secure_storage_test_control;
 
@@ -175,12 +177,23 @@ pub fn run() {
         .manage(ArtifactNativeRuntime::new())
         .manage(ArtifactReportNativeRuntime::new())
         .manage(ArtifactVideoNativeRuntime::new());
+    #[cfg(not(feature = "feat126-s10-driver"))]
+    let builder = builder.manage(workflows::WorkflowRuntime::new(
+        local_profile,
+        chat_native_auth.clone(),
+    ));
     #[cfg(feature = "feat128-s7b-runtime")]
     let builder = builder.manage(feat128_s7b_runtime);
     #[cfg(feature = "feat128-s10-runtime")]
     let builder = builder.manage(feat128_s10d_runtime);
     let builder = builder.on_window_event(|window, event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
+            #[cfg(not(feature = "feat126-s10-driver"))]
+            if window.label() == "main" {
+                window
+                    .state::<workflows::WorkflowRuntime>()
+                    .invalidate_from_window_event();
+            }
             window
                 .state::<ArtifactFileNativeRuntime>()
                 .invalidate_webview(window.label());
@@ -286,6 +299,7 @@ pub fn run() {
             if let Some(roots) = app.state::<SkillRuntime>().roots() {
                 skills::watch_skill_install_root(app.handle().clone(), roots.install_root.clone());
             }
+            workflows::create_main_window(app)?;
             let startup_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let runtime = startup_app.state::<SkillRuntime>();
@@ -308,6 +322,14 @@ pub fn run() {
         native_auth_status,
         list_my_tenants,
         get_my_capabilities,
+        workflows::workflow_service_status,
+        workflows::workflow_list,
+        workflows::workflow_create,
+        workflows::workflow_editor_open,
+        workflows::workflow_editor_exchange,
+        workflows::workflow_editor_close,
+        workflows::workflow_run_start,
+        workflows::workflow_run_query,
         skills::host::skills_list_v1,
         skills::host::skills_scan_v1,
         skills::host::skills_install_v1,
@@ -413,9 +435,12 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::Exit) {
                 // Tauri terminates the process after this callback, so managed state destructors
                 // are not a reliable place to stop the owned Host child.
-                let _ = tauri::async_runtime::block_on(
-                    app.state::<ChatRuntime>().shutdown_for_app_exit(),
-                );
+                let _ = tauri::async_runtime::block_on(async {
+                    app.state::<workflows::WorkflowRuntime>()
+                        .shutdown_for_app_exit()
+                        .await;
+                    app.state::<ChatRuntime>().shutdown_for_app_exit().await
+                });
             }
         });
 }

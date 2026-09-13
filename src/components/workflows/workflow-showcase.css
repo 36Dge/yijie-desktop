@@ -1,0 +1,52 @@
+.workflow-showcase-control {
+  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-bg-card);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--yj-motion-fast) var(--yj-ease-standard),
+    border-color var(--yj-motion-fast) var(--yj-ease-standard);
+}
+
+.workflow-showcase-control .yj-icon { color: inherit; }
+
+.workflow-page .workflow-showcase-control:hover {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-control-hover);
+}
+
+.workflow-page .workflow-showcase-control:active { background: var(--yj-color-control-pressed); }
+
+.workflow-page .workflow-showcase-control[aria-pressed="true"] {
+  border-color: var(--yj-color-on-brand);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
+  font-weight: var(--yj-font-weight-semibold);
+}
+
+.workflow-page .workflow-showcase-control[aria-pressed="true"]:hover { background: var(--yj-color-brand-hover); }
+.workflow-page .workflow-showcase-control[aria-pressed="true"]:active { background: var(--yj-color-brand-active); }
+
+.workflow-showcase-control:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: var(--yj-focus-ring-width);
+}
+
+.workflow-showcase-card {
+  transition: border-color var(--yj-motion-base) var(--yj-ease-standard),
+    transform var(--yj-motion-base) var(--yj-ease-standard);
+}
+
+.workflow-page .workflow-showcase-card:hover,
+.workflow-page .workflow-showcase-card:focus-within {
+  border-color: var(--yj-color-brand-primary);
+  transform: translateY(calc(var(--yj-space-1) / -2));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-showcase-control,
+  .workflow-showcase-card { transition: none; }
+
+  .workflow-page .workflow-showcase-card:hover,
+  .workflow-page .workflow-showcase-card:focus-within { transform: none; }
+}

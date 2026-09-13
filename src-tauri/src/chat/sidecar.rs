@@ -392,6 +392,10 @@ impl SidecarConfig {
     }
 
     fn forceful_child_cleanup_enabled(&self) -> bool {
+        #[cfg(not(feature = "feat126-s10-driver"))]
+        if crate::workflows::exact_local_enabled() {
+            return false;
+        }
         !self.minimax_provider_enabled || self.image_generation_enabled
     }
 }

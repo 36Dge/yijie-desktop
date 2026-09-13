@@ -12,6 +12,7 @@ interface ImportMetaEnv {
   readonly VITE_YIJIE_FEAT136_EXECUTION_ENABLED?: string;
   readonly VITE_YIJIE_FEAT137_APPROVAL_ENABLED?: string;
   readonly VITE_YIJIE_SKILL_MARKETPLACE_UI_ENABLED?: string;
+  readonly VITE_YIJIE_WORKFLOW_ENABLED?: string;
 }
 
 interface ImportMeta {

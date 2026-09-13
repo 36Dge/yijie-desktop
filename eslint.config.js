@@ -15,6 +15,7 @@ export default tseslint.config(
       "**/.vitepress/**",
       "**/*.d.ts",
       "src/api/generated/native-conversation-validator.gen.js",
+      "src/api/generated/workflow-local-validator.gen.js",
     ],
   },
   {
