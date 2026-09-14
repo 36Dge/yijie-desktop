@@ -28,33 +28,6 @@ fn exact_local_settings(
     environment == Some("local") && profile == Some("demo_fast") && enabled == Some("true")
 }
 
-#[cfg(test)]
-mod local_gate_tests {
-    #[test]
-    fn workflow_local_cleanup_and_window_gate_is_exact_and_opt_in() {
-        assert!(super::exact_local_settings(
-            Some("local"),
-            Some("demo_fast"),
-            Some("true")
-        ));
-        assert!(!super::exact_local_settings(
-            Some("local"),
-            Some("demo_fast"),
-            None
-        ));
-        assert!(!super::exact_local_settings(
-            Some("local"),
-            Some("demo_fast"),
-            Some("false")
-        ));
-        assert!(!super::exact_local_settings(
-            Some("production"),
-            Some("demo_fast"),
-            Some("true")
-        ));
-    }
-}
-
 use generated::{ErrorCode, ErrorResponse};
 
 fn error(code: ErrorCode) -> ErrorResponse {
@@ -80,5 +53,32 @@ fn error(code: ErrorCode) -> ErrorResponse {
         code,
         message: message.to_owned(),
         operation_id: None,
+    }
+}
+
+#[cfg(test)]
+mod local_gate_tests {
+    #[test]
+    fn workflow_local_cleanup_and_window_gate_is_exact_and_opt_in() {
+        assert!(super::exact_local_settings(
+            Some("local"),
+            Some("demo_fast"),
+            Some("true")
+        ));
+        assert!(!super::exact_local_settings(
+            Some("local"),
+            Some("demo_fast"),
+            None
+        ));
+        assert!(!super::exact_local_settings(
+            Some("local"),
+            Some("demo_fast"),
+            Some("false")
+        ));
+        assert!(!super::exact_local_settings(
+            Some("production"),
+            Some("demo_fast"),
+            Some("true")
+        ));
     }
 }

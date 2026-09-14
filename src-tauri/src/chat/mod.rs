@@ -1348,7 +1348,10 @@ mod tests {
             active_runtime_turn_id: None,
             active_turn_operation_id: None,
         };
-        assert_eq!(check_sorftime_startup_history(&[history.clone()]), Ok(()));
+        assert_eq!(
+            check_sorftime_startup_history(std::slice::from_ref(&history)),
+            Ok(())
+        );
         let queued = database::Feat126ResumeCandidate {
             active_local_turn_id: Some(Uuid::now_v7()),
             active_turn_operation_id: Some(Uuid::now_v7()),
