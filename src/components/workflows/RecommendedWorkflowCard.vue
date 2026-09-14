@@ -1,33 +1,25 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import type { RecommendedWorkflow } from "../../domain/workflow-showcase";
-import YjIcon from "../yijie/YjIcon.vue";
 defineProps<{ workflow: RecommendedWorkflow }>();
-const stages = ["输入", "处理", "输出"] as const;
+const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 </script>
 
 <template>
-  <article class="recommended-workflow-card">
+  <article class="recommended-workflow-card workflow-showcase-card">
     <header class="recommended-workflow-card__header">
       <h3 class="recommended-workflow-card__title">{{ workflow.title }}</h3>
       <span class="recommended-workflow-card__badge yj-badge">{{ workflow.badge }}</span>
     </header>
     <p class="recommended-workflow-card__description">{{ workflow.description }}</p>
 
-    <ol class="recommended-workflow-card__flow" :aria-label="`${workflow.title}流程`">
-      <li v-for="(node, index) in workflow.nodes" :key="node.label" class="recommended-workflow-card__flow-item">
-        <span class="recommended-workflow-card__step-caption"><span class="recommended-workflow-card__step-number">{{ String(index + 1).padStart(2, '0') }}</span>{{ stages[index] }}</span>
-        <span class="recommended-workflow-card__node">
-          <span class="recommended-workflow-card__node-icon"><YjIcon :name="node.icon" size="lg" /></span>
-          <span class="recommended-workflow-card__node-label">{{ node.label }}</span>
-        </span>
-        <span v-if="index < workflow.nodes.length - 1" class="recommended-workflow-card__connector" aria-hidden="true"><YjIcon name="chevronRight" size="xs" tone="muted" /></span>
-      </li>
-    </ol>
-
     <footer class="recommended-workflow-card__footer">
       <p class="recommended-workflow-card__usage">使用量 <strong>{{ workflow.usage }}</strong></p>
-      <div class="recommended-workflow-card__actions" aria-label="工作流操作（仅展示）">
-        <span v-for="action in workflow.actions" :key="action" class="recommended-workflow-card__action yj-control" aria-disabled="true">{{ action }}</span>
+      <div class="recommended-workflow-card__actions" role="group" :aria-label="`${workflow.title}操作`">
+        <button v-for="action in workflow.actions" :key="action" type="button"
+          class="recommended-workflow-card__action workflow-showcase-control yj-control"
+          :class="action === '执行' ? 'recommended-workflow-card__action--primary' : 'recommended-workflow-card__action--secondary'"
+          :aria-pressed="selectedAction === action" @click="selectedAction = selectedAction === action ? null : action">{{ action }}</button>
       </div>
     </footer>
   </article>
@@ -37,8 +29,9 @@ const stages = ["输入", "处理", "输出"] as const;
 .recommended-workflow-card {
   display: flex;
   min-width: 0;
+  min-height: calc(var(--yj-space-16) * 3);
   flex-direction: column;
-  gap: var(--yj-space-3);
+  gap: var(--yj-space-4);
   padding: var(--yj-space-5);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
@@ -56,6 +49,7 @@ const stages = ["输入", "处理", "输出"] as const;
 
 .recommended-workflow-card__header {
   align-items: flex-start;
+  gap: var(--yj-space-2);
 }
 
 .recommended-workflow-card__title,
@@ -66,7 +60,6 @@ const stages = ["输入", "处理", "输出"] as const;
 
 .recommended-workflow-card__title {
   min-width: 0;
-  min-height: calc(var(--yj-line-height-card-title) * 2);
   color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-card-title);
   font-weight: var(--yj-font-weight-semibold);
@@ -81,94 +74,14 @@ const stages = ["输入", "处理", "输出"] as const;
 }
 
 .recommended-workflow-card__description {
-  min-height: calc(var(--yj-line-height-body) * 2);
   color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
-}
-
-.recommended-workflow-card__flow {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: var(--yj-space-5) 0;
-  margin: 0;
-  list-style: none;
-}
-
-.recommended-workflow-card__flow-item {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  justify-items: center;
-  align-content: start;
-  gap: var(--yj-space-3);
-}
-
-.recommended-workflow-card__step-caption {
-  display: flex;
-  align-items: center;
-  gap: var(--yj-space-1);
-  color: var(--yj-color-text-body);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-}
-
-.recommended-workflow-card__step-number {
-  font-variant-numeric: tabular-nums;
-}
-
-.recommended-workflow-card__node {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  min-width: 0;
-  justify-items: center;
-  gap: var(--yj-space-2);
-  color: var(--yj-color-text-primary);
-}
-
-.recommended-workflow-card__node-icon {
-  display: inline-flex;
-  width: var(--yj-space-10);
-  height: var(--yj-space-10);
-  align-items: center;
-  justify-content: center;
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-bg-card);
-}
-
-.recommended-workflow-card__node :deep(.yj-icon) {
-  color: inherit;
-}
-
-.recommended-workflow-card__node-label {
-  color: var(--yj-color-text-body);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-  text-align: center;
   overflow-wrap: anywhere;
 }
 
-.recommended-workflow-card__connector {
-  position: absolute;
-  top: calc(var(--yj-line-height-caption) + var(--yj-space-3) + var(--yj-space-5));
-  left: calc(50% + var(--yj-space-5) + var(--yj-space-1));
-  right: calc(-50% + var(--yj-space-5) + var(--yj-space-1));
-  display: flex;
-  align-items: center;
-  height: var(--yj-border-width);
-  border-top: var(--yj-border-width) solid var(--yj-color-border-default);
-}
-
-.recommended-workflow-card__connector :deep(.yj-icon) {
-  position: absolute;
-  top: 0;
-  right: 0;
-  transform: translateY(-50%);
-}
-
 .recommended-workflow-card__footer {
+  flex-wrap: wrap;
   margin-top: auto;
   padding-top: var(--yj-space-4);
   border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);
@@ -191,11 +104,38 @@ const stages = ["输入", "处理", "输出"] as const;
 .recommended-workflow-card__actions {
   display: flex;
   gap: var(--yj-space-2);
+  margin-left: auto;
 }
 
-.recommended-workflow-card__action {
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
-  color: var(--yj-color-text-disabled);
-  background: var(--yj-color-control-disabled-bg);
+.recommended-workflow-card .recommended-workflow-card__action--primary {
+  border-color: var(--yj-color-border-control);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
+  font-weight: var(--yj-font-weight-semibold);
+}
+
+.recommended-workflow-card .recommended-workflow-card__action--primary:hover {
+  border-color: var(--yj-color-border-control-hover);
+  background: var(--yj-color-brand-hover);
+}
+
+.recommended-workflow-card .recommended-workflow-card__action--primary[aria-pressed="true"],
+.recommended-workflow-card .recommended-workflow-card__action--primary:active {
+  border-color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-active);
+}
+
+.recommended-workflow-card .recommended-workflow-card__action--secondary {
+  color: var(--yj-color-text-secondary);
+  font-weight: var(--yj-font-weight-regular);
+}
+
+.recommended-workflow-card .recommended-workflow-card__action--secondary[aria-pressed="true"],
+.recommended-workflow-card .recommended-workflow-card__action--secondary[aria-pressed="true"]:hover,
+.recommended-workflow-card .recommended-workflow-card__action--secondary:active {
+  border-color: var(--yj-color-border-control-hover);
+  color: var(--yj-color-text-primary);
+  background: var(--yj-color-control-pressed);
+  font-weight: var(--yj-font-weight-regular);
 }
 </style>

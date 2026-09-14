@@ -30,6 +30,28 @@ const OPERATION_ID = "10000000-0000-4000-8000-000000000001";
 const RUN_EPOCH = "20000000-0000-4000-8000-000000000001";
 const cleanup: Array<() => void> = [];
 
+it("creates confirmed metadata without opening a session in the departing overview", async () => {
+  const native = nativeClient();
+  const state = workspaceHarness(native);
+  expect(await state.create(" 中文流程 ", " 本地用途 ", false)).toBe(true);
+  expect(native.create).toHaveBeenCalledExactlyOnceWith({ name: "中文流程", description: "本地用途" });
+  expect(state.createdWorkflowId.value).toBe(WORKFLOW_A);
+  expect(native.open).not.toHaveBeenCalled();
+});
+
+it("queries an uncertain modal creation without duplicate writes or opening a departing session", async () => {
+  const native = nativeClient();
+  native.create.mockRejectedValueOnce(new WorkflowNativeError("operation_unknown", OPERATION_ID));
+  const state = workspaceHarness(native);
+  await state.create("中文流程", "说明", false);
+  await state.create("中文流程", "说明", false);
+  expect(native.create).toHaveBeenCalledOnce();
+  native.query.mockResolvedValueOnce({ receipt: { operation_id: OPERATION_ID, kind: "create", phase: "completed", workflow_id: WORKFLOW_A } });
+  await state.queryPendingCreate(false);
+  expect(state.createdWorkflowId.value).toBe(WORKFLOW_A);
+  expect(native.open).not.toHaveBeenCalled();
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(complete => { resolve = complete; });
@@ -62,6 +84,7 @@ function nativeClient() {
   return {
     status: vi.fn<WorkflowNativeClient["status"]>().mockResolvedValue(status),
     list: vi.fn<WorkflowNativeClient["list"]>().mockResolvedValue({ items: [] }),
+    delete: vi.fn<WorkflowNativeClient["delete"]>(),
     create: vi.fn<WorkflowNativeClient["create"]>().mockResolvedValue(workflow()),
     open: vi.fn<WorkflowNativeClient["open"]>().mockImplementation(async request => opened(request.workflow_id)),
     exchange: vi.fn<WorkflowNativeClient["exchange"]>().mockImplementation(async request => ({ request_id: request.request_id, workflow: workflow() })),
@@ -96,10 +119,10 @@ function channelHarness(view: EditorOpenedView, native: WorkflowNativeClient, ho
 }
 
 function hooks(): EditorChannelHooks {
-  return { ready: vi.fn(), dirty: vi.fn(), requestClose: vi.fn(), result: vi.fn(), failure: vi.fn(), busy: vi.fn() };
+  return { ready: vi.fn(), dirty: vi.fn(), requestClose: vi.fn(), requestHistory: vi.fn(), result: vi.fn(), failure: vi.fn(), busy: vi.fn() };
 }
 
-function notification(view: EditorOpenedView, kind: "ready" | "request_close"): WorkflowEditorBridgeV1 {
+function notification(view: EditorOpenedView, kind: "ready" | "request_close" | "request_history"): WorkflowEditorBridgeV1 {
   return { kind, protocol_version: 1, request_id: crypto.randomUUID(), bridge_id: view.bridge_id, generation: view.generation };
 }
 
@@ -239,6 +262,37 @@ describe("FEAT-153 generated native request boundary", () => {
 });
 
 describe("FEAT-153 normal editor MessageChannel", () => {
+  it("opens history only from a ready current port and keeps it independent of native editor writes", async () => {
+    const view = opened();
+    const native = nativeClient();
+    const events = hooks();
+    const { peer, channel } = channelHarness(view, native, events);
+    peer.postMessage(notification(view, "request_history"));
+    peer.postMessage(notification(view, "ready"));
+    await vi.waitFor(() => expect(events.ready).toHaveBeenCalledOnce());
+    expect(events.requestHistory).not.toHaveBeenCalled();
+    peer.postMessage(notification(view, "request_history"));
+    await vi.waitFor(() => expect(events.requestHistory).toHaveBeenCalledOnce());
+    expect(native.exchange).not.toHaveBeenCalled();
+    expect(native.query).not.toHaveBeenCalled();
+    expect(events.busy).not.toHaveBeenCalled();
+    expect(events.failure).not.toHaveBeenCalled();
+
+    channel.close();
+    const nextView = opened(WORKFLOW_A, 2);
+    const nextEvents = hooks();
+    const next = channelHarness(nextView, native, nextEvents);
+    // A normal queued notification from the closed prior editor cannot open
+    // the new editor's history panel; no real transport fault is manufactured.
+    peer.postMessage(notification(view, "request_history"));
+    next.peer.postMessage(notification(nextView, "ready"));
+    await vi.waitFor(() => expect(nextEvents.ready).toHaveBeenCalledOnce());
+    expect(events.requestHistory).toHaveBeenCalledOnce();
+    expect(nextEvents.requestHistory).not.toHaveBeenCalled();
+    next.peer.postMessage(notification(nextView, "request_history"));
+    await vi.waitFor(() => expect(nextEvents.requestHistory).toHaveBeenCalledOnce());
+  });
+
   it("uses the source handshake and forwards ordinary dirty/close notifications", async () => {
     const view = opened();
     const native = nativeClient();

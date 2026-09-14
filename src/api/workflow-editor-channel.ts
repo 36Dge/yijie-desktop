@@ -16,6 +16,7 @@ export interface EditorChannelHooks {
   ready(): void;
   dirty(value: boolean): void;
   requestClose(): void;
+  requestHistory(): void;
   result(value: WorkflowSchemas["EditorExchangeResult"]): void;
   failure(value: WorkflowNativeError): void;
   busy(writes: number): void;
@@ -108,6 +109,10 @@ export class WorkflowEditorChannel {
     }
     if (value.kind === "request_close") {
       this.hooks.requestClose();
+      return;
+    }
+    if (value.kind === "request_history") {
+      this.hooks.requestHistory();
       return;
     }
     if (value.kind !== "request") return;

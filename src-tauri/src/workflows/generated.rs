@@ -116,6 +116,8 @@ pub struct Workflow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published_version: Option<Version>,
     pub updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 impl std::fmt::Debug for Workflow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -154,6 +156,8 @@ impl std::fmt::Debug for ListRequest {
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 impl std::fmt::Debug for CreateInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -166,6 +170,8 @@ impl std::fmt::Debug for CreateInput {
 pub struct CreateRequest {
     pub name: String,
     pub operation_id: OperationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 impl std::fmt::Debug for CreateRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -569,6 +575,8 @@ pub struct WorkflowSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published_version: Option<Version>,
     pub updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 impl std::fmt::Debug for WorkflowSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -598,5 +606,40 @@ pub struct RunSummary {
 impl std::fmt::Debug for RunSummary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("RunSummary([redacted])")
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteInput {
+    pub workflow_id: Identifier,
+    pub expected_revision: Identifier,
+}
+impl std::fmt::Debug for DeleteInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeleteInput([redacted])")
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteRequest {
+    pub expected_revision: Identifier,
+}
+impl std::fmt::Debug for DeleteRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeleteRequest([redacted])")
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteResult {
+    pub workflow_id: Identifier,
+    pub deleted: bool,
+}
+impl std::fmt::Debug for DeleteResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeleteResult([redacted])")
     }
 }

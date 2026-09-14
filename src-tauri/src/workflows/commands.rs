@@ -96,3 +96,13 @@ pub(crate) async fn workflow_run_query(
     require_app_main(&window, &runtime).await?;
     runtime.query(request).await
 }
+
+#[tauri::command]
+pub(crate) async fn workflow_delete(
+    window: WebviewWindow,
+    runtime: State<'_, WorkflowRuntime>,
+    request: DeleteInput,
+) -> Result<DeleteResult, ErrorResponse> {
+    require_app_main(&window, &runtime).await?;
+    runtime.delete(request).await
+}

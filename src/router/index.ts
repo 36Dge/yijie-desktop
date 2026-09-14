@@ -26,6 +26,7 @@ export interface AppPageLoaders {
   chat: () => Promise<Component>;
   store: () => Promise<Component>;
   workflows: () => Promise<Component>;
+  workflowEditor?: () => Promise<Component>;
   plugins: () => Promise<Component>;
   settings: () => Promise<Component>;
   accessDenied: () => Promise<Component>;
@@ -35,6 +36,7 @@ const APP_PAGE_LOADERS: AppPageLoaders = {
   chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
   store: async () => (await import("../pages/store/StorePage.vue")).default,
   workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
+  workflowEditor: async () => (await import("../pages/workflows/WorkflowEditorPage.vue")).default,
   plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
@@ -132,6 +134,14 @@ export function createAppRouteRecords(
       documentTitle: "工作流 · 易界 AI",
     },
   });
+  if (workflowUiEnabled) records.push({ path: "/workflows/new", redirect: { path: "/workflows", query: { create: "1" } } });
+  if (workflowUiEnabled) records.push({
+    path: "/workflows/:workflowId",
+    name: "workflow-editor",
+    component: pageLoaders.workflowEditor ?? APP_PAGE_LOADERS.workflowEditor!,
+    props: true,
+    meta: { navKey: "workspace", documentTitle: "编辑工作流 · 易界 AI" },
+  });
   records.push(
     {
       path: "/settings",
@@ -208,7 +218,7 @@ export function createAppRouter(
     if (!storeUiEnabled && route.path === "/store") {
       return { path: "/settings", replace: true };
     }
-    if (!workflowUiEnabled && route.path === "/workflows") {
+    if (!workflowUiEnabled && (route.path === "/workflows" || route.path.startsWith("/workflows/"))) {
       return { path: "/settings", replace: true };
     }
 

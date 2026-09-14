@@ -82,6 +82,7 @@ export function resolveRootRoute(snapshot: PermissionPolicySnapshot): AppRoutePa
 }
 
 export function requiredCapabilityForPath(path: string): KnownCapability | null {
+  if (path.startsWith("/workflows/")) return "workspace.use";
   if (/^\/chat\/[^/]+$/.test(path)) {
     return "task.read";
   }
@@ -96,7 +97,7 @@ export function canRenderProtectedPath(
   const chatUiAllowed = snapshot.chatUiEnabled !== false || (path !== "/chat" && !path.startsWith("/chat/"));
   const skillUiAllowed = snapshot.skillMarketplaceUiEnabled !== false || path !== "/plugins";
   const storeUiAllowed = snapshot.storeShowcaseUiEnabled !== false || path !== "/store";
-  const workflowUiAllowed = snapshot.workflowShowcaseUiEnabled !== false || path !== "/workflows";
+  const workflowUiAllowed = snapshot.workflowShowcaseUiEnabled !== false || (path !== "/workflows" && !path.startsWith("/workflows/"));
   return (
     chatUiAllowed && skillUiAllowed && storeUiAllowed && workflowUiAllowed && (capability === null ||
     (snapshot.enabled && snapshot.ready && snapshot.hasCapability(capability))

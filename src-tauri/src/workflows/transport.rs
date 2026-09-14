@@ -161,7 +161,8 @@ impl Transport {
             .request(method.clone(), url)
             .header(AUTHORIZATION, authorization)
             .header("X-Yijie-Run-Epoch", &credentials.epoch)
-            .header(ACCEPT, "application/json");
+            .header(ACCEPT, "application/json")
+            .header("X-Yijie-Workflow-Metadata", "description-v1");
         if let Some(session) = session {
             let mut header = HeaderValue::from_str(session.expose())
                 .map_err(|_| error(ErrorCode::SessionExpired))?;
@@ -171,7 +172,7 @@ impl Transport {
         if let Some(body) = body {
             request = request.header(CONTENT_TYPE, "application/json").body(body);
         }
-        if method == Method::DELETE {
+        if method == Method::DELETE && path.starts_with("/v1/workflow-local/editor-sessions/") {
             request = request.timeout(Duration::from_secs(2));
         }
         let mut response = request.send().await.map_err(|_| uncertain())?;

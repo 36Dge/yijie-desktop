@@ -33,6 +33,7 @@ fn limits() -> Limits {
 fn initial_workflow(name: String) -> Workflow {
     Workflow {
         workflow_id: WORKFLOW_ID.into(),
+        description: None,
         name,
         revision: "revision-1".into(),
         canvas: r#"{"nodes":[],"edges":[]}"#.into(),
@@ -45,6 +46,7 @@ fn initial_workflow(name: String) -> Workflow {
 #[derive(Default)]
 struct ProviderState {
     workflow: Option<Workflow>,
+    deleted: bool,
     runs: HashMap<String, Run>,
     operations: HashMap<String, OperationReceipt>,
     saves: usize,
@@ -177,6 +179,7 @@ async fn serve_one(
     let expected_authorization = Zeroizing::new(format!("Bearer {}", token.expose()));
     assert!(header("authorization") == Some(expected_authorization.as_str()));
     assert!(header("x-yijie-run-epoch") == Some(EPOCH));
+    assert_eq!(header("x-yijie-workflow-metadata"), Some("description-v1"));
     let session_required = method == "PUT"
         || path.ends_with("/bootstrap")
         || path.ends_with("/test-runs")
@@ -204,6 +207,19 @@ async fn serve_one(
             })
             .unwrap(),
         ),
+        ("DELETE", path) if path == format!("/v1/workflows/{WORKFLOW_ID}") => {
+            validation::value("DeleteRequest", &input).unwrap();
+            let request: DeleteRequest = serde_json::from_value(input).unwrap();
+            assert_eq!(
+                request.expected_revision,
+                state.workflow.as_ref().unwrap().revision
+            );
+            state.deleted = true;
+            (
+                200,
+                serde_json::json!({"workflow_id":WORKFLOW_ID,"deleted":true}),
+            )
+        }
         ("POST", "/v1/workflows") => {
             validation::value("CreateRequest", &input).unwrap();
             let request: CreateRequest = serde_json::from_value(input).unwrap();
@@ -213,7 +229,8 @@ async fn serve_one(
                     .get_version_num()
                     == 7
             );
-            let workflow = initial_workflow(request.name);
+            let mut workflow = initial_workflow(request.name);
+            workflow.description = request.description;
             state.operations.insert(
                 request.operation_id.clone(),
                 receipt(request.operation_id, OperationKind::Create, &workflow, None),
@@ -228,6 +245,7 @@ async fn serve_one(
                     .workflow
                     .iter()
                     .map(|workflow| WorkflowSummary {
+                        description: workflow.description.clone(),
                         workflow_id: workflow.workflow_id.clone(),
                         name: workflow.name.clone(),
                         revision: workflow.revision.clone(),
@@ -507,6 +525,7 @@ async fn normal_context_change_during_open_retires_the_late_session() {
     fixture
         .runtime
         .create(CreateInput {
+            description: None,
             name: "上下文切换合成流程".into(),
         })
         .await
@@ -541,6 +560,7 @@ async fn delayed_normal_window_cleanup_preserves_a_new_context_binding() {
     let runtime = &fixture.runtime;
     runtime
         .create(CreateInput {
+            description: None,
             name: "正常页面上下文".into(),
         })
         .await
@@ -580,6 +600,7 @@ async fn normal_close_invalidates_a_queued_editor_reopen() {
     let runtime = fixture.runtime.clone();
     runtime
         .create(CreateInput {
+            description: None,
             name: "正常关闭合成流程".into(),
         })
         .await
@@ -631,11 +652,13 @@ async fn normal_loopback_native_consumer_preserves_resources_operations_and_expi
         .is_empty());
     let created = runtime
         .create(CreateInput {
+            description: Some("本地文本用途".into()),
             name: "合成通用流程".into(),
         })
         .await
         .unwrap();
     assert_eq!(created.workflow_id, WORKFLOW_ID);
+    assert_eq!(created.description.as_deref(), Some("本地文本用途"));
     assert_eq!(
         runtime
             .list(ListRequest {
@@ -902,4 +925,39 @@ async fn disabled_profile_never_requires_an_editor_or_network_for_status() {
         runtime.service_status().await.unwrap_err().code,
         ErrorCode::ProfileDisabled
     );
+}
+
+#[tokio::test]
+async fn normal_delete_is_idempotent_and_clears_matching_native_editor() {
+    let fixture = Fixture::new().await;
+    let w = fixture
+        .runtime
+        .create(CreateInput {
+            name: "删除合成流程".into(),
+            description: None,
+        })
+        .await
+        .unwrap();
+    fixture
+        .runtime
+        .open(EditorOpenRequest {
+            workflow_id: w.workflow_id.clone(),
+        })
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let result = fixture
+            .runtime
+            .delete(DeleteInput {
+                workflow_id: w.workflow_id.clone(),
+                expected_revision: w.revision.clone(),
+            })
+            .await
+            .unwrap();
+        assert!(result.deleted);
+        assert_eq!(result.workflow_id, w.workflow_id);
+    }
+    assert!(fixture.state.lock().await.deleted);
+    assert!(fixture.runtime.state.lock().await.editor.is_none());
+    fixture.finish().await;
 }

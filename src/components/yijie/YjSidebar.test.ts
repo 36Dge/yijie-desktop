@@ -108,6 +108,8 @@ describe("YjSidebar permission rendering", () => {
 
     expect(workflowLink?.attributes("href")).toBe("/workflows");
     expect(workflowLink?.attributes("aria-current")).toBe("page");
+    await wrapper.setProps({ currentPath: "/workflows/7684934079279529984" });
+    expect(wrapper.findAll("a").find(link => link.attributes("href") === "/workflows")?.attributes("aria-current")).toBe("page");
     expect(wrapper.find('[aria-label="工作流，即将开放"]').exists()).toBe(false);
   });
 

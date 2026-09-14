@@ -66,7 +66,7 @@ export function createWorkflowNativeClient(nativeInvoke: Invoker = invoke) {
     if (input && !validators[input](request)) {
       throw new WorkflowNativeError("invalid_request");
     }
-    const write = command === "workflow_create" || command === "workflow_run_start"
+    const write = command === "workflow_delete" || command === "workflow_create" || command === "workflow_run_start"
       || (command === "workflow_editor_exchange"
         && validators.EditorExchangeInput(request)
         && ["save_draft", "test_draft", "publish_internal"].includes(request.operation));
@@ -92,6 +92,8 @@ export function createWorkflowNativeClient(nativeInvoke: Invoker = invoke) {
       call("workflow_list", "WorkflowList", "ListRequest", request),
     create: (request: WorkflowSchemas["CreateInput"]) =>
       call("workflow_create", "Workflow", "CreateInput", request),
+    delete: (request: WorkflowSchemas["DeleteInput"]) =>
+      call("workflow_delete", "DeleteResult", "DeleteInput", request),
     open: (request: WorkflowSchemas["EditorOpenRequest"]) =>
       call("workflow_editor_open", "EditorOpenedView", "EditorOpenRequest", request),
     exchange: (request: WorkflowSchemas["EditorExchangeInput"]) =>

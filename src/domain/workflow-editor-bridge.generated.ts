@@ -1,7 +1,7 @@
 /* Generated from workflow editor source. Do not edit by hand. */
 import type { components } from "./workflow-local.generated.js";
 
-export type WorkflowEditorBridgeV1 = (WorkflowEditorBridgeV11 | WorkflowEditorBridgeV12 | WorkflowEditorBridgeV13 | WorkflowEditorBridgeV14 | WorkflowEditorBridgeV15 | WorkflowEditorBridgeV16 | WorkflowEditorBridgeV17)
+export type WorkflowEditorBridgeV1 = (WorkflowEditorBridgeV11 | WorkflowEditorBridgeV12 | WorkflowEditorBridgeV13 | WorkflowEditorBridgeV14 | WorkflowEditorBridgeV15 | WorkflowEditorBridgeV16 | WorkflowEditorBridgeV17 | WorkflowEditorBridgeV18)
 
 /**
  * Source MessageChannel envelope; data DTOs reference the authoritative workflow-local OpenAPI components.
@@ -100,4 +100,18 @@ dirty?: boolean
 request?: components["schemas"]["EditorExchangeInput"]
 response?: components["schemas"]["EditorExchangeResult"]
 error?: components["schemas"]["ErrorResponse"]
+}
+/**
+ * Source MessageChannel envelope; data DTOs reference the authoritative workflow-local OpenAPI components.
+ */
+export interface WorkflowEditorBridgeV18 {
+protocol_version: 1
+request_id: string
+kind: "request_history"
+bridge_id: string
+generation: number
+dirty?: never
+request?: never
+response?: never
+error?: never
 }

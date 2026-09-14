@@ -24,6 +24,7 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
   const pendingWrites = ref(0);
   const pendingCreate = ref<string | null>(null);
   const createUncertain = ref(false);
+  const createdWorkflowId = ref<string | null>(null);
   const nextCursor = ref<string | undefined>();
   let navigation = 0;
   let listGeneration = 0;
@@ -31,7 +32,7 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
   let openingSettled = Promise.resolve();
 
   async function refresh(more = false) {
-    if (loading.value) return;
+    if (disposed || loading.value) return;
     const ticket = ++listGeneration;
     loading.value = true;
     error.value = null;
@@ -54,7 +55,7 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
   }
 
   async function openWorkflow(workflowId: string, reconnect = false) {
-    if (openPending.value || reconnecting.value || closing.value || (reconnect && pendingWrites.value > 0)) return;
+    if (disposed || openPending.value || reconnecting.value || closing.value || (reconnect && pendingWrites.value > 0)) return;
     const ticket = ++navigation;
     openPending.value = true;
     let settle: () => void = () => undefined;
@@ -90,15 +91,17 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
     await openingSettled;
   }
 
-  async function create(name: string) {
-    if (creating.value || createUncertain.value) return false;
+  async function create(name: string, description?: string, openAfterCreate = true) {
+    if (disposed || creating.value || createUncertain.value) return false;
     creating.value = true;
+    createdWorkflowId.value = null;
     error.value = null;
     try {
-      const workflow = await native.create({ name: name.trim() });
+      const workflow = await native.create({ name: name.trim(), ...(description === undefined ? {} : { description: description.trim() }) });
       if (disposed) return false;
+      createdWorkflowId.value = workflow.workflow_id;
       await refresh();
-      await openWorkflow(workflow.workflow_id);
+      if (openAfterCreate) await openWorkflow(workflow.workflow_id);
       return true;
     } catch (failure) {
       if (!disposed) {
@@ -114,7 +117,7 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
     }
   }
 
-  async function queryPendingCreate() {
+  async function queryPendingCreate(openAfterCreate = true) {
     if (!pendingCreate.value || creating.value) return;
     creating.value = true;
     try {
@@ -122,11 +125,12 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
       const receipt = result.receipt;
       if (!receipt || disposed) return;
       if (receipt.phase === "completed" && receipt.workflow_id) {
+        createdWorkflowId.value = receipt.workflow_id;
         pendingCreate.value = null;
         createUncertain.value = false;
         error.value = null;
         await refresh();
-        await openWorkflow(receipt.workflow_id);
+        if (openAfterCreate) await openWorkflow(receipt.workflow_id);
       } else if (receipt.phase === "rejected") {
         pendingCreate.value = null;
         createUncertain.value = false;
@@ -181,7 +185,7 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
 
   return {
     workflows, status, error, loading, creating, opening, openPending, reconnecting, closing,
-    editor, dirty, pendingWrites, pendingCreate, createUncertain, nextCursor,
+    editor, dirty, pendingWrites, pendingCreate, createUncertain, createdWorkflowId, nextCursor,
     refresh, create, openWorkflow, cancelOpening, queryPendingCreate, closeEditor,
     acceptEditorResult, acceptEditorFailure,
   };

@@ -325,6 +325,7 @@ pub fn run() {
         workflows::workflow_service_status,
         workflows::workflow_list,
         workflows::workflow_create,
+        workflows::workflow_delete,
         workflows::workflow_editor_open,
         workflows::workflow_editor_exchange,
         workflows::workflow_editor_close,

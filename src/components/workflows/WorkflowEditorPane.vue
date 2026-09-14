@@ -13,6 +13,7 @@ import {
 } from "../../api/workflow-native-client";
 
 const props = defineProps<{
+  fullPage?: boolean;
   view: EditorOpenedView;
   reconnecting: boolean;
   closing: boolean;
@@ -22,6 +23,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
+  history: [];
   reconnect: [];
   dirty: [value: boolean];
   result: [value: WorkflowSchemas["EditorExchangeResult"]];
@@ -66,6 +68,7 @@ function bind() {
       ready: () => { /* The real bootstrap result marks the editor usable. */ },
       dirty: (value) => { if (current()) emit("dirty", value); },
       requestClose: () => { if (current()) emit("close"); },
+      requestHistory: () => { if (current()) emit("history"); },
       result: (value) => {
         if (!current()) return;
         if (value.bootstrap) ready.value = true;
@@ -99,16 +102,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="workflow-editor-pane" aria-label="工作流编辑器" :aria-busy="reconnecting || closing || !ready">
-    <header class="workflow-editor-pane__header">
+  <section class="workflow-editor-pane" :class="{ 'workflow-editor-pane--full': fullPage }" aria-label="工作流编辑器" :aria-busy="reconnecting || closing || !ready">
+    <header v-if="!fullPage" class="workflow-editor-pane__header">
       <button type="button" class="workflow-showcase-control yj-control" :disabled="closing" @click="emit('close')">
         返回工作流
       </button>
       <div class="workflow-editor-pane__heading">
-        <h2>{{ view.workflow.name }}</h2>
+        <component :is="fullPage ? 'h1' : 'h2'">{{ view.workflow.name }}</component>
         <span class="workflow-editor-pane__meta">{{ dirty ? '未保存的修改' : '草稿已读取' }}</span>
       </div>
       <span class="workflow-editor-pane__meta">{{ expired ? '会话已到期' : ready ? '编辑器已连接' : '正在连接编辑器…' }}</span>
+      <slot name="actions" />
     </header>
 
     <div v-if="visibleFailure && !expired && !interrupted" class="workflow-editor-pane__notice" role="alert">{{ visibleFailure.message }}</div>
@@ -127,6 +131,8 @@ onBeforeUnmount(() => {
           <p v-if="pendingWrites">正在确认已发出的操作，结果返回后再重新连接。</p>
           <button v-if="recoveryRequired && !closing" ref="reconnectButton" type="button" class="workflow-showcase-control yj-control workflow-editor-pane__primary"
             :disabled="!canReconnect" @click="emit('reconnect')">{{ reconnecting ? '正在连接…' : '重新连接' }}</button>
+          <button v-if="fullPage" type="button" class="workflow-showcase-control yj-control"
+            :disabled="closing" @click="emit('close')">返回工作流</button>
         </div>
       </div>
     </div>
@@ -137,7 +143,7 @@ onBeforeUnmount(() => {
 .workflow-editor-pane { display: grid; gap: var(--yj-space-3); min-width: 0; }
 .workflow-editor-pane__header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); }
 .workflow-editor-pane__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--yj-space-2); flex: 1; min-width: 0; }
-.workflow-editor-pane__heading h2 { margin: 0; font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); overflow-wrap: anywhere; }
+.workflow-editor-pane__heading :is(h1, h2) { margin: 0; font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); overflow-wrap: anywhere; }
 .workflow-editor-pane__meta { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .workflow-editor-pane__canvas { position: relative; height: max(calc(var(--yj-space-16) * 8), calc(100vh - var(--yj-space-16) * 3)); min-width: 0; }
 .workflow-editor-pane iframe { display: block; width: 100%; height: 100%; border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); }
@@ -147,4 +153,8 @@ onBeforeUnmount(() => {
 .workflow-editor-pane__notice p { margin: var(--yj-space-2) 0 var(--yj-space-3); }
 .workflow-editor-pane__primary { background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); }
 .workflow-editor-pane__primary:hover { background: var(--yj-color-brand-hover); }
+
+.workflow-editor-pane--full { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0; }
+.workflow-editor-pane--full .workflow-editor-pane__canvas { flex: 1; height: auto; min-height: 0; }
+.workflow-editor-pane--full iframe { border: 0; border-radius: 0; }
 </style>

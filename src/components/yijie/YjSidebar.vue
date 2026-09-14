@@ -30,7 +30,7 @@ function isSelected(entry: AppNavEntry): boolean {
   if (entry.kind !== "item" || entry.disabled) return false;
   return entry.key === "newTask"
     ? props.currentPath === "/chat"
-    : entry.to === props.currentPath;
+    : entry.to === props.currentPath || (entry.key === "workspace" && props.currentPath.startsWith("/workflows/"));
 }
 
 function handleEntryClick(entry: AppNavEntry): void {

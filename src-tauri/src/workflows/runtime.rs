@@ -148,11 +148,60 @@ impl WorkflowRuntime {
             .await
     }
 
+    pub(super) async fn delete(&self, input: DeleteInput) -> Result<DeleteResult, ErrorResponse> {
+        input_valid("DeleteInput", &input)?;
+        let _opening = self.opening.lock().await;
+        let credentials = self.ready().await?;
+        let request = DeleteRequest {
+            expected_revision: input.expected_revision,
+        };
+        let result: DeleteResult = self
+            .transport()?
+            .request(
+                &credentials,
+                Method::DELETE,
+                &workflow_path(&input.workflow_id, ""),
+                Some(encode("DeleteRequest", &request)?),
+                None,
+                200,
+                "DeleteResult",
+                None,
+            )
+            .await
+            .map_err(|failure| {
+                if matches!(
+                    failure.code,
+                    ErrorCode::ServiceUnavailable
+                        | ErrorCode::ProtocolMismatch
+                        | ErrorCode::StorageUnavailable
+                        | ErrorCode::InternalError
+                ) {
+                    error(ErrorCode::OperationUnknown)
+                } else {
+                    failure
+                }
+            })?;
+        if !result.deleted || result.workflow_id != input.workflow_id {
+            return Err(error(ErrorCode::OperationUnknown));
+        }
+        let mut state = self.state.lock().await;
+        if state
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.workflow_id == input.workflow_id)
+        {
+            self.context_revision.fetch_add(1, Ordering::AcqRel);
+            state.editor = None;
+        }
+        Ok(result)
+    }
+
     pub(super) async fn create(&self, input: CreateInput) -> Result<Workflow, ErrorResponse> {
         input_valid("CreateInput", &input)?;
         let credentials = self.ready().await?;
         let request = CreateRequest {
             name: input.name,
+            description: input.description,
             operation_id: uuid::Uuid::now_v7().to_string(),
         };
         self.transport()?

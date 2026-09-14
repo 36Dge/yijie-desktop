@@ -86,7 +86,11 @@ export interface paths {
          */
         put: operations["SaveWorkflow"];
         post?: never;
-        delete?: never;
+        /**
+         * Soft-delete an owned workflow after confirmation
+         * @description Fixed authenticated native scope, current draft revision and no active run are required. The tombstone is authoritative. Repeated identical deletion succeeds. Only normal soft deletion is supported; no physical purge or restore operation is exposed. Deletion audits record each attempt.
+         */
+        delete: operations["DeleteWorkflow"];
         options?: never;
         head?: never;
         patch?: never;
@@ -341,6 +345,8 @@ export interface components {
             published_version?: components["schemas"]["Version"];
             /** Format: int64 */
             updated_at_ms: number;
+            /** @description Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute. */
+            description?: string;
         };
         WorkflowList: {
             items: components["schemas"]["WorkflowSummary"][];
@@ -356,10 +362,14 @@ export interface components {
         };
         CreateInput: {
             name: string;
+            /** @description Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute. */
+            description?: string;
         };
         CreateRequest: {
             name: string;
             operation_id: components["schemas"]["OperationId"];
+            /** @description Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute. */
+            description?: string;
         };
         TextInput: {
             input: string;
@@ -532,6 +542,8 @@ export interface components {
             published_version?: components["schemas"]["Version"];
             /** Format: int64 */
             updated_at_ms: number;
+            /** @description Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute. */
+            description?: string;
         };
         /** @description Bounded list summary; read the detail endpoint for full content. */
         RunSummary: {
@@ -550,6 +562,21 @@ export interface components {
             finished_at_ms?: number;
             error?: components["schemas"]["ErrorResponse"];
         };
+        /** @description Native overview deletion after explicit UI confirmation. The original ID and revision are retained for all retries. */
+        DeleteInput: {
+            workflow_id: components["schemas"]["Identifier"];
+            expected_revision: components["schemas"]["Identifier"];
+        };
+        /** @description Idempotent, revision-bound soft deletion. Repeating this exact ID/revision returns the same deletion result. No operation ID or OperationKind extension; audits are per attempt. A changed revision returns revision_conflict and requires a fresh user confirmation. Active execution returns run_busy. No physical graph/version/history deletion. */
+        DeleteRequest: {
+            expected_revision: components["schemas"]["Identifier"];
+        };
+        /** @description Confirmed soft deletion of the named owned resource. It no longer appears in normal lists and cannot be opened/saved/published/run. Existing API editor sessions are revoked. Durable graph/version/history and ownership rows are retained. Ambiguous failures must retry the original ID/revision, not infer success or change targets. */
+        DeleteResult: {
+            workflow_id: components["schemas"]["Identifier"];
+            /** @enum {boolean} */
+            deleted: true;
+        };
     };
     responses: never;
     parameters: never;
@@ -564,6 +591,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path?: never;
             cookie?: never;
@@ -640,6 +669,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path?: never;
             cookie?: never;
@@ -719,6 +750,8 @@ export interface operations {
             };
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path?: never;
             cookie?: never;
@@ -795,6 +828,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path?: never;
             cookie?: never;
@@ -875,6 +910,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -955,6 +992,8 @@ export interface operations {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
                 /** @description Native-only E. Coze private adapter validates K_AC instead; this API session header is never forwarded to Coze. */
                 "X-Yijie-Editor-Session": string;
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1032,6 +1071,90 @@ export interface operations {
             };
         };
     };
+    DeleteWorkflow: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
+            };
+            path: {
+                workflow_id: components["schemas"]["Identifier"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Resource or dispatch result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteResult"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Safe typed error. Retry must preserve operation semantics. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     GetEditorBootstrap: {
         parameters: {
             query?: never;
@@ -1039,6 +1162,8 @@ export interface operations {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
                 /** @description Native-only E. Coze private adapter validates K_AC instead; this API session header is never forwarded to Coze. */
                 "X-Yijie-Editor-Session": string;
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1119,6 +1244,8 @@ export interface operations {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
                 /** @description Native-only E. Coze private adapter validates K_AC instead; this API session header is never forwarded to Coze. */
                 "X-Yijie-Editor-Session": string;
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1203,6 +1330,8 @@ export interface operations {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
                 /** @description Native-only E. Coze private adapter validates K_AC instead; this API session header is never forwarded to Coze. */
                 "X-Yijie-Editor-Session": string;
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1288,6 +1417,8 @@ export interface operations {
             };
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1366,6 +1497,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1448,6 +1581,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 workflow_id: components["schemas"]["Identifier"];
@@ -1527,6 +1662,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 operation_id: components["schemas"]["OperationId"];
@@ -1605,6 +1742,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path?: never;
             cookie?: never;
@@ -1685,6 +1824,8 @@ export interface operations {
             query?: never;
             header: {
                 "X-Yijie-Run-Epoch": components["schemas"]["RunEpoch"];
+                /** @description Set description-v1 to opt into description response metadata. Missing or unrecognized values retain the legacy response projection. This is a capability selector, not authentication. */
+                "X-Yijie-Workflow-Metadata"?: "description-v1";
             };
             path: {
                 session_id: components["schemas"]["Identifier"];

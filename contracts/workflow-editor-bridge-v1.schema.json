@@ -18,7 +18,8 @@
         "request",
         "response",
         "dirty_changed",
-        "request_close"
+        "request_close",
+        "request_history"
       ]
     },
     "bridge_id": {
@@ -165,6 +166,27 @@
           "bridge_id",
           "generation"
         ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "request_history"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "bridge_id",
+          "generation"
+        ],
+        "properties": {
+          "dirty": false,
+          "request": false,
+          "response": false,
+          "error": false
+        }
       }
     }
   ]

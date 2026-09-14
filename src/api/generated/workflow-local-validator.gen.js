@@ -1576,7 +1576,7 @@ validate33.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const v_Workflow = validate36;
 const schema58 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/Workflow","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/Workflow"};
-const schema59 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"name":{"type":"string","maxLength":80,"minLength":1},"revision":{"$ref":"#/$defs/Identifier"},"canvas":{"type":"string","maxLength":262144,"x-utf8-max-bytes":262144},"runnable":{"type":"boolean"},"published_version":{"$ref":"#/$defs/Version"},"updated_at_ms":{"type":"integer","minimum":0}},"required":["workflow_id","name","revision","canvas","runnable","updated_at_ms"],"description":"Coze-owned graph and revision. Canvas is native JSON text; safe incomplete drafts may be saved. IDs are opaque strings, including decimal Coze IDs, never JS numbers."};
+const schema59 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"name":{"type":"string","maxLength":80,"minLength":1},"revision":{"$ref":"#/$defs/Identifier"},"canvas":{"type":"string","maxLength":262144,"x-utf8-max-bytes":262144},"runnable":{"type":"boolean"},"published_version":{"$ref":"#/$defs/Version"},"updated_at_ms":{"type":"integer","minimum":0},"description":{"type":"string","maxLength":600,"description":"Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."}},"required":["workflow_id","name","revision","canvas","runnable","updated_at_ms"],"description":"Coze-owned graph and revision. Canvas is native JSON text; safe incomplete drafts may be saved. IDs are opaque strings, including decimal Coze IDs, never JS numbers."};
 
 function validate37(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -1650,7 +1650,7 @@ vErrors.push(err5);
 errors++;
 }
 for(const key0 in data){
-if(!(((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "canvas")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms"))){
+if(!((((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "canvas")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms")) || (key0 === "description"))){
 const err6 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err6];
@@ -1893,14 +1893,39 @@ errors++;
 }
 }
 }
-}
-else {
-const err27 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data7 = data.description;
+if(typeof data7 === "string"){
+if(func1(data7) > 600){
+const err27 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err27];
 }
 else {
 vErrors.push(err27);
+}
+errors++;
+}
+}
+else {
+const err28 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err28];
+}
+else {
+vErrors.push(err28);
+}
+errors++;
+}
+}
+}
+else {
+const err29 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err29];
+}
+else {
+vErrors.push(err29);
 }
 errors++;
 }
@@ -1933,7 +1958,7 @@ validate36.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 export const v_WorkflowList = validate39;
 const schema63 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/WorkflowList","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/WorkflowList"};
 const schema64 = {"type":"object","additionalProperties":false,"properties":{"items":{"type":"array","items":{"$ref":"#/$defs/WorkflowSummary"},"maxItems":50},"next_cursor":{"type":"string","maxLength":256}},"required":["items"]};
-const schema65 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"name":{"type":"string","maxLength":80,"minLength":1},"revision":{"$ref":"#/$defs/Identifier"},"runnable":{"type":"boolean"},"published_version":{"$ref":"#/$defs/Version"},"updated_at_ms":{"type":"integer","minimum":0}},"required":["workflow_id","name","revision","runnable","updated_at_ms"],"description":"Bounded list summary; read the detail endpoint for full content."};
+const schema65 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"name":{"type":"string","maxLength":80,"minLength":1},"revision":{"$ref":"#/$defs/Identifier"},"runnable":{"type":"boolean"},"published_version":{"$ref":"#/$defs/Version"},"updated_at_ms":{"type":"integer","minimum":0},"description":{"type":"string","maxLength":600,"description":"Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."}},"required":["workflow_id","name","revision","runnable","updated_at_ms"],"description":"Bounded list summary; read the detail endpoint for full content."};
 
 function validate41(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -1997,7 +2022,7 @@ vErrors.push(err4);
 errors++;
 }
 for(const key0 in data){
-if(!((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms"))){
+if(!(((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms")) || (key0 === "description"))){
 const err5 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err5];
@@ -2205,14 +2230,39 @@ errors++;
 }
 }
 }
-}
-else {
-const err23 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data6 = data.description;
+if(typeof data6 === "string"){
+if(func1(data6) > 600){
+const err23 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err23];
 }
 else {
 vErrors.push(err23);
+}
+errors++;
+}
+}
+else {
+const err24 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+}
+}
+else {
+const err25 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
 }
 errors++;
 }
@@ -2455,7 +2505,7 @@ validate44.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const v_CreateInput = validate45;
 const schema71 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/CreateInput","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput"};
-const schema72 = {"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":80,"minLength":1}},"required":["name"]};
+const schema72 = {"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":80,"minLength":1},"description":{"type":"string","maxLength":600,"description":"Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."}},"required":["name"]};
 
 function validate45(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 /*# sourceURL="https://schemas.yijie.ai/browser/workflow-local/CreateInput" */;
@@ -2480,7 +2530,7 @@ vErrors.push(err0);
 errors++;
 }
 for(const key0 in data){
-if(!(key0 === "name")){
+if(!((key0 === "name") || (key0 === "description"))){
 const err1 = {instancePath,schemaPath:"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err1];
@@ -2526,14 +2576,39 @@ vErrors.push(err4);
 errors++;
 }
 }
-}
-else {
-const err5 = {instancePath,schemaPath:"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data1 = data.description;
+if(typeof data1 === "string"){
+if(func1(data1) > 600){
+const err5 = {instancePath:instancePath+"/description",schemaPath:"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err5];
 }
 else {
 vErrors.push(err5);
+}
+errors++;
+}
+}
+else {
+const err6 = {instancePath:instancePath+"/description",schemaPath:"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+}
+else {
+const err7 = {instancePath,schemaPath:"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateInput/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
 }
 errors++;
 }
@@ -2544,7 +2619,7 @@ validate45.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const v_CreateRequest = validate46;
 const schema73 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/CreateRequest","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/CreateRequest"};
-const schema74 = {"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":80,"minLength":1},"operation_id":{"$ref":"#/$defs/OperationId"}},"required":["name","operation_id"]};
+const schema74 = {"type":"object","additionalProperties":false,"properties":{"name":{"type":"string","maxLength":80,"minLength":1},"operation_id":{"$ref":"#/$defs/OperationId"},"description":{"type":"string","maxLength":600,"description":"Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."}},"required":["name","operation_id"]};
 
 function validate47(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -2578,7 +2653,7 @@ vErrors.push(err1);
 errors++;
 }
 for(const key0 in data){
-if(!((key0 === "name") || (key0 === "operation_id"))){
+if(!(((key0 === "name") || (key0 === "operation_id")) || (key0 === "description"))){
 const err2 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err2];
@@ -2669,14 +2744,39 @@ vErrors.push(err9);
 errors++;
 }
 }
-}
-else {
-const err10 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data2 = data.description;
+if(typeof data2 === "string"){
+if(func1(data2) > 600){
+const err10 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err10];
 }
 else {
 vErrors.push(err10);
+}
+errors++;
+}
+}
+else {
+const err11 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+}
+else {
+const err12 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
 }
 errors++;
 }
@@ -4427,7 +4527,7 @@ validate66.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 export const v_Run = validate71;
 const schema110 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/Run","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/Run"};
 const schema111 = {"type":"object","additionalProperties":false,"properties":{"run_id":{"$ref":"#/$defs/Identifier"},"workflow_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/OperationId"},"mode":{"$ref":"#/$defs/RunMode"},"revision":{"$ref":"#/$defs/Identifier"},"version":{"$ref":"#/$defs/Version"},"state":{"type":"string","maxLength":64,"description":"Actual engine status; new values stay visible and never imply success."},"terminal":{"type":"boolean"},"input":{"$ref":"#/$defs/TextInput"},"output":{"type":"string","maxLength":5120,"x-utf8-max-bytes":5120},"nodes":{"type":"array","items":{"$ref":"#/$defs/NodeResult"},"maxItems":3},"started_at_ms":{"type":"integer","minimum":0},"finished_at_ms":{"type":"integer","minimum":0},"error":{"$ref":"#/$defs/ErrorResponse"}},"required":["run_id","workflow_id","operation_id","mode","state","terminal","started_at_ms"]};
-const func78 = Object.prototype.hasOwnProperty;
+const func82 = Object.prototype.hasOwnProperty;
 
 function validate73(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -4682,7 +4782,7 @@ vErrors.push(err6);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema111.properties, key0))){
+if(!(func82.call(schema111.properties, key0))){
 const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err7];
@@ -5287,7 +5387,7 @@ vErrors.push(err6);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema123.properties, key0))){
+if(!(func82.call(schema123.properties, key0))){
 const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err7];
@@ -6729,7 +6829,7 @@ vErrors.push(err5);
 errors++;
 }
 for(const key0 in data){
-if(!(((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "canvas")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms"))){
+if(!((((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "canvas")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms")) || (key0 === "description"))){
 const err6 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err6];
@@ -6972,14 +7072,39 @@ errors++;
 }
 }
 }
-}
-else {
-const err27 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data7 = data.description;
+if(typeof data7 === "string"){
+if(func1(data7) > 600){
+const err27 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err27];
 }
 else {
 vErrors.push(err27);
+}
+errors++;
+}
+}
+else {
+const err28 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err28];
+}
+else {
+vErrors.push(err28);
+}
+errors++;
+}
+}
+}
+else {
+const err29 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err29];
+}
+else {
+vErrors.push(err29);
 }
 errors++;
 }
@@ -8965,7 +9090,7 @@ vErrors.push(err67);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema169.properties, key0))){
+if(!(func82.call(schema169.properties, key0))){
 const err68 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err68];
@@ -10014,7 +10139,7 @@ vErrors.push(err6);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema111.properties, key0))){
+if(!(func82.call(schema111.properties, key0))){
 const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err7];
@@ -12105,7 +12230,7 @@ vErrors.push(err4);
 errors++;
 }
 for(const key0 in data){
-if(!((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms"))){
+if(!(((((((key0 === "workflow_id") || (key0 === "name")) || (key0 === "revision")) || (key0 === "runnable")) || (key0 === "published_version")) || (key0 === "updated_at_ms")) || (key0 === "description"))){
 const err5 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err5];
@@ -12313,14 +12438,39 @@ errors++;
 }
 }
 }
-}
-else {
-const err23 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.description !== undefined){
+let data6 = data.description;
+if(typeof data6 === "string"){
+if(func1(data6) > 600){
+const err23 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/maxLength",keyword:"maxLength",params:{limit: 600},message:"must NOT have more than 600 characters"};
 if(vErrors === null){
 vErrors = [err23];
 }
 else {
 vErrors.push(err23);
+}
+errors++;
+}
+}
+else {
+const err24 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+}
+}
+else {
+const err25 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
 }
 errors++;
 }
@@ -12435,7 +12585,7 @@ vErrors.push(err6);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema123.properties, key0))){
+if(!(func82.call(schema123.properties, key0))){
 const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err7];
@@ -12814,13 +12964,458 @@ return errors === 0;
 }
 validate145.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-export const validateBridge = validate149;
-const schema229 = {"type":"object","additionalProperties":false,"properties":{"protocol_version":{"const":1},"request_id":{"type":"string","maxLength":64,"minLength":1},"kind":{"type":"string","enum":["connect","ready","request","response","dirty_changed","request_close"]},"bridge_id":{"type":"string","maxLength":64,"minLength":1},"generation":{"type":"integer","minimum":1},"dirty":{"type":"boolean"},"request":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeInput"},"response":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeResult"},"error":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/ErrorResponse"}},"required":["protocol_version","request_id","kind"],"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://schemas.yijie.ai/workflow-editor/bridge-v1.schema.json","title":"WorkflowEditorBridgeV1","description":"Source MessageChannel envelope; data DTOs reference the authoritative workflow-local OpenAPI components.","allOf":[{"if":{"properties":{"kind":{"const":"connect"}}},"then":{"required":["bridge_id","generation"]}},{"if":{"properties":{"kind":{"const":"ready"}}},"then":{"required":["bridge_id","generation"]}},{"if":{"properties":{"kind":{"const":"request"}}},"then":{"required":["bridge_id","generation","request"]}},{"if":{"properties":{"kind":{"const":"response"}}},"then":{"required":["bridge_id","generation"],"oneOf":[{"required":["response"],"not":{"required":["error"]}},{"required":["error"],"not":{"required":["response"]}}]}},{"if":{"properties":{"kind":{"const":"dirty_changed"}}},"then":{"required":["bridge_id","generation","dirty"]}},{"if":{"properties":{"kind":{"const":"request_close"}}},"then":{"required":["bridge_id","generation"]}}]};
+export const v_DeleteInput = validate149;
+const schema229 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/DeleteInput","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/DeleteInput"};
+const schema230 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"expected_revision":{"$ref":"#/$defs/Identifier"}},"required":["workflow_id","expected_revision"],"description":"Native overview deletion after explicit UI confirmation. The original ID and revision are retained for all retries."};
 
 function validate150(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
 const evaluated0 = validate150.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.workflow_id === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "workflow_id"},message:"must have required property '"+"workflow_id"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+if(data.expected_revision === undefined){
+const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "expected_revision"},message:"must have required property '"+"expected_revision"+"'"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((key0 === "workflow_id") || (key0 === "expected_revision"))){
+const err2 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+}
+if(data.workflow_id !== undefined){
+let data0 = data.workflow_id;
+if(typeof data0 === "string"){
+if(func1(data0) > 64){
+const err3 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+if(func1(data0) < 1){
+const err4 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+if(!pattern4.test(data0)){
+const err5 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9_-]+$"},message:"must match pattern \""+"^[A-Za-z0-9_-]+$"+"\""};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+else {
+const err6 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+if(data.expected_revision !== undefined){
+let data1 = data.expected_revision;
+if(typeof data1 === "string"){
+if(func1(data1) > 64){
+const err7 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+if(func1(data1) < 1){
+const err8 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+if(!pattern4.test(data1)){
+const err9 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9_-]+$"},message:"must match pattern \""+"^[A-Za-z0-9_-]+$"+"\""};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+else {
+const err10 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+}
+else {
+const err11 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+validate150.errors = vErrors;
+return errors === 0;
+}
+validate150.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+
+function validate149(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+/*# sourceURL="https://schemas.yijie.ai/browser/workflow-local/DeleteInput" */;
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate149.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(!(validate150(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate150.errors : vErrors.concat(validate150.errors);
+errors = vErrors.length;
+}
+validate149.errors = vErrors;
+return errors === 0;
+}
+validate149.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+export const v_DeleteRequest = validate152;
+const schema233 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/DeleteRequest","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/DeleteRequest"};
+const schema234 = {"type":"object","additionalProperties":false,"properties":{"expected_revision":{"$ref":"#/$defs/Identifier"}},"required":["expected_revision"],"description":"Idempotent, revision-bound soft deletion. Repeating this exact ID/revision returns the same deletion result. No operation ID or OperationKind extension; audits are per attempt. A changed revision returns revision_conflict and requires a fresh user confirmation. Active execution returns run_busy. No physical graph/version/history deletion."};
+
+function validate153(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate153.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.expected_revision === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "expected_revision"},message:"must have required property '"+"expected_revision"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+for(const key0 in data){
+if(!(key0 === "expected_revision")){
+const err1 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+}
+if(data.expected_revision !== undefined){
+let data0 = data.expected_revision;
+if(typeof data0 === "string"){
+if(func1(data0) > 64){
+const err2 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+if(func1(data0) < 1){
+const err3 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+if(!pattern4.test(data0)){
+const err4 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9_-]+$"},message:"must match pattern \""+"^[A-Za-z0-9_-]+$"+"\""};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+}
+else {
+const err5 = {instancePath:instancePath+"/expected_revision",schemaPath:"#/$defs/Identifier/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+}
+else {
+const err6 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+validate153.errors = vErrors;
+return errors === 0;
+}
+validate153.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+
+function validate152(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+/*# sourceURL="https://schemas.yijie.ai/browser/workflow-local/DeleteRequest" */;
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate152.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(!(validate153(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate153.errors : vErrors.concat(validate153.errors);
+errors = vErrors.length;
+}
+validate152.errors = vErrors;
+return errors === 0;
+}
+validate152.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+export const v_DeleteResult = validate155;
+const schema236 = {"$id":"https://schemas.yijie.ai/browser/workflow-local/DeleteResult","$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/DeleteResult"};
+const schema237 = {"type":"object","additionalProperties":false,"properties":{"workflow_id":{"$ref":"#/$defs/Identifier"},"deleted":{"type":"boolean","enum":[true]}},"required":["workflow_id","deleted"],"description":"Confirmed soft deletion of the named owned resource. It no longer appears in normal lists and cannot be opened/saved/published/run. Existing API editor sessions are revoked. Durable graph/version/history and ownership rows are retained. Ambiguous failures must retry the original ID/revision, not infer success or change targets."};
+
+function validate156(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate156.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.workflow_id === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "workflow_id"},message:"must have required property '"+"workflow_id"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+if(data.deleted === undefined){
+const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "deleted"},message:"must have required property '"+"deleted"+"'"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((key0 === "workflow_id") || (key0 === "deleted"))){
+const err2 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+}
+if(data.workflow_id !== undefined){
+let data0 = data.workflow_id;
+if(typeof data0 === "string"){
+if(func1(data0) > 64){
+const err3 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+if(func1(data0) < 1){
+const err4 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+if(!pattern4.test(data0)){
+const err5 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9_-]+$"},message:"must match pattern \""+"^[A-Za-z0-9_-]+$"+"\""};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+else {
+const err6 = {instancePath:instancePath+"/workflow_id",schemaPath:"#/$defs/Identifier/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+if(data.deleted !== undefined){
+let data1 = data.deleted;
+if(typeof data1 !== "boolean"){
+const err7 = {instancePath:instancePath+"/deleted",schemaPath:"#/properties/deleted/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+if(!(data1 === true)){
+const err8 = {instancePath:instancePath+"/deleted",schemaPath:"#/properties/deleted/enum",keyword:"enum",params:{allowedValues: schema237.properties.deleted.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+}
+else {
+const err9 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+validate156.errors = vErrors;
+return errors === 0;
+}
+validate156.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+
+function validate155(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+/*# sourceURL="https://schemas.yijie.ai/browser/workflow-local/DeleteResult" */;
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate155.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(!(validate156(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate156.errors : vErrors.concat(validate156.errors);
+errors = vErrors.length;
+}
+validate155.errors = vErrors;
+return errors === 0;
+}
+validate155.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+export const validateBridge = validate158;
+const schema239 = {"type":"object","additionalProperties":false,"properties":{"protocol_version":{"const":1},"request_id":{"type":"string","maxLength":64,"minLength":1},"kind":{"type":"string","enum":["connect","ready","request","response","dirty_changed","request_close","request_history"]},"bridge_id":{"type":"string","maxLength":64,"minLength":1},"generation":{"type":"integer","minimum":1},"dirty":{"type":"boolean"},"request":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeInput"},"response":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeResult"},"error":{"$ref":"https://schemas.yijie.ai/workflow-local/v1#/$defs/ErrorResponse"}},"required":["protocol_version","request_id","kind"],"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://schemas.yijie.ai/workflow-editor/bridge-v1.schema.json","title":"WorkflowEditorBridgeV1","description":"Source MessageChannel envelope; data DTOs reference the authoritative workflow-local OpenAPI components.","allOf":[{"if":{"properties":{"kind":{"const":"connect"}}},"then":{"required":["bridge_id","generation"]}},{"if":{"properties":{"kind":{"const":"ready"}}},"then":{"required":["bridge_id","generation"]}},{"if":{"properties":{"kind":{"const":"request"}}},"then":{"required":["bridge_id","generation","request"]}},{"if":{"properties":{"kind":{"const":"response"}}},"then":{"required":["bridge_id","generation"],"oneOf":[{"required":["response"],"not":{"required":["error"]}},{"required":["error"],"not":{"required":["response"]}}]}},{"if":{"properties":{"kind":{"const":"dirty_changed"}}},"then":{"required":["bridge_id","generation","dirty"]}},{"if":{"properties":{"kind":{"const":"request_close"}}},"then":{"required":["bridge_id","generation"]}},{"if":{"properties":{"kind":{"const":"request_history"}}},"then":{"required":["bridge_id","generation"],"properties":{"dirty":false,"request":false,"response":false,"error":false}}}]};
+
+function validate159(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate159.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -13799,7 +14394,7 @@ vErrors.push(err67);
 errors++;
 }
 for(const key0 in data){
-if(!(func78.call(schema169.properties, key0))){
+if(!(func82.call(schema169.properties, key0))){
 const err68 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err68];
@@ -14304,16 +14899,16 @@ vErrors.push(err111);
 }
 errors++;
 }
-validate150.errors = vErrors;
+validate159.errors = vErrors;
 return errors === 0;
 }
-validate150.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate159.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate152(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate161(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate152.evaluated;
+const evaluated0 = validate161.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -14468,16 +15063,16 @@ vErrors.push(err10);
 }
 errors++;
 }
-validate152.errors = vErrors;
+validate161.errors = vErrors;
 return errors === 0;
 }
-validate152.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate161.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate158(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate167(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate158.evaluated;
+const evaluated0 = validate167.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -14621,17 +15216,17 @@ vErrors.push(err11);
 }
 errors++;
 }
-validate158.errors = vErrors;
+validate167.errors = vErrors;
 return errors === 0;
 }
-validate158.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate167.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate149(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate158(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 /*# sourceURL="https://schemas.yijie.ai/workflow-editor/bridge-v1.schema.json" */;
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate149.evaluated;
+const evaluated0 = validate158.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -15182,9 +15777,13 @@ vErrors.push(err32);
 }
 errors++;
 }
+const _errs39 = errors;
+let valid16 = true;
+const _errs40 = errors;
 if(data && typeof data == "object" && !Array.isArray(data)){
-if(data.protocol_version === undefined){
-const err33 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "protocol_version"},message:"must have required property '"+"protocol_version"+"'"};
+if(data.kind !== undefined){
+if("request_history" !== data.kind){
+const err33 = {};
 if(vErrors === null){
 vErrors = [err33];
 }
@@ -15193,8 +15792,23 @@ vErrors.push(err33);
 }
 errors++;
 }
-if(data.request_id === undefined){
-const err34 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "request_id"},message:"must have required property '"+"request_id"+"'"};
+}
+}
+var _valid7 = _errs40 === errors;
+errors = _errs39;
+if(vErrors !== null){
+if(_errs39){
+vErrors.length = _errs39;
+}
+else {
+vErrors = null;
+}
+}
+if(_valid7){
+const _errs42 = errors;
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.bridge_id === undefined){
+const err34 = {instancePath,schemaPath:"#/allOf/6/then/required",keyword:"required",params:{missingProperty: "bridge_id"},message:"must have required property '"+"bridge_id"+"'"};
 if(vErrors === null){
 vErrors = [err34];
 }
@@ -15203,8 +15817,8 @@ vErrors.push(err34);
 }
 errors++;
 }
-if(data.kind === undefined){
-const err35 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "kind"},message:"must have required property '"+"kind"+"'"};
+if(data.generation === undefined){
+const err35 = {instancePath,schemaPath:"#/allOf/6/then/required",keyword:"required",params:{missingProperty: "generation"},message:"must have required property '"+"generation"+"'"};
 if(vErrors === null){
 vErrors = [err35];
 }
@@ -15213,9 +15827,8 @@ vErrors.push(err35);
 }
 errors++;
 }
-for(const key0 in data){
-if(!(func78.call(schema229.properties, key0))){
-const err36 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(data.dirty !== undefined){
+const err36 = {instancePath:instancePath+"/dirty",schemaPath:"#/allOf/6/then/properties/dirty/false schema",keyword:"false schema",params:{},message:"boolean schema is false"};
 if(vErrors === null){
 vErrors = [err36];
 }
@@ -15224,10 +15837,8 @@ vErrors.push(err36);
 }
 errors++;
 }
-}
-if(data.protocol_version !== undefined){
-if(1 !== data.protocol_version){
-const err37 = {instancePath:instancePath+"/protocol_version",schemaPath:"#/properties/protocol_version/const",keyword:"const",params:{allowedValue: 1},message:"must be equal to constant"};
+if(data.request !== undefined){
+const err37 = {instancePath:instancePath+"/request",schemaPath:"#/allOf/6/then/properties/request/false schema",keyword:"false schema",params:{},message:"boolean schema is false"};
 if(vErrors === null){
 vErrors = [err37];
 }
@@ -15236,12 +15847,8 @@ vErrors.push(err37);
 }
 errors++;
 }
-}
-if(data.request_id !== undefined){
-let data7 = data.request_id;
-if(typeof data7 === "string"){
-if(func1(data7) > 64){
-const err38 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(data.response !== undefined){
+const err38 = {instancePath:instancePath+"/response",schemaPath:"#/allOf/6/then/properties/response/false schema",keyword:"false schema",params:{},message:"boolean schema is false"};
 if(vErrors === null){
 vErrors = [err38];
 }
@@ -15250,8 +15857,8 @@ vErrors.push(err38);
 }
 errors++;
 }
-if(func1(data7) < 1){
-const err39 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(data.error !== undefined){
+const err39 = {instancePath:instancePath+"/error",schemaPath:"#/allOf/6/then/properties/error/false schema",keyword:"false schema",params:{},message:"boolean schema is false"};
 if(vErrors === null){
 vErrors = [err39];
 }
@@ -15261,8 +15868,19 @@ vErrors.push(err39);
 errors++;
 }
 }
-else {
-const err40 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+var _valid7 = _errs42 === errors;
+valid16 = _valid7;
+if(valid16){
+var props0 = {};
+props0.dirty = true;
+props0.request = true;
+props0.response = true;
+props0.error = true;
+props0.kind = true;
+}
+}
+if(!valid16){
+const err40 = {instancePath,schemaPath:"#/allOf/6/if",keyword:"if",params:{failingKeyword: "then"},message:"must match \"then\" schema"};
 if(vErrors === null){
 vErrors = [err40];
 }
@@ -15271,11 +15889,13 @@ vErrors.push(err40);
 }
 errors++;
 }
+if(props0 !== true){
+props0 = props0 || {};
+props0.kind = true;
 }
-if(data.kind !== undefined){
-let data8 = data.kind;
-if(typeof data8 !== "string"){
-const err41 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.protocol_version === undefined){
+const err41 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "protocol_version"},message:"must have required property '"+"protocol_version"+"'"};
 if(vErrors === null){
 vErrors = [err41];
 }
@@ -15284,8 +15904,8 @@ vErrors.push(err41);
 }
 errors++;
 }
-if(!((((((data8 === "connect") || (data8 === "ready")) || (data8 === "request")) || (data8 === "response")) || (data8 === "dirty_changed")) || (data8 === "request_close"))){
-const err42 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema229.properties.kind.enum},message:"must be equal to one of the allowed values"};
+if(data.request_id === undefined){
+const err42 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "request_id"},message:"must have required property '"+"request_id"+"'"};
 if(vErrors === null){
 vErrors = [err42];
 }
@@ -15294,12 +15914,8 @@ vErrors.push(err42);
 }
 errors++;
 }
-}
-if(data.bridge_id !== undefined){
-let data9 = data.bridge_id;
-if(typeof data9 === "string"){
-if(func1(data9) > 64){
-const err43 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(data.kind === undefined){
+const err43 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "kind"},message:"must have required property '"+"kind"+"'"};
 if(vErrors === null){
 vErrors = [err43];
 }
@@ -15308,8 +15924,9 @@ vErrors.push(err43);
 }
 errors++;
 }
-if(func1(data9) < 1){
-const err44 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+for(const key0 in data){
+if(!(func82.call(schema239.properties, key0))){
+const err44 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err44];
 }
@@ -15319,8 +15936,9 @@ vErrors.push(err44);
 errors++;
 }
 }
-else {
-const err45 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data.protocol_version !== undefined){
+if(1 !== data.protocol_version){
+const err45 = {instancePath:instancePath+"/protocol_version",schemaPath:"#/properties/protocol_version/const",keyword:"const",params:{allowedValue: 1},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err45];
 }
@@ -15330,10 +15948,11 @@ vErrors.push(err45);
 errors++;
 }
 }
-if(data.generation !== undefined){
-let data10 = data.generation;
-if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
-const err46 = {instancePath:instancePath+"/generation",schemaPath:"#/properties/generation/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(data.request_id !== undefined){
+let data12 = data.request_id;
+if(typeof data12 === "string"){
+if(func1(data12) > 64){
+const err46 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
 if(vErrors === null){
 vErrors = [err46];
 }
@@ -15342,9 +15961,8 @@ vErrors.push(err46);
 }
 errors++;
 }
-if((typeof data10 == "number") && (isFinite(data10))){
-if(data10 < 1 || isNaN(data10)){
-const err47 = {instancePath:instancePath+"/generation",schemaPath:"#/properties/generation/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(func1(data12) < 1){
+const err47 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err47];
 }
@@ -15354,10 +15972,8 @@ vErrors.push(err47);
 errors++;
 }
 }
-}
-if(data.dirty !== undefined){
-if(typeof data.dirty !== "boolean"){
-const err48 = {instancePath:instancePath+"/dirty",schemaPath:"#/properties/dirty/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+else {
+const err48 = {instancePath:instancePath+"/request_id",schemaPath:"#/properties/request_id/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err48];
 }
@@ -15367,27 +15983,10 @@ vErrors.push(err48);
 errors++;
 }
 }
-if(data.request !== undefined){
-if(!(validate150(data.request, {instancePath:instancePath+"/request",parentData:data,parentDataProperty:"request",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate150.errors : vErrors.concat(validate150.errors);
-errors = vErrors.length;
-}
-}
-if(data.response !== undefined){
-if(!(validate152(data.response, {instancePath:instancePath+"/response",parentData:data,parentDataProperty:"response",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate152.errors : vErrors.concat(validate152.errors);
-errors = vErrors.length;
-}
-}
-if(data.error !== undefined){
-if(!(validate158(data.error, {instancePath:instancePath+"/error",parentData:data,parentDataProperty:"error",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate158.errors : vErrors.concat(validate158.errors);
-errors = vErrors.length;
-}
-}
-}
-else {
-const err49 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.kind !== undefined){
+let data13 = data.kind;
+if(typeof data13 !== "string"){
+const err49 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err49];
 }
@@ -15396,10 +15995,122 @@ vErrors.push(err49);
 }
 errors++;
 }
-validate149.errors = vErrors;
+if(!(((((((data13 === "connect") || (data13 === "ready")) || (data13 === "request")) || (data13 === "response")) || (data13 === "dirty_changed")) || (data13 === "request_close")) || (data13 === "request_history"))){
+const err50 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema239.properties.kind.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err50];
+}
+else {
+vErrors.push(err50);
+}
+errors++;
+}
+}
+if(data.bridge_id !== undefined){
+let data14 = data.bridge_id;
+if(typeof data14 === "string"){
+if(func1(data14) > 64){
+const err51 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err51];
+}
+else {
+vErrors.push(err51);
+}
+errors++;
+}
+if(func1(data14) < 1){
+const err52 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err52];
+}
+else {
+vErrors.push(err52);
+}
+errors++;
+}
+}
+else {
+const err53 = {instancePath:instancePath+"/bridge_id",schemaPath:"#/properties/bridge_id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err53];
+}
+else {
+vErrors.push(err53);
+}
+errors++;
+}
+}
+if(data.generation !== undefined){
+let data15 = data.generation;
+if(!(((typeof data15 == "number") && (!(data15 % 1) && !isNaN(data15))) && (isFinite(data15)))){
+const err54 = {instancePath:instancePath+"/generation",schemaPath:"#/properties/generation/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err54];
+}
+else {
+vErrors.push(err54);
+}
+errors++;
+}
+if((typeof data15 == "number") && (isFinite(data15))){
+if(data15 < 1 || isNaN(data15)){
+const err55 = {instancePath:instancePath+"/generation",schemaPath:"#/properties/generation/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err55];
+}
+else {
+vErrors.push(err55);
+}
+errors++;
+}
+}
+}
+if(data.dirty !== undefined){
+if(typeof data.dirty !== "boolean"){
+const err56 = {instancePath:instancePath+"/dirty",schemaPath:"#/properties/dirty/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err56];
+}
+else {
+vErrors.push(err56);
+}
+errors++;
+}
+}
+if(data.request !== undefined){
+if(!(validate159(data.request, {instancePath:instancePath+"/request",parentData:data,parentDataProperty:"request",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate159.errors : vErrors.concat(validate159.errors);
+errors = vErrors.length;
+}
+}
+if(data.response !== undefined){
+if(!(validate161(data.response, {instancePath:instancePath+"/response",parentData:data,parentDataProperty:"response",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate161.errors : vErrors.concat(validate161.errors);
+errors = vErrors.length;
+}
+}
+if(data.error !== undefined){
+if(!(validate167(data.error, {instancePath:instancePath+"/error",parentData:data,parentDataProperty:"error",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate167.errors : vErrors.concat(validate167.errors);
+errors = vErrors.length;
+}
+}
+}
+else {
+const err57 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err57];
+}
+else {
+vErrors.push(err57);
+}
+errors++;
+}
+validate158.errors = vErrors;
 return errors === 0;
 }
-validate149.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate158.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validators = Object.freeze({
   Identifier: v_Identifier,
@@ -15443,4 +16154,7 @@ export const validators = Object.freeze({
   CloseResult: v_CloseResult,
   WorkflowSummary: v_WorkflowSummary,
   RunSummary: v_RunSummary,
+  DeleteInput: v_DeleteInput,
+  DeleteRequest: v_DeleteRequest,
+  DeleteResult: v_DeleteResult,
 });

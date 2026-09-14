@@ -7,6 +7,7 @@
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
+  --yj-color-workflow-create-ink: #4b651d;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;
   --yj-color-brand-soft: #ffffff;
@@ -133,6 +134,8 @@
   --yj-layout-sidebar-expanded: 240px;
   --yj-layout-sidebar-collapsed: 72px;
   --yj-layout-form-max: 960px;
+  --yj-layout-workflow-create-width: 560px;
+  --yj-z-workflow-card-action: 1;
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
   --yj-layout-chat-column-max: 880px;
@@ -169,6 +172,7 @@
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
+  --yj-color-workflow-create-ink: #c3f35b;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;
   --yj-color-brand-soft: #25282b;

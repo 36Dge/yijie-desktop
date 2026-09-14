@@ -215,6 +215,11 @@
         "updated_at_ms": {
           "type": "integer",
           "minimum": 0
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."
         }
       },
       "required": [
@@ -272,6 +277,11 @@
           "type": "string",
           "maxLength": 80,
           "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."
         }
       },
       "required": [
@@ -289,6 +299,11 @@
         },
         "operation_id": {
           "$ref": "#/$defs/OperationId"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."
         }
       },
       "required": [
@@ -1161,6 +1176,11 @@
         "updated_at_ms": {
           "type": "integer",
           "minimum": 0
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Human-readable workflow purpose. Optional for legacy clients/resources; omitted create value means empty. Response field is emitted only after description-v1 HTTP opt-in. Not a prompt or an instruction to execute."
         }
       },
       "required": [
@@ -1224,6 +1244,56 @@
         "started_at_ms"
       ],
       "description": "Bounded list summary; read the detail endpoint for full content."
+    },
+    "DeleteInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "expected_revision"
+      ],
+      "description": "Native overview deletion after explicit UI confirmation. The original ID and revision are retained for all retries."
+    },
+    "DeleteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "description": "Idempotent, revision-bound soft deletion. Repeating this exact ID/revision returns the same deletion result. No operation ID or OperationKind extension; audits are per attempt. A changed revision returns revision_conflict and requires a fresh user confirmation. Active execution returns run_busy. No physical graph/version/history deletion."
+    },
+    "DeleteResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "deleted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        }
+      },
+      "required": [
+        "workflow_id",
+        "deleted"
+      ],
+      "description": "Confirmed soft deletion of the named owned resource. It no longer appears in normal lists and cannot be opened/saved/published/run. Existing API editor sessions are revoked. Durable graph/version/history and ownership rows are retained. Ambiguous failures must retry the original ID/revision, not infer success or change targets."
     }
   }
 }

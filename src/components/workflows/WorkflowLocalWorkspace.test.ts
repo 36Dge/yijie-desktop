@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { workflowNativeClient, WorkflowNativeError, type EditorOpenedView, type WorkflowSchemas } from "../../api/workflow-native-client";
 import WorkflowLocalWorkspace from "./WorkflowLocalWorkspace.vue";
 
-vi.mock("vue-router", () => ({ onBeforeRouteLeave: vi.fn() }));
+const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock("vue-router", () => ({ onBeforeRouteLeave: vi.fn(), onBeforeRouteUpdate: vi.fn(), useRouter: () => navigation }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 // contract-impact=none: this component test changes no implementation, wire,
@@ -45,19 +46,20 @@ const status: WorkflowSchemas["ServiceStatus"] = {
 
 const EditorPane = defineComponent({
   name: "WorkflowEditorPane",
-  emits: ["close"],
+  emits: ["close", "history"],
   setup(_props, { emit }) {
     return () => h("section", { "data-testid": "retained-editor" }, [
       h("button", { type: "button", onClick: () => emit("close") }, "返回工作流"),
+      h("button", { type: "button", onClick: () => emit("history") }, "运行记录"),
     ]);
   },
 });
 const Dialog = defineComponent({
   name: "NModal",
-  props: { show: Boolean },
+  props: { show: Boolean, title: String },
   setup(props, { slots }) {
     return () => props.show
-      ? h("div", { role: "dialog", "aria-label": "有未保存或待确认的内容" }, [slots.default?.(), slots.action?.()])
+      ? h("div", { role: "dialog", "aria-label": props.title }, [slots.default?.(), slots.action?.()])
       : null;
   },
 });
@@ -76,14 +78,14 @@ describe("workflow unknown execution departure", () => {
     vi.spyOn(workflowNativeClient, "query").mockResolvedValue({ history: { items: [] } });
     const close = vi.spyOn(workflowNativeClient, "close").mockResolvedValue({ closed: true });
     const run = vi.spyOn(workflowNativeClient, "run").mockRejectedValueOnce(new WorkflowNativeError("operation_unknown"));
-    wrapper = mount(WorkflowLocalWorkspace, { global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
+    wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
     await flushPromises();
     const button = (label: string) => {
       const target = wrapper!.findAll("button").find(candidate => candidate.text() === label);
       expect(target, `button: ${label}`).toBeDefined();
       return target!;
     };
-    await button("打开编辑器").trigger("click");
+    await button("运行记录").trigger("click");
     await flushPromises();
     await wrapper.get("#workflow-run-input").setValue("普通输入");
     await wrapper.get("form.workflow-runs__form").trigger("submit");
@@ -97,25 +99,45 @@ describe("workflow unknown execution departure", () => {
     const leave = vi.mocked(onBeforeRouteLeave).mock.calls[0]![0] as () => Promise<boolean>;
     const stay = leave();
     await nextTick();
-    expect(wrapper.get('[role="dialog"]').text()).toContain("待确认操作的查询入口");
+    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("待确认操作的查询入口");
     await button("继续编辑").trigger("click");
     await expect(stay).resolves.toBe(false);
     expect(close).not.toHaveBeenCalled();
     expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("尚未取得可查询的操作标识");
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="有未保存或待确认的内容"]').exists()).toBe(false);
 
     const depart = leave();
     await nextTick();
-    expect(wrapper.get('[role="dialog"]').text()).toContain("已经提交的操作不会因此撤销");
-    expect(wrapper.get('[role="dialog"]').text()).toContain("运行历史仍保留在服务端");
+    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("已经提交的操作不会因此撤销");
+    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("运行历史仍保留在服务端");
     await button("放弃本地内容并返回").trigger("click");
     await expect(depart).resolves.toBe(true);
     await flushPromises();
     expect(close).toHaveBeenCalledExactlyOnceWith({ bridge_id: view.bridge_id });
     expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain("我的工作流");
+    expect(wrapper.text()).toContain("打开工作流");
     expect(run).toHaveBeenCalledTimes(1);
     expect(invoke).not.toHaveBeenCalled();
   });
+});
+
+it("keeps a confirmed new workflow ID when opening fails and retries only that resource", async () => {
+  vi.spyOn(workflowNativeClient, "status").mockResolvedValue(status);
+  vi.spyOn(workflowNativeClient, "list").mockResolvedValue({ items: [workflow] });
+  const create = vi.spyOn(workflowNativeClient, "create").mockResolvedValue(workflow);
+  const open = vi.spyOn(workflowNativeClient, "open").mockRejectedValueOnce(new WorkflowNativeError("service_unavailable")).mockResolvedValue(view);
+  vi.spyOn(workflowNativeClient, "query").mockResolvedValue({ history: { items: [] } });
+  vi.spyOn(workflowNativeClient, "close").mockResolvedValue({ closed: true });
+  wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
+  await flushPromises();
+  expect(create).not.toHaveBeenCalled();
+  expect(open).toHaveBeenCalledOnce();
+  await wrapper.findAll("button").find(button => button.text() === "重新连接")!.trigger("click");
+  await flushPromises();
+  expect(open).toHaveBeenLastCalledWith({ workflow_id: workflowId });
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(create).not.toHaveBeenCalled();
+  expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(true);
+  expect(invoke).not.toHaveBeenCalled();
 });
