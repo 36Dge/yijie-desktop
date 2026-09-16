@@ -32,7 +32,8 @@
       "minimum": 1
     },
     "dirty": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "当前 editor 页包含离开会失去的本地内容或待确认操作查询上下文。true 包含可保存草稿差异、仅保留于本页内存且尚不支持持久保存的 UI 设计状态、尚待核对的操作上下文；false 表示当前 producer 确认这些保护条件均不存在。此标志只驱动宿主应用内离开确认，不代表内容已发送或已保存、内容可被 save_draft 接受、执行权限、操作终态或原生窗口及应用退出已被拦截。consumer 不得据此自动保存、试运行、发布或取消既有操作。"
     },
     "request": {
       "$ref": "https://schemas.yijie.ai/workflow-local/v1#/$defs/EditorExchangeInput"
@@ -151,7 +152,8 @@
           "generation",
           "dirty"
         ]
-      }
+      },
+      "description": "只作用于当前已 ready 的 port、bridge_id 和 generation；重连必须重新发送当前保护值，切换连接不能清空仍存在的保护条件。保护位不用于阻止用户明确运行已有的服务端发布版本。"
     },
     {
       "if": {
@@ -166,7 +168,8 @@
           "bridge_id",
           "generation"
         ]
-      }
+      },
+      "description": "请求宿主尝试应用内页面导航，由宿主统一确认本页内容处置并正常关闭编辑会话；请求本身不保存内容、不取消既有操作，也不保证原生窗口或应用退出被拦截。"
     },
     {
       "if": {
@@ -187,7 +190,8 @@
           "response": false,
           "error": false
         }
-      }
+      },
+      "description": "请求在当前页面打开已有历史面板；不离开或替换当前编辑图，不隐含保存或执行操作。"
     }
   ]
 }

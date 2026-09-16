@@ -262,6 +262,41 @@ describe("FEAT-153 generated native request boundary", () => {
 });
 
 describe("FEAT-153 normal editor MessageChannel", () => {
+  it("reprojects page-only protection after reconnect without saving or treating history as busy", async () => {
+    const native = nativeClient();
+    const state = workspaceHarness(native);
+    await state.openWorkflow(WORKFLOW_A);
+    const events = hooks();
+    events.dirty = vi.fn(value => { state.dirty.value = value; });
+    const firstView = state.editor.value!;
+    const first = channelHarness(firstView, native, events);
+    first.peer.postMessage(notification(firstView, "ready"));
+    await vi.waitFor(() => expect(events.ready).toHaveBeenCalledOnce());
+    const protectedPage = (view: EditorOpenedView) => ({ kind: "dirty_changed" as const,
+      protocol_version: 1 as const, request_id: crypto.randomUUID(), bridge_id: view.bridge_id,
+      generation: view.generation, dirty: true });
+    first.peer.postMessage(protectedPage(firstView));
+    await vi.waitFor(() => expect(state.dirty.value).toBe(true));
+    first.channel.close();
+    native.open.mockResolvedValueOnce(opened(WORKFLOW_A, 2));
+    await state.openWorkflow(WORKFLOW_A, true);
+    expect(state.dirty.value).toBe(true);
+    const secondView = state.editor.value!;
+    const secondEvents = hooks();
+    secondEvents.dirty = vi.fn(value => { state.dirty.value = value; });
+    const second = channelHarness(secondView, native, secondEvents);
+    second.peer.postMessage(notification(secondView, "ready"));
+    await vi.waitFor(() => expect(secondEvents.ready).toHaveBeenCalledOnce());
+    second.peer.postMessage(protectedPage(secondView));
+    second.peer.postMessage(notification(secondView, "request_history"));
+    await vi.waitFor(() => expect(secondEvents.requestHistory).toHaveBeenCalledOnce());
+    expect(secondEvents.dirty).toHaveBeenCalledExactlyOnceWith(true);
+    expect(state.dirty.value).toBe(true);
+    expect(native.exchange).not.toHaveBeenCalled();
+    expect(native.run).not.toHaveBeenCalled();
+    expect(secondEvents.busy).not.toHaveBeenCalled();
+  });
+
   it("opens history only from a ready current port and keeps it independent of native editor writes", async () => {
     const view = opened();
     const native = nativeClient();

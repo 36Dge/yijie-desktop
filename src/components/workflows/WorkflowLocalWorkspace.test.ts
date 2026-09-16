@@ -12,9 +12,8 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("vue-router", () => ({ onBeforeRouteLeave: vi.fn(), onBeforeRouteUpdate: vi.fn(), useRouter: () => navigation }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-// contract-impact=none: this component test changes no implementation, wire,
-// persistence or native behavior. It supplies a source-defined unknown result
-// to ordinary client mocks; no real IPC failure, iframe or network is created.
+// FEAT-154 consumer conformance uses normal source-defined states and ordinary
+// client completions; no real IPC failure, iframe or network is created.
 const workflowId = "7684526620584968192";
 const workflow: WorkflowSchemas["Workflow"] = {
   workflow_id: workflowId,
@@ -46,7 +45,7 @@ const status: WorkflowSchemas["ServiceStatus"] = {
 
 const EditorPane = defineComponent({
   name: "WorkflowEditorPane",
-  emits: ["close", "history"],
+  emits: ["close", "history", "dirty"],
   setup(_props, { emit }) {
     return () => h("section", { "data-testid": "retained-editor" }, [
       h("button", { type: "button", onClick: () => emit("close") }, "返回工作流"),
@@ -59,9 +58,67 @@ const Dialog = defineComponent({
   props: { show: Boolean, title: String },
   setup(props, { slots }) {
     return () => props.show
-      ? h("div", { role: "dialog", "aria-label": props.title }, [slots.default?.(), slots.action?.()])
+      ? h("div", { role: "dialog", "aria-label": props.title }, [slots["header-extra"]?.(), slots.default?.(), slots.action?.()])
       : null;
   },
+});
+
+it("protects page-only design, preserves the editor through history and closes only after explicit consent", async () => {
+  vi.spyOn(workflowNativeClient, "status").mockResolvedValue(status);
+  vi.spyOn(workflowNativeClient, "list").mockResolvedValue({ items: [workflow] });
+  vi.spyOn(workflowNativeClient, "open").mockResolvedValue(view);
+  vi.spyOn(workflowNativeClient, "query").mockResolvedValue({ history: { items: [] } });
+  const exchange = vi.spyOn(workflowNativeClient, "exchange");
+  const close = vi.spyOn(workflowNativeClient, "close")
+    .mockRejectedValueOnce(new WorkflowNativeError("service_unavailable"))
+    .mockResolvedValue({ closed: true });
+  const run = vi.spyOn(workflowNativeClient, "run").mockResolvedValue({
+    workflow_id: workflowId, run_id: "7684526620584968193", operation_id: "10000000-0000-4000-8000-000000000001",
+    mode: "release", version: "v0.0.1", state: "succeeded", terminal: true, started_at_ms: 1_800_000_000_000,
+  });
+  wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
+  await flushPromises();
+  const pane = wrapper.findComponent(EditorPane);
+  const retainedElement = pane.element;
+  pane.vm.$emit("dirty", true);
+  await nextTick();
+  const button = (label: string) => wrapper!.findAll("button").find(candidate => candidate.text() === label)!;
+
+  await button("运行记录").trigger("click");
+  await flushPromises();
+  expect(button("执行所选版本").attributes("disabled")).toBeUndefined();
+  await wrapper.get("#workflow-run-input").setValue("普通历史版本输入");
+  await wrapper.get("form.workflow-runs__form").trigger("submit");
+  await flushPromises();
+  expect(run).toHaveBeenCalledExactlyOnceWith({ workflow_id: workflowId, version: "v0.0.1", input: { input: "普通历史版本输入" } });
+  expect(exchange).not.toHaveBeenCalled();
+  await wrapper.get('[aria-label="关闭运行记录"]').trigger("click");
+  expect(wrapper.find('[aria-label="版本与运行记录"]').exists()).toBe(false);
+  expect(wrapper.findComponent(EditorPane).element).toBe(retainedElement);
+
+  const leave = vi.mocked(onBeforeRouteLeave).mock.calls[0]![0] as () => Promise<boolean>;
+  const stay = leave();
+  await nextTick();
+  expect(wrapper.text()).toContain("本页内存中的电商节点设计");
+  expect(wrapper.text()).toContain("关闭窗口、退出应用或刷新不保证保留本页配置");
+  await button("继续编辑").trigger("click");
+  await expect(stay).resolves.toBe(false);
+  expect(close).not.toHaveBeenCalled();
+
+  const firstClose = leave();
+  await nextTick();
+  await button("放弃本页未保存内容并离开").trigger("click");
+  await expect(firstClose).resolves.toBe(false);
+  expect(wrapper.findComponent(EditorPane).element).toBe(retainedElement);
+  const retry = leave();
+  await nextTick();
+  expect(wrapper.find('[aria-label="有未保存或待确认的内容"]').exists()).toBe(true);
+  await button("放弃本页未保存内容并离开").trigger("click");
+  await expect(retry).resolves.toBe(true);
+  expect(close).toHaveBeenCalledTimes(2);
+  expect(exchange).not.toHaveBeenCalled();
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(invoke).not.toHaveBeenCalled();
 });
 let wrapper: VueWrapper | undefined;
 afterEach(() => {
@@ -111,7 +168,7 @@ describe("workflow unknown execution departure", () => {
     await nextTick();
     expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("已经提交的操作不会因此撤销");
     expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("运行历史仍保留在服务端");
-    await button("放弃本地内容并返回").trigger("click");
+    await button("放弃本页未保存内容并离开").trigger("click");
     await expect(depart).resolves.toBe(true);
     await flushPromises();
     expect(close).toHaveBeenCalledExactlyOnceWith({ bridge_id: view.bridge_id });

@@ -96,10 +96,11 @@ function requestClose() { void router.push({ name: "workflows" }); }
     </NModal>
     <NModal :show="confirmClose" preset="dialog" title="有未保存或待确认的内容" :show-icon="false"
       :mask-closable="false" :closable="false" @esc="decideClose(false)">
-      <p>继续编辑会保留当前画布和原操作查询入口。返回将关闭编辑会话并丢弃本地内容及待确认操作的查询入口；已经提交的操作不会因此撤销，运行历史仍保留在服务端。</p>
+      <p>继续编辑会保留当前画布、节点配置和原操作查询入口。离开将关闭编辑会话，放弃本页内存中的电商节点设计、原草稿未保存的修改及待确认操作的查询入口。电商节点设计尚不支持持久保存。</p>
+      <p>已经提交的操作不会因此撤销，运行历史仍保留在服务端。关闭窗口、退出应用或刷新不保证保留本页配置。</p>
       <template #action>
         <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(false)">继续编辑</button>
-        <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(true)">放弃本地内容并返回</button>
+        <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(true)">放弃本页未保存内容并离开</button>
       </template>
     </NModal>
   </div>
