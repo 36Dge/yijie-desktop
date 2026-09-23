@@ -40,6 +40,7 @@ describe("app navigation", () => {
       { key: "newTask", to: "/chat" },
       { key: "store", to: "/store" },
       { key: "workspace", to: "/workflows" },
+      { key: "scheduledTask", to: "/scheduled-tasks" },
       { key: "plugin", to: "/plugins" },
       { key: "settings", to: "/settings" },
     ]);

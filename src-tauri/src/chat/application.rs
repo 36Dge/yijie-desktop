@@ -28,6 +28,7 @@ use super::host_domain::{
     HostCleanupReason, HostCleanupSurfaceStatus, HostErrorCode, HostEventCursor, HostSessionState,
     HostStreamEvent,
 };
+#[cfg(test)]
 use super::native_project;
 use super::public_tasks::{
     PublicTaskControlPlane, PublicTaskCreateIntent, PublicTaskCreateOutcome, PublicTaskIssueCode,
@@ -51,6 +52,11 @@ pub struct ConversationApplication {
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
     artifact_transfers: Option<ArtifactTransferService>,
     feat137_streaming_enabled: bool,
+    lifecycle: super::lifecycle::Lifecycle,
+    schedule_authority: Option<crate::native_auth::NativeAuthRuntime>,
+    coordinator_stopping: Arc<std::sync::atomic::AtomicBool>,
+    recovery_poll: Arc<std::sync::Mutex<Option<(u64, std::time::Instant)>>>,
+    schedule_poll: Arc<std::sync::Mutex<Option<(u64, i64)>>>,
 }
 
 #[derive(Clone)]
@@ -242,6 +248,21 @@ impl AuthorizedConversationApplication {
     ) -> Result<SessionPage, ChatError> {
         self.authorize(context_id, ChatAction::ReadSessions)?;
         self.application.list_sessions(cursor, limit).await
+    }
+
+    pub async fn session_purpose(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+    ) -> Result<super::session_purpose_generated::SessionPurposeView, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        let result = self
+            .application
+            .database
+            .call(move |r| r.session_purpose(session_id))
+            .await;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        result
     }
 
     pub async fn resync_session(
@@ -541,7 +562,9 @@ pub enum CoordinatorOutcome {
 }
 
 pub struct ConversationCoordinator {
+    lifecycle: super::lifecycle::Lifecycle,
     stop: watch::Sender<bool>,
+    stopping: Arc<std::sync::atomic::AtomicBool>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -581,21 +604,30 @@ impl ConversationCoordinator {
             return Err(ChatError::InvalidInput);
         }
         let (stop, mut stop_receiver) = watch::channel(false);
+        let stopping = application.coordinator_stopping.clone();
+        let lifecycle = application.lifecycle.clone();
         let task = tokio::spawn(async move {
+            // Clock reads run beside delivery, under this same stop owner. They
+            // cannot delay processing a terminal event or releasing a reservation.
+            let timing_task = match (&application.host, &application.schedule_authority) {
+                (Some(host), Some(auth)) => Some(tokio::spawn(
+                    super::schedules::timing_runtime::run_collector(
+                        application.database.clone(),
+                        host.clone(),
+                        auth.clone(),
+                        application.lifecycle.clone(),
+                        stop_receiver.clone(),
+                    ),
+                )),
+                _ => None,
+            };
             loop {
-                let outcome = tokio::select! {
-                    result = application.run_background_once_with_projection_sink(projection_sink.as_ref()) => Some(result),
-                    changed = stop_receiver.changed() => {
-                        if changed.is_err() || *stop_receiver.borrow() {
-                            None
-                        } else {
-                            continue;
-                        }
-                    }
-                };
-                let Some(outcome) = outcome else {
+                if application.stopping() {
                     break;
-                };
+                }
+                let outcome = application
+                    .run_background_once_with_projection_sink(projection_sink.as_ref())
+                    .await;
                 if let Ok(value) = &outcome {
                     let _ = projection_sink.publish_coordinator(value);
                 }
@@ -606,7 +638,8 @@ impl ConversationCoordinator {
                 );
                 if should_wait {
                     tokio::select! {
-                        _ = tokio::time::sleep(idle_poll_interval) => {}
+                        _ = tokio::time::sleep(idle_poll_interval.min(Duration::from_secs(1))) => {}
+                        _ = application.database.schedule_changed.notified() => {}
                         changed = stop_receiver.changed() => {
                             if changed.is_err() || *stop_receiver.borrow() {
                                 break;
@@ -615,29 +648,46 @@ impl ConversationCoordinator {
                     }
                 }
             }
+            if let Some(task) = timing_task {
+                let _ = task.await;
+            }
         });
         Ok(Self {
+            lifecycle,
             stop,
+            stopping,
             task: Some(task),
         })
     }
 
-    pub async fn stop(mut self) -> Result<(), ChatError> {
-        let _ = self.stop.send(true);
-        if let Some(task) = self.task.take() {
-            task.await
-                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+    pub fn request_stop(&self) {
+        if !self
+            .stopping
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.lifecycle
+                .transition(super::lifecycle::Phase::Recovering);
         }
-        Ok(())
+        let _ = self.stop.send(true);
+    }
+    pub async fn wait_stopped(&mut self) -> Result<(), ChatError> {
+        self.request_stop();
+        let result = match self.task.as_mut() {
+            Some(task) => task.await.map_err(|_| ChatError::OrchestrationUnavailable),
+            None => Ok(()),
+        };
+        // Cancellation before completion leaves the handle above in place. A
+        // completed JoinError must be consumed too, never polled a second time.
+        self.task.take();
+        result
+    }
+    pub async fn stop(mut self) -> Result<(), ChatError> {
+        self.wait_stopped().await
     }
 }
-
 impl Drop for ConversationCoordinator {
     fn drop(&mut self) {
-        let _ = self.stop.send(true);
-        if let Some(task) = self.task.take() {
-            task.abort();
-        }
+        self.request_stop();
     }
 }
 
@@ -919,6 +969,11 @@ impl ConversationApplication {
             artifact_transfers: None,
 
             feat137_streaming_enabled: false,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -931,6 +986,11 @@ impl ConversationApplication {
             artifact_transfers: Some(ArtifactTransferService::new(host.clone(), database.clone())),
 
             feat137_streaming_enabled: false,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
             database,
             host: Some(host),
             public_tasks: Some(public_tasks),
@@ -949,6 +1009,11 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
 
             feat137_streaming_enabled: false,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -964,6 +1029,11 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
 
             feat137_streaming_enabled: false,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -979,6 +1049,11 @@ impl ConversationApplication {
             public_tasks: Some(public_tasks),
 
             feat137_streaming_enabled: true,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -990,9 +1065,39 @@ impl ConversationApplication {
             artifact_transfers: None,
 
             feat137_streaming_enabled: false,
+            lifecycle: super::lifecycle::Lifecycle::default(),
+            schedule_authority: None,
+            coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            recovery_poll: Arc::new(std::sync::Mutex::new(None)),
+            schedule_poll: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
+    pub(crate) fn require_coordinator_admission(&self) -> Result<(), ChatError> {
+        if matches!(
+            self.lifecycle.phase(),
+            super::lifecycle::Phase::Stopping
+                | super::lifecycle::Phase::StopPending
+                | super::lifecycle::Phase::Stopped
+        ) {
+            Err(ChatError::CleanupIncomplete)
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn with_native_lifecycle(
+        mut self,
+        lifecycle: super::lifecycle::Lifecycle,
+        authority: Option<crate::native_auth::NativeAuthRuntime>,
+    ) -> Self {
+        self.lifecycle = lifecycle;
+        self.schedule_authority = authority;
+        self
+    }
+    fn stopping(&self) -> bool {
+        self.coordinator_stopping
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
     pub(crate) fn feat137_streaming_enabled(&self) -> bool {
         self.feat137_streaming_enabled
     }
@@ -1567,6 +1672,12 @@ impl ConversationApplication {
     }
 
     pub async fn dispatch_next(&self) -> Result<DispatchOutcome, ChatError> {
+        if self.stopping() {
+            return Ok(DispatchOutcome::Idle);
+        }
+        let Ok(epoch) = self.lifecycle.permit() else {
+            return Ok(DispatchOutcome::Idle);
+        };
         let now = unix_seconds()?;
         if self.feat137_streaming_enabled {
             if let Some(status) = self
@@ -1579,28 +1690,69 @@ impl ConversationApplication {
         }
         let Some(claimed) = self
             .database
-            .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+            .claim_next_conversation_outbox_gated(
+                now,
+                OUTBOX_LEASE_SECONDS,
+                self.lifecycle.clone(),
+                epoch,
+            )
             .await?
         else {
             return Ok(DispatchOutcome::Idle);
         };
-        match claimed.kind {
-            OutboxKind::CreateSession => self.dispatch_create(claimed, now).await,
-            OutboxKind::StartTurn => self.dispatch_turn(claimed, now).await,
-            OutboxKind::InterruptTurn => self.dispatch_interrupt(claimed, now).await,
+        if let Err(error) = self
+            .database
+            .guard_conversation_dispatch(claimed.operation_id)
+            .await
+        {
+            self.scheduled_dispatch_error(claimed.operation_id, error.code().to_owned())
+                .await?;
+            return Err(error);
+        }
+        let operation = claimed.operation_id;
+        let result = match claimed.kind {
+            OutboxKind::CreateSession => self.dispatch_create(claimed, now, epoch).await,
+            OutboxKind::StartTurn => self.dispatch_turn(claimed, now, epoch).await,
+            OutboxKind::InterruptTurn => self.dispatch_interrupt(claimed, now, epoch).await,
             _ => {
                 self.database.fail_outbox(claimed.operation_id).await?;
                 Ok(DispatchOutcome::FailedSafely {
                     operation_id: claimed.operation_id,
                 })
             }
+        };
+        if let Err(error) = &result {
+            self.scheduled_dispatch_error(operation, error.code().to_owned())
+                .await?;
         }
+        result
+    }
+
+    async fn dispatch_host(&self, operation: Uuid, epoch: u64) -> Result<HostBridge, ChatError> {
+        super::schedules::dispatch::admitted_host(
+            &self.database,
+            self.host()?,
+            &self.lifecycle,
+            epoch,
+            operation,
+        )
+        .await
+    }
+    async fn scheduled_dispatch_error(
+        &self,
+        operation: Uuid,
+        code: String,
+    ) -> Result<Option<bool>, ChatError> {
+        self.database
+            .call(move |r| r.schedule_dispatch_failed(operation, &code))
+            .await
     }
 
     async fn dispatch_create(
         &self,
         claimed: ClaimedOutbox,
         now: i64,
+        epoch: u64,
     ) -> Result<DispatchOutcome, ChatError> {
         let dispatch = self
             .database
@@ -1614,7 +1766,45 @@ impl ConversationApplication {
                     client_reference_id: dispatch.client_reference_id,
                     authorization_revision: dispatch.authorization_revision,
                 };
-                match self.public_tasks()?.create_task(intent).await {
+                self.lifecycle.validate(epoch)?;
+                // Candidate scheduled public-task preparation is exactly the existing
+                // local native adapter; an arbitrary control-plane trait cannot run here.
+                let operation = dispatch.operation_id;
+                let local = self
+                    .database
+                    .call(move |r| {
+                        if r.scheduled_dispatch_context(operation)?.is_some() {
+                            Ok(Some((
+                                r.schedule_dispatch_authority
+                                    .clone()
+                                    .ok_or(ChatError::ScopeDenied)?,
+                                r.scope.clone(),
+                            )))
+                        } else if r.draft_dispatch_context(operation)?.is_some() {
+                            Ok(Some((
+                                r.schedule_draft_dispatch_authority
+                                    .clone()
+                                    .ok_or(ChatError::ScopeDenied)?,
+                                r.scope.clone(),
+                            )))
+                        } else {
+                            Ok(None)
+                        }
+                    })
+                    .await?;
+                let outcome = if let Some((authority, scope)) = local {
+                    super::public_tasks::NativePublicTaskControlPlane::new(
+                        authority,
+                        Uuid::parse_str(&scope.owner_user_id)
+                            .map_err(|_| ChatError::ScopeDenied)?,
+                        Uuid::parse_str(&scope.tenant_id).map_err(|_| ChatError::ScopeDenied)?,
+                    )
+                    .create_task(intent)
+                    .await
+                } else {
+                    self.public_tasks()?.create_task(intent).await
+                };
+                match outcome {
                     PublicTaskCreateOutcome::Bound { public_task_id } => {
                         let status = self
                             .database
@@ -1687,23 +1877,71 @@ impl ConversationApplication {
                 }
             }
         };
-        let bookmark = self
+        let project = dispatch.project_id.to_string();
+        let directory = self
             .database
-            .project_bookmark(dispatch.project_id.to_string())
+            .call(move |r| r.resolve_schedule_project(&project))
             .await?;
-        let selection =
-            tokio::task::spawn_blocking(move || native_project::resolve_bookmark(&bookmark))
-                .await
-                .map_err(|_| ChatError::ProjectUnavailable)??;
         let trace = HostTrace {
             request_id: Some(dispatch.operation_id),
             ..HostTrace::default()
         };
-        match self
-            .host()?
-            .start_session(public_task_id, &selection.canonical_path, &trace)
-            .await
-        {
+        let host = self.dispatch_host(dispatch.operation_id, epoch).await?;
+        let operation = dispatch.operation_id;
+        let draft = self
+            .database
+            .call(move |r| r.draft_dispatch_context(operation))
+            .await?;
+        let result = if let Some(draft) = draft {
+            host.require_draft_capability()
+                .await
+                .map_err(|_| ChatError::SidecarUnavailable)?;
+            self.lifecycle.validate(epoch)?;
+            host.start_draft_session(public_task_id, draft.workspace)
+                .await
+        } else {
+            host.start_session(public_task_id, &directory, &trace).await
+        };
+        if host.is_schedule_admitted() {
+            let code = match &result {
+                Err(error) => Some(format!("{:?}:{:?}", error.kind(), error.code())),
+                Ok(session)
+                    if session.task_id != public_task_id
+                        || session.state != HostSessionState::Idle
+                        || !session.model_ready
+                        || session.codex_thread_id.is_none() =>
+                {
+                    Some("invalid_create_response".into())
+                }
+                _ => None,
+            };
+            if let Some(code) = code {
+                let operation = claimed.operation_id;
+                if self
+                    .database
+                    .call(move |r| r.scheduled_operation_cancelled(operation))
+                    .await?
+                {
+                    return Ok(DispatchOutcome::FailedSafely {
+                        operation_id: operation,
+                    });
+                }
+                let attempted = self
+                    .scheduled_dispatch_error(claimed.operation_id, code)
+                    .await?
+                    .unwrap_or(true);
+                return Ok(if attempted {
+                    DispatchOutcome::FailedSafely {
+                        operation_id: claimed.operation_id,
+                    }
+                } else {
+                    DispatchOutcome::RetryScheduled {
+                        operation_id: claimed.operation_id,
+                    }
+                });
+            }
+        }
+        match result {
             Ok(session)
                 if session.task_id == public_task_id
                     && session.state == HostSessionState::Idle
@@ -1814,6 +2052,7 @@ impl ConversationApplication {
         &self,
         claimed: ClaimedOutbox,
         now: i64,
+        epoch: u64,
     ) -> Result<DispatchOutcome, ChatError> {
         match self
             .database
@@ -1835,6 +2074,13 @@ impl ConversationApplication {
                         .permission_state(Some(dispatch.session_id))
                         .await?
                         .mode;
+                    self.database
+                        .begin_conversation_dispatch(
+                            dispatch.operation_id,
+                            self.host()?.instance_nonce().to_owned(),
+                        )
+                        .await?;
+                    self.lifecycle.validate(epoch)?;
                     self.host()?
                         .start_permission_turn(
                             dispatch.agent_session_id,
@@ -1847,6 +2093,13 @@ impl ConversationApplication {
                         )
                         .await
                 } else {
+                    self.database
+                        .begin_conversation_dispatch(
+                            dispatch.operation_id,
+                            self.host()?.instance_nonce().to_owned(),
+                        )
+                        .await?;
+                    self.lifecycle.validate(epoch)?;
                     self.host()?
                         .start_turn(dispatch.agent_session_id, &dispatch.input, &trace)
                         .await
@@ -1878,31 +2131,95 @@ impl ConversationApplication {
                     request_id: Some(dispatch.operation_id),
                     ..HostTrace::default()
                 };
-                let result = if super::runtime_permissions::enabled() {
-                    let mode = self
-                        .database
-                        .permission_state(Some(dispatch.session_id))
-                        .await?
-                        .mode;
-                    self.host()?
-                        .start_permission_turn(
-                            dispatch.agent_session_id,
-                            dispatch.operation_id,
-                            &dispatch.content_blocks,
-                            &trace,
-                            mode,
-                        )
+                let host = self.dispatch_host(dispatch.operation_id, epoch).await?;
+                let operation = dispatch.operation_id;
+                let draft = self
+                    .database
+                    .call(move |r| r.draft_dispatch_context(operation))
+                    .await?;
+                let result = if draft.is_some() {
+                    host.require_draft_capability()
                         .await
+                        .map_err(|_| ChatError::SidecarUnavailable)?;
+                    self.lifecycle.validate(epoch)?;
+                    host.start_draft_turn(
+                        dispatch.agent_session_id,
+                        operation,
+                        &dispatch.content_blocks,
+                    )
+                    .await
+                } else if host.is_schedule_admitted() || super::runtime_permissions::enabled() {
+                    let mode = if host.is_schedule_admitted() {
+                        super::runtime_permissions::PermissionMode::Ask
+                    } else {
+                        self.database
+                            .permission_state(Some(dispatch.session_id))
+                            .await?
+                            .mode
+                    };
+                    self.lifecycle.validate(epoch)?;
+                    host.start_permission_turn(
+                        dispatch.agent_session_id,
+                        dispatch.operation_id,
+                        &dispatch.content_blocks,
+                        &trace,
+                        mode,
+                    )
+                    .await
                 } else {
-                    self.host()?
-                        .start_turn_v2(
-                            dispatch.agent_session_id,
-                            dispatch.operation_id,
-                            &dispatch.content_blocks,
-                            &trace,
-                        )
-                        .await
+                    self.lifecycle.validate(epoch)?;
+                    host.start_turn_v2(
+                        dispatch.agent_session_id,
+                        dispatch.operation_id,
+                        &dispatch.content_blocks,
+                        &trace,
+                    )
+                    .await
                 };
+                if draft.is_some() && result.is_err() {
+                    let attempted = self
+                        .database
+                        .call(move |r| {
+                            Ok(r.draft_context_for_operation(operation)?
+                                .is_some_and(|c| c.turn_attempted))
+                        })
+                        .await?;
+                    if attempted {
+                        return self.record_uncertain_turn_submission(&dispatch).await;
+                    }
+                }
+                if host.is_schedule_admitted() {
+                    if let Err(error) = &result {
+                        let operation = dispatch.operation_id;
+                        if self
+                            .database
+                            .call(move |r| r.scheduled_operation_cancelled(operation))
+                            .await?
+                        {
+                            return Ok(DispatchOutcome::FailedSafely {
+                                operation_id: operation,
+                            });
+                        }
+                        let attempted = self
+                            .scheduled_dispatch_error(
+                                dispatch.operation_id,
+                                format!("{:?}:{:?}", error.kind(), error.code()),
+                            )
+                            .await?
+                            .unwrap_or(true);
+                        return Ok(if attempted {
+                            DispatchOutcome::TurnSubmissionUncertain {
+                                operation_id: dispatch.operation_id,
+                                session_id: dispatch.session_id,
+                                turn_id: dispatch.turn_id,
+                            }
+                        } else {
+                            DispatchOutcome::RetryScheduled {
+                                operation_id: dispatch.operation_id,
+                            }
+                        });
+                    }
+                }
                 if result.as_ref().is_err_and(|error| {
                     matches!(
                         error.kind(),
@@ -1994,6 +2311,7 @@ impl ConversationApplication {
         &self,
         claimed: ClaimedOutbox,
         now: i64,
+        epoch: u64,
     ) -> Result<DispatchOutcome, ChatError> {
         let dispatch = self
             .database
@@ -2003,6 +2321,14 @@ impl ConversationApplication {
             request_id: Some(dispatch.operation_id),
             ..HostTrace::default()
         };
+        self.lifecycle.validate(epoch)?;
+        self.database
+            .begin_conversation_dispatch(
+                dispatch.operation_id,
+                self.host()?.instance_nonce().to_owned(),
+            )
+            .await?;
+        self.lifecycle.validate(epoch)?;
         match self
             .host()?
             .interrupt_turn(dispatch.agent_session_id, dispatch.runtime_turn_id, &trace)
@@ -2060,6 +2386,242 @@ impl ConversationApplication {
         }
     }
 
+    /// Both the outer coordinator and an open native SSE use this same tick.
+    async fn native_schedule_tick(&self) -> Result<(), ChatError> {
+        let now = unix_seconds()?;
+        self.lifecycle.observe_clock(now);
+        let epoch = self.lifecycle.epoch();
+        let scan = {
+            let mut last = self
+                .schedule_poll
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let scan = *last != Some((epoch, now));
+            if scan {
+                *last = Some((epoch, now));
+            }
+            scan
+        };
+        let candidates = if scan {
+            let lifecycle = self.lifecycle.clone();
+            self.database
+                .call(move |r| {
+                    r.expire_manual(now)?;
+                    r.expire_automatic(now)?;
+                    r.expire_unstarted_rerun(now)?;
+                    if r.schema_version()? < super::migrations::SCHEDULE_TRIGGER_SCHEMA_VERSION {
+                        if lifecycle.phase() == super::lifecycle::Phase::Recovering {
+                            r.recover_schedule_clocks(now)?;
+                        }
+                        Ok(Vec::new())
+                    } else {
+                        r.trigger_clock_tick(&lifecycle, now)
+                    }
+                })
+                .await?
+        } else {
+            Vec::new()
+        };
+        if scan {
+            if let Some(c) = self.database.call(|r| r.next_draft_recovery()).await? {
+                if let Ok(host) = self.host() {
+                    let _ = super::schedules::draft_recovery::recover_source(
+                        &self.database,
+                        host,
+                        &self.lifecycle,
+                        c,
+                    )
+                    .await;
+                }
+            }
+        }
+        let recovery = self.recover_schedule_once().await;
+        if recovery.as_ref().is_ok_and(|ready| *ready) {
+            self.lifecycle.ready(epoch);
+        }
+        for c in candidates {
+            let reason = if let Some((session, task, thread)) = c.remote {
+                let observed = async {
+                    let host = self.host()?;
+                    let status = host.get_session(session).await.map_err(map_host_error)?;
+                    let approvals = host
+                        .runtime_approvals(session)
+                        .await
+                        .map_err(map_host_error)?;
+                    Ok::<_, ChatError>(
+                        if status.agent_session_id != session
+                            || status.task_id != task
+                            || status.codex_thread_id != Some(thread)
+                        {
+                            Some("target_unavailable")
+                        } else if status.active_turn_id.is_some()
+                            || status.state != HostSessionState::Idle
+                            || approvals.requests.iter().any(|a| a.status == "pending")
+                        {
+                            Some("busy")
+                        } else if !status.model_ready {
+                            Some("resource_unavailable")
+                        } else {
+                            None
+                        },
+                    )
+                }
+                .await;
+                observed.unwrap_or(Some("resource_unavailable"))
+            } else {
+                None
+            };
+            self.database
+                .call(move |r| r.process_schedule_due(c, reason, unix_seconds()?))
+                .await?;
+            tokio::task::yield_now().await;
+        }
+        recovery.map(|_| ())
+    }
+
+    async fn recover_schedule_once(&self) -> Result<bool, ChatError> {
+        let Some(authority) = self.schedule_authority.clone() else {
+            return Ok(true);
+        };
+        let epoch = self.lifecycle.epoch();
+        {
+            let mut last = self
+                .recovery_poll
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            if last.is_some_and(|(e, t)| e == epoch && t.elapsed() < Duration::from_secs(1)) {
+                return Ok(false);
+            }
+            *last = Some((epoch, std::time::Instant::now()));
+        }
+        let now = unix_seconds()?;
+        let a = match authority.schedule_authority(now) {
+            Ok(a) => a,
+            Err(_) => return Ok(true),
+        };
+        let candidate = self
+            .database
+            .call(move |r| r.scheduled_recovery_candidate(&a, now))
+            .await?;
+        let Some(mut c) = candidate else {
+            return Ok(true);
+        };
+        let host = self.host()?;
+        let result = async {
+            if let Some(task) = c.task.filter(|_| {
+                c.thread.is_none() && matches!(c.create_attempt.as_str(), "attempted" | "unknown")
+            }) {
+                if let Some(mapping) = host
+                    .schedule_session_mapping(task)
+                    .await
+                    .map_err(map_host_error)?
+                {
+                    let now = unix_seconds()?;
+                    let a = authority
+                        .schedule_authority(now)
+                        .map_err(|_| ChatError::ScopeDenied)?;
+                    let run = c.run.clone();
+                    c.thread = mapping
+                        .codex_thread_id
+                        .as_deref()
+                        .map(Uuid::parse_str)
+                        .transpose()
+                        .map_err(|_| ChatError::OrchestrationUnavailable)?;
+                    c.session = Some(
+                        Uuid::parse_str(&mapping.agent_session_id)
+                            .map_err(|_| ChatError::OrchestrationUnavailable)?,
+                    );
+                    self.database
+                        .call(move |r| r.apply_schedule_mapping(&a, &run, &mapping, now))
+                        .await?;
+                } else {
+                    let run = c.run.clone();
+                    self.database
+                        .call(move |r| r.schedule_unknown(&run))
+                        .await?;
+                }
+            }
+            if c.thread.is_none() {
+                let run = c.run.clone();
+                let nonce = host.instance_nonce().to_owned();
+                let now = unix_seconds()?;
+                let a = authority
+                    .schedule_authority(now)
+                    .map_err(|_| ChatError::ScopeDenied)?;
+                self.database
+                    .call(move |r| {
+                        if r.manual_runtime.enabled {
+                            r.release_stopped_schedule(&a, &run, &nonce, now)?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
+            }
+            if let Some(session) = c.session {
+                if matches!(c.turn_attempt.as_str(), "attempted" | "unknown") {
+                    if let Some(operation) = host
+                        .schedule_turn_operation(session, c.operation)
+                        .await
+                        .map_err(map_host_error)?
+                    {
+                        let now = unix_seconds()?;
+                        let a = authority
+                            .schedule_authority(now)
+                            .map_err(|_| ChatError::ScopeDenied)?;
+                        let run = c.run.clone();
+                        self.database
+                            .call(move |r| r.apply_schedule_operation(&a, &run, &operation, now))
+                            .await?;
+                    } else {
+                        let run = c.run.clone();
+                        self.database
+                            .call(move |r| r.schedule_unknown(&run))
+                            .await?;
+                    }
+                }
+                // Live session-scoped approvals block conservatively; disappearance
+                // is never interpreted as a turn terminal.
+                let approvals = host
+                    .runtime_approvals(session)
+                    .await
+                    .map_err(map_host_error)?;
+                if approvals.requests.iter().any(|p| p.status == "pending") {
+                    let run = c.run.clone();
+                    self.database
+                        .call(move |r| r.schedule_needs_attention(&run))
+                        .await?;
+                } else {
+                    let status = host.get_session(session).await.map_err(map_host_error)?;
+                    if status.agent_session_id == session
+                        && Some(status.task_id) == c.task
+                        && status.codex_thread_id == c.thread
+                        && status.active_turn_id.is_none()
+                        && status.state == HostSessionState::Idle
+                    {
+                        let now = unix_seconds()?;
+                        let a = authority
+                            .schedule_authority(now)
+                            .map_err(|_| ChatError::ScopeDenied)?;
+                        let run = c.run.clone();
+                        let nonce = host.instance_nonce().to_owned();
+                        self.database
+                            .call(move |r| r.release_stopped_schedule(&a, &run, &nonce, now))
+                            .await?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            let run = c.run;
+            self.database
+                .call(move |r| r.schedule_unknown(&run))
+                .await?;
+        }
+        result.map(|_| true)
+    }
+
     pub async fn run_background_once(&self) -> Result<CoordinatorOutcome, ChatError> {
         self.run_background_once_with_projection_sink(&NoopProjectionSink)
             .await
@@ -2069,12 +2631,37 @@ impl ConversationApplication {
         &self,
         sink: &dyn TurnProjectionSink,
     ) -> Result<CoordinatorOutcome, ChatError> {
-        if let Some(artifact_transfers) = &self.artifact_transfers {
+        if self.stopping() {
+            return Ok(CoordinatorOutcome::Idle);
+        }
+        if matches!(
+            self.lifecycle.phase(),
+            super::lifecycle::Phase::Suspended
+                | super::lifecycle::Phase::Stopping
+                | super::lifecycle::Phase::StopPending
+                | super::lifecycle::Phase::Stopped
+        ) {
+            return Ok(CoordinatorOutcome::Idle);
+        }
+        let recovery_result = self.native_schedule_tick().await;
+        let background_only = self
+            .database
+            .call(|r| Ok(r.schedule_background_only))
+            .await?;
+        if let Some(artifact_transfers) = &self
+            .artifact_transfers
+            .as_ref()
+            .filter(|_| !background_only)
+        {
             artifact_transfers
                 .recover_pending_acknowledgements()
                 .await?;
         }
-        let dispatch = self.dispatch_next().await?;
+        let dispatch = if recovery_result.is_ok() {
+            self.dispatch_next().await?
+        } else {
+            DispatchOutcome::Idle
+        };
         if dispatch != DispatchOutcome::Idle {
             return Ok(CoordinatorOutcome::Dispatched(dispatch));
         }
@@ -2083,6 +2670,10 @@ impl ConversationApplication {
             self.stream_active_turn_with_projection_sink(session_id, sink)
                 .await?;
             return Ok(CoordinatorOutcome::StreamRecovered { session_id });
+        }
+        recovery_result?; // Still permit precise existing native observation above.
+        if background_only {
+            return Ok(CoordinatorOutcome::Idle);
         }
         let now = unix_seconds()?;
         let Some(claimed) = self
@@ -2290,13 +2881,40 @@ impl ConversationApplication {
             .await?;
         // Old rows are archives even when they contain Runtime IDs. They must
         // finish in the old app before cutover; never promote them by guessing.
-        if origin.is_none() {
+        let nonce = host.instance_nonce().to_owned();
+        let epoch = self.lifecycle.epoch();
+        let (recovered_schedule, recovered_draft) = self
+            .database
+            .call(move |r| {
+                Ok((
+                    r.is_recovered_schedule_turn(session_id, context.turn_id)?,
+                    r.recovered_draft_observation(session_id, context.turn_id, &nonce, epoch)?,
+                ))
+            })
+            .await?;
+        let recovered = recovered_schedule || recovered_draft;
+        let verify_draft_observation = || async {
+            if recovered_draft {
+                let nonce = host.instance_nonce().to_owned();
+                let allowed = self
+                    .database
+                    .call(move |r| {
+                        r.recovered_draft_observation(session_id, context.turn_id, &nonce, epoch)
+                    })
+                    .await?;
+                if !allowed {
+                    return Err(ChatError::OrchestrationUnavailable);
+                }
+            }
+            Ok(())
+        };
+        if origin.is_none() && !recovered {
             return Err(ChatError::OrchestrationUnavailable);
         }
         let generation_changed = origin
             .as_deref()
             .is_some_and(|nonce| nonce != host.instance_nonce());
-        if generation_changed {
+        if generation_changed || recovered {
             let snapshot = host
                 .read_native_thread(context.agent_session_id)
                 .await
@@ -2327,6 +2945,7 @@ impl ConversationApplication {
                 }
             }
         }
+        verify_draft_observation().await?;
         let mut stream = match host
             .open_native_event_stream(context.agent_session_id, cursor)
             .await
@@ -2401,11 +3020,26 @@ impl ConversationApplication {
         let mut dispatch = tokio::time::interval(PROGRESS_FLUSH_INTERVAL);
         dispatch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            if self.stopping()
+                || matches!(
+                    self.lifecycle.phase(),
+                    super::lifecycle::Phase::Suspended
+                        | super::lifecycle::Phase::Stopping
+                        | super::lifecycle::Phase::StopPending
+                        | super::lifecycle::Phase::Stopped
+                )
+            {
+                if dirty > 0 {
+                    self.flush_native_buffer(&mut buffer, None, sink).await?;
+                }
+                return Ok(());
+            }
             if buffer.view.terminal_observed && artifact_delivery_done {
                 return Ok(());
             }
             tokio::select! {
                 _=dispatch.tick()=>{
+                    let _=self.native_schedule_tick().await;
                     // SSE can stay open for the whole Turn. Keep the existing
                     // outbox dispatcher responsive to native interrupt requests
                     // and ordinary submissions while receiving notifications.
@@ -2425,6 +3059,7 @@ impl ConversationApplication {
                             return Err(ChatError::OrchestrationUnavailable)
                         }
                     };
+                    verify_draft_observation().await?;
                     match buffer.observe(&event) {
                         Ok(false)=>continue,
                         Err(_)=>{
@@ -2560,7 +3195,9 @@ mod tests {
     async fn finished_coordinator_handle_is_not_reported_as_running() {
         let (stop, _stop_receiver) = watch::channel(false);
         let coordinator = ConversationCoordinator {
+            lifecycle: super::super::lifecycle::Lifecycle::default(),
             stop,
+            stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             task: Some(tokio::spawn(async {})),
         };
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -2896,7 +3533,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnAccepted {
@@ -2971,7 +3608,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionFailed {
@@ -3051,7 +3688,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionUncertain {
@@ -3137,7 +3774,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(reclaimed, reclaim_at)
+                .dispatch_turn(reclaimed, reclaim_at, 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnAccepted {
@@ -3208,7 +3845,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionUncertain {
@@ -3280,7 +3917,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionUncertain {
@@ -3353,7 +3990,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(claimed, unix_seconds().unwrap())
+                .dispatch_turn(claimed, unix_seconds().unwrap(), 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionFailed {
@@ -3434,7 +4071,7 @@ mod tests {
 
         assert_eq!(
             application
-                .dispatch_turn(reclaimed, reclaim_at)
+                .dispatch_turn(reclaimed, reclaim_at, 1)
                 .await
                 .unwrap(),
             DispatchOutcome::TurnSubmissionUncertain {
@@ -3887,7 +4524,7 @@ mod tests {
             .unwrap();
         let stream_id = Uuid::now_v7();
         let event = |sequence, method: &str, status: &str| {
-            let e = serde_json::json!({"schema_version":7,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
+            let e = serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
             format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {e}\n\n")
         };
         let started = event(1, "turn/started", "inProgress");
@@ -3914,8 +4551,8 @@ mod tests {
             let (mut sse, _) = listener.accept().await.unwrap();
             assert!(read_request(&mut sse)
                 .await
-                .starts_with("GET /v7/agent-sessions/"));
-            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 7\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
+                .starts_with("GET /v8/agent-sessions/"));
+            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 8\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
             sse.write_all(format!("{headers}{started}").as_bytes())
                 .await
                 .unwrap();
@@ -4016,7 +4653,7 @@ mod tests {
             ("turn/completed",serde_json::json!({"turn":{"id":runtime_turn_id,"status":"failed","errorCode":"usageLimitExceeded","items":[],"itemsComplete":false}})),
         ].into_iter().enumerate(){
             let sequence=index+1;let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available"});for(k,v)in payload.as_object().unwrap(){n[k]=v.clone();}
-            let event=serde_json::json!({"schema_version":7,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+            let event=serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
             sse.push_str(&format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n"));
         }
         let token_directory = root.join("host");
@@ -4033,7 +4670,7 @@ mod tests {
                     ("Content-Type", "text/event-stream"),
                     ("Cache-Control", "no-store"),
                     ("X-Accel-Buffering", "no"),
-                    ("X-Yijie-Event-Schema-Version", "7"),
+                    ("X-Yijie-Event-Schema-Version", "8"),
                     ("X-Yijie-Event-Stream-ID", &stream_id.to_string()),
                 ],
                 &sse,
@@ -4075,7 +4712,7 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v7/agent-sessions/{agent_session_id}/events HTTP/1.1"
+            "GET /v8/agent-sessions/{agent_session_id}/events HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);
@@ -4105,7 +4742,7 @@ mod tests {
         let token_path = token_directory.join("api-token");
         fs::write(&token_path, TOKEN).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let snapshot = serde_json::json!({"schema_version":1,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
+        let snapshot = serde_json::json!({"schema_version":2,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
         let (port, server) = serve_http(vec![
             ready_response(CURRENT),
             json_response("200 OK", &snapshot.to_string()),
@@ -4146,11 +4783,44 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v1/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
+            "GET /v2/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }
+    #[tokio::test]
+    async fn feat155_3b2_pending_stop_retains_join_until_normal_completion() {
+        let (stop, _) = watch::channel(false);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = finished.clone();
+        let mut coordinator = ConversationCoordinator {
+            lifecycle: super::super::lifecycle::Lifecycle::default(),
+            stop,
+            stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            task: Some(tokio::spawn(async move {
+                rx.await.unwrap();
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+            })),
+        };
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), coordinator.wait_stopped())
+                .await
+                .is_err()
+        );
+        assert!(coordinator.task.is_some());
+        assert!(!coordinator.is_finished());
+        coordinator.request_stop();
+        tx.send(()).unwrap();
+        coordinator.wait_stopped().await.unwrap();
+        assert!(finished.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(coordinator.is_finished());
+        coordinator.wait_stopped().await.unwrap();
+    }
 }
+
+#[cfg(test)]
+#[path = "schedules/dispatch_tests.rs"]
+mod scheduled_dispatch_tests;

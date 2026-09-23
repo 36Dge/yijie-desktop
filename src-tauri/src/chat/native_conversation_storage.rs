@@ -310,6 +310,12 @@ impl ChatRepository {
             params![status, view.turn_id, view.runtime_turn_id],
         )
         .map_err(|_| ChatError::DatabaseUnavailable)?;
+        super::schedules::recovery::native_terminal(
+            &tx,
+            &view.turn_id,
+            &view.runtime_turn_id,
+            status,
+        )?;
         // Native history confirms it ended, but provides no trustworthy completion time.
         tx.execute("UPDATE chat_outbox SET state='done',next_attempt_at=NULL WHERE operation_id=(SELECT operation_id FROM chat_turns WHERE id=?1) AND kind='start_turn' AND state='inflight'",[&view.turn_id]).map_err(|_|ChatError::DatabaseUnavailable)?;
         tx.execute(
@@ -412,6 +418,12 @@ impl ChatRepository {
                             let terminal = n.method == "turn/completed" && status != "streaming";
                             tx.execute("UPDATE chat_turns SET status=?1,terminal_at=?2,terminal_code=?3 WHERE id=?4",params![status,terminal.then_some(now),turn.error_code,view.turn_id]).map_err(|_|ChatError::DatabaseUnavailable)?;
                             if terminal {
+                                super::schedules::recovery::native_terminal(
+                                    &tx,
+                                    &view.turn_id,
+                                    &runtime_turn,
+                                    status,
+                                )?;
                                 tx.execute("UPDATE chat_outbox SET state='done',next_attempt_at=NULL WHERE operation_id=?1 AND kind='start_turn' AND state='inflight'",[context.turn_operation_id.to_string()]).map_err(|_|ChatError::DatabaseUnavailable)?;
                             }
                         }

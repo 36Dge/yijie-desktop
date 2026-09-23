@@ -40,6 +40,7 @@ const emit = defineEmits<{
 }>();
 
 const slots = defineSlots<{
+  "structured-answer"(props: { turnId: string }): unknown;
   "legacy-records"(props: {turnId: string}): unknown;
   "artifact-reference"(props: {
     item: ConversationTimelineItemViewModel;
@@ -376,7 +377,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             class="chat-turn-group__unclassified"
             role="note"
           >
-            此消息未标注阶段，未将其视为最终回答。
+            {{ slots['structured-answer'] ? "此消息未标注阶段，草案以校验结果为准。" : "此消息未标注阶段，未将其视为最终回答。" }}
           </p>
 
           <p
@@ -393,6 +394,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               <ChatSafeContent :blocks="[block]" mode="plain" />
             </section>
           </div>
+          <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
           <ChatSafeContent
             v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
             :blocks="item.contentBlocks"
@@ -425,7 +427,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
           </ChatSafeContent>
 
           <template
-            v-if="item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
+            v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
             #actions
           >
             <slot name="item-actions" :item="item" />

@@ -29,6 +29,7 @@ export const NAVIGATION_CAPABILITIES = {
 
 export const ROUTE_CAPABILITIES = {
   "/chat": "task.create",
+  "/scheduled-tasks": "schedule.read",
   "/store": "store.read",
   "/workflows": "workspace.use",
   "/plugins": "plugin.read",

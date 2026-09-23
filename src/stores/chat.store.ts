@@ -1,3 +1,4 @@
+import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
 import {conversationMessageItemId} from "../api/chat-conversation-adapter";
 import {selectConversationItem} from "../domain/conversation-view";
 import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
@@ -376,6 +377,7 @@ export function createChatStoreDefinition(
     const sessions = shallowRef<readonly ChatSession[]>(Object.freeze([]));
     const sessionsCursor = ref<string | null>(null);
     const selectedSessionId = ref<string | null>(null);
+    const selectedSessionPurpose = shallowRef<SessionPurpose | null>(null);
     const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
     const localSubmissions = shallowRef<Readonly<Record<string, LocalSubmissionView>>>({});
@@ -683,6 +685,7 @@ export function createChatStoreDefinition(
     }
 
     function clearSelection(): void {
+      selectedSessionPurpose.value = null;
       selectionIntentEpoch += 1;
       selectionEpoch += 1;
       clearCleanupPoll();
@@ -2040,7 +2043,7 @@ export function createChatStoreDefinition(
       }
     }
 
-    async function bind(tenantSelector: string): Promise<void> {
+    async function bind(tenantSelector: string, managementOnly = false): Promise<void> {
       clearAuthority("binding");
       const bindEpoch = authorityEpoch;
       lastErrorCode.value = null;
@@ -2054,6 +2057,15 @@ export function createChatStoreDefinition(
         }
       };
       try {
+        if (managementOnly) {
+          if (!client.bindManagementContext) throw new Error("Management binding unavailable");
+          const bound = await atBindStage("context", client.bindManagementContext(tenantSelector));
+          if (bindEpoch !== authorityEpoch) return;
+          context.value = bound;
+          scheduleContextExpiry(bound);
+          phase.value = "ready";
+          return;
+        }
         await Promise.all([
           atBindStage("event_listener", ensureEventListener()),
           atBindStage("event_listener", ensureArtifactEventListener()),
@@ -2328,7 +2340,6 @@ export function createChatStoreDefinition(
         (deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null)
       ) return;
       lastErrorCode.value = null;
-      const canSyncDraftTarget = hasAction("submit_turn");
       // Never carry attachment names or recovery state across a selection
       // boundary. A live bound session reloads only its own draft below.
       clearDraftTargetState();
@@ -2350,6 +2361,10 @@ export function createChatStoreDefinition(
       bufferingArtifactEvents = artifactIntegration !== null;
       let activationStage: ChatSelectionActivationStage = "control-plane";
       try {
+        const purpose = await client.getSessionPurpose(bound.contextId, sessionId, controller.signal);
+        if (!isCurrent(epoch, controller, sessionId)) return;
+        selectedSessionPurpose.value = purpose.purpose;
+        const canSyncDraftTarget = purpose.purpose === "ordinary" && hasAction("submit_turn");
         if (streamingV6Enabled) {
           const expectedObservationEpoch = controlPlaneObservationEpoch;
           const expectedGapEpoch = controlPlaneGapEpoch;
@@ -4240,6 +4255,7 @@ export function createChatStoreDefinition(
       sessionsCursor,
       selectedSessionId,
       selectedAccessMode,
+      selectedSessionPurpose,
       history,
       conversationState,
       nativeLiveTurnId,

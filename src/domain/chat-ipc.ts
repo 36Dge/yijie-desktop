@@ -1,3 +1,4 @@
+import { isSessionPurposeView, type SessionPurposeView } from "./chat-session-purpose.generated";
 import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
 
 export const CHAT_IPC_SCHEMA_VERSION = 1 as const;
@@ -22,6 +23,7 @@ const SAFE_CWD_SEGMENT_PATTERN = /^(?!\.{1,2}$)(?!(?:con|prn|aux|nul|com[1-9]|lp
 
 export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_bind_context_v1",
+  "chat_bind_management_context_v1",
   "chat_list_projects_v1",
   "chat_pick_project_v1",
   "chat_revalidate_project_v1",
@@ -30,6 +32,7 @@ export const CHAT_COMMAND_NAMES = Object.freeze([
   "chat_create_session_v1",
   "chat_submit_turn_v1",
   "chat_list_sessions_v1",
+  "chat_get_session_purpose_v1",
   "chat_load_history_v1",
   "chat_load_reasoning_v1",
   "chat_rename_session_v1",
@@ -1494,6 +1497,13 @@ export function parseAttachmentImportEvent(value: unknown): ChatAttachmentImport
     stage,
     itemCount,
     issue,
+  });
+}
+
+export function parseSessionPurposeResponse(value: unknown): SessionPurposeView {
+  return responseData(value, data => {
+    if (!isSessionPurposeView(data)) throw new ChatContractError();
+    return Object.freeze(data);
   });
 }
 

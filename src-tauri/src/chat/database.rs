@@ -647,11 +647,35 @@ struct TitlePayloadV1 {
 }
 
 pub struct ChatRepository {
+    pub(crate) schedule_background_only: bool,
+    pub(crate) manual_runtime: super::schedules::manual::NativeState,
+    pub(crate) draft_runtime: super::schedules::draft_runtime::NativeState,
     pub(super) connection: Connection,
     pub(super) database_path: PathBuf,
     pub(super) scope: ChatScope,
+    pub(super) schedule_draft_dispatch_authority: Option<crate::native_auth::NativeAuthRuntime>,
+    pub(super) schedule_draft_writes_enabled: bool,
+    pub(super) schedule_ui_deadline: Option<i64>,
+    pub(super) schedule_writes_enabled: bool,
+    pub(super) schedule_execution_writes_enabled: bool,
+    pub(super) schedule_timing_writes_enabled: bool,
+    pub(super) schedule_preparation_enabled: bool,
+    pub(super) schedule_trigger_lifecycle: Option<super::lifecycle::Lifecycle>,
+    pub(super) schedule_dispatch_authority: Option<crate::native_auth::NativeAuthRuntime>,
     receipt_key: ReceiptKey,
     attachment_checkpoint_pending: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ScheduledEnqueue<'a> {
+    pub run_id: &'a str,
+    pub operation_id: Uuid,
+}
+pub(super) struct ConversationEnqueueContext<'a> {
+    pub scope: &'a ChatScope,
+    pub now: i64,
+    pub scheduled: Option<ScheduledEnqueue<'a>>,
+    pub draft: bool,
 }
 
 #[cfg(feature = "feat126-s10-driver")]
@@ -776,6 +800,24 @@ impl ChatRepository {
         receipt_key: ReceiptKey,
         scope: ChatScope,
     ) -> Result<Self, ChatError> {
+        Self::open_with_schedule_storage(
+            chat_directory,
+            key,
+            receipt_key,
+            scope,
+            super::schedules::ScheduleStorageMode::CompatibleReader,
+        )
+    }
+
+    /// Explicit native-only candidate entry. The ordinary launcher never enables
+    /// the plan writer; phase-two checks use this with normal temporary data.
+    pub fn open_with_schedule_storage(
+        chat_directory: &Path,
+        key: &DatabaseKey,
+        receipt_key: ReceiptKey,
+        scope: ChatScope,
+        schedule_mode: super::schedules::ScheduleStorageMode,
+    ) -> Result<Self, ChatError> {
         prepare_chat_directory(chat_directory)?;
         let database_path = chat_directory.join(DATABASE_FILE_NAME);
         prepare_database_file(&database_path)?;
@@ -790,14 +832,113 @@ impl ChatRepository {
                 row.get::<_, i64>(0)
             })
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        migrations::validate_reader(&connection)?;
         configure_connection(&connection)?;
         migrations::validate_embedded_migrations()?;
-        migrations::migrate(&mut connection)?;
+        if schedule_mode == super::schedules::ScheduleStorageMode::TimingFoundation {
+            super::migrations::migrate_to_target(
+                &mut connection,
+                super::migrations::SCHEDULE_TIMING_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::SingleRunFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_SINGLE_RUN_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::AutomaticFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_AUTOMATIC_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::ManagementFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_MANAGEMENT_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::DraftFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_DRAFT_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::TriggerFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_TRIGGER_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::DispatchFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_DISPATCH_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::RecoveryFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_RECOVERY_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::LocalPreparation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_PREPARATION_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::ExecutionFoundation {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_EXECUTION_SCHEMA_VERSION,
+            )?;
+        } else if schedule_mode == super::schedules::ScheduleStorageMode::PlanWriter {
+            migrations::migrate_to_target(&mut connection, migrations::SCHEDULE_SCHEMA_VERSION)?;
+        } else {
+            migrations::migrate(&mut connection)?;
+        }
         protect_database_files(&database_path)?;
         let mut repository = Self {
+            schedule_background_only: false,
+            manual_runtime: Default::default(),
+            draft_runtime: Default::default(),
             connection,
             database_path,
             scope,
+            schedule_draft_dispatch_authority: None,
+            schedule_draft_writes_enabled: matches!(
+                schedule_mode,
+                super::schedules::ScheduleStorageMode::DraftFoundation
+                    | super::schedules::ScheduleStorageMode::ManagementFoundation
+                    | super::schedules::ScheduleStorageMode::AutomaticFoundation
+                    | super::schedules::ScheduleStorageMode::SingleRunFoundation
+                    | super::schedules::ScheduleStorageMode::TimingFoundation
+            ),
+            schedule_ui_deadline: None,
+            schedule_writes_enabled: schedule_mode
+                != super::schedules::ScheduleStorageMode::CompatibleReader,
+            schedule_timing_writes_enabled: schedule_mode
+                == super::schedules::ScheduleStorageMode::TimingFoundation,
+            schedule_execution_writes_enabled: matches!(
+                schedule_mode,
+                super::schedules::ScheduleStorageMode::ExecutionFoundation
+                    | super::schedules::ScheduleStorageMode::LocalPreparation
+                    | super::schedules::ScheduleStorageMode::RecoveryFoundation
+                    | super::schedules::ScheduleStorageMode::DispatchFoundation
+                    | super::schedules::ScheduleStorageMode::TriggerFoundation
+                    | super::schedules::ScheduleStorageMode::DraftFoundation
+                    | super::schedules::ScheduleStorageMode::ManagementFoundation
+                    | super::schedules::ScheduleStorageMode::AutomaticFoundation
+                    | super::schedules::ScheduleStorageMode::SingleRunFoundation
+                    | super::schedules::ScheduleStorageMode::TimingFoundation
+            ),
+            schedule_preparation_enabled: matches!(
+                schedule_mode,
+                super::schedules::ScheduleStorageMode::LocalPreparation
+                    | super::schedules::ScheduleStorageMode::RecoveryFoundation
+                    | super::schedules::ScheduleStorageMode::DispatchFoundation
+                    | super::schedules::ScheduleStorageMode::TriggerFoundation
+                    | super::schedules::ScheduleStorageMode::DraftFoundation
+                    | super::schedules::ScheduleStorageMode::ManagementFoundation
+                    | super::schedules::ScheduleStorageMode::AutomaticFoundation
+                    | super::schedules::ScheduleStorageMode::SingleRunFoundation
+                    | super::schedules::ScheduleStorageMode::TimingFoundation
+            ),
+            schedule_dispatch_authority: None,
+            schedule_trigger_lifecycle: None,
             receipt_key,
             // A prior process may have committed attachment cleanup and exited before
             // truncating WAL. Every open proves that no stale attachment frames remain.
@@ -1141,6 +1282,9 @@ impl ChatRepository {
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        if let Some(id) = &existing {
+            super::schedules::workspace::require_user(&self.connection, &self.scope, id)?;
+        }
         let id = existing.unwrap_or_else(|| Uuid::now_v7().to_string());
         self.connection
             .execute(
@@ -1163,6 +1307,7 @@ impl ChatRepository {
 
     pub fn project_bookmark(&self, project_id: &str) -> Result<Vec<u8>, ChatError> {
         validate_uuid(project_id)?;
+        super::schedules::workspace::require_user(&self.connection, &self.scope, project_id)?;
         self.connection
             .query_row(
                 "SELECT bookmark_ref FROM chat_projects
@@ -1182,6 +1327,7 @@ impl ChatRepository {
         bookmark: &[u8],
     ) -> Result<ProjectSummary, ChatError> {
         validate_uuid(project_id)?;
+        super::schedules::workspace::require_user(&self.connection, &self.scope, project_id)?;
         let canonical = validate_project_path(canonical_path)?;
         let safe_name = canonical
             .file_name()
@@ -1215,11 +1361,12 @@ impl ChatRepository {
     pub fn list_projects(&self) -> Result<Vec<ProjectSummary>, ChatError> {
         let mut statement = self
             .connection
-            .prepare(
+            .prepare(&format!(
                 "SELECT id, safe_name, pinned_at, last_used_at FROM chat_projects
-                 WHERE owner_user_id=?1 AND tenant_id=?2 AND removed_at IS NULL
+                 WHERE owner_user_id=?1 AND tenant_id=?2 AND removed_at IS NULL{}
                  ORDER BY pinned_at IS NULL ASC, pinned_at DESC, last_used_at DESC, id DESC",
-            )
+                super::schedules::workspace::user_filter(&self.connection)?
+            ))
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let rows = statement
             .query_map(
@@ -1241,6 +1388,7 @@ impl ChatRepository {
 
     pub fn remove_project(&mut self, project_id: &str) -> Result<(), ChatError> {
         validate_uuid(project_id)?;
+        super::schedules::workspace::require_user(&self.connection, &self.scope, project_id)?;
         let changed = self
             .connection
             .execute(
@@ -1267,6 +1415,11 @@ impl ChatRepository {
         now: i64,
     ) -> Result<(), ChatError> {
         validate_non_nil(project_id)?;
+        super::schedules::workspace::require_user(
+            &self.connection,
+            &self.scope,
+            &project_id.to_string(),
+        )?;
         if now < 0 {
             return Err(ChatError::InvalidInput);
         }
@@ -1707,6 +1860,11 @@ impl ChatRepository {
         authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
         validate_non_nil(project_id)?;
+        super::schedules::workspace::require_user(
+            &self.connection,
+            &self.scope,
+            &project_id.to_string(),
+        )?;
         validate_non_nil(create_operation_id)?;
         if authorization_revision == 0 {
             return Err(ChatError::InvalidInput);
@@ -1714,6 +1872,7 @@ impl ChatRepository {
         validate_message(input)?;
         let now = unix_seconds()?;
         let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        super::schedules::execution_guard::foreground(&transaction)?;
         if let Some((stored_session_id, version, payload, stored_revision)) = transaction
             .query_row(
                 "SELECT o.session_id, o.payload_version, o.encrypted_payload, b.authorization_revision
@@ -1900,8 +2059,45 @@ impl ChatRepository {
         }
         let now = unix_seconds()?;
         self.expire_attachments(now)?;
-        let text_projection = draft_text_projection(blocks);
         let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        let result = Self::create_session_and_enqueue_in_transaction(
+            &transaction,
+            ConversationEnqueueContext {
+                scope: &self.scope,
+                now,
+                scheduled: None,
+                draft: false,
+            },
+            project_id,
+            blocks,
+            create_operation_id,
+            authorization_revision,
+        )?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        Ok(result)
+    }
+
+    pub(super) fn create_session_and_enqueue_in_transaction(
+        transaction: &Transaction<'_>,
+        context: ConversationEnqueueContext<'_>,
+        project_id: Uuid,
+        blocks: &[DraftContentBlock],
+        create_operation_id: Uuid,
+        authorization_revision: u64,
+    ) -> Result<PendingConversation, ChatError> {
+        let scope = context.scope;
+        let now = context.now;
+        let text_projection = draft_text_projection(blocks);
+        if context.scheduled.is_none() {
+            super::schedules::execution_guard::foreground(transaction)?;
+            if !context.draft {
+                super::schedules::workspace::require_user(
+                    transaction,
+                    scope,
+                    &project_id.to_string(),
+                )?;
+            }
+        }
         if let Some((stored_session_id, version, payload, stored_revision)) = transaction
             .query_row(
                 "SELECT o.session_id, o.payload_version, o.encrypted_payload, b.authorization_revision
@@ -1911,8 +2107,8 @@ impl ChatRepository {
                    AND s.owner_user_id=?2 AND s.tenant_id=?3",
                 params![
                     create_operation_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
+                    scope.owner_user_id,
+                    scope.tenant_id
                 ],
                 |row| {
                     Ok((
@@ -1944,8 +2140,8 @@ impl ChatRepository {
                 || stored_revision
                     != i64::try_from(authorization_revision)
                         .map_err(|_| ChatError::InvalidInput)?
-                || !draft_matches_stored_blocks(&transaction, payload.message_id, blocks)?
-                || stored_content_block_digest(&transaction, payload.message_id)?
+                || !draft_matches_stored_blocks(transaction, payload.message_id, blocks)?
+                || stored_content_block_digest(transaction, payload.message_id)?
                     != payload.block_digest
             {
                 return Err(ChatError::ConversationConflict);
@@ -1964,11 +2160,7 @@ impl ChatRepository {
                    SELECT 1 FROM chat_projects
                    WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3 AND removed_at IS NULL
                  )",
-                params![
-                    project_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
-                ],
+                params![project_id.to_string(), scope.owner_user_id, scope.tenant_id],
                 |row| row.get(0),
             )
             .map_err(map_sqlite_error)?;
@@ -1977,9 +2169,9 @@ impl ChatRepository {
         }
         let title_source = if text_projection.trim().is_empty() {
             first_attachment_name(
-                &transaction,
-                &self.scope.owner_user_id,
-                &self.scope.tenant_id,
+                transaction,
+                &scope.owner_user_id,
+                &scope.tenant_id,
                 &DraftTarget::New,
                 blocks,
                 now,
@@ -1992,7 +2184,10 @@ impl ChatRepository {
         let task_id = session_id;
         let client_reference_id = Uuid::now_v7();
         let turn_id = Uuid::now_v7();
-        let turn_operation_id = Uuid::now_v7();
+        let turn_operation_id = context
+            .scheduled
+            .map(|s| s.operation_id)
+            .unwrap_or_else(Uuid::now_v7);
         let message_id = Uuid::now_v7();
         transaction
             .execute(
@@ -2002,8 +2197,8 @@ impl ChatRepository {
                  ) VALUES (?1, ?2, ?3, ?4, ?5, 'fallback', 'not_started', ?6, ?6)",
                 params![
                     session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id,
+                    scope.owner_user_id,
+                    scope.tenant_id,
                     project_id.to_string(),
                     fallback_title(&title_source),
                     now,
@@ -2050,9 +2245,9 @@ impl ChatRepository {
             )
             .map_err(map_constraint_or_database)?;
         let block_digest = bind_draft_blocks(
-            &transaction,
-            &self.scope.owner_user_id,
-            &self.scope.tenant_id,
+            transaction,
+            &scope.owner_user_id,
+            &scope.tenant_id,
             &DraftTarget::New,
             message_id,
             blocks,
@@ -2080,13 +2275,27 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
-        persist_new_task_permission(
-            &transaction,
-            &self.scope.owner_user_id,
-            &self.scope.tenant_id,
-            session_id,
-        )?;
-        transaction.commit().map_err(map_sqlite_error)?;
+        if let Some(scheduled) = context.scheduled {
+            transaction
+                .execute(
+                    "INSERT INTO chat_task_permissions(session_id,mode) VALUES(?1,'ask')",
+                    [session_id.to_string()],
+                )
+                .map_err(map_sqlite_error)?;
+            transaction
+                .execute(
+                    "UPDATE chat_outbox SET scheduled_run_id=?1 WHERE operation_id=?2",
+                    params![scheduled.run_id, create_operation_id.to_string()],
+                )
+                .map_err(map_sqlite_error)?;
+        } else {
+            persist_new_task_permission(
+                transaction,
+                &scope.owner_user_id,
+                &scope.tenant_id,
+                session_id,
+            )?;
+        }
         Ok(PendingConversation {
             session_id,
             task_id,
@@ -2105,11 +2314,18 @@ impl ChatRepository {
         validate_non_nil(session_id)?;
         validate_non_nil(operation_id)?;
         validate_message(input)?;
+        super::schedules::drafts::guard_conversation(
+            &self.connection,
+            &self.scope,
+            &session_id.to_string(),
+            false,
+        )?;
         let now = unix_seconds()?;
         let transaction = self
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        super::schedules::execution_guard::foreground(&transaction)?;
         if let Some((turn_id, stored_input)) = transaction
             .query_row(
                 "SELECT t.id, m.content
@@ -2225,8 +2441,42 @@ impl ChatRepository {
         validate_draft_blocks(blocks)?;
         let now = unix_seconds()?;
         self.expire_attachments(now)?;
-        let text_projection = draft_text_projection(blocks);
         let transaction = self.connection.transaction().map_err(map_sqlite_error)?;
+        let result = Self::enqueue_turn_in_transaction(
+            &transaction,
+            ConversationEnqueueContext {
+                scope: &self.scope,
+                now,
+                scheduled: None,
+                draft: false,
+            },
+            session_id,
+            blocks,
+            operation_id,
+        )?;
+        transaction.commit().map_err(map_sqlite_error)?;
+        Ok(result)
+    }
+
+    pub(super) fn enqueue_turn_in_transaction(
+        transaction: &Transaction<'_>,
+        context: ConversationEnqueueContext<'_>,
+        session_id: Uuid,
+        blocks: &[DraftContentBlock],
+        operation_id: Uuid,
+    ) -> Result<Uuid, ChatError> {
+        super::schedules::drafts::guard_conversation(
+            transaction,
+            context.scope,
+            &session_id.to_string(),
+            context.draft,
+        )?;
+        let scope = context.scope;
+        let now = context.now;
+        let text_projection = draft_text_projection(blocks);
+        if context.scheduled.is_none() {
+            super::schedules::execution_guard::foreground(transaction)?;
+        }
         if let Some((turn_id, version, payload)) = transaction
             .query_row(
                 "SELECT t.id, o.payload_version, o.encrypted_payload
@@ -2237,8 +2487,8 @@ impl ChatRepository {
                 params![
                     operation_id.to_string(),
                     session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id,
+                    scope.owner_user_id,
+                    scope.tenant_id,
                 ],
                 |row| {
                     Ok((
@@ -2256,8 +2506,8 @@ impl ChatRepository {
             }
             let payload: StartTurnPayloadV2 = decode_payload(&payload)?;
             if payload.turn_id.to_string() != turn_id
-                || !draft_matches_stored_blocks(&transaction, payload.message_id, blocks)?
-                || stored_content_block_digest(&transaction, payload.message_id)?
+                || !draft_matches_stored_blocks(transaction, payload.message_id, blocks)?
+                || stored_content_block_digest(transaction, payload.message_id)?
                     != payload.block_digest
             {
                 return Err(ChatError::ConversationConflict);
@@ -2275,11 +2525,7 @@ impl ChatRepository {
                        SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id
                      )
                  )",
-                params![
-                    session_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id,
-                ],
+                params![session_id.to_string(), scope.owner_user_id, scope.tenant_id,],
                 |row| row.get(0),
             )
             .map_err(map_sqlite_error)?;
@@ -2321,9 +2567,9 @@ impl ChatRepository {
             )
             .map_err(map_constraint_or_database)?;
         let block_digest = bind_draft_blocks(
-            &transaction,
-            &self.scope.owner_user_id,
-            &self.scope.tenant_id,
+            transaction,
+            &scope.owner_user_id,
+            &scope.tenant_id,
             &DraftTarget::Session(session_id),
             message_id,
             blocks,
@@ -2348,7 +2594,14 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
-        transaction.commit().map_err(map_sqlite_error)?;
+        if let Some(scheduled) = context.scheduled {
+            transaction
+                .execute(
+                    "UPDATE chat_outbox SET scheduled_run_id=?1 WHERE operation_id=?2",
+                    params![scheduled.run_id, operation_id.to_string()],
+                )
+                .map_err(map_sqlite_error)?;
+        }
         Ok(turn_id)
     }
 
@@ -2363,22 +2616,60 @@ impl ChatRepository {
         let lease_expires_at = now
             .checked_add(lease_seconds)
             .ok_or(ChatError::InvalidInput)?;
+        let authority = self
+            .schedule_dispatch_authority
+            .as_ref()
+            .and_then(|a| a.schedule_authority(now).ok());
+        let draft_authority = self
+            .schedule_draft_dispatch_authority
+            .as_ref()
+            .and_then(|a| a.schedule_authority(now).ok());
         let transaction = self
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let scheduled = super::schedules::dispatch::eligible_operation(
+            &transaction,
+            &self.scope,
+            authority.as_ref(),
+            now,
+            self.schedule_trigger_lifecycle.as_ref(),
+            &self.manual_runtime,
+        )?;
+        let gate = if self.schedule_background_only {
+            "0".to_owned()
+        } else {
+            super::schedules::execution_guard::outbox_predicate(&transaction, "chat_outbox")?
+        };
         transaction
             .execute(
-                "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
+                &format!("UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE kind IN ('start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
-                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2))",
+                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate}"),
                 params![OUTBOX_MAX_ATTEMPTS, now],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let normal = if self.schedule_background_only {
+            "0".to_owned()
+        } else {
+            super::schedules::execution_guard::outbox_predicate(&transaction, "o")?
+        };
+        // Only a validated canonical operation can join the normal claim path.
+        let draft = super::schedules::drafts::eligible_operation(
+            &transaction,
+            &self.scope,
+            draft_authority.as_ref(),
+            now,
+            &self.draft_runtime,
+        )?;
+        let gate = match scheduled.or(draft) {
+            Some(id) => format!("({normal} OR o.operation_id='{id}')"),
+            None => normal,
+        };
         let row: Option<(String, String, String, i64)> = transaction
             .query_row(
-                "SELECT o.operation_id, o.session_id, o.kind, o.attempt_count
+                &format!("SELECT o.operation_id, o.session_id, o.kind, o.attempt_count
                  FROM chat_outbox o JOIN chat_sessions s ON s.id=o.session_id
                  WHERE s.owner_user_id=?1 AND s.tenant_id=?2
                    AND o.kind IN ('create_session', 'start_turn', 'interrupt_turn')
@@ -2393,8 +2684,9 @@ impl ChatRepository {
                    AND o.attempt_count < ?3
                    AND ((o.state='pending' AND (o.next_attempt_at IS NULL OR o.next_attempt_at<=?4))
                      OR (o.state='inflight' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?4))
+                 AND {gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
-                 LIMIT 1",
+                 LIMIT 1"),
                 params![
                     self.scope.owner_user_id,
                     self.scope.tenant_id,
@@ -2414,11 +2706,11 @@ impl ChatRepository {
         let changed = transaction
             .execute(
                 "UPDATE chat_outbox
-                 SET state='inflight', attempt_count=attempt_count+1, next_attempt_at=?1
+                 SET state='inflight', attempt_count=CASE WHEN ?5 THEN MAX(attempt_count,1) ELSE attempt_count+1 END, next_attempt_at=?1
                  WHERE operation_id=?2 AND attempt_count=?3
                    AND ((state='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?4))
                      OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?4))",
-                params![lease_expires_at, operation_id, attempt_count, now],
+                params![lease_expires_at, operation_id, attempt_count, now, scheduled.is_some_and(|v|v.to_string()==operation_id)],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         if changed != 1 {
@@ -2436,6 +2728,10 @@ impl ChatRepository {
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
         }
+        let is_scheduled = scheduled.is_some_and(|v| v.to_string() == operation_id);
+        if is_scheduled {
+            transaction.execute("UPDATE chat_scheduled_recovery SET native_claim=1 WHERE run_id=(SELECT scheduled_run_id FROM chat_outbox WHERE operation_id=?1)",[&operation_id]).map_err(map_sqlite_error)?;
+        }
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -2443,8 +2739,12 @@ impl ChatRepository {
             operation_id: parse_uuid_value(&operation_id)?,
             session_id: parse_uuid_value(&session_id)?,
             kind: parse_outbox_kind(&kind)?,
-            attempt_count: u8::try_from(attempt_count + 1)
-                .map_err(|_| ChatError::DatabaseUnavailable)?,
+            attempt_count: u8::try_from(if is_scheduled {
+                attempt_count.max(1)
+            } else {
+                attempt_count + 1
+            })
+            .map_err(|_| ChatError::DatabaseUnavailable)?,
         }))
     }
 
@@ -2459,9 +2759,11 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let gate = super::schedules::execution_guard::outbox_predicate(&transaction, "o")?;
         let row: Option<(String, String)> = transaction
             .query_row(
-                "SELECT o.operation_id, b.session_id
+                &format!(
+                    "SELECT o.operation_id, b.session_id
                  FROM chat_outbox o
                  JOIN chat_public_task_bindings b ON b.create_operation_id=o.operation_id
                  JOIN chat_sessions s ON s.id=b.session_id
@@ -2474,8 +2776,10 @@ impl ChatRepository {
                    AND (b.state!='bound' OR (
                      s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL
                    ))
+                 AND {gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
-                 LIMIT 1",
+                 LIMIT 1"
+                ),
                 params![
                     self.scope.owner_user_id,
                     self.scope.tenant_id,
@@ -2529,6 +2833,7 @@ impl ChatRepository {
         operation_id: Uuid,
     ) -> Result<CreateSessionDispatch, ChatError> {
         validate_non_nil(operation_id)?;
+        self.guard_conversation_dispatch(operation_id)?;
         let (
             session_id,
             project_id,
@@ -2929,19 +3234,46 @@ impl ChatRepository {
         agent_session_id: Uuid,
         codex_thread_id: Uuid,
     ) -> Result<(), ChatError> {
-        for value in [
-            create_operation_id,
-            task_id,
-            agent_session_id,
-            codex_thread_id,
-        ] {
-            validate_non_nil(value)?;
-        }
         let now = unix_seconds()?;
-        let transaction = self
+        let tx = self
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Self::bind_host_session_in_transaction(
+            &tx,
+            &self.scope,
+            [
+                create_operation_id,
+                task_id,
+                agent_session_id,
+                codex_thread_id,
+            ],
+            now,
+            false,
+        )?;
+        tx.commit().map_err(|_| ChatError::DatabaseUnavailable)
+    }
+    pub(crate) fn bind_host_session_in_transaction(
+        transaction: &rusqlite::Transaction<'_>,
+        scope: &ChatScope,
+        ids: [Uuid; 4],
+        now: i64,
+        recovered: bool,
+    ) -> Result<(), ChatError> {
+        Self::bind_host_session_parts(transaction, scope, ids, now, recovered, true)
+    }
+    pub(crate) fn bind_host_session_parts(
+        transaction: &rusqlite::Transaction<'_>,
+        scope: &ChatScope,
+        ids: [Uuid; 4],
+        now: i64,
+        recovered: bool,
+        queue_turn: bool,
+    ) -> Result<(), ChatError> {
+        let [create_operation_id, task_id, agent_session_id, codex_thread_id] = ids;
+        for id in ids {
+            validate_non_nil(id)?;
+        }
         let (session_id, state, version, payload, bound_public_task_id): (
             String,
             String,
@@ -2959,8 +3291,8 @@ impl ChatRepository {
                    AND s.owner_user_id=?2 AND s.tenant_id=?3",
                 params![
                     create_operation_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id
+                    scope.owner_user_id,
+                    scope.tenant_id
                 ],
                 |row| {
                     Ok((
@@ -3010,13 +3342,13 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
-        transaction
-            .execute(
-                "UPDATE chat_outbox SET state='done', next_attempt_at=NULL
-                 WHERE operation_id=?1 AND state IN ('inflight', 'done')",
-                [create_operation_id.to_string()],
-            )
-            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let changed=transaction.execute("UPDATE chat_outbox SET state='done',next_attempt_at=NULL WHERE operation_id=?1 AND (state IN ('inflight','done') OR (?2=1 AND state IN ('pending','failed')))",params![create_operation_id.to_string(),recovered]).map_err(map_sqlite_error)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        if !queue_turn {
+            return Ok(());
+        }
         let turn_payload = encode_start_turn_payload(&create)?;
         transaction
             .execute(
@@ -3034,6 +3366,9 @@ impl ChatRepository {
                 ],
             )
             .map_err(map_constraint_or_database)?;
+        if super::schedules::execution_guard::present(transaction)? {
+            transaction.execute("UPDATE chat_outbox SET scheduled_run_id=(SELECT scheduled_run_id FROM chat_outbox WHERE operation_id=?1) WHERE operation_id=?2",params![create_operation_id.to_string(),create.turn_operation_id.to_string()]).map_err(map_sqlite_error)?;
+        }
         let actual: Option<(String, String, i64, Vec<u8>)> = transaction
             .query_row(
                 "SELECT session_id, kind, payload_version, encrypted_payload
@@ -3053,12 +3388,10 @@ impl ChatRepository {
         {
             return Err(ChatError::ConversationConflict);
         }
-        if state == "failed" {
+        if state == "failed" && !recovered {
             return Err(ChatError::ConversationConflict);
         }
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
+        Ok(())
     }
 
     pub fn load_start_turn_dispatch(
@@ -3066,6 +3399,7 @@ impl ChatRepository {
         operation_id: Uuid,
     ) -> Result<StartTurnDispatch, ChatError> {
         validate_non_nil(operation_id)?;
+        self.guard_conversation_dispatch(operation_id)?;
         let row: Option<(String, String, String, i64, Vec<u8>, String)> = self
             .connection
             .query_row(
@@ -3139,6 +3473,7 @@ impl ChatRepository {
         operation_id: Uuid,
     ) -> Result<StartTurnDispatchV2, ChatError> {
         validate_non_nil(operation_id)?;
+        self.guard_conversation_dispatch(operation_id)?;
         let now = unix_seconds()?;
         self.expire_attachments(now)?;
         type StoredStartTurnDispatchRow =
@@ -3395,10 +3730,13 @@ impl ChatRepository {
         }
         let active: Option<(String, String)> = transaction
             .query_row(
-                "SELECT t.id, t.runtime_turn_id
+                &super::schedules::recovery::coordination_sql(
+                    &transaction,
+                    "SELECT t.id, t.runtime_turn_id
                  FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
                  WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
                    AND t.status IN ('streaming', 'stopping')",
+                )?,
                 params![
                     session_id.to_string(),
                     self.scope.owner_user_id,
@@ -3563,6 +3901,15 @@ impl ChatRepository {
         runtime_turn_id: Uuid,
         host_instance_nonce: Option<&str>,
     ) -> Result<(), ChatError> {
+        self.bind_started_turn_recovered(operation_id, runtime_turn_id, host_instance_nonce, false)
+    }
+    pub(crate) fn bind_started_turn_recovered(
+        &mut self,
+        operation_id: Uuid,
+        runtime_turn_id: Uuid,
+        host_instance_nonce: Option<&str>,
+        recovered: bool,
+    ) -> Result<(), ChatError> {
         validate_non_nil(operation_id)?;
         validate_non_nil(runtime_turn_id)?;
         let transaction = self
@@ -3575,11 +3922,11 @@ impl ChatRepository {
                  FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id
                  JOIN chat_outbox o ON o.operation_id=t.operation_id
                  WHERE t.operation_id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
-                   AND o.kind='start_turn' AND o.state IN ('inflight', 'done')",
+                   AND o.kind='start_turn' AND (o.state IN ('inflight', 'done') OR (?4=1 AND o.state IN ('pending','failed')))",
                 params![
                     operation_id.to_string(),
                     self.scope.owner_user_id,
-                    self.scope.tenant_id
+                    self.scope.tenant_id, recovered
                 ],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -3589,7 +3936,8 @@ impl ChatRepository {
         if existing_runtime_turn
             .as_deref()
             .is_some_and(|value| value != runtime_turn_id.to_string())
-            || !matches!(status.as_str(), "queued" | "streaming")
+            || !(matches!(status.as_str(), "queued" | "streaming")
+                || (recovered && status == "failed" && existing_runtime_turn.is_none()))
         {
             return Err(ChatError::ConversationConflict);
         }
@@ -3644,6 +3992,9 @@ impl ChatRepository {
                 .map_err(map_constraint_or_database)?;
         }
         transaction.execute("INSERT OR IGNORE INTO chat_native_bindings(turn_id,session_id,runtime_thread_id,runtime_turn_id,host_instance_nonce) SELECT t.id,t.session_id,s.runtime_thread_id,t.runtime_turn_id,?2 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id WHERE t.id=?1",params![turn_id,host_instance_nonce]).map_err(|_|ChatError::DatabaseUnavailable)?;
+        if super::schedules::recovery::present(&transaction)? {
+            transaction.execute("UPDATE chat_scheduled_runs SET delivery_state='accepted',needs_attention=0 WHERE operation_id=?1 AND format_version=1 AND EXISTS(SELECT 1 FROM chat_scheduled_recovery e WHERE e.run_id=chat_scheduled_runs.run_id AND e.format_version=1 AND e.release_kind IS NULL)",[operation_id.to_string()]).map_err(map_sqlite_error)?;
+        }
         transaction
             .commit()
             .map_err(|_| ChatError::DatabaseUnavailable)
@@ -3803,14 +4154,14 @@ impl ChatRepository {
         let row: ActiveRow = self
             .connection
             .query_row(
-                "SELECT s.id, b.public_task_id, t.id, t.operation_id, s.agent_session_id, s.runtime_thread_id,
+                &super::schedules::recovery::coordination_sql(&self.connection,"SELECT s.id, b.public_task_id, t.id, t.operation_id, s.agent_session_id, s.runtime_thread_id,
                         t.runtime_turn_id, COALESCE(m.content, ''), c.stream_id, c.sequence, c.event_id
                  FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
                  JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
                  LEFT JOIN chat_messages m ON m.turn_id=t.id AND m.role='assistant'
                  LEFT JOIN chat_event_cursors c ON c.session_id=s.id
                  WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3
-                   AND t.status IN ('streaming', 'stopping')",
+                   AND t.status IN ('streaming', 'stopping')")?,
                 params![
                     session_id.to_string(),
                     self.scope.owner_user_id,
@@ -3879,7 +4230,7 @@ impl ChatRepository {
                 .optional()
                 .map_err(map_sqlite_error)?
                 .unwrap_or("ask".to_owned());
-            busy = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM chat_turns WHERE session_id=?1 AND status IN ('queued','streaming','stopping'))",[id.to_string()],|r|r.get(0)).map_err(map_sqlite_error)?;
+            busy = self.connection.query_row(&super::schedules::recovery::coordination_sql(&self.connection,"SELECT EXISTS(SELECT 1 FROM chat_turns WHERE session_id=?1 AND status IN ('queued','streaming','stopping'))")?,[id.to_string()],|r|r.get(0)).map_err(map_sqlite_error)?;
             busy |= self.deletion_status_for_session(id)?.is_some();
         }
         Ok(super::runtime_permissions::PermissionState {
@@ -3895,6 +4246,14 @@ impl ChatRepository {
         mode: super::runtime_permissions::PermissionMode,
         confirm_full: bool,
     ) -> Result<super::runtime_permissions::PermissionState, ChatError> {
+        if let Some(id) = session_id {
+            super::schedules::drafts::guard_conversation(
+                &self.connection,
+                &self.scope,
+                &id.to_string(),
+                false,
+            )?;
+        }
         let current = self.permission_state(session_id)?;
         if current.busy {
             return Err(ChatError::ConversationConflict);
@@ -4847,6 +5206,11 @@ impl ChatRepository {
         if now < 0 {
             return Err(ChatError::InvalidInput);
         }
+        super::schedules::workspace::guard_deletion(
+            &self.connection,
+            &self.scope,
+            &session_id.to_string(),
+        )?;
         let keyed_hash = scoped_session_hash(
             &self.receipt_key,
             &self.scope.owner_user_id,
@@ -4905,6 +5269,11 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        super::schedules::workspace::guard_deletion(
+            &transaction,
+            &self.scope,
+            &session_id.to_string(),
+        )?;
         let session: Option<Option<String>> = transaction
             .query_row(
                 "SELECT agent_session_id FROM chat_sessions
@@ -4924,8 +5293,11 @@ impl ChatRepository {
             .transpose()?;
         let active: Option<(String, String, Option<String>)> = transaction
             .query_row(
-                "SELECT id, status, runtime_turn_id FROM chat_turns
+                &super::schedules::recovery::coordination_sql(
+                    &transaction,
+                    "SELECT id, status, runtime_turn_id FROM chat_turns
                  WHERE session_id=?1 AND status IN ('queued', 'streaming', 'stopping')",
+                )?,
                 [session_id.to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -4958,8 +5330,7 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             transaction
                 .execute(
-                    "UPDATE chat_turns SET submission_status='cancelled'
-                     WHERE session_id=?2 AND status='queued' AND ?1>=0",
+                    &format!("UPDATE chat_turns SET submission_status='cancelled' WHERE session_id=?2 AND status='queued' AND ?1>=0 AND {}",super::schedules::recovery::effective_turn(&transaction,"chat_turns")?),
                     params![now, session_id.to_string()],
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -5056,7 +5427,9 @@ impl ChatRepository {
         type DeletionRow = (String, i64, Vec<u8>, String, String, String, i64);
         let row: Option<DeletionRow> = transaction
             .query_row(
-                "SELECT operation_id, 1, encrypted_retry_ids, desktop_state,
+                &super::schedules::recovery::coordination_sql(
+                    &transaction,
+                    "SELECT operation_id, 1, encrypted_retry_ids, desktop_state,
                         host_state, runtime_state, attempt_count
                  FROM chat_deletion_jobs d
                  WHERE d.session_id IS NOT NULL AND d.attempt_count<?1
@@ -5068,6 +5441,7 @@ impl ChatRepository {
                        AND t.status IN ('queued', 'streaming', 'stopping')
                    )
                  ORDER BY d.next_attempt_at, d.operation_id LIMIT 1",
+                )?,
                 params![OUTBOX_MAX_ATTEMPTS, now],
                 |row| {
                     Ok((
@@ -5405,9 +5779,9 @@ impl ChatRepository {
             let mut statement = self
                 .connection
                 .prepare(
-                    "SELECT DISTINCT s.id FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
+                    &super::schedules::recovery::coordination_sql(&self.connection,"SELECT DISTINCT s.id FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
                      WHERE s.owner_user_id=?1 AND s.tenant_id=?2
-                       AND t.status IN ('streaming', 'stopping') ORDER BY s.id",
+                       AND t.status IN ('streaming', 'stopping') ORDER BY s.id")?,
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             let collected = statement
@@ -5453,7 +5827,8 @@ impl ChatRepository {
     ) -> Result<Vec<Feat126ResumeCandidate>, ChatError> {
         let mut statement = self
             .connection
-            .prepare(
+            .prepare(&super::schedules::recovery::coordination_sql(
+                &self.connection,
                 "SELECT b.public_task_id, s.id, s.agent_session_id, s.runtime_thread_id,
                         active_turn.id, active_turn.runtime_turn_id, active_turn.operation_id
                  FROM chat_sessions s
@@ -5464,7 +5839,7 @@ impl ChatRepository {
                  WHERE s.owner_user_id=?1 AND s.tenant_id=?2
                    AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL
                  ORDER BY s.id",
-            )
+            )?)
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let candidates = statement
             .query_map(
@@ -5588,6 +5963,7 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        super::schedules::workspace::guard_deletion(&transaction, &self.scope, session_id)?;
         let message_ids = {
             let mut statement = transaction
                 .prepare("SELECT id FROM chat_messages WHERE session_id=?1 ORDER BY id")
@@ -5638,6 +6014,7 @@ impl ChatRepository {
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
             result
         };
+        super::schedules::invalidate_targets(&transaction, &self.scope, session_id)?;
         let changed = transaction
             .execute(
                 "DELETE FROM chat_sessions WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3",

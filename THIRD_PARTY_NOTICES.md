@@ -27,3 +27,9 @@ Upstream NOTICE:
 - License: 0BSD
 - Source: https://github.com/microsoft/tslib/tree/2.3.0
 - Registry integrity: `sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg==`
+
+## ajv-formats 3.0.1 (FEAT-155 private IPC validator generation)
+
+- License: MIT; full copyright and license retained in `src/api/generated/scheduled-task-ipc-formats.gen.js`.
+- Source: https://github.com/ajv-validator/ajv-formats
+- Generator reads the existing Contracts toolchain package; package version and source SHA-256 are recorded in `contracts/scheduled-ipc.candidate.json`. No new dependency or lockfile change.

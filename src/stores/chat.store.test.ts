@@ -526,6 +526,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
   const client: ChatClient = {
+    getSessionPurpose: async (_context, sessionId) => ({sessionId, purpose: "ordinary"}),
     loadNativeHistory: async () => ({views: [], submissions: [], remainingTurnIds: [], historyAvailability: "unavailable"}),
     onNativeView: async handler => {nativeHandler = handler; return () => undefined;},
     bindContext: async () => ({
@@ -773,6 +774,28 @@ describe("chat view-model store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("FEAT-155 binds management without readiness, listeners, projects or Host preparation", async () => {
+    const { client } = fakeClient();
+    const bound = await client.bindContext(TENANT);
+    client.bindContext = vi.fn(async () => bound);
+    client.bindManagementContext = vi.fn(async () => bound);
+    client.getLocalReadiness = vi.fn(client.getLocalReadiness);
+    client.listProjects = vi.fn(client.listProjects);
+    client.listSessions = vi.fn(client.listSessions);
+    client.onEvent = vi.fn(client.onEvent);
+    const store = createStore(client);
+    await store.bind(TENANT, true);
+    expect(store.context).toEqual(bound);
+    expect(store.phase).toBe("ready");
+    expect(client.bindManagementContext).toHaveBeenCalledOnce();
+    expect(client.bindContext).not.toHaveBeenCalled();
+    expect(client.getLocalReadiness).not.toHaveBeenCalled();
+    expect(client.listProjects).not.toHaveBeenCalled();
+    expect(client.listSessions).not.toHaveBeenCalled();
+    expect(client.onEvent).not.toHaveBeenCalled();
+    await store.dispose();
   });
 
   it("binds one opaque context and never stores owner, token, key, or project path", async () => {
@@ -3591,6 +3614,8 @@ describe("FEAT-134 chat store v4 authority", () => {
       "019c1a00-0000-7000-8000-000000000009",
       "synthetic legacy create",
     )).resolves.toBe(SESSION_A);
+    // A durable receipt precedes asynchronous session activation/purpose reads.
+    await vi.waitFor(() => expect(store.canSend).toBe(true));
     await store.submitTurn("synthetic legacy submit");
 
     expect(createSession).toHaveBeenCalledWith(

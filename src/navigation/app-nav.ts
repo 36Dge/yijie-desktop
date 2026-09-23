@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 
-export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/settings";
+export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/settings" | "/scheduled-tasks";
 export type AppNavPlacement = "main" | "bottom";
 export type AppNavItemKey =
   | "newTask"
@@ -75,7 +75,8 @@ export const APP_NAVIGATION = [
     label: "定时任务",
     icon: "scheduledTask",
     placement: "main",
-    disabled: true,
+    disabled: false,
+    to: "/scheduled-tasks",
   },
   {
     kind: "item",

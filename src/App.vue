@@ -12,7 +12,7 @@ import { skillMarketplaceUiEnabled } from "./authorization/skill-marketplace-ui-
 import { storeShowcaseUiEnabled } from "./authorization/store-showcase-ui-config";
 import { workflowShowcaseUiEnabled } from "./authorization/workflow-showcase-ui-config";
 import { createChatPermissionLifecycle } from "./authorization/chat-permission-lifecycle";
-import { CHAT_AUTHORITY_RETRY_KEY } from "./authorization/chat-authority-recovery";
+import { CHAT_AUTHORITY_RETRY_KEY, CHAT_EXECUTION_PREPARE_KEY } from "./authorization/chat-authority-recovery";
 import { demoFastLocalProfileEnabled } from "./authorization/local-profile";
 import {
   darkTheme,
@@ -22,6 +22,7 @@ import {
   NMessageProvider,
   NNotificationProvider,
 } from "naive-ui";
+import ScheduledUpdates from "./components/schedules/ScheduledUpdates.vue";
 import YjAppShell from "./components/yijie/YjAppShell.vue";
 import { createNaiveThemeOverrides } from "./design/theme/naive-theme";
 import { usePermissionStore } from "./stores/permission.store";
@@ -48,6 +49,7 @@ let routeSelectionEpoch = 0;
 const opaqueSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const chatPermissionLifecycle = createChatPermissionLifecycle(chatStore, localChatUiEnabled);
 provide(CHAT_AUTHORITY_RETRY_KEY, () => chatPermissionLifecycle.retry());
+provide(CHAT_EXECUTION_PREPARE_KEY, () => chatPermissionLifecycle.prepareExecution());
 
 const permissionSnapshot = computed(() => ({
   enabled: authoritativePermissionUiEnabled,
@@ -67,6 +69,8 @@ async function synchronizeChatAuthority(): Promise<void> {
     expiresAt: permissionStore.expiresAt,
     canCreateTask: permissionStore.hasCapability("task.create"),
     canReadTask: permissionStore.hasCapability("task.read"),
+    canReadSchedule: permissionStore.hasCapability("schedule.read"),
+    managementOnly: route.path === "/scheduled-tasks",
   });
 }
 
@@ -197,6 +201,7 @@ watch(
 
 watch(
   [
+    () => route.path === "/scheduled-tasks",
     () => permissionStore.phase,
     () => permissionStore.selectedTenantId,
     () => permissionStore.authorizationRevision,
@@ -248,6 +253,7 @@ onBeforeUnmount(() => {
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>
+          <ScheduledUpdates v-if="localChatUiEnabled" />
           <YjAppShell>
             <RouterView v-slot="{ Component }">
               <component :is="Component" v-if="canRenderCurrentRoute" />

@@ -160,6 +160,7 @@ struct AuthorizationState {
 }
 
 struct AuthorizationInner {
+    owner_user_id: String,
     tenant_id: Uuid,
     process_epoch: Uuid,
     state: Mutex<AuthorizationState>,
@@ -184,6 +185,7 @@ impl ChatAuthorizationManager {
     pub(crate) fn new(scope: &ChatScope) -> Result<Self, ChatError> {
         Ok(Self {
             inner: Arc::new(AuthorizationInner {
+                owner_user_id: scope.owner_user_id.clone(),
                 tenant_id: scope.tenant_uuid()?,
                 process_epoch: Uuid::now_v7(),
                 state: Mutex::new(AuthorizationState {
@@ -193,6 +195,52 @@ impl ChatAuthorizationManager {
                 }),
             }),
         })
+    }
+
+    /// Keep the current UI binding stable for one synchronous database operation.
+    /// No await or native/renderer callback may run while this lease is held.
+    pub(crate) fn with_schedule_context<T>(
+        &self,
+        context: Uuid,
+        scope: &ChatScope,
+        write: bool,
+        run: bool,
+        now: i64,
+        operation: impl FnOnce(i64, u64) -> T,
+    ) -> Result<T, AuthorizationFailure> {
+        if self.inner.owner_user_id != scope.owner_user_id
+            || scope.tenant_uuid().ok() != Some(self.inner.tenant_id)
+            || context.is_nil()
+            || now < 0
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        let state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?;
+        let record = state
+            .contexts
+            .get(&context)
+            .ok_or(AuthorizationFailure::ContextInvalid)?;
+        if record.expires_at <= now
+            || record.process_epoch != self.inner.process_epoch
+            || record.authorization_revision != state.highest_revision
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        if !["schedule.read", "task.read"]
+            .iter()
+            .all(|c| record.capabilities.contains(*c))
+            || (write && !record.capabilities.contains("task.create"))
+            || (run && !record.capabilities.contains("workspace.use"))
+        {
+            return Err(AuthorizationFailure::CapabilityDenied);
+        }
+        let result = operation(record.expires_at, record.authorization_revision);
+        drop(state);
+        Ok(result)
     }
 
     pub fn bind(

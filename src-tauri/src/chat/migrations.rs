@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 15] = [
+const CATALOG: [CatalogEntry; 26] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -107,9 +107,77 @@ const CATALOG: [CatalogEntry; 15] = [
         name: "0015_chat_native_formats",
         sql: include_str!("../../migrations/chat/0015_chat_native_formats.sql"),
     },
+    CatalogEntry {
+        version: 16,
+        name: "0016_scheduled_plan_foundation",
+        sql: include_str!("../../migrations/chat/0016_scheduled_plan_foundation.sql"),
+    },
+    CatalogEntry {
+        version: 17,
+        name: "0017_scheduled_execution_foundation",
+        sql: include_str!("../../migrations/chat/0017_scheduled_execution_foundation.sql"),
+    },
+    CatalogEntry {
+        version: 18,
+        name: "0018_scheduled_local_preparation",
+        sql: include_str!("../../migrations/chat/0018_scheduled_local_preparation.sql"),
+    },
+    CatalogEntry {
+        version: 19,
+        name: "0019_scheduled_recovery",
+        sql: include_str!("../../migrations/chat/0019_scheduled_recovery.sql"),
+    },
+    CatalogEntry {
+        version: 20,
+        name: "0020_scheduled_dispatch",
+        sql: include_str!("../../migrations/chat/0020_scheduled_dispatch.sql"),
+    },
+    CatalogEntry {
+        version: 21,
+        name: "0021_scheduled_triggers",
+        sql: include_str!("../../migrations/chat/0021_scheduled_triggers.sql"),
+    },
+    CatalogEntry {
+        version: 22,
+        name: "0022_scheduled_draft_sources",
+        sql: include_str!("../../migrations/chat/0022_scheduled_draft_sources.sql"),
+    },
+    CatalogEntry {
+        version: 23,
+        name: "0023_scheduled_plan_created_at",
+        sql: include_str!("../../migrations/chat/0023_scheduled_plan_created_at.sql"),
+    },
+    CatalogEntry {
+        version: 24,
+        name: "0024_scheduled_automatic_consent",
+        sql: include_str!("../../migrations/chat/0024_scheduled_automatic_consent.sql"),
+    },
+    CatalogEntry {
+        version: 25,
+        name: "0025_scheduled_single_run_grants",
+        sql: include_str!("../../migrations/chat/0025_scheduled_single_run_grants.sql"),
+    },
+    CatalogEntry {
+        version: 26,
+        name: "0026_scheduled_execution_timing",
+        sql: include_str!("../../migrations/chat/0026_scheduled_execution_timing.sql"),
+    },
 ];
 
-pub const LATEST_SCHEMA_VERSION: i64 = CATALOG.len() as i64;
+// Preserve the existing activated-version surface; reader support is separate.
+pub const LATEST_SCHEMA_VERSION: i64 = 15;
+pub const MAX_READABLE_SCHEMA_VERSION: i64 = CATALOG.len() as i64;
+pub const SCHEDULE_SCHEMA_VERSION: i64 = 16;
+pub const SCHEDULE_EXECUTION_SCHEMA_VERSION: i64 = 17;
+pub const SCHEDULE_PREPARATION_SCHEMA_VERSION: i64 = 18;
+pub const SCHEDULE_RECOVERY_SCHEMA_VERSION: i64 = 19;
+pub const SCHEDULE_DISPATCH_SCHEMA_VERSION: i64 = 20;
+pub const SCHEDULE_TRIGGER_SCHEMA_VERSION: i64 = 21;
+pub const SCHEDULE_DRAFT_SCHEMA_VERSION: i64 = 22;
+pub const SCHEDULE_MANAGEMENT_SCHEMA_VERSION: i64 = 23;
+pub const SCHEDULE_AUTOMATIC_SCHEMA_VERSION: i64 = 24;
+pub const SCHEDULE_SINGLE_RUN_SCHEMA_VERSION: i64 = 25;
+pub const SCHEDULE_TIMING_SCHEMA_VERSION: i64 = 26;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -118,18 +186,70 @@ pub fn validate_embedded_migrations() -> Result<(), ChatError> {
 }
 
 pub fn migrate(connection: &mut Connection) -> Result<(), ChatError> {
+    migrate_to_target(connection, LATEST_SCHEMA_VERSION)
+}
+
+pub(super) fn validate_reader(connection: &Connection) -> Result<(), ChatError> {
+    let current = user_version(connection)?;
+    if !(0..=MAX_READABLE_SCHEMA_VERSION).contains(&current) {
+        return Err(ChatError::MigrationFailed);
+    }
+    verify_ledger(connection, current)
+}
+
+pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Result<(), ChatError> {
+    if ![
+        LATEST_SCHEMA_VERSION,
+        SCHEDULE_SCHEMA_VERSION,
+        SCHEDULE_EXECUTION_SCHEMA_VERSION,
+        SCHEDULE_PREPARATION_SCHEMA_VERSION,
+        SCHEDULE_RECOVERY_SCHEMA_VERSION,
+        SCHEDULE_DISPATCH_SCHEMA_VERSION,
+        SCHEDULE_TRIGGER_SCHEMA_VERSION,
+        SCHEDULE_DRAFT_SCHEMA_VERSION,
+        SCHEDULE_MANAGEMENT_SCHEMA_VERSION,
+        SCHEDULE_AUTOMATIC_SCHEMA_VERSION,
+        SCHEDULE_SINGLE_RUN_SCHEMA_VERSION,
+        SCHEDULE_TIMING_SCHEMA_VERSION,
+    ]
+    .contains(&target)
+    {
+        return Err(ChatError::MigrationFailed);
+    }
     if connection.is_readonly(MAIN_DB).map_err(map_sqlite_error)? {
         return Err(ChatError::DatabaseReadOnly);
     }
     let current = user_version(connection)?;
-    if current > LATEST_SCHEMA_VERSION {
-        return Err(ChatError::MigrationFailed);
+    validate_reader(connection)?;
+    if current < target {
+        // SQLite's documented parent-table replacement procedure. Only the
+        // v18 crossing needs this; per-migration foreign_key_check still runs
+        // inside the transaction, before commit. Restore enforcement on errors.
+        let replace_parent = current < SCHEDULE_PREPARATION_SCHEMA_VERSION
+            && target >= SCHEDULE_PREPARATION_SCHEMA_VERSION;
+        if !connection.is_autocommit() {
+            return Err(ChatError::MigrationFailed);
+        }
+        let foreign_keys: bool = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        if replace_parent {
+            connection
+                .pragma_update(None, "foreign_keys", false)
+                .map_err(map_sqlite_error)?;
+        }
+        let result = migrations()
+            .to_version(connection, target as usize)
+            .map_err(map_migration_error);
+        if replace_parent {
+            connection
+                .pragma_update(None, "foreign_keys", foreign_keys)
+                .map_err(map_sqlite_error)?;
+        }
+        result?;
     }
-    verify_ledger(connection, current)?;
-    migrations()
-        .to_latest(connection)
-        .map_err(map_migration_error)?;
-    verify_ledger(connection, LATEST_SCHEMA_VERSION)?;
+    // A compatible reader keeps an existing newer database at its current version. Never downgrade.
+    verify_ledger(connection, current.max(target))?;
     let violation: Option<i64> = connection
         .query_row(
             "SELECT 1 FROM pragma_foreign_key_check LIMIT 1",
@@ -242,6 +362,99 @@ mod tests {
     use rusqlite::OpenFlags;
     use std::fs;
     use uuid::Uuid;
+
+    #[test]
+    fn feat155_preparation_migration_preserves_parent_and_old_chat() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        migrate(&mut c).unwrap();
+        c.execute_batch("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at)
+            VALUES('project','owner','tenant','ordinary',printf('%064d',0),X'0102',1);
+            INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at)
+            VALUES('chat','owner','tenant','project','ordinary','fallback','not_started',1,1);
+            INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES('turn','chat','operation','queued');
+            INSERT INTO chat_messages(id,session_id,turn_id,role,content,status,ordinal,created_at)
+            VALUES('message','chat','turn','user','ordinary','committed',0,1);
+            INSERT INTO chat_outbox(operation_id,session_id,kind,state,payload_version,encrypted_payload)
+            VALUES('operation','chat','start_turn','pending',1,X'7B7D');").unwrap();
+        migrate_to_target(&mut c, 17).unwrap();
+        let old_ledger: Vec<(i64, String)> = c
+            .prepare("SELECT version,sha256 FROM chat_schema_migrations ORDER BY version")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        migrate_to_target(&mut c, 18).unwrap();
+        assert_eq!(user_version(&c).unwrap(), 18);
+        assert!(c
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+            .unwrap());
+        let record:(String,Vec<u8>,String)=c.query_row("SELECT p.workspace_source,p.bookmark_ref,m.content FROM chat_projects p JOIN chat_sessions s ON s.project_id=p.id JOIN chat_messages m ON m.session_id=s.id",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(
+            record,
+            ("user_project".into(), vec![1, 2], "ordinary".into())
+        );
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM chat_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let after:Vec<(i64,String)>=c.prepare("SELECT version,sha256 FROM chat_schema_migrations WHERE version<=17 ORDER BY version").unwrap()
+            .query_map([],|r|Ok((r.get(0)?,r.get(1)?))).unwrap().collect::<Result<_,_>>().unwrap();
+        assert_eq!(old_ledger, after);
+        migrate(&mut c).unwrap();
+        assert_eq!(user_version(&c).unwrap(), 18);
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn feat155_migration_default_target_and_future_reader_boundary() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), 15);
+        migrate_to_target(&mut connection, 16).unwrap();
+        validate_reader(&connection).unwrap();
+        migrate(&mut connection).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), 16);
+        assert_eq!(
+            migrate_to_target(&mut connection, MAX_READABLE_SCHEMA_VERSION + 1),
+            Err(ChatError::MigrationFailed)
+        );
+        // Build a normal synthetic future format with the standard migration
+        // tool. No existing file, permission or ledger is corrupted.
+        let future_entry = CatalogEntry {
+            version: MAX_READABLE_SCHEMA_VERSION + 1,
+            name: "future_fixture",
+            sql: "CREATE TABLE future_fixture(id INTEGER PRIMARY KEY);",
+        };
+        let future_catalog = Migrations::new(
+            CATALOG
+                .iter()
+                .copied()
+                .chain(std::iter::once(future_entry))
+                .map(|entry| M::up_with_hook(entry.sql, move |tx| record_migration(tx, entry)))
+                .collect(),
+        );
+        let mut future = Connection::open_in_memory().unwrap();
+        future_catalog.to_latest(&mut future).unwrap();
+        let changes = future.total_changes();
+        assert_eq!(validate_reader(&future), Err(ChatError::MigrationFailed));
+        assert_eq!(migrate(&mut future), Err(ChatError::MigrationFailed));
+        assert_eq!(future.total_changes(), changes);
+        assert_eq!(
+            user_version(&future).unwrap(),
+            MAX_READABLE_SCHEMA_VERSION + 1
+        );
+    }
 
     #[test]
     fn embedded_migrations_validate_and_write_checksum_ledger() {

@@ -392,11 +392,8 @@ impl SidecarConfig {
     }
 
     fn forceful_child_cleanup_enabled(&self) -> bool {
-        #[cfg(not(feature = "feat126-s10-driver"))]
-        if crate::workflows::exact_local_enabled() {
-            return false;
-        }
-        !self.minimax_provider_enabled || self.image_generation_enabled
+        // Normal lifecycle never escalates to a kill, including non-provider mode.
+        false
     }
 }
 
@@ -532,6 +529,7 @@ struct SupervisorState {
     instance_nonce: Option<String>,
     capture: Option<ProcessCapture>,
     cleanup_unknown: bool,
+    last_stopped_nonce: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -602,6 +600,7 @@ pub(super) struct HostConnection {
 }
 
 pub struct SidecarSupervisor {
+    scheduled_candidate: Option<super::schedules::candidate::Launch>,
     config: Option<SidecarConfig>,
     demo_fast: bool,
     skill_roots: Option<SkillRoots>,
@@ -631,6 +630,7 @@ impl SidecarSupervisor {
             .build()
             .map_err(|_| ChatError::InvalidConfiguration)?;
         Ok(Self {
+            scheduled_candidate: None,
             config,
             demo_fast,
             skill_roots,
@@ -642,8 +642,35 @@ impl SidecarSupervisor {
                 instance_nonce: None,
                 capture: None,
                 cleanup_unknown: false,
+                last_stopped_nonce: None,
             }),
         })
+    }
+
+    pub(crate) fn with_scheduled_candidate(
+        mut self,
+        base: &Path,
+        launch: super::schedules::candidate::Launch,
+    ) -> Result<Self, ChatError> {
+        let config = self
+            .config
+            .as_mut()
+            .ok_or(ChatError::InvalidConfiguration)?;
+        if !self.demo_fast
+            || config.test_profile.is_some()
+            || config.image_generation_enabled
+            || config.sorftime_proxy.is_some()
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        let host = base.join("host");
+        let runtime = base.join("runtime");
+        super::schedules::candidate::private_directory(&host)?;
+        super::schedules::candidate::private_directory(&runtime)?;
+        config.host_home = host;
+        config.codex_home = Some(runtime);
+        self.scheduled_candidate = Some(launch);
+        Ok(self)
     }
 
     pub async fn status(&self) -> SidecarState {
@@ -702,9 +729,15 @@ impl SidecarSupervisor {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
+        if let Some(candidate) = &self.scheduled_candidate {
+            command.env(super::schedules::candidate::CHILD_ENV, candidate.encode()?);
+        }
         // One-time, explicit environment handoff after env_clear. Do not add
         // the credential to the generic environment projection or log capture.
         let mut sorftime_token = config.sorftime_token.lock().await;
+        if self.scheduled_candidate.is_some() && sorftime_token.is_some() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
         if let Some(token) = sorftime_token.as_ref() {
             if prepared.is_some() || !self.demo_fast || !config.minimax_provider_enabled {
                 return Err(ChatError::InvalidConfiguration);
@@ -836,12 +869,16 @@ impl SidecarSupervisor {
 
     pub async fn stop(&self) -> Result<SidecarState, ChatError> {
         let mut state = self.inner.lock().await;
-        if state.cleanup_unknown {
-            return Err(ChatError::CleanupIncomplete);
-        }
+        let already_stopping = state.cleanup_unknown;
         let identity = state.child_identity.clone();
         let had_child = state.child.is_some();
         let exit_status = match (state.child.as_mut(), identity.as_ref()) {
+            (Some(child), Some(_)) if already_stopping => {
+                tokio::time::timeout(Duration::from_secs(3), child.wait())
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+            }
             (Some(child), Some(identity)) => {
                 terminate_child(
                     child,
@@ -854,10 +891,14 @@ impl SidecarSupervisor {
             }
             _ => None,
         };
-        if had_child && exit_status.is_none() {
+        if had_child && !exit_status.as_ref().is_some_and(ExitStatus::success) {
             retain_unknown_child(&mut state, "stop_outcome_unknown");
             return Err(ChatError::CleanupIncomplete);
         }
+        if had_child {
+            state.last_stopped_nonce = state.instance_nonce.clone();
+        }
+        state.cleanup_unknown = false;
         state.child = None;
         state.child_identity = None;
         state.instance_nonce = None;
@@ -868,6 +909,10 @@ impl SidecarSupervisor {
             SidecarState::Disabled
         };
         Ok(state.state)
+    }
+
+    pub(crate) async fn stopped_generation(&self) -> Option<String> {
+        self.inner.lock().await.last_stopped_nonce.clone()
     }
 
     #[cfg(feature = "feat126-s10-driver")]
@@ -1035,7 +1080,7 @@ fn valid_instance_response(response: &reqwest::Response, instance_nonce: &str) -
 async fn terminate_child(
     child: &mut Child,
     expected: &OwnedProcessIdentity,
-    forceful_cleanup_enabled: bool,
+    _forceful_cleanup_enabled: bool,
 ) -> Option<ExitStatus> {
     match child.try_wait() {
         Ok(Some(status)) => return Some(status),
@@ -1051,40 +1096,15 @@ async fn terminate_child(
     match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
         Ok(Ok(status)) => Some(status),
         Ok(Err(_)) => None,
-        Err(_) => {
-            match child.try_wait() {
-                Ok(Some(status)) => return Some(status),
-                Ok(None) => {}
-                Err(_) => return None,
-            }
-            if !forceful_cleanup_enabled {
-                return None;
-            }
-            if child.id() != Some(expected.pid)
-                || owned_process_identity_matches(expected).ok() != Some(true)
-                || child.start_kill().is_err()
-            {
-                return None;
-            }
-            tokio::time::timeout(Duration::from_secs(3), child.wait())
-                .await
-                .ok()
-                .and_then(Result::ok)
-        }
+        Err(_) => child.try_wait().ok().flatten(),
     }
 }
 
 fn retain_unknown_child(state: &mut SupervisorState, final_state: &str) {
-    if let Some(child) = state.child.take() {
-        std::mem::forget(child);
-    }
-    state.child_identity = None;
-    state.instance_nonce = None;
     state.cleanup_unknown = true;
     state.state = SidecarState::Failed;
-    if let Some(mut capture) = state.capture.take() {
-        capture.stdout_task.abort();
-        capture.stderr_task.abort();
+    // Keep the child, identity, nonce and capture tasks alive for normal waiting.
+    if let Some(capture) = state.capture.as_mut() {
         capture.evidence.state = final_state.to_owned();
         let _ = write_process_evidence(&capture.evidence_path, &capture.evidence);
     }
@@ -2109,7 +2129,7 @@ mod tests {
         assert!(stable_environment.iter().any(|(name, value)| {
             *name == MINIMAX_API_KEY_FILE_ENV && value == &canonical.to_string_lossy()
         }));
-        assert!(config.forceful_child_cleanup_enabled());
+        assert!(!config.forceful_child_cleanup_enabled());
         assert!(!stable_api_only.forceful_child_cleanup_enabled());
         assert_eq!(stable_api_only.validate_provider_key_file(), Ok(()));
         fs::remove_dir_all(root).unwrap();
@@ -2488,6 +2508,7 @@ mod tests {
                 sorftime_proxy: None,
             };
             let supervisor = SidecarSupervisor {
+                scheduled_candidate: None,
                 config: Some(config),
                 demo_fast: false,
                 skill_roots: None,
@@ -2499,6 +2520,7 @@ mod tests {
                     instance_nonce: None,
                     capture: None,
                     cleanup_unknown: false,
+                    last_stopped_nonce: None,
                 }),
             };
             assert_eq!(supervisor.start().await, Err(ChatError::SidecarUnavailable));
@@ -2581,6 +2603,7 @@ mod tests {
             sorftime_proxy: None,
         };
         let supervisor = SidecarSupervisor {
+            scheduled_candidate: None,
             config: Some(config),
             demo_fast: false,
             skill_roots: None,
@@ -2598,6 +2621,7 @@ mod tests {
                 instance_nonce: None,
                 capture: None,
                 cleanup_unknown: false,
+                last_stopped_nonce: None,
             }),
         };
         assert_eq!(
@@ -2951,6 +2975,7 @@ mod tests {
             .build()
             .unwrap();
         let supervisor = SidecarSupervisor {
+            scheduled_candidate: None,
             config: None,
             demo_fast: false,
             skill_roots: None,
@@ -2962,6 +2987,7 @@ mod tests {
                 instance_nonce: None,
                 capture: None,
                 cleanup_unknown: false,
+                last_stopped_nonce: None,
             }),
         };
         (config, supervisor)

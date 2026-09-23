@@ -49,7 +49,7 @@ const historyGroups = computed<readonly ChatHistoryProjectGroup[]>(() => {
     .map(([projectId, sessions]) => ({
       projectId,
       project: null,
-      label: "项目已移除",
+      label: sessions.some(session => session.projectAvailable) ? "任务目录" : "项目已移除",
       sessions,
     }));
   return [...availableGroups, ...removedGroups];

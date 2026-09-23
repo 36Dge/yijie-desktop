@@ -1,3 +1,4 @@
+import { type SessionPurposeView } from "../domain/chat-session-purpose.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen,type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -49,6 +50,7 @@ parseResyncResponseV6,
 parseSessionControlPlaneResponse,
 parseSessionControlPlaneResponseV6,
 parseSessionPageResponse,
+parseSessionPurposeResponse,
 parseSubscriptionResponse,
 parseSubscriptionResponseV4,
 parseSubscriptionResponseV5,
@@ -108,6 +110,7 @@ export interface ChatClient {
   onNativeView(handler: (event: NativeConversationViewEvent) => void, onInvalid?: (scope?: ChatInvalidEventScope | null) => void): Promise<UnlistenFn>;
 
   bindContext(tenantSelector: string): Promise<BoundChatContext>;
+  bindManagementContext?(tenantSelector: string): Promise<BoundChatContext>;
   listProjects(contextId: string, signal?: AbortSignal): Promise<readonly ChatProject[]>;
   pickProject(contextId: string, operationId: string): Promise<ChatProject | null>;
   revalidateProject(contextId: string, projectId: string, operationId: string): Promise<ChatProject>;
@@ -132,6 +135,7 @@ export interface ChatClient {
     operationId: string,
   ): Promise<ChatCreatedTurn>;
   listSessions(contextId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatSessionPage>;
+  getSessionPurpose(contextId: string, sessionId: string, signal?: AbortSignal): Promise<SessionPurposeView>;
   loadHistory(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadHistoryV2(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
   loadHistoryV3(contextId: string, sessionId: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<ChatHistoryPage>;
@@ -531,6 +535,11 @@ export function createChatClient(transport: ChatClientTransport = productionTran
   }
 
   return {
+    bindManagementContext(tenantSelector) {
+      const id = requestId();
+      return run("chat_bind_management_context_v1",
+        { schemaVersion: 1, requestId: id, payload: { tenantSelector } }, parseBoundContextResponse);
+    },
     bindContext(tenantSelector) {
       const id = requestId();
       return run(
@@ -594,6 +603,12 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     listSessions: (contextId, cursor, limit, signal) =>
       runRead("chat_list_sessions_v1", contextId, { cursor, limit }, parseSessionPageResponse, signal),
+    getSessionPurpose: (contextId, sessionId, signal) =>
+      runRead("chat_get_session_purpose_v1", contextId, { sessionId }, value => {
+        const result = parseSessionPurposeResponse(value);
+        if (result.sessionId !== sessionId) throw new ChatContractError();
+        return result;
+      }, signal),
     loadHistory: (contextId, sessionId, cursor, limit, signal) =>
       runRead("chat_load_history_v1", contextId, { sessionId, cursor, limit }, parseHistoryPageResponse, signal),
     loadHistoryV2: (contextId, sessionId, cursor, limit, signal) =>

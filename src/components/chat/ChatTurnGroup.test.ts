@@ -26,6 +26,21 @@ import ChatTurnGroup from "./ChatTurnGroup.vue";
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";
 
+it("uses the draft review slot for unclassified output without inventing its phase", async () => {
+  const item = { ...message("unclassified", 0, "assistant_message", '{"raw":"provider"}'), agentMessagePhase: null };
+  const turn = projectedTurn({ items: [item] });
+  const wrapper = mount(ChatTurnGroup, {
+    props: { turn, position: 0 },
+    slots: { "structured-answer": ({ turnId }: { turnId: string }) => h("button", { "data-turn": turnId }, "查看本轮草案摘要") },
+  });
+  await wrapper.get('[aria-expanded="false"]').trigger("click");
+  expect(wrapper.text()).toContain("草案以校验结果为准");
+  expect(wrapper.text()).not.toContain('{"raw":"provider"}');
+  expect(wrapper.get("[data-turn]").attributes("data-turn")).toBe(TURN_ID);
+  expect(turn.items[0]?.presentation).toBe("assistant_unclassified");
+  wrapper.unmount();
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });

@@ -64,6 +64,26 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
+# This selects an isolated native candidate, never a permission override. The
+# exact artifact identity comes from the same Contracts projection as Host.
+scheduled_candidate="${YIJIE_FEAT155_SCHEDULED_CANDIDATE:-false}"
+[[ "$scheduled_candidate" == "true" || "$scheduled_candidate" == "false" ]] || fail "invalid scheduled candidate selection"
+if [[ "$scheduled_candidate" == "true" ]]; then
+  [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" && "$sorftime_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
+  node "$workspace_root/yijie-contracts/scripts/generate-runtime-input-only.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-runtime-input-only.mjs" --check
+  candidate_lock="$desktop_root/contracts/runtime-input-only.candidate.json"
+  codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/input-only/aarch64-apple-darwin}"
+  codex_binary="$codex_runtime_root/codex"
+  codex_manifest="$codex_runtime_root/runtime-manifest.json"
+  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
+  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
+  image_generation_enabled="false"
+  runtime_root="$desktop_root/.local/feat155-candidate"
+  host_home="$runtime_root/host-home"
+  codex_home="$runtime_root/codex-home"
+fi
+
 workflow_environment=()
 workflow_tauri_config=()
 [[ "$workflow_requested" == "true" || "$workflow_requested" == "false" ]] || fail "invalid workflow opt-in"
@@ -98,9 +118,9 @@ export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 [[ -f "$codex_binary" && -x "$codex_binary" && ! -L "$codex_binary" ]] || fail "Codex Runtime binary is missing"
 [[ -f "$codex_manifest" && ! -L "$codex_manifest" ]] || fail "Codex Runtime manifest is missing"
 [[ "$(sha256_file "$codex_binary")" == "$runtime_binary_sha256" ]] ||
-  fail "Codex Runtime binary differs from the retained FEAT-136 artifact"
+  fail "Codex Runtime binary differs from the selected pinned artifact"
 [[ "$(sha256_file "$codex_manifest")" == "$runtime_manifest_sha256" ]] ||
-  fail "Codex Runtime manifest differs from the retained FEAT-136 artifact"
+  fail "Codex Runtime manifest differs from the selected pinned artifact"
 [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 
 # FEAT-134 first verifies its exact Contracts/Host v4 authority. The Skill
@@ -132,6 +152,9 @@ fi
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
 fi
+if [[ "$scheduled_candidate" == "true" ]]; then
+  node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
+fi
 
 if [[ "$stable_api_only" == "true" ]]; then
   pnpm tauri:build:demo-fast:stable
@@ -153,6 +176,9 @@ fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
+fi
+if [[ "$scheduled_candidate" == "true" ]]; then
+  node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
 fi
 
 # Public opt-in only; the credential never appears in shell arguments, files,
@@ -199,6 +225,7 @@ exec env \
   -u YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE \
   -u VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE \
   -u VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE \
+  -u YIJIE_SCHEDULED_CANDIDATE \
   -u YIJIE_DESKTOP_NATIVE_AUTH_ENABLED \
   -u YIJIE_DESKTOP_AUTH_ENVIRONMENT \
   -u YIJIE_DESKTOP_OIDC_ISSUER \
@@ -249,6 +276,7 @@ exec env \
   VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false \
   YIJIE_ENV=local \
   YIJIE_LOCAL_PROFILE=demo_fast \
+  "YIJIE_FEAT155_SCHEDULED_CANDIDATE=$scheduled_candidate" \
   YIJIE_CHAT_LOCAL_ENABLED=true \
   YIJIE_CHAT_LOCAL_HOST_ENABLED=true \
   YIJIE_CHAT_LOCAL_OWNER_USER_ID=12500000-0000-4000-8000-000000000001 \

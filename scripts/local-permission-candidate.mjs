@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { isScheduledHostCandidate, verifyScheduledHostCandidate } from "./scheduled-host-build-candidate.mjs";
+
 const exec = promisify(execFile);
 
 // Desktop may retain unrelated local edits. Its permission dependencies must
@@ -33,7 +35,7 @@ export function validatePermissionPins(lock, hostLock) {
   }
 }
 
-async function verifyPinnedFiles(root, pin, label) {
+async function verifyPinnedFiles(root, pin, label, candidateSources = null) {
   const { stdout: resolved } = await exec("git", ["-C", root, "rev-parse", "--verify", `${pin.full_commit}^{commit}`]);
   if (resolved.trim() !== pin.full_commit || !Object.keys(pin.sources ?? {}).length) {
     throw new Error(`${label} committed source is unavailable`);
@@ -48,7 +50,7 @@ async function verifyPinnedFiles(root, pin, label) {
       exec("git", ["-C", root, "show", `${pin.full_commit}:${source}`], { encoding: "buffer", maxBuffer: 8 * 1024 * 1024 }),
       readFile(path.join(root, source)),
     ]);
-    if (createHash("sha256").update(committed).digest("hex") !== digest || !committed.equals(working)) {
+    if (createHash("sha256").update(committed).digest("hex") !== digest || (candidateSources ? createHash("sha256").update(working).digest("hex") !== candidateSources[source] : !committed.equals(working))) {
       throw new Error(`${label} source differs from its committed pin: ${source}`);
     }
   }
@@ -60,14 +62,16 @@ export async function verifyLocalPermissionCandidate(desktopRoot, contractsRoot,
     readFile(path.join(hostRoot, "api/runtime-permissions.lock.json"), "utf8").then(JSON.parse),
   ]);
   validatePermissionPins(lock, hostLock);
+  const scheduledSources = isScheduledHostCandidate()
+    ? await verifyScheduledHostCandidate(desktopRoot, contractsRoot, hostRoot) : null;
   await Promise.all([
     verifyPinnedFiles(contractsRoot, lock.contracts, "FEAT-152 Contracts"),
-    verifyPinnedFiles(hostRoot, lock.agent_host, "FEAT-152 Host"),
+    verifyPinnedFiles(hostRoot, lock.agent_host, "FEAT-152 Host", scheduledSources),
   ]);
   // The launcher builds the Host from this checkout. Include all its build
   // sources and embedded resources, rather than validating only the DTO files.
   const hostPaths = ["cmd", "internal", "go.mod", "go.sum"];
-  try {
+  if (!scheduledSources) try {
     await exec("git", ["-C", hostRoot, "diff", "--quiet", lock.agent_host.full_commit, "--", ...hostPaths]);
     const { stdout } = await exec("git", ["-C", hostRoot, "ls-files", "--others", "--exclude-standard", "--", ...hostPaths]);
     if (stdout.trim()) throw new Error("Uncommitted Host build input");

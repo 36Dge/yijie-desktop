@@ -18,6 +18,7 @@ import YjIcon from "../yijie/YjIcon.vue";
 const props = withDefaults(defineProps<{
   modelValue: string;
   mode: "new" | "reply";
+  textOnly?: boolean;
   projects: readonly ChatProject[];
   selectedProjectId: string | null;
   activeProjectName?: string | null;
@@ -39,6 +40,7 @@ const props = withDefaults(defineProps<{
   attachmentImporting: false,
   attachmentErrorCode: null,
   dragActive: false,
+  textOnly: false,
 });
 
 const emit = defineEmits<{
@@ -92,7 +94,7 @@ const sendDisabled = computed(() =>
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
   attachmentConstraintMessage.value !== null ||
-  (props.mode === "new" && selectedProject.value === null),
+  (!props.textOnly && props.mode === "new" && selectedProject.value === null),
 );
 const sendLabel = computed(() => {
   if (props.submissionState === "validating") return "正在验证任务";
@@ -266,7 +268,7 @@ function handlePaste(event: ClipboardEvent): void {
     :aria-busy="submissionBusy ? 'true' : undefined"
   >
     <button
-      v-if="mode === 'new'"
+      v-if="mode === 'new' && !textOnly"
       class="chat-composer__project chat-composer__project--button"
       type="button"
       :disabled="submissionBusy || streaming"
@@ -277,7 +279,7 @@ function handlePaste(event: ClipboardEvent): void {
       <YjIcon name="folder" size="sm" tone="muted" />
       <span class="chat-composer__project-name">{{ projectName }}</span>
     </button>
-    <div v-else class="chat-composer__project" :aria-label="`当前聊天项目：${projectName}`">
+    <div v-else-if="!textOnly" class="chat-composer__project" :aria-label="`当前聊天项目：${projectName}`">
       <YjIcon name="folder" size="sm" tone="muted" />
       <span class="chat-composer__project-name">{{ projectName }}</span>
     </div>
@@ -375,7 +377,7 @@ function handlePaste(event: ClipboardEvent): void {
         class="chat-composer__textarea"
         :value="modelValue"
         :readonly="submissionBusy"
-        :placeholder="mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
+        :placeholder="textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
         :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
         :aria-invalid="visibleValidationMessage ? 'true' : undefined"
         autocomplete="off"
@@ -389,6 +391,7 @@ function handlePaste(event: ClipboardEvent): void {
       <div class="chat-composer__actions">
         <div class="chat-composer__leading-actions">
           <button
+            v-if="!textOnly"
             class="chat-composer__add"
             type="button"
             :disabled="attachmentButtonDisabled"
@@ -398,7 +401,7 @@ function handlePaste(event: ClipboardEvent): void {
           >
             <YjIcon name="plus" size="lg" />
           </button>
-          <slot name="permission-control">
+          <slot v-if="!textOnly" name="permission-control">
           <button
             class="chat-composer__permission yj-control"
             type="button"

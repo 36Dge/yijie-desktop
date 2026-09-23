@@ -33,6 +33,7 @@ const emit = defineEmits<{
 }>();
 
 const slots = defineSlots<{
+  "structured-answer"(props: { turnId: string }): unknown;
   "legacy-records"(props: {turnId: string}): unknown;
   "artifact-reference"(props: {
     item: ConversationTimelineItemViewModel;
@@ -149,6 +150,8 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
         v-for="(turn, index) in timeline.turns"
         :key="turn.identity"
         class="chat-timeline__turn"
+        :data-turn-id="turn.turnId"
+        tabindex="-1"
       >
         <ChatTurnGroup
           :turn="turn"
@@ -159,6 +162,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
           @disclosure-change="forwardDisclosure"
           @approval-decision="forwardApprovalDecision"
         >
+          <template v-if="slots['structured-answer']" #structured-answer="{ turnId }"><slot name="structured-answer" :turn-id="turnId" /></template>
           <template v-if="slots['legacy-records']" #legacy-records="{ turnId }"><slot name="legacy-records" :turn-id="turnId" /></template>
           <template
             v-if="slots['artifact-reference']"

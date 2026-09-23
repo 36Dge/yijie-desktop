@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/scheduled-tasks/execution/v1",
+  "title": "ScheduledExecutionFoundationV1",
+  "description": "Phase 3A local native foundation. No renderer endpoint, enabled schedule, executable outbox or HTTP producer. Confirming a grant does not enable a plan or receive a run. Scope and authorization derive from native authority. Workspace IDs are native-owned references, never raw paths. A managed_schedule reference identifies the plan workspace policy; per-chat directories are allocated in phase 3B. Run results preserve native outcome separately from delivery and attention; terminal does not prove business success. Logical run quota is not a Provider request budget. Optional properties are absent, never null. Private SQL and reservation ownership remain Desktop-local.",
+  "$defs": {
+    "Identity": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "ScheduleCapability": {
+      "type": "string",
+      "enum": [
+        "schedule.read",
+        "schedule.manage",
+        "schedule.run"
+      ]
+    },
+    "WorkspaceSource": {
+      "type": "string",
+      "enum": [
+        "user_project",
+        "managed_schedule"
+      ]
+    },
+    "WorkspaceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "resource_id"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/WorkspaceSource"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/Identity"
+        }
+      }
+    },
+    "ExecutionErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_input",
+        "not_found",
+        "scope_denied",
+        "revision_conflict",
+        "request_conflict",
+        "target_unavailable",
+        "permission_denied",
+        "grant_missing",
+        "grant_expired",
+        "grant_exhausted",
+        "grant_stale",
+        "reservation_busy",
+        "storage_disabled",
+        "storage_unavailable",
+        "format_unsupported",
+        "execution_not_ready"
+      ]
+    },
+    "GrantState": {
+      "type": "string",
+      "enum": [
+        "active",
+        "stale",
+        "expired",
+        "exhausted"
+      ]
+    },
+    "GrantConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "plan_id",
+        "expected_revision",
+        "max_runs",
+        "expires_at"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "GrantView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "plan_id",
+        "plan_revision",
+        "authorization_revision",
+        "definition_digest",
+        "workspace",
+        "max_runs",
+        "occupied_runs",
+        "expires_at",
+        "state"
+      ],
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "authorization_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceReference"
+        },
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "occupied_runs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "state": {
+          "$ref": "#/$defs/GrantState"
+        }
+      }
+    },
+    "RunTrigger": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual",
+        "rerun"
+      ]
+    },
+    "DeliveryState": {
+      "type": "string",
+      "enum": [
+        "reserved",
+        "sending",
+        "accepted",
+        "uncertain",
+        "terminal",
+        "cancelled"
+      ]
+    },
+    "NativeOutcome": {
+      "type": "string",
+      "enum": [
+        "unobserved",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "RunView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "plan_id",
+        "plan_revision",
+        "schedule_epoch",
+        "request_id",
+        "operation_id",
+        "trigger",
+        "grant_id",
+        "snapshot_digest",
+        "workspace",
+        "permission_mode",
+        "delivery_state",
+        "native_outcome",
+        "needs_attention"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "trigger": {
+          "$ref": "#/$defs/RunTrigger"
+        },
+        "original_run_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "logical_slot": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceReference"
+        },
+        "permission_mode": {
+          "type": "string",
+          "enum": [
+            "ask"
+          ]
+        },
+        "delivery_state": {
+          "$ref": "#/$defs/DeliveryState"
+        },
+        "native_outcome": {
+          "$ref": "#/$defs/NativeOutcome"
+        },
+        "needs_attention": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "automatic"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "logical_slot"
+            ],
+            "properties": {
+              "logical_slot": {
+                "$ref": "#/$defs/RunView/properties/logical_slot"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "logical_slot": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "rerun"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "original_run_id"
+            ],
+            "properties": {
+              "original_run_id": {
+                "$ref": "#/$defs/RunView/properties/original_run_id"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "original_run_id": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

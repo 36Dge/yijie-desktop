@@ -3,7 +3,11 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NCard, NModal } from "naive-ui";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type RouteLocationNormalized } from "vue-router";
+import ScheduledDraftPanel from "../../components/schedules/ScheduledDraftPanel.vue";
+import { useScheduledDraft } from "../schedules/use-scheduled-draft";
+import { queueScheduleDraftIntent, takeScheduleDraftIntent, clearScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
+import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
@@ -42,7 +46,7 @@ import {
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";
-import type { ConversationView } from "../../domain/conversation-view";
+import { selectConversationTurn, type ConversationView } from "../../domain/conversation-view";
 import {
   browserFrameProjectionScheduler,
   createFrameBatchedProjection,
@@ -63,17 +67,40 @@ import { chatArtifactReportNativeClient } from "../../api/chat-artifact-report-n
 import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
+import { locateChatTurn } from "../../domain/locate-chat-turn";
 
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
 const artifactStore = useArtifactStore();
+const permissionScope = usePermissionStore();
+const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
 
 const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const composerDrafts = shallowRef(createChatComposerDrafts());
+const leaveScheduledOpen = ref(false);
+let resolveScheduledLeave: ((leave: boolean) => void) | null = null;
+function finishScheduledLeave(leave: boolean) { leaveScheduledOpen.value = false; resolveScheduledLeave?.(leave); resolveScheduledLeave = null; }
+const changingDraftMode = ref(false);
+async function guardDraftNavigation(to: RouteLocationNormalized) {
+  if (isDraftMode.value && !(await draftPanel.value?.allowLeave() ?? true)) return false;
+  const modeChange = (to.query.create === "schedule") !== isNewDraftMode.value && to.path === "/chat";
+  if (to.path !== "/scheduled-tasks" && !modeChange) return true;
+  if (!Object.values(composerDrafts.value).some(value => value.trim().length > 0) && chatStore.draftAttachments.length === 0) return true;
+  changingDraftMode.value = modeChange;
+  return new Promise<boolean>(resolve => { resolveScheduledLeave = resolve; leaveScheduledOpen.value = true; });
+}
+onBeforeRouteLeave(guardDraftNavigation);
+onBeforeRouteUpdate(guardDraftNavigation);
 const routeSessionId = computed(() => typeof route.params.sessionId === "string"
   ? route.params.sessionId
   : null);
+const requestedTurn = computed(() => typeof route.query.turn === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(route.query.turn) ? route.query.turn : null);
+const locatingTurn = ref(false); const turnLocationNotice = ref("");
+let locationEpoch = 0;
+const isNewDraftMode = computed(() => routeSessionId.value === null && route.query.create === "schedule");
+const isDraftMode = computed(() => isNewDraftMode.value || (routeSessionId.value !== null && chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "scheduled_plan_draft"));
+const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "ordinary"));
 const composerDraftTargetKey = computed(() => chatComposerDraftKey(routeSessionId.value));
 const prompt = computed({
   get: () => chatComposerDraftValue(composerDrafts.value, composerDraftTargetKey.value),
@@ -96,6 +123,7 @@ function handleEntryFocus(event: FocusEvent): void {
   }
 }
 const composerSubmissionState = computed<ChatComposerSubmissionState>(() => {
+  if (draft.writing.value) return "submitting";
   if (chatStore.submissionState !== "idle") return chatStore.submissionState;
   return submitting.value ? "submitting" : "idle";
 });
@@ -150,6 +178,37 @@ const conversationTimeline = computed(() => {
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       );
 });
+const draftLatestTurn = computed(() => {
+  if (!routeSessionId.value) return null;
+  return Object.values(chatStore.conversationState.turns)
+    .filter(turn => turn.threadId === routeSessionId.value)
+    .sort((a, b) => b.ordinal - a.ordinal)[0]?.turnId ?? null;
+});
+const draftExecutionPending = computed(() => Object.values(chatStore.conversationState.turns).some(turn =>
+  turn.threadId === routeSessionId.value && ["queued", "in_progress", "waiting_approval", "unknown", "recovery_required"].includes(turn.status) &&
+  !(turn.source === "local_submission" && (turn.submissionStatus === "failed" || turn.submissionStatus === "cancelled")),
+));
+const draft = useScheduledDraft(() => isDraftMode.value, () => routeSessionId.value, () => draftLatestTurn.value, () => draftExecutionPending.value);
+let entryPrefilled = false;
+watch([isNewDraftMode, () => chatStore.context?.contextId, () => permissionScope.selectedTenantId, () => permissionScope.authorizationRevision], () => {
+  if (!isNewDraftMode.value) { entryPrefilled = false; return; }
+  if (entryPrefilled || !chatStore.context || !permissionScope.selectedTenantId || permissionScope.authorizationRevision === null) return;
+  const text = takeScheduleDraftIntent(permissionScope.selectedTenantId, permissionScope.authorizationRevision);
+  entryPrefilled = true;
+  if (text !== null) prompt.value = text;
+}, { immediate: true, flush: "post" });
+async function enterDraftMode() {
+  if (!permissionScope.selectedTenantId || permissionScope.authorizationRevision === null) return;
+  queueScheduleDraftIntent(permissionScope.selectedTenantId, permissionScope.authorizationRevision, prompt.value.trim() || undefined);
+  if (await router.push({ path: "/chat", query: { create: "schedule" } })) clearScheduleDraftIntent();
+}
+async function openDraftConversation(id: string) {
+  await chatStore.reloadSessions();
+  if (routeSessionId.value !== id) await router.push(`/chat/${id}`);
+  else await chatStore.selectSession(id);
+}
+function viewDraftPlan(id: string) { void router.push({ path: "/scheduled-tasks", query: { plan: id } }); }
+async function recoverDraft() { await retryChatAuthority(); await recoverReadiness(); await draft.refresh(); }
 const readiness = computed(() => readinessNotice(chatStore.localReadiness));
 const cleanup = computed(() => cleanupNotice(chatStore.cleanupStatus));
 const stableError = computed(() => errorNotice(
@@ -162,7 +221,7 @@ const stableError = computed(() => errorNotice(
 const isStreaming = computed(() => chatStore.phase === "streaming");
 const runtimePermissionsEnabled = import.meta.env.VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED === "true" && import.meta.env.VITE_YIJIE_ENV === "local" && import.meta.env.VITE_YIJIE_LOCAL_PROFILE === "demo_fast";
 const permissions = useRuntimePermissions(
-  () => runtimePermissionsEnabled ? chatStore.context?.contextId ?? null : null,
+  () => runtimePermissionsEnabled && !isDraftMode.value && normalPurposeReady.value ? chatStore.context?.contextId ?? null : null,
   () => chatStore.selectedSessionId,
   () => isStreaming.value || composerSubmissionState.value !== "idle",
 );
@@ -175,7 +234,7 @@ const isHistoryLoading = computed(() =>
 );
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
-  chatStore.canAttach && composerSubmissionState.value === "idle" && !isStreaming.value,
+  !isDraftMode.value && normalPurposeReady.value && chatStore.canAttach && composerSubmissionState.value === "idle" && !isStreaming.value,
 );
 const permissionDenied = computed(() =>
   chatStore.lastErrorCode === "chat_capability_denied" ||
@@ -242,7 +301,7 @@ watch(
     actionErrorCode.value = null;
     transientNotice.value = null;
     if (selectedSession.value) selectedProjectId.value = selectedSession.value.projectId;
-    void nextTick(() => scrollToBottom());
+    if (!requestedTurn.value) void nextTick(() => scrollToBottom());
   },
 );
 
@@ -257,9 +316,35 @@ const presentedConversationChange = computed(() => [renderedConversationView.val
 
 watch(
   presentedConversationChange,
-  () => { void followNewContent(); },
+  () => { if (!requestedTurn.value) void followNewContent(); },
   { flush: "post" },
 );
+
+async function locateRequestedTurn() {
+  const turnId = requestedTurn.value; const session = routeSessionId.value;
+  const context = chatStore.context?.contextId; const epoch = ++locationEpoch;
+  if (!turnId || !session || chatStore.selectedSessionId !== session || !context || !chatStore.history) return;
+  locatingTurn.value = true; turnLocationNotice.value = "正在定位本次运行对应的轮次…";
+  const current = () => epoch === locationEpoch && routeSessionId.value === session && requestedTurn.value === turnId && chatStore.context?.contextId === context;
+  try {
+    const result = await locateChatTurn({ current, found: () => selectConversationTurn(chatStore.conversationState, session, turnId) !== null,
+      cursor: () => chatStore.history?.nextCursor, loadOlder: () => chatStore.loadOlderHistory() });
+    if (!current()) return;
+    if (result === "found") {
+      timelineFrameProjection.push(chatStore.conversationState, false);
+      await nextTick();
+      const element = conversationScroller.value?.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
+      if (element) { element.scrollIntoView({ block: "start" }); element.focus({ preventScroll: true }); turnLocationNotice.value = "已定位本次运行对应的轮次。"; }
+      else turnLocationNotice.value = "已读取目标轮次，暂未呈现，请重新定位。";
+    } else turnLocationNotice.value = result === "more" ? "目标轮次较早，可继续有界加载定位。" : "目标轮次尚未加载或已不可用，没有使用最新轮次替代。";
+  } catch { if (current()) turnLocationNotice.value = "对应轮次读取失败，可重试定位。"; }
+  finally { if (current()) locatingTurn.value = false; }
+}
+watch([requestedTurn, routeSessionId, () => chatStore.context?.contextId, () => chatStore.selectedSessionId, () => chatStore.history !== null], () => {
+  locationEpoch++; locatingTurn.value = false; turnLocationNotice.value = "";
+  if (requestedTurn.value) void locateRequestedTurn();
+}, { flush: "post", immediate: true });
+onBeforeUnmount(() => { locationEpoch++; });
 
 function captureError(error: unknown): void {
   actionErrorCode.value = error instanceof ChatClientError
@@ -328,7 +413,17 @@ async function pickProject(): Promise<void> {
 }
 
 async function submit(): Promise<void> {
-  if (submitting.value || !permissionCanSend.value) return;
+  if (submitting.value) return;
+  if (isDraftMode.value) {
+    const target = composerDraftTargetKey.value;
+    const result = await draft.submit(prompt.value);
+    if (result && "conversation_id" in result) {
+      composerDrafts.value = clearChatComposerDraft(composerDrafts.value, target);
+      await openDraftConversation(result.conversation_id);
+    }
+    return;
+  }
+  if (!normalPurposeReady.value || !permissionCanSend.value) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
@@ -581,7 +676,9 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="transientNotice" class="chat-entry__unsupported" role="alert">{{ transientNotice }}</p>
 
-      <p v-if="runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
+      <button v-else-if="permissionScope.hasCapability('schedule.read')" type="button" class="chat-notice__action yj-control" :disabled="submitting" @click="enterDraftMode">通过当前输入创建定时任务</button>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -589,15 +686,16 @@ onBeforeUnmount(() => {
         :projects="chatStore.projects"
         :selected-project-id="selectedProjectId"
         :readiness="readiness"
-        :can-send="chatStore.canSend && permissionCanSend"
+        :text-only="isDraftMode"
+        :can-send="isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
         :recovery-available="canRecoverReadiness"
-        :attachments="chatStore.draftAttachments"
-        :attachment-import-attempt="chatStore.attachmentImportAttempt"
-        :attachment-importing="chatStore.attachmentImporting"
-        :attachment-error-code="chatStore.attachmentErrorCode"
+        :attachments="isDraftMode ? [] : chatStore.draftAttachments"
+        :attachment-import-attempt="isDraftMode ? null : chatStore.attachmentImportAttempt"
+        :attachment-importing="!isDraftMode && chatStore.attachmentImporting"
+        :attachment-error-code="isDraftMode ? null : chatStore.attachmentErrorCode"
         :drag-active="dragActive"
         @pick-project="pickProject"
         @pick-attachments="pickAttachments"
@@ -608,7 +706,7 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
-        <template v-if="runtimePermissionsEnabled" #permission-control>
+        <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>
       </ChatComposer>
@@ -622,7 +720,7 @@ onBeforeUnmount(() => {
           {{ selectedSession?.title ?? (isHistoryLoading ? "正在读取任务" : "任务对话") }}
         </h1>
         <p class="chat-workspace__meta">
-          <span><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
+          <span v-if="isDraftMode">定时任务草案 · 仅输入文本</span><span v-else><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
           <span v-if="chatStore.liveTurnStatus"><YjIcon name="pending" size="xs" tone="muted" />{{ turnStatusLabel(chatStore.liveTurnStatus) }}</span>
         </p>
       </div>
@@ -660,6 +758,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <p v-if="requestedTurn" class="chat-entry__unsupported" role="status">{{ turnLocationNotice || '等待对应对话与轮次加载…' }} <button type="button" class="chat-notice__action yj-control" :disabled="locatingTurn" @click="locateRequestedTurn">{{ locatingTurn ? '定位中' : '定位本次轮次' }}</button></p>
           <ChatTimeline
             v-if="conversationTimeline"
             :timeline="conversationTimeline"
@@ -668,6 +767,10 @@ onBeforeUnmount(() => {
             :approval-transients="chatStore.approvalTransients"
             @approval-decision="decideApproval"
           >
+            <template v-if="isDraftMode" #structured-answer="{ turnId }">
+              <p>本轮用于生成定时任务草案。计划是否保存以确认回执为准。</p>
+              <button class="chat-notice__action yj-control" type="button" @click="draft.selectTurn(turnId)">查看本轮草案摘要</button>
+            </template>
             <template #legacy-records="{ turnId }">
               <template v-for="turn in displayTurns.filter(t => t.turnId === turnId && (!('projectionAuthority' in t) || t.projectionAuthority === 'legacy'))" :key="turn.turnId">
                 <ChatReasoningDisclosure v-if="turn.reasoning.length > 0" :disclosure-id="`legacy-reasoning-${turn.turnId}`" :metadata="turn.reasoning" :items="reasoningItems[turn.turnId] ?? []" :loading="reasoningLoading.has(turn.turnId)" @load="loadReasoning(turn)" />
@@ -757,7 +860,7 @@ onBeforeUnmount(() => {
             </div>
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
-          <RuntimeApprovalList v-if="runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
+          <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
         </div>
       </div>
 
@@ -784,7 +887,9 @@ onBeforeUnmount(() => {
         <button v-if="stableError.actionLabel" type="button" @click="handleStableErrorAction">{{ stableError.actionLabel }}</button>
       </p>
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
-      <p v-if="runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
+      <button v-else-if="permissionScope.hasCapability('schedule.read')" type="button" class="chat-notice__action yj-control" :disabled="submitting" @click="enterDraftMode">通过当前输入创建定时任务</button>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -793,15 +898,16 @@ onBeforeUnmount(() => {
         :selected-project-id="selectedSession?.projectId ?? null"
         :active-project-name="activeProject?.safeName"
         :readiness="readiness"
-        :can-send="chatStore.canSend && permissionCanSend"
+        :text-only="isDraftMode"
+        :can-send="isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="isStreaming"
         :recovery-available="canRecoverReadiness"
-          :attachments="chatStore.draftAttachments"
-          :attachment-import-attempt="chatStore.attachmentImportAttempt"
-          :attachment-importing="chatStore.attachmentImporting"
-        :attachment-error-code="chatStore.attachmentErrorCode"
+          :attachments="isDraftMode ? [] : chatStore.draftAttachments"
+          :attachment-import-attempt="isDraftMode ? null : chatStore.attachmentImportAttempt"
+          :attachment-importing="!isDraftMode && chatStore.attachmentImporting"
+        :attachment-error-code="isDraftMode ? null : chatStore.attachmentErrorCode"
         :drag-active="dragActive"
         @pick-project="pickProject"
         @pick-attachments="pickAttachments"
@@ -813,7 +919,7 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
-        <template v-if="runtimePermissionsEnabled" #permission-control>
+        <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>
       </ChatComposer>
@@ -838,6 +944,15 @@ onBeforeUnmount(() => {
       <p class="permission-dialog__note">本入口只展示已生效策略，不能在页面中提升权限。</p>
       <div class="permission-dialog__actions">
         <button type="button" class="yj-control yj-control--regular" @click="permissionDialogOpen = false">知道了</button>
+      </div>
+    </n-card>
+  </n-modal>
+  <n-modal :show="leaveScheduledOpen" :mask-closable="false" @update:show="finishScheduledLeave(false)">
+    <n-card class="permission-dialog" title="离开当前对话？" role="dialog" aria-modal="true" aria-label="离开当前对话确认">
+      <p>{{ changingDraftMode ? "切换创建方式将替换新任务输入。仅带入你当前输入的文本，附件和聊天历史不会发送；其它会话草稿保持。默认保留并留在当前对话。" : "有尚未发送的内容。离开后页面中的文字草稿会丢弃，已选择的附件保留在原草稿中。" }}</p>
+      <div class="permission-dialog__actions">
+        <button type="button" class="yj-control yj-control--regular" autofocus @click="finishScheduledLeave(false)">留在对话</button>
+        <button type="button" class="yj-control yj-control--regular" @click="finishScheduledLeave(true)">{{ changingDraftMode ? "确认切换" : "放弃文字并离开" }}</button>
       </div>
     </n-card>
   </n-modal>

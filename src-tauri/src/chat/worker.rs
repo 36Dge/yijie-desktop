@@ -110,6 +110,9 @@ mod feat144_reader_tests {
 #[derive(Clone)]
 pub struct DatabaseWorker {
     inner: Arc<DatabaseWorkerInner>,
+    pub(crate) schedule_changed: Arc<tokio::sync::Notify>,
+    pub(crate) timing_changed: Arc<tokio::sync::Notify>,
+    pub(crate) timing_lane: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct DatabaseWorkerInner {
@@ -133,6 +136,35 @@ impl Drop for DatabaseWorkerInner {
 }
 
 impl DatabaseWorker {
+    pub(crate) async fn claim_next_conversation_outbox_gated(
+        &self,
+        now: i64,
+        lease: i64,
+        gate: super::lifecycle::Lifecycle,
+        epoch: u64,
+    ) -> Result<Option<ClaimedOutbox>, ChatError> {
+        self.call(move |r| {
+            gate.validate(epoch)?;
+            r.claim_next_conversation_outbox(now, lease)
+        })
+        .await
+    }
+    pub(crate) async fn begin_conversation_dispatch(
+        &self,
+        operation: uuid::Uuid,
+        host: String,
+    ) -> Result<(), ChatError> {
+        self.call(move |r| r.begin_conversation_dispatch(operation, &host))
+            .await
+    }
+    pub async fn guard_conversation_dispatch(
+        &self,
+        operation_id: uuid::Uuid,
+    ) -> Result<(), ChatError> {
+        self.call(move |repo| repo.guard_conversation_dispatch(operation_id))
+            .await
+    }
+
     pub async fn native_thread_binding(
         &self,
         session_id: uuid::Uuid,
@@ -202,12 +234,34 @@ impl DatabaseWorker {
         key_store: Box<dyn DatabaseKeyStore>,
         receipt_key_store: Box<dyn ReceiptKeyStore>,
     ) -> Result<Self, ChatError> {
+        Self::start_with_schedule_storage(
+            chat_directory,
+            scope,
+            key_store,
+            receipt_key_store,
+            super::schedules::ScheduleStorageMode::CompatibleReader,
+        )
+    }
+
+    pub fn start_with_schedule_storage(
+        chat_directory: PathBuf,
+        scope: ChatScope,
+        key_store: Box<dyn DatabaseKeyStore>,
+        receipt_key_store: Box<dyn ReceiptKeyStore>,
+        mode: super::schedules::ScheduleStorageMode,
+    ) -> Result<Self, ChatError> {
         let database_exists = ChatRepository::database_exists(&chat_directory);
         let key = key_store.load_or_create(database_exists)?;
         let deletion_identity_exists =
             ChatRepository::deletion_identity_exists(&chat_directory, &key)?;
         let receipt_key = receipt_key_store.load_or_create(deletion_identity_exists)?;
-        let repository = ChatRepository::open(&chat_directory, &key, receipt_key, scope)?;
+        let repository = ChatRepository::open_with_schedule_storage(
+            &chat_directory,
+            &key,
+            receipt_key,
+            scope,
+            mode,
+        )?;
         let (sender, receiver) = mpsc::channel::<DatabaseJob>();
         #[cfg(test)]
         let thread_lifetime = Arc::new(());
@@ -225,6 +279,9 @@ impl DatabaseWorker {
             })
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         Ok(Self {
+            schedule_changed: Arc::new(tokio::sync::Notify::new()),
+            timing_changed: Arc::new(tokio::sync::Notify::new()),
+            timing_lane: Arc::new(tokio::sync::Mutex::new(())),
             inner: Arc::new(DatabaseWorkerInner {
                 sender: Some(sender),
                 thread: Some(thread),
@@ -234,13 +291,172 @@ impl DatabaseWorker {
         })
     }
 
+    /// One native candidate worker; storage and per-operation authority stay distinct.
+    pub(crate) async fn start_scheduled_candidate(
+        chat_directory: PathBuf,
+        scope: ChatScope,
+        key_store: Box<dyn DatabaseKeyStore>,
+        receipt_key_store: Box<dyn ReceiptKeyStore>,
+        authority: crate::native_auth::NativeAuthRuntime,
+        lifecycle: super::lifecycle::Lifecycle,
+    ) -> Result<Self, ChatError> {
+        let worker = Self::start_with_schedule_storage(
+            chat_directory,
+            scope,
+            key_store,
+            receipt_key_store,
+            super::schedules::ScheduleStorageMode::TimingFoundation,
+        )?;
+        worker
+            .call(move |r| {
+                let now = super::schedules::dispatch::timestamp()?;
+                authority
+                    .schedule_authority(now)
+                    .map_err(|_| ChatError::ScopeDenied)?
+                    .require(
+                        &r.scope,
+                        super::schedules::execution_generated::ScheduleCapability::ScheduleRead,
+                        now,
+                    )
+                    .map_err(|_| ChatError::ScopeDenied)?;
+                // Startup must not revive unrelated foreground outbox work.
+                r.schedule_background_only = true;
+                // Manual actions retain volatile permits; automatic runs require durable consent.
+                r.schedule_dispatch_authority = Some(authority.clone());
+                r.manual_runtime.enabled = true;
+                r.manual_runtime.lifecycle = Some(lifecycle.clone());
+                r.schedule_trigger_lifecycle = Some(lifecycle.clone());
+                r.schedule_draft_dispatch_authority = Some(authority);
+                r.draft_runtime.lifecycle = Some(lifecycle);
+                Ok(())
+            })
+            .await?;
+        Ok(worker)
+    }
+
+    /// Explicit native candidate constructor. No launcher, IPC, environment flag
+    /// or stored value selects this; normal opens always retain default denial.
+    #[allow(dead_code)]
+    pub(crate) async fn start_schedule_draft_candidate(
+        chat_directory: PathBuf,
+        scope: ChatScope,
+        key_store: Box<dyn DatabaseKeyStore>,
+        receipt_key_store: Box<dyn ReceiptKeyStore>,
+        authority: crate::native_auth::NativeAuthRuntime,
+    ) -> Result<Self, ChatError> {
+        let worker = Self::start_with_schedule_storage(
+            chat_directory,
+            scope,
+            key_store,
+            receipt_key_store,
+            super::schedules::ScheduleStorageMode::DraftFoundation,
+        )?;
+        worker
+            .call(move |r| {
+                let now = super::schedules::dispatch::timestamp()?;
+                authority
+                    .schedule_authority(now)
+                    .map_err(|_| ChatError::ScopeDenied)?
+                    .require(
+                        &r.scope,
+                        super::schedules::execution_generated::ScheduleCapability::ScheduleRun,
+                        now,
+                    )
+                    .map_err(|_| ChatError::ScopeDenied)?;
+                r.schedule_draft_dispatch_authority = Some(authority);
+                Ok(())
+            })
+            .await?;
+        Ok(worker)
+    }
+
+    /// Explicit native candidate constructor. No launcher, IPC, environment flag
+    /// or stored value selects this; normal opens always retain default denial.
+    #[allow(dead_code)]
+    pub(crate) async fn start_schedule_dispatch_candidate(
+        chat_directory: PathBuf,
+        scope: ChatScope,
+        key_store: Box<dyn DatabaseKeyStore>,
+        receipt_key_store: Box<dyn ReceiptKeyStore>,
+        authority: crate::native_auth::NativeAuthRuntime,
+    ) -> Result<Self, ChatError> {
+        let worker = Self::start_with_schedule_storage(
+            chat_directory,
+            scope,
+            key_store,
+            receipt_key_store,
+            super::schedules::ScheduleStorageMode::DispatchFoundation,
+        )?;
+        worker
+            .call(move |r| {
+                let now = super::schedules::dispatch::timestamp()?;
+                authority
+                    .schedule_authority(now)
+                    .map_err(|_| ChatError::ScopeDenied)?
+                    .require(
+                        &r.scope,
+                        super::schedules::execution_generated::ScheduleCapability::ScheduleRun,
+                        now,
+                    )
+                    .map_err(|_| ChatError::ScopeDenied)?;
+                r.schedule_dispatch_authority = Some(authority);
+                Ok(())
+            })
+            .await?;
+        Ok(worker)
+    }
+
+    /// Schema and authority opt-in remain separate; no ordinary caller selects this candidate.
+    #[allow(dead_code)]
+    pub(crate) async fn start_schedule_trigger_candidate(
+        chat_directory: PathBuf,
+        scope: ChatScope,
+        key_store: Box<dyn DatabaseKeyStore>,
+        receipt_key_store: Box<dyn ReceiptKeyStore>,
+        authority: crate::native_auth::NativeAuthRuntime,
+        lifecycle: super::lifecycle::Lifecycle,
+    ) -> Result<Self, ChatError> {
+        let worker = Self::start_with_schedule_storage(
+            chat_directory,
+            scope,
+            key_store,
+            receipt_key_store,
+            super::schedules::ScheduleStorageMode::TriggerFoundation,
+        )?;
+        worker
+            .call(move |r| {
+                let now = super::schedules::dispatch::timestamp()?;
+                authority
+                    .schedule_authority(now)
+                    .map_err(|_| ChatError::ScopeDenied)?
+                    .require(
+                        &r.scope,
+                        super::schedules::execution_generated::ScheduleCapability::ScheduleRun,
+                        now,
+                    )
+                    .map_err(|_| ChatError::ScopeDenied)?;
+                r.schedule_dispatch_authority = Some(authority);
+                r.schedule_trigger_lifecycle = Some(lifecycle);
+                Ok(())
+            })
+            .await?;
+        Ok(worker)
+    }
+
+    pub(crate) fn has_other_owners(&self) -> bool {
+        Arc::strong_count(&self.inner) != 1
+    }
+    pub(crate) async fn checkpoint_for_exit(&self) -> Result<(), ChatError> {
+        self.call(|r| r.checkpoint_after_delete()).await
+    }
+
     #[cfg(feature = "feat128-s10-runtime")]
     pub(super) async fn feat128_s10d_checkpoint(&self) -> Result<(), ChatError> {
         self.call(|repository| repository.checkpoint_after_delete())
             .await
     }
 
-    async fn call<T, F>(&self, operation: F) -> Result<T, ChatError>
+    pub(super) async fn call<T, F>(&self, operation: F) -> Result<T, ChatError>
     where
         T: Send + 'static,
         F: FnOnce(&mut ChatRepository) -> Result<T, ChatError> + Send + 'static,

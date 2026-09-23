@@ -1,0 +1,4510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/desktop/private/scheduled-task-ipc/v1",
+  "title": "ScheduledTaskPrivateIpcV1",
+  "description": "Desktop-owned native/WebView boundary. Shared domain sources remain canonical. Explicit candidate SQL26; ordinary startup15. Availability never activates migration or dispatch. Timing contains only verified native clock facts; no model, arbitrary path, authority, tick or release input.",
+  "$defs": {
+    "Empty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "FilterState": {
+      "type": "string",
+      "enum": [
+        "all",
+        "enabled",
+        "paused",
+        "completed"
+      ]
+    },
+    "PlanOrder": {
+      "type": "string",
+      "enum": [
+        "name_asc",
+        "name_desc",
+        "next_asc"
+      ]
+    },
+    "PauseReason": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "budget",
+        "authorization",
+        "target",
+        "permission",
+        "resource",
+        "confirmation"
+      ]
+    },
+    "PrivateErrorCode": {
+      "type": "string",
+      "enum": [
+        "context_invalid",
+        "cursor_invalid",
+        "protocol_mismatch",
+        "operation_unknown",
+        "storage_read_only",
+        "draft_unavailable",
+        "draft_source_invalid",
+        "draft_source_deleted",
+        "draft_not_candidate"
+      ]
+    },
+    "IpcErrorCode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/execution_ExecutionErrorCode"
+        },
+        {
+          "$ref": "#/$defs/PrivateErrorCode"
+        }
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "code"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "code": {
+          "$ref": "#/$defs/IpcErrorCode"
+        }
+      }
+    },
+    "Availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "readable",
+        "writable",
+        "preparation_enabled",
+        "dispatch",
+        "platform_qualified"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 26
+        },
+        "readable": {
+          "type": "boolean"
+        },
+        "writable": {
+          "type": "boolean"
+        },
+        "preparation_enabled": {
+          "type": "boolean"
+        },
+        "dispatch": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "native_candidate"
+          ]
+        },
+        "platform_qualified": {
+          "const": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "PlanQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "include_deleted": {
+          "type": "boolean"
+        },
+        "order": {
+          "$ref": "#/$defs/PlanOrder"
+        }
+      }
+    },
+    "TargetQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 255
+        }
+      }
+    },
+    "RecordQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        }
+      }
+    },
+    "PlanKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "PlanMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "expected_revision"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "TimeQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule"
+      ],
+      "properties": {
+        "rule": {
+          "$ref": "#/$defs/plan_TimeRule"
+        }
+      }
+    },
+    "RunKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "run_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "run",
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "OccurrenceKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "plan_id",
+        "schedule_epoch",
+        "logical_slot"
+      ],
+      "properties": {
+        "kind": {
+          "const": "occurrence",
+          "type": "string"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "logical_slot": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 16
+        }
+      }
+    },
+    "RecordKey": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RunKey"
+        },
+        {
+          "$ref": "#/$defs/OccurrenceKey"
+        }
+      ]
+    },
+    "RerunInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "RerunConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id",
+        "original_snapshot_digest",
+        "plan_id",
+        "revision",
+        "definition_digest",
+        "grant_id"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "original_snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "ManualInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "revision"
+      ],
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "PlanSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "name",
+        "revision",
+        "raw_state",
+        "effective_state",
+        "target_mode",
+        "target_state"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "name": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/name"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "raw_state": {
+          "$ref": "#/$defs/plan_PlanState"
+        },
+        "effective_state": {
+          "$ref": "#/$defs/plan_PlanState"
+        },
+        "pause_reason": {
+          "$ref": "#/$defs/PauseReason"
+        },
+        "target_mode": {
+          "$ref": "#/$defs/plan_TargetMode"
+        },
+        "target_state": {
+          "$ref": "#/$defs/plan_TargetState"
+        },
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "PlanDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan",
+        "summary"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/plan_PlanView"
+        },
+        "summary": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "grant": {
+          "$ref": "#/$defs/execution_GrantView"
+        }
+      }
+    },
+    "EnableResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan",
+        "grant",
+        "automatic_consent"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/plan_PlanView"
+        },
+        "grant": {
+          "$ref": "#/$defs/execution_GrantView"
+        },
+        "future_hold": {
+          "$ref": "#/$defs/PauseReason"
+        },
+        "automatic_consent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RerunPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmation",
+        "original",
+        "current"
+      ],
+      "properties": {
+        "confirmation": {
+          "$ref": "#/$defs/RerunReview"
+        },
+        "original": {
+          "$ref": "#/$defs/plan_PlanDefinition"
+        },
+        "current": {
+          "$ref": "#/$defs/plan_PlanDefinition"
+        }
+      }
+    },
+    "TargetSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "title",
+        "updated_at",
+        "workspace_source",
+        "can_save",
+        "execution"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "updated_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "workspace_source": {
+          "$ref": "#/$defs/execution_WorkspaceSource"
+        },
+        "can_save": {
+          "type": "boolean"
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "requires_recheck",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "target_unavailable",
+            "permission_denied",
+            "busy",
+            "native_identity_unavailable"
+          ]
+        }
+      }
+    },
+    "Disposition": {
+      "type": "string",
+      "enum": [
+        "consumed",
+        "skipped_paused",
+        "missed_offline",
+        "clock_discontinuity",
+        "cancelled",
+        "missed_late",
+        "busy",
+        "target_unavailable",
+        "permission_denied",
+        "resource_unavailable",
+        "unauthorized"
+      ]
+    },
+    "Occurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "scheduled_at",
+        "disposition"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/OccurrenceKey"
+        },
+        "scheduled_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "disposition": {
+          "$ref": "#/$defs/Disposition"
+        },
+        "missed_through": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "ConversationLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "deleted",
+            "unavailable"
+          ]
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "local_turn_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "conversation_id",
+              "local_turn_id"
+            ],
+            "properties": {
+              "conversation_id": {
+                "$ref": "#/$defs/plan_Identity"
+              },
+              "local_turn_id": {
+                "$ref": "#/$defs/plan_Identity"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "conversation_id": false,
+              "local_turn_id": false
+            }
+          }
+        }
+      ]
+    },
+    "Timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_time",
+        "duration",
+        "source"
+      ],
+      "properties": {
+        "execution_time": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "unknown",
+            "known"
+          ]
+        },
+        "duration": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "unknown",
+            "known",
+            "in_progress"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "no_execution_clock",
+            "runtime_read"
+          ]
+        },
+        "started_at": {
+          "type": "integer",
+          "minimum": -8640000000000,
+          "maximum": 8640000000000
+        },
+        "completed_at": {
+          "type": "integer",
+          "minimum": -8640000000000,
+          "maximum": 8640000000000
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "time_zone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "diagnostic": {
+          "type": "string",
+          "enum": [
+            "format_unsupported",
+            "field_invalid",
+            "source_conflict",
+            "history_unavailable",
+            "identity_mismatch"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "execution_time": {
+                "const": "known"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "started_at"
+            ],
+            "properties": {
+              "started_at": {}
+            }
+          },
+          "else": {
+            "properties": {
+              "started_at": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "duration": {
+                "const": "known"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "duration_ms"
+            ],
+            "properties": {
+              "duration_ms": {}
+            }
+          },
+          "else": {
+            "properties": {
+              "duration_ms": false
+            }
+          }
+        }
+      ]
+    },
+    "RunRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "plan",
+        "run",
+        "conversation",
+        "timing",
+        "attention",
+        "business_result"
+      ],
+      "properties": {
+        "kind": {
+          "const": "run",
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/$defs/RunKey"
+        },
+        "plan": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "run": {
+          "$ref": "#/$defs/execution_RunView"
+        },
+        "occurrence": {
+          "$ref": "#/$defs/Occurrence"
+        },
+        "conversation": {
+          "$ref": "#/$defs/ConversationLink"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        },
+        "attention": {
+          "type": "string",
+          "enum": [
+            "none",
+            "needs_attention"
+          ]
+        },
+        "business_result": {
+          "const": "not_evaluated",
+          "type": "string"
+        }
+      }
+    },
+    "OccurrenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "plan",
+        "occurrence",
+        "timing"
+      ],
+      "properties": {
+        "kind": {
+          "const": "occurrence",
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/$defs/OccurrenceKey"
+        },
+        "plan": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "occurrence": {
+          "$ref": "#/$defs/Occurrence"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        }
+      }
+    },
+    "RecordView": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RunRecord"
+        },
+        {
+          "$ref": "#/$defs/OccurrenceRecord"
+        }
+      ]
+    },
+    "SavedConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "content",
+        "rule",
+        "target_mode"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/name"
+        },
+        "content": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/content"
+        },
+        "rule": {
+          "$ref": "#/$defs/plan_TimeRule"
+        },
+        "target_mode": {
+          "$ref": "#/$defs/plan_TargetMode"
+        }
+      }
+    },
+    "RecordDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/RecordView"
+        },
+        "configuration": {
+          "$ref": "#/$defs/SavedConfiguration"
+        }
+      }
+    },
+    "PlanPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanSummary"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "TargetPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetSummary"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "RecordPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordView"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "AvailabilityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "AvailabilityResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/Availability"
+        }
+      }
+    },
+    "ListPlansRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanQuery"
+        }
+      }
+    },
+    "ListPlansResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanPage"
+        }
+      }
+    },
+    "GetPlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanKey"
+        }
+      }
+    },
+    "GetPlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanDetail"
+        }
+      }
+    },
+    "PreviewTimeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/TimeQuery"
+        }
+      }
+    },
+    "PreviewTimeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/plan_TimePreview"
+        }
+      }
+    },
+    "ListTargetsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/TargetQuery"
+        }
+      }
+    },
+    "ListTargetsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/TargetPage"
+        }
+      }
+    },
+    "ListRecordsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordQuery"
+        }
+      }
+    },
+    "ListRecordsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordPage"
+        }
+      }
+    },
+    "GetRecordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordKey"
+        }
+      }
+    },
+    "GetRecordResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordDetail"
+        }
+      }
+    },
+    "SavePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/plan_SavePlanRequest"
+        }
+      }
+    },
+    "SavePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/plan_PlanView"
+        }
+      }
+    },
+    "PausePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutation"
+        }
+      }
+    },
+    "PausePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/plan_PlanView"
+        }
+      }
+    },
+    "DeletePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutation"
+        }
+      }
+    },
+    "DeletePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/plan_PlanView"
+        }
+      }
+    },
+    "ConfirmGrantRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/execution_GrantConfirmation"
+        }
+      }
+    },
+    "ConfirmGrantResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/execution_GrantView"
+        }
+      }
+    },
+    "ConfirmEnableRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/EnableConfirmation"
+        }
+      }
+    },
+    "ConfirmEnableResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/EnableResult"
+        }
+      }
+    },
+    "ManualRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/ManualInput"
+        }
+      }
+    },
+    "ManualRunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/execution_RunView"
+        }
+      }
+    },
+    "PreviewRerunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RerunInput"
+        }
+      }
+    },
+    "PreviewRerunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RerunPreview"
+        }
+      }
+    },
+    "ConfirmRerunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RerunConfirmation"
+        }
+      }
+    },
+    "ConfirmRerunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/execution_RunView"
+        }
+      }
+    },
+    "DraftSubmit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/draft_Text"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "DraftKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "source_id"
+      ]
+    },
+    "DraftReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "local_turn_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "status": {
+          "type": "string",
+          "const": "accepted"
+        }
+      },
+      "required": [
+        "source_id",
+        "conversation_id",
+        "local_turn_id",
+        "operation_id",
+        "status"
+      ]
+    },
+    "DraftPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "candidate",
+            "needs_clarification",
+            "unavailable",
+            "confirmed"
+          ]
+        },
+        "source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "output": {
+          "$ref": "#/$defs/draft_Output"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "source_id",
+        "status"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "candidate",
+                  "needs_clarification"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "source_digest",
+              "output"
+            ],
+            "properties": {
+              "source_digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "output": {
+                "$ref": "#/$defs/draft_Output"
+              },
+              "plan_id": false
+            }
+          },
+          "else": {
+            "properties": {
+              "source_digest": false,
+              "output": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "confirmed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "plan_id"
+            ],
+            "properties": {
+              "plan_id": {
+                "$ref": "#/$defs/plan_Identity"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "plan_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "candidate"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "output": {
+                "$ref": "#/$defs/draft_Candidate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "needs_clarification"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "output": {
+                "$ref": "#/$defs/draft_Clarification"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DraftConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "definition": {
+          "$ref": "#/$defs/plan_PlanDefinition"
+        }
+      },
+      "required": [
+        "source_id",
+        "source_digest",
+        "definition"
+      ]
+    },
+    "SubmitDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSubmit"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "SubmitDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "PreviewDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "PreviewDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftPreview"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ConfirmDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftConfirmation"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ConfirmDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/plan_PlanView"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "DraftSourceQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "local_turn_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "local_turn_id"
+      ]
+    },
+    "DraftSourceLookup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "found": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "found"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "found": {
+                "const": true
+              }
+            },
+            "required": [
+              "found"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "$ref": "#/$defs/DraftReceipt"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "else": {
+            "not": {
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/DraftReceipt"
+                }
+              },
+              "required": [
+                "source"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "OperationCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "storage_disabled",
+            "storage_read_only",
+            "authority_missing",
+            "candidate_disabled",
+            "runtime_unqualified"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": true
+              }
+            },
+            "required": [
+              "available"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "ready"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "storage_disabled",
+                  "storage_read_only",
+                  "authority_missing",
+                  "candidate_disabled",
+                  "runtime_unqualified"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "OperationCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "save": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "manual": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "automatic": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "draft": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "single_run": {
+          "$ref": "#/$defs/OperationCapability"
+        }
+      },
+      "required": [
+        "read",
+        "save",
+        "manual",
+        "automatic",
+        "draft",
+        "single_run"
+      ]
+    },
+    "FindDraftSourceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSourceQuery"
+        }
+      }
+    },
+    "FindDraftSourceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftSourceLookup"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "OperationCapabilitiesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "OperationCapabilitiesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/OperationCapabilities"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ContinueDraftSourceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftKey"
+        }
+      }
+    },
+    "ContinueDraftSourceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "PlanCardOrder": {
+      "type": "string",
+      "enum": [
+        "created_desc",
+        "created_asc"
+      ]
+    },
+    "PlanCardQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "include_deleted": {
+          "type": "boolean"
+        },
+        "order": {
+          "$ref": "#/$defs/PlanCardOrder"
+        }
+      }
+    },
+    "PlanCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "content_preview",
+        "rule"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "content_preview": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "rule": {
+          "$ref": "#/$defs/plan_TimeRule"
+        },
+        "created_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "target_title": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "RecordRowQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        }
+      }
+    },
+    "RecordRowSource": {
+      "type": "string",
+      "enum": [
+        "run_snapshot",
+        "current_plan_reference"
+      ]
+    },
+    "RecordRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "name",
+        "content_preview",
+        "source"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/RecordView"
+        },
+        "name": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/name"
+        },
+        "content_preview": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "source": {
+          "$ref": "#/$defs/RecordRowSource"
+        }
+      }
+    },
+    "PlanMutationReceiptQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_request_id"
+      ],
+      "properties": {
+        "original_request_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "ReceiptObservation": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "not_observed"
+      ]
+    },
+    "PlanMutationReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ObservedPlanMutationReceipt"
+        },
+        {
+          "$ref": "#/$defs/UnobservedPlanMutationReceipt"
+        }
+      ]
+    },
+    "PlanCardPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanCard"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "RecordRowPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordRow"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "ListPlanCardsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanCardQuery"
+        }
+      }
+    },
+    "ListPlanCardsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanCardPage"
+        }
+      }
+    },
+    "ListRecordRowsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordRowQuery"
+        }
+      }
+    },
+    "ListRecordRowsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordRowPage"
+        }
+      }
+    },
+    "ReadPlanMutationReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutationReceiptQuery"
+        }
+      }
+    },
+    "ReadPlanMutationReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanMutationReceipt"
+        }
+      }
+    },
+    "ObservedPlanMutationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation",
+        "plan_id",
+        "current_plan"
+      ],
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "observed"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "current_plan": {
+          "$ref": "#/$defs/PlanDetail"
+        }
+      }
+    },
+    "UnobservedPlanMutationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation"
+      ],
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      }
+    },
+    "DraftSubmissionKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original_request_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "original_request_id"
+      ]
+    },
+    "DraftSubmissionNotObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      },
+      "required": [
+        "observation"
+      ]
+    },
+    "DraftSubmissionObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "observed"
+        },
+        "receipt": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "observation",
+        "receipt"
+      ]
+    },
+    "DraftSubmissionDeleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "source_deleted"
+        },
+        "source_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "observation",
+        "source_id"
+      ]
+    },
+    "DraftSubmissionReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DraftSubmissionNotObserved"
+        },
+        {
+          "$ref": "#/$defs/DraftSubmissionObserved"
+        },
+        {
+          "$ref": "#/$defs/DraftSubmissionDeleted"
+        }
+      ]
+    },
+    "ReadDraftSubmissionReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSubmissionKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ReadDraftSubmissionReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftSubmissionReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ExecutionReceiptKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "manual",
+            "enable",
+            "single_grant",
+            "rerun"
+          ]
+        },
+        "original_request_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "operation",
+        "original_request_id"
+      ]
+    },
+    "ExecutionNotObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      },
+      "required": [
+        "observation"
+      ]
+    },
+    "GrantObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "grant_observed"
+        },
+        "grant": {
+          "$ref": "#/$defs/execution_GrantView"
+        }
+      },
+      "required": [
+        "observation",
+        "grant"
+      ]
+    },
+    "ManualObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "manual_observed"
+        },
+        "run": {
+          "$ref": "#/$defs/execution_RunView"
+        }
+      },
+      "required": [
+        "observation",
+        "run"
+      ]
+    },
+    "ExecutionReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ExecutionNotObserved"
+        },
+        {
+          "$ref": "#/$defs/GrantObserved"
+        },
+        {
+          "$ref": "#/$defs/ManualObserved"
+        },
+        {
+          "$ref": "#/$defs/EnableObserved"
+        },
+        {
+          "$ref": "#/$defs/SingleGrantObserved"
+        },
+        {
+          "$ref": "#/$defs/RerunObserved"
+        }
+      ]
+    },
+    "ReadExecutionReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/ExecutionReceiptKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ReadExecutionReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/ExecutionReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "EnableConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {
+          "$ref": "#/$defs/execution_GrantConfirmation"
+        },
+        "expected_next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      },
+      "required": [
+        "confirmation",
+        "expected_next_at"
+      ]
+    },
+    "EnableObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "enable_observed"
+        },
+        "result": {
+          "$ref": "#/$defs/EnableResult"
+        }
+      },
+      "required": [
+        "observation",
+        "result"
+      ]
+    },
+    "RerunReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id",
+        "original_snapshot_digest",
+        "plan_id",
+        "revision",
+        "definition_digest"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "original_snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "SingleRunKind": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "rerun"
+      ]
+    },
+    "SingleRunGrantConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {
+          "$ref": "#/$defs/execution_GrantConfirmation"
+        },
+        "kind": {
+          "$ref": "#/$defs/SingleRunKind"
+        },
+        "review": {
+          "$ref": "#/$defs/RerunReview"
+        }
+      },
+      "required": [
+        "confirmation",
+        "kind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rerun"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "review"
+            ],
+            "properties": {
+              "review": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "review"
+              ],
+              "properties": {
+                "review": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SingleRunGrantResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grant": {
+          "$ref": "#/$defs/execution_GrantView"
+        },
+        "kind": {
+          "$ref": "#/$defs/SingleRunKind"
+        },
+        "original_run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      },
+      "required": [
+        "grant",
+        "kind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rerun"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "original_run_id"
+            ],
+            "properties": {
+              "original_run_id": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "original_run_id"
+              ],
+              "properties": {
+                "original_run_id": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ConfirmSingleRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/SingleRunGrantConfirmation"
+        }
+      }
+    },
+    "ConfirmSingleRunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/SingleRunGrantResult"
+        }
+      }
+    },
+    "SingleGrantObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "single_grant_observed"
+        },
+        "result": {
+          "$ref": "#/$defs/SingleRunGrantResult"
+        }
+      },
+      "required": [
+        "observation",
+        "result"
+      ]
+    },
+    "RerunObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "rerun_observed"
+        },
+        "run": {
+          "$ref": "#/$defs/execution_RunView"
+        }
+      },
+      "required": [
+        "observation",
+        "run"
+      ]
+    },
+    "ImportantUpdateState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "needs_attention",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "ImportantUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "plan_id",
+        "name",
+        "state"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/ImportantUpdateState"
+        }
+      }
+    },
+    "ImportantUpdates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "truncated"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ImportantUpdate"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ImportantUpdatesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "contextId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "ImportantUpdatesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/ImportantUpdates"
+        }
+      }
+    },
+    "plan_Identity": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "plan_TimeRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frequency",
+        "time_zone",
+        "local_time"
+      ],
+      "properties": {
+        "frequency": {
+          "enum": [
+            "once",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "time_zone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "local_time": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "local_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "weekdays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "once"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "local_date"
+            ],
+            "properties": {
+              "local_date": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "local_date": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "weekly"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "weekdays"
+            ],
+            "properties": {
+              "weekdays": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 7
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "weekdays": false
+            }
+          }
+        }
+      ]
+    },
+    "plan_TargetMode": {
+      "enum": [
+        "dedicated_chat",
+        "new_chat_each_run",
+        "existing_chat"
+      ]
+    },
+    "plan_PlanState": {
+      "type": "string",
+      "enum": [
+        "paused",
+        "enabled",
+        "completed",
+        "deleted"
+      ]
+    },
+    "plan_TargetState": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "unbound",
+        "missing"
+      ]
+    },
+    "plan_ScheduleErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_input",
+        "target_unavailable",
+        "not_found",
+        "revision_conflict",
+        "request_conflict",
+        "storage_disabled",
+        "storage_unavailable",
+        "time_query_exhausted",
+        "rule_version_unsupported",
+        "execution_not_ready"
+      ]
+    },
+    "plan_TargetReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/plan_TargetMode"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/plan_Identity"
+        }
+      }
+    },
+    "plan_PlanDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "content",
+        "rule",
+        "target"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "rule": {
+          "$ref": "#/$defs/plan_TimeRule"
+        },
+        "target": {
+          "$ref": "#/$defs/plan_TargetReference"
+        }
+      }
+    },
+    "plan_SavePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "definition"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definition": {
+          "$ref": "#/$defs/plan_PlanDefinition"
+        }
+      },
+      "dependentRequired": {
+        "plan_id": [
+          "expected_revision"
+        ],
+        "expected_revision": [
+          "plan_id"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "mode": {
+                        "const": "existing_chat"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "required": [
+                      "conversation_id"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "conversation_id": {
+                        "$ref": "#/$defs/plan_TargetReference/properties/conversation_id"
+                      }
+                    }
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "conversation_id": false
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "plan_PlanView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "revision",
+        "schedule_epoch",
+        "definition",
+        "state",
+        "target_state",
+        "effective_from",
+        "rule_version",
+        "tzdb_version"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definition": {
+          "$ref": "#/$defs/plan_PlanDefinition"
+        },
+        "state": {
+          "$ref": "#/$defs/plan_PlanState"
+        },
+        "target_state": {
+          "$ref": "#/$defs/plan_TargetState"
+        },
+        "effective_from": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "rule_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "tzdb_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "authorization_ref": {
+          "$ref": "#/$defs/plan_Identity"
+        },
+        "authorization_expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        }
+      },
+      "dependentRequired": {
+        "authorization_ref": [
+          "authorization_expires_at"
+        ],
+        "authorization_expires_at": [
+          "authorization_ref"
+        ]
+      }
+    },
+    "plan_TimePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skipped_slots",
+        "candidates_examined",
+        "rule_version",
+        "tzdb_version"
+      ],
+      "properties": {
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "logical_slot": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+        },
+        "skipped_slots": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 16
+          }
+        },
+        "candidates_examined": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "rule_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "tzdb_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      },
+      "dependentRequired": {
+        "next_at": [
+          "logical_slot"
+        ],
+        "logical_slot": [
+          "next_at"
+        ]
+      }
+    },
+    "execution_Identity": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "execution_ScheduleCapability": {
+      "type": "string",
+      "enum": [
+        "schedule.read",
+        "schedule.manage",
+        "schedule.run"
+      ]
+    },
+    "execution_WorkspaceSource": {
+      "type": "string",
+      "enum": [
+        "user_project",
+        "managed_schedule"
+      ]
+    },
+    "execution_WorkspaceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "resource_id"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/execution_WorkspaceSource"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/execution_Identity"
+        }
+      }
+    },
+    "execution_ExecutionErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_input",
+        "not_found",
+        "scope_denied",
+        "revision_conflict",
+        "request_conflict",
+        "target_unavailable",
+        "permission_denied",
+        "grant_missing",
+        "grant_expired",
+        "grant_exhausted",
+        "grant_stale",
+        "reservation_busy",
+        "storage_disabled",
+        "storage_unavailable",
+        "format_unsupported",
+        "execution_not_ready"
+      ]
+    },
+    "execution_GrantState": {
+      "type": "string",
+      "enum": [
+        "active",
+        "stale",
+        "expired",
+        "exhausted"
+      ]
+    },
+    "execution_GrantConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "plan_id",
+        "expected_revision",
+        "max_runs",
+        "expires_at"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "execution_GrantView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "plan_id",
+        "plan_revision",
+        "authorization_revision",
+        "definition_digest",
+        "workspace",
+        "max_runs",
+        "occupied_runs",
+        "expires_at",
+        "state"
+      ],
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "authorization_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "workspace": {
+          "$ref": "#/$defs/execution_WorkspaceReference"
+        },
+        "max_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "occupied_runs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "state": {
+          "$ref": "#/$defs/execution_GrantState"
+        }
+      }
+    },
+    "execution_RunTrigger": {
+      "type": "string",
+      "enum": [
+        "automatic",
+        "manual",
+        "rerun"
+      ]
+    },
+    "execution_DeliveryState": {
+      "type": "string",
+      "enum": [
+        "reserved",
+        "sending",
+        "accepted",
+        "uncertain",
+        "terminal",
+        "cancelled"
+      ]
+    },
+    "execution_NativeOutcome": {
+      "type": "string",
+      "enum": [
+        "unobserved",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "execution_RunView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "plan_id",
+        "plan_revision",
+        "schedule_epoch",
+        "request_id",
+        "operation_id",
+        "trigger",
+        "grant_id",
+        "snapshot_digest",
+        "workspace",
+        "permission_mode",
+        "delivery_state",
+        "native_outcome",
+        "needs_attention"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "request_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "trigger": {
+          "$ref": "#/$defs/execution_RunTrigger"
+        },
+        "original_run_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "logical_slot": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/execution_Identity"
+        },
+        "snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "workspace": {
+          "$ref": "#/$defs/execution_WorkspaceReference"
+        },
+        "permission_mode": {
+          "type": "string",
+          "enum": [
+            "ask"
+          ]
+        },
+        "delivery_state": {
+          "$ref": "#/$defs/execution_DeliveryState"
+        },
+        "native_outcome": {
+          "$ref": "#/$defs/execution_NativeOutcome"
+        },
+        "needs_attention": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "automatic"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "logical_slot"
+            ],
+            "properties": {
+              "logical_slot": {
+                "$ref": "#/$defs/execution_RunView/properties/logical_slot"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "logical_slot": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger": {
+                "const": "rerun"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "original_run_id"
+            ],
+            "properties": {
+              "original_run_id": {
+                "$ref": "#/$defs/execution_RunView/properties/original_run_id"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "original_run_id": false
+            }
+          }
+        }
+      ]
+    },
+    "draft_Identity": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "draft_Version": {
+      "type": "integer",
+      "const": 1
+    },
+    "draft_Text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "draft_CreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "task_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/draft_Identity"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "task_id",
+        "workspace_id"
+      ]
+    },
+    "draft_ResumeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version"
+      ]
+    },
+    "draft_TurnRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "operation_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "text": {
+          "$ref": "#/$defs/draft_Text"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "operation_id",
+        "text"
+      ]
+    },
+    "draft_SessionReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "purpose": {
+          "type": "string",
+          "const": "scheduled_plan_draft"
+        },
+        "task_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "agent_session_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/draft_Identity"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "purpose",
+        "task_id",
+        "agent_session_id",
+        "workspace_id"
+      ]
+    },
+    "draft_TurnReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "agent_session_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "turn_id": {
+          "$ref": "#/$defs/draft_Identity"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "agent_session_id",
+        "operation_id",
+        "turn_id"
+      ]
+    },
+    "draft_Capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "storage_disabled",
+            "policy_unqualified"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "available",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": true
+              }
+            },
+            "required": [
+              "available"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "ready"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "storage_disabled",
+                  "policy_unqualified"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "draft_ErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "not_found",
+        "request_conflict",
+        "purpose_conflict",
+        "storage_disabled",
+        "policy_unqualified",
+        "operation_unknown",
+        "busy",
+        "storage_unavailable",
+        "unauthorized"
+      ]
+    },
+    "draft_Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "code": {
+          "$ref": "#/$defs/draft_ErrorCode"
+        }
+      },
+      "required": [
+        "schema_version",
+        "code"
+      ]
+    },
+    "draft_Clarification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "missing_fields",
+        "question"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "needs_clarification"
+        },
+        "missing_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 6,
+          "items": {
+            "enum": [
+              "name",
+              "content",
+              "frequency",
+              "time",
+              "time_zone",
+              "target"
+            ]
+          }
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "draft_Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "name",
+        "content",
+        "schedule",
+        "target"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "kind": {
+          "const": "candidate"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "frequency",
+            "time_zone",
+            "local_time"
+          ],
+          "properties": {
+            "frequency": {
+              "enum": [
+                "once",
+                "daily",
+                "weekdays",
+                "weekly"
+              ]
+            },
+            "time_zone": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "local_time": {
+              "type": "string",
+              "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+            },
+            "local_date": {
+              "type": "string",
+              "format": "date"
+            },
+            "weekdays": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 7
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "frequency": {
+                    "const": "once"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "local_date"
+                ],
+                "properties": {
+                  "local_date": {
+                    "type": "string",
+                    "format": "date"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "local_date": false
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "frequency": {
+                    "const": "weekly"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "weekdays"
+                ],
+                "properties": {
+                  "weekdays": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 7,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 7
+                    }
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "weekdays": false
+                }
+              }
+            }
+          ]
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "dedicated_chat",
+                "new_chat_each_run",
+                "existing_chat"
+              ]
+            },
+            "existing_chat_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "existing_chat"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "existing_chat_label"
+                ],
+                "properties": {
+                  "existing_chat_label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "existing_chat_label": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "draft_Output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/draft_Clarification"
+        },
+        {
+          "$ref": "#/$defs/draft_Candidate"
+        }
+      ]
+    },
+    "draft_RecoveryMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "purpose": {
+          "type": "string",
+          "const": "scheduled_plan_draft"
+        },
+        "task_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "agent_session_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "mapping_state": {
+          "type": "string",
+          "enum": [
+            "reserved",
+            "bound"
+          ]
+        },
+        "codex_thread_id": {
+          "$ref": "#/$defs/draft_Identity"
+        },
+        "responding_host_instance_id": {
+          "$ref": "#/$defs/draft_Identity"
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_version",
+        "purpose",
+        "task_id",
+        "agent_session_id",
+        "workspace_id",
+        "mapping_state"
+      ],
+      "description": "Read-only persistent purpose and mapping. Responding instance is not the original execution generation. Omitted IDs are unknown, never non-execution evidence.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mapping_state": {
+                "const": "bound"
+              }
+            },
+            "required": [
+              "mapping_state"
+            ]
+          },
+          "then": {
+            "required": [
+              "codex_thread_id"
+            ],
+            "properties": {
+              "codex_thread_id": {
+                "$ref": "#/$defs/draft_Identity"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "codex_thread_id"
+              ],
+              "properties": {
+                "codex_thread_id": {
+                  "$ref": "#/$defs/draft_Identity"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

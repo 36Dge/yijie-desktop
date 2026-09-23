@@ -331,6 +331,7 @@ impl ChatIpcRuntime {
         application: ConversationApplication,
         authorization: ChatAuthorizationManager,
     ) -> Result<(), ChatError> {
+        application.require_coordinator_admission()?;
         let feat137_streaming_enabled = application.feat137_streaming_enabled();
         self.inner
             .event_bridge
@@ -355,6 +356,7 @@ impl ChatIpcRuntime {
         }
         let mut coordinator = self.inner.coordinator.lock().await;
         if coordinator.is_none() {
+            application.require_coordinator_admission()?;
             *coordinator = Some(ConversationCoordinator::start_with_projection_sink(
                 application,
                 Duration::from_millis(50),
@@ -362,6 +364,27 @@ impl ChatIpcRuntime {
             )?);
         }
         Ok(())
+    }
+
+    /// One native startup attempt; failure remains visible through normal readiness.
+    /// No renderer context is created and no old operation gains permission.
+    pub(crate) async fn start_scheduled_background(
+        &self,
+        app: AppHandle,
+        runtime: &ChatRuntime,
+    ) -> Result<(), ChatError> {
+        if !runtime.scheduled_startup_needed().await? {
+            return Ok(());
+        }
+        runtime.ensure_demo_fast_sidecar().await?;
+        // A missing historical session must not prevent clock recovery or
+        // observation of other facts. The original per-run checks still block I/O.
+        if let Err(error) = self.ensure_bound_sessions_resumed(runtime).await {
+            eprintln!("Scheduled history resume unavailable: {}", error.code());
+        }
+        let application = runtime.local_conversation_application().await?;
+        self.ensure_coordinator(app, application, runtime.authorization_manager()?)
+            .await
     }
 
     async fn ensure_bound_sessions_resumed(&self, runtime: &ChatRuntime) -> Result<(), ChatError> {
@@ -373,11 +396,12 @@ impl ChatIpcRuntime {
         .await
     }
 
-    async fn stop_coordinator(&self) -> Result<(), ChatError> {
-        let coordinator = self.inner.coordinator.lock().await.take();
-        if let Some(coordinator) = coordinator {
-            coordinator.stop().await?;
+    pub(crate) async fn stop_coordinator(&self) -> Result<(), ChatError> {
+        let mut coordinator = self.inner.coordinator.lock().await;
+        if let Some(running) = coordinator.as_mut() {
+            running.wait_stopped().await?;
         }
+        coordinator.take();
         Ok(())
     }
 
@@ -4810,8 +4834,9 @@ mod tests {
         }
     }
 
-    const COMMAND_NAMES: [&str; 23] = [
+    const COMMAND_NAMES: [&str; 25] = [
         "chat_bind_context_v1",
+        "chat_bind_management_context_v1",
         "chat_list_projects_v1",
         "chat_pick_project_v1",
         "chat_revalidate_project_v1",
@@ -4820,6 +4845,7 @@ mod tests {
         "chat_create_session_v1",
         "chat_submit_turn_v1",
         "chat_list_sessions_v1",
+        "chat_get_session_purpose_v1",
         "chat_load_history_v1",
         "chat_load_reasoning_v1",
         "chat_rename_session_v1",
@@ -7468,6 +7494,56 @@ pub(crate) struct ResyncDtoV6 {
     pending_approval_snapshot: Value,
 }
 
+/// Shared UI authority without constructing a Host, resuming sessions or dispatching.
+/// The App coordinates this bind with the same manager used by the chat page.
+#[tauri::command]
+pub async fn chat_bind_management_context_v1(
+    request: Value,
+    auth_runtime: State<'_, NativeAuthRuntime>,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<BoundContextDto>, ChatIpcError> {
+    let request = decode_bind_request(request)?;
+    let generation = ipc_runtime.begin_binding();
+    let now = unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let native = auth_runtime
+        .chat_projection(&request.payload.tenant_selector, now)
+        .await
+        .map_err(|e| map_native_projection_error(e, request.request_id))?;
+    if !native.capabilities.iter().any(|c| c == "schedule.read") {
+        return Err(ChatIpcError::capability_denied(Some(request.request_id)));
+    }
+    let projection = AuthoritativeChatProjection::from_trusted_native_projection(
+        native.tenant_id,
+        native.authorization_revision,
+        native.expires_at,
+        native.capabilities,
+    )
+    .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let manager = chat_runtime
+        .authorization_manager()
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    let _guard = ipc_runtime.inner.bind_gate.lock().await;
+    if !ipc_runtime.binding_is_current(generation) {
+        return Err(ChatIpcError::request_cancelled(Some(request.request_id)));
+    }
+    let context = manager
+        .bind(projection, now)
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    ipc_runtime.invalidate_all();
+    let allowed_actions = manager
+        .allowed_actions(context.context_id, now)
+        .map_err(|_| ChatIpcError::context_invalid(Some(request.request_id)))?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        BoundContextDto {
+            context_id: context.context_id.to_string(),
+            expires_at_epoch_seconds: context.expires_at,
+            allowed_actions,
+        },
+    ))
+}
+
 #[tauri::command]
 pub async fn chat_bind_context_v1(
     request: Value,
@@ -7542,6 +7618,10 @@ pub async fn chat_bind_context_v1(
         let context = manager
             .bind(projection, now)
             .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+        chat_runtime
+            .allow_foreground_dispatch()
+            .await
+            .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
         chat_runtime
             .ensure_demo_fast_sidecar()
             .await
@@ -8179,6 +8259,24 @@ pub async fn chat_submit_turn_v2(
             operation_id: request.payload.operation_id.to_string(),
         },
     ))
+}
+
+#[tauri::command]
+pub async fn chat_get_session_purpose_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::session_purpose_generated::SessionPurposeView>, ChatIpcError> {
+    let request: CommandRequest<SessionControlPlanePayload> = decode_request(request)?;
+    let (_, authorized, _) = offline_applications(&chat_runtime, request.request_id).await?;
+    ipc_runtime.begin_read(request.request_id)?;
+    let result = authorized
+        .session_purpose(request.context_id, request.payload.session_id)
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let purpose = result.map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    finished?;
+    Ok(CommandResponse::new(request.request_id, purpose))
 }
 
 #[tauri::command]

@@ -173,6 +173,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
+        .manage(chat::schedules::ipc::ScheduleIpcRuntime::default())
+        .manage(chat::exit_owner::ExitOwner::default())
         .manage(ArtifactFileNativeRuntime::new())
         .manage(ArtifactNativeRuntime::new())
         .manage(ArtifactReportNativeRuntime::new())
@@ -296,6 +298,20 @@ pub fn run() {
                 local_profile,
                 skill_roots,
             ));
+            chat::platform_lifecycle::install(app.state::<ChatRuntime>().lifecycle.clone());
+            let scheduled_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = scheduled_app
+                    .state::<ChatIpcRuntime>()
+                    .start_scheduled_background(
+                        scheduled_app.clone(),
+                        &scheduled_app.state::<ChatRuntime>(),
+                    )
+                    .await
+                {
+                    eprintln!("Scheduled startup unavailable: {}", error.code());
+                }
+            });
             if let Some(roots) = app.state::<SkillRuntime>().roots() {
                 skills::watch_skill_install_root(app.handle().clone(), roots.install_root.clone());
             }
@@ -315,6 +331,34 @@ pub fn run() {
     });
     #[cfg(not(feature = "feat126-s10-driver"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        chat::schedules::ipc_commands_generated::schedule_submit_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_find_draft_source_v1,
+        chat::schedules::ipc_commands_generated::schedule_read_draft_submission_receipt_v1,
+        chat::schedules::ipc_commands_generated::schedule_operation_capabilities_v1,
+        chat::schedules::ipc_commands_generated::schedule_continue_draft_source_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_availability_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_plans_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_plan_cards_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_record_rows_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_important_updates_v1,
+        chat::schedules::ipc_commands_generated::schedule_read_plan_mutation_receipt_v1,
+        chat::schedules::ipc_commands_generated::schedule_get_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_time_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_targets_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_records_v1,
+        chat::schedules::ipc_commands_generated::schedule_get_record_v1,
+        chat::schedules::ipc_commands_generated::schedule_save_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_pause_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_delete_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_grant_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_single_run_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_enable_v1,
+        chat::schedules::ipc_commands_generated::schedule_manual_run_v1,
+        chat::schedules::ipc_commands_generated::schedule_read_execution_receipt_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_rerun_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_rerun_v1,
         runtime_health,
         native_auth_login,
         native_auth_local_whitelist_login,
@@ -340,6 +384,7 @@ pub fn run() {
         chat::chat_start_local_host,
         chat::chat_stop_local_host,
         chat::ipc::chat_bind_context_v1,
+        chat::ipc::chat_bind_management_context_v1,
         chat::ipc::chat_list_projects_v1,
         chat::ipc::chat_pick_project_v1,
         chat::ipc::chat_revalidate_project_v1,
@@ -360,6 +405,7 @@ pub fn run() {
         chat::ipc::chat_create_session_v2,
         chat::ipc::chat_submit_turn_v2,
         chat::ipc::chat_list_sessions_v1,
+        chat::ipc::chat_get_session_purpose_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_native_history_v1,
         chat::ipc::chat_load_native_history_v2,
@@ -403,6 +449,33 @@ pub fn run() {
     ]);
     #[cfg(feature = "feat126-s10-driver")]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        chat::schedules::ipc_commands_generated::schedule_submit_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_find_draft_source_v1,
+        chat::schedules::ipc_commands_generated::schedule_operation_capabilities_v1,
+        chat::schedules::ipc_commands_generated::schedule_continue_draft_source_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_draft_v1,
+        chat::schedules::ipc_commands_generated::schedule_availability_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_plans_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_plan_cards_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_record_rows_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_important_updates_v1,
+        chat::schedules::ipc_commands_generated::schedule_read_plan_mutation_receipt_v1,
+        chat::schedules::ipc_commands_generated::schedule_get_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_time_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_targets_v1,
+        chat::schedules::ipc_commands_generated::schedule_list_records_v1,
+        chat::schedules::ipc_commands_generated::schedule_get_record_v1,
+        chat::schedules::ipc_commands_generated::schedule_save_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_pause_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_delete_plan_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_grant_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_single_run_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_enable_v1,
+        chat::schedules::ipc_commands_generated::schedule_manual_run_v1,
+        chat::schedules::ipc_commands_generated::schedule_read_execution_receipt_v1,
+        chat::schedules::ipc_commands_generated::schedule_preview_rerun_v1,
+        chat::schedules::ipc_commands_generated::schedule_confirm_rerun_v1,
         feat126_s10_driver::feat126_s10_driver_startup_stage,
         feat126_s10_driver::feat126_s10_driver_login,
         feat126_s10_driver::feat126_s10_driver_register_project,
@@ -433,15 +506,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                // Tauri terminates the process after this callback, so managed state destructors
-                // are not a reliable place to stop the owned Host child.
-                let _ = tauri::async_runtime::block_on(async {
-                    app.state::<workflows::WorkflowRuntime>()
-                        .shutdown_for_app_exit()
-                        .await;
-                    app.state::<ChatRuntime>().shutdown_for_app_exit().await
-                });
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } = &event
+            {
+                if label == "main" && !app.state::<chat::exit_owner::ExitOwner>().ready() {
+                    api.prevent_close();
+                    app.state::<chat::exit_owner::ExitOwner>()
+                        .request(app.clone());
+                }
+            }
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                let owner = app.state::<chat::exit_owner::ExitOwner>();
+                if !owner.ready() {
+                    api.prevent_exit();
+                    owner.request(app.clone());
+                }
             }
         });
 }

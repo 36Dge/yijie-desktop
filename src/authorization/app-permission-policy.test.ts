@@ -118,3 +118,9 @@ describe("app permission policy", () => {
     expect(canRenderProtectedPath("/chat", readOnly)).toBe(false);
   });
 });
+
+it("FEAT-155 requires schedule.read for management navigation and deep links", () => {
+  expect(requiredCapabilityForPath("/scheduled-tasks")).toBe("schedule.read");
+  expect(canRenderProtectedPath("/scheduled-tasks", snapshot(["schedule.read"]))).toBe(true);
+  expect(canRenderProtectedPath("/scheduled-tasks", snapshot(["task.read"]))).toBe(false);
+});

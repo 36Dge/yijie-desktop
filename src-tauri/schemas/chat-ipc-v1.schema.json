@@ -8,6 +8,7 @@
   "x-yijie-control-plane-event-channel": "yijie:chat:control-plane:event:v1",
   "x-yijie-command-names": [
     "chat_bind_context_v1",
+    "chat_bind_management_context_v1",
     "chat_list_projects_v1",
     "chat_pick_project_v1",
     "chat_revalidate_project_v1",
@@ -16,6 +17,7 @@
     "chat_create_session_v1",
     "chat_submit_turn_v1",
     "chat_list_sessions_v1",
+    "chat_get_session_purpose_v1",
     "chat_load_history_v1",
     "chat_load_reasoning_v1",
     "chat_rename_session_v1",
@@ -33,6 +35,7 @@
   ],
   "x-yijie-command-contracts": {
     "chat_bind_context_v1": { "request": "#/$defs/bindRequest", "response": "#/$defs/boundContextResponse" },
+    "chat_bind_management_context_v1": {"request": "#/$defs/bindRequest", "response": "#/$defs/boundContextResponse"},
     "chat_list_projects_v1": { "request": "#/$defs/emptyRequest", "response": "#/$defs/projectListResponse" },
     "chat_pick_project_v1": { "request": "#/$defs/operationOnlyRequest", "response": "#/$defs/optionalProjectResponse" },
     "chat_revalidate_project_v1": { "request": "#/$defs/projectOperationRequest", "response": "#/$defs/projectResponse" },
@@ -41,6 +44,7 @@
     "chat_create_session_v1": { "request": "#/$defs/createSessionRequest", "response": "#/$defs/createdTurnResponse" },
     "chat_submit_turn_v1": { "request": "#/$defs/submitTurnRequest", "response": "#/$defs/createdTurnResponse" },
     "chat_list_sessions_v1": { "request": "#/$defs/listSessionsRequest", "response": "#/$defs/sessionPageResponse" },
+    "chat_get_session_purpose_v1": { "request": "#/$defs/sessionControlPlaneRequest", "response": "#/$defs/sessionPurposeResponse" },
     "chat_load_history_v1": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/historyPageResponse" },
     "chat_load_reasoning_v1": { "request": "#/$defs/reasoningRequest", "response": "#/$defs/reasoningListResponse" },
     "chat_rename_session_v1": { "request": "#/$defs/renameSessionRequest", "response": "#/$defs/operationResponse" },
@@ -84,6 +88,40 @@
     "context_invalidated"
   ],
   "$defs": {
+    "sessionPurpose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "purpose"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "ordinary",
+            "scheduled_plan_draft"
+          ]
+        }
+      }
+    },
+    "sessionPurposeResponse": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commandResponse"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/sessionPurpose"
+            }
+          }
+        }
+      ]
+    },
     "uuid": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

@@ -36,6 +36,7 @@ describe("iconRegistry", () => {
       "plugin",
       "plus",
       "refresh",
+      "run",
       "scanSearch",
       "scheduledTask",
       "send",

@@ -57,6 +57,15 @@ afterEach(() => {
 });
 
 describe("ChatSidebarTree", () => {
+  it("keeps a native available managed directory distinct from a removed project", async () => {
+    const { wrapper, store } = await mountTree();
+    store.projects = [];
+    await flushPromises();
+    expect(wrapper.text()).toContain("任务目录");
+    expect(wrapper.text()).not.toContain("项目已移除");
+    expect(wrapper.text()).toContain("Synthetic Session");
+    expect(wrapper.find('[aria-label="项目 任务目录 的操作菜单"]').exists()).toBe(false);
+  });
   it("renders project/session metadata from the authoritative store", async () => {
     const { wrapper } = await mountTree();
     expect(wrapper.text()).toContain("Synthetic Workspace");

@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { defineComponent, h } from "vue";
+import { RouterView } from "vue-router";
 
 import { flushPromises,mount } from "@vue/test-utils";
 import axe from "axe-core";
@@ -196,6 +198,7 @@ async function mountPage(
   active = false,
   activeHistory: ChatHistoryPage = HISTORY,
   retryChatAuthority: () => Promise<boolean> = async () => false,
+  throughRouter = false,
 ) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   const pinia = createPinia();
@@ -215,6 +218,7 @@ async function mountPage(
   store.sessions = active ? [SESSION] : [];
   store.selectedSessionId = active ? SESSION_ID : null;
   store.selectedAccessMode = active ? "live" : null;
+  store.selectedSessionPurpose = active ? "ordinary" : null;
   store.draftTarget = active ? chatSessionDraftTarget(SESSION_ID) : CHAT_NEW_DRAFT_TARGET;
   store.draftTargetReady = true;
   if (active) setHistoryProjection(store, activeHistory);
@@ -229,11 +233,12 @@ async function mountPage(
       { path: "/chat", component: ChatPage },
       { path: "/chat/:sessionId", component: ChatPage },
       { path: "/settings", component: { template: "<div />" } },
+      { path: "/scheduled-tasks", component: { template: "<div>管理页</div>" } },
     ],
   });
   await router.push(path);
   await router.isReady();
-  const wrapper = mount(ChatPage, {
+  const wrapper = mount(throughRouter ? defineComponent({ render: () => h(RouterView) }) : ChatPage, {
     attachTo: document.body,
     global: {
       plugins: [pinia, router],
@@ -253,6 +258,21 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+it("locates the exact requested local turn without sending or substituting the latest turn", async () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+  const { wrapper, store, router } = await mountPage(`/chat/${SESSION_ID}?turn=${TURN_ID}`, true);
+  await flushPromises();
+  expect(wrapper.text()).toContain("已定位本次运行对应的轮次");
+  expect(wrapper.find(`[data-turn-id="${TURN_ID}"]`).exists()).toBe(true);
+  expect(scroll).toHaveBeenCalled();
+  const submit = vi.spyOn(store, "submitTurn");
+  await router.push(`/chat/${SESSION_ID}?turn=019c1a00-0000-7000-8000-000000009999`);
+  await flushPromises();
+  expect(wrapper.text()).toContain("没有使用最新轮次替代");
+  expect(submit).not.toHaveBeenCalled();
+  wrapper.unmount();
 });
 
 describe("FEAT-126 ChatPage", () => {
@@ -1485,4 +1505,17 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("正在永久删除任务");
     expect(wrapper.text()).not.toContain("任务已永久删除");
   });
+});
+
+it("FEAT-155 confirms leaving an unsent chat draft and defaults to staying", async () => {
+  const {wrapper,router}=await mountPage("/chat",false,HISTORY,async()=>false,true);
+  await wrapper.get("textarea").setValue("未发送的导航验证");
+  const first=router.push("/scheduled-tasks"); await flushPromises();
+  expect(document.body.textContent).toContain("离开当前对话？");
+  const button=(label:string)=>Array.from(document.querySelectorAll("button")).find(b=>b.textContent===label)!;
+  button("留在对话").click(); await first; await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/chat");
+  expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("未发送的导航验证");
+  const second=router.push("/scheduled-tasks");await flushPromises();button("放弃文字并离开").click();await second;
+  expect(router.currentRoute.value.path).toBe("/scheduled-tasks");wrapper.unmount();
 });

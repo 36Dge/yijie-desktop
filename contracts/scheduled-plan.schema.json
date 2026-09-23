@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/scheduled-tasks/storage/v1",
+  "title": "ScheduledPlanStorageV1",
+  "description": "Native domain boundary, phase two. No registered renderer command or HTTP API. Scope, time, IDs/provenance and authorization come from native authority. New or edited plans are paused; execution/activation are unavailable. Save requires existing target ID only in existing_chat mode. View may omit a deleted target ID and mark missing. Requests replay to current plan state, never reapply old content or resurrect deleted plans. Time/target shape reuses plan-draft v1. Private SQL is Desktop-owned.",
+  "$defs": {
+    "Identity": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "TimeRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frequency",
+        "time_zone",
+        "local_time"
+      ],
+      "properties": {
+        "frequency": {
+          "enum": [
+            "once",
+            "daily",
+            "weekdays",
+            "weekly"
+          ]
+        },
+        "time_zone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "local_time": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "local_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "weekdays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "once"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "local_date"
+            ],
+            "properties": {
+              "local_date": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "local_date": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "frequency": {
+                "const": "weekly"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "weekdays"
+            ],
+            "properties": {
+              "weekdays": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 7
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "weekdays": false
+            }
+          }
+        }
+      ]
+    },
+    "TargetMode": {
+      "enum": [
+        "dedicated_chat",
+        "new_chat_each_run",
+        "existing_chat"
+      ]
+    },
+    "PlanState": {
+      "type": "string",
+      "enum": [
+        "paused",
+        "enabled",
+        "completed",
+        "deleted"
+      ]
+    },
+    "TargetState": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "unbound",
+        "missing"
+      ]
+    },
+    "ScheduleErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_input",
+        "target_unavailable",
+        "not_found",
+        "revision_conflict",
+        "request_conflict",
+        "storage_disabled",
+        "storage_unavailable",
+        "time_query_exhausted",
+        "rule_version_unsupported",
+        "execution_not_ready"
+      ]
+    },
+    "TargetReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/TargetMode"
+        },
+        "conversation_id": {
+          "$ref": "#/$defs/Identity"
+        }
+      }
+    },
+    "PlanDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "content",
+        "rule",
+        "target"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "rule": {
+          "$ref": "#/$defs/TimeRule"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetReference"
+        }
+      }
+    },
+    "SavePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "definition"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definition": {
+          "$ref": "#/$defs/PlanDefinition"
+        }
+      },
+      "dependentRequired": {
+        "plan_id": [
+          "expected_revision"
+        ],
+        "expected_revision": [
+          "plan_id"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "mode": {
+                        "const": "existing_chat"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "required": [
+                      "conversation_id"
+                    ],
+                    "type": "object",
+                    "properties": {
+                      "conversation_id": {
+                        "$ref": "#/$defs/TargetReference/properties/conversation_id"
+                      }
+                    }
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "definition": {
+                "properties": {
+                  "target": {
+                    "properties": {
+                      "conversation_id": false
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "PlanView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "revision",
+        "schedule_epoch",
+        "definition",
+        "state",
+        "target_state",
+        "effective_from",
+        "rule_version",
+        "tzdb_version"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "definition": {
+          "$ref": "#/$defs/PlanDefinition"
+        },
+        "state": {
+          "$ref": "#/$defs/PlanState"
+        },
+        "target_state": {
+          "$ref": "#/$defs/TargetState"
+        },
+        "effective_from": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "rule_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "tzdb_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "authorization_ref": {
+          "$ref": "#/$defs/Identity"
+        },
+        "authorization_expires_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        }
+      },
+      "dependentRequired": {
+        "authorization_ref": [
+          "authorization_expires_at"
+        ],
+        "authorization_expires_at": [
+          "authorization_ref"
+        ]
+      }
+    },
+    "TimePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skipped_slots",
+        "candidates_examined",
+        "rule_version",
+        "tzdb_version"
+      ],
+      "properties": {
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799,
+          "description": "UTC Unix seconds. Reference time supplied by native, not renderer."
+        },
+        "logical_slot": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+        },
+        "skipped_slots": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 16
+          }
+        },
+        "candidates_examined": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "rule_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "tzdb_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      },
+      "dependentRequired": {
+        "next_at": [
+          "logical_slot"
+        ],
+        "logical_slot": [
+          "next_at"
+        ]
+      }
+    }
+  }
+}

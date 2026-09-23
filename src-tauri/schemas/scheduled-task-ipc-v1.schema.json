@@ -1,0 +1,3426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/desktop/private/scheduled-task-ipc/v1",
+  "title": "ScheduledTaskPrivateIpcV1",
+  "description": "Desktop-owned native/WebView boundary. Shared domain sources remain canonical. Explicit candidate SQL26; ordinary startup15. Availability never activates migration or dispatch. Timing contains only verified native clock facts; no model, arbitrary path, authority, tick or release input.",
+  "x-commands": [
+    {
+      "name": "schedule_availability_v1",
+      "request": "AvailabilityRequest",
+      "response": "AvailabilityResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_list_plans_v1",
+      "request": "ListPlansRequest",
+      "response": "ListPlansResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_get_plan_v1",
+      "request": "GetPlanRequest",
+      "response": "GetPlanResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_preview_time_v1",
+      "request": "PreviewTimeRequest",
+      "response": "PreviewTimeResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_list_targets_v1",
+      "request": "ListTargetsRequest",
+      "response": "ListTargetsResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_list_records_v1",
+      "request": "ListRecordsRequest",
+      "response": "ListRecordsResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_get_record_v1",
+      "request": "GetRecordRequest",
+      "response": "GetRecordResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_save_plan_v1",
+      "request": "SavePlanRequest",
+      "response": "SavePlanResponse",
+      "permission": "manage",
+      "write": true
+    },
+    {
+      "name": "schedule_pause_plan_v1",
+      "request": "PausePlanRequest",
+      "response": "PausePlanResponse",
+      "permission": "manage",
+      "write": true
+    },
+    {
+      "name": "schedule_delete_plan_v1",
+      "request": "DeletePlanRequest",
+      "response": "DeletePlanResponse",
+      "permission": "manage",
+      "write": true
+    },
+    {
+      "name": "schedule_confirm_grant_v1",
+      "request": "ConfirmGrantRequest",
+      "response": "ConfirmGrantResponse",
+      "permission": "manage",
+      "write": true
+    },
+    {
+      "name": "schedule_confirm_enable_v1",
+      "request": "ConfirmEnableRequest",
+      "response": "ConfirmEnableResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_manual_run_v1",
+      "request": "ManualRunRequest",
+      "response": "ManualRunResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_preview_rerun_v1",
+      "request": "PreviewRerunRequest",
+      "response": "PreviewRerunResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_confirm_rerun_v1",
+      "request": "ConfirmRerunRequest",
+      "response": "ConfirmRerunResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_submit_draft_v1",
+      "request": "SubmitDraftRequest",
+      "response": "SubmitDraftResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_preview_draft_v1",
+      "request": "PreviewDraftRequest",
+      "response": "PreviewDraftResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_confirm_draft_v1",
+      "request": "ConfirmDraftRequest",
+      "response": "ConfirmDraftResponse",
+      "permission": "manage",
+      "write": true
+    },
+    {
+      "name": "schedule_find_draft_source_v1",
+      "request": "FindDraftSourceRequest",
+      "response": "FindDraftSourceResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_operation_capabilities_v1",
+      "request": "OperationCapabilitiesRequest",
+      "response": "OperationCapabilitiesResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_continue_draft_source_v1",
+      "request": "ContinueDraftSourceRequest",
+      "response": "ContinueDraftSourceResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_list_plan_cards_v1",
+      "request": "ListPlanCardsRequest",
+      "response": "ListPlanCardsResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_list_record_rows_v1",
+      "request": "ListRecordRowsRequest",
+      "response": "ListRecordRowsResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_read_plan_mutation_receipt_v1",
+      "request": "ReadPlanMutationReceiptRequest",
+      "response": "ReadPlanMutationReceiptResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_read_draft_submission_receipt_v1",
+      "request": "ReadDraftSubmissionReceiptRequest",
+      "response": "ReadDraftSubmissionReceiptResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_read_execution_receipt_v1",
+      "request": "ReadExecutionReceiptRequest",
+      "response": "ReadExecutionReceiptResponse",
+      "permission": "read",
+      "write": false
+    },
+    {
+      "name": "schedule_confirm_single_run_v1",
+      "request": "ConfirmSingleRunRequest",
+      "response": "ConfirmSingleRunResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_list_important_updates_v1",
+      "request": "ImportantUpdatesRequest",
+      "response": "ImportantUpdatesResponse",
+      "permission": "read",
+      "write": false
+    }
+  ],
+  "$defs": {
+    "Empty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "FilterState": {
+      "type": "string",
+      "enum": [
+        "all",
+        "enabled",
+        "paused",
+        "completed"
+      ]
+    },
+    "PlanOrder": {
+      "type": "string",
+      "enum": [
+        "name_asc",
+        "name_desc",
+        "next_asc"
+      ]
+    },
+    "PauseReason": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "budget",
+        "authorization",
+        "target",
+        "permission",
+        "resource",
+        "confirmation"
+      ]
+    },
+    "PrivateErrorCode": {
+      "type": "string",
+      "enum": [
+        "context_invalid",
+        "cursor_invalid",
+        "protocol_mismatch",
+        "operation_unknown",
+        "storage_read_only",
+        "draft_unavailable",
+        "draft_source_invalid",
+        "draft_source_deleted",
+        "draft_not_candidate"
+      ]
+    },
+    "IpcErrorCode": {
+      "oneOf": [
+        {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/ExecutionErrorCode"
+        },
+        {
+          "$ref": "#/$defs/PrivateErrorCode"
+        }
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "code"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "code": {
+          "$ref": "#/$defs/IpcErrorCode"
+        }
+      }
+    },
+    "Availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "readable",
+        "writable",
+        "preparation_enabled",
+        "dispatch",
+        "platform_qualified"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 26
+        },
+        "readable": {
+          "type": "boolean"
+        },
+        "writable": {
+          "type": "boolean"
+        },
+        "preparation_enabled": {
+          "type": "boolean"
+        },
+        "dispatch": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "native_candidate"
+          ]
+        },
+        "platform_qualified": {
+          "const": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "PlanQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "include_deleted": {
+          "type": "boolean"
+        },
+        "order": {
+          "$ref": "#/$defs/PlanOrder"
+        }
+      }
+    },
+    "TargetQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 255
+        }
+      }
+    },
+    "RecordQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        }
+      }
+    },
+    "PlanKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "PlanMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "expected_revision"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "TimeQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule"
+      ],
+      "properties": {
+        "rule": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TimeRule"
+        }
+      }
+    },
+    "RunKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "run_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "run",
+          "type": "string"
+        },
+        "run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "OccurrenceKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "plan_id",
+        "schedule_epoch",
+        "logical_slot"
+      ],
+      "properties": {
+        "kind": {
+          "const": "occurrence",
+          "type": "string"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "schedule_epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "logical_slot": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 16
+        }
+      }
+    },
+    "RecordKey": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RunKey"
+        },
+        {
+          "$ref": "#/$defs/OccurrenceKey"
+        }
+      ]
+    },
+    "RerunInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "RerunConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id",
+        "original_snapshot_digest",
+        "plan_id",
+        "revision",
+        "definition_digest",
+        "grant_id"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "original_snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "grant_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "ManualInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "revision"
+      ],
+      "properties": {
+        "grant_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "PlanSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "name",
+        "revision",
+        "raw_state",
+        "effective_state",
+        "target_mode",
+        "target_state"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "name": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition/properties/name"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "raw_state": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanState"
+        },
+        "effective_state": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanState"
+        },
+        "pause_reason": {
+          "$ref": "#/$defs/PauseReason"
+        },
+        "target_mode": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TargetMode"
+        },
+        "target_state": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TargetState"
+        },
+        "next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "PlanDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan",
+        "summary"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        },
+        "summary": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "grant": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantView"
+        }
+      }
+    },
+    "EnableResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan",
+        "grant",
+        "automatic_consent"
+      ],
+      "properties": {
+        "plan": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        },
+        "grant": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantView"
+        },
+        "future_hold": {
+          "$ref": "#/$defs/PauseReason"
+        },
+        "automatic_consent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RerunPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmation",
+        "original",
+        "current"
+      ],
+      "properties": {
+        "confirmation": {
+          "$ref": "#/$defs/RerunReview"
+        },
+        "original": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition"
+        },
+        "current": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition"
+        }
+      }
+    },
+    "TargetSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "title",
+        "updated_at",
+        "workspace_source",
+        "can_save",
+        "execution"
+      ],
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "updated_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "workspace_source": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/WorkspaceSource"
+        },
+        "can_save": {
+          "type": "boolean"
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "requires_recheck",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "target_unavailable",
+            "permission_denied",
+            "busy",
+            "native_identity_unavailable"
+          ]
+        }
+      }
+    },
+    "Disposition": {
+      "type": "string",
+      "enum": [
+        "consumed",
+        "skipped_paused",
+        "missed_offline",
+        "clock_discontinuity",
+        "cancelled",
+        "missed_late",
+        "busy",
+        "target_unavailable",
+        "permission_denied",
+        "resource_unavailable",
+        "unauthorized"
+      ]
+    },
+    "Occurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "scheduled_at",
+        "disposition"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/OccurrenceKey"
+        },
+        "scheduled_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "disposition": {
+          "$ref": "#/$defs/Disposition"
+        },
+        "missed_through": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      }
+    },
+    "ConversationLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "deleted",
+            "unavailable"
+          ]
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "local_turn_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "conversation_id",
+              "local_turn_id"
+            ],
+            "properties": {
+              "conversation_id": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+              },
+              "local_turn_id": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "conversation_id": false,
+              "local_turn_id": false
+            }
+          }
+        }
+      ]
+    },
+    "Timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_time",
+        "duration",
+        "source"
+      ],
+      "properties": {
+        "execution_time": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "unknown",
+            "known"
+          ]
+        },
+        "duration": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "unknown",
+            "known",
+            "in_progress"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "no_execution_clock",
+            "runtime_read"
+          ]
+        },
+        "started_at": {
+          "type": "integer",
+          "minimum": -8640000000000,
+          "maximum": 8640000000000
+        },
+        "completed_at": {
+          "type": "integer",
+          "minimum": -8640000000000,
+          "maximum": 8640000000000
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "time_zone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "diagnostic": {
+          "type": "string",
+          "enum": [
+            "format_unsupported",
+            "field_invalid",
+            "source_conflict",
+            "history_unavailable",
+            "identity_mismatch"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "execution_time": {
+                "const": "known"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "started_at"
+            ],
+            "properties": {
+              "started_at": {}
+            }
+          },
+          "else": {
+            "properties": {
+              "started_at": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "duration": {
+                "const": "known"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "duration_ms"
+            ],
+            "properties": {
+              "duration_ms": {}
+            }
+          },
+          "else": {
+            "properties": {
+              "duration_ms": false
+            }
+          }
+        }
+      ]
+    },
+    "RunRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "plan",
+        "run",
+        "conversation",
+        "timing",
+        "attention",
+        "business_result"
+      ],
+      "properties": {
+        "kind": {
+          "const": "run",
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/$defs/RunKey"
+        },
+        "plan": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "run": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/RunView"
+        },
+        "occurrence": {
+          "$ref": "#/$defs/Occurrence"
+        },
+        "conversation": {
+          "$ref": "#/$defs/ConversationLink"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        },
+        "attention": {
+          "type": "string",
+          "enum": [
+            "none",
+            "needs_attention"
+          ]
+        },
+        "business_result": {
+          "const": "not_evaluated",
+          "type": "string"
+        }
+      }
+    },
+    "OccurrenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "plan",
+        "occurrence",
+        "timing"
+      ],
+      "properties": {
+        "kind": {
+          "const": "occurrence",
+          "type": "string"
+        },
+        "key": {
+          "$ref": "#/$defs/OccurrenceKey"
+        },
+        "plan": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "occurrence": {
+          "$ref": "#/$defs/Occurrence"
+        },
+        "timing": {
+          "$ref": "#/$defs/Timing"
+        }
+      }
+    },
+    "RecordView": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RunRecord"
+        },
+        {
+          "$ref": "#/$defs/OccurrenceRecord"
+        }
+      ]
+    },
+    "SavedConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "content",
+        "rule",
+        "target_mode"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition/properties/name"
+        },
+        "content": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition/properties/content"
+        },
+        "rule": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TimeRule"
+        },
+        "target_mode": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TargetMode"
+        }
+      }
+    },
+    "RecordDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/RecordView"
+        },
+        "configuration": {
+          "$ref": "#/$defs/SavedConfiguration"
+        }
+      }
+    },
+    "PlanPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanSummary"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "TargetPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetSummary"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "RecordPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordView"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "AvailabilityRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "AvailabilityResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/Availability"
+        }
+      }
+    },
+    "ListPlansRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanQuery"
+        }
+      }
+    },
+    "ListPlansResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanPage"
+        }
+      }
+    },
+    "GetPlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanKey"
+        }
+      }
+    },
+    "GetPlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanDetail"
+        }
+      }
+    },
+    "PreviewTimeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/TimeQuery"
+        }
+      }
+    },
+    "PreviewTimeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TimePreview"
+        }
+      }
+    },
+    "ListTargetsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/TargetQuery"
+        }
+      }
+    },
+    "ListTargetsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/TargetPage"
+        }
+      }
+    },
+    "ListRecordsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordQuery"
+        }
+      }
+    },
+    "ListRecordsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordPage"
+        }
+      }
+    },
+    "GetRecordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordKey"
+        }
+      }
+    },
+    "GetRecordResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordDetail"
+        }
+      }
+    },
+    "SavePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/SavePlanRequest"
+        }
+      }
+    },
+    "SavePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        }
+      }
+    },
+    "PausePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutation"
+        }
+      }
+    },
+    "PausePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        }
+      }
+    },
+    "DeletePlanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutation"
+        }
+      }
+    },
+    "DeletePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        }
+      }
+    },
+    "ConfirmGrantRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantConfirmation"
+        }
+      }
+    },
+    "ConfirmGrantResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantView"
+        }
+      }
+    },
+    "ConfirmEnableRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/EnableConfirmation"
+        }
+      }
+    },
+    "ConfirmEnableResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/EnableResult"
+        }
+      }
+    },
+    "ManualRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/ManualInput"
+        }
+      }
+    },
+    "ManualRunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/RunView"
+        }
+      }
+    },
+    "PreviewRerunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RerunInput"
+        }
+      }
+    },
+    "PreviewRerunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RerunPreview"
+        }
+      }
+    },
+    "ConfirmRerunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RerunConfirmation"
+        }
+      }
+    },
+    "ConfirmRerunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/RunView"
+        }
+      }
+    },
+    "DraftSubmit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/draft-execution/v1#/$defs/Text"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "DraftKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "source_id"
+      ]
+    },
+    "DraftReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "conversation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "local_turn_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "operation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "status": {
+          "type": "string",
+          "const": "accepted"
+        }
+      },
+      "required": [
+        "source_id",
+        "conversation_id",
+        "local_turn_id",
+        "operation_id",
+        "status"
+      ]
+    },
+    "DraftPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "candidate",
+            "needs_clarification",
+            "unavailable",
+            "confirmed"
+          ]
+        },
+        "source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "output": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/draft-execution/v1#/$defs/Output"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "source_id",
+        "status"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "candidate",
+                  "needs_clarification"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "source_digest",
+              "output"
+            ],
+            "properties": {
+              "source_digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "output": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/draft-execution/v1#/$defs/Output"
+              },
+              "plan_id": false
+            }
+          },
+          "else": {
+            "properties": {
+              "source_digest": false,
+              "output": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "confirmed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "plan_id"
+            ],
+            "properties": {
+              "plan_id": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "plan_id": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "candidate"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "output": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/draft-execution/v1#/$defs/Candidate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "needs_clarification"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "output": {
+                "$ref": "https://schemas.yijie.ai/scheduled-tasks/draft-execution/v1#/$defs/Clarification"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DraftConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "definition": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition"
+        }
+      },
+      "required": [
+        "source_id",
+        "source_digest",
+        "definition"
+      ]
+    },
+    "SubmitDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSubmit"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "SubmitDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "PreviewDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "PreviewDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftPreview"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ConfirmDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftConfirmation"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ConfirmDraftResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanView"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "DraftSourceQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "local_turn_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "local_turn_id"
+      ]
+    },
+    "DraftSourceLookup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "found": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "found"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "found": {
+                "const": true
+              }
+            },
+            "required": [
+              "found"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "$ref": "#/$defs/DraftReceipt"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "else": {
+            "not": {
+              "properties": {
+                "source": {
+                  "$ref": "#/$defs/DraftReceipt"
+                }
+              },
+              "required": [
+                "source"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "OperationCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "storage_disabled",
+            "storage_read_only",
+            "authority_missing",
+            "candidate_disabled",
+            "runtime_unqualified"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": true
+              }
+            },
+            "required": [
+              "available"
+            ]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "ready"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "storage_disabled",
+                  "storage_read_only",
+                  "authority_missing",
+                  "candidate_disabled",
+                  "runtime_unqualified"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "OperationCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "save": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "manual": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "automatic": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "draft": {
+          "$ref": "#/$defs/OperationCapability"
+        },
+        "single_run": {
+          "$ref": "#/$defs/OperationCapability"
+        }
+      },
+      "required": [
+        "read",
+        "save",
+        "manual",
+        "automatic",
+        "draft",
+        "single_run"
+      ]
+    },
+    "FindDraftSourceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSourceQuery"
+        }
+      }
+    },
+    "FindDraftSourceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftSourceLookup"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "OperationCapabilitiesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "OperationCapabilitiesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/OperationCapabilities"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ContinueDraftSourceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftKey"
+        }
+      }
+    },
+    "ContinueDraftSourceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "PlanCardOrder": {
+      "type": "string",
+      "enum": [
+        "created_desc",
+        "created_asc"
+      ]
+    },
+    "PlanCardQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "include_deleted": {
+          "type": "boolean"
+        },
+        "order": {
+          "$ref": "#/$defs/PlanCardOrder"
+        }
+      }
+    },
+    "PlanCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "content_preview",
+        "rule"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/PlanSummary"
+        },
+        "content_preview": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "rule": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/TimeRule"
+        },
+        "created_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        },
+        "target_title": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "RecordRowQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "state": {
+          "$ref": "#/$defs/FilterState"
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        }
+      }
+    },
+    "RecordRowSource": {
+      "type": "string",
+      "enum": [
+        "run_snapshot",
+        "current_plan_reference"
+      ]
+    },
+    "RecordRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "name",
+        "content_preview",
+        "source"
+      ],
+      "properties": {
+        "record": {
+          "$ref": "#/$defs/RecordView"
+        },
+        "name": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/PlanDefinition/properties/name"
+        },
+        "content_preview": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "source": {
+          "$ref": "#/$defs/RecordRowSource"
+        }
+      }
+    },
+    "PlanMutationReceiptQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_request_id"
+      ],
+      "properties": {
+        "original_request_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "ReceiptObservation": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "not_observed"
+      ]
+    },
+    "PlanMutationReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ObservedPlanMutationReceipt"
+        },
+        {
+          "$ref": "#/$defs/UnobservedPlanMutationReceipt"
+        }
+      ]
+    },
+    "PlanCardPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanCard"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "RecordRowPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RecordRow"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      }
+    },
+    "ListPlanCardsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanCardQuery"
+        }
+      }
+    },
+    "ListPlanCardsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanCardPage"
+        }
+      }
+    },
+    "ListRecordRowsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/RecordRowQuery"
+        }
+      }
+    },
+    "ListRecordRowsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/RecordRowPage"
+        }
+      }
+    },
+    "ReadPlanMutationReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/PlanMutationReceiptQuery"
+        }
+      }
+    },
+    "ReadPlanMutationReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/PlanMutationReceipt"
+        }
+      }
+    },
+    "ObservedPlanMutationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation",
+        "plan_id",
+        "current_plan"
+      ],
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "observed"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "current_plan": {
+          "$ref": "#/$defs/PlanDetail"
+        }
+      }
+    },
+    "UnobservedPlanMutationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation"
+      ],
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      }
+    },
+    "DraftSubmissionKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original_request_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "original_request_id"
+      ]
+    },
+    "DraftSubmissionNotObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      },
+      "required": [
+        "observation"
+      ]
+    },
+    "DraftSubmissionObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "observed"
+        },
+        "receipt": {
+          "$ref": "#/$defs/DraftReceipt"
+        }
+      },
+      "required": [
+        "observation",
+        "receipt"
+      ]
+    },
+    "DraftSubmissionDeleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "source_deleted"
+        },
+        "source_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "observation",
+        "source_id"
+      ]
+    },
+    "DraftSubmissionReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DraftSubmissionNotObserved"
+        },
+        {
+          "$ref": "#/$defs/DraftSubmissionObserved"
+        },
+        {
+          "$ref": "#/$defs/DraftSubmissionDeleted"
+        }
+      ]
+    },
+    "ReadDraftSubmissionReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftSubmissionKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ReadDraftSubmissionReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/DraftSubmissionReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "ExecutionReceiptKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "manual",
+            "enable",
+            "single_grant",
+            "rerun"
+          ]
+        },
+        "original_request_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "operation",
+        "original_request_id"
+      ]
+    },
+    "ExecutionNotObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "not_observed"
+        }
+      },
+      "required": [
+        "observation"
+      ]
+    },
+    "GrantObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "grant_observed"
+        },
+        "grant": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantView"
+        }
+      },
+      "required": [
+        "observation",
+        "grant"
+      ]
+    },
+    "ManualObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "manual_observed"
+        },
+        "run": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/RunView"
+        }
+      },
+      "required": [
+        "observation",
+        "run"
+      ]
+    },
+    "ExecutionReceipt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ExecutionNotObserved"
+        },
+        {
+          "$ref": "#/$defs/GrantObserved"
+        },
+        {
+          "$ref": "#/$defs/ManualObserved"
+        },
+        {
+          "$ref": "#/$defs/EnableObserved"
+        },
+        {
+          "$ref": "#/$defs/SingleGrantObserved"
+        },
+        {
+          "$ref": "#/$defs/RerunObserved"
+        }
+      ]
+    },
+    "ReadExecutionReceiptRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/ExecutionReceiptKey"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "ReadExecutionReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/ExecutionReceipt"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "EnableConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantConfirmation"
+        },
+        "expected_next_at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 253402300799
+        }
+      },
+      "required": [
+        "confirmation",
+        "expected_next_at"
+      ]
+    },
+    "EnableObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "enable_observed"
+        },
+        "result": {
+          "$ref": "#/$defs/EnableResult"
+        }
+      },
+      "required": [
+        "observation",
+        "result"
+      ]
+    },
+    "RerunReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_run_id",
+        "original_snapshot_digest",
+        "plan_id",
+        "revision",
+        "definition_digest"
+      ],
+      "properties": {
+        "original_run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "original_snapshot_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "definition_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "SingleRunKind": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "rerun"
+      ]
+    },
+    "SingleRunGrantConfirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmation": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantConfirmation"
+        },
+        "kind": {
+          "$ref": "#/$defs/SingleRunKind"
+        },
+        "review": {
+          "$ref": "#/$defs/RerunReview"
+        }
+      },
+      "required": [
+        "confirmation",
+        "kind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rerun"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "review"
+            ],
+            "properties": {
+              "review": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "review"
+              ],
+              "properties": {
+                "review": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SingleRunGrantResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grant": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/GrantView"
+        },
+        "kind": {
+          "$ref": "#/$defs/SingleRunKind"
+        },
+        "original_run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        }
+      },
+      "required": [
+        "grant",
+        "kind"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rerun"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "original_run_id"
+            ],
+            "properties": {
+              "original_run_id": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "original_run_id"
+              ],
+              "properties": {
+                "original_run_id": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ConfirmSingleRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/SingleRunGrantConfirmation"
+        }
+      }
+    },
+    "ConfirmSingleRunResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/SingleRunGrantResult"
+        }
+      }
+    },
+    "SingleGrantObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "single_grant_observed"
+        },
+        "result": {
+          "$ref": "#/$defs/SingleRunGrantResult"
+        }
+      },
+      "required": [
+        "observation",
+        "result"
+      ]
+    },
+    "RerunObserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observation": {
+          "type": "string",
+          "const": "rerun_observed"
+        },
+        "run": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/execution/v1#/$defs/RunView"
+        }
+      },
+      "required": [
+        "observation",
+        "run"
+      ]
+    },
+    "ImportantUpdateState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "needs_attention",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "ImportantUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "plan_id",
+        "name",
+        "state"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "plan_id": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "state": {
+          "$ref": "#/$defs/ImportantUpdateState"
+        }
+      }
+    },
+    "ImportantUpdates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "truncated"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ImportantUpdate"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ImportantUpdatesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "contextId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "payload": {
+          "$ref": "#/$defs/Empty"
+        }
+      }
+    },
+    "ImportantUpdatesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "requestId": {
+          "$ref": "https://schemas.yijie.ai/scheduled-tasks/storage/v1#/$defs/Identity"
+        },
+        "data": {
+          "$ref": "#/$defs/ImportantUpdates"
+        }
+      }
+    }
+  }
+}

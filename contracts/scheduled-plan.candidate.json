@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.1.0",
+  "mode": "local_candidate",
+  "release": false,
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "base_commit": "db4458fe94572c4df41a114005d54a049bb79b1f",
+  "sources": [
+    {
+      "path": "scripts/scheduled-schema-source.mjs",
+      "sha256": "4afa5abda0bb8fd76a3c01759605a8b1f3c59f5548ac93587750e07cd08f406c"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/plan-storage-v1.schema.json",
+      "sha256": "0883ab69c0cbcda311113fd2a966ea98065ddc47b301e36611e2447620667cd2"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/plan-draft-v1.schema.json",
+      "sha256": "267efaf2f7ba9ada27f7494c9042473c6775b7d9eeecab4f3673cc84d0814171"
+    },
+    {
+      "path": "scripts/generate-scheduled-plan.mjs",
+      "sha256": "429b9691adcd2aef37986654f172167d5faeed98a17a4b183054295e45a12362"
+    },
+    {
+      "path": "scripts/sync-scheduled-plan.mjs",
+      "sha256": "3724df87f56d70d3981aa360eb2e662223764172a34f0e802a1be0c44c590667"
+    },
+    {
+      "path": "scripts/scheduled-consumer-source.mjs",
+      "sha256": "69e7fa6b1b4371d1d6c9456fe68b9ede76cc3a0896253597428729f531fde015"
+    }
+  ],
+  "generated": [
+    {
+      "path": "sdks/rust/scheduled-plan/types.gen.rs",
+      "sha256": "1223692af5937b691453edb57b5a8689a419472af9be806b04855247a09a1614"
+    },
+    {
+      "path": "sdks/typescript/src/jsonschema/scheduled-plan.gen.ts",
+      "sha256": "34d152ce71516f533b258bf79456d772ca2895bd3925028bdaa21ce445834185"
+    },
+    {
+      "path": "sdks/jsonschema/scheduled-plan.schema.json",
+      "sha256": "8ab948f965e5681859d129f91a18a5931cfed89cfd32c0e866db9b5edf9283f4"
+    }
+  ],
+  "generators": {
+    "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
+    "jsonschema": "canonical context-preserving draft references v2"
+  },
+  "source_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
+  "source_lock_path": "compatibility/scheduled-plan/source.lock.json"
+}

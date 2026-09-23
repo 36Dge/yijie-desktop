@@ -8,6 +8,7 @@ mod attachment;
 mod authorization;
 mod database;
 mod error;
+pub(crate) mod exit_owner;
 mod feat134;
 mod feat136;
 mod feat137;
@@ -15,10 +16,14 @@ mod host_bridge;
 mod host_domain;
 pub(crate) mod ipc;
 mod keychain;
+pub(crate) mod lifecycle;
 mod migrations;
 mod native_project;
+pub(crate) mod platform_lifecycle;
 mod public_tasks;
 mod runtime_permissions;
+pub mod schedules;
+pub(crate) mod session_purpose_generated;
 mod sidecar;
 mod worker;
 
@@ -160,6 +165,7 @@ fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
 
 #[derive(Clone)]
 struct LocalChatConfig {
+    scheduled_candidate: bool,
     chat_directory: PathBuf,
     demo_fast_secret_directory: Option<PathBuf>,
     scope: database::ChatScope,
@@ -178,6 +184,8 @@ enum RuntimeMode {
 }
 
 pub struct ChatRuntime {
+    pub(crate) lifecycle: lifecycle::Lifecycle,
+    schedule_authority: Option<NativeAuthRuntime>,
     mode: RuntimeMode,
     authorization: Option<ChatAuthorizationManager>,
     worker: Mutex<Option<DatabaseWorker>>,
@@ -269,6 +277,8 @@ impl ChatRuntime {
                     initialization: Mutex::new(()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
+                    lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+                    schedule_authority: Some(native_auth.clone()),
                 };
             }
         };
@@ -286,6 +296,8 @@ impl ChatRuntime {
                     initialization: Mutex::new(()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
+                    lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+                    schedule_authority: Some(native_auth.clone()),
                 };
             }
         };
@@ -304,6 +316,8 @@ impl ChatRuntime {
                     initialization: Mutex::new(()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
+                    lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+                    schedule_authority: Some(native_auth.clone()),
                 };
             }
         };
@@ -322,9 +336,23 @@ impl ChatRuntime {
                 initialization: Mutex::new(()),
                 sidecar: None,
                 host_bridge: Mutex::new(None),
+                lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+                schedule_authority: Some(native_auth.clone()),
             };
         }
+        let candidate_requested = std::env::var(schedules::candidate::FLAG).ok();
+        let candidate_enabled =
+            candidate_requested.as_deref() == Some("true") && local_profile.is_demo_fast();
+        let candidate_invalid = candidate_requested
+            .as_deref()
+            .is_some_and(|v| v != "false" && !(v == "true" && local_profile.is_demo_fast()));
+        let local_data = app_data_directory.join(if candidate_enabled {
+            "demo-fast-scheduled-candidate-v1"
+        } else {
+            "demo-fast-v1"
+        });
         let mut mode = if secure_storage_invalid
+            || candidate_invalid
             || std::env::var("YIJIE_ENV").as_deref() != Ok("local")
         {
             RuntimeMode::Invalid
@@ -336,8 +364,9 @@ impl ChatRuntime {
                 (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
                     Ok(scope) => match (scope.owner_uuid(), scope.tenant_uuid()) {
                         (Ok(owner_user_id), Ok(tenant_id)) => RuntimeMode::Local(LocalChatConfig {
+                            scheduled_candidate: candidate_enabled,
                             chat_directory: if local_profile.is_demo_fast() {
-                                app_data_directory.join("demo-fast-v1").join("chat")
+                                local_data.join("chat")
                             } else {
                                 secure_storage
                                     .as_ref()
@@ -346,7 +375,7 @@ impl ChatRuntime {
                             },
                             demo_fast_secret_directory: local_profile
                                 .is_demo_fast()
-                                .then(|| app_data_directory.join("demo-fast-v1").join("secrets")),
+                                .then(|| local_data.join("secrets")),
                             public_tasks: Arc::new(NativePublicTaskControlPlane::new(
                                 native_auth.clone(),
                                 owner_user_id,
@@ -370,7 +399,34 @@ impl ChatRuntime {
             local_profile.is_demo_fast(),
             skill_roots,
         ) {
-            Ok(supervisor) => Some(Arc::new(supervisor)),
+            Ok(supervisor) => {
+                let prepared = (|| {
+                    if let RuntimeMode::Local(config) = &mode {
+                        if config.scheduled_candidate {
+                            let base = config
+                                .chat_directory
+                                .parent()
+                                .ok_or(ChatError::InvalidConfiguration)?;
+                            schedules::candidate::private_directory(base)?;
+                            schedules::candidate::private_directory(&config.chat_directory)?;
+                            schedules::candidate::private_directory(&base.join("secrets"))?;
+                            let launch = schedules::candidate::Launch::prepare(
+                                &config.chat_directory,
+                                &config.scope,
+                            )?;
+                            return supervisor.with_scheduled_candidate(base, launch);
+                        }
+                    }
+                    Ok(supervisor)
+                })();
+                match prepared {
+                    Ok(supervisor) => Some(Arc::new(supervisor)),
+                    Err(_) => {
+                        mode = RuntimeMode::Invalid;
+                        None
+                    }
+                }
+            }
             Err(_) => {
                 mode = RuntimeMode::Invalid;
                 None
@@ -387,10 +443,18 @@ impl ChatRuntime {
             initialization: Mutex::new(()),
             sidecar,
             host_bridge: Mutex::new(None),
+            lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+            schedule_authority: Some(native_auth.clone()),
         }
     }
 
     async fn database(&self) -> Result<DatabaseWorker, ChatError> {
+        if matches!(
+            self.lifecycle.phase(),
+            lifecycle::Phase::Stopping | lifecycle::Phase::StopPending | lifecycle::Phase::Stopped
+        ) {
+            return Err(ChatError::CleanupIncomplete);
+        }
         let config = match &self.mode {
             RuntimeMode::Disabled => return Err(ChatError::Disabled),
             RuntimeMode::Invalid => return Err(ChatError::InvalidConfiguration),
@@ -403,7 +467,10 @@ impl ChatRuntime {
         if let Some(worker) = self.worker.lock().await.clone() {
             return Ok(worker);
         }
-        let worker = tokio::task::spawn_blocking(move || {
+        let candidate = config.scheduled_candidate;
+        let directory = config.chat_directory.clone();
+        let scope = config.scope.clone();
+        let (key_store, receipt_key_store) = tokio::task::spawn_blocking(move || {
             let (key_store, receipt_key_store) = match config.demo_fast_secret_directory {
                 Some(directory) => (
                     ProtectedDatabaseKeyStore::new_local_demo(
@@ -418,15 +485,30 @@ impl ChatRuntime {
                     ProtectedReceiptKeyStore::new(config.secure_storage.clone())?,
                 ),
             };
-            DatabaseWorker::start(
-                config.chat_directory,
-                config.scope,
-                Box::new(key_store),
-                Box::new(receipt_key_store),
-            )
+            Ok::<_, ChatError>((key_store, receipt_key_store))
         })
         .await
         .map_err(|_| ChatError::DatabaseUnavailable)??;
+        let worker = if candidate {
+            DatabaseWorker::start_scheduled_candidate(
+                directory,
+                scope,
+                Box::new(key_store),
+                Box::new(receipt_key_store),
+                self.schedule_authority
+                    .clone()
+                    .ok_or(ChatError::ScopeDenied)?,
+                self.lifecycle.clone(),
+            )
+            .await?
+        } else {
+            DatabaseWorker::start(
+                directory,
+                scope,
+                Box::new(key_store),
+                Box::new(receipt_key_store),
+            )?
+        };
         *self.worker.lock().await = Some(worker.clone());
         Ok(worker)
     }
@@ -571,6 +653,15 @@ impl ChatRuntime {
         let candidates = self.database().await?.feat126_resume_candidates().await?;
         let host = self.local_host_bridge().await?;
         for candidate in candidates {
+            let id = candidate.session_id;
+            let draft = self
+                .database()
+                .await?
+                .call(move |r| r.draft_conversation(id))
+                .await?;
+            if draft {
+                continue;
+            }
             let resumed = host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
                 .await
@@ -588,6 +679,7 @@ impl ChatRuntime {
     }
 
     pub(crate) async fn invalidate_host_bridge(&self) {
+        self.lifecycle.transition(lifecycle::Phase::Recovering);
         *self.host_bridge.lock().await = None;
     }
 
@@ -628,6 +720,11 @@ impl ChatRuntime {
             return Ok(());
         }
         for candidate in candidates {
+            let id = candidate.session_id;
+            let draft = database.call(move |r| r.draft_conversation(id)).await?;
+            if draft {
+                continue;
+            }
             let resumed = match host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
                 .await
@@ -855,6 +952,12 @@ impl ChatRuntime {
     }
 
     async fn start_sidecar(&self) -> Result<SidecarState, ChatError> {
+        if matches!(
+            self.lifecycle.phase(),
+            lifecycle::Phase::Stopping | lifecycle::Phase::StopPending | lifecycle::Phase::Stopped
+        ) {
+            return Err(ChatError::CleanupIncomplete);
+        }
         match self.mode {
             RuntimeMode::Local(_) => {
                 let supervisor = self
@@ -865,12 +968,45 @@ impl ChatRuntime {
                 let connection = supervisor.connection().await?;
                 let bridge = HostBridge::from_connection(connection)
                     .map_err(|_| ChatError::SidecarUnavailable)?;
+                self.lifecycle.host(bridge.instance_nonce());
+                let bridge = bridge.with_lifecycle(self.lifecycle.clone());
                 *self.host_bridge.lock().await = Some(Arc::new(bridge));
                 Ok(state)
             }
             RuntimeMode::Disabled => Err(ChatError::Disabled),
             RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
         }
+    }
+
+    /// Called by native setup only. Management IPC does not start any service.
+    pub(crate) async fn scheduled_startup_needed(&self) -> Result<bool, ChatError> {
+        if !matches!(&self.mode, RuntimeMode::Local(c) if c.scheduled_candidate) {
+            return Ok(false);
+        }
+        let worker = self.database().await?;
+        let gate = self.lifecycle.clone();
+        worker
+            .call(move |r| {
+                let n = schedules::dispatch::timestamp()?;
+                gate.observe_clock(n);
+                // Local never-sent cleanup does not require Host readiness.
+                r.expire_manual(n)?;
+                r.expire_automatic(n)?;
+                r.expire_unstarted_rerun(n)?;
+                r.trigger_clock_tick(&gate, n)?;
+                let (future, pending) = r.automatic_startup_work(n)?;
+                Ok(future || pending)
+            })
+            .await
+    }
+    pub(crate) async fn allow_foreground_dispatch(&self) -> Result<(), ChatError> {
+        self.database()
+            .await?
+            .call(|r| {
+                r.schedule_background_only = false;
+                Ok(())
+            })
+            .await
     }
 
     pub(crate) async fn ensure_demo_fast_sidecar(&self) -> Result<(), ChatError> {
@@ -888,22 +1024,40 @@ impl ChatRuntime {
     }
 
     pub(crate) async fn shutdown_for_app_exit(&self) -> Result<(), ChatError> {
-        *self.host_bridge.lock().await = None;
-        match &self.sidecar {
-            Some(sidecar) => sidecar.stop().await.map(|_| ()),
-            None => Ok(()),
+        if let Some(sidecar) = &self.sidecar {
+            sidecar.stop().await?;
+            if let Some(nonce) = sidecar.stopped_generation().await {
+                if let Some(worker) = self.worker.lock().await.as_ref() {
+                    worker
+                        .call(move |r| r.record_stopped_schedule_generation(&nonce))
+                        .await?;
+                }
+            }
         }
+        *self.host_bridge.lock().await = None;
+        let mut slot = self.worker.lock().await;
+        if let Some(worker) = slot.as_ref() {
+            if worker.has_other_owners() {
+                return Err(ChatError::CleanupIncomplete);
+            }
+            worker.checkpoint_for_exit().await?;
+        }
+        slot.take();
+        Ok(())
     }
 
     async fn stop_sidecar(&self) -> Result<SidecarState, ChatError> {
         match self.mode {
             RuntimeMode::Local(_) => {
-                *self.host_bridge.lock().await = None;
-                self.sidecar
+                self.lifecycle.transition(lifecycle::Phase::Recovering);
+                let state = self
+                    .sidecar
                     .as_ref()
                     .ok_or(ChatError::InvalidConfiguration)?
                     .stop()
-                    .await
+                    .await?;
+                *self.host_bridge.lock().await = None;
+                Ok(state)
             }
             RuntimeMode::Disabled => Err(ChatError::Disabled),
             RuntimeMode::Invalid => Err(ChatError::InvalidConfiguration),
@@ -954,6 +1108,14 @@ impl ChatRuntime {
     }
 
     pub async fn local_conversation_application(
+        &self,
+    ) -> Result<ConversationApplication, ChatError> {
+        Ok(self
+            .build_local_conversation_application()
+            .await?
+            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone()))
+    }
+    async fn build_local_conversation_application(
         &self,
     ) -> Result<ConversationApplication, ChatError> {
         let database = self.database().await?;
@@ -1008,7 +1170,8 @@ impl ChatRuntime {
     pub async fn local_offline_conversation_application(
         &self,
     ) -> Result<ConversationApplication, ChatError> {
-        Ok(ConversationApplication::new_offline(self.database().await?))
+        Ok(ConversationApplication::new_offline(self.database().await?)
+            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone()))
     }
 
     pub async fn local_authorized_conversation_application(
@@ -1250,6 +1413,7 @@ mod tests {
         let authorization = ChatAuthorizationManager::new(&scope).ok();
         ChatRuntime {
             mode: RuntimeMode::Local(LocalChatConfig {
+                scheduled_candidate: false,
                 chat_directory: profile.desktop_app_data().join("chat"),
                 demo_fast_secret_directory: None,
                 scope,
@@ -1265,6 +1429,8 @@ mod tests {
             initialization: Mutex::new(()),
             sidecar: None,
             host_bridge: Mutex::new(None),
+            lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+            schedule_authority: None,
         }
     }
 
@@ -1504,6 +1670,8 @@ mod tests {
             initialization: Mutex::new(()),
             sidecar: None,
             host_bridge: Mutex::new(None),
+            lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+            schedule_authority: None,
         };
         let status = runtime.foundation_status().await.unwrap();
         assert_eq!(status.state, "disabled");
@@ -1527,6 +1695,8 @@ mod tests {
             initialization: Mutex::new(()),
             sidecar: None,
             host_bridge: Mutex::new(Some(Arc::new(bridge))),
+            lifecycle: lifecycle::Lifecycle::default(),
+            schedule_authority: None,
         };
 
         runtime
@@ -1549,6 +1719,8 @@ mod tests {
             initialization: Mutex::new(()),
             sidecar: None,
             host_bridge: Mutex::new(None),
+            lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
+            schedule_authority: None,
         };
         let readiness = runtime.local_readiness(false).await;
         assert_eq!(readiness.lifecycle, ChatReadinessLifecycle::Blocked);

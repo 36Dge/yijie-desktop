@@ -16,6 +16,8 @@ export default tseslint.config(
       "**/*.d.ts",
       "src/api/generated/native-conversation-validator.gen.js",
       "src/api/generated/workflow-local-validator.gen.js",
+      "src/api/generated/scheduled-task-ipc-validator.gen.js",
+      "src/api/generated/scheduled-task-ipc-formats.gen.js",
     ],
   },
   {

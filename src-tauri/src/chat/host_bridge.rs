@@ -71,7 +71,11 @@ impl Debug for HostTrace {
     }
 }
 
+#[derive(Clone)]
 pub struct HostBridge {
+    schedule_admission: Option<super::schedules::dispatch::Admission>,
+    draft_admission: Option<super::schedules::draft_admission::Admission>,
+    lifecycle: super::lifecycle::Lifecycle,
     origin: Url,
     token_path: PathBuf,
     expected_nonce: String,
@@ -446,6 +450,35 @@ impl HostBridge {
         }
         Ok(value)
     }
+    pub(crate) async fn read_native_turn_timing(
+        &self,
+        session: Uuid,
+        turn: Uuid,
+    ) -> Result<super::schedules::timing_generated::NativeTurnTiming, HostBridgeError> {
+        require_non_nil(session)?;
+        require_non_nil(turn)?;
+        let response = self
+            .authorized_request(
+                Method::GET,
+                &format!("/v1/agent-sessions/{session}/turns/{turn}/timing"),
+            )
+            .await?
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if response.status() != StatusCode::OK {
+            return Err(parse_rejection(response).await);
+        }
+        validate_no_store(response.headers())?;
+        let bytes = read_limited(response, 8 * 1024).await?;
+        let value: super::schedules::timing_generated::NativeTurnTiming =
+            serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
+        if value.agent_session_id != session.to_string() || value.turn_id != turn.to_string() {
+            return Err(protocol_error());
+        }
+        Ok(value)
+    }
     pub async fn open_native_event_stream(
         &self,
         session_id: Uuid,
@@ -478,11 +511,40 @@ impl HostBridge {
             .build()
             .map_err(|_| configuration_error())?;
         Ok(Self {
+            schedule_admission: None,
+            draft_admission: None,
+            lifecycle: super::lifecycle::Lifecycle::default(),
             origin,
             token_path: connection.token_path,
             expected_nonce: connection.instance_nonce,
             client,
         })
+    }
+
+    pub(crate) fn with_lifecycle(mut self, lifecycle: super::lifecycle::Lifecycle) -> Self {
+        self.lifecycle = lifecycle;
+        self
+    }
+
+    pub(crate) fn with_schedule_admission(
+        &self,
+        admission: super::schedules::dispatch::Admission,
+    ) -> Self {
+        let mut bridge = self.clone();
+        bridge.schedule_admission = Some(admission);
+        bridge
+    }
+    pub(crate) fn with_draft_admission(
+        &self,
+        admission: super::schedules::draft_admission::Admission,
+    ) -> Self {
+        let mut bridge = self.clone();
+        bridge.schedule_admission = None;
+        bridge.draft_admission = Some(admission);
+        bridge
+    }
+    pub(crate) fn is_schedule_admitted(&self) -> bool {
+        self.schedule_admission.is_some()
     }
 
     pub(crate) fn instance_nonce(&self) -> &str {
@@ -1265,8 +1327,22 @@ impl HostBridge {
         if body.len() > limit {
             return Err(protocol_error());
         }
-        self.authorized_request(method, path_and_query)
-            .await?
+        let request = self.authorized_request(method, path_and_query).await?;
+        if let Some(admission) = &self.schedule_admission {
+            admission
+                .begin(self, path_and_query, &body)
+                .await
+                .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?;
+        }
+        if path_and_query.starts_with("/v1/scheduled-plan-draft-sessions") {
+            self.draft_admission
+                .as_ref()
+                .ok_or_else(|| HostBridgeError::new(HostBridgeErrorKind::NotReady))?
+                .begin(self, path_and_query, &body)
+                .await
+                .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?;
+        }
+        request
             .header(CONTENT_TYPE, "application/json")
             .timeout(REQUEST_TIMEOUT)
             .body(body)
@@ -1280,7 +1356,36 @@ impl HostBridge {
         method: Method,
         path_and_query: &str,
     ) -> Result<reqwest::RequestBuilder, HostBridgeError> {
+        let execution = method != Method::GET
+            && (path_and_query.ends_with("/turns")
+                || path_and_query.ends_with("/permission-turns")
+                || path_and_query.ends_with("/agent-sessions")
+                || path_and_query.ends_with("/interrupt")
+                || path_and_query.starts_with("/v1/scheduled-plan-draft-sessions"));
+        let permit = if execution {
+            Some(
+                self.lifecycle
+                    .permit()
+                    .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?,
+            )
+        } else {
+            None
+        };
         self.ensure_ready().await?;
+        let request = self.bearer_request(method, path_and_query).await?;
+        if let Some(epoch) = permit {
+            self.lifecycle
+                .validate(epoch)
+                .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?;
+        }
+        Ok(request)
+    }
+
+    async fn bearer_request(
+        &self,
+        method: Method,
+        path_and_query: &str,
+    ) -> Result<reqwest::RequestBuilder, HostBridgeError> {
         let token_path = self.token_path.clone();
         let token = tokio::task::spawn_blocking(move || load_owner_token(&token_path))
             .await
@@ -1296,7 +1401,114 @@ impl HostBridge {
             .header(AUTHORIZATION, authorization))
     }
 
-    async fn ensure_ready(&self) -> Result<(), HostBridgeError> {
+    // Exact recovery GETs are storage-only and must work while Runtime is unavailable.
+    async fn recovery_get<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<Option<T>, HostBridgeError> {
+        let response = self
+            .client
+            .get(self.exact_url("/healthz")?)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        if header_text_name(response.headers(), "X-Yijie-Host-Instance-Nonce")?
+            != self.expected_nonce
+        {
+            return Err(instance_error());
+        }
+        let body = expect_json_status(response, StatusCode::OK).await?;
+        let health: serde_json::Value =
+            serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+        if health.as_object().is_none_or(|v| v.len() != 2)
+            || health["service"] != "yijie-agent-host"
+            || health["status"] != "ok"
+        {
+            return Err(protocol_error());
+        }
+        let response = self
+            .bearer_request(Method::GET, path)
+            .await?
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|_| transport_error())?;
+        validate_no_store(response.headers())?;
+        if header_text(response.headers(), CONTENT_TYPE)? != "application/json" {
+            return Err(protocol_error());
+        }
+        let status = response.status();
+        let body = read_limited(response, 4096).await?;
+        if status == StatusCode::NOT_FOUND {
+            if path.starts_with("/v1/scheduled-plan-draft-session-mappings/") {
+                let value: serde_json::Value =
+                    serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+                if !super::schedules::drafts::valid_wire("Error", &value)
+                    || value["code"] != "not_found"
+                {
+                    return Err(protocol_error());
+                }
+                return Ok(None);
+            }
+            let error: super::schedules::recovery_generated::RecoveryError =
+                serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+            if error.error.code!=super::schedules::recovery_generated::RecoveryErrorErrorCode::RecoveryRecordNotFound{return Err(protocol_error())}
+            return Ok(None);
+        }
+        if status != StatusCode::OK {
+            return Err(HostBridgeError::new(HostBridgeErrorKind::NotReady));
+        }
+        serde_json::from_slice(&body)
+            .map(Some)
+            .map_err(|_| protocol_error())
+    }
+    pub(crate) async fn schedule_session_mapping(
+        &self,
+        task: Uuid,
+    ) -> Result<Option<super::schedules::recovery_generated::SessionMapping>, HostBridgeError> {
+        require_non_nil(task)?;
+        let value: Option<super::schedules::recovery_generated::SessionMapping> = self
+            .recovery_get(&format!("/v1/tasks/{task}/agent-session-mapping"))
+            .await?;
+        if let Some(v) = &value {
+            if v.task_id != task.to_string()
+                || v.responding_host_instance_id
+                    .as_deref()
+                    .is_some_and(|n| n != self.expected_nonce)
+            {
+                return Err(instance_error());
+            }
+        }
+        Ok(value)
+    }
+    pub(crate) async fn schedule_turn_operation(
+        &self,
+        session: Uuid,
+        operation: Uuid,
+    ) -> Result<Option<super::schedules::recovery_generated::TurnOperationResult>, HostBridgeError>
+    {
+        require_non_nil(session)?;
+        require_non_nil(operation)?;
+        let value: Option<super::schedules::recovery_generated::TurnOperationResult> = self
+            .recovery_get(&format!(
+                "/v1/agent-sessions/{session}/turn-operations/{operation}"
+            ))
+            .await?;
+        if let Some(v) = &value {
+            if v.agent_session_id != session.to_string()
+                || v.operation_id != operation.to_string()
+                || v.responding_host_instance_id
+                    .as_deref()
+                    .is_some_and(|n| n != self.expected_nonce)
+            {
+                return Err(instance_error());
+            }
+        }
+        Ok(value)
+    }
+
+    pub(crate) async fn ensure_ready(&self) -> Result<(), HostBridgeError> {
         let response = self
             .client
             .get(self.exact_url("/readyz")?)
@@ -3267,4 +3479,200 @@ mod tests {
         ));
         let _ = server.await.unwrap();
     }
+    #[tokio::test]
+    async fn feat155_3b2_recovery_gets_use_health_and_owner_without_runtime_ready() {
+        let token = TestToken::new(0o600);
+        let task = Uuid::now_v7();
+        let session = Uuid::now_v7();
+        let op = Uuid::now_v7();
+        let turn = Uuid::now_v7();
+        let health = || {
+            response(
+                "200 OK",
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Cache-Control", "no-store"),
+                    ("X-Yijie-Host-Instance-Nonce", NONCE),
+                ],
+                r#"{"service":"yijie-agent-host","status":"ok"}"#,
+            )
+        };
+        let mapping = serde_json::json!({"task_id":task,"agent_session_id":session,"mapping_state":"reserved","responding_host_instance_id":NONCE});
+        let operation = serde_json::json!({"agent_session_id":session,"operation_id":op,"state":"accepted","turn_id":turn});
+        let (port, server) = serve(vec![
+            health(),
+            json_response("200 OK", &mapping.to_string()),
+            health(),
+            json_response("200 OK", &operation.to_string()),
+        ])
+        .await;
+        let gate =
+            super::super::lifecycle::Lifecycle::new(super::super::lifecycle::Phase::Recovering);
+        let host = HostBridge::from_connection(HostConnection {
+            port,
+            token_path: token.path.clone(),
+            instance_nonce: NONCE.into(),
+        })
+        .unwrap()
+        .with_lifecycle(gate);
+        assert_eq!(
+            host.schedule_session_mapping(task)
+                .await
+                .unwrap()
+                .unwrap()
+                .mapping_state,
+            super::super::schedules::recovery_generated::MappingState::Reserved
+        );
+        assert_eq!(
+            host.schedule_turn_operation(session, op)
+                .await
+                .unwrap()
+                .unwrap()
+                .turn_id,
+            Some(turn.to_string())
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests
+            .iter()
+            .all(|r| r.starts_with("GET ") && !r.contains("/readyz")));
+        for r in [&requests[1], &requests[3]] {
+            assert!(r.to_ascii_lowercase().contains(&format!(
+                "authorization: bearer {}",
+                TOKEN.to_ascii_lowercase()
+            )));
+            assert!(!r.lines().next().unwrap().contains('?'));
+        }
+    }
+    #[tokio::test]
+    async fn feat155_3b2_missing_recovery_is_not_execution_absence() {
+        let token = TestToken::new(0o600);
+        let task = Uuid::now_v7();
+        let health = response(
+            "200 OK",
+            &[
+                ("Content-Type", "application/json"),
+                ("Cache-Control", "no-store"),
+                ("X-Yijie-Host-Instance-Nonce", NONCE),
+            ],
+            r#"{"service":"yijie-agent-host","status":"ok"}"#,
+        );
+        let (port, server) = serve(vec![
+            health,
+            json_response(
+                "404 Not Found",
+                r#"{"error":{"code":"recovery_record_not_found","message":"No current record"}}"#,
+            ),
+        ])
+        .await;
+        let host = HostBridge::from_connection(HostConnection {
+            port,
+            token_path: token.path.clone(),
+            instance_nonce: NONCE.into(),
+        })
+        .unwrap();
+        assert!(host.schedule_session_mapping(task).await.unwrap().is_none());
+        server.await.unwrap();
+    }
+    #[test]
+    fn feat155_3b2_generated_recovery_validates_dependent_fields_and_emits_native_values() {
+        use super::super::schedules::recovery_generated::*;
+        let id = NONCE;
+        for state in ["reserved", "bound"] {
+            let mut v =
+                serde_json::json!({"task_id":id,"agent_session_id":id,"mapping_state":state});
+            assert_eq!(
+                serde_json::from_value::<SessionMapping>(v.clone()).is_ok(),
+                state == "reserved"
+            );
+            v["codex_thread_id"] = id.into();
+            assert_eq!(
+                serde_json::from_value::<SessionMapping>(v.clone()).is_ok(),
+                state == "bound"
+            );
+        }
+        for state in ["pending", "uncertain", "accepted"] {
+            let mut v = serde_json::json!({"agent_session_id":id,"operation_id":id,"state":state});
+            assert_eq!(
+                serde_json::from_value::<TurnOperationResult>(v.clone()).is_ok(),
+                state != "accepted"
+            );
+            v["turn_id"] = id.into();
+            assert_eq!(
+                serde_json::from_value::<TurnOperationResult>(v).is_ok(),
+                state == "accepted"
+            );
+        }
+        let valid =
+            serde_json::json!({"task_id":id,"agent_session_id":id,"mapping_state":"reserved"});
+        let mut null = valid.clone();
+        null["responding_host_instance_id"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<SessionMapping>(null).is_err());
+        let mut unknown = valid.clone();
+        unknown["mapping_state"] = "future".into();
+        assert!(serde_json::from_value::<SessionMapping>(unknown).is_err());
+        let mut extra = valid.clone();
+        extra["future_field"] = true.into();
+        assert!(serde_json::from_value::<SessionMapping>(extra).is_err());
+        let mapping: SessionMapping = serde_json::from_value(valid).unwrap();
+        let operation = TurnOperationResult {
+            agent_session_id: id.into(),
+            operation_id: id.into(),
+            state: OperationState::Accepted,
+            turn_id: Some(id.into()),
+            responding_host_instance_id: None,
+        };
+        operation.validate().unwrap();
+        if let Ok(path) = std::env::var("FEAT155_RECOVERY_PRODUCER_OUTPUT") {
+            std::fs::write(
+                path,
+                serde_json::to_vec_pretty(
+                    &serde_json::json!({"mapping":mapping,"operation":operation}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn feat155_3b2_sleep_during_readiness_blocks_permission_turn_before_io() {
+        let token = TestToken::new(0o600);
+        let gate = super::super::lifecycle::Lifecycle::default();
+        let changed = gate.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut stream).await;
+            assert!(request.starts_with("GET /readyz "));
+            changed.transition(super::super::lifecycle::Phase::Suspended);
+            stream
+                .write_all(ready_response(NONCE).as_bytes())
+                .await
+                .unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        let host = HostBridge::from_connection(HostConnection {
+            port,
+            token_path: token.path.clone(),
+            instance_nonce: NONCE.into(),
+        })
+        .unwrap()
+        .with_lifecycle(gate);
+        let result = host
+            .start_permission_turn(
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+                &[HostTurnInputBlock::Text {
+                    text: "普通测试".into(),
+                }],
+                &HostTrace::default(),
+                super::super::runtime_permissions::PermissionMode::Ask,
+            )
+            .await;
+        assert_eq!(result.unwrap_err().kind(), HostBridgeErrorKind::NotReady);
+        server.await.unwrap();
+    }
 }
+
+mod scheduled_draft;

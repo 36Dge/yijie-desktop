@@ -313,6 +313,23 @@ impl NativeAuthRuntime {
         ))
     }
 
+    /// Fresh, native-only schedule authority. No renderer context, bearer,
+    /// network lookup, or public/production fallback is accepted here.
+    pub(crate) fn schedule_authority(
+        &self,
+        now: i64,
+    ) -> Result<
+        crate::chat::schedules::ScheduleAuthority,
+        crate::chat::schedules::execution_generated::ExecutionErrorCode,
+    > {
+        if !matches!(self.mode, RuntimeMode::DemoFast) {
+            return Err(
+                crate::chat::schedules::execution_generated::ExecutionErrorCode::ScopeDenied,
+            );
+        }
+        crate::chat::schedules::ScheduleAuthority::local(now)
+    }
+
     pub(crate) async fn chat_projection(
         &self,
         tenant_selector: &str,

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.1.0",
+  "mode": "local_candidate",
+  "release": false,
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "base_commit": "db4458fe94572c4df41a114005d54a049bb79b1f",
+  "sources": [
+    {
+      "path": "scripts/scheduled-schema-source.mjs",
+      "sha256": "4afa5abda0bb8fd76a3c01759605a8b1f3c59f5548ac93587750e07cd08f406c"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/execution-v1.schema.json",
+      "sha256": "dec7517a4d7d3cff42eb3058c8c49c7cf5d94db751ccc16b1b7acacf2811ec3e"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/plan-storage-v1.schema.json",
+      "sha256": "0883ab69c0cbcda311113fd2a966ea98065ddc47b301e36611e2447620667cd2"
+    },
+    {
+      "path": "scripts/generate-scheduled-execution.mjs",
+      "sha256": "83b96c91dd33ab79cdbe5dc240f36d505b033073745d7d629a980b217212fa79"
+    },
+    {
+      "path": "scripts/sync-scheduled-execution.mjs",
+      "sha256": "2b8f149392e01fad7049fdae98b60ecc83bfedb14ed253dfab28b6d2d46be0d3"
+    },
+    {
+      "path": "scripts/scheduled-consumer-source.mjs",
+      "sha256": "69e7fa6b1b4371d1d6c9456fe68b9ede76cc3a0896253597428729f531fde015"
+    }
+  ],
+  "generated": [
+    {
+      "path": "sdks/rust/scheduled-execution/types.gen.rs",
+      "sha256": "f53ed95baf4548dc0ad1eddf4872afffd88975984e1e67af6174834305b7d778"
+    },
+    {
+      "path": "sdks/typescript/src/jsonschema/scheduled-execution.gen.ts",
+      "sha256": "70184382b025d57155098b8a597e6c3994d903813191188f6532fd7655a612bf"
+    },
+    {
+      "path": "sdks/jsonschema/scheduled-execution.schema.json",
+      "sha256": "b6c9763e00285d75c79c21b195929c52ad997f050ecadeb735f51507c7609df9"
+    }
+  ],
+  "generators": {
+    "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
+    "jsonschema": "canonical context-preserving storage references v2"
+  },
+  "source_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
+  "source_lock_path": "compatibility/scheduled-execution/source.lock.json"
+}

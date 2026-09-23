@@ -23,6 +23,7 @@ import { usePermissionStore } from "../stores/permission.store";
 const RootRoutePage: Component = { render: () => null };
 
 export interface AppPageLoaders {
+  scheduledTasks?: () => Promise<Component>;
   chat: () => Promise<Component>;
   store: () => Promise<Component>;
   workflows: () => Promise<Component>;
@@ -33,6 +34,7 @@ export interface AppPageLoaders {
 }
 
 const APP_PAGE_LOADERS: AppPageLoaders = {
+  scheduledTasks: async () => (await import("../pages/schedules/ScheduledTasksPage.vue")).default,
   chat: async () => (await import("../pages/chat/ChatPage.vue")).default,
   store: async () => (await import("../pages/store/StorePage.vue")).default,
   workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
@@ -107,6 +109,7 @@ export function createAppRouteRecords(
       },
     },
   );
+  records.push({ path: "/scheduled-tasks", name: "scheduled-tasks", component: pageLoaders.scheduledTasks ?? APP_PAGE_LOADERS.scheduledTasks!, meta: { navKey: "scheduledTask", documentTitle: "定时任务 · 易界 AI" } });
   if (skillUiEnabled) records.push({
     path: "/plugins",
     name: "plugins",

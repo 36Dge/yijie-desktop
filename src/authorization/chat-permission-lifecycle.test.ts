@@ -139,3 +139,27 @@ describe("Chat permission lifecycle", () => {
     expect(bind).toHaveBeenCalledWith(nextTenant);
   });
 });
+
+it("reuses chat authority for management and only prepares chat after a cold management bind", async () => {
+  const store = { bind: vi.fn(async () => true), dispose: vi.fn(async () => undefined) };
+  const lifecycle = createChatPermissionLifecycle(store, true);
+  const shared = { ...accepted, canReadSchedule: true };
+  await lifecycle.synchronize({ ...shared, managementOnly: true });
+  expect(store.bind).toHaveBeenLastCalledWith(accepted.tenantId, true);
+  await lifecycle.synchronize({ ...shared, managementOnly: true });
+  expect(store.bind).toHaveBeenCalledOnce();
+  await lifecycle.synchronize({ ...shared, managementOnly: false });
+  expect(store.bind).toHaveBeenLastCalledWith(accepted.tenantId);
+  await lifecycle.synchronize({ ...shared, managementOnly: true });
+  expect(store.bind).toHaveBeenCalledTimes(2);
+});
+it("explicit execution preparation upgrades a cold management bind once", async () => {
+  const store = { bind: vi.fn(async () => true), dispose: vi.fn(async () => undefined) };
+  const lifecycle = createChatPermissionLifecycle(store, true);
+  await lifecycle.synchronize({ ...accepted, managementOnly: true, canReadSchedule: true });
+  expect(store.bind).toHaveBeenLastCalledWith(accepted.tenantId, true);
+  expect(await lifecycle.prepareExecution()).toBe(true);
+  expect(store.bind).toHaveBeenLastCalledWith(accepted.tenantId);
+  await lifecycle.prepareExecution(); expect(store.bind).toHaveBeenCalledTimes(2);
+  await lifecycle.stop(); expect(await lifecycle.prepareExecution()).toBe(false);
+});

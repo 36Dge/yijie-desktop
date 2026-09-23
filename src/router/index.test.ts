@@ -134,11 +134,12 @@ describe("app router", () => {
   it("ROUTE-006 exposes no route for unpublished business modules", () => {
     expect(APP_ROUTE_RECORDS.map((route) => route.path)).toEqual([
       "/",
+      "/scheduled-tasks",
       "/settings",
       "/access-denied",
     ]);
     expect(APP_ROUTE_RECORDS.map((route) => route.path)).not.toEqual(
-      expect.arrayContaining(["/tasks", "/store", "/workflows", "/scheduled-tasks", "/plugins", "/knowledge"]),
+      expect.arrayContaining(["/tasks", "/store", "/workflows", "/plugins", "/knowledge"]),
     );
   });
 
@@ -294,6 +295,12 @@ describe("app router", () => {
         name: "chat-session",
         navKey: "newTask",
         documentTitle: "任务对话 · 易界 AI",
+      },
+      {
+        path: "/scheduled-tasks",
+        name: "scheduled-tasks",
+        navKey: "scheduledTask",
+        documentTitle: "定时任务 · 易界 AI",
       },
       {
         path: "/settings",
