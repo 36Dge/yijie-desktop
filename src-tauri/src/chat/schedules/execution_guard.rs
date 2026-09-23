@@ -47,7 +47,7 @@ pub(crate) fn outbox_predicate(db: &Connection, alias: &str) -> Result<String, C
     let interrupt = interrupt_eligible(db, alias)?;
     let draft = super::drafts::ordinary_outbox_predicate(db, alias)?;
     Ok(format!(
-        "({draft} AND {eligible} AND (({alias}.kind='interrupt_turn' AND {interrupt}) OR ({idle}=1 AND {alias}.scheduled_run_id IS NULL)))"
+        "({draft} AND {eligible} AND (({alias}.kind='interrupt_turn' AND {interrupt}) OR ({alias}.kind!='interrupt_turn' AND {idle}=1 AND {alias}.scheduled_run_id IS NULL)))"
     ))
 }
 

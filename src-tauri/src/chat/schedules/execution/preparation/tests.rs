@@ -816,12 +816,13 @@ fn feat155_3b2_stopped_unknown_releases_index_without_changing_history_or_quota(
     assert!(guard::held(&r.connection).unwrap());
     let interrupt = Uuid::now_v7();
     r.enqueue_interrupt(chat, interrupt).unwrap();
-    r.connection
-        .execute(
-            "UPDATE chat_outbox SET state='inflight' WHERE operation_id=?1",
-            [interrupt.to_string()],
-        )
+    let claim_time = now().unwrap() + 30;
+    let claimed = r
+        .claim_next_conversation_outbox(claim_time, 30)
+        .unwrap()
         .unwrap();
+    assert_eq!(claimed.operation_id, interrupt);
+    r.guard_conversation_dispatch(interrupt).unwrap();
     let original = Uuid::now_v7().to_string();
     // Ordinary declared historical-send/normal-stop facts; no process is killed.
     r.connection.execute("UPDATE chat_scheduled_recovery SET create_host_instance=?2,original_host_instance=?2,create_attempt='attempted',turn_attempt='attempted' WHERE run_id=?1",params![run.run_id,original]).unwrap();
@@ -840,7 +841,12 @@ fn feat155_3b2_stopped_unknown_releases_index_without_changing_history_or_quota(
     let (_, _, _, local) = binding(&r, &run);
     let state:(String,String,i64)=r.connection.query_row("SELECT r.delivery_state,t.status,g.occupied_runs FROM chat_scheduled_runs r JOIN chat_scheduled_run_bindings b ON b.run_id=r.run_id JOIN chat_turns t ON t.id=b.local_turn_id JOIN chat_scheduled_grants g ON g.grant_id=r.grant_id WHERE r.run_id=?1",[&run.run_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(state, ("uncertain".into(), "streaming".into(), 1));
-    assert!(r.claim_next_conversation_outbox(n, 30).unwrap().is_none());
+    // Query after the real enqueue time and claim lease; the fixture's earlier
+    // second could hide an eligible stale retry. No system clock is changed.
+    assert!(r
+        .claim_next_conversation_outbox(claim_time + 31, 30)
+        .unwrap()
+        .is_none());
     // Reuse the existing ordinary submission API: the old index must no longer
     // occupy this chat, while the unknown row remains present and unchanged.
     let next = r.enqueue_turn(chat, "正常下一轮", Uuid::now_v7()).unwrap();
