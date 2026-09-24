@@ -97,3 +97,15 @@ make test-production-hardened
 
 `production_hardened` 入口不会刷新 S10D-H digest 或改变其 `FAIL/PAUSED` 账本；WAL/axe 的 RCA
 与一次授权复跑完成前，该入口保持失败是预期行为。
+
+## FEAT-155 日常定时任务入口（2026-09-25）
+
+Owner已授权将定时任务接到普通客户端。`pnpm tauri:dev`、`pnpm tauri:demo-fast`和`pnpm tauri:demo-fast:app`默认设置原生`YIJIE_FEAT155_SCHEDULED_DAILY=true`，使用原`demo-fast-v1` SQLCipher库、`.local/demo-fast/host-home`及`.local/demo-fast/codex-home`。复用已有SQL16～26/Store6迁移、worker、Coordinator和outbox；不另建数据库或调度服务。新保存计划仍暂停，执行与启用仍需用户有限确认。
+
+默认产物改用Contracts固定的input-only Runtime（原FEAT136产物保留），Host源码必须匹配已提交的精确source lock。普通图片、已启用工作流与普通MCP配置保留；受限草案依靠逐线程/逐轮原生空工具回执隔离，不继承普通工具权限。首页及普通聊天页的“通过当前输入创建定时任务”已移除，第二种创建方式保留在定时任务管理页“通过对话创建”。
+
+`YIJIE_FEAT155_SCHEDULED_CANDIDATE=true`仍显式选择独立验收库；不能同时选择daily。`--stable-api-only`仍保留原稳定配置及其Host/Runtime目录；显式`YIJIE_FEAT155_SCHEDULED_DAILY=false`保留原日常数据路径。二者均不执行新定时写入，已有高版本SQL数据使用兼容reader，禁止降级数据库或切换库伪造回滚。保留原Runtime的回退不提供草案资格；回退前正常暂停计划/退出，保留未知运行历史。该接线仅用于local/demo_fast，不是生产发布或任意二进制资格开关。
+
+日常历史兼容：旧v1投递明确failed但projection仍queued时，只有turn payload精确匹配、无Runtime turn绑定、没有同轮非failed操作，且submission不是submitted/uncertain，才不占用全局调度通道。已有聊天自身的原索引/删除保护继续有效；不会把旧历史改成成功或重新投递。清理重试耗尽且lease已释放的记录仍留存，但不再冒充当前清理工作；pending或仍持有lease的清理照常阻挡。
+
+专属聊天的首次create若从未尝试、已按原生恢复流程取消退款且仍无Host/Runtime绑定，则它只是已撤销运行的本地占位。后续显式确认可沿同一受管目录创建新会话/新操作，组合事务重验后更新当前专属关联；旧run、旧聊天和旧outbox继续留存且不得出站。已有真实绑定、已尝试、未释放或未知记录不适用此重建规则。

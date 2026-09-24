@@ -998,3 +998,168 @@ fn feat155_3c2_schema21_reopens_old_manual_receipts_and_chat_without_activation(
 
 #[path = "timing_tests.rs"]
 mod timing_tests;
+
+#[cfg(target_os = "macos")]
+#[test]
+fn feat155_daily_failed_legacy_queue_and_exhausted_cleanup_do_not_hold_global_lane() {
+    let root = Temp::new();
+    let n = now().unwrap();
+    let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+    let dir = root.0.join("ordinary");
+    std::fs::create_dir(&dir).unwrap();
+    let selection = crate::chat::native_project::create_selection(&dir)
+        .unwrap()
+        .unwrap();
+    let project = r
+        .register_project(&selection.canonical_path, &selection.bookmark)
+        .unwrap();
+    let chat = r
+        .create_session_and_enqueue(
+            Uuid::parse_str(&project.id).unwrap(),
+            "declared legacy history",
+            Uuid::now_v7(),
+        )
+        .unwrap();
+    assert!(guard::foreground_busy(&r.connection).unwrap());
+    // Declared historical v1 failure, no process or request is executed.
+    r.connection
+        .execute(
+            "UPDATE chat_outbox SET state='failed',attempt_count=1 WHERE session_id=?1",
+            [chat.session_id.to_string()],
+        )
+        .unwrap();
+    r.connection
+        .execute(
+            "UPDATE chat_public_task_bindings SET state='failed',last_error_code='chat_protocol_error' WHERE session_id=?1",
+            [chat.session_id.to_string()],
+        )
+        .unwrap();
+    assert!(!guard::foreground_busy(&r.connection).unwrap());
+    let state = || {
+        r.connection
+            .query_row(
+                "SELECT status FROM chat_turns WHERE session_id=?1",
+                [chat.session_id.to_string()],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(state(), "queued");
+    for submission in ["uncertain", "submitted"] {
+        r.connection
+            .execute(
+                "UPDATE chat_turns SET submission_status=?2 WHERE session_id=?1",
+                params![chat.session_id.to_string(), submission],
+            )
+            .unwrap();
+        assert!(guard::foreground_busy(&r.connection).unwrap());
+    }
+    r.connection.execute("UPDATE chat_turns SET submission_status='queued',runtime_turn_id=?2 WHERE session_id=?1", params![chat.session_id.to_string(),Uuid::now_v7().to_string()]).unwrap();
+    assert!(guard::foreground_busy(&r.connection).unwrap());
+    r.connection
+        .execute(
+            "UPDATE chat_turns SET runtime_turn_id=NULL WHERE session_id=?1",
+            [chat.session_id.to_string()],
+        )
+        .unwrap();
+    r.connection
+        .execute(
+            "UPDATE chat_outbox SET state='inflight' WHERE session_id=?1",
+            [chat.session_id.to_string()],
+        )
+        .unwrap();
+    assert!(guard::foreground_busy(&r.connection).unwrap());
+    r.connection
+        .execute(
+            "UPDATE chat_outbox SET state='failed' WHERE session_id=?1",
+            [chat.session_id.to_string()],
+        )
+        .unwrap();
+    let deletion = Uuid::now_v7();
+    r.begin_session_deletion(chat.session_id, deletion, n)
+        .unwrap();
+    assert!(guard::foreground_busy(&r.connection).unwrap());
+    r.connection.execute("UPDATE chat_deletion_jobs SET outcome_code='retry_limit_exceeded',lease_expires_at=0 WHERE operation_id=?1", [deletion.to_string()]).unwrap();
+    assert!(!guard::foreground_busy(&r.connection).unwrap());
+    r.connection
+        .execute(
+            "UPDATE chat_deletion_jobs SET lease_expires_at=?2 WHERE operation_id=?1",
+            params![deletion.to_string(), n + 30],
+        )
+        .unwrap();
+    assert!(guard::foreground_busy(&r.connection).unwrap());
+    r.connection
+        .execute(
+            "UPDATE chat_deletion_jobs SET lease_expires_at=0 WHERE operation_id=?1",
+            [deletion.to_string()],
+        )
+        .unwrap();
+    let (plan, _, grant) = confirmed(&mut r, TargetMode::DedicatedChat, None, n, 1);
+    let run = r
+        .prepare_manual_local(
+            &ScheduleAuthority::local(n).unwrap(),
+            &grant.grant_id,
+            plan.revision,
+            &Uuid::now_v7().to_string(),
+            n,
+        )
+        .unwrap();
+    assert_eq!(count(&r, "chat_scheduled_runs"), 1);
+    assert_eq!(count(&r, "chat_deletion_jobs"), 1);
+    let (_, _, create, _) = binding(&r, &run);
+    assert!(super::super::dispatch::validate_operation(
+        &r.connection,
+        &r.scope,
+        &ScheduleAuthority::local(n).unwrap(),
+        Uuid::parse_str(&create.unwrap()).unwrap(),
+        n,
+        false,
+        None
+    )
+    .is_ok());
+    assert!(read_run(&r.connection, &r.scope, &run.run_id).is_ok());
+}
+
+#[test]
+fn feat155_daily_cancelled_uncreated_dedicated_target_gets_fresh_operation() {
+    let root = Temp::new();
+    let n = now().unwrap();
+    let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+    let (p, _, g) = confirmed(&mut r, TargetMode::DedicatedChat, None, n, 2);
+    let a = ScheduleAuthority::local(n).unwrap();
+    let first = r
+        .prepare_manual_local(&a, &g.grant_id, p.revision, &Uuid::now_v7().to_string(), n)
+        .unwrap();
+    let before = binding(&r, &first);
+    r.cancel_unsent_schedule(&a, &first.run_id, n).unwrap();
+    let second = r
+        .prepare_manual_local(&a, &g.grant_id, p.revision, &Uuid::now_v7().to_string(), n)
+        .unwrap();
+    let after = binding(&r, &second);
+    assert_ne!(before.0, after.0);
+    assert_eq!(before.1, after.1);
+    assert_ne!(before.2, after.2);
+    assert_eq!(binding(&r, &first), before);
+    let old:(String,i64)=r.connection.query_row("SELECT r.delivery_state,e.refunded FROM chat_scheduled_runs r JOIN chat_scheduled_recovery e ON e.run_id=r.run_id WHERE r.run_id=?1",[&first.run_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(old, ("cancelled".into(), 1));
+    assert!(super::super::dispatch::validate_operation(
+        &r.connection,
+        &r.scope,
+        &a,
+        Uuid::parse_str(&after.2.unwrap()).unwrap(),
+        n,
+        false,
+        None
+    )
+    .is_ok());
+    assert!(super::super::dispatch::validate_operation(
+        &r.connection,
+        &r.scope,
+        &a,
+        Uuid::parse_str(&before.2.unwrap()).unwrap(),
+        n,
+        false,
+        None
+    )
+    .is_err());
+}

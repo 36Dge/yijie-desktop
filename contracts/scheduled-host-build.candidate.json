@@ -110,7 +110,7 @@
     "cmd/runtime-healthcheck/main_test.go": "8f30119cd5202db6c1307dd74c39cd0515db5a9876d24ded375b3804a6476476",
     "go.mod": "f47ba476ef396d83074df316e25ec9b2fe9323ca2925401fa5969e4a446de39d",
     "go.sum": "9644330cdaa7bbfc0137cd27ff32b189fcf6b4b1f3f74576f0f953a7ff960945",
-    "internal/app/app.go": "22d597b01641b8703de8ad6b0161f80c73c23b0ca9f79fa7ebfb294f3b5a4028",
+    "internal/app/app.go": "b1e3385c3eb4bbf5482c67b8148dba617bc3dfcc82d14b08270216901d126ce3",
     "internal/app/app_test.go": "262d8e799cc19af86ddfc5a255a649d5bc7b6b1aa2f7270ff39290e839a1ac82",
     "internal/app/feat126_evidence_test.go": "1f2b4988e1901cc0f4afd9a9c6554337f18031ca38531f196d9d7a93060a5b3b",
     "internal/app/feat134_handler_test.go": "8f367660ff705e3c164b07f57814a1da8c1d2842757c96f83a151858f1be64d4",
@@ -164,7 +164,8 @@
     "internal/codex/runtime_permissions_integration_test.go": "4b0ecbd31c2791a209fd25ac98c7969e3fdeb24d693d1d96def6ceca643d7352",
     "internal/codex/runtime_permissions_test.go": "60e9e1fd48a220ea2ceeb2a8ad09adf1ef87744291cd796837097d9830a09df9",
     "internal/codex/runtime_test.go": "9145ed8e5065cdae0f42c02ea543651f2957a4508e65adfae282e1e26c369e2e",
-    "internal/codex/scheduled_draft.go": "202034d7404bc25a7150b84ebe0da5c3667605cd4d56af33d57143d5e395770e",
+    "internal/codex/scheduled_daily_integration_test.go": "cdb4d834bcd0169308bcd090b6b4c4c55a25bcd355c18e605b0dbed09780ed34",
+    "internal/codex/scheduled_draft.go": "bb04a7723bce4b650ea9778751ff3170924fd44809491d91f8ee6cc9abb5c4d7",
     "internal/codex/scheduled_draft_integration_test.go": "e245b811e83691570330ee1ed5841d8df08686a940924da35bf475cf58d19b94",
     "internal/codex/scheduled_draft_meter_integration_test.go": "ebe9f0c0f859c9e4417263b8ecc5de34aaab6e27c8e55cca0eff7627df12599f",
     "internal/codex/scheduled_draft_test.go": "d1cc7da0ac8d07ba0310ce5127725e2069ebf3f68cc24999ff431999047bcb5a",
@@ -273,6 +274,6 @@
     "internal/skills/store_database_test.go": "5320bcd71f700b1efe7227a8e7016306868423468a245c47f04ba78d0c506f22",
     "internal/tools/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
-  "full_commit": "56e9a924454e850bd181c452c35078b3e0a36954",
+  "full_commit": "1d62b198d2430be985d2a1164647b7163edfcd92",
   "contracts_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1"
 }

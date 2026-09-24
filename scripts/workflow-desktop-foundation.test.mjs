@@ -64,10 +64,10 @@ describe("workflow Desktop normal foundation boundaries", () => {
     expect(launcher).toContain('pnpm tauri:build:demo-fast "${workflow_tauri_config');
   });
 
-  it("disables forceful Host cleanup only on the approved exact workflow path", () => {
+  it("preserves normal non-forceful Host cleanup with workflow and daily schedules", () => {
     const cleanup = sidecar.slice(sidecar.indexOf("    fn forceful_child_cleanup_enabled("), sidecar.indexOf("fn feat136_exact_local_enabled("));
-    expect(cleanup).toContain("if crate::workflows::exact_local_enabled()");
-    expect(cleanup.indexOf("return false;")).toBeLessThan(cleanup.indexOf("!self.minimax_provider_enabled || self.image_generation_enabled"));
+    expect(cleanup).toMatch(/fn forceful_child_cleanup_enabled\(&self\) -> bool \{[\s\S]*?\n {8}false\n {4}\}/);
+    expect(cleanup).not.toContain("self.image_generation_enabled");
     expect(sidecar).toContain(".kill_on_drop(config.forceful_child_cleanup_enabled())");
   });
 

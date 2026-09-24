@@ -48,11 +48,13 @@ it("prefills only, hides ordinary project/attachment/permission controls, and qu
   expect(root.text()).toContain("尚未观察到原请求提交");
   expect(native.calls.filter(c=>c==="schedule_submit_draft_v1")).toHaveLength(1);
 });
-it("keeps an existing unsent input when the default mode-change confirmation is cancelled",async()=>{
+it("keeps an existing unsent input when leaving for scheduled management is cancelled",async()=>{
   const {root,router}=await page(false);await root.get("textarea").setValue("保留我的未发送草稿");
-  await root.findAll("button").find(b=>b.text()==="通过当前输入创建定时任务")!.trigger("click");await flushPromises();
-  expect(document.body.textContent).toContain("确认切换");
+  const navigation=router.push("/scheduled-tasks");await flushPromises();
+  expect(document.body.textContent).toContain("有尚未发送的内容");
   (Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="留在对话")!).click();await flushPromises();
+  await navigation;
+  expect(router.currentRoute.value.path).toBe("/chat");
   expect(router.currentRoute.value.query.create).toBeUndefined();
   expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe("保留我的未发送草稿");
   expect(native.calls).toEqual([]);

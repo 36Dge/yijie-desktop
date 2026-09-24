@@ -600,7 +600,7 @@ pub(super) struct HostConnection {
 }
 
 pub struct SidecarSupervisor {
-    scheduled_candidate: Option<super::schedules::candidate::Launch>,
+    scheduled_candidate: Option<(super::schedules::candidate::Launch, bool)>,
     config: Option<SidecarConfig>,
     demo_fast: bool,
     skill_roots: Option<SkillRoots>,
@@ -647,10 +647,11 @@ impl SidecarSupervisor {
         })
     }
 
-    pub(crate) fn with_scheduled_candidate(
+    pub(crate) fn with_scheduled_tasks(
         mut self,
         base: &Path,
         launch: super::schedules::candidate::Launch,
+        isolated: bool,
     ) -> Result<Self, ChatError> {
         let config = self
             .config
@@ -658,18 +659,21 @@ impl SidecarSupervisor {
             .ok_or(ChatError::InvalidConfiguration)?;
         if !self.demo_fast
             || config.test_profile.is_some()
-            || config.image_generation_enabled
-            || config.sorftime_proxy.is_some()
+            || (isolated && (config.image_generation_enabled || config.sorftime_proxy.is_some()))
         {
             return Err(ChatError::InvalidConfiguration);
         }
-        let host = base.join("host");
-        let runtime = base.join("runtime");
-        super::schedules::candidate::private_directory(&host)?;
-        super::schedules::candidate::private_directory(&runtime)?;
-        config.host_home = host;
-        config.codex_home = Some(runtime);
-        self.scheduled_candidate = Some(launch);
+        if isolated {
+            let host = base.join("host");
+            let runtime = base.join("runtime");
+            super::schedules::candidate::private_directory(&host)?;
+            super::schedules::candidate::private_directory(&runtime)?;
+            config.host_home = host;
+            config.codex_home = Some(runtime);
+        }
+        // Daily activation must retain the original Host mappings, Runtime
+        // rollouts, image configuration and optional ordinary MCP credentials.
+        self.scheduled_candidate = Some((launch, isolated));
         Ok(self)
     }
 
@@ -729,13 +733,18 @@ impl SidecarSupervisor {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
-        if let Some(candidate) = &self.scheduled_candidate {
+        if let Some((candidate, _)) = &self.scheduled_candidate {
             command.env(super::schedules::candidate::CHILD_ENV, candidate.encode()?);
         }
         // One-time, explicit environment handoff after env_clear. Do not add
         // the credential to the generic environment projection or log capture.
         let mut sorftime_token = config.sorftime_token.lock().await;
-        if self.scheduled_candidate.is_some() && sorftime_token.is_some() {
+        if self
+            .scheduled_candidate
+            .as_ref()
+            .is_some_and(|(_, isolated)| *isolated)
+            && sorftime_token.is_some()
+        {
             return Err(ChatError::OrchestrationUnavailable);
         }
         if let Some(token) = sorftime_token.as_ref() {

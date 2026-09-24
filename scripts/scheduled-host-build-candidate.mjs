@@ -7,7 +7,9 @@ const exec = promisify(execFile);
 const sha = value => createHash("sha256").update(value).digest("hex");
 const inputs = ["cmd", "internal", "api", "go.mod", "go.sum"];
 export function isScheduledHostCandidate(env = process.env) {
-  return env.YIJIE_FEAT155_SCHEDULED_CANDIDATE === "true" && env.YIJIE_ENV === "local" && env.YIJIE_LOCAL_PROFILE === "demo_fast";
+  const isolated = env.YIJIE_FEAT155_SCHEDULED_CANDIDATE === "true";
+  const daily = env.YIJIE_FEAT155_SCHEDULED_DAILY === "true";
+  return isolated !== daily && env.YIJIE_ENV === "local" && env.YIJIE_LOCAL_PROFILE === "demo_fast";
 }
 // A committed local source snapshot, never an arbitrary dirty-tree exception
 // or release qualification. FEAT-152 wire pins are checked separately.

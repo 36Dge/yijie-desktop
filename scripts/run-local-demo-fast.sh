@@ -64,12 +64,23 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
-# This selects an isolated native candidate, never a permission override. The
-# exact artifact identity comes from the same Contracts projection as Host.
+# The normal local entry now uses scheduled storage in the original daily data
+# roots. The existing isolated candidate remains an explicit test selection.
+# Neither selection is a plan grant or an execution permission.
 scheduled_candidate="${YIJIE_FEAT155_SCHEDULED_CANDIDATE:-false}"
 [[ "$scheduled_candidate" == "true" || "$scheduled_candidate" == "false" ]] || fail "invalid scheduled candidate selection"
-if [[ "$scheduled_candidate" == "true" ]]; then
-  [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" && "$sorftime_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
+scheduled_daily_default="true"
+if [[ "$scheduled_candidate" == "true" || "$stable_api_only" == "true" ]]; then
+  scheduled_daily_default="false"
+fi
+scheduled_daily="${YIJIE_FEAT155_SCHEDULED_DAILY:-$scheduled_daily_default}"
+[[ "$scheduled_daily" == "true" || "$scheduled_daily" == "false" ]] || fail "invalid daily scheduled selection"
+if [[ "$scheduled_daily" == "true" ]]; then
+  [[ "$scheduled_candidate" == "false" && "$stable_api_only" == "false" ]] || fail "daily scheduled entry cannot select isolated data"
+fi
+scheduled_enabled="false"
+if [[ "$scheduled_candidate" == "true" || "$scheduled_daily" == "true" ]]; then
+  scheduled_enabled="true"
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-input-only.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-input-only.mjs" --check
   candidate_lock="$desktop_root/contracts/runtime-input-only.candidate.json"
@@ -78,11 +89,16 @@ if [[ "$scheduled_candidate" == "true" ]]; then
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
   runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
   runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
+fi
+if [[ "$scheduled_candidate" == "true" ]]; then
+  [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" && "$sorftime_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
   image_generation_enabled="false"
   runtime_root="$desktop_root/.local/feat155-candidate"
   host_home="$runtime_root/host-home"
   codex_home="$runtime_root/codex-home"
 fi
+export YIJIE_FEAT155_SCHEDULED_CANDIDATE="$scheduled_candidate"
+export YIJIE_FEAT155_SCHEDULED_DAILY="$scheduled_daily"
 
 workflow_environment=()
 workflow_tauri_config=()
@@ -152,7 +168,7 @@ fi
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
 fi
-if [[ "$scheduled_candidate" == "true" ]]; then
+if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
 fi
 
@@ -177,7 +193,7 @@ fi
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
 fi
-if [[ "$scheduled_candidate" == "true" ]]; then
+if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
 fi
 
@@ -277,6 +293,7 @@ exec env \
   YIJIE_ENV=local \
   YIJIE_LOCAL_PROFILE=demo_fast \
   "YIJIE_FEAT155_SCHEDULED_CANDIDATE=$scheduled_candidate" \
+  "YIJIE_FEAT155_SCHEDULED_DAILY=$scheduled_daily" \
   YIJIE_CHAT_LOCAL_ENABLED=true \
   YIJIE_CHAT_LOCAL_HOST_ENABLED=true \
   YIJIE_CHAT_LOCAL_OWNER_USER_ID=12500000-0000-4000-8000-000000000001 \

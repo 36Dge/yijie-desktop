@@ -156,11 +156,13 @@ fn other_busy(db: &Connection, run: &str) -> Result<bool, ChatError> {
     let active = super::super::recovery::effective_turn(db, "t")?;
     let outbox = super::super::recovery::unreleased(db, "o.scheduled_run_id")?;
     let interrupt = super::super::execution_guard::interrupt_eligible(db, "o")?;
+    let failed_legacy = guard::FAILED_LEGACY_QUEUE;
+    let cleanup = guard::ACTIVE_CLEANUP;
     db.query_row(&format!("SELECT
-      EXISTS(SELECT 1 FROM chat_deletion_jobs)
+      EXISTS(SELECT 1 FROM chat_deletion_jobs WHERE {cleanup})
       OR EXISTS(SELECT 1 FROM chat_scheduled_reservation WHERE run_id!=?1)
       OR EXISTS(SELECT 1 FROM chat_scheduled_runs r LEFT JOIN chat_scheduled_recovery e ON e.run_id=r.run_id WHERE r.run_id!=?1 AND (r.format_version!=1 OR e.format_version!=1 OR e.run_id IS NULL OR (e.release_kind IS NULL AND (r.delivery_state NOT IN ('terminal','cancelled') OR r.needs_attention=1))))
-      OR EXISTS(SELECT 1 FROM chat_turns t WHERE {active} AND (t.status IN ('streaming','stopping') OR t.submission_status='uncertain' OR (t.status='queued' AND COALESCE(t.submission_status,'queued') NOT IN ('failed','cancelled'))) AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings b JOIN chat_scheduled_runs r ON r.run_id=b.run_id WHERE b.run_id=?1 AND b.local_turn_id=t.id AND b.conversation_id=t.session_id AND r.operation_id=t.operation_id))
+      OR EXISTS(SELECT 1 FROM chat_turns t WHERE {active} AND (t.status IN ('streaming','stopping') OR t.submission_status='uncertain' OR (t.status='queued' AND COALESCE(t.submission_status,'queued') NOT IN ('failed','cancelled') AND NOT {failed_legacy})) AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings b JOIN chat_scheduled_runs r ON r.run_id=b.run_id WHERE b.run_id=?1 AND b.local_turn_id=t.id AND b.conversation_id=t.session_id AND r.operation_id=t.operation_id))
       OR EXISTS(SELECT 1 FROM chat_outbox o WHERE o.kind IN ('create_session','start_turn','interrupt_turn') AND o.state IN ('pending','inflight') AND {outbox} AND (o.kind!='interrupt_turn' OR {interrupt}) AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings b JOIN chat_scheduled_runs r ON r.run_id=b.run_id WHERE b.run_id=?1 AND o.scheduled_run_id=r.run_id AND o.session_id=b.conversation_id AND ((o.kind='create_session' AND o.operation_id=b.create_operation_id) OR (o.kind='start_turn' AND o.operation_id=r.operation_id))))
       OR EXISTS(SELECT 1 FROM chat_public_task_bindings p WHERE p.state IN ('pending','inflight','retry_wait') AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings b WHERE b.run_id=?1 AND b.create_operation_id=p.create_operation_id AND b.conversation_id=p.session_id) AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings b JOIN chat_scheduled_recovery e ON e.run_id=b.run_id WHERE b.create_operation_id=p.create_operation_id AND e.format_version=1 AND e.release_kind IS NOT NULL))"),[run],|r|r.get(0)).map_err(db_error)
 }

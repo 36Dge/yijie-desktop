@@ -165,7 +165,7 @@ fn artifacts_v3_transfer_enabled(value: Option<&str>) -> bool {
 
 #[derive(Clone)]
 struct LocalChatConfig {
-    scheduled_candidate: bool,
+    schedule_selection: schedules::candidate::Selection,
     chat_directory: PathBuf,
     demo_fast_secret_directory: Option<PathBuf>,
     scope: database::ChatScope,
@@ -341,16 +341,15 @@ impl ChatRuntime {
             };
         }
         let candidate_requested = std::env::var(schedules::candidate::FLAG).ok();
-        let candidate_enabled =
-            candidate_requested.as_deref() == Some("true") && local_profile.is_demo_fast();
-        let candidate_invalid = candidate_requested
-            .as_deref()
-            .is_some_and(|v| v != "false" && !(v == "true" && local_profile.is_demo_fast()));
-        let local_data = app_data_directory.join(if candidate_enabled {
-            "demo-fast-scheduled-candidate-v1"
-        } else {
-            "demo-fast-v1"
-        });
+        let daily_requested = std::env::var(schedules::candidate::DAILY_FLAG).ok();
+        let selection = schedules::candidate::Selection::resolve(
+            local_profile.is_demo_fast(),
+            candidate_requested.as_deref(),
+            daily_requested.as_deref(),
+        );
+        let candidate_invalid = selection.is_err();
+        let selection = selection.unwrap_or(schedules::candidate::Selection::Disabled);
+        let local_data = app_data_directory.join(selection.data_directory());
         let mut mode = if secure_storage_invalid
             || candidate_invalid
             || std::env::var("YIJIE_ENV").as_deref() != Ok("local")
@@ -364,7 +363,7 @@ impl ChatRuntime {
                 (Ok(owner), Ok(tenant)) => match database::ChatScope::new(owner, tenant) {
                     Ok(scope) => match (scope.owner_uuid(), scope.tenant_uuid()) {
                         (Ok(owner_user_id), Ok(tenant_id)) => RuntimeMode::Local(LocalChatConfig {
-                            scheduled_candidate: candidate_enabled,
+                            schedule_selection: selection,
                             chat_directory: if local_profile.is_demo_fast() {
                                 local_data.join("chat")
                             } else {
@@ -402,19 +401,25 @@ impl ChatRuntime {
             Ok(supervisor) => {
                 let prepared = (|| {
                     if let RuntimeMode::Local(config) = &mode {
-                        if config.scheduled_candidate {
+                        if config.schedule_selection.enabled() {
                             let base = config
                                 .chat_directory
                                 .parent()
                                 .ok_or(ChatError::InvalidConfiguration)?;
-                            schedules::candidate::private_directory(base)?;
+                            let isolated = config.schedule_selection
+                                == schedules::candidate::Selection::Isolated;
+                            if isolated {
+                                schedules::candidate::private_directory(base)?;
+                                schedules::candidate::private_directory(&base.join("secrets"))?;
+                            } else {
+                                schedules::candidate::prepare_daily_directory(base)?;
+                            }
                             schedules::candidate::private_directory(&config.chat_directory)?;
-                            schedules::candidate::private_directory(&base.join("secrets"))?;
                             let launch = schedules::candidate::Launch::prepare(
                                 &config.chat_directory,
                                 &config.scope,
                             )?;
-                            return supervisor.with_scheduled_candidate(base, launch);
+                            return supervisor.with_scheduled_tasks(base, launch, isolated);
                         }
                     }
                     Ok(supervisor)
@@ -467,7 +472,7 @@ impl ChatRuntime {
         if let Some(worker) = self.worker.lock().await.clone() {
             return Ok(worker);
         }
-        let candidate = config.scheduled_candidate;
+        let candidate = config.schedule_selection.enabled();
         let directory = config.chat_directory.clone();
         let scope = config.scope.clone();
         let (key_store, receipt_key_store) = tokio::task::spawn_blocking(move || {
@@ -980,7 +985,7 @@ impl ChatRuntime {
 
     /// Called by native setup only. Management IPC does not start any service.
     pub(crate) async fn scheduled_startup_needed(&self) -> Result<bool, ChatError> {
-        if !matches!(&self.mode, RuntimeMode::Local(c) if c.scheduled_candidate) {
+        if !matches!(&self.mode, RuntimeMode::Local(c) if c.schedule_selection.enabled()) {
             return Ok(false);
         }
         let worker = self.database().await?;
@@ -1413,7 +1418,7 @@ mod tests {
         let authorization = ChatAuthorizationManager::new(&scope).ok();
         ChatRuntime {
             mode: RuntimeMode::Local(LocalChatConfig {
-                scheduled_candidate: false,
+                schedule_selection: schedules::candidate::Selection::Disabled,
                 chat_directory: profile.desktop_app_data().join("chat"),
                 demo_fast_secret_directory: None,
                 scope,

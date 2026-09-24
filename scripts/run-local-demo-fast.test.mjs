@@ -53,7 +53,7 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('image_generation_enabled="false"');
     expect(argumentBoundary).toContain('stable_api_only="true"');
     expect(runner).toContain(
-      'codex_runtime_root="$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0"',
+      'codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$host_root/.local/runtime-artifacts/feat-136-b2b20e2fc4a0}"',
     );
     expect(runner).toContain('codex_binary="$codex_runtime_root/codex"');
     expect(runner).toContain('codex_manifest="$codex_runtime_root/runtime-manifest.json"');
@@ -67,7 +67,7 @@ describe("local demo launcher profiles", () => {
     expect(argumentBoundary).toContain('case "$#" in');
   });
 
-  it("pins both entries to the retained FEAT-136 Runtime provenance artifact pair", async () => {
+  it("keeps exact retained artifact checks for the stable and explicit rollback entries", async () => {
     const runner = await readFile(runnerPath, "utf8");
 
     expect(runner).toContain(

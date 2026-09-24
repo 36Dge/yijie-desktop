@@ -54,6 +54,25 @@ fn existing_run(
     } // Never fill an old partial foundation reservation.
     read_run(db, scope, &run).map(Some)
 }
+// A local placeholder whose first create was provably never attempted is not
+// an established dedicated Runtime chat. A newly confirmed run gets a new
+// create operation; old cancelled history/outbox remains immutable and blocked.
+fn dedicated_target(
+    db: &rusqlite::Connection,
+    scope: &crate::chat::database::ChatScope,
+    plan: &str,
+) -> Result<Option<Option<String>>, Error> {
+    let binding: Option<Option<String>> = db.query_row("SELECT conversation_id FROM chat_scheduled_target_bindings WHERE plan_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![plan,scope.owner_user_id,scope.tenant_id],|r|r.get(0)).optional().map_err(|_|Error::StorageUnavailable)?;
+    if let Some(Some(chat)) = &binding {
+        if super::super::recovery::present(db).map_err(chat_error)? {
+            let reusable: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM chat_sessions s JOIN chat_public_task_bindings p ON p.session_id=s.id JOIN chat_outbox o ON o.operation_id=p.create_operation_id JOIN chat_scheduled_run_bindings b ON b.create_operation_id=o.operation_id AND b.conversation_id=s.id JOIN chat_scheduled_runs r ON r.run_id=b.run_id JOIN chat_scheduled_recovery e ON e.run_id=r.run_id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND s.agent_session_id IS NULL AND s.runtime_thread_id IS NULL AND p.state='pending' AND p.attempt_count=0 AND o.attempt_count=0 AND o.state IN ('pending','failed') AND r.plan_id=?4 AND r.format_version=1 AND r.delivery_state='cancelled' AND e.format_version=1 AND e.release_kind='never_sent_cancel' AND e.refunded=1 AND e.create_attempt='never' AND e.turn_attempt='never' AND NOT EXISTS(SELECT 1 FROM chat_scheduled_run_bindings other WHERE other.conversation_id=s.id AND other.run_id!=r.run_id) AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id))",params![chat,scope.owner_user_id,scope.tenant_id,plan],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
+            if reusable {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(binding)
+}
 impl ChatRepository {
     fn preparation_storage(&self) -> Result<(), Error> {
         self.execution_storage(true)?;
@@ -74,7 +93,7 @@ impl ChatRepository {
                     .ok_or(Error::TargetUnavailable)?,
             ),
             TargetMode::DedicatedChat => {
-                let binding:Option<Option<String>>=self.connection.query_row("SELECT conversation_id FROM chat_scheduled_target_bindings WHERE plan_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![p.plan_id,self.scope.owner_user_id,self.scope.tenant_id],|r|r.get(0)).optional().map_err(|_|Error::StorageUnavailable)?;
+                let binding = dedicated_target(&self.connection, &self.scope, &p.plan_id)?;
                 match binding {
                     Some(None) => return Err(Error::TargetUnavailable),
                     Some(Some(id)) => Some(id),
@@ -235,10 +254,10 @@ impl ChatRepository {
             self.schedule_trigger_lifecycle.as_ref(),
             timestamp,
         )?;
-        let expected_chat=match p.definition.target.mode {
-            TargetMode::ExistingChat=>p.definition.target.conversation_id.clone(),
-            TargetMode::NewChatEachRun=>None,
-            TargetMode::DedicatedChat=>tx.query_row("SELECT conversation_id FROM chat_scheduled_target_bindings WHERE plan_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![p.plan_id,scope.owner_user_id,scope.tenant_id],|r|r.get::<_,Option<String>>(0)).optional().map_err(|_|Error::StorageUnavailable)?.flatten(),
+        let expected_chat = match p.definition.target.mode {
+            TargetMode::ExistingChat => p.definition.target.conversation_id.clone(),
+            TargetMode::NewChatEachRun => None,
+            TargetMode::DedicatedChat => dedicated_target(&tx, &scope, &p.plan_id)?.flatten(),
         };
         if expected_chat != target.conversation {
             return Err(Error::TargetUnavailable);
@@ -309,7 +328,7 @@ impl ChatRepository {
             )
             .map_err(chat_error)?;
             if p.definition.target.mode == TargetMode::DedicatedChat {
-                tx.execute("INSERT INTO chat_scheduled_target_bindings(plan_id,owner_user_id,tenant_id,conversation_id,project_id) VALUES(?1,?2,?3,?4,?5)",params![p.plan_id,scope.owner_user_id,scope.tenant_id,pending.session_id.to_string(),target.project]).map_err(|_|Error::StorageUnavailable)?;
+                tx.execute("INSERT INTO chat_scheduled_target_bindings(plan_id,owner_user_id,tenant_id,conversation_id,project_id) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(plan_id) DO UPDATE SET conversation_id=excluded.conversation_id,project_id=excluded.project_id",params![p.plan_id,scope.owner_user_id,scope.tenant_id,pending.session_id.to_string(),target.project]).map_err(|_|Error::StorageUnavailable)?;
             }
             (
                 pending.session_id.to_string(),

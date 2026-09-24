@@ -6,7 +6,7 @@ import { NCard, NModal } from "naive-ui";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type RouteLocationNormalized } from "vue-router";
 import ScheduledDraftPanel from "../../components/schedules/ScheduledDraftPanel.vue";
 import { useScheduledDraft } from "../schedules/use-scheduled-draft";
-import { queueScheduleDraftIntent, takeScheduleDraftIntent, clearScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
+import { takeScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
 import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
@@ -197,11 +197,6 @@ watch([isNewDraftMode, () => chatStore.context?.contextId, () => permissionScope
   entryPrefilled = true;
   if (text !== null) prompt.value = text;
 }, { immediate: true, flush: "post" });
-async function enterDraftMode() {
-  if (!permissionScope.selectedTenantId || permissionScope.authorizationRevision === null) return;
-  queueScheduleDraftIntent(permissionScope.selectedTenantId, permissionScope.authorizationRevision, prompt.value.trim() || undefined);
-  if (await router.push({ path: "/chat", query: { create: "schedule" } })) clearScheduleDraftIntent();
-}
 async function openDraftConversation(id: string) {
   await chatStore.reloadSessions();
   if (routeSessionId.value !== id) await router.push(`/chat/${id}`);
@@ -678,7 +673,6 @@ onBeforeUnmount(() => {
 
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <button v-else-if="permissionScope.hasCapability('schedule.read')" type="button" class="chat-notice__action yj-control" :disabled="submitting" @click="enterDraftMode">通过当前输入创建定时任务</button>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -889,7 +883,6 @@ onBeforeUnmount(() => {
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
-      <button v-else-if="permissionScope.hasCapability('schedule.read')" type="button" class="chat-notice__action yj-control" :disabled="submitting" @click="enterDraftMode">通过当前输入创建定时任务</button>
       <ChatComposer
         ref="composer"
         v-model="prompt"

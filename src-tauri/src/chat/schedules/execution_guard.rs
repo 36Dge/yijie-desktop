@@ -129,6 +129,25 @@ impl ChatRepository {
     }
 }
 
+// Legacy v1 failures retained a queued projection. A failed operation is
+// not runnable and must not reserve the global lane forever. Require an
+// exact turn payload and no native binding; unknown/submitted turns and any
+// nonfailed matching operation stay busy. Never rewrite historical state.
+pub(super) const FAILED_LEGACY_QUEUE: &str = "(t.runtime_turn_id IS NULL
+      AND COALESCE(t.submission_status,'queued')='queued'
+      AND EXISTS(SELECT 1 FROM chat_outbox f WHERE f.session_id=t.session_id
+        AND f.kind IN ('create_session','start_turn') AND f.state='failed'
+        AND f.payload_version IN (1,2)
+        AND CASE WHEN json_valid(CAST(f.encrypted_payload AS TEXT))
+          THEN json_extract(CAST(f.encrypted_payload AS TEXT),'$.turn_id')=t.id ELSE 0 END)
+      AND NOT EXISTS(SELECT 1 FROM chat_outbox f WHERE f.session_id=t.session_id
+        AND f.kind IN ('create_session','start_turn') AND f.state!='failed'
+        AND CASE WHEN json_valid(CAST(f.encrypted_payload AS TEXT))
+          THEN json_extract(CAST(f.encrypted_payload AS TEXT),'$.turn_id')=t.id ELSE 1 END))";
+
+pub(super) const ACTIVE_CLEANUP: &str =
+    "outcome_code!='retry_limit_exceeded' OR lease_expires_at!=0";
+
 /// All foreground submissions reserve implicitly via their existing durable
 /// turn/outbox. This preserves foreground/foreground behavior and closes the
 /// accepted-but-not-yet-recorded and create-session I/O windows.
@@ -141,14 +160,16 @@ pub(super) fn foreground_busy(db: &Connection) -> Result<bool, ChatError> {
     } else {
         "1=1"
     };
+    let failed_legacy = FAILED_LEGACY_QUEUE;
+    let cleanup = ACTIVE_CLEANUP;
     db.query_row(&format!("SELECT
       EXISTS(SELECT 1 FROM chat_turns t WHERE {turn} AND (status IN ('streaming','stopping')
         OR submission_status='uncertain'
-        OR (status='queued' AND COALESCE(submission_status,'queued') NOT IN ('failed','cancelled'))))
+        OR (status='queued' AND COALESCE(submission_status,'queued') NOT IN ('failed','cancelled') AND NOT {failed_legacy})))
       OR EXISTS(SELECT 1 FROM chat_outbox o WHERE kind IN ('create_session','start_turn','interrupt_turn')
         AND state IN ('pending','inflight') AND {outbox} AND (kind!='interrupt_turn' OR {interrupt}))
       OR EXISTS(SELECT 1 FROM chat_public_task_bindings p WHERE state IN ('pending','inflight','retry_wait') AND {public})
-      OR EXISTS(SELECT 1 FROM chat_deletion_jobs)"),
+      OR EXISTS(SELECT 1 FROM chat_deletion_jobs WHERE {cleanup})"),
       [], |r|r.get(0)).map_err(|_|ChatError::DatabaseUnavailable)
 }
 pub(super) fn interrupt_eligible(db: &Connection, alias: &str) -> Result<String, ChatError> {

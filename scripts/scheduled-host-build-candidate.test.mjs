@@ -7,3 +7,11 @@ it("keeps the reviewed candidate source exception local and explicit", () => {
   for(const key of Object.keys(env)) expect(isScheduledHostCandidate({...env,[key]:""})).toBe(false);
   expect(isScheduledHostCandidate({...env,YIJIE_ENV:"production"})).toBe(false);
 });
+
+it("accepts the daily committed source without treating it as isolated data", () => {
+  const env={YIJIE_FEAT155_SCHEDULED_DAILY:"true",YIJIE_ENV:"local",YIJIE_LOCAL_PROFILE:"demo_fast"};
+  expect(isScheduledHostCandidate(env)).toBe(true);
+  expect(isScheduledHostCandidate({...env,YIJIE_ENV:"production"})).toBe(false);
+  expect(isScheduledHostCandidate({...env,YIJIE_FEAT155_SCHEDULED_CANDIDATE:"true"})).toBe(false);
+  expect(isScheduledHostCandidate({...env,YIJIE_FEAT155_SCHEDULED_DAILY:"false"})).toBe(false);
+});

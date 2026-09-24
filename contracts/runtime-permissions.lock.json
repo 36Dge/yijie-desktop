@@ -15,13 +15,13 @@
   },
   "agent_host": {
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
-    "full_commit": "56e9a924454e850bd181c452c35078b3e0a36954",
+    "full_commit": "1d62b198d2430be985d2a1164647b7163edfcd92",
     "sources": {
       "api/openapi/runtime-permissions.yaml": "613032548bc666f6724b62f73444ef0052f07f71af715bdc5a436da6fb887fc1",
       "api/runtime-permissions.lock.json": "6fde8a4201efa80808c37c5fff5259fcc6e2ffda0d015ab4411adf52721b07fa",
       "go.mod": "f47ba476ef396d83074df316e25ec9b2fe9323ca2925401fa5969e4a446de39d",
       "go.sum": "9644330cdaa7bbfc0137cd27ff32b189fcf6b4b1f3f74576f0f953a7ff960945",
-      "internal/app/app.go": "22d597b01641b8703de8ad6b0161f80c73c23b0ca9f79fa7ebfb294f3b5a4028",
+      "internal/app/app.go": "b1e3385c3eb4bbf5482c67b8148dba617bc3dfcc82d14b08270216901d126ce3",
       "internal/app/runtime_permission_verification.go": "1309dc277590710819a7565d8af3e89bc22bbdcd5421c46d874993ea830d61c4",
       "internal/app/runtime_permissions.go": "0fdbb5e03f0cbd72bad357a05376842905cef54a7c8e88fac44aa0d14c78f0d1",
       "internal/codex/runtime.go": "f36b914105e3f276b71c297232e7773088937e6fb21afe942ca52b93b1fd43fd",
