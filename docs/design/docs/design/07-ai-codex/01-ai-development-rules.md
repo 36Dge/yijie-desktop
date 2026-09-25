@@ -45,7 +45,7 @@
 
 准确值以 [颜色 Tokens](../02-tokens/02-color-tokens.md)、[主题与暗色模式](../03-ui-system/05-theme-dark-mode.md)、[品牌资产](../03-ui-system/06-brand-assets.md) 为准。此次基线不改变字体、间距、圆角尺度、布局结构和交互规则。
 
-普通文字按 primary/body/secondary/metadata/disabled 分角色；正文和普通工具图标不使用深绿或青柠，图表首色独立固定。所有新页面及现有页面修改都必须逐项查 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)：2px 中性 focus、普通卡片/输入无阴影、浮层轻投影、readonly/disabled 与组合优先级不可省略。
+普通文字按 primary/body/secondary/metadata/disabled 分角色；正文和普通工具图标不使用深绿或青柠，图表首色独立固定。所有新页面及现有页面修改都必须逐项查 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)：输入类控件单层 1px 中性焦点边框（与 Chat Composer 一致），按钮/导航等保留 2px 键盘焦点、普通卡片/输入无阴影、浮层轻投影、readonly/disabled 与组合优先级不可省略。
 
 ## 样式约束
 

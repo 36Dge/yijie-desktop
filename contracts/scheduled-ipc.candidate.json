@@ -11,7 +11,7 @@
   "sources": [
     {
       "path": "src-tauri/schemas/scheduled-task-ipc-v1.schema.json",
-      "sha256": "62e3415c7fa00cb7afba72ae379f9a012daea5ef2e449136a36c92c80ba9cfeb"
+      "sha256": "7ae177182c8d4b07c9eeaf0f0660265184944e77b686c802a207c55c66d08a06"
     },
     {
       "path": "scripts/generate-scheduled-ipc.mjs",
@@ -61,15 +61,15 @@
     },
     {
       "path": "src-tauri/src/chat/schedules/ipc_generated.rs",
-      "sha256": "c3faf308d91747e6847af7bebd18f6c1df60506ebd0bef6176c94e71dfc5059c"
+      "sha256": "6bc606b999ebd16e0561224222de856d31d7b3d983eb7e2ad1a174878e7f38f8"
     },
     {
       "path": "src-tauri/src/chat/schedules/ipc_commands_generated.rs",
-      "sha256": "7c5d039242c65a36b14347b5b171b67521f7e79347726b08ef39428dd00f1d7c"
+      "sha256": "05079389aecff478aa0cff9e3ea7eb9fe8fba0e5fa4e9463089b781efc3c839e"
     },
     {
       "path": "src/api/generated/scheduled-task-ipc.gen.ts",
-      "sha256": "c4eaa2ad96ce1f3c0260d43245c56e44ab4e8edc1110a1a9c542fd8d6ff86e4c"
+      "sha256": "f4f02685a8a7ad07e7cf1514a95ecde1109b28316397467e2eda1c2a7682c068"
     },
     {
       "path": "src/api/generated/scheduled-task-ipc-validator.gen.js",

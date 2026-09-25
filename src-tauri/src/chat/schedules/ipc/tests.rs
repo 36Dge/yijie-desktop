@@ -932,3 +932,5 @@ async fn feat155_final_important_updates_do_not_open_ordinary_storage() {
         .unwrap();
     f.close().await;
 }
+
+mod default_activation_tests;

@@ -6,12 +6,13 @@ import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 
 type Command = keyof Requests;
-type Pending = Readonly<{ id: string; scope: string; kind: "save"; payload: SavePlanRequest } | { id: string; scope: string; kind: "pause" | "delete"; payload: PlanMutation }>;
+type Pending = Readonly<{ id: string; scope: string; kind: "save"; payload: SavePlanRequest } | { id: string; scope: string; kind: "pause" | "delete" | "enable"; payload: PlanMutation }>;
 export function useScheduledManagement(client = createScheduledTaskNativeClient()) {
   const chat = useChatStore(); const permissions = usePermissionStore();
   const tab = ref("plans"); const search = ref(""); const state = ref<FilterState>("all"); const order = ref<PlanCardOrder>("created_desc"); const planFilter = ref<string | null>(null);
   const cards = shallowRef<PlanCard[]>([]); const records = shallowRef<RecordRow[]>([]); const capabilities = shallowRef<OperationCapabilities | null>(null);
   const cursor = ref<string>(); const loading = ref(false); const writing = ref(false); const error = ref<IpcErrorCode | null>(null); const notice = ref("");
+  const success = ref("");
   const pending = shallowRef<Pending | null>(null); const receipt = shallowRef<PlanDetail | null>(null);
   let epoch = 0; let disposed = false; let timer: ReturnType<typeof setTimeout> | undefined;
   const context = computed(() => chat.context?.contextId ?? null);
@@ -51,15 +52,17 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
   async function runPending(): Promise<boolean> {
     const action = pending.value;
     if (!action || action.scope !== scope.value || writing.value || !context.value) return false;
-    writing.value = true; error.value = null; notice.value = "";
+    writing.value = true; error.value = null; notice.value = ""; success.value = "";
     try {
-      const result = action.kind === "save" ? await call("schedule_save_plan_v1", action.payload, action.id)
+      const result = action.kind === "save" ? await call("schedule_save_active_plan_v1", action.payload, action.id)
+        : action.kind === "enable" ? await call("schedule_enable_plan_v1", action.payload, action.id)
         : action.kind === "pause" ? await call("schedule_pause_plan_v1", action.payload, action.id)
           : await call("schedule_delete_plan_v1", action.payload, action.id);
       if (pending.value !== action) return false;
       pending.value = null;
-      notice.value = action.kind === "delete" ? "计划已删除，历史记录已保留。" : "计划已保存为暂停状态，不会自动执行。";
-      receipt.value = await call("schedule_get_plan_v1", { plan_id: result.plan_id }).catch(() => null);
+      // A deleted plan remains in storage for history, but is not a visible management receipt.
+      success.value = action.kind === "delete" ? "" : action.kind === "save" ? (result.state === "enabled" ? "定时任务已保存并开启" : "定时任务已保存") : result.state === "enabled" ? "定时任务已开启" : "定时任务已关闭";
+      receipt.value = action.kind === "delete" ? null : await call("schedule_get_plan_v1", { plan_id: result.plan_id }).catch(() => null);
       await refresh(); return true;
     } catch (e) {
       if (pending.value !== action) return false;
@@ -76,7 +79,7 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
     pending.value = Object.freeze({ kind: "save", id, scope: scope.value, payload: structuredClone({ ...payload, request_id: id }) });
     return runPending();
   }
-  async function mutate(kind: "pause" | "delete", payload: PlanMutation) {
+  async function mutate(kind: "pause" | "delete" | "enable", payload: PlanMutation) {
     if (!canManage.value || !scope.value) return false;
     receipt.value = null;
     pending.value = Object.freeze({ kind, id: crypto.randomUUID(), scope: scope.value, payload: structuredClone(payload) });
@@ -90,8 +93,9 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
       const result = await call("schedule_read_plan_mutation_receipt_v1", { original_request_id: action.id });
       if (pending.value !== action) return;
       if (result.observation === "observed") {
-        receipt.value = result.current_plan ?? null; pending.value = null;
-        notice.value = "已查到原请求回执。下方显示计划当前状态；它可能已被后续操作更新。";
+        receipt.value = action.kind === "delete" ? null : result.current_plan ?? null; pending.value = null;
+        notice.value = "";
+        success.value = action.kind === "delete" ? "" : "已确认操作结果，任务列表已更新";
         await refresh();
       } else notice.value = "尚未查到回执，结果仍不确定。可再次查证，或明确重试同一请求。";
     } catch (e) { if (pending.value === action) error.value = errorCode(e); }
@@ -105,5 +109,5 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
     timer = setTimeout(() => { void refresh(); }, 220);
   });
   onScopeDispose(() => { disposed = true; epoch++; clearTimeout(timer); pending.value = null; });
-  return { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, pending, receipt, context, canManage, call, refresh, save, mutate, queryReceipt, retryMutation: runPending };
+  return { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, success, pending, receipt, context, canManage, call, refresh, save, mutate, queryReceipt, retryMutation: runPending };
 }

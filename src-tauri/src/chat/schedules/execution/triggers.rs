@@ -354,10 +354,7 @@ impl ChatRepository {
         }
         let w = workspace(&tx, &scope, &p)?;
         // A dedicated binding is not the authorization policy, but must still be usable.
-        let ask:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_scheduled_target_bindings b LEFT JOIN chat_sessions s ON s.id=b.conversation_id AND s.owner_user_id=b.owner_user_id AND s.tenant_id=b.tenant_id LEFT JOIN chat_projects w ON w.id=s.project_id AND w.owner_user_id=s.owner_user_id AND w.tenant_id=s.tenant_id LEFT JOIN chat_task_permissions m ON m.session_id=s.id WHERE b.plan_id=?1 AND (b.conversation_id IS NULL OR s.id IS NULL OR w.id IS NULL OR w.removed_at IS NOT NULL OR COALESCE(m.mode,'ask')!='ask' OR EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)))",[&p.plan_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
-        if !ask {
-            return Err(Error::TargetUnavailable);
-        }
+        validate_automatic_target(&tx, &p)?;
         let clock = now.max(store::cursor_at(&tx, &scope, &p.plan_id).map_err(plan_error)?);
         let next =
             time::preview(&p.definition.rule, clock, p.effective_from).map_err(plan_error)?;
@@ -402,6 +399,61 @@ impl ChatRepository {
             future_hold: None,
         })
     }
+}
+
+fn validate_automatic_target(tx: &Transaction<'_>, p: &PlanView) -> Result<(), Error> {
+    let ask:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_scheduled_target_bindings b LEFT JOIN chat_sessions s ON s.id=b.conversation_id AND s.owner_user_id=b.owner_user_id AND s.tenant_id=b.tenant_id LEFT JOIN chat_projects w ON w.id=s.project_id AND w.owner_user_id=s.owner_user_id AND w.tenant_id=s.tenant_id LEFT JOIN chat_task_permissions m ON m.session_id=s.id WHERE b.plan_id=?1 AND (b.conversation_id IS NULL OR s.id IS NULL OR w.id IS NULL OR w.removed_at IS NOT NULL OR COALESCE(m.mode,'ask')!='ask' OR EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)))",[&p.plan_id],|r|r.get(0)).map_err(|_|Error::StorageUnavailable)?;
+    if !ask {
+        return Err(Error::TargetUnavailable);
+    }
+    Ok(())
+}
+
+/// Creation or a direct switch click is the scheduling intent. Keep the existing
+/// grant/receipt format so dispatch, revocation and older readers retain their
+/// checks. These represent storage bounds, not a user-facing renewal period.
+pub(in crate::chat::schedules) fn activate_default(
+    tx: &Transaction<'_>,
+    scope: &ChatScope,
+    authority: &ScheduleAuthority,
+    p: &mut PlanView,
+    now: i64,
+) -> Result<(), Error> {
+    authority.require(scope, ScheduleCapability::ScheduleManage, now)?;
+    authority.require(scope, ScheduleCapability::ScheduleRun, now)?;
+    if !super::super::automatic::present(tx)? {
+        return Err(Error::StorageDisabled);
+    }
+    let w = workspace(tx, scope, p)?;
+    validate_automatic_target(tx, p)?;
+    let clock = now.max(store::cursor_at(tx, scope, &p.plan_id).map_err(plan_error)?);
+    let next = time::preview(&p.definition.rule, clock, p.effective_from).map_err(plan_error)?;
+    if next.next_at.is_none() {
+        return Err(Error::InvalidInput);
+    }
+    let gid = Uuid::now_v7().to_string();
+    let request = Uuid::now_v7().to_string();
+    let expires = 253402300799_i64;
+    let max_runs =
+        if p.definition.rule.frequency == super::super::generated::TimeRuleFrequency::Once {
+            1
+        } else {
+            2147483647_i64
+        };
+    p.state = PlanState::Enabled;
+    p.next_at = next.next_at;
+    p.authorization_ref = Some(gid.clone());
+    p.authorization_expires_at = Some(expires);
+    store::write_plan(tx, scope, p, clock).map_err(plan_error)?;
+    tx.execute("INSERT INTO chat_scheduled_grants(grant_id,owner_user_id,tenant_id,request_id,request_digest,plan_id,plan_revision,authorization_revision,definition_digest,workspace_source,workspace_id,max_runs,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![gid,scope.owner_user_id,scope.tenant_id,request,digest(&encode(&("default-enable/1", &p.plan_id, p.revision))?),p.plan_id,p.revision,authority.revision,definition_digest(p,&w)?,word(&w.source)?,w.resource_id,max_runs,expires]).map_err(|_|Error::StorageUnavailable)?;
+    tx.execute("INSERT INTO chat_scheduled_enable_receipts(grant_id,format_version,automatic_consent_version) VALUES(?1,1,1)", [&gid]).map_err(|_|Error::StorageUnavailable)?;
+    tx.execute(
+        "UPDATE chat_scheduled_plans SET future_hold=NULL WHERE plan_id=?1",
+        [&p.plan_id],
+    )
+    .map_err(|_| Error::StorageUnavailable)?;
+    store::cancel_slots(tx, scope, &p.plan_id).map_err(plan_error)?;
+    store::insert_future(tx, scope, p, next.logical_slot.as_deref(), clock).map_err(plan_error)
 }
 impl ScheduleExecutionService {
     pub async fn confirm_and_enable(

@@ -66,7 +66,7 @@ describe("design 2.1 resolved component colors", () => {
       .toBeGreaterThanOrEqual(4.5);
     expect(overrides.Checkbox?.checkMarkColor).toBe(graphite);
     expect(overrides.Radio?.dotColorActive).toBe(graphite);
-    expect(overrides.Switch?.buttonColor).toBe(graphite);
+    expect(overrides.Switch?.buttonColor).toBe(read("--yj-color-control-switch-thumb"));
     expect(overrides.Pagination?.itemTextColorActive).toBe(graphite);
     expect(overrides.Tag?.textColorChecked).toBe(graphite);
     expect(contrast(read("--yj-color-focus-ring"), read("--yj-color-bg-page")))
@@ -115,7 +115,7 @@ describe("design 2.1 resolved component colors", () => {
     expect(css("loading-action", "--n-text-color")).toBe(read("--yj-color-on-brand"));
     expect(css("field", "--n-border")).toBe(`1px solid ${read("--yj-color-border-control")}`);
     expect(css("field", "--n-border-error")).toBe(`1px solid ${read("--yj-color-error")}`);
-    expect(css("field", "--n-box-shadow-focus-error")).toBe(read("--yj-shadow-control-focus"));
+    expect(css("field", "--n-box-shadow-focus-error")).toBe("none");
     expect(wrapper.get<HTMLInputElement>("input").element.readOnly).toBe(true);
     expect(wrapper.get<HTMLInputElement>("input").element.value).toBe("只读店铺");
     expect(css("menu", "--n-item-color-active")).toBe(read("--yj-color-bg-nav"));

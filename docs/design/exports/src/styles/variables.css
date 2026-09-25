@@ -11,7 +11,8 @@
   --yj-color-brand-text: #25282b;
   --yj-color-on-brand: #25282b;
   --yj-color-focus-ring: #25282b;
-  --yj-color-control-track: #b8bec5;
+  --yj-color-control-track: #e7e7e7;
+  --yj-color-control-switch-thumb: #ffffff;
 
   --yj-color-text-primary: #25282b;
   --yj-color-text-secondary: #51565d;
@@ -157,7 +158,8 @@
   --yj-color-brand-text: #f5f7fa;
   --yj-color-on-brand: #25282b;
   --yj-color-focus-ring: #f5f7fa;
-  --yj-color-control-track: #b8bec5;
+  --yj-color-control-track: #51565d;
+  --yj-color-control-switch-thumb: #ffffff;
 
   --yj-color-text-primary: #f5f7fa;
   --yj-color-text-secondary: #c2c7ce;

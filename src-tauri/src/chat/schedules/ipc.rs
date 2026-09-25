@@ -490,6 +490,19 @@ fn operation(
             repo.preview_draft(&decode::<wire::DraftKey>(q)?.source_id, n)
         }
         "schedule_confirm_draft_v1" => value(&repo.confirm_draft(decode(q)?, request, n)?),
+        "schedule_confirm_active_draft_v1" => {
+            value(&repo.confirm_draft_with_activation(decode(q)?, request, n, Some(a))?)
+        }
+        "schedule_enable_plan_v1" => {
+            value(&repo.enable_default_schedule(a, decode(q)?, request, n)?)
+        }
+        "schedule_save_active_plan_v1" => {
+            let r: super::generated::SavePlanRequest = decode(q)?;
+            if r.request_id != request {
+                return Err(E::RequestConflict.into());
+            }
+            value(&repo.save_active_schedule(a, r, n)?)
+        }
         "schedule_list_plans_v1"
         | "schedule_list_targets_v1"
         | "schedule_list_records_v1"

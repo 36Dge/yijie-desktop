@@ -35,7 +35,7 @@ Naive UI 是基础组件库，不是易界完整设计系统。易界设计系�
 
 颜色主题由 `variables.css` 与唯一 `createNaiveThemeOverrides` 入口共同定义；`component-colors.css` 仅承接主题 API 无法表达的文字选区、导航标记、focus、禁用 Switch 与暗色浮层控件轮廓。该样式在应用入口集中加载，不在页面散落相同补丁。文档站加载同规则的 reference exports。
 
-Naive 之外的原生 focus 也使用中性焦点色和 2px 宽度。路由标题保留程序焦点与辅助技术公告；WebKit 的 `auto` outline 会忽略自定义颜色，因此该标题焦点使用 `solid` 绘制，不恢复系统蓝色。各输入组件已有的字段焦点环与 outline 样式仍由组件自身负责，避免叠加双重焦点圈。
+Naive Input（含多行、数字、日期/时间入口）和 InternalSelection 统一使用单层 1px 焦点边框，focus/active 及错误、警告状态均无外圈阴影。Naive 之外的独立原生输入框和 select 复用 `yj-input-control`；Chat Composer 继续由已有外框承接 1px 焦点。按钮、导航等其他原生控件保持中性焦点色和 2px 宽度。路由标题保留程序焦点与辅助技术公告；WebKit 的 `auto` outline 会忽略自定义颜色，因此该标题焦点使用 `solid` 绘制，不恢复系统蓝色。不再添加页面专属输入焦点主题；原生输入不叠加 outline，统一细边框作为焦点替代。
 
 普通 secondary 按钮默认白/卡片底，hover/pressed 为小控件中性底；普通 Input/NSpin loading 图标中性，error/warning 输入 spinner 使用相应可读语义前景。主按钮 disabled 使用禁用前景/局部底，loading 则保留动作身份与 on-brand。全部状态与组合见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
 

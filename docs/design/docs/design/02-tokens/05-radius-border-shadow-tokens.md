@@ -37,7 +37,7 @@
 - `border-strong`：分隔强边界；选中需同时配合可读文字与局部标记。
 - `border-control`：输入/选择控件轮廓，亮色 `#8C939B`、暗色 `#6A727C`。
 - `border-control-hover`：hover 轮廓，亮色 `#60666E`、暗色 `#969EA8`；暗色浮层内 Input/Select 的默认边界也使用此角色。
-- `focus-ring`：中性焦点，亮色 `#25282B`、暗色 `#F5F7FA`，宽度 `--yj-focus-ring-width: 2px`，无模糊/无 glow。selected 标记与 error 边框不能覆盖焦点。
+- `focus-ring`：中性焦点，亮色 `#25282B`、暗色 `#F5F7FA`，宽度 `--yj-focus-ring-width: 2px`，无模糊/无 glow。用于按钮、导航等非输入控件。2026-09-25 用户调整：输入框、文本域、数字、日期/时间入口和选择框统一采用 `--yj-border-width: 1px` 单层焦点边框，与 Chat Composer 一致，不叠外圈或阴影；错误/警告聚焦时使用相应 semantic ink 保留区分。
 
 | 边框 token | 亮色 | 暗色 |
 |---|---|---|
@@ -53,7 +53,7 @@
 - `shadow-popover`：Popover、Dropdown。
 - `shadow-modal`：Modal、Drawer。
 
-普通卡片、图标底板和输入使用细边框，hover/focus 也不浮起。真实 Popover、Dropdown、Modal 和 Drawer 才使用统一轻投影；焦点的 2px 零模糊色环不是投影，不得再叠加 glow 或卡片阴影。
+普通卡片、图标底板和输入使用细边框，hover/focus 也不浮起。真实 Popover、Dropdown、Modal 和 Drawer 才使用统一轻投影；非输入控件的 2px 零模糊色环不是投影；输入类控件所有状态只使用单层 1px 边框，不叠加外圈、glow 或卡片阴影。
 
 | Token | 亮色 | 暗色 |
 |---|---|---|

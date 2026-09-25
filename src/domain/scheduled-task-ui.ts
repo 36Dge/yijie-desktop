@@ -9,15 +9,20 @@ export function timeLabel(value?: number, zone?: string): string {
   if (value === undefined) return "未知";
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short", ...(zone ? { timeZone: zone } : {}) }).format(value * 1000);
 }
-export function executionTimeLabel(timing: Timing): string {
+export function executionTimeLabel(timing: Timing, compact = false): string {
   if (timing.execution_time === "not_started") return "未开始";
   if (timing.execution_time !== "known" || timing.started_at === undefined || !Number.isSafeInteger(timing.started_at)) return "未知";
   const date = new Date(timing.started_at * 1000);
   if (!Number.isFinite(date.getTime())) return "未知";
-  const format = (timeZone: string) => new Intl.DateTimeFormat("zh-CN", {
-    timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset",
-  }).format(date);
-  try { return `${format(timing.time_zone ?? "UTC")}（${timing.time_zone ?? "UTC"}）`; }
+  const format = (timeZone: string) => {
+    const formatter = new Intl.DateTimeFormat("zh-CN", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", ...(compact ? {} : { timeZoneName: "longOffset" as const }),
+    });
+    if (!compact) return formatter.format(date);
+    const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+  try { return compact ? format(timing.time_zone ?? "UTC") : `${format(timing.time_zone ?? "UTC")}（${timing.time_zone ?? "UTC"}）`; }
   catch { return `${format("UTC")}（UTC，原时区不可用）`; }
 }
 export function durationLabel(timing: Timing): string {

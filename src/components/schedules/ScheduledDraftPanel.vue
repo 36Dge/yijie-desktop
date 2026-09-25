@@ -12,6 +12,7 @@ const form = ref<InstanceType<typeof ScheduledPlanForm>>();
 const editing = shallowRef<{ definition: PlanDefinition; source: string; digest: string } | null>(null);
 const dialog = useDialog();
 const clarification = computed(() => preview.value?.status === "needs_clarification" && preview.value.output?.kind === "needs_clarification" ? preview.value.output : null);
+const showPanel = computed(() => !!(source.value || preview.value || saved.value || pending.value || error.value || notice.value || !readable.value || (capabilities.value && !capabilities.value.draft.available)));
 function review() {
   if (canConfirm.value && initialDefinition.value && preview.value?.source_digest) editing.value = { definition: structuredClone(initialDefinition.value), source: preview.value.source_id, digest: preview.value.source_digest };
 }
@@ -43,8 +44,7 @@ async function allowLeave(): Promise<boolean> {
 defineExpose({ allowLeave });
 </script>
 <template>
-  <NCard size="small" class="scheduled-draft-panel" aria-label="定时任务草案">
-    <p class="scheduled-draft-panel__intro">创建定时任务草案，确认后才会保存。这里只理解你输入的文本，不执行任务。</p>
+  <NCard v-if="showPanel" size="small" class="scheduled-draft-panel" aria-label="定时任务草案">
     <NAlert v-if="error" type="error" role="alert">{{ scheduleError(error) }}</NAlert>
     <p v-if="notice" role="status">{{ notice }}</p>
     <NAlert v-if="!readable" type="warning">草案授权尚未就绪。<NButton @click="emit('recover')">恢复授权</NButton></NAlert>
@@ -70,7 +70,6 @@ defineExpose({ allowLeave });
 </template>
 <style scoped>
 .scheduled-draft-panel { margin-block: var(--yj-space-3); max-height: 32vh; overflow: auto; }
-.scheduled-draft-panel__intro { color: var(--yj-color-text-secondary); }
 .scheduled-draft-panel__title { margin: var(--yj-space-2) var(--yj-space-0); font-size: var(--yj-font-size-body); overflow-wrap: anywhere; }
 .scheduled-draft-panel__content { white-space: pre-wrap; overflow-wrap: anywhere; }
 .scheduled-draft-panel__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--yj-space-2); margin-top: var(--yj-space-3); }

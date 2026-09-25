@@ -11,6 +11,12 @@ describe("scheduled native timing display", () => {
     expect(durationLabel({ ...clock, duration_ms: 61250 })).toBe("1 分 1.25 秒");
     expect(executionTimeLabel({ ...clock, started_at: 0, time_zone: "UTC" })).toContain("00:00:00");
   });
+  it("formats compact details using the recorded zone and preserves fallback states", () => {
+    expect(executionTimeLabel(clock, true)).toBe("2026-09-23 16:14:57");
+    expect(executionTimeLabel({ ...clock, time_zone: "UTC" }, true)).toBe("2026-09-23 08:14:57");
+    expect(executionTimeLabel({ ...clock, time_zone: "unavailable-zone" }, true)).toContain("UTC，原时区不可用");
+    expect(executionTimeLabel({ ...clock, execution_time: "unknown" }, true)).toBe("未知");
+  });
   it("preserves unknown, not-started, ongoing and conflicts", () => {
     for (const state of ["unknown", "not_started"] as const) {
       const v: Timing = { execution_time: state, duration: state, source: "no_execution_clock" };

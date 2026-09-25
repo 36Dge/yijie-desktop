@@ -124,7 +124,7 @@ const sortOptions = [
           </ul>
           <div class="workflow-page__display-options" role="group" aria-label="排序和视图">
             <span class="workflow-page__sort-wrapper">
-              <select v-model="selectedSort" class="workflow-page__sort workflow-showcase-control yj-control" aria-label="工作流排序">
+              <select v-model="selectedSort" class="workflow-page__sort workflow-showcase-control yj-control yj-input-control" aria-label="工作流排序">
                 <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
               <YjIcon name="chevronDown" size="sm" tone="muted" />

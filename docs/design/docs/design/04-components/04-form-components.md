@@ -31,7 +31,7 @@
 
 Token、密钥、授权信息、Webhook secret 等敏感字段默认隐藏，提供复制、重置、重新授权等明确操作。不得在日志或页面明文展示完整 secret。
 
-本类组件的文字、图标、背景、边界、2px 中性焦点、普通容器无阴影与真实浮层轻投影，以 [组件配色与状态矩阵](./09-component-color-state-matrix.md) 为准。readonly 保留正常读值；disabled 只作用于不可用控件；error 与 selected 不能抹掉焦点。现有组件职责、布局与交互不变。
+本类组件的文字、图标、背景、边界、输入类控件单层 1px 焦点边框、普通容器无阴影与真实浮层轻投影，以 [组件配色与状态矩阵](./09-component-color-state-matrix.md) 为准。readonly 保留正常读值；disabled 只作用于不可用控件；error 与 selected 不能抹掉焦点。现有组件职责、布局与交互不变。
 
 ## AI / Codex 必须遵守
 

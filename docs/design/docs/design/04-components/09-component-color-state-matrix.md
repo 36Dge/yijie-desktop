@@ -39,7 +39,7 @@
 | LH / 青柠 hover 填充 | `#D0F780` | `#D0F780` | 实色青柠控件 hover |
 | LA / 青柠 pressed 填充 | `#B1E343` | `#B1E343` | 实色青柠控件 pressed |
 | ON / 青柠上前景 | `#25282B` | `#25282B` | 青柠上的文字、勾选、圆点和图标 |
-| TR / 未选中 Switch 轨道 | `#B8BEC5` | `#B8BEC5` | 小型开关局部，不能用于背景容器 |
+| TR / 未选中 Switch 轨道 | `#E7E7E7` | `#51565D` | 小型开关局部，不能用于背景容器 |
 | F / 中性焦点色 | `#25282B` | `#F5F7FA` | 2 px 清晰轮廓、无模糊、无 glow |
 | E / 错误边框语义 | 既有 `#DC2626` | 既有 `#DC2626` | 局部错误边框；配可读正文与明确错误消息 |
 | EI / 错误文字与图标 | `#B91C1C` | `#FCA5A5` | 错误标题、小标签、状态图标；长说明保持 T |
@@ -93,7 +93,7 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 
 ### 3.2 输入框、搜索框与 Chat Composer
 
-2026-09-07 用户调整：新建任务与继续对话的 Chat Composer 聚焦、拖放态采用单层 1 px 品牌青柠边框（`--yj-border-width` / `--yj-color-brand-primary`），不叠加外圈或阴影。此项覆盖本矩阵通用 F 规则对 Composer 外框的约束；内部按钮仍保留各自键盘焦点。新建任务标题上方移除“本地 AI 工作区”。
+2026-09-25 用户调整：所有输入框统一采用当前 Chat Composer 的细描边效果。文本、搜索、多行、数字、日期/时间入口及选择框聚焦时使用单层 1 px 中性边框（`--yj-border-width` / `--yj-color-focus-ring`），不叠加外圈、outline 或阴影。错误/警告字段使用相应 semantic ink 的 1 px 边框，继续显示错误消息。此规则覆盖输入类控件的通用 2 px F 规则；按钮、导航、Checkbox、Radio、Switch 等仍保留各自键盘焦点。
 
 | 状态 | 内容前景 / 背景 / 边框 | 焦点 | 阴影及说明 |
 |---|---|---|---|
@@ -101,13 +101,13 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 | hover | `T / C / BH` | 无 | none；不改变输入填充 |
 | pressed | `T / C / BH` | 若获得焦点使用 F | none；按压不是长期状态 |
 | selected | 仅已选文字 `ON / L`：两主题文本选区均为青柠底、石墨字；其余内容仍 `T / C` | 原焦点可保留 | none；不把整个输入改为青柠底 |
-| focus | 普通 Input：`T / C / F`；Composer：`T / C / L` | 普通 Input：2 px F；Composer：1 px 青柠边框 | 无投影 / glow；Composer 不叠加外圈 |
+| focus | 输入框与 Composer：`T / C / F` | 单层 1 px 中性边框 | 无外圈、outline、投影或 glow |
 | readonly | `T / C / BC`；保留可选择/复制的值及“只读”说明 | 键盘可达时仍有 F | none；不使用 D、DB 或禁用光标伪装只读 |
 | disabled | `D / DB / B` | 原生 disabled 为 N/A | none；不得拿禁用样式承载权限原因正文 |
 | loading | `T / C / BC`；spinner 使用 P，错误/警告 spinner 分别使用 EI/WI；明确 busy 信息 | 已聚焦则 F | none；保持现有内容，不把正文清空成不可读骨架 |
-| error | `T / C / E`；消息正文=T/S，错误标记=EI | 有焦点时仍叠 F | none；E 边框不被 F 覆盖，F 也不被 error 清除 |
+| error / warning | 1 px 语义色边框；消息正文=T/S，标记=EI/WI | 聚焦时 1 px EI/WI 边框 | none；保留可读错误/警告消息，不叠加外圈 |
 
-输入的 readonly 与 disabled 是不同语义。只读值有信息价值，仍使用正常文字对比；disabled 只表示无法使用的控件。审批的“只读 · 禁止写入”是正常权限说明，不是禁用文字。文本选区使用 `text-selection-bg / text-selection-ink`，只改变绘制色，不改变原生选词、键盘选择、复制和输入法行为；它与输入框焦点可以并存。Composer 拖放态采用单层 1 px 青柠边框与拖放说明；附件真实错误、警告仍使用既有语义标记，不叠外环。
+输入的 readonly 与 disabled 是不同语义。只读值有信息价值，仍使用正常文字对比；disabled 只表示无法使用的控件。审批的“只读 · 禁止写入”是正常权限说明，不是禁用文字。文本选区使用 `text-selection-bg / text-selection-ink`，只改变绘制色，不改变原生选词、键盘选择、复制和输入法行为；它与输入框焦点可以并存。Composer 拖放态保持现有单层 1 px 中性边框与拖放说明；附件真实错误、警告仍使用既有语义标记，不叠外环。
 
 ### 3.3 主导航、标签页与筛选
 
@@ -130,16 +130,16 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 
 | 状态 | Checkbox / Radio | Switch | Select / 下拉选项 |
 |---|---|---|---|
-| default（未选中） | 标记无；label=T；`C / BC` | 轨道 TR，滑块 ON，label=T | 输入 `T / C / BC`；选项 `T / O / 无` |
-| hover | label=T，控件 `C / BH` | 维持 TR/ON，不出现绿色 glow | 输入 `T/C/BH`；未选选项 `T/H/无` |
+| default（未选中） | 标记无；label=T；`C / BC` | 轨道 TR，白色滑块，label=T | 输入 `T / C / BC`；选项 `T / O / 无` |
+| hover | label=T，控件 `C / BH` | 维持 TR/白色滑块，不出现绿色 glow | 输入 `T/C/BH`；未选选项 `T/H/无` |
 | pressed | 维持当前选值，按既有交互提交；不预先伪造 checked | 维持当前选值，提交后更新；无投影 | 输入保持 C；选项 `T/A/无` |
-| selected | 填充 L，勾/圆点 ON，边界 ON；label=T | 轨道 L，滑块 ON，轨道文字 ON | 输入保持 `T/C/BC`；已选选项 `P/O/无` + P 勾；不用软绿底 |
-| selected + hover | 保留 checked/ON；hover 不覆盖勾 | 保留 L/ON | 已选项可用局部 H 反馈；P 勾和选中语义保留 |
-| focus | 当前配色 `＋F` | 当前配色 `＋F` | 输入/选项当前配色 `＋F`；浮层仍用 OSh |
+| selected | 填充 L，勾/圆点 ON，边界 ON；label=T | 轨道 L，白色滑块，轨道文字 ON | 输入保持 `T/C/BC`；已选选项 `P/O/无` + P 勾；不用软绿底 |
+| selected + hover | 保留 checked/ON；hover 不覆盖勾 | 保留 L/白色滑块 | 已选项可用局部 H 反馈；P 勾和选中语义保留 |
+| focus | 当前配色 `＋F` | 仅键盘 focus-visible 叠加 F | 输入采用 1 px 中性边框，选项保留原键盘焦点；浮层仍用 OSh |
 | readonly | 不提供伪造原生 readonly；用静态选值呈现，正常 label T，保留可读选值 | 静态“开启/关闭”文本，正常 T，不渲染假可切换控件 | `T/C/BC`；可复制，不打开选择菜单，正常只读说明 |
 | disabled | label/勾=D，局部 DB/B；既有 checked 值不丢 | 轨道 DB、滑块 D、状态文字 D，保留滑块位置；无 hover | `D/DB/B`；不可选项 D/O；原因说明仍 T/S |
 | loading | 当前选值和正常前景 `＋Busy`，不闪回未选中 | 状态不提前切换；busy 保持正常读值 | 输入内容与选择不变；同色 spinner；未就绪菜单显示可读说明 |
-| error | label 正常 T，EI 标记 / E 边框 + 原选值；有焦点再叠 F | 不把轨道当错误色块；EI 标记与正常错误文本独立 | 输入 `T/C/E`；有焦点仍 F；菜单正文不整片变红 |
+| error | label 正常 T，EI 标记 / E 边框 + 原选值；有焦点再叠 F | 不把轨道当错误色块；EI 标记与正常错误文本独立 | 输入保持 1 px E，聚焦时为 1 px EI；不叠外圈，菜单正文不整片变红 |
 
 Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅规定视觉，不新增 fake checked 或延迟写操作。Select 的选中勾已经提供明确识别，青柠额外装饰标记不是必需；普通选项的正文与图标均中性。
 
@@ -185,7 +185,7 @@ Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅
 2. **确定真实 selected/checked 值**：只有真实当前路由、选择或已提交开关值才显示选中。loading/error 不清空选值，取消选择也不能由 hover 色暗示。
 3. **在可操作控件上叠加 hover/pressed**：pressed 优先于 hover。已选侧栏导航 default 使用浅灰底 H；hover/pressed 仅当前小项使用 H/A，不使用 L 标记。小筛选 selected 的 hover/pressed 使用 LH/LA。
 4. **错误语义独立叠加**：错误边框 E 和消息保留正常正文。错误既不清除选中，也不覆盖全部标签/内容；危险动作使用已有独立语义。
-5. **键盘 focus 始终可见**：对实际可聚焦元素叠 2 px F；selected+focus 保留 L 标记，error+focus 保留 E 边框及 F 外环。原生 disabled 不参与键盘 focus；若既有 aria-disabled 控件可聚焦以解释原因，仍保留 F 且不执行动作。
+5. **键盘 focus 始终可见**：输入类控件使用单层 1 px 中性焦点边框；错误/警告输入使用对应 1 px semantic ink 边框，不叠外圈。其他可聚焦元素保留 2 px F，selected+focus 保留选中标记。原生 disabled 不参与键盘 focus；若既有 aria-disabled 控件可聚焦以解释原因，仍保留焦点且不执行动作。
 6. **loading 保持原角色并标记 busy**：spinner 使用当前可读前景；仅防重复提交不应把 pending 操作变成一片低对比灰。真正能力 disabled 与 busy 同时存在时，操作仍不可用，但原因与进度文本不使用 D。
 
 ### 必须一起查看的组合
@@ -218,7 +218,7 @@ Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅
 - 普通文字目标至少 4.5:1；键盘焦点与必要控件轮廓至少 3:1。暗色默认 BC 对 O 表面约 2.65:1，因此暗色 Modal/Popover/Drawer 内 Input 与 Select 的默认轮廓提升为 BH `#969EA8`（统一浮层适配），不可把 BC 对 C 的结果直接当作对 O 也通过。装饰卡片边框 B 不独立承载“可点击”含义；输入和选择控件用 BC。无障碍不靠全局把所有细边框加黑实现。
 - active 不是文字变色的借口：青柠按钮始终 ON，白底次按钮始终 P。普通图标继承当前中性前景；Logo 与图表不被全局 `svg { color: ... }` 误伤。
 - 普通 NInput 与 NSpin 的 loading 图标使用 P；带 error/warning 状态的输入 spinner 分别使用 EI/WI。主青柠按钮内部 spinner 保持 ON，不因统一普通 loading 图标而变为浅色。
-- focus 只改变焦点表达，不改变文字/布局。2 px 中性无 glow 的标准覆盖 Composer、Naive 输入、选项与图标按钮；不能把每个元素都加 4 px 品牌描边。
+- focus 只改变焦点表达，不改变文字/布局。输入类控件与 Composer 使用单层 1 px 边框；选项、图标按钮等继续使用 2 px 中性无 glow 焦点，不能给输入叠加外圈。
 - Light 结构全白；H/A/DB 只能是局部状态。反例：`Page background = control-hover`、`Card background = disabled-bg`、`Sidebar background = brand-soft`。
 - 正常卡片、输入、普通图标底板为无阴影；浮层用 OSh。反例：卡片一 hover 就用大阴影，输入 focus 叠卡片阴影与绿色 glow。
 - 样张应使用真实 NButton、NInput、NMenu、NCheckbox、NRadio、NSwitch、NSelect 与现有 Yj 组件检查继承；不能只画色块宣称所有组件已经适配。
@@ -233,3 +233,11 @@ Checkbox、Radio、Switch 的状态值必须与真实模型同步；此矩阵仅
 - 真实语义状态的小字、Alert 标题/图标与指标趋势使用对应 semantic ink；语义底色和边框保留原状态含义。
 - 工作流普通类别图标/节点不使用图表或品牌 accent 色；真实图表自身的系列色不变。促销/来源标签使用中性角色，当前只读视图保留真实 selected 表达。
 - 已禁用的推荐演示/执行按 disabled 优先级使用中性不可用状态；这只改变颜色，不能新增点击或业务效果。
+
+
+### 2026-09-25 开关调整
+
+用户要求标准无描边开关：轨道使用 TR，开启沿用品牌青柠；滑块使用
+`--yj-color-control-switch-thumb`（亮暗均为白色），无阴影。移除浏览器 button 默认边框，
+键盘焦点仍使用 F，disabled 保留原有不可操作语义。定时任务不显示重复状态标签，
+开启/关闭直接提交，成功后以 toast 反馈；失败保持原状态并提供可读错误。

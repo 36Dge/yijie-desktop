@@ -21,7 +21,7 @@ export function createNaiveThemeOverrides(
   const onBrand = token('--yj-color-on-brand')
   const brandText = token('--yj-color-brand-text')
   const focusColor = token('--yj-color-focus-ring')
-  const focusBorder = `1px solid ${focusColor}`
+  const focusBorder = `${token('--yj-border-width')} solid ${focusColor}`
   const surface = token('--yj-color-bg-card')
   const brandFill = token('--yj-color-brand-primary')
   const ink = token('--yj-color-text-primary')
@@ -227,11 +227,12 @@ export function createNaiveThemeOverrides(
     Switch: {
       railColor: token('--yj-color-control-track'),
       railColorActive: brandFill,
-      buttonColor: onBrand,
+      buttonColor: token('--yj-color-control-switch-thumb'),
+      buttonBoxShadow: 'none',
       textColor: onBrand,
       iconColor: brandFill,
       loadingColor: brandFill,
-      boxShadowFocus: focus
+      boxShadowFocus: 'none'
     },
     Tabs: {
       colorSegment: surface,
@@ -256,16 +257,24 @@ export function createNaiveThemeOverrides(
       borderHover: hoverBorder,
       borderActive: focusBorder,
       borderFocus: focusBorder,
-      boxShadowActive: focus,
-      boxShadowFocus: focus,
+      boxShadowActive: 'none',
+      boxShadowFocus: 'none',
       loadingColor: brandText,
       colorDisabled: disabledBg,
       textColorDisabled: disabled,
       boxShadowHover: 'none',
-      boxShadowFocusError: focus,
-      boxShadowActiveError: focus,
-      boxShadowFocusWarning: focus,
-      boxShadowActiveWarning: focus
+      borderError: `1px solid ${error}`,
+      borderHoverError: `1px solid ${error}`,
+      borderFocusError: `1px solid ${errorInk}`,
+      borderActiveError: `1px solid ${errorInk}`,
+      borderWarning: `1px solid ${token('--yj-color-warning')}`,
+      borderHoverWarning: `1px solid ${token('--yj-color-warning')}`,
+      borderFocusWarning: `1px solid ${warningInk}`,
+      borderActiveWarning: `1px solid ${warningInk}`,
+      boxShadowFocusError: 'none',
+      boxShadowActiveError: 'none',
+      boxShadowFocusWarning: 'none',
+      boxShadowActiveWarning: 'none'
     },
     InternalSelectMenu: {
       color: token('--yj-color-bg-elevated'),
@@ -306,7 +315,7 @@ export function createNaiveThemeOverrides(
       heightMedium: '36px',
       colorFocus: token('--yj-color-bg-card'),
       caretColor: token('--yj-color-text-primary'),
-      boxShadowFocus: focus,
+      boxShadowFocus: 'none',
       borderHover: hoverBorder,
       borderFocus: focusBorder,
       textColor: body,
@@ -318,9 +327,12 @@ export function createNaiveThemeOverrides(
       colorDisabled: disabledBg,
       borderError: `1px solid ${error}`,
       borderHoverError: `1px solid ${error}`,
-      borderFocusError: `1px solid ${error}`,
-      boxShadowFocusError: focus,
-      boxShadowFocusWarning: focus
+      borderFocusError: `1px solid ${errorInk}`,
+      borderWarning: `1px solid ${token('--yj-color-warning')}`,
+      borderHoverWarning: `1px solid ${token('--yj-color-warning')}`,
+      borderFocusWarning: `1px solid ${warningInk}`,
+      boxShadowFocusError: 'none',
+      boxShadowFocusWarning: 'none'
     },
     DataTable: {
       borderRadius: token('--yj-radius-lg'),

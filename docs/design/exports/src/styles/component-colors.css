@@ -5,8 +5,8 @@
   background-color: var(--yj-color-text-selection-bg);
 }
 
-/* Keep WebKit's native focus indication in the same neutral role. Components
-   that deliberately use a field ring still retain their own outline style. */
+/* Non-field controls retain the shared neutral keyboard outline. Input fields
+   use their single border, via the global theme or yj-input-control below. */
 :focus-visible {
   outline-color: var(--yj-color-focus-ring);
   outline-width: var(--yj-focus-ring-width);
@@ -16,6 +16,31 @@
    outline ignores outline-color, so keep that existing indication solid. */
 main h1[tabindex="-1"]:focus-visible {
   outline-style: solid;
+}
+
+/* Native text/search/password/number fields and selects share the Composer's
+   single 1px focus border. Composite Naive inputs use the global theme instead. */
+.yj-input-control {
+  border: var(--yj-border-width) solid var(--yj-color-border-control);
+  box-shadow: none;
+}
+
+.yj-input-control:not(:disabled):hover {
+  border-color: var(--yj-color-border-control-hover);
+}
+
+:is(input, textarea, select).yj-input-control:not(:disabled):focus {
+  border-color: var(--yj-color-focus-ring);
+  outline: none;
+  box-shadow: none;
+}
+
+.yj-input-control[aria-invalid="true"]:not(:disabled) {
+  border-color: var(--yj-color-error);
+}
+
+.yj-input-control[aria-invalid="true"]:not(:disabled):focus {
+  border-color: var(--yj-color-semantic-error-ink);
 }
 
 .n-button {
@@ -57,6 +82,9 @@ main h1[tabindex="-1"]:focus-visible {
 .n-menu .n-menu-item-content:not(.n-menu-item-content--disabled):active::before {
   background: var(--yj-color-control-pressed);
 }
+
+.n-switch { border: 0; padding: 0; background: transparent; }
+.n-switch:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); border-radius: var(--yj-radius-full); }
 
 /* Disabled takes precedence over checked color while preserving the actual value. */
 .n-switch--disabled {

@@ -224,6 +224,15 @@ impl ChatRepository {
         request: &str,
         n: i64,
     ) -> Result<PlanView, Error> {
+        self.confirm_draft_with_activation(input, request, n, None)
+    }
+    pub(super) fn confirm_draft_with_activation(
+        &mut self,
+        input: wire::DraftConfirmation,
+        request: &str,
+        n: i64,
+        authority: Option<&super::ScheduleAuthority>,
+    ) -> Result<PlanView, Error> {
         self.draft_storage(true)?;
         self.schedule_writable().map_err(execution::plan_error)?;
         let definition =
@@ -255,7 +264,7 @@ impl ChatRepository {
             if p["source_digest"].as_str() != Some(&input.source_digest) {
                 return Err(P::DraftSourceInvalid.into());
             }
-            let p = store::save_in_transaction(
+            let mut p = store::save_in_transaction(
                 &tx,
                 &scope,
                 SavePlanRequest {
@@ -267,6 +276,9 @@ impl ChatRepository {
                 n,
             )
             .map_err(execution::plan_error)?;
+            if let Some(authority) = authority {
+                super::triggers::activate_default(&tx, &scope, authority, &mut p, n)?;
+            }
             sql(tx.execute("UPDATE chat_scheduled_draft_sources SET source_digest=?1,confirmation_digest=?2,plan_id=?3 WHERE source_id=?4 AND plan_id IS NULL",params![input.source_digest,digest,p.plan_id,input.source_id]))?;
             p
         };

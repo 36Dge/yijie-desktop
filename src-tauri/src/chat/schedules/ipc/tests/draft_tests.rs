@@ -537,3 +537,35 @@ async fn feat155_draft_clarification_followup_uses_same_restricted_conversation(
     }).await.unwrap();
     f.close().await;
 }
+
+#[tokio::test]
+async fn confirmed_draft_is_enabled_once_without_a_second_authorization() {
+    let f = Fixture::new(ScheduleStorageMode::TimingFoundation);
+    let receipt = submit(&f).await;
+    let preview = finish(&f, &receipt, candidate(), "completed", false).await;
+    let input = confirm(&preview);
+    let plan = f
+        .call("schedule_confirm_active_draft_v1", input.clone())
+        .await
+        .unwrap();
+    assert_eq!(plan["state"], "enabled");
+    let detail = f
+        .call("schedule_get_plan_v1", json!({"plan_id":plan["plan_id"]}))
+        .await
+        .unwrap();
+    assert_eq!(detail["summary"]["effective_state"], "enabled");
+    let paused = f
+        .call(
+            "schedule_pause_plan_v1",
+            json!({"plan_id":plan["plan_id"],"expected_revision":plan["revision"]}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.call("schedule_confirm_active_draft_v1", input)
+            .await
+            .unwrap(),
+        paused
+    );
+    f.close().await;
+}

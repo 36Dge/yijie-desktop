@@ -102,10 +102,10 @@ export function useScheduledDraft(
     writing.value = true; error.value = null; notice.value = "";
     try {
       if (action.kind === "confirm") {
-        const result = await call("schedule_confirm_draft_v1", action.payload, action.id);
+        const result = await call("schedule_confirm_active_draft_v1", action.payload, action.id);
         if (pending.value !== action) return null;
         pending.value = null; saved.value = result;
-        notice.value = "计划已保存为暂停状态，尚未授权执行。";
+        notice.value = result.state === "enabled" ? "定时任务已创建并开启，将按设定时间执行。" : "已查回保存的定时任务，当前状态以下方记录为准。";
         await refreshPreview();
         return result;
       }

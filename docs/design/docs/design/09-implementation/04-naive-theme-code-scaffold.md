@@ -40,7 +40,7 @@ export function resolveThemeOverrides() {
 }
 ```
 
-上例展示统一入口；完整 theme factory 参考 `exports/src/design/theme/naive-theme.ts`。颜色角色与共享适配 CSS 必须一起接入：中性普通文字、正文、2px focus、导航标记、disabled优先级、semantic ink、无阴影普通容器和浮层轻投影。不要再追加第二个候选/覆盖主题函数；完整状态见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
+上例展示统一入口；完整 theme factory 参考 `exports/src/design/theme/naive-theme.ts`。颜色角色与共享适配 CSS 必须一起接入：中性普通文字、正文、输入类控件单层 1px 焦点边框、其他控件 2px 键盘焦点、导航标记、disabled优先级、semantic ink、无阴影普通容器和浮层轻投影。原生输入使用 `yj-input-control`；不要再追加页面专属输入焦点主题。完整状态见 [组件配色与状态矩阵](../04-components/09-component-color-state-matrix.md)。
 
 `App.vue` 在设置 light/dark 的 `data-theme` 后，通过
 `getComputedStyle(document.documentElement).getPropertyValue(name)` 读取 token。

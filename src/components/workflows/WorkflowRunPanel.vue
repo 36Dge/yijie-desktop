@@ -26,9 +26,9 @@ const at = (time: number) => new Date(time).toLocaleString("zh-CN", { hour12: fa
         <p v-if="latestVersion">最新内部版本为 {{ latestVersion }}。选择要执行的版本；未保存的草稿不会影响已发布版本。</p>
         <p v-else>保存并成功试运行草稿后，在画布中内部发布，即可执行版本。</p>
         <label for="workflow-run-version">版本</label>
-        <input id="workflow-run-version" v-model="version" class="yj-control" placeholder="例如 v0.0.1" :disabled="submitting || !!pending" autocomplete="off" />
+        <input id="workflow-run-version" v-model="version" class="yj-control yj-input-control" placeholder="例如 v0.0.1" :disabled="submitting || !!pending" autocomplete="off" />
         <label for="workflow-run-input">运行输入</label>
-        <textarea id="workflow-run-input" v-model="input" class="yj-control" rows="3" :disabled="submitting || !!pending" placeholder="输入需要处理的文本" />
+        <textarea id="workflow-run-input" v-model="input" class="yj-control yj-input-control" rows="3" :disabled="submitting || !!pending" placeholder="输入需要处理的文本" />
         <span :role="inputBytes > 4096 ? 'alert' : undefined">{{ inputBytes }} / 4096 字节</span>
         <button type="submit" class="workflow-showcase-control yj-control workflow-runs__primary"
           :disabled="!latestVersion || !validInput || busy || submitting || !!pending || !!activeRun" :aria-busy="submitting">{{ submitting ? '正在确认执行…' : '执行所选版本' }}</button>

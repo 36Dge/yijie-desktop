@@ -200,6 +200,77 @@ pub(super) fn cursor_at(
 }
 
 impl ChatRepository {
+    pub(super) fn save_active_schedule(
+        &mut self,
+        authority: &super::ScheduleAuthority,
+        request: SavePlanRequest,
+        now: i64,
+    ) -> Result<PlanView, super::execution_generated::ExecutionErrorCode> {
+        use super::execution::plan_error;
+        self.schedule_writable().map_err(plan_error)?;
+        let deadline = self.schedule_ui_deadline;
+        let tx = self
+            .connection
+            .transaction()
+            .map_err(|_| super::execution_generated::ExecutionErrorCode::StorageUnavailable)?;
+        let plan = save_active_in_transaction(&tx, &self.scope, authority, request, now)?;
+        super::ipc::commit_deadline(deadline)?;
+        tx.commit()
+            .map_err(|_| super::execution_generated::ExecutionErrorCode::StorageUnavailable)?;
+        Ok(plan)
+    }
+
+    pub(super) fn enable_default_schedule(
+        &mut self,
+        authority: &super::ScheduleAuthority,
+        input: super::ipc_generated::PlanMutation,
+        request: &str,
+        now: i64,
+    ) -> Result<PlanView, super::execution_generated::ExecutionErrorCode> {
+        use super::execution::plan_error;
+        use super::execution_generated::ExecutionErrorCode as E;
+        self.schedule_writable().map_err(plan_error)?;
+        let deadline = self.schedule_ui_deadline;
+        let tx = self
+            .connection
+            .transaction()
+            .map_err(|_| E::StorageUnavailable)?;
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(
+                encode(&("default-enable/1", &input.plan_id, input.expected_revision))
+                    .map_err(plan_error)?
+                    .as_bytes()
+            )
+        );
+        let prior: Option<(String, String)> = tx.query_row("SELECT request_digest,plan_id FROM chat_scheduled_requests WHERE owner_user_id=?1 AND tenant_id=?2 AND request_id=?3", params![self.scope.owner_user_id,self.scope.tenant_id,request], |r| Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_| E::StorageUnavailable)?;
+        if let Some((old, id)) = prior {
+            if old != hash || id != input.plan_id {
+                return Err(E::RequestConflict);
+            }
+            return read_plan(&tx, &self.scope, &id).map_err(plan_error);
+        }
+        let mut plan = read_plan(&tx, &self.scope, &input.plan_id).map_err(plan_error)?;
+        if plan.state == PlanState::Deleted {
+            return Err(E::NotFound);
+        }
+        if plan.revision != input.expected_revision {
+            return Err(E::RevisionConflict);
+        }
+        // An unresolved run must be reconciled before future dispatch resumes.
+        if super::execution_guard::plan_held(&tx, &self.scope, &plan.plan_id)
+            .map_err(|_| E::StorageUnavailable)?
+        {
+            return Err(E::ReservationBusy);
+        }
+        plan.revision = next_revision(plan.revision).map_err(plan_error)?;
+        super::triggers::activate_default(&tx, &self.scope, authority, &mut plan, now)?;
+        tx.execute("INSERT INTO chat_scheduled_requests(owner_user_id,tenant_id,request_id,request_digest,plan_id) VALUES(?1,?2,?3,?4,?5)", params![self.scope.owner_user_id,self.scope.tenant_id,request,hash,plan.plan_id]).map_err(|_| E::StorageUnavailable)?;
+        super::ipc::commit_deadline(deadline)?;
+        tx.commit().map_err(|_| E::StorageUnavailable)?;
+        Ok(plan)
+    }
+
     fn schedule_readable(&self) -> Result<(), Error> {
         if self
             .schema_version()
@@ -479,6 +550,32 @@ impl ScheduleService {
             .await
             .map_err(|_| Error::StorageUnavailable)?
     }
+}
+
+pub(super) fn save_active_in_transaction(
+    tx: &Transaction<'_>,
+    scope: &ChatScope,
+    authority: &super::ScheduleAuthority,
+    request: SavePlanRequest,
+    now: i64,
+) -> Result<PlanView, super::execution_generated::ExecutionErrorCode> {
+    use super::execution::plan_error;
+    use super::execution_generated::ExecutionErrorCode as E;
+    let replay: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM chat_scheduled_requests WHERE owner_user_id=?1 AND tenant_id=?2 AND request_id=?3)", params![scope.owner_user_id,scope.tenant_id,request.request_id], |r| r.get(0)).map_err(|_| E::StorageUnavailable)?;
+    let active = match request.plan_id.as_deref() {
+        None => true,
+        Some(id) => read_plan(tx, scope, id).map_err(plan_error)?.state == PlanState::Enabled,
+    };
+    let mut plan = save_in_transaction(tx, scope, request, now).map_err(plan_error)?;
+    if active && !replay {
+        if super::execution_guard::plan_held(tx, scope, &plan.plan_id)
+            .map_err(|_| E::StorageUnavailable)?
+        {
+            return Err(E::ReservationBusy);
+        }
+        super::triggers::activate_default(tx, scope, authority, &mut plan, now)?;
+    }
+    Ok(plan)
 }
 
 pub(super) fn save_in_transaction(

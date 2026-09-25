@@ -698,6 +698,9 @@ export interface Requests {
 "schedule_read_execution_receipt_v1":ReadExecutionReceiptRequest;
 "schedule_confirm_single_run_v1":ConfirmSingleRunRequest;
 "schedule_list_important_updates_v1":ImportantUpdatesRequest;
+"schedule_save_active_plan_v1":SavePlanRequest;
+"schedule_confirm_active_draft_v1":ConfirmDraftRequest;
+"schedule_enable_plan_v1":PausePlanRequest;
 }
 export interface Responses {
 "schedule_availability_v1":AvailabilityResponse;
@@ -728,6 +731,9 @@ export interface Responses {
 "schedule_read_execution_receipt_v1":ReadExecutionReceiptResponse;
 "schedule_confirm_single_run_v1":ConfirmSingleRunResponse;
 "schedule_list_important_updates_v1":ImportantUpdatesResponse;
+"schedule_save_active_plan_v1":SavePlanResponse;
+"schedule_confirm_active_draft_v1":ConfirmDraftResponse;
+"schedule_enable_plan_v1":PausePlanResponse;
 }
 export const commands = {
   "schedule_availability_v1": {
@@ -897,5 +903,23 @@ export const commands = {
     "response": "ImportantUpdatesResponse",
     "write": false,
     "permission": "read"
+  },
+  "schedule_save_active_plan_v1": {
+    "request": "SavePlanRequest",
+    "response": "SavePlanResponse",
+    "write": true,
+    "permission": "run"
+  },
+  "schedule_confirm_active_draft_v1": {
+    "request": "ConfirmDraftRequest",
+    "response": "ConfirmDraftResponse",
+    "write": true,
+    "permission": "run"
+  },
+  "schedule_enable_plan_v1": {
+    "request": "PausePlanRequest",
+    "response": "PausePlanResponse",
+    "write": true,
+    "permission": "run"
   }
 } as const;

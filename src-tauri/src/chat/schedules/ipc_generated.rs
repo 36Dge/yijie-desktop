@@ -2674,4 +2674,25 @@ pub(crate) const COMMANDS: &[(&str, &str, &str, &str, bool)] = &[
         "read",
         false,
     ),
+    (
+        "schedule_save_active_plan_v1",
+        "SavePlanRequest",
+        "SavePlanResponse",
+        "run",
+        true,
+    ),
+    (
+        "schedule_confirm_active_draft_v1",
+        "ConfirmDraftRequest",
+        "ConfirmDraftResponse",
+        "run",
+        true,
+    ),
+    (
+        "schedule_enable_plan_v1",
+        "PausePlanRequest",
+        "PausePlanResponse",
+        "run",
+        true,
+    ),
 ];

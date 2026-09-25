@@ -299,7 +299,7 @@ async function selectTenant(tenantId: string): Promise<void> {
             <input
               id="local-login-username"
               v-model="localUsername"
-              class="local-login-form__input"
+              class="local-login-form__input yj-input-control"
               type="text"
               inputmode="numeric"
               autocomplete="off"
@@ -323,7 +323,7 @@ async function selectTenant(tenantId: string): Promise<void> {
             <input
               id="local-login-password"
               v-model="localPassword"
-              class="local-login-form__input"
+              class="local-login-form__input yj-input-control"
               type="password"
               autocomplete="new-password"
               :disabled="operationPending"
@@ -546,13 +546,7 @@ async function selectTenant(tenantId: string): Promise<void> {
   box-sizing: border-box;
 }
 
-.local-login-form__input:focus-visible {
-  border-color: var(--yj-color-focus-ring);
-  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
-  outline-offset: var(--yj-space-1);
-}
-
-.local-login-form__input:hover:not(:disabled):not(:focus-visible) {
+.local-login-form__input:hover:not(:disabled):not(:focus) {
   border-color: var(--yj-color-border-control-hover);
 }
 

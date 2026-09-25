@@ -16,7 +16,8 @@
   --yj-color-brand-text: #25282b;
   --yj-color-on-brand: #25282b;
   --yj-color-focus-ring: #25282b;
-  --yj-color-control-track: #b8bec5;
+  --yj-color-control-track: #e7e7e7;
+  --yj-color-control-switch-thumb: #ffffff;
   --yj-color-control-hover: #f7f8f9;
   --yj-color-control-pressed: #eceef0;
   --yj-color-control-disabled-bg: #f7f8f9;
@@ -135,9 +136,17 @@
   --yj-layout-sidebar-collapsed: 72px;
   --yj-layout-form-max: 960px;
   --yj-layout-workflow-create-width: 560px;
+  --yj-layout-schedule-form-width: 520px;
+  --yj-layout-schedule-record-width: 520px;
+  --yj-layout-schedule-search-width: 240px;
+  --yj-layout-schedule-state-width: 112px;
+  --yj-layout-schedule-sort-width: 112px;
+  --yj-layout-schedule-plan-filter-width: var(--yj-layout-schedule-state-width);
+  --yj-layout-schedule-empty-min-height: 360px;
   --yj-z-workflow-card-action: 1;
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
+  --yj-layout-chat-entry-max: 760px;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-sidebar-indent: 28px;
@@ -181,7 +190,8 @@
   --yj-color-brand-text: #f5f7fa;
   --yj-color-on-brand: #25282b;
   --yj-color-focus-ring: #f5f7fa;
-  --yj-color-control-track: #b8bec5;
+  --yj-color-control-track: #51565d;
+  --yj-color-control-switch-thumb: #ffffff;
   --yj-color-control-hover: #30363d;
   --yj-color-control-pressed: #414850;
   --yj-color-control-disabled-bg: #30363d;

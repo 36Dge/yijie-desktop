@@ -6,7 +6,7 @@ import { NCard, NModal } from "naive-ui";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type RouteLocationNormalized } from "vue-router";
 import ScheduledDraftPanel from "../../components/schedules/ScheduledDraftPanel.vue";
 import { useScheduledDraft } from "../schedules/use-scheduled-draft";
-import { takeScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
+import { queueScheduleDraftIntent, takeScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
 import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
@@ -84,6 +84,12 @@ function finishScheduledLeave(leave: boolean) { leaveScheduledOpen.value = false
 const changingDraftMode = ref(false);
 async function guardDraftNavigation(to: RouteLocationNormalized) {
   if (isDraftMode.value && !(await draftPanel.value?.allowLeave() ?? true)) return false;
+  if (isNewDraftMode.value && (to.path !== "/chat" || to.query.create !== "schedule")) {
+    if (prompt.value.trim() && !draft.pending.value && permissionScope.selectedTenantId && permissionScope.authorizationRevision !== null) {
+      queueScheduleDraftIntent(permissionScope.selectedTenantId, permissionScope.authorizationRevision, prompt.value);
+    }
+    return true;
+  }
   const modeChange = (to.query.create === "schedule") !== isNewDraftMode.value && to.path === "/chat";
   if (to.path !== "/scheduled-tasks" && !modeChange) return true;
   if (!Object.values(composerDrafts.value).some(value => value.trim().length > 0) && chatStore.draftAttachments.length === 0) return true;
@@ -112,6 +118,9 @@ const prompt = computed({
     );
   },
 });
+watch(isNewDraftMode, (active, previous) => {
+  if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, chatComposerDraftKey(null));
+}, { flush: "post" });
 const selectedProjectId = ref<string | null>(null);
 const submitting = ref(false);
 const composer = ref<ChatComposerHandle | null>(null);
@@ -962,7 +971,7 @@ onBeforeUnmount(() => {
 
 .chat-entry__content {
   display: flex;
-  width: min(100%, var(--yj-layout-form-max));
+  width: min(100%, var(--yj-layout-chat-entry-max));
   flex-direction: column;
   align-items: center;
   align-self: start;

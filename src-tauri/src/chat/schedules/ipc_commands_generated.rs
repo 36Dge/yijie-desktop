@@ -386,3 +386,45 @@ pub async fn schedule_list_important_updates_v1(
     )
     .await
 }
+#[tauri::command]
+pub async fn schedule_save_active_plan_v1(
+    request: serde_json::Value,
+    chat_runtime: tauri::State<'_, crate::chat::ChatRuntime>,
+    ipc_runtime: tauri::State<'_, ipc::ScheduleIpcRuntime>,
+) -> Result<serde_json::Value, super::ipc_generated::ErrorResponse> {
+    ipc::command(
+        request,
+        &chat_runtime,
+        &ipc_runtime,
+        "schedule_save_active_plan_v1",
+    )
+    .await
+}
+#[tauri::command]
+pub async fn schedule_confirm_active_draft_v1(
+    request: serde_json::Value,
+    chat_runtime: tauri::State<'_, crate::chat::ChatRuntime>,
+    ipc_runtime: tauri::State<'_, ipc::ScheduleIpcRuntime>,
+) -> Result<serde_json::Value, super::ipc_generated::ErrorResponse> {
+    ipc::command(
+        request,
+        &chat_runtime,
+        &ipc_runtime,
+        "schedule_confirm_active_draft_v1",
+    )
+    .await
+}
+#[tauri::command]
+pub async fn schedule_enable_plan_v1(
+    request: serde_json::Value,
+    chat_runtime: tauri::State<'_, crate::chat::ChatRuntime>,
+    ipc_runtime: tauri::State<'_, ipc::ScheduleIpcRuntime>,
+) -> Result<serde_json::Value, super::ipc_generated::ErrorResponse> {
+    ipc::command(
+        request,
+        &chat_runtime,
+        &ipc_runtime,
+        "schedule_enable_plan_v1",
+    )
+    .await
+}

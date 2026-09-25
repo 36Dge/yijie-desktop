@@ -368,6 +368,7 @@ onBeforeUnmount(() => {
         <input
           :id="`artifact-file-${artifact.artifactId}-search`"
           data-testid="artifact-file-search"
+          class="yj-input-control"
           type="search"
           :value="searchQuery"
           autocomplete="off"
@@ -462,7 +463,6 @@ onBeforeUnmount(() => {
 }
 
 .artifact-file button:focus-visible,
-.artifact-file input:focus-visible,
 .artifact-file__preview:focus-visible,
 .artifact-file__text:focus-visible,
 .artifact-file__table-scroll:focus-visible {

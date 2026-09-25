@@ -12,7 +12,8 @@ it("submits a native-previewed paused definition and excludes unsaveable draft t
   const saved=vi.fn();
   const root=mount(defineComponent({setup:()=>()=>h(NDialogProvider,null,{default:()=>h(ScheduledPlanForm,{plan:null,busy:false,uncertain:false,error:"",preview,targets,onSave:saved})})}),{attachTo:document.body});disposers.push(()=>root.unmount());
   const form=root.findComponent(ScheduledPlanForm);const inputs=form.findAllComponents(NInput);
-  inputs[0]!.vm.$emit("update:value","每日检查");inputs[1]!.vm.$emit("update:value","只保存计划");
+  inputs.find(input=>input.props("inputProps")?.["aria-label"]==="计划名称")!.vm.$emit("update:value","每日检查");
+  inputs.find(input=>input.props("inputProps")?.["aria-label"]==="任务内容")!.vm.$emit("update:value","只保存计划");
   await vi.waitFor(()=>expect(preview).toHaveBeenCalled());
   const modes=form.findAllComponents(NSelect);
   modes[1]!.vm.$emit("update:value","existing_chat");

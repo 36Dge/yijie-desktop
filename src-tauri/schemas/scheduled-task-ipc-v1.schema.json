@@ -199,6 +199,27 @@
       "response": "ImportantUpdatesResponse",
       "permission": "read",
       "write": false
+    },
+    {
+      "name": "schedule_save_active_plan_v1",
+      "request": "SavePlanRequest",
+      "response": "SavePlanResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_confirm_active_draft_v1",
+      "request": "ConfirmDraftRequest",
+      "response": "ConfirmDraftResponse",
+      "permission": "run",
+      "write": true
+    },
+    {
+      "name": "schedule_enable_plan_v1",
+      "request": "PausePlanRequest",
+      "response": "PausePlanResponse",
+      "permission": "run",
+      "write": true
     }
   ],
   "$defs": {

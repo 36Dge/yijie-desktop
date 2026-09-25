@@ -93,3 +93,42 @@ it("completed plans permit one explicit manual run without reopening the plan",a
  const h=harness();h.plan.state="completed";await vi.waitFor(()=>expect(h.s.canPrepare.value).toBe(true));await h.s.open(h.plan.plan_id);await h.s.confirm();
  expect(h.s.error.value).toBeNull();expect(h.plan.state).toBe("completed");expect(h.calls.some(c=>/pause|enable/.test(c.command))).toBe(false);
 });
+
+it("runs directly from a card without exposing a review and announces only an accepted run", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  await Promise.all([h.s.runNow(h.plan.plan_id), h.s.runNow(h.plan.plan_id)]);
+  expect(h.prepare).toHaveBeenCalledOnce();
+  expect(h.s.review.value).toBeNull(); expect(h.s.direct.value).toBe(true);
+  expect(h.s.startedRunId.value).toBe(h.run.run_id);
+  expect(h.s.notice.value).toBe("");
+  expect(h.calls.filter(c => c.command === "schedule_confirm_single_run_v1")).toHaveLength(1);
+  expect(h.calls.filter(c => c.command === "schedule_manual_run_v1")).toHaveLength(1);
+  expect(h.plan.state).toBe("paused");
+});
+
+it("does not submit or announce a run if local execution preparation fails", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  h.prepare.mockResolvedValue(false);
+  await h.s.runNow(h.plan.plan_id);
+  expect(h.s.error.value).toBe("execution_not_ready");
+  expect(h.s.review.value).toBeNull(); expect(h.s.startedRunId.value).toBeNull();
+  expect(h.calls.some(c => /confirm_single_run|manual_run/.test(c.command))).toBe(false);
+});
+
+it("retains an uncertain direct run for read-only receipt recovery without another submission", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  h.fail("manual"); await h.s.runNow(h.plan.plan_id);
+  expect(h.s.pending.value).toBe(true); expect(h.s.review.value).toBeNull(); expect(h.s.startedRunId.value).toBeNull();
+  const request = h.s.intent.value!.manualId;
+  await h.s.query();
+  expect(h.s.pending.value).toBe(false); expect(h.s.startedRunId.value).toBeNull();
+  expect(h.calls.filter(c => c.command === "schedule_manual_run_v1")).toHaveLength(1);
+  expect(h.calls.find(c => c.command === "schedule_read_execution_receipt_v1")?.request.payload).toEqual({ operation: "manual", original_request_id: request });
+});
+
+it("does not announce a cancelled or failed historical run as newly started", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  h.run.delivery_state = "cancelled"; h.run.native_outcome = "failed";
+  await h.s.runNow(h.plan.plan_id);
+  expect(h.s.startedRunId.value).toBeNull(); expect(h.s.notice.value).toContain("查看当前状态");
+});

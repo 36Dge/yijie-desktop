@@ -36,6 +36,7 @@ async function page(draft: boolean) {
 it("prefills only, hides ordinary project/attachment/permission controls, and queries uncertainty without resending",async()=>{
   const {root}=await page(true);
   expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe(SCHEDULE_DRAFT_GUIDE);
+  expect(root.find('[aria-label="定时任务草案"]').exists()).toBe(false);
   expect(root.find('[aria-label="添加图片或文件"]').exists()).toBe(false);
   expect(root.find('[aria-label="选择本地项目"]').exists()).toBe(false);
   expect(root.find('.chat-composer__permission').exists()).toBe(false);
@@ -47,6 +48,22 @@ it("prefills only, hides ordinary project/attachment/permission controls, and qu
   const query=root.findAll("button").find(b=>b.text()==="查证原请求")!;await query.trigger("click");await flushPromises();
   expect(root.text()).toContain("尚未观察到原请求提交");
   expect(native.calls.filter(c=>c==="schedule_submit_draft_v1")).toHaveLength(1);
+});
+it("leaves the new scheduled draft without a text warning and restores edited text on return",async()=>{
+  const {root,router}=await page(true);
+  const edited="每周一九点生成我提供的商品摘要";
+  await root.get("textarea").setValue(edited);
+  await router.push("/scheduled-tasks");await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/scheduled-tasks");
+  expect(document.body.textContent).not.toContain("离开当前对话？");
+  expect(native.calls.filter(c=>c==="schedule_submit_draft_v1")).toHaveLength(0);
+  queueScheduleDraftIntent(usePermissionStore().selectedTenantId!,1);
+  await router.push("/chat?create=schedule");await flushPromises();
+  expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe(edited);
+  await router.push("/chat");await flushPromises();
+  expect(router.currentRoute.value.path).toBe("/chat");
+  expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+  expect(document.body.textContent).not.toContain("离开当前对话？");
 });
 it("keeps an existing unsent input when leaving for scheduled management is cancelled",async()=>{
   const {root,router}=await page(false);await root.get("textarea").setValue("保留我的未发送草稿");
