@@ -122,6 +122,11 @@ watch(isNewDraftMode, (active, previous) => {
   if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, chatComposerDraftKey(null));
 }, { flush: "post" });
 const selectedProjectId = ref<string | null>(null);
+// A new task owns its picker state. Historical session projects may be removed
+// or internal, and must never become a hidden destination for a new submission.
+const availableProjectId = computed(() => chatStore.projects.find(project =>
+  project.projectId === selectedProjectId.value && project.available,
+)?.projectId ?? null);
 const submitting = ref(false);
 const composer = ref<ChatComposerHandle | null>(null);
 const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
@@ -277,8 +282,9 @@ function flushTimelineAfterSelection(): void {
 watch(
   () => chatStore.projects,
   (projects) => {
-    if (selectedProjectId.value && projects.some((project) => project.projectId === selectedProjectId.value && project.available)) return;
-    selectedProjectId.value = projects.find((project) => project.available)?.projectId ?? null;
+    if (!projects.some(project => project.projectId === selectedProjectId.value && project.available)) {
+      selectedProjectId.value = null;
+    }
   },
   { immediate: true },
 );
@@ -288,13 +294,14 @@ watch(
   (contextId, previousContextId) => {
     if (contextId === previousContextId) return;
     if (previousContextId === null && contextId !== null) return;
+    selectedProjectId.value = null;
     composerDrafts.value = createChatComposerDrafts();
   },
 );
 
 watch(
   () => chatStore.selectedSessionId,
-  () => {
+  (sessionId, previousSessionId) => {
     // Replace any presentation frame queued for the previous session. The
     // native view remains synchronous; only its DOM projection
     // is frame-batched.
@@ -304,7 +311,7 @@ watch(
     reasoningFailed.value = new Set();
     actionErrorCode.value = null;
     transientNotice.value = null;
-    if (selectedSession.value) selectedProjectId.value = selectedSession.value.projectId;
+    if (sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
     if (!requestedTurn.value) void nextTick(() => scrollToBottom());
   },
 );
@@ -451,11 +458,7 @@ async function submit(): Promise<void> {
       scrollToBottom();
       return;
     }
-    if (!selectedProjectId.value) {
-      actionErrorCode.value = "chat_project_invalid";
-      return;
-    }
-    const result = await chatStore.createSessionWithResult(selectedProjectId.value, input);
+    const result = await chatStore.createSessionWithResult(availableProjectId.value, input);
     if (result.status !== "local_durable_accepted") {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
@@ -571,7 +574,11 @@ async function loadOlderHistory(): Promise<void> {
 
 async function refreshCleanup(): Promise<void> {
   try {
-    await chatStore.refreshSelectedCleanup();
+    if (chatStore.cleanupStatus?.outcomeCode === "retry_limit_exceeded") {
+      await chatStore.deleteSelected();
+    } else {
+      await chatStore.refreshSelectedCleanup();
+    }
   } catch (error: unknown) {
     captureError(error);
   }
@@ -687,7 +694,7 @@ onBeforeUnmount(() => {
         v-model="prompt"
         mode="new"
         :projects="chatStore.projects"
-        :selected-project-id="selectedProjectId"
+        :selected-project-id="availableProjectId"
         :readiness="readiness"
         :text-only="isDraftMode"
         :can-send="isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend"
@@ -723,7 +730,7 @@ onBeforeUnmount(() => {
           {{ selectedSession?.title ?? (isHistoryLoading ? "正在读取任务" : "任务对话") }}
         </h1>
         <p class="chat-workspace__meta">
-          <span v-if="isDraftMode">定时任务草案 · 仅输入文本</span><span v-else><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
+          <span v-if="isDraftMode">定时任务草案 · 仅输入文本</span><span v-else-if="selectedSession?.projectId"><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
           <span v-if="chatStore.liveTurnStatus"><YjIcon name="pending" size="xs" tone="muted" />{{ turnStatusLabel(chatStore.liveTurnStatus) }}</span>
         </p>
       </div>

@@ -93,8 +93,7 @@ const sendDisabled = computed(() =>
   submissionBusy.value || props.streaming || !props.canSend || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
-  attachmentConstraintMessage.value !== null ||
-  (!props.textOnly && props.mode === "new" && selectedProject.value === null),
+  attachmentConstraintMessage.value !== null,
 );
 const sendLabel = computed(() => {
   if (props.submissionState === "validating") return "正在验证任务";
@@ -279,7 +278,7 @@ function handlePaste(event: ClipboardEvent): void {
       <YjIcon name="folder" size="sm" tone="muted" />
       <span class="chat-composer__project-name">{{ projectName }}</span>
     </button>
-    <div v-else-if="!textOnly" class="chat-composer__project" :aria-label="`当前聊天项目：${projectName}`">
+    <div v-else-if="!textOnly && selectedProjectId !== null" class="chat-composer__project" :aria-label="`当前聊天项目：${projectName}`">
       <YjIcon name="folder" size="sm" tone="muted" />
       <span class="chat-composer__project-name">{{ projectName }}</span>
     </div>

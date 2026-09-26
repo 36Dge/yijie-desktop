@@ -9,7 +9,9 @@
         "label": "main",
         "create": false,
         "title": "易界 AI",
-        "width": 1180,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "width": 1268,
         "height": 780,
         "minWidth": 1180,
         "minHeight": 760

@@ -116,7 +116,7 @@ export interface ChatClient {
   revalidateProject(contextId: string, projectId: string, operationId: string): Promise<ChatProject>;
   setProjectPinned(contextId: string, projectId: string, pinned: boolean, operationId: string): Promise<string>;
   removeProject(contextId: string, projectId: string, operationId: string): Promise<string>;
-  createSession(contextId: string, projectId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
+  createSession(contextId: string, projectId: string | null, input: string, operationId: string): Promise<ChatCreatedTurn>;
   submitTurn(contextId: string, sessionId: string, input: string, operationId: string): Promise<ChatCreatedTurn>;
   pickAttachments(contextId: string, draftTarget: ChatDraftTarget, remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
   importAttachments(contextId: string, draftTarget: ChatDraftTarget, paths: readonly string[], remainingCapacity: number, operationId: string): Promise<readonly ChatAttachment[]>;
@@ -124,7 +124,7 @@ export interface ChatClient {
   removeAttachment(contextId: string, draftTarget: ChatDraftTarget, attachmentId: string, operationId: string): Promise<string>;
   createSessionV2(
     contextId: string,
-    projectId: string,
+    projectId: string | null,
     contentBlocks: readonly ChatTurnContentBlock[],
     operationId: string,
   ): Promise<ChatCreatedTurn>;

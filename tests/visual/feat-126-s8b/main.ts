@@ -14,12 +14,26 @@ import { useChatStore } from "../../../src/stores/chat.store";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
 import VisualHarness from "./VisualHarness.vue";
+import { uiZoomCssValue, uiZoomedViewportCss, uiZoomedWindowMinimumCss } from "../../../src/domain/ui-zoom";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 const dark = new URLSearchParams(window.location.search).get("theme") === "dark";
 const view = new URLSearchParams(window.location.search).get("view") ?? "active";
 document.documentElement.dataset.theme = dark ? "dark" : "light";
+
+const previewZoom = Number(new URLSearchParams(window.location.search).get("zoom") ?? 100);
+if ([80, 100, 120, 140, 160, 180, 200].includes(previewZoom)) {
+  const viewport = uiZoomedViewportCss(previewZoom);
+  const minimum = uiZoomedWindowMinimumCss(previewZoom);
+  document.documentElement.style.setProperty("zoom", uiZoomCssValue(previewZoom));
+  document.documentElement.style.setProperty("--yj-ui-scale", uiZoomCssValue(previewZoom));
+  document.documentElement.style.setProperty("--yj-ui-viewport-width", viewport.width);
+  document.documentElement.style.setProperty("--yj-ui-viewport-height", viewport.height);
+  document.documentElement.style.setProperty("--yj-layout-window-min-width", minimum.width);
+  document.documentElement.style.setProperty("--yj-layout-window-min-height", minimum.height);
+  document.documentElement.dataset.uiZoomPercent = String(previewZoom);
+}
 
 const projects: readonly ChatProject[] = Object.freeze([
   { projectId: PROJECT_ID, safeName: "project", pinnedAt: 1, lastUsedAt: 9, available: true },
@@ -92,8 +106,8 @@ store.context = {
     "remove_project", "read_cleanup",
   ],
 };
-store.projects = projects;
-store.sessions = sessions;
+store.projects = view === "projectless" ? [] : projects;
+store.sessions = view === "projectless" ? [] : sessions;
 store.selectedSessionId = view === "active" ? SESSION_ID : null;
 store.history = view === "active" ? history : null;
 store.liveAssistantText = view === "active" ? "正在核对 reduced-motion 与键盘焦点行为。" : "";
@@ -118,6 +132,27 @@ store.loadOlderHistory = async () => undefined;
 store.revalidateProject = async (projectId) => projects.find((project) => project.projectId === projectId) ?? null;
 store.pickProject = async () => projects[0] ?? null;
 store.interruptSelected = async () => undefined;
+
+// The projectless preview demonstrates local acceptance only; it calls no Host or model.
+if (view === "projectless") {
+  store.draftTarget = { type: "new" };
+  store.draftTargetReady = true;
+  store.createSessionWithResult = async (projectId, input) => {
+    if (projectId !== null) throw new Error("projectless fixture expects no selected project");
+    store.sessions = [{
+      sessionId: SESSION_ID, projectId: null, title: input, titleSource: "fallback",
+      pinnedAt: null, lastActivityAt: 1, latestTurnStatus: "queued", projectAvailable: true,
+    }];
+    store.selectedSessionId = SESSION_ID;
+    store.selectedSessionPurpose = "ordinary";
+    store.selectedAccessMode = "live";
+    store.controlPlane = { sessionId: SESSION_ID, state: "binding_pending", issueCode: null, retryable: false, recovery: "none" };
+    store.phase = "binding-pending";
+    store.draftTarget = { type: "session", sessionId: SESSION_ID };
+    return { status: "local_durable_accepted", draftTarget: { type: "new" }, sessionId: SESSION_ID,
+      turnId: "019c1a00-0000-7000-8000-000000000005", operationId: "019c1a00-0000-7000-8000-000000000006" };
+  };
+}
 
 const router = createRouter({
   history: createMemoryHistory(),

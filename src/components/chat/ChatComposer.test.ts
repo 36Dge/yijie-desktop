@@ -304,11 +304,23 @@ describe("ChatComposer", () => {
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
-  it("disables send for blank input, missing project, unavailable readiness and active turn", async () => {
+  it("disables send for blank input, unavailable readiness and active turn", async () => {
     expect(mountComposer({ modelValue: "" }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
-    expect(mountComposer({ selectedProjectId: null }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     expect(mountComposer({ canSend: false }).get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     expect(mountComposer({ streaming: true }).find('[aria-label="停止生成"]').exists()).toBe(true);
+  });
+
+  it("sends text or ready attachments without selecting a project", async () => {
+    const wrapper = mountComposer({ projects: [], selectedProjectId: null });
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    expect(wrapper.emitted("submit")).toHaveLength(1);
+    await wrapper.setProps({ modelValue: "   " });
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+    await wrapper.setProps({ attachments: [READY_FILE] });
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
+    await wrapper.setProps({ mode: "reply" });
+    expect(wrapper.find(".chat-composer__project").exists()).toBe(false);
   });
 
   it("keeps the predecessor Stop as the active-turn-action fallback", async () => {

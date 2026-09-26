@@ -6,10 +6,29 @@ import WorkflowPage from "../../../src/pages/workflows/WorkflowPage.vue";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
 import WorkflowVisualHarness from "./WorkflowVisualHarness.vue";
+import { workflowNativeClient } from "../../../src/api/workflow-native-client";
+import { WORKFLOW_CREATE_GUIDE_KEY } from "../../../src/domain/workflow-onboarding";
+import { uiZoomCssValue, uiZoomedViewportCss, uiZoomedWindowMinimumCss } from "../../../src/domain/ui-zoom";
 
 const query = new URLSearchParams(window.location.search);
 const dark = query.get("theme") === "dark";
 document.documentElement.dataset.theme = dark ? "dark" : "light";
+
+// Read-only synthetic data in this isolated visual harness; no native service calls.
+workflowNativeClient.status = async () => ({ protocol_version: 1, ready: true, state: "ready", run_epoch: "15300000-0000-4000-8000-000000000001", limits: { input_bytes: 4096, prefix_bytes: 1024, output_bytes: 5120, canvas_bytes: 262144, message_bytes: 524288, max_active_runs: 1, execution_budget_seconds: 30, editor_ttl_seconds: 300 } });
+workflowNativeClient.list = async () => ({ items: [] });
+if (query.get("guide") === "preview") localStorage.removeItem(WORKFLOW_CREATE_GUIDE_KEY);
+const previewZoom = Number(query.get("zoom") ?? 100);
+if ([80, 100, 120, 140, 160, 180, 200].includes(previewZoom)) {
+  const viewport = uiZoomedViewportCss(previewZoom);
+  const minimum = uiZoomedWindowMinimumCss(previewZoom);
+  document.documentElement.style.setProperty("zoom", uiZoomCssValue(previewZoom));
+  document.documentElement.style.setProperty("--yj-ui-scale", uiZoomCssValue(previewZoom));
+  document.documentElement.style.setProperty("--yj-ui-viewport-width", viewport.width);
+  document.documentElement.style.setProperty("--yj-ui-viewport-height", viewport.height);
+  document.documentElement.style.setProperty("--yj-layout-window-min-width", minimum.width);
+  document.documentElement.style.setProperty("--yj-layout-window-min-height", minimum.height);
+}
 
 const router = createRouter({
   history: createMemoryHistory(),

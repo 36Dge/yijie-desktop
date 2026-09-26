@@ -20,18 +20,20 @@ export function executionTimeLabel(timing: Timing, compact = false): string {
     });
     if (!compact) return formatter.format(date);
     const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
-    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
   };
   try { return compact ? format(timing.time_zone ?? "UTC") : `${format(timing.time_zone ?? "UTC")}（${timing.time_zone ?? "UTC"}）`; }
   catch { return `${format("UTC")}（UTC，原时区不可用）`; }
 }
-export function durationLabel(timing: Timing): string {
+export function durationLabel(timing: Timing, compact = false): string {
   if (timing.duration === "not_started") return "未开始";
   if (timing.duration === "in_progress") return "尚未结束";
   const ms = timing.duration_ms;
   if (timing.duration !== "known" || ms === undefined || !Number.isSafeInteger(ms) || ms < 0) return "未知";
-  const seconds = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format((ms % 60000) / 1000);
-  const minutes = Math.floor(ms / 60000);
+  if (compact && ms > 0 && ms < 1000) return "不到 1 秒";
+  const displayMs = compact ? Math.round(ms / 1000) * 1000 : ms;
+  const seconds = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 3 }).format((displayMs % 60000) / 1000);
+  const minutes = Math.floor(displayMs / 60000);
   return minutes ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
 }
 export function timingNote(timing: Timing): string {
@@ -70,19 +72,31 @@ export function recordStatus(record: RecordView): string {
  if (record.run.native_outcome !== "unobserved") return { completed: "执行已结束", failed: "执行失败", interrupted: "执行已停止" }[record.run.native_outcome];
  return { reserved: "已预约", sending: "投递中", accepted: "已接受", uncertain: "结果待查证", terminal: "执行状态未知", cancelled: "已取消" }[record.run.delivery_state];
 }
+export function recordElementId(record: RecordView): string {
+  return `schedule-record-${record.kind === "run" ? record.run.run_id : JSON.stringify(record.key)}`;
+}
+export function recordTone(record: RecordView): "default" | "success" | "warning" | "error" | "info" {
+  if (record.kind === "occurrence") return record.occurrence.disposition === "skipped_paused" ? "default" : "warning";
+  if (record.attention === "needs_attention") return "warning";
+  if (record.run.native_outcome === "completed") return "success";
+  if (record.run.native_outcome === "failed") return "error";
+  if (record.run.native_outcome === "interrupted" || record.run.delivery_state === "cancelled") return "default";
+  if (record.run.delivery_state === "uncertain" || record.run.delivery_state === "terminal") return "warning";
+  return "info";
+}
 export function executionError(code: IpcErrorCode | null): string {
   const messages: Partial<Record<IpcErrorCode, string>> = {
     operation_unknown: "尚不能确认本次授权或运行是否受理。请查证原请求，不要创建新的运行。",
     context_invalid: "本次会话授权已失效。恢复授权后可只读查证；旧许可不会因此续期。",
     execution_not_ready: "本地执行服务尚未就绪。请稍后重新准备运行。",
-    reservation_busy: "已有聊天正在排队、执行、等待审批或结果未明。请先处理原运行。",
+    reservation_busy: "本次未能开始执行：执行通道暂被占用，可能仍有执行、待确认状态或后台清理尚未结束。请稍后重试；若持续出现，请查看执行记录。",
     grant_missing: "本次运行许可不可用，请重新审阅并确认。",
     grant_expired: "本次运行许可已失效，请重新审阅并确认。",
     grant_stale: "计划或授权已变化，请重新审阅当前配置。",
     grant_exhausted: "本次许可的一次运行已占用，请查看原运行。",
     revision_conflict: "计划已被修改，请重新审阅最新版本。",
     request_conflict: "本次请求与已有回执不一致，请查证原运行。",
-    permission_denied: "当前没有执行权限，或计划不再处于暂停状态。",
+    permission_denied: "当前没有执行此任务的权限。",
   };
   return code ? messages[code] ?? scheduleError(code) : "";
 }

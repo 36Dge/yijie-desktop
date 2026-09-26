@@ -1252,10 +1252,32 @@ impl TurnProjectionSink for ChatEventBridge {
                 (*operation_id, "retry_scheduled", false)
             }
             CoordinatorOutcome::CleanupComplete(status) => (status.operation_id, "complete", true),
+            // The operation finished; clients still read the per-surface receipt
+            // and must not infer full cleanup from this invalidation notification.
+            CoordinatorOutcome::CleanupHistoryRemoved(status) => {
+                (status.operation_id, "complete", true)
+            }
             CoordinatorOutcome::Idle
             | CoordinatorOutcome::Dispatched(_)
             | CoordinatorOutcome::StreamRecovered { .. } => return Ok(()),
         };
+        if terminal {
+            let app = self
+                .inner
+                .lock()
+                .map_err(|_| ChatError::OrchestrationUnavailable)?
+                .app
+                .clone();
+            if let Some(app) = app {
+                // A completed background deletion also invalidates unselected
+                // sidebar entries. No session identity or content is broadcast.
+                app.emit(
+                    "yijie://chat-history-changed-v1",
+                    json!({"schemaVersion": 1}),
+                )
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            }
+        }
         let (app, events) = {
             let mut state = self
                 .inner
@@ -2453,7 +2475,8 @@ struct SetProjectPinnedPayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateSessionPayload {
-    project_id: Uuid,
+    #[serde(deserialize_with = "required_project_id")]
+    project_id: Option<Uuid>,
     input: String,
     operation_id: Uuid,
 }
@@ -2526,9 +2549,16 @@ enum TurnContentBlockPayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateSessionV2Payload {
-    project_id: Uuid,
+    #[serde(deserialize_with = "required_project_id")]
+    project_id: Option<Uuid>,
     content_blocks: Vec<TurnContentBlockPayload>,
     operation_id: Uuid,
+}
+
+fn required_project_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Uuid>, D::Error> {
+    Option::<Uuid>::deserialize(deserializer)
 }
 
 #[derive(Deserialize)]
@@ -2666,7 +2696,7 @@ impl From<ProjectSummary> for ProjectDto {
 #[serde(rename_all = "camelCase")]
 struct SessionDto {
     session_id: String,
-    project_id: String,
+    project_id: Option<String>,
     title: String,
     title_source: &'static str,
     pinned_at: Option<i64>,
@@ -2679,7 +2709,7 @@ impl From<SessionSummary> for SessionDto {
     fn from(session: SessionSummary) -> Self {
         Self {
             session_id: session.session_id.to_string(),
-            project_id: session.project_id.to_string(),
+            project_id: session.project_id.map(|id| id.to_string()),
             title: session.title,
             title_source: match session.title_source {
                 SessionTitleSource::Fallback => "fallback",
@@ -5206,7 +5236,7 @@ mod tests {
             SessionPageDto {
                 sessions: vec![SessionDto {
                     session_id: session_id.to_owned(),
-                    project_id: project_id.to_owned(),
+                    project_id: Some(project_id.to_owned()),
                     title: "Synthetic Session".to_owned(),
                     title_source: "fallback",
                     pinned_at: None,
@@ -5322,7 +5352,7 @@ mod tests {
             ResyncDto {
                 session: SessionDto {
                     session_id: session_id.to_owned(),
-                    project_id: project_id.to_owned(),
+                    project_id: Some(project_id.to_owned()),
                     title: "Synthetic Session".to_owned(),
                     title_source: "fallback",
                     pinned_at: None,
@@ -5544,7 +5574,7 @@ mod tests {
         let shared_request: CommandRequest<CreateSessionV2Payload> =
             decode_request_v2(shared_fixture).expect("shared TypeScript/Rust request fixture");
         assert_eq!(
-            shared_request.payload.project_id.to_string(),
+            shared_request.payload.project_id.unwrap().to_string(),
             "019c1a00-0000-7000-8000-000000000013"
         );
         assert_eq!(shared_request.payload.content_blocks.len(), 1);
@@ -6558,7 +6588,7 @@ mod tests {
         let resync = serde_json::to_value(ResyncDtoV5 {
             session: SessionSummary {
                 session_id: Uuid::now_v7(),
-                project_id: Uuid::now_v7(),
+                project_id: Some(Uuid::now_v7()),
                 title: "mixed".to_owned(),
                 title_source: SessionTitleSource::Fallback,
                 pinned_at: None,
@@ -6718,7 +6748,7 @@ mod tests {
         let data = ResyncDtoV4 {
             session: SessionDto {
                 session_id: session_id.to_string(),
-                project_id: project_id.to_string(),
+                project_id: Some(project_id.to_string()),
                 title: "snapshot".to_owned(),
                 title_source: "fallback",
                 pinned_at: None,
@@ -9904,4 +9934,36 @@ pub async fn chat_runtime_approvals_v1(
     let mut result = chat_runtime_approvals_v2(request, chat_runtime).await?;
     result.data.requests.retain(|r| r.kind != "mcp");
     Ok(result)
+}
+
+#[cfg(test)]
+mod projectless_payload_tests {
+    use super::*;
+
+    #[test]
+    fn projectless_payload_requires_explicit_null_or_existing_project_id() {
+        let operation = Uuid::now_v7();
+        let text =
+            serde_json::json!({"projectId":null,"input":"无项目任务","operationId":operation});
+        assert!(serde_json::from_value::<CreateSessionPayload>(text.clone())
+            .unwrap()
+            .project_id
+            .is_none());
+        let blocks = serde_json::json!({"projectId":null,"contentBlocks":[{"type":"text","text":"无项目任务"}],"operationId":operation});
+        assert!(
+            serde_json::from_value::<CreateSessionV2Payload>(blocks.clone())
+                .unwrap()
+                .project_id
+                .is_none()
+        );
+        let mut missing = text;
+        missing.as_object_mut().unwrap().remove("projectId");
+        assert!(serde_json::from_value::<CreateSessionPayload>(missing).is_err());
+        let mut selected = blocks;
+        selected["projectId"] = serde_json::json!(Uuid::now_v7());
+        assert!(serde_json::from_value::<CreateSessionV2Payload>(selected)
+            .unwrap()
+            .project_id
+            .is_some());
+    }
 }

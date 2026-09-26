@@ -22,18 +22,18 @@ function harness() {
   const originalId=crypto.randomUUID();
   const preview={confirmation:{original_run_id:originalId,original_snapshot_digest:"c".repeat(64),plan_id:plan.plan_id,revision:plan.revision,definition_digest:"d".repeat(64)},original:{...plan.definition,content:"旧内容"},current:plan.definition};
   const calls: { command: string; request: Requests[keyof Requests] }[] = [];
-  let prepared=false; let failure: "grant" | "manual" | null = null; let observed=true;
+  let prepared=false; let failure: "grant" | "manual" | "busy" | null = null; let observed=true; let listFails=false;
   const prepare=vi.fn(async()=>{prepared=true;return true;});
   const native = createScheduledTaskNativeClient(async(command,args)=>{
     const request=args.request as Requests[keyof Requests];calls.push({command,request});let data:unknown;
     switch(command) {
       case "schedule_operation_capabilities_v1": data=Object.fromEntries(["read","save","manual","automatic","draft","single_run"].map(k=>[k,{available:k==="read"||k==="save"||(k==="single_run"&&prepared),reason:k==="read"||k==="save"||(k==="single_run"&&prepared)?"ready":k==="single_run"?"runtime_unqualified":"candidate_disabled"}]));break;
-      case "schedule_list_plan_cards_v1": data={items:[]};break;
+      case "schedule_list_plan_cards_v1": if(listFails)throw {schemaVersion:1,requestId:request.requestId,code:"storage_unavailable"};data={items:[]};break;
       case "schedule_get_plan_v1":data={plan,summary};break;
       case "schedule_confirm_single_run_v1":if(failure==="grant")throw {schemaVersion:1,requestId:request.requestId,code:"operation_unknown"};data={grant,kind:"kind" in request.payload?request.payload.kind:"manual",...("review" in request.payload ? {original_run_id:originalId}: {})};break;
       case "schedule_preview_rerun_v1":data=preview;break;
       case "schedule_confirm_rerun_v1":
-      case "schedule_manual_run_v1":if(failure==="manual")throw {schemaVersion:1,requestId:request.requestId,code:"operation_unknown"};data=command==="schedule_confirm_rerun_v1"?{...run,trigger:"rerun",original_run_id:originalId}:run;break;
+      case "schedule_manual_run_v1":if(failure==="manual"||failure==="busy")throw {schemaVersion:1,requestId:request.requestId,code:failure==="busy"?"reservation_busy":"operation_unknown"};data=command==="schedule_confirm_rerun_v1"?{...run,trigger:"rerun",original_run_id:originalId}:run;break;
       case "schedule_read_execution_receipt_v1":{
         const operation="operation" in request.payload?request.payload.operation:"";
         data=!observed?{observation:"not_observed"}:operation==="single_grant"?{observation:"single_grant_observed",result:{grant,kind:calls.some(c=>c.command==="schedule_preview_rerun_v1")?"rerun":"manual",...(calls.some(c=>c.command==="schedule_preview_rerun_v1")?{original_run_id:originalId}:{})}}:{observation:operation==="rerun"?"rerun_observed":"manual_observed",run:operation==="rerun"?{...run,trigger:"rerun",original_run_id:originalId}:run};break;
@@ -44,7 +44,7 @@ function harness() {
     return {schemaVersion:1,requestId:request.requestId,data};
   });
   const scope=effectScope(); const state=scope.run(()=>{const m=useScheduledManagement(native);return {m,s:useScheduledManual(m,prepare)};})!;cleanup.push(()=>scope.stop());
-  return {...state,plan,run,originalId,preview,calls,chat,permission,prepare,fail:(v:typeof failure)=>{failure=v;},observe:(v:boolean)=>{observed=v;}};
+  return {...state,plan,run,originalId,preview,calls,chat,permission,prepare,fail:(v:typeof failure)=>{failure=v;},failList:(v:boolean)=>{listFails=v;},observe:(v:boolean)=>{observed=v;}};
 }
 it("reads cold, explicitly prepares, confirms exactly one bounded run and locates its receipt",async()=>{
   const h=harness();await vi.waitFor(()=>expect(h.s.canPrepare.value).toBe(true));expect(h.prepare).not.toHaveBeenCalled();
@@ -131,4 +131,32 @@ it("does not announce a cancelled or failed historical run as newly started", as
   h.run.delivery_state = "cancelled"; h.run.native_outcome = "failed";
   await h.s.runNow(h.plan.plan_id);
   expect(h.s.startedRunId.value).toBeNull(); expect(h.s.notice.value).toContain("查看当前状态");
+});
+
+it("clears a definite rejection only after a successful refresh, without another submission", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  h.fail("busy"); await h.s.runNow(h.plan.plan_id);
+  expect(h.s.error.value).toBe("reservation_busy"); expect(h.s.notice.value).toBe("");
+  expect(h.s.pending.value).toBe(false);
+  h.failList(true); await h.m.refresh();
+  expect(h.s.error.value).toBe("reservation_busy");
+  h.failList(false); await h.m.refresh();
+  expect(h.s.error.value).toBeNull(); expect(h.s.notice.value).toBe("");
+  expect(h.calls.filter(c => c.command === "schedule_manual_run_v1")).toHaveLength(1);
+  expect(h.calls.filter(c => c.command === "schedule_confirm_single_run_v1")).toHaveLength(1);
+});
+
+it.each(["grant", "manual"] as const)("preserves an uncertain %s and its original request through refresh, dismissal and rebind", async failure => {
+  const h = harness(); await vi.waitFor(() => expect(h.s.canPrepare.value).toBe(true));
+  h.fail(failure); await h.s.runNow(h.plan.plan_id);
+  const intent = h.s.intent.value!; const error = h.s.error.value; const notice = h.s.notice.value;
+  await h.m.refresh(); h.s.dismissFeedback();
+  h.chat.context = null; await nextTick(); h.chat.context = { contextId: crypto.randomUUID() }; await nextTick();
+  await h.m.refresh();
+  expect(h.s.pending.value).toBe(true); expect(h.s.intent.value).toBe(intent);
+  expect(h.s.error.value).toBe(error); expect(h.s.notice.value).toBe(notice);
+  h.observe(false); await h.s.query();
+  expect(h.calls.find(c => c.command === "schedule_read_execution_receipt_v1")?.request.payload).toEqual({ operation: failure === "grant" ? "single_grant" : "manual", original_request_id: failure === "grant" ? intent.confirmation.request_id : intent.manualId });
+  expect(h.calls.filter(c => c.command === "schedule_confirm_single_run_v1")).toHaveLength(1);
+  expect(h.calls.filter(c => c.command === "schedule_manual_run_v1")).toHaveLength(failure === "grant" ? 0 : 1);
 });

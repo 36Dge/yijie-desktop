@@ -112,5 +112,10 @@ describe("FEAT-126 chat UI rules", () => {
     expect(cleanupNotice(base)?.title).toContain("正在");
     expect(cleanupNotice({ ...base, hostState: "incomplete" })?.title).toContain("尚未完成");
     expect(cleanupNotice({ ...base, hostState: "complete", runtimeState: "complete" })?.title).toContain("已永久删除");
+    const local = { ...base, hostState: "incomplete" as const, runtimeState: "incomplete" as const,
+      outcomeCode: "local_history_deleted", completedAt: 2 };
+    expect(cleanupNotice(local)).toMatchObject({ title: "本地任务记录已删除", tone: "warning", actionLabel: null });
+    expect(cleanupNotice(local)?.detail).toContain("无法确认");
+    expect(cleanupNotice({ ...local, completedAt: null })?.title).toContain("尚未完成");
   });
 });

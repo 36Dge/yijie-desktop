@@ -23,6 +23,7 @@ import {
   NNotificationProvider,
 } from "naive-ui";
 import ScheduledUpdates from "./components/schedules/ScheduledUpdates.vue";
+import ChatDeletionUpdates from "./components/chat/ChatDeletionUpdates.vue";
 import YjAppShell from "./components/yijie/YjAppShell.vue";
 import { createNaiveThemeOverrides } from "./design/theme/naive-theme";
 import { usePermissionStore } from "./stores/permission.store";
@@ -129,6 +130,7 @@ function applyUiZoom(percent: number): void {
   const windowMinimum = uiZoomedWindowMinimumCss(percent);
   const viewport = uiZoomedViewportCss(percent);
   document.documentElement.style.setProperty("zoom", uiZoomCssValue(percent));
+  document.documentElement.style.setProperty("--yj-ui-scale", uiZoomCssValue(percent));
   document.documentElement.style.setProperty("--yj-layout-window-min-width", windowMinimum.width);
   document.documentElement.style.setProperty("--yj-layout-window-min-height", windowMinimum.height);
   document.documentElement.style.setProperty("--yj-ui-viewport-width", viewport.width);
@@ -232,6 +234,7 @@ onBeforeUnmount(() => {
   colorSchemeQuery?.removeEventListener("change", handleColorSchemeChange);
   window.removeEventListener("keydown", handleUiZoomShortcut);
   document.documentElement.style.removeProperty("zoom");
+  document.documentElement.style.removeProperty("--yj-ui-scale");
   document.documentElement.style.removeProperty("--yj-layout-window-min-width");
   document.documentElement.style.removeProperty("--yj-layout-window-min-height");
   document.documentElement.style.removeProperty("--yj-ui-viewport-width");
@@ -254,6 +257,7 @@ onBeforeUnmount(() => {
       <n-dialog-provider>
         <n-notification-provider>
           <ScheduledUpdates v-if="localChatUiEnabled" />
+          <ChatDeletionUpdates v-if="localChatUiEnabled" />
           <YjAppShell>
             <RouterView v-slot="{ Component }">
               <component :is="Component" v-if="canRenderCurrentRoute" />

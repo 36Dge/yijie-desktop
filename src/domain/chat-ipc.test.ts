@@ -47,6 +47,14 @@ function fixture(name: string): unknown {
 }
 
 describe("private chat IPC v1 contract", () => {
+  it("reads an available projectless conversation in list and resync responses", () => {
+    const responses = fixture("response-corpus.json") as Record<string, {data: {sessions: {projectId: string | null}[]; session: {projectId: string | null}}}>;
+    responses.sessionPage!.data.sessions[0]!.projectId = null;
+    responses.resync!.data.session.projectId = null;
+    expect(parseSessionPageResponse(responses.sessionPage).sessions[0]!.projectId).toBeNull();
+    expect(parseResyncResponse(responses.resync).session.projectId).toBeNull();
+  });
+
   it("keeps the v2 attachment command allowlist closed", () => {
     expect(CHAT_V2_COMMAND_NAMES).toEqual([
       "chat_pick_attachments_v2",

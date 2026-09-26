@@ -12,10 +12,10 @@
   outline-width: var(--yj-focus-ring-width);
 }
 
-/* Route headings receive programmatic focus for announcements. WebKit's auto
-   outline ignores outline-color, so keep that existing indication solid. */
-main h1[tabindex="-1"]:focus-visible {
-  outline-style: solid;
+/* Preserve route announcements while keeping non-interactive headings neutral.
+   Focus indicators on actual controls continue to use the rules above/below. */
+main h1[tabindex="-1"]:focus {
+  outline: none;
 }
 
 /* Native text/search/password/number fields and selects share the Composer's

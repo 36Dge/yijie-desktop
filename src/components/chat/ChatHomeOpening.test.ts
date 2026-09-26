@@ -40,7 +40,7 @@ describe("home opening playback",()=>{
     await advance(1000);
     expect(wrapper.attributes("data-animating")).toBe("false");
     expect(wrapper.get("h1").text()).toBe("易界AI");
-    expect(wrapper.text()).toContain("让跨境生意，更进一步。");
+    expect(wrapper.text()).toContain("让跨境经营更高效，让全球生意更进一步。");
     expect(frames.size).toBe(0);
   });
   it("replays on each homepage entry and cancels the previous entry's frames",async()=>{

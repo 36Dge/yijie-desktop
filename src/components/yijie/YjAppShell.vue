@@ -12,6 +12,7 @@ import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
 import YjSidebar from "./YjSidebar.vue";
+import YjWindowTitlebar from "./YjWindowTitlebar.vue";
 
 const route = useRoute();
 const chatStore = useChatStore();
@@ -34,10 +35,9 @@ const navigationEntries = computed(() =>
     }),
   ),
 );
-const sidebarCollapsed = computed(() => isLocalChatRoute.value ? false : sidebarStore.isCollapsed);
+const sidebarCollapsed = computed(() => sidebarStore.isCollapsed);
 const showTaskHistoryTree = computed(() =>
   localChatUiEnabled &&
-  !sidebarCollapsed.value &&
   navigationEntries.value.some((entry) => entry.kind === "section" && entry.key === "taskHistory"),
 );
 
@@ -60,24 +60,26 @@ function recoverCurrentNewTask(): void {
 
 <template>
   <div class="yj-app-shell" :class="{ 'yj-app-shell--chat': isLocalChatRoute }">
-    <YjSidebar
-      :entries="navigationEntries"
-      :collapsed="sidebarCollapsed"
-      :current-path="route.path"
-      :show-chat-tree="showTaskHistoryTree"
-      :allow-toggle="!isLocalChatRoute"
-      @toggle="sidebarStore.toggle"
-      @recover-new-task="recoverCurrentNewTask"
-    />
-    <main class="yj-app-shell__content" tabindex="0">
-      <slot />
-    </main>
+    <YjWindowTitlebar :collapsed="sidebarCollapsed" @toggle="sidebarStore.toggle" />
+    <div class="yj-app-shell__body">
+      <YjSidebar
+        :entries="navigationEntries"
+        :collapsed="sidebarCollapsed"
+        :current-path="route.path"
+        :show-chat-tree="showTaskHistoryTree"
+        @recover-new-task="recoverCurrentNewTask"
+      />
+      <main class="yj-app-shell__content" tabindex="0">
+        <slot />
+      </main>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .yj-app-shell {
   display: flex;
+  flex-direction: column;
   width: var(--yj-ui-viewport-width, 100%);
   min-width: var(--yj-layout-window-min-width);
   min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
@@ -85,6 +87,13 @@ function recoverCurrentNewTask(): void {
   overflow: hidden;
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-app);
+}
+
+.yj-app-shell__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .yj-app-shell__content {

@@ -49,6 +49,31 @@ const MAX_PAGE_SIZE: usize = 50;
 pub(crate) const OUTBOX_MAX_ATTEMPTS: i64 = 16;
 const OUTBOX_PAYLOAD_VERSION: i64 = 1;
 const DELETION_RECEIPT_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
+#[path = "deletion_recovery.rs"]
+mod deletion_recovery;
+// Deleting a queued chat cancels its outbox but retains the historical queued
+// projection. Only a turn that never reached start_turn may stop blocking the
+// existing cleanup worker. create_session can have retries: it initializes an
+// idle session and never submits the user's input. A failed/attempted start is
+// not proof of nonexecution. Such a turn requires the separate Host cleanup
+// path below; cancellation alone never permits local deletion.
+const CANCELLED_UNSTARTED_TURN: &str = "(
+    t.submission_status='cancelled' AND t.runtime_turn_id IS NULL
+    AND NOT EXISTS(SELECT 1 FROM chat_native_bindings n WHERE n.turn_id=t.id)
+    AND EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=t.session_id
+      AND o.state='failed' AND o.payload_version IN (1,2)
+      AND ((o.kind='create_session') OR
+           (o.kind='start_turn' AND o.operation_id=t.operation_id AND o.attempt_count=0))
+      AND CASE WHEN json_valid(CAST(o.encrypted_payload AS TEXT))
+        THEN json_extract(CAST(o.encrypted_payload AS TEXT),'$.turn_id')=t.id ELSE 0 END)
+    AND NOT EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=t.session_id
+      AND o.kind IN ('create_session','start_turn')
+      AND CASE WHEN o.payload_version IN (1,2) AND json_valid(CAST(o.encrypted_payload AS TEXT))
+        THEN COALESCE(json_extract(CAST(o.encrypted_payload AS TEXT),'$.turn_id')=t.id,1) ELSE 1 END
+      AND (o.state NOT IN ('failed','done') OR o.payload_version NOT IN (1,2)
+        OR NOT json_valid(CAST(o.encrypted_payload AS TEXT))
+        OR (o.kind='start_turn' AND (o.state!='failed' OR o.attempt_count!=0))))
+)";
 #[cfg(feature = "feat126-s10-driver")]
 const R8_SESSION_COUNT: u64 = 10_000;
 #[cfg(feature = "feat126-s10-driver")]
@@ -487,7 +512,7 @@ pub struct SessionPageCursor {
 #[derive(Clone, PartialEq, Eq)]
 pub struct SessionSummary {
     pub session_id: Uuid,
-    pub project_id: Uuid,
+    pub project_id: Option<Uuid>,
     pub title: String,
     pub title_source: SessionTitleSource,
     pub pinned_at: Option<i64>,
@@ -1860,7 +1885,7 @@ impl ChatRepository {
         authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
         validate_non_nil(project_id)?;
-        super::schedules::workspace::require_user(
+        super::projectless::require_chat_project(
             &self.connection,
             &self.scope,
             &project_id.to_string(),
@@ -2091,7 +2116,7 @@ impl ChatRepository {
         if context.scheduled.is_none() {
             super::schedules::execution_guard::foreground(transaction)?;
             if !context.draft {
-                super::schedules::workspace::require_user(
+                super::projectless::require_chat_project(
                     transaction,
                     scope,
                     &project_id.to_string(),
@@ -4365,8 +4390,8 @@ impl ChatRepository {
         };
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT s.id, s.project_id, s.title, s.title_source, s.pinned_at,
+            .prepare(&format!(
+                "SELECT s.id, {}, s.title, s.title_source, s.pinned_at,
                         s.last_activity_at,
                         (SELECT t.status FROM chat_turns t WHERE t.session_id=s.id
                          ORDER BY t.rowid DESC LIMIT 1),
@@ -4391,7 +4416,8 @@ impl ChatRepository {
                  ORDER BY s.pinned_at IS NULL ASC, s.pinned_at DESC,
                           s.last_activity_at DESC, s.id DESC
                  LIMIT ?6",
-            )
+                super::projectless::project_projection(&self.connection)?,
+            ))
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let rows = statement
             .query_map(
@@ -4406,7 +4432,7 @@ impl ChatRepository {
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, Option<i64>>(4)?,
@@ -4436,7 +4462,7 @@ impl ChatRepository {
                 )| {
                     Ok(SessionSummary {
                         session_id: parse_uuid_value(&session_id)?,
-                        project_id: parse_uuid_value(&project_id)?,
+                        project_id: project_id.as_deref().map(parse_uuid_value).transpose()?,
                         title,
                         title_source: parse_title_source(&title_source)?,
                         pinned_at,
@@ -5429,7 +5455,8 @@ impl ChatRepository {
             .query_row(
                 &super::schedules::recovery::coordination_sql(
                     &transaction,
-                    "SELECT operation_id, 1, encrypted_retry_ids, desktop_state,
+                    &format!(
+                        "SELECT operation_id, 1, encrypted_retry_ids, desktop_state,
                         host_state, runtime_state, attempt_count
                  FROM chat_deletion_jobs d
                  WHERE d.session_id IS NOT NULL AND d.attempt_count<?1
@@ -5438,9 +5465,13 @@ impl ChatRepository {
                    AND d.outcome_code='pending'
                    AND NOT EXISTS(
                      SELECT 1 FROM chat_turns t WHERE t.session_id=d.session_id
-                       AND t.status IN ('queued', 'streaming', 'stopping')
+                       AND (t.status IN ('streaming', 'stopping')
+                         OR (t.status='queued' AND NOT COALESCE(
+                           {CANCELLED_UNSTARTED_TURN} OR {host_cleanup_turn},0)))
                    )
                  ORDER BY d.next_attempt_at, d.operation_id LIMIT 1",
+                        host_cleanup_turn = deletion_recovery::CANCELLED_HOST_CLEANUP_TURN,
+                    ),
                 )?,
                 params![OUTBOX_MAX_ATTEMPTS, now],
                 |row| {
@@ -5606,6 +5637,15 @@ impl ChatRepository {
         operation_id: Uuid,
         completed_at: i64,
     ) -> Result<DeletionStatus, ChatError> {
+        self.write_deletion_receipt(operation_id, completed_at, false)
+    }
+
+    fn write_deletion_receipt(
+        &mut self,
+        operation_id: Uuid,
+        completed_at: i64,
+        local_history_only: bool,
+    ) -> Result<DeletionStatus, ChatError> {
         validate_non_nil(operation_id)?;
         if completed_at < 0 {
             return Err(ChatError::InvalidInput);
@@ -5622,9 +5662,9 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let row: Option<(String, String, String, String, i64)> = transaction
+        let row: Option<(String, String, String, String, i64, Option<String>)> = transaction
             .query_row(
-                "SELECT keyed_session_hash, desktop_state, host_state, runtime_state, requested_at
+                "SELECT keyed_session_hash, desktop_state, host_state, runtime_state, requested_at, last_error_code
                  FROM chat_deletion_jobs WHERE operation_id=?1 AND outcome_code='pending'",
                 [operation_id.to_string()],
                 |row| {
@@ -5634,15 +5674,20 @@ impl ChatRepository {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
-        let (keyed_hash, desktop, host, runtime, requested_at) = row.ok_or(ChatError::NotFound)?;
-        if [desktop.as_str(), host.as_str(), runtime.as_str()]
-            .iter()
-            .any(|state| *state != "complete")
+        let (keyed_hash, desktop, host, runtime, requested_at, reason) =
+            row.ok_or(ChatError::NotFound)?;
+        if desktop != "complete"
+            || if local_history_only {
+                reason.as_deref() != Some("host_session_not_found")
+            } else {
+                host != "complete" || runtime != "complete"
+            }
         {
             return Err(ChatError::CleanupIncomplete);
         }
@@ -5651,14 +5696,25 @@ impl ChatRepository {
                 "INSERT INTO chat_deletion_receipts(
                    operation_id, keyed_session_hash, desktop_state, host_state, runtime_state,
                    outcome, outcome_code, requested_at, completed_at, expires_at, schema_version
-                 ) VALUES (?1, ?2, 'complete', 'complete', 'complete', 'complete',
-                           'cleanup_complete', ?3, ?4, ?5, 1)",
+                 ) VALUES (?1, ?2, 'complete', ?6, ?7, ?8, ?9, ?3, ?4, ?5, 1)",
                 params![
                     operation_id.to_string(),
                     keyed_hash,
                     requested_at,
                     completed_at,
-                    expires_at
+                    expires_at,
+                    host,
+                    runtime,
+                    if local_history_only {
+                        "incomplete"
+                    } else {
+                        "complete"
+                    },
+                    if local_history_only {
+                        "local_history_deleted"
+                    } else {
+                        "cleanup_complete"
+                    },
                 ],
             )
             .map_err(map_constraint_or_database)?;
@@ -8075,7 +8131,7 @@ fn load_session_summary_from_connection(
     session_id: Uuid,
 ) -> Result<SessionSummary, ChatError> {
     type SummaryRow = (
-        String,
+        Option<String>,
         String,
         String,
         Option<i64>,
@@ -8085,13 +8141,16 @@ fn load_session_summary_from_connection(
     );
     let row: SummaryRow = connection
         .query_row(
-            "SELECT s.project_id, s.title, s.title_source, s.pinned_at,
+            &format!(
+                "SELECT {}, s.title, s.title_source, s.pinned_at,
                     s.last_activity_at,
                     (SELECT t.status FROM chat_turns t WHERE t.session_id=s.id
                      ORDER BY t.rowid DESC LIMIT 1),
                     p.removed_at IS NULL
              FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id
              WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3",
+                super::projectless::project_projection(connection)?
+            ),
             params![session_id.to_string(), scope.owner_user_id, scope.tenant_id],
             |row| {
                 Ok((
@@ -8110,7 +8169,7 @@ fn load_session_summary_from_connection(
         .ok_or(ChatError::NotFound)?;
     Ok(SessionSummary {
         session_id,
-        project_id: parse_uuid_value(&row.0)?,
+        project_id: row.0.as_deref().map(parse_uuid_value).transpose()?,
         title: row.1,
         title_source: parse_title_source(&row.2)?,
         pinned_at: row.3,
@@ -8680,6 +8739,151 @@ mod tests {
                 .id,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn cancelled_queue_cleanup_remains_compatible_with_base_schema() {
+        let root = std::env::temp_dir().join(format!("cancelled-cleanup-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 45, owner.clone());
+        let version: i64 = repo
+            .connection
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        let project = register_synthetic_project(&mut repo, &root);
+        let chat = repo
+            .create_session_and_enqueue(project, "尚未发送的普通消息", Uuid::now_v7())
+            .unwrap();
+        let deletion = Uuid::now_v7();
+        let n = unix_seconds().unwrap();
+        repo.begin_session_deletion(chat.session_id, deletion, n)
+            .unwrap();
+        drop(repo);
+        let mut repo = open_repository_for_scope(&root, 45, owner.clone());
+        assert_eq!(
+            repo.claim_next_deletion(n + 1, 30)
+                .unwrap()
+                .unwrap()
+                .operation_id,
+            deletion
+        );
+        repo.complete_local_deletion(deletion).unwrap();
+        repo.finalize_deletion_receipt(deletion, n + 1).unwrap();
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 45, owner);
+        assert_eq!(
+            repo.deletion_status(deletion)
+                .unwrap()
+                .unwrap()
+                .completed_at,
+            Some(n + 1)
+        );
+        assert_eq!(
+            repo.connection
+                .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            version
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_recovery_attempted_cancel_requires_confirmed_host_cleanup() {
+        let root = std::env::temp_dir().join(format!("deletion-recovery-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repo = open_repository(&root, 46);
+        let project = register_synthetic_project(&mut repo, &root);
+        let chat = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let turn = bind_and_claim_first_turn(&mut repo, &chat, now);
+        repo.fail_outbox(turn.operation_id).unwrap();
+        let deletion = Uuid::now_v7();
+        repo.begin_session_deletion(chat.session_id, deletion, now + 1)
+            .unwrap();
+        let claimed = repo.claim_next_deletion(now + 2, 30).unwrap().unwrap();
+        assert_eq!(claimed.operation_id, deletion);
+        assert_eq!(
+            repo.complete_local_deletion(deletion),
+            Err(ChatError::CleanupIncomplete)
+        );
+        assert_eq!(
+            repo.complete_missing_host_deletion(
+                deletion,
+                claimed.agent_session_id.unwrap(),
+                now + 2
+            ),
+            Err(ChatError::ConversationConflict)
+        );
+        assert!(repo.agent_session_id_for_session(chat.session_id).is_ok());
+        repo.record_cleanup_surfaces(
+            deletion,
+            CleanupSurfaceState::Complete,
+            CleanupSurfaceState::Complete,
+            "cleanup_complete".into(),
+            now + 2,
+        )
+        .unwrap();
+        repo.complete_local_deletion(deletion).unwrap();
+        assert_eq!(
+            repo.finalize_deletion_receipt(deletion, now + 2)
+                .unwrap()
+                .outcome_code,
+            "cleanup_complete"
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_recovery_missing_host_keeps_truthful_receipt_across_reopen() {
+        let root = std::env::temp_dir().join(format!("deletion-orphan-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 47, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let chat = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let turn = bind_and_claim_first_turn(&mut repo, &chat, now);
+        repo.fail_outbox(turn.operation_id).unwrap();
+        // Normal persisted terminal history, independent of a live Runtime.
+        repo.connection.execute("UPDATE chat_turns SET status='completed',submission_status='submitted' WHERE id=?1",
+            [chat.turn_id.to_string()]).unwrap();
+        let deletion = Uuid::now_v7();
+        repo.begin_session_deletion(chat.session_id, deletion, now + 1)
+            .unwrap();
+        let claimed = repo.claim_next_deletion(now + 2, 30).unwrap().unwrap();
+        assert_eq!(
+            repo.complete_missing_host_deletion(deletion, Uuid::now_v7(), now + 2),
+            Err(ChatError::ConversationConflict)
+        );
+        let receipt = repo
+            .complete_missing_host_deletion(deletion, claimed.agent_session_id.unwrap(), now + 2)
+            .unwrap();
+        assert_eq!(receipt.desktop_state, CleanupSurfaceState::Complete);
+        assert_eq!(receipt.host_state, CleanupSurfaceState::Incomplete);
+        assert_eq!(receipt.runtime_state, CleanupSurfaceState::Incomplete);
+        assert_eq!(receipt.outcome_code, "local_history_deleted");
+        assert_eq!(receipt.completed_at, Some(now + 2));
+        assert!(repo.agent_session_id_for_session(chat.session_id).is_err());
+        assert!(repo.claim_next_deletion(now + 3, 30).unwrap().is_none());
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 47, owner);
+        assert_eq!(repo.deletion_status(deletion).unwrap(), Some(receipt));
+        assert_eq!(
+            repo.connection
+                .query_row("SELECT count(*) FROM chat_deletion_jobs", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn bind_and_accept_first_turn(
@@ -10251,7 +10455,7 @@ mod tests {
         };
         let session = SessionSummary {
             session_id: Uuid::now_v7(),
-            project_id: Uuid::now_v7(),
+            project_id: Some(Uuid::now_v7()),
             title: canary.to_owned(),
             title_source: SessionTitleSource::User,
             pinned_at: None,

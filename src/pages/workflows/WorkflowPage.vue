@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import type { WorkflowSchemas } from "../../api/workflow-native-client";
 import WorkflowCreateDialog from "../../components/workflows/WorkflowCreateDialog.vue";
+import WorkflowCreateGuide from "../../components/workflows/WorkflowCreateGuide.vue";
+import { useWorkflowCreateGuide } from "./use-workflow-create-guide";
 import { useWorkflowWorkspace } from "./use-workflow-workspace";
 import { useWorkflowDeletion } from "./use-workflow-deletion";
 import WorkflowDeleteDialog from "../../components/workflows/WorkflowDeleteDialog.vue";
@@ -45,9 +47,11 @@ const { loading, error, nextCursor, creating, createUncertain, pendingCreate, cr
 const router = useRouter();
 const route = useRoute();
 const showCreate = ref(false);
+const { show: showCreateGuide, enter: enterCreateGuide, dismiss: dismissCreateGuide } = useWorkflowCreateGuide();
 const createTrigger = ref<HTMLButtonElement | null>(null);
 watch(() => route.query.create, value => { if (value === "1") openCreate(); });
 function openCreate() {
+  dismissCreateGuide();
   // macOS mouse activation does not focus buttons; give the modal a real return target.
   createTrigger.value?.focus();
   state.error.value = null;
@@ -74,9 +78,11 @@ onBeforeRouteLeave(() => {
   return true;
 });
 const cards = computed(() => workflowCards(workflowLocalUiEnabled ? state.workflows.value.filter(row => !removedIds.value.has(row.workflow_id)) : [], MY_WORKFLOWS));
-onMounted(() => {
+onMounted(async () => {
   if (workflowLocalUiEnabled) void state.refresh();
-  if (route.query.create === "1") openCreate();
+  if (route.query.create === "1") { openCreate(); return; }
+  await nextTick();
+  if (workflowLocalUiEnabled && !showCreate.value) enterCreateGuide();
 });
 const sortOptions = [
   { value: "modified", label: "最近修改" },
@@ -89,7 +95,7 @@ const sortOptions = [
   <YjPage>
     <div class="workflow-page">
       <YjPageHeader title="工作流">
-        <template #description><template v-if="workflowLocalUiEnabled">集中管理和编排本地文本流程，点击<span class="workflow-page__create-highlight">创建工作流</span>开始。电商推荐方案仍为示意。</template><template v-else>集中查看常用自动化流程与推荐方案，工作流方案正在实现中，点击<span class="workflow-page__create-highlight">创建工作流</span>按钮。</template></template>
+        <template #description><template v-if="workflowLocalUiEnabled">集中管理和编排本地文本流程，点击<mark class="workflow-page__create-highlight">创建工作流</mark>开始。</template><template v-else>集中查看常用自动化流程与推荐方案，点击<mark class="workflow-page__create-highlight">创建工作流</mark>按钮开始。</template>下方电商工作流方案为展示作用，并无实际实现。</template>
       </YjPageHeader>
 
       <section class="workflow-page__categories" aria-label="工作流能力分类">
@@ -107,8 +113,8 @@ const sortOptions = [
 
       <YjSection title="我的工作流" icon="workflow">
         <template #actions>
-          <button ref="createTrigger" type="button" class="workflow-page__create-card workflow-showcase-control yj-control" @click="openCreate">
-            <YjIcon name="plus" size="sm" tone="muted" />
+          <button ref="createTrigger" type="button" class="workflow-page__create-card workflow-showcase-control yj-control" :aria-describedby="showCreateGuide ? 'workflow-guide-description' : undefined" @click="openCreate">
+            <YjIcon name="plus" size="sm" />
             创建工作流
           </button>
         </template>
@@ -158,7 +164,7 @@ const sortOptions = [
             查看全部 <YjIcon name="chevronRight" size="sm" />
           </button>
         </template>
-        <ul class="workflow-page__recommended-grid" aria-label="推荐工作流列表">
+        <ul class="workflow-page__recommended-grid workflow-card-layout" aria-label="推荐工作流列表">
           <li v-for="workflow in RECOMMENDED_WORKFLOWS" :key="workflow.id"><RecommendedWorkflowCard :workflow="workflow" /></li>
         </ul>
       </YjSection>
@@ -166,6 +172,7 @@ const sortOptions = [
     <WorkflowDeleteDialog :target="deletion.target.value" :busy="deletion.busy.value" :uncertain="deletion.uncertain.value" :error="deletion.error.value" @cancel="cancelDelete" @confirm="deletion.confirm" @closed="restoreDeleteFocus" />
     <WorkflowCreateDialog :show="showCreate" :busy="creating" :uncertain="createUncertain" :queryable="!!pendingCreate" :created="!!createdWorkflowId"
       :available="workflowLocalUiEnabled" :error="error?.message" @closed="createTrigger?.focus()" @cancel="cancelCreate" @confirm="confirmCreate" @query="queryCreate" @enter="enterCreated" />
+    <WorkflowCreateGuide :show="showCreateGuide" :target="createTrigger" @dismiss="dismissCreateGuide" />
   </YjPage>
 </template>
 
@@ -198,7 +205,8 @@ const sortOptions = [
 }
 
 .workflow-page__create-highlight {
-  color: var(--yj-color-workflow-create-ink);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
   font-weight: var(--yj-font-weight-semibold);
   white-space: nowrap;
 }
@@ -243,7 +251,7 @@ const sortOptions = [
 
 .workflow-page__recommended-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--workflow-visible-cards), minmax(0, 1fr));
   gap: var(--yj-space-4);
 }
 
@@ -255,11 +263,15 @@ const sortOptions = [
   height: 100%;
 }
 
-.workflow-page__create-card {
+.workflow-page .workflow-page__create-card {
   text-decoration: none;
-  border-style: dashed;
   border-color: var(--yj-color-border-control);
+  background: var(--yj-color-brand-primary);
+  color: var(--yj-color-on-brand);
+  font-weight: var(--yj-font-weight-semibold);
 }
+.workflow-page .workflow-page__create-card:hover { background: var(--yj-color-brand-hover); }
+.workflow-page .workflow-page__create-card:active { background: var(--yj-color-brand-active); }
 
 .workflow-page__view-all {
   border-color: transparent;
@@ -267,16 +279,5 @@ const sortOptions = [
   background: transparent;
 }
 
-@container workflow-page (min-width: 1120px) {
-    .workflow-page__recommended-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-@container workflow-page (max-width: 600px) {
-    .workflow-page__recommended-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 .workflow-page__notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); color: var(--yj-color-text-secondary); }
 </style>

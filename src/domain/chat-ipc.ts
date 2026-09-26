@@ -176,7 +176,7 @@ export interface ChatProject {
 
 export interface ChatSession {
   readonly sessionId: string;
-  readonly projectId: string;
+  readonly projectId: string | null;
   readonly title: string;
   readonly titleSource: "fallback" | "model" | "user";
   readonly pinnedAt: number | null;
@@ -1401,7 +1401,7 @@ function parseSession(value: unknown): ChatSession {
   if (typeof session.projectAvailable !== "boolean") throw new ChatContractError();
   return Object.freeze({
     sessionId: uuid(session.sessionId),
-    projectId: uuid(session.projectId),
+    projectId: nullable(session.projectId, uuid),
     title: stringValue(session.title, 1024),
     titleSource: oneOf(session.titleSource, ["fallback", "model", "user"] as const),
     pinnedAt: nullable(session.pinnedAt, (entry) => integer(entry)),

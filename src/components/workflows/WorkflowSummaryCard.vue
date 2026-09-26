@@ -52,7 +52,7 @@ function select(key: string) {
   min-height: calc(var(--yj-space-16) * 3 + var(--yj-space-8));
   flex-direction: column;
   gap: var(--yj-space-4);
-  padding: var(--yj-space-5);
+  padding: var(--workflow-card-padding, var(--yj-space-5));
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
@@ -68,7 +68,7 @@ function select(key: string) {
 .workflow-summary-card__header {
   display: flex;
   align-items: center;
-  gap: var(--yj-space-3);
+  gap: var(--yj-space-2);
 }
 
 .workflow-summary-card__icon {

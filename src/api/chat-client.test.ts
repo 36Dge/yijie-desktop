@@ -23,6 +23,16 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it.each([1, 2])("sends an explicit null project using create-session v%s", async (version) => {
+    const invoke = vi.fn(async () => ({schemaVersion: version, requestId: REQUEST_ID, data: {sessionId: SESSION_ID, turnId: TURN_ID, operationId: REQUEST_ID}}));
+    const client = createChatClient(transport(invoke));
+    if (version === 1) await client.createSession(CONTEXT_ID, null, "无项目任务", REQUEST_ID);
+    else await client.createSessionV2(CONTEXT_ID, null, [{type: "text", text: "无项目任务"}], REQUEST_ID);
+    expect(invoke).toHaveBeenCalledWith(`chat_create_session_v${version}`, {
+      request: expect.objectContaining({ payload: expect.objectContaining({projectId: null, operationId: REQUEST_ID}) }),
+    });
+  });
+
   it("loads versioned native history and validates its generated response", async () => {
     vi.stubGlobal("crypto", {randomUUID: () => REQUEST_ID});
     const data = {views: [], submissions: [], remainingTurnIds: [], historyAvailability: "partial"};

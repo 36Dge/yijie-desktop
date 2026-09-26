@@ -1000,6 +1000,132 @@ fn feat155_3c2_schema21_reopens_old_manual_receipts_and_chat_without_activation(
 mod timing_tests;
 
 #[cfg(target_os = "macos")]
+fn cleanup_chat(r: &mut ChatRepository, root: &Path) -> crate::chat::database::PendingConversation {
+    let dir = root.join("ordinary");
+    std::fs::create_dir(&dir).unwrap();
+    let selection = crate::chat::native_project::create_selection(&dir)
+        .unwrap()
+        .unwrap();
+    let project = r
+        .register_project(&selection.canonical_path, &selection.bookmark)
+        .unwrap();
+    r.create_session_and_enqueue(
+        Uuid::parse_str(&project.id).unwrap(),
+        "普通清理回归",
+        Uuid::now_v7(),
+    )
+    .unwrap()
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cancelled_queue_cleanup_recovers_persisted_unstarted_chats_and_releases_lane() {
+    for attempts in [0, 16] {
+        let root = Temp::new();
+        let n = now().unwrap();
+        let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+        let chat = cleanup_chat(&mut r, &root.0);
+        if attempts > 0 {
+            // Declared exhausted session-initialization history. No start_turn
+            // has been queued, and no Host or model is called by this test.
+            r.connection
+                .execute(
+                    "UPDATE chat_outbox SET state='failed',attempt_count=?1 WHERE operation_id=?2",
+                    params![attempts, chat.create_operation_id.to_string()],
+                )
+                .unwrap();
+        }
+        let deletion = Uuid::now_v7();
+        r.begin_session_deletion(chat.session_id, deletion, n)
+            .unwrap();
+        assert!(guard::foreground_busy(&r.connection).unwrap());
+        drop(r);
+        let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+        let claimed = r.claim_next_deletion(n + 1, 30).unwrap().unwrap();
+        assert_eq!(claimed.operation_id, deletion);
+        assert!(r.claim_next_deletion(n + 1, 30).unwrap().is_none());
+        r.complete_local_deletion(deletion).unwrap();
+        let receipt = r.finalize_deletion_receipt(deletion, n + 1).unwrap();
+        assert_eq!(receipt.completed_at, Some(n + 1));
+        assert_eq!(count(&r, "chat_deletion_jobs"), 0);
+        assert!(!guard::foreground_busy(&r.connection).unwrap());
+        let (plan, _, grant) = confirmed(&mut r, TargetMode::DedicatedChat, None, n + 2, 1);
+        assert!(r
+            .prepare_manual_local(
+                &ScheduleAuthority::local(n + 2).unwrap(),
+                &grant.grant_id,
+                plan.revision,
+                &Uuid::now_v7().to_string(),
+                n + 2
+            )
+            .is_ok());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cancelled_queue_cleanup_distinguishes_unstarted_from_attempted_turns() {
+    for attempted in [false, true] {
+        let root = Temp::new();
+        let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+        let chat = cleanup_chat(&mut r, &root.0);
+        let n = now().unwrap();
+        r.claim_next_conversation_outbox(n + 1, 30)
+            .unwrap()
+            .unwrap();
+        r.bind_public_task(chat.create_operation_id, chat.task_id, n + 1)
+            .unwrap();
+        r.bind_host_session_and_enqueue_turn(
+            chat.create_operation_id,
+            chat.task_id,
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        )
+        .unwrap();
+        if attempted {
+            r.claim_next_conversation_outbox(n + 2, 30)
+                .unwrap()
+                .unwrap();
+        }
+        let deletion = Uuid::now_v7();
+        r.begin_session_deletion(chat.session_id, deletion, n + 3)
+            .unwrap();
+        let claimed = r.claim_next_deletion(n + 4, 30).unwrap();
+        assert!(claimed.is_some());
+        // Both unstarted and attempted submissions require the existing Host
+        // cleanup receipt; claiming work never proves Runtime cessation.
+        assert!(r.complete_local_deletion(deletion).is_err());
+        assert!(guard::foreground_busy(&r.connection).unwrap());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cancelled_queue_cleanup_keeps_live_uncertain_and_bound_turns_blocked() {
+    for (status, submission, runtime_bound) in [
+        ("queued", "uncertain", false),
+        ("queued", "submitted", false),
+        ("queued", "cancelled", true),
+        ("streaming", "cancelled", false),
+        ("stopping", "cancelled", false),
+    ] {
+        let root = Temp::new();
+        let n = now().unwrap();
+        let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+        let chat = cleanup_chat(&mut r, &root.0);
+        r.begin_session_deletion(chat.session_id, Uuid::now_v7(), n)
+            .unwrap();
+        // Ordinary declared persisted states; no process failures or injection.
+        r.connection.execute("UPDATE chat_turns SET status=?1,submission_status=?2,runtime_turn_id=?3 WHERE id=?4", params![status, submission, runtime_bound.then(||Uuid::now_v7().to_string()), chat.turn_id.to_string()]).unwrap();
+        assert!(
+            r.claim_next_deletion(n + 1, 30).unwrap().is_none(),
+            "{status}/{submission}/{runtime_bound}"
+        );
+        assert!(guard::foreground_busy(&r.connection).unwrap());
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[test]
 fn feat155_daily_failed_legacy_queue_and_exhausted_cleanup_do_not_hold_global_lane() {
     let root = Temp::new();

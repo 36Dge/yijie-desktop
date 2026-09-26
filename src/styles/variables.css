@@ -134,23 +134,29 @@
   --yj-layout-window-min-height: 760px;
   --yj-layout-sidebar-expanded: 240px;
   --yj-layout-sidebar-collapsed: 72px;
+  --yj-layout-titlebar-height: var(--yj-space-8);
+  --yj-layout-titlebar-controls-inset: calc(var(--yj-space-16) + var(--yj-space-8));
   --yj-layout-form-max: 960px;
   --yj-layout-workflow-create-width: 560px;
   --yj-layout-schedule-form-width: 520px;
   --yj-layout-schedule-record-width: 520px;
+  --yj-layout-schedule-record-skeleton-height: 176px;
   --yj-layout-schedule-search-width: 240px;
   --yj-layout-schedule-state-width: 112px;
   --yj-layout-schedule-sort-width: 112px;
   --yj-layout-schedule-plan-filter-width: var(--yj-layout-schedule-state-width);
   --yj-layout-schedule-empty-min-height: 360px;
   --yj-z-workflow-card-action: 1;
+  --yj-z-onboarding: 1900;
+  --yj-layout-onboarding-width: 320px;
+  --yj-color-onboarding-scrim: rgba(0, 0, 0, 0.38);
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
   --yj-layout-chat-entry-max: 760px;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-sidebar-indent: var(--yj-space-0);
-  --yj-layout-permission-menu-width: 380px;
+  --yj-layout-permission-menu-width: 340px;
   --yj-layout-permission-confirm-width: 420px;
 
   /* Home brand opening on each page entry. */

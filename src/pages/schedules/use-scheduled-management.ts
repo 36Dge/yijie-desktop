@@ -13,6 +13,7 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
   const cards = shallowRef<PlanCard[]>([]); const records = shallowRef<RecordRow[]>([]); const capabilities = shallowRef<OperationCapabilities | null>(null);
   const cursor = ref<string>(); const loading = ref(false); const writing = ref(false); const error = ref<IpcErrorCode | null>(null); const notice = ref("");
   const success = ref("");
+  const refreshVersion = ref(0);
   const pending = shallowRef<Pending | null>(null); const receipt = shallowRef<PlanDetail | null>(null);
   let epoch = 0; let disposed = false; let timer: ReturnType<typeof setTimeout> | undefined;
   const context = computed(() => chat.context?.contextId ?? null);
@@ -46,6 +47,7 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
         if (current !== epoch) return;
         records.value = more ? [...records.value, ...page.items] : page.items; cursor.value = page.next_cursor;
       }
+      refreshVersion.value++;
     } catch (e) { if (current === epoch) error.value = errorCode(e); }
     finally { if (current === epoch) loading.value = false; }
   }
@@ -109,5 +111,5 @@ export function useScheduledManagement(client = createScheduledTaskNativeClient(
     timer = setTimeout(() => { void refresh(); }, 220);
   });
   onScopeDispose(() => { disposed = true; epoch++; clearTimeout(timer); pending.value = null; });
-  return { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, success, pending, receipt, context, canManage, call, refresh, save, mutate, queryReceipt, retryMutation: runPending };
+  return { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, success, refreshVersion, pending, receipt, context, canManage, call, refresh, save, mutate, queryReceipt, retryMutation: runPending };
 }

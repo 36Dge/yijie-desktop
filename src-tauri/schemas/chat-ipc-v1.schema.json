@@ -232,7 +232,7 @@
       "additionalProperties": false,
       "required": ["projectId", "input", "operationId"],
       "properties": {
-        "projectId": { "$ref": "#/$defs/uuid" },
+        "projectId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "input": { "$ref": "#/$defs/textInput" },
         "operationId": { "$ref": "#/$defs/uuid" }
       }
@@ -481,7 +481,7 @@
       ],
       "properties": {
         "sessionId": { "$ref": "#/$defs/uuid" },
-        "projectId": { "$ref": "#/$defs/uuid" },
+        "projectId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "title": { "$ref": "#/$defs/title" },
         "titleSource": { "enum": ["fallback", "model", "user"] },
         "pinnedAt": { "$ref": "#/$defs/nullableEpoch" },

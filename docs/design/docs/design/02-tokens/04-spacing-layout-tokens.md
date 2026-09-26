@@ -79,3 +79,5 @@
 `docs/design/docs/design/01-foundations/06-window-density-baseline.md`、`exports/src/styles/variables.css`
 
 - 定时任务执行记录详情：520px（`--yj-layout-schedule-record-width`），五项标签/值布局，底部操作右对齐；窗口不足时保留 16px 两侧安全间距，长内容在弹窗内滚动。
+
+- 定时任务记录卡片：双栏、16px 间距、20px 内边距，容器不足 720px 时单栏。标题预留两行 24px 行高，普通卡片及加载骨架约 176px 高（`--yj-layout-schedule-record-skeleton-height`），特殊说明允许自然增高；底部允许换行，不能压缩图标操作。

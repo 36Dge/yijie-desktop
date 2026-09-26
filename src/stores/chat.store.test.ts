@@ -776,6 +776,28 @@ describe("chat view-model store", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([false, true])("creates a projectless task without native project revalidation (v2=%s)", async (multimodal) => {
+    const noProject = { ...session(SESSION_A), projectId: null };
+    const { client } = fakeClient({
+      listSessions: async () => ({ sessions: [noProject], nextCursor: null }),
+      resyncSession: async () => ({ ...projection(SESSION_A), session: noProject }),
+      resyncSessionV2: async () => ({ ...projection(SESSION_A), session: noProject }),
+    });
+    const revalidate = vi.spyOn(client, "revalidateProject");
+    const create = vi.spyOn(client, multimodal ? "createSessionV2" : "createSession");
+    const store = createStore(client);
+    await store.bind(TENANT);
+    if (multimodal) store.draftAttachments = [attachment()];
+    const result = await store.createSessionWithResult(null, "无项目任务");
+    expect(result.status).toBe("local_durable_accepted");
+    expect(revalidate).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]![1]).toBeNull();
+    for (let index = 0; index < 32; index += 1) await Promise.resolve();
+    expect(store.sessions.find(value => value.sessionId === SESSION_A)?.projectId).toBeNull();
+    await store.dispose();
+  });
+
   it("FEAT-155 binds management without readiness, listeners, projects or Host preparation", async () => {
     const { client } = fakeClient();
     const bound = await client.bindContext(TENANT);
@@ -3182,6 +3204,26 @@ describe("chat view-model store", () => {
       nextSessionId: SESSION_B,
       path: `/chat/${SESSION_B}`,
     });
+  });
+
+  it("removes orphaned local history while preserving an incomplete remote cleanup receipt", async () => {
+    let listCount = 0;
+    const receipt = {
+      operationId: "019c1a00-0000-7000-8000-00000000000c",
+      desktopState: "complete" as const, hostState: "incomplete" as const, runtimeState: "incomplete" as const,
+      outcomeCode: "local_history_deleted", lastErrorCode: null, requestedAt: 1, completedAt: 2, expiresAt: 3,
+    };
+    const { client } = fakeClient({
+      listSessions: async () => ({ sessions: ++listCount === 1 ? [session(SESSION_A)] : [], nextCursor: null }),
+      deleteSession: async () => receipt,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "navigate", path: "/chat" });
+    expect(store.sessions).toEqual([]);
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.cleanupStatus).toEqual(receipt);
   });
 
   it("polls a pending deletion to completion when the unavailable session has no live subscription", async () => {

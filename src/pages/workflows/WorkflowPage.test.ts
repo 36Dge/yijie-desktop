@@ -29,7 +29,7 @@ describe("WorkflowPage", () => {
       "我的工作流",
       "推荐工作流",
     ]);
-    expect(wrapper.get(".yj-page-header__description").text()).toBe("集中查看常用自动化流程与推荐方案，工作流方案正在实现中，点击创建工作流按钮。");
+    expect(wrapper.get(".yj-page-header__description").text()).toBe("集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。下方电商工作流方案为展示作用，并无实际实现。");
     expect(wrapper.get(".workflow-page__create-highlight").text()).toBe("创建工作流");
     expect(wrapper.get('[aria-label="工作流能力分类"] li').text()).toContain("全部");
     expect(wrapper.findAll('[aria-label="工作流能力分类"] li').map((item) => item.text()))

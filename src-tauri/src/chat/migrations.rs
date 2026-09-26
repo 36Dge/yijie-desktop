@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 26] = [
+const CATALOG: [CatalogEntry; 27] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -162,6 +162,11 @@ const CATALOG: [CatalogEntry; 26] = [
         name: "0026_scheduled_execution_timing",
         sql: include_str!("../../migrations/chat/0026_scheduled_execution_timing.sql"),
     },
+    CatalogEntry {
+        version: 27,
+        name: "0027_projectless_chat",
+        sql: include_str!("../../migrations/chat/0027_projectless_chat.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -178,6 +183,7 @@ pub const SCHEDULE_MANAGEMENT_SCHEMA_VERSION: i64 = 23;
 pub const SCHEDULE_AUTOMATIC_SCHEMA_VERSION: i64 = 24;
 pub const SCHEDULE_SINGLE_RUN_SCHEMA_VERSION: i64 = 25;
 pub const SCHEDULE_TIMING_SCHEMA_VERSION: i64 = 26;
+pub const PROJECTLESS_SCHEMA_VERSION: i64 = 27;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -211,6 +217,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         SCHEDULE_AUTOMATIC_SCHEMA_VERSION,
         SCHEDULE_SINGLE_RUN_SCHEMA_VERSION,
         SCHEDULE_TIMING_SCHEMA_VERSION,
+        PROJECTLESS_SCHEMA_VERSION,
     ]
     .contains(&target)
     {
@@ -223,10 +230,11 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
     validate_reader(connection)?;
     if current < target {
         // SQLite's documented parent-table replacement procedure. Only the
-        // v18 crossing needs this; per-migration foreign_key_check still runs
+        // v18/v27 crossings need this; per-migration foreign_key_check still runs
         // inside the transaction, before commit. Restore enforcement on errors.
-        let replace_parent = current < SCHEDULE_PREPARATION_SCHEMA_VERSION
-            && target >= SCHEDULE_PREPARATION_SCHEMA_VERSION;
+        let replace_parent = (current < SCHEDULE_PREPARATION_SCHEMA_VERSION
+            && target >= SCHEDULE_PREPARATION_SCHEMA_VERSION)
+            || (current < PROJECTLESS_SCHEMA_VERSION && target >= PROJECTLESS_SCHEMA_VERSION);
         if !connection.is_autocommit() {
             return Err(ChatError::MigrationFailed);
         }

@@ -20,6 +20,7 @@ pub(crate) mod lifecycle;
 mod migrations;
 mod native_project;
 pub(crate) mod platform_lifecycle;
+mod projectless;
 mod public_tasks;
 mod runtime_permissions;
 pub mod schedules;

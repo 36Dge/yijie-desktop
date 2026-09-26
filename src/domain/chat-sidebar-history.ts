@@ -10,10 +10,15 @@ export interface ChatHistoryProjectGroup {
 export function buildChatSidebarHistory(
   projects: readonly ChatProject[],
   sessions: readonly ChatSession[],
-): { groups: readonly ChatHistoryProjectGroup[]; removedProjectSessions: readonly ChatSession[] } {
+): { groups: readonly ChatHistoryProjectGroup[]; removedProjectSessions: readonly ChatSession[]; projectlessSessions: readonly ChatSession[] } {
   const grouped = new Map<string, ChatSession[]>();
   const removedProjectSessions: ChatSession[] = [];
+  const projectlessSessions: ChatSession[] = [];
   for (const session of sessions) {
+    if (session.projectId === null) {
+      projectlessSessions.push(session);
+      continue;
+    }
     if (!session.projectAvailable) {
       removedProjectSessions.push(session);
       continue;
@@ -37,5 +42,5 @@ export function buildChatSidebarHistory(
     }
   }
   // Preserve the authoritative session order within the final, flat history section.
-  return { groups, removedProjectSessions };
+  return { groups, removedProjectSessions, projectlessSessions };
 }

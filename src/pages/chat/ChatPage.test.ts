@@ -874,12 +874,52 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
 
     expect(createSession).toHaveBeenCalledTimes(1);
-    expect(createSession).toHaveBeenCalledWith(PROJECT_ID, "检查标题");
+    expect(createSession).toHaveBeenCalledWith(null, "检查标题");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
     expect(document.activeElement).toBe(wrapper.get("textarea").element);
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="添加图片或文件"]').exists()).toBe(true);
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音输入/);
+  });
+
+  it("creates a projectless task from the real composer when no local project is selected", async () => {
+    const { wrapper, store, router } = await mountPage("/chat");
+    store.projects = [];
+    const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await flushPromises();
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    await wrapper.get("textarea").setValue("无项目任务");
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(createSession).toHaveBeenCalledWith(null, "无项目任务");
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+  });
+
+  it("does not reuse a removed history project's hidden ID when returning to a new task", async () => {
+    const { wrapper, store, router } = await mountPage("/chat");
+    store.sessions = [{ ...SESSION, projectId: SECOND_PROJECT.projectId, projectAvailable: false }];
+    store.selectedSessionId = SESSION_ID;
+    store.selectedSessionPurpose = "ordinary";
+    store.selectedAccessMode = "live";
+    store.draftTarget = chatSessionDraftTarget(SESSION_ID);
+    await router.push(`/chat/${SESSION_ID}`);
+    await flushPromises();
+    await router.push("/chat");
+    store.selectedSessionId = null;
+    store.selectedSessionPurpose = null;
+    store.selectedAccessMode = null;
+    store.draftTarget = CHAT_NEW_DRAFT_TARGET;
+    store.draftTargetReady = true;
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await flushPromises();
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    await wrapper.get("textarea").setValue("今天周几？");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith(null, "今天周几？");
+    expect(wrapper.text()).not.toContain("任务不可用");
+    wrapper.unmount();
   });
 
   it("uses the same-route recovery action to clear a deleted task and re-enable the new composer", async () => {
@@ -921,7 +961,7 @@ describe("FEAT-126 ChatPage", () => {
     });
     const createSession = vi.spyOn(store, "createSessionWithResult")
       .mockResolvedValue(acceptedSubmission());
-    expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
     expect(wrapper.find("select").exists()).toBe(false);
     await wrapper.get(".chat-composer__project--button").trigger("click");
     await flushPromises();
@@ -933,6 +973,23 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新项目");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+  });
+
+  it("clears an unavailable chosen directory without silently selecting another saved project", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    vi.spyOn(store, "pickProject").mockResolvedValue(PROJECT);
+    await wrapper.get(".chat-composer__project--button").trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
+    store.projects = [{ ...PROJECT, available: false }, SECOND_PROJECT];
+    await flushPromises();
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await wrapper.get("textarea").setValue("无目录继续发送");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click");
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith(null, "无目录继续发送");
+    wrapper.unmount();
   });
 
   it("keeps input and displays stable recovery copy when create fails", async () => {
@@ -1504,6 +1561,24 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("正在永久删除任务");
     expect(wrapper.text()).not.toContain("任务已永久删除");
+  });
+
+  it("retries an already confirmed deletion after its automatic retry budget is exhausted", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    store.cleanupStatus = { operationId: "019c1a00-0000-7000-8000-000000000007",
+      desktopState: "incomplete", hostState: "incomplete", runtimeState: "incomplete",
+      outcomeCode: "retry_limit_exceeded", lastErrorCode: "cleanup_protocol_failure",
+      requestedAt: 1, completedAt: null, expiresAt: null };
+    const retry = vi.spyOn(store, "deleteSelected").mockResolvedValue(null);
+    const check = vi.spyOn(store, "refreshSelectedCleanup").mockResolvedValue(null);
+    await flushPromises();
+    const button = wrapper.findAll("button").find(button => button.text() === "重新尝试删除");
+    expect(button).toBeDefined();
+    await button!.trigger("click");
+    await flushPromises();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(check).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 });
 

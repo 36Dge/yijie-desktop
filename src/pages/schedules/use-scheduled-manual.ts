@@ -21,6 +21,12 @@ export function useScheduledManual(m: ReturnType<typeof useScheduledManagement>,
   const busy = ref(false); const error = ref<IpcErrorCode | null>(null); const notice = ref("");
   let epoch = 0; let disposed = false; let timer: ReturnType<typeof setTimeout> | undefined;
   const pending = computed(() => intent.value !== null);
+  // A resolved action's feedback is not a live execution status. An uncertain
+  // request must keep its receipt-recovery state even when the list changes.
+  function dismissFeedback() {
+    if (busy.value || pending.value) return;
+    error.value = null; notice.value = "";
+  }
   const canPrepare = computed(() => !!m.context.value && permissions.hasCapability("schedule.read") && permissions.hasCapability("task.create") && permissions.hasCapability("task.read") && permissions.hasCapability("workspace.use") &&
     (m.capabilities.value?.single_run.available === true || m.capabilities.value?.single_run.reason === "runtime_unqualified"));
   const code = (e: unknown): IpcErrorCode => e instanceof ScheduledTaskNativeError ? e.code : "operation_unknown";
@@ -114,7 +120,7 @@ export function useScheduledManual(m: ReturnType<typeof useScheduledManagement>,
     error.value = code(e);
     if (!["operation_unknown", "context_invalid", "storage_unavailable", "protocol_mismatch"].includes(error.value)) {
       intent.value = null; review.value = null;
-      notice.value = direct.value ? "本次执行未获受理，请按错误说明处理后重试。" : "本次提交未获受理，请按错误说明处理后重新审阅。";
+      notice.value = "";
     } else notice.value = "回执尚不明确。请只读查证原请求，页面不会自动续发。";
   }
   async function confirm() {
@@ -172,7 +178,8 @@ export function useScheduledManual(m: ReturnType<typeof useScheduledManagement>,
   function closeReview() { if (!busy.value && !pending.value) review.value = null; }
   watch(() => permissions.selectedTenantId, reset, { flush: "sync" });
   watch(() => permissions.isReady && (!permissions.hasCapability("schedule.read") || !permissions.hasCapability("task.create") || !permissions.hasCapability("task.read") || !permissions.hasCapability("workspace.use")), revoked => { if (revoked) reset(); }, { flush: "sync" });
-  watch(m.context, () => { review.value = null; clearTimeout(timer); });
+  watch(m.refreshVersion, dismissFeedback, { flush: "sync" });
+  watch(m.context, () => { review.value = null; clearTimeout(timer); dismissFeedback(); });
   onScopeDispose(() => { disposed = true; reset(); });
-  return { review, rerun, targetTitle, intent, pending, busy, error, notice, result, direct, startedRunId, canPrepare, open, runNow, openRerun, confirm, query, retry, refreshResult, closeReview };
+  return { review, rerun, targetTitle, intent, pending, busy, error, notice, result, direct, startedRunId, canPrepare, dismissFeedback, open, runNow, openRerun, confirm, query, retry, refreshResult, closeReview };
 }

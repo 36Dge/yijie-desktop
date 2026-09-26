@@ -50,8 +50,8 @@ function navigate(event: KeyboardEvent): void {
     </template>
     <div ref="menuElement" class="permission-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">
       <button v-for="option in options" :key="option.mode" type="button" role="menuitemradio" :aria-checked="state?.mode === option.mode" :class="{ 'is-full': option.mode === 'full' }" @click="choose(option.mode)">
-        <YjIcon :name="option.icon" size="md" :tone="option.mode === 'full' ? 'warning' : 'default'" />
-        <span class="permission-option-copy"><strong>{{ option.label }}</strong><span>{{ option.description }}</span></span>
+        <YjIcon :name="option.icon" size="sm" :tone="option.mode === 'full' ? 'warning' : 'default'" />
+        <span class="permission-option-copy"><span class="permission-option-label">{{ option.label }}</span><span class="permission-option-description">{{ option.description }}</span></span>
         <span class="permission-option-check" aria-hidden="true"><YjIcon v-if="state?.mode === option.mode" name="permissionCheck" size="xs" /></span>
       </button>
     </div>
@@ -103,7 +103,7 @@ function navigate(event: KeyboardEvent): void {
 }
 .permission-menu {
   width: min(var(--yj-layout-permission-menu-width), calc(100vw - var(--yj-space-10)));
-  padding: var(--yj-space-2);
+  padding: var(--yj-space-1);
   background: var(--yj-color-bg-elevated);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-lg);
@@ -114,7 +114,7 @@ function navigate(event: KeyboardEvent): void {
   align-items: center;
   gap: var(--yj-space-2);
   width: 100%;
-  padding: var(--yj-space-2);
+  padding: var(--yj-space-1) var(--yj-space-2);
   border: 0;
   border-radius: var(--yj-radius-md);
   text-align: left;
@@ -122,27 +122,28 @@ function navigate(event: KeyboardEvent): void {
   background: transparent;
   font: inherit;
   font-size: var(--yj-font-size-body);
-  line-height: var(--yj-line-height-body);
+  line-height: var(--yj-control-line-height);
   cursor: pointer;
 }
 .permission-menu button:hover,
 .permission-menu button[aria-checked="true"] { background: var(--yj-color-control-hover); }
 .permission-menu button:active { background: var(--yj-color-control-pressed); }
 .permission-option-copy { display: grid; flex: 1; min-width: 0; }
-.permission-option-copy strong { font-weight: var(--yj-font-weight-semibold); }
-.permission-option-copy > span {
-  color: var(--yj-color-text-secondary);
+.permission-option-label { font-weight: var(--yj-font-weight-regular); }
+.permission-option-description {
+  color: color-mix(in srgb, var(--yj-color-text-tertiary) 75%, var(--yj-color-text-secondary));
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
-.permission-menu .is-full strong { color: var(--yj-color-semantic-warning-ink); }
+.permission-menu button:active .permission-option-description { color: var(--yj-color-text-secondary); }
+.permission-menu .is-full .permission-option-label { color: var(--yj-color-semantic-warning-ink); }
 .permission-option-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: var(--yj-space-5);
-  height: var(--yj-space-5);
+  width: var(--yj-space-4);
+  height: var(--yj-space-4);
   border-radius: var(--yj-radius-full);
 }
 [aria-checked="true"] .permission-option-check { background: var(--yj-color-brand-primary); }

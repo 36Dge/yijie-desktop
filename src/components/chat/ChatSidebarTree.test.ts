@@ -211,6 +211,23 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).not.toContain("项目已移除");
   });
 
+  it("shows available projectless tasks at the top level ahead of removed-project history", async () => {
+    const { wrapper, store } = await mountTree();
+    const existing = store.sessions[0]!;
+    store.sessions = [
+      { ...existing, sessionId: "removed", projectAvailable: false, title: "Removed" },
+      { ...existing, projectId: null, title: "No Project" },
+    ];
+    await flushPromises();
+    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session .chat-tree__session-title").map(row => row.text())).toEqual(["No Project", "Removed"]);
+    expect(wrapper.text()).not.toContain("任务目录");
+    expect(wrapper.get('[aria-current="page"]').text()).toContain("No Project");
+    store.projects = [];
+    await flushPromises();
+    expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("暂无任务记录");
+  });
+
   it("moves every session out of a collapsed directory after confirming removal", async () => {
     const { wrapper, store } = await mountTree();
     store.sessions = [...store.sessions, { ...store.sessions[0]!, sessionId: "second", title: "Second Session" }];

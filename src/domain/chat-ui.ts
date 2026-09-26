@@ -243,8 +243,21 @@ export function reasoningStatusLabel(status: ChatReasoningStatus, reasonCode: st
   return "推理记录不可用";
 }
 
+export function localHistoryDeletionFinished(status: ChatCleanupStatus): boolean {
+  return status.outcomeCode === "local_history_deleted"
+    && status.desktopState === "complete" && status.completedAt !== null;
+}
+
 export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | null {
   if (status === null) return null;
+  if (localHistoryDeletionFinished(status)) {
+    return {
+      title: "本地任务记录已删除",
+      detail: "后台会话已不存在，无法确认其运行数据的清理结果。",
+      actionLabel: null,
+      tone: "warning",
+    };
+  }
   const states = [status.desktopState, status.hostState, status.runtimeState];
   if (states.every((state) => state === "complete")) {
     return {
@@ -257,8 +270,10 @@ export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | 
   if (states.some((state) => state === "incomplete")) {
     return {
       title: "任务删除尚未完成",
-      detail: "部分本地清理失败，应用会保留状态以便重试。",
-      actionLabel: "检查删除状态",
+      detail: status.outcomeCode === "retry_limit_exceeded"
+        ? "自动重试已暂停，可以重新尝试删除。"
+        : "部分本地清理失败，应用会保留状态以便重试。",
+      actionLabel: status.outcomeCode === "retry_limit_exceeded" ? "重新尝试删除" : "检查删除状态",
       tone: "error",
     };
   }

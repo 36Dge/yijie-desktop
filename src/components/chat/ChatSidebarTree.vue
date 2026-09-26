@@ -26,8 +26,8 @@ let knownProjectIds = new Set<string>();
 
 const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions));
 const historyGroups = computed(() => history.value.groups);
-const removedProjectSessions = computed(() => history.value.removedProjectSessions);
-const hasHistory = computed(() => historyGroups.value.length > 0 || removedProjectSessions.value.length > 0);
+const topLevelSessions = computed(() => [...history.value.projectlessSessions, ...history.value.removedProjectSessions]);
+const hasHistory = computed(() => historyGroups.value.length > 0 || topLevelSessions.value.length > 0);
 const treeLoading = computed(() => chatStore.phase === "binding" || chatStore.phase === "loading");
 const treeError = computed(() => {
   if (chatStore.phase === "permission-denied" && !chatStore.hasAction("read_sessions")) {
@@ -285,7 +285,7 @@ async function confirmRemoveProject(): Promise<void> {
         </ul>
       </li>
       <ChatSidebarSessionRow
-        v-for="session in removedProjectSessions"
+        v-for="session in topLevelSessions"
         :key="session.sessionId"
         :session="session"
         :current-path="currentPath"

@@ -134,6 +134,9 @@ pub(super) fn managed_path(
 }
 impl ChatRepository {
     pub(crate) fn resolve_schedule_project(&self, project: &str) -> Result<PathBuf, ChatError> {
+        if let Some(path) = self.resolve_projectless_workspace(project)? {
+            return Ok(path);
+        }
         let w = reference(&self.connection, &self.scope, project)?;
         match w.source {
             WorkspaceSource::UserProject => Ok(crate::chat::native_project::resolve_bookmark(

@@ -38,7 +38,7 @@
 
 完整状态与 N/A 范围见 [组件配色与状态矩阵](./09-component-color-state-matrix.md)。
 
-`YjSidebar` 必须支持 240px 展开和 72px 收起两种 token 化尺寸。收起控件固定在侧栏右边界并与品牌区垂直居中；状态作为非敏感本地 UI 偏好跨路由和应用重启保留，读取失败时默认展开。
+`YjSidebar` 必须支持 240px 展开和 72px 收起两种 token 化尺寸。唯一收起控件位于 `YjWindowTitlebar`，在原生三色窗口按钮右侧；状态作为非敏感本地 UI 偏好跨路由和应用重启保留，读取失败时默认展开。
 
 `YjNavItem` 至少支持 `default`、`hover`、`focus-visible`、`selected`、`disabled` 和权限过滤后的 `hidden` 语义：
 

@@ -10,6 +10,7 @@ import YjTabs from "../../components/yijie/YjTabs.vue";
 import YjEmpty from "../../components/yijie/YjEmpty.vue";
 import ScheduledCardAction from "../../components/schedules/ScheduledCardAction.vue";
 import ScheduledRecordDialog from "../../components/schedules/ScheduledRecordDialog.vue";
+import ScheduledRecordCards from "../../components/schedules/ScheduledRecordCards.vue";
 import ScheduledDeleteDialog from "../../components/schedules/ScheduledDeleteDialog.vue";
 import ScheduledPlanForm from "../../components/schedules/ScheduledPlanForm.vue";
 import { CHAT_AUTHORITY_RETRY_KEY, CHAT_EXECUTION_PREPARE_KEY } from "../../authorization/chat-authority-recovery";
@@ -17,13 +18,17 @@ import { usePermissionStore } from "../../stores/permission.store";
 import { ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
 import type { PlanDefinition, PlanView } from "../../domain/scheduled-plan.generated";
 import type { PlanSummary, RecordDetail, RecordRow } from "../../api/generated/scheduled-task-ipc.gen";
-import { pauseReasonLabels, executionError, recordStatus, ruleLabel, scheduleError, stateLabels, stateOptions, targetLabels, timeLabel, executionTimeLabel, durationLabel } from "../../domain/scheduled-task-ui";
+import { pauseReasonLabels, executionError, recordStatus, ruleLabel, scheduleError, stateLabels, stateOptions, targetLabels, timeLabel, recordElementId } from "../../domain/scheduled-task-ui";
 import { useScheduledManagement } from "./use-scheduled-management";
 import { useScheduledManual } from "./use-scheduled-manual";
 
 const router = useRouter(); const route = useRoute();
 // Resolve the live brand token exactly like the Skill install action.
-const scheduleSwitchTheme = { railColorActive: "var(--yj-color-brand-primary)" };
+const scheduleSwitchTheme = {
+  railColorActive: "var(--yj-color-brand-primary)",
+  buttonColor: "var(--schedule-switch-thumb)",
+  loadingColor: "var(--schedule-switch-loading)",
+};
 const m = useScheduledManagement();
 const { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, pending, receipt, context, canManage } = m;
 const permissions = usePermissionStore(); const message = useMessage();
@@ -36,7 +41,7 @@ watch(manual.startedRunId, value => { if (value) message.success("任务已开�
 async function runNow(planId: string) {
   if (runningAction.value || runPending.value) return;
   runningPlanId.value = planId;
-  try { await manual.runNow(planId); if (runError.value) message.error(executionError(runError.value)); }
+  try { await manual.runNow(planId); }
   finally { runningPlanId.value = null; }
 }
 const prepareExecution = inject(CHAT_EXECUTION_PREPARE_KEY, async () => false);
@@ -107,7 +112,7 @@ watch([context, () => route.query.plan], async ([bound, id]) => {
   if (!bound || typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) return;
   try { const detail = await m.call("schedule_get_plan_v1", { plan_id: id }); if (context.value === bound && route.query.plan === id) { receipt.value = detail; notice.value = "已定位保存的计划，当前状态以下方记录为准。"; } } catch (e) { report(e); }
 }, { immediate: true });
-function create() { error.value = null; editing.value = null; formOpen.value = true; }
+function create() { manual.dismissFeedback(); error.value = null; editing.value = null; formOpen.value = true; }
 function viewHistory(plan: PlanSummary) {
   search.value = ""; state.value = "all"; planFilter.value = plan.plan_id;
   if (!planOptions.value.some(p => p.value === plan.plan_id)) planOptions.value.unshift({ value: plan.plan_id, label: plan.name });
@@ -118,25 +123,19 @@ function cardClick(event: MouseEvent, plan: PlanSummary) {
   if (event.target instanceof Element && event.target.closest("button, a, input, [role=switch]")) return;
   if (canManage.value && !writing.value && !autoBusy.value && !autoPending.value && !runningAction.value && !runPending.value) void edit(plan);
 }
-function recordId(row: RecordRow) {
-  return `schedule-record-${row.record.kind === "run" ? row.record.run.run_id : JSON.stringify(row.record.key)}`;
-}
-function recordClick(event: MouseEvent, row: RecordRow) {
-  if (event.target instanceof Element && event.target.closest("button, a, input")) return;
-  void viewRecord(row);
-}
 watch([context, () => route.query.run], async ([bound, id]) => {
   if (!bound || typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) return;
   const epoch = ++openingEpoch;
   try {
     const result = await m.call("schedule_get_record_v1", { kind: "run", run_id: id });
     if (epoch !== openingEpoch || context.value !== bound || route.query.run !== id) return;
-    tab.value = "records"; recordReturnFocus.value = "scheduled-panel"; runError.value = null;
+    tab.value = "records"; recordReturnFocus.value = "scheduled-panel"; manual.dismissFeedback();
     recordName.value = result.configuration?.name ?? result.record.plan.name; recordDetail.value = result;
   } catch (e) { if (epoch === openingEpoch) report(e); }
 }, { immediate: true });
 
 async function edit(plan: PlanSummary) {
+  manual.dismissFeedback();
   const epoch = ++openingEpoch;
   try { const detail = await m.call("schedule_get_plan_v1", { plan_id: plan.plan_id }); if (epoch === openingEpoch && canManage.value) { editing.value = detail.plan; formOpen.value = true; } }
   catch (e) { report(e); }
@@ -178,13 +177,14 @@ async function loadOptions(more = false) {
 }
 function searchOptions(value: string) { optionsSearch.value = Array.from(value).slice(0,80).join(""); void loadOptions(); }
 async function viewRecord(row: RecordRow) {
-  runError.value = null;
-  recordReturnFocus.value = recordId(row);
+  manual.dismissFeedback();
+  recordReturnFocus.value = recordElementId(row.record);
   const epoch = ++openingEpoch;
   try { const result = await m.call("schedule_get_record_v1", row.record.key); if (epoch === openingEpoch) { recordDetail.value = result; recordName.value = row.name; } }
   catch (e) { report(e); }
 }
 async function openConversation(detail: RecordDetail) {
+  manual.dismissFeedback();
   try {
     // Revalidate the native association in this scope immediately before navigation.
     const current = await m.call("schedule_get_record_v1", detail.record.key);
@@ -221,7 +221,7 @@ onBeforeRouteLeave(() => {
       <div class="schedules-controls">
         <YjTabs v-model="tab" class="schedules-tabs" :items="tabs" panel-id="scheduled-panel" aria-label="定时任务页面" />
         <div v-if="context && !unavailable" class="schedules-toolbar" :class="{ 'schedules-toolbar--records': tab === 'records' }">
-          <NInput v-model:value="search" clearable :maxlength="80" :placeholder="tab === 'plans' ? '搜索计划名称或内容' : '搜索记录中的名称或内容'" :input-props="{ 'aria-label': '搜索任务名称或内容' }" />
+          <NInput v-model:value="search" clearable :maxlength="80" :placeholder="tab === 'plans' ? '搜索计划名称或内容' : '搜索执行记录'" :input-props="{ 'aria-label': '搜索任务名称或内容' }" />
           <NSelect v-model:value="state" :options="stateOptions" aria-label="计划状态筛选" />
           <NSelect v-if="tab === 'plans'" v-model:value="order" :options="sorts" aria-label="创建时间排序" />
           <NSelect v-else v-model:value="planFilter" :options="planOptions" :loading="optionsLoading" clearable filterable remote placeholder="全部任务" :consistent-menu-width="false" :menu-props="{ style: { maxWidth: 'calc(100vw - var(--yj-space-8))' } }" aria-label="按任务筛选" @search="searchOptions" @update:show="value => { if (value) loadOptions(); }" />
@@ -233,10 +233,13 @@ onBeforeRouteLeave(() => {
         {{ writing ? '正在处理，请稍候。' : '不要重新创建计划。查证结果只对应原请求，重试也会使用同一请求与原始内容。' }}
         <div class="schedules-actions"><NButton :disabled="!context || writing" @click="checkReceipt">查证原请求</NButton><NButton :disabled="!context || writing" @click="retryWrite">重试同一请求</NButton></div>
       </NAlert>
-      <NAlert v-if="runNotice" type="info" role="status">{{ runNotice }}</NAlert>
-      <NAlert v-if="runError" type="error" role="alert">{{ executionError(runError) }}</NAlert>
-      <NAlert v-if="runPending && !runReview && !runningAction" type="warning" title="本次运行待查证"><NButton :disabled="runningAction || !context" @click="manual.query">查证本次原请求</NButton><NButton :disabled="runningAction || !context" @click="manual.retry">{{ runIntent?.grant && !runIntent.manualAttempted ? '继续本次运行' : '重试本次原请求' }}</NButton></NAlert>
-      <NCard v-if="runResult && !manual.direct.value" title="本次运行" size="small" aria-label="本次运行记录"><p>{{ recordStatus(runResult.record) }} · 业务结果尚未评估</p><p class="schedules-meta" v-if="runResult.record.kind === 'run'">运行编号：{{ runResult.record.run.run_id }}</p><div class="schedules-actions"><NButton @click="manual.refreshResult()">刷新运行结果</NButton><NButton @click="recordDetail = runResult; recordName = runResult.configuration?.name ?? '本次运行'">查看本次记录</NButton><NButton :disabled="runResult.record.kind !== 'run' || runResult.record.conversation.status !== 'available'" @click="openConversation(runResult)">查看完整对话</NButton></div></NCard>
+      <NAlert v-if="runNotice && !runError && !runPending && !runReview && !recordDetail" type="info" role="status" :closable="!runningAction" @close="manual.dismissFeedback">{{ runNotice }}</NAlert>
+      <NAlert v-if="runError && !runPending && !runReview && !recordDetail" type="error" role="alert" aria-label="执行操作提示" :closable="!runningAction" @close="manual.dismissFeedback">
+        {{ executionError(runError) }}
+        <div class="schedules-actions"><NButton size="small" :disabled="loading || !context" @click="m.refresh()">刷新列表</NButton><NButton v-if="runError === 'reservation_busy'" size="small" @click="tab = 'records'; search = ''; state = 'all'; planFilter = null">查看执行记录</NButton></div>
+      </NAlert>
+      <NAlert v-if="runPending && !runReview && !runningAction" type="warning" role="alert" aria-label="本次运行待查证" title="本次运行待查证"><p>{{ runNotice }}</p><p v-if="runError">{{ executionError(runError) }}</p><NButton :disabled="runningAction || !context" @click="manual.query">查证本次原请求</NButton><NButton :disabled="runningAction || !context" @click="manual.retry">{{ runIntent?.grant && !runIntent.manualAttempted ? '继续本次运行' : '重试本次原请求' }}</NButton></NAlert>
+      <NCard v-if="runResult && !manual.direct.value" title="本次运行" size="small" aria-label="本次运行记录"><p>{{ recordStatus(runResult.record) }}</p><div class="schedules-actions"><NButton @click="manual.refreshResult()">刷新运行结果</NButton><NButton @click="recordDetail = runResult; recordName = runResult.configuration?.name ?? '本次运行'">查看本次记录</NButton><NButton :disabled="runResult.record.kind !== 'run' || runResult.record.conversation.status !== 'available'" @click="openConversation(runResult)">查看完整对话</NButton></div></NCard>
       <NAlert v-if="error" type="error" role="alert">{{ scheduleError(error) }} <NButton v-if="!pending" size="small" :disabled="loading" @click="m.refresh()">刷新</NButton></NAlert>
       <YjEmpty v-if="!context" title="管理授权尚未就绪" description="恢复授权后可读取与保存计划。管理页面不需要任务执行服务就绪。" icon="scheduledTask">
         <template #actions><NButton @click="recoverAuthority">恢复授权</NButton></template>
@@ -244,12 +247,12 @@ onBeforeRouteLeave(() => {
       <YjEmpty v-else-if="unavailable" title="定时任务管理暂未开放" description="当前环境尚未开放此能力，请在受支持的环境中使用。" icon="scheduledTask" />
       <template v-else>
         <NAlert v-if="readOnly" type="warning">当前为只读状态，可以查看计划和记录，无法修改。</NAlert>
-        <div v-if="tab === 'records'" class="schedules-meta">状态筛选按计划当前状态；名称和内容按运行时快照。未执行项标明当前计划参考。
+        <div v-if="tab === 'records' && (planFilter || optionsCursor || optionsError)" class="schedules-meta">
           <NTag v-if="planFilter" closable @close="planFilter = null">{{ planOptions.find(p => p.value === planFilter)?.label ?? '所选任务' }}</NTag>
           <NButton v-if="optionsCursor" size="tiny" :loading="optionsLoading" @click="loadOptions(true)">更多任务选项</NButton><NButton v-if="optionsError" size="tiny" @click="loadOptions()">{{ optionsError }} · 重试</NButton>
         </div>
         <section id="scheduled-panel" role="tabpanel" tabindex="-1" :aria-labelledby="`scheduled-panel-tab-${tab}`" :aria-busy="loading">
-          <div v-if="loading && !(tab === 'plans' ? cards.length : records.length)" class="schedules-grid"><NSkeleton v-for="i in 4" :key="i" height="200px" /></div>
+          <div v-if="loading && !(tab === 'plans' ? cards.length : records.length)" class="schedules-grid"><NSkeleton v-for="i in 4" :key="i" :height="tab === 'plans' ? '200px' : 'var(--yj-layout-schedule-record-skeleton-height)'" /></div>
           <YjEmpty v-else-if="!(tab === 'plans' ? cards.length : records.length) && !error" class="schedules-empty" :title="search || state !== 'all' || planFilter ? '没有匹配的记录' : tab === 'plans' ? '还没有定时任务' : '还没有执行记录'" :description="tab === 'plans' ? '通过对话或手动设置创建计划，保存后可随时调整。' : '计划保存和未来时间预览不会产生执行记录。'" icon="scheduledTask"><template #actions><NButton v-if="search || state !== 'all' || planFilter" @click="search = ''; state = 'all'; planFilter = null">清空筛选</NButton><NButton v-else-if="tab === 'plans'" type="primary" :disabled="!canManage" @click="create">新建定时任务</NButton></template></YjEmpty>
           <div v-else-if="tab === 'plans'" class="schedules-grid">
             <NCard v-for="card in cards" :key="card.summary.plan_id" class="schedule-card schedule-plan-card" content-style="padding: var(--yj-space-5); display: flex; flex-direction: column" :aria-label="card.summary.name" @click="cardClick($event, card.summary)">
@@ -266,16 +269,7 @@ onBeforeRouteLeave(() => {
               </div></div>
             </NCard>
           </div>
-          <div v-else class="schedules-records">
-            <NCard v-for="row in records" :key="JSON.stringify(row.record.key)" class="schedule-card schedule-record-card" @click="recordClick($event, row)">
-              <div class="schedule-card__heading"><h2><button :id="recordId(row)" class="schedule-card__title" :aria-label="`查看 ${row.name} 的执行记录详情`" @click.stop="viewRecord(row)">{{ row.name }}</button></h2><NTag size="small">{{ recordStatus(row.record) }}</NTag></div>
-              <p class="schedule-card__content">{{ row.content_preview }}</p>
-              <p class="schedules-meta">{{ row.source === 'run_snapshot' ? '运行时快照' : '当前计划参考 · 此项未执行' }} · 计划当前{{ stateLabels[row.record.plan.effective_state] }}</p>
-              <p class="schedules-meta">执行时间：{{ executionTimeLabel(row.record.timing) }} · 耗时：{{ durationLabel(row.record.timing) }}</p>
-              <p v-if="row.record.kind === 'run'" class="schedules-meta">业务结果尚未评估。聊天关联：{{ row.record.conversation.status === 'available' ? '已关联' : row.record.conversation.status === 'deleted' ? '已删除' : '未知或不可用' }}</p>
-              <div class="schedules-actions"><NButton :id="row.record.kind === 'run' ? `schedule-rerun-${row.record.run.run_id}` : undefined" size="small" :disabled="row.record.kind !== 'run' || row.record.plan.raw_state === 'deleted' || row.record.plan.target_state === 'missing' || !canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending" :title="row.record.kind !== 'run' ? '此项未执行，请从当前计划立即运行' : row.record.plan.raw_state === 'deleted' ? '原计划已删除，不能重跑' : row.record.plan.target_state === 'missing' ? '当前运行目标不可用' : '审阅当前配置后创建一次新运行'" @click="rerunRecord(row)">重新执行</NButton><NButton size="small" :disabled="row.record.kind !== 'run' || row.record.conversation.status !== 'available'" @click="openRowConversation(row)">查看对话</NButton></div>
-            </NCard>
-          </div>
+          <ScheduledRecordCards v-else :rows="records" :rerun-disabled="!canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending" @open="viewRecord" @rerun="rerunRecord" @conversation="openRowConversation" />
           <div v-if="cursor" class="schedules-more"><NButton :loading="loading" @click="m.refresh(true)">加载更多</NButton></div>
         </section>
       </template>
@@ -299,9 +293,7 @@ onBeforeRouteLeave(() => {
 .schedules-toolbar--records { --schedule-last-filter-width: var(--yj-layout-schedule-plan-filter-width); }
 .schedules-empty { min-height: var(--yj-layout-schedule-empty-min-height); }
 .schedules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--yj-space-4); }
-.schedules-records { display: grid; gap: var(--yj-space-4); }
 .schedule-card { min-width: 0; }
-.schedule-record-card { cursor: pointer; }
 .schedule-card__state { display: flex; gap: var(--yj-space-2); align-items: center; flex-shrink: 0; }
 .schedule-card__title { color: inherit; font: inherit; text-align: left; border: 0; padding: 0; background: transparent; cursor: pointer; overflow-wrap: anywhere; }
 .schedule-card__title:disabled { cursor: default; }
@@ -319,7 +311,8 @@ onBeforeRouteLeave(() => {
 .schedule-card__timing { flex: 1; min-width: 0; color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
 .schedule-card__timing p { display: flex; align-items: center; gap: var(--yj-space-2); margin: var(--yj-space-2) 0 0; }
 .schedule-card__timing span { overflow-wrap: anywhere; }
-.schedule-switch { border: none; padding: 0; background: transparent; }
+.schedule-switch { --schedule-switch-thumb: var(--yj-color-text-primary); --schedule-switch-loading: var(--yj-color-bg-card); border: none; padding: 0; background: transparent; }
+.schedule-switch[aria-checked="true"] { --schedule-switch-thumb: var(--yj-color-on-brand); --schedule-switch-loading: var(--yj-color-brand-primary); }
 .schedules-meta { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); overflow-wrap: anywhere; }
 .schedules-actions { display: flex; flex-wrap: wrap; gap: var(--yj-space-2); margin-top: var(--yj-space-3); }
 .schedules-more { display: flex; justify-content: center; padding: var(--yj-space-4); }

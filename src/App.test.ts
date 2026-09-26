@@ -7,6 +7,8 @@ import { defineComponent, h, inject } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHAT_NEW_DRAFT_TARGET } from "./domain/chat-ipc";
 import { useChatStore } from "./stores/chat.store";
+import { useSidebarStore } from "./stores/sidebar.store";
+import YjAppShell from "./components/yijie/YjAppShell.vue";
 import App from "./App.vue";
 import { CHAT_AUTHORITY_RETRY_KEY } from "./authorization/chat-authority-recovery";
 
@@ -36,6 +38,41 @@ afterEach(() => {
 });
 
 describe("App chat route synchronization", () => {
+  it("uses one titlebar toggle across chat and business routes while preserving content and preference", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const sidebar = useSidebarStore(pinia);
+    const persist = vi.fn();
+    sidebar.hydrate({ getItem: () => "collapsed", setItem: persist });
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+      {path: "/chat", component: {template: "<div />"}},
+      {path: "/store", component: {template: "<div />"}},
+    ] });
+    await router.push("/chat");
+    await router.isReady();
+    const wrapper = mount(YjAppShell, {
+      slots: {default: '<input aria-label="保留任务输入" value="草稿" />'},
+      global: {plugins: [pinia, router]},
+    });
+    const input = wrapper.get("input").element;
+    expect(wrapper.find(".yj-sidebar--collapsed").exists()).toBe(true);
+    expect(wrapper.find(".yj-sidebar__toggle").exists()).toBe(false);
+    expect(wrapper.get(".yj-window-titlebar").text()).toBe("");
+    await wrapper.get('[aria-label="展开侧栏"]').trigger("click");
+    expect(wrapper.find(".yj-sidebar--collapsed").exists()).toBe(false);
+    expect(wrapper.get("input").element).toBe(input);
+    expect(persist).toHaveBeenLastCalledWith("yijie.desktop.ui.sidebar.v1", "expanded");
+    await router.push("/store");
+    await flushPromises();
+    expect(wrapper.findAll(".yj-window-titlebar__sidebar-toggle")).toHaveLength(1);
+    await wrapper.get('[aria-label="收起侧栏"]').trigger("click");
+    await router.push("/chat");
+    await flushPromises();
+    expect(wrapper.find(".yj-sidebar--collapsed").exists()).toBe(true);
+    expect(wrapper.get('[aria-label="展开侧栏"]').attributes("aria-expanded")).toBe("false");
+    wrapper.unmount();
+  });
+
   it("provides the Chat authority retry through the App lifecycle", async () => {
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
@@ -105,6 +142,7 @@ describe("App chat route synchronization", () => {
 
     expect(zoomEvent.defaultPrevented).toBe(true);
     expect(document.documentElement.style.getPropertyValue("zoom")).toBe("1.2");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-scale")).toBe("1.2");
     expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-width"))
       .toBe("983.3333333333334px");
     expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-height"))
@@ -119,6 +157,7 @@ describe("App chat route synchronization", () => {
     wrapper.unmount();
 
     expect(document.documentElement.style.getPropertyValue("zoom")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--yj-ui-scale")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-width")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--yj-layout-window-min-height")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--yj-ui-viewport-width")).toBe("");

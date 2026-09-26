@@ -32,7 +32,7 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
   min-height: calc(var(--yj-space-16) * 3);
   flex-direction: column;
   gap: var(--yj-space-4);
-  padding: var(--yj-space-5);
+  padding: var(--workflow-card-padding, var(--yj-space-5));
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
   background: var(--yj-color-bg-card);
@@ -82,6 +82,7 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 
 .recommended-workflow-card__footer {
   flex-wrap: wrap;
+  gap: var(--yj-space-2);
   margin-top: auto;
   padding-top: var(--yj-space-4);
   border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);

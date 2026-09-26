@@ -70,7 +70,7 @@ CHAT_NEW_DRAFT_TARGET,
 ChatClientError,
 chatSessionDraftTarget,
 } from "../domain/chat-ipc";
-import { CHAT_INPUT_MAX_BYTES } from "../domain/chat-ui";
+import { CHAT_INPUT_MAX_BYTES, localHistoryDeletionFinished } from "../domain/chat-ui";
 import {
 createConversationApprovalState,
 disconnectConversationApprovals,
@@ -534,7 +534,7 @@ export function createChatStoreDefinition(
 
     function submissionKey(
       kind: "create" | "submit",
-      targetId: string,
+      targetId: string | null,
       input: string,
       blocks: readonly ChatTurnContentBlock[],
     ): string {
@@ -3665,7 +3665,7 @@ export function createChatStoreDefinition(
     }
 
     async function createSessionWithResult(
-      projectId: string,
+      projectId: string | null,
       input: string,
     ): Promise<ChatSubmissionResult> {
       const bound = context.value;
@@ -3696,15 +3696,18 @@ export function createChatStoreDefinition(
           hasAction("create_session") &&
           hasAction("use_project")
         );
-        let project: ChatProject | null;
-        try {
-          project = await revalidateProject(projectId);
-        } catch (error: unknown) {
-          if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
-          throw error;
+        if (projectId !== null) {
+          let project: ChatProject | null;
+          try {
+            project = await revalidateProject(projectId);
+          } catch (error: unknown) {
+            if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
+            throw error;
+          }
+          if (project === null || !canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
+          if (project.projectId !== projectId || !project.available) throw projectInvalidError();
         }
-        if (project === null || !canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
-        if (project.projectId !== projectId || !project.available) throw projectInvalidError();
+        if (!canDispatchCreateAttempt()) return CHAT_SUBMISSION_NOT_ACCEPTED;
         const currentBlocks = turnContentBlocks(input);
         if (
           currentBlocks === null ||
@@ -3777,7 +3780,7 @@ export function createChatStoreDefinition(
       }
     }
 
-    async function createSession(projectId: string, input: string): Promise<string | null> {
+    async function createSession(projectId: string | null, input: string): Promise<string | null> {
       const result = await createSessionWithResult(projectId, input);
       return result.status === "local_durable_accepted" ? result.sessionId : null;
     }
@@ -3953,8 +3956,9 @@ export function createChatStoreDefinition(
       return context.value?.contextId === bound.contextId && selectedSessionId.value === sessionId;
     }
 
-    function cleanupIsComplete(status: ChatCleanupStatus): boolean {
-      return status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete";
+    function cleanupIsFinished(status: ChatCleanupStatus): boolean {
+      return localHistoryDeletionFinished(status)
+        || (status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete");
     }
 
     function cleanupSurfaceRank(state: ChatCleanupStatus["desktopState"]): number {
@@ -3979,7 +3983,7 @@ export function createChatStoreDefinition(
       const current = cleanupStatus.value;
       if (current !== null) {
         if (
-          current.operationId !== status.operationId || cleanupIsComplete(current) ||
+          current.operationId !== status.operationId || cleanupIsFinished(current) ||
           current.outcomeCode === "retry_limit_exceeded" || current.completedAt !== null ||
           cleanupSurfaceRank(status.desktopState) < cleanupSurfaceRank(current.desktopState) ||
           cleanupSurfaceRank(status.hostState) < cleanupSurfaceRank(current.hostState) ||
@@ -3987,7 +3991,7 @@ export function createChatStoreDefinition(
         ) return false;
       }
       cleanupStatus.value = status;
-      if (cleanupIsComplete(status) || status.outcomeCode === "retry_limit_exceeded") {
+      if (cleanupIsFinished(status) || status.outcomeCode === "retry_limit_exceeded") {
         clearCleanupPoll();
       }
       return true;
@@ -4024,8 +4028,8 @@ export function createChatStoreDefinition(
             deleteInFlightSessionId.value !== null
           ) return;
           if (commitObservedCleanupStatus(status, observation) && status !== null) {
-            if (cleanupIsComplete(status)) {
-              await finishCompletedCleanup(bound, sessionId, status);
+            if (cleanupIsFinished(status)) {
+              await finishDeletedHistory(bound, sessionId, status);
               return;
             }
             if (status.outcomeCode === "retry_limit_exceeded") {
@@ -4033,8 +4037,8 @@ export function createChatStoreDefinition(
             }
           }
           const retainedCleanup = cleanupStatus.value;
-          if (retainedCleanup !== null && cleanupIsComplete(retainedCleanup)) {
-            await finishCompletedCleanup(bound, sessionId, retainedCleanup);
+          if (retainedCleanup !== null && cleanupIsFinished(retainedCleanup)) {
+            await finishDeletedHistory(bound, sessionId, retainedCleanup);
             return;
           }
           if (retainedCleanup?.outcomeCode === "retry_limit_exceeded") return;
@@ -4054,7 +4058,7 @@ export function createChatStoreDefinition(
       cleanupPollTimer = setTimeout(() => { void poll(); }, CLEANUP_POLL_INTERVAL_MS);
     }
 
-    async function finishCompletedCleanup(
+    async function finishDeletedHistory(
       bound: BoundChatContext,
       deletedSessionId: string,
       status: ChatCleanupStatus,
@@ -4104,8 +4108,8 @@ export function createChatStoreDefinition(
       ) return null;
       const currentCleanup = cleanupStatus.value;
       if (currentCleanup !== null) {
-        if (cleanupIsComplete(currentCleanup)) {
-          return finishCompletedCleanup(bound, sessionId, currentCleanup);
+        if (cleanupIsFinished(currentCleanup)) {
+          return finishDeletedHistory(bound, sessionId, currentCleanup);
         }
         if (currentCleanup.outcomeCode !== "retry_limit_exceeded") {
           scheduleSelectedCleanupPoll(bound, sessionId, currentCleanup.operationId);
@@ -4130,7 +4134,7 @@ export function createChatStoreDefinition(
         ) return null;
         cleanupStatus.value = status;
         revokeSelectedRealtimeAuthorityForCleanup(bound, sessionId);
-        if (cleanupIsComplete(status)) return finishCompletedCleanup(bound, sessionId, status);
+        if (cleanupIsFinished(status)) return finishDeletedHistory(bound, sessionId, status);
         if (status.outcomeCode !== "retry_limit_exceeded") {
           scheduleSelectedCleanupPoll(bound, sessionId, status.operationId);
         }
@@ -4170,8 +4174,8 @@ export function createChatStoreDefinition(
       if (status === null) return null;
       const retainedStatus = cleanupStatus.value;
       if (retainedStatus === null) return null;
-      if (cleanupIsComplete(retainedStatus)) {
-        return finishCompletedCleanup(bound, sessionId, retainedStatus);
+      if (cleanupIsFinished(retainedStatus)) {
+        return finishDeletedHistory(bound, sessionId, retainedStatus);
       }
       if (retainedStatus.outcomeCode !== "retry_limit_exceeded") {
         scheduleSelectedCleanupPoll(bound, sessionId, retainedStatus.operationId);

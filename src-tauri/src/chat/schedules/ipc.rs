@@ -413,7 +413,7 @@ fn operation(
         .map_err(|_| E::StorageUnavailable)?;
     if name == "schedule_operation_capabilities_v1" {
         let readable =
-            (21..=crate::chat::migrations::SCHEDULE_TIMING_SCHEMA_VERSION).contains(&version);
+            (21..=crate::chat::migrations::MAX_READABLE_SCHEMA_VERSION).contains(&version);
         let permitted = |cap| a.require(&repo.scope, cap, n).is_ok();
         let cap = |available: bool, reason: &str| json!({"available":available,"reason":if available {"ready"}else{reason}});
         let writable = readable && repo.schedule_execution_writes_enabled;
@@ -438,11 +438,11 @@ fn operation(
     }
     if name == "schedule_availability_v1" {
         return Ok(
-            json!({"schema_version":version,"readable":(21..=crate::chat::migrations::SCHEDULE_TIMING_SCHEMA_VERSION).contains(&version),"writable":(21..=crate::chat::migrations::SCHEDULE_TIMING_SCHEMA_VERSION).contains(&version)&&repo.schedule_execution_writes_enabled,"preparation_enabled":repo.schedule_preparation_enabled,"dispatch":if repo.schedule_dispatch_authority.is_some(){"native_candidate"}else{"disabled"},"platform_qualified":false}),
+            json!({"schema_version":version,"readable":(21..=crate::chat::migrations::MAX_READABLE_SCHEMA_VERSION).contains(&version),"writable":(21..=crate::chat::migrations::MAX_READABLE_SCHEMA_VERSION).contains(&version)&&repo.schedule_execution_writes_enabled,"preparation_enabled":repo.schedule_preparation_enabled,"dispatch":if repo.schedule_dispatch_authority.is_some(){"native_candidate"}else{"disabled"},"platform_qualified":false}),
         );
     }
     let (_, _, _, write) = definition(name)?;
-    if !(21..=crate::chat::migrations::SCHEDULE_TIMING_SCHEMA_VERSION).contains(&version) {
+    if !(21..=crate::chat::migrations::MAX_READABLE_SCHEMA_VERSION).contains(&version) {
         return Err(E::StorageDisabled.into());
     }
     if write && !repo.schedule_execution_writes_enabled {

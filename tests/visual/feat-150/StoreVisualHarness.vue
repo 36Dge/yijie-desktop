@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { darkTheme, NConfigProvider } from "naive-ui";
 import { useRoute } from "vue-router";
+import YjWindowTitlebar from "../../../src/components/yijie/YjWindowTitlebar.vue";
 import YjSidebar from "../../../src/components/yijie/YjSidebar.vue";
 import { resolveAppNavigation } from "../../../src/navigation/app-nav";
 
@@ -15,14 +16,16 @@ const entries = resolveAppNavigation();
 <template>
   <n-config-provider :theme="dark ? darkTheme : null">
     <div class="store-visual-shell">
-      <YjSidebar
-        :entries="entries"
-        :collapsed="collapsed"
-        :current-path="route.path"
-        :show-chat-tree="false"
-        @toggle="collapsed = !collapsed"
-      />
-      <main class="store-visual-shell__content"><RouterView /></main>
+      <YjWindowTitlebar :collapsed="collapsed" @toggle="collapsed = !collapsed" />
+      <div class="store-visual-shell__body">
+        <YjSidebar
+          :entries="entries"
+          :collapsed="collapsed"
+          :current-path="route.path"
+          :show-chat-tree="false"
+        />
+        <main class="store-visual-shell__content"><RouterView /></main>
+      </div>
     </div>
   </n-config-provider>
 </template>
@@ -30,14 +33,17 @@ const entries = resolveAppNavigation();
 <style scoped>
 .store-visual-shell {
   display: flex;
-  width: 100%;
+  flex-direction: column;
+  width: var(--yj-ui-viewport-width, 100%);
   min-width: var(--yj-layout-window-min-width);
-  min-height: var(--yj-layout-window-min-height);
-  height: 100vh;
+  min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
+  height: var(--yj-ui-viewport-height, 100vh);
   overflow: hidden;
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-app);
 }
+
+.store-visual-shell__body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
 .store-visual-shell__content {
   min-width: 0;

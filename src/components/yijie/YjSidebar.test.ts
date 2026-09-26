@@ -113,9 +113,9 @@ describe("YjSidebar permission rendering", () => {
     expect(wrapper.find('[aria-label="工作流，即将开放"]').exists()).toBe(false);
   });
 
-  it("FEAT-126 hides the sidebar visibility control when chat owns the fixed App Shell", async () => {
+  it("leaves the sidebar toggle to the global window titlebar", async () => {
     const wrapper = await mountSidebar(["task.create"]);
-    await wrapper.setProps({ allowToggle: false, currentPath: "/chat" });
+    await wrapper.setProps({ currentPath: "/chat" });
 
     expect(wrapper.find('[aria-label="收起侧栏"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="展开侧栏"]').exists()).toBe(false);
@@ -160,6 +160,19 @@ describe("YjSidebar permission rendering", () => {
     expect(history.find("a").exists()).toBe(false);
     expect(history.get('[aria-label="任务记录：项目与对话"]').attributes("aria-busy")).toBe("false");
     expect(wrapper.findAll("a").some((link) => link.text().includes("任务记录"))).toBe(false);
+  });
+
+  it("hides task history in icon mode and preserves collapsed directories when restored", async () => {
+    const wrapper = await mountSidebar(["task.read"]);
+    await wrapper.setProps({ showChatTree: true });
+    await wrapper.get('[aria-label="折叠项目 Synthetic Workspace"]').trigger("click");
+    const tree = wrapper.get(".chat-tree").element;
+    await wrapper.setProps({ collapsed: true });
+    expect(wrapper.get(".chat-tree").isVisible()).toBe(false);
+    expect(wrapper.find(".yj-sidebar--chat-tree").exists()).toBe(false);
+    await wrapper.setProps({ collapsed: false });
+    expect(wrapper.get(".chat-tree").element).toBe(tree);
+    expect(wrapper.get('[aria-label="展开项目 Synthetic Workspace"]').attributes("aria-expanded")).toBe("false");
   });
 
   it("FEAT-130 associates an active conversation with history instead of new task", async () => {

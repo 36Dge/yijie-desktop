@@ -96,3 +96,9 @@ Iconify / Simple Icons 只能作为经过审核的备用来源，不是默认来
 ## 关联文件
 
 `exports/src/icons/registry.ts`、`exports/src/components/yijie/YjIcon.vue`、`docs/design/docs/design/09-implementation/03-yj-icon-code-scaffold.md`
+
+## 定时任务记录操作（2026-09-25）
+
+记录卡片操作使用 registry 中 `rerun`（Lucide RotateCcw）和 `arrowUpRight`
+（Lucide ArrowUpRight），分别表示重新执行和查看关联对话。沿用 16px、2px 线宽、
+中性前景及禁用态，不添加装饰背景，不引入新的图标依赖。

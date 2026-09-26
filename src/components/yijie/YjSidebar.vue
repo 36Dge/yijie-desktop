@@ -11,20 +11,16 @@ const props = withDefaults(defineProps<{
   collapsed: boolean;
   currentPath: string;
   showChatTree?: boolean;
-  allowToggle?: boolean;
 }>(), {
   showChatTree: false,
-  allowToggle: true,
 });
 
 const emit = defineEmits<{
-  toggle: [];
   "recover-new-task": [];
 }>();
 
 const mainEntries = computed(() => props.entries.filter((entry) => entry.placement === "main"));
 const bottomEntries = computed(() => props.entries.filter((entry) => entry.placement === "bottom"));
-const toggleLabel = computed(() => (props.collapsed ? "展开侧栏" : "收起侧栏"));
 
 function isSelected(entry: AppNavEntry): boolean {
   if (entry.kind !== "item" || entry.disabled) return false;
@@ -43,22 +39,11 @@ function handleEntryClick(entry: AppNavEntry): void {
 <template>
   <aside
     class="yj-sidebar"
-    :class="{ 'yj-sidebar--collapsed': collapsed, 'yj-sidebar--chat-tree': showChatTree }"
+    :class="{ 'yj-sidebar--collapsed': collapsed, 'yj-sidebar--chat-tree': showChatTree && !collapsed }"
     :aria-label="collapsed ? '主导航（已收起）' : '主导航'"
   >
     <div class="yj-sidebar__brand">
       <YjLogo :variant="collapsed ? 'icon-only' : 'horizontal'" size="md" />
-      <button
-        v-if="allowToggle"
-        class="yj-sidebar__toggle"
-        type="button"
-        :aria-label="toggleLabel"
-        :title="toggleLabel"
-        :aria-expanded="!collapsed"
-        @click="emit('toggle')"
-      >
-        <YjIcon :name="collapsed ? 'expandSidebar' : 'collapseSidebar'" size="sm" />
-      </button>
     </div>
 
     <nav class="yj-sidebar__navigation" aria-label="应用导航">
@@ -92,6 +77,7 @@ function handleEntryClick(entry: AppNavEntry): void {
           />
           <ChatSidebarTree
             v-if="showChatTree && entry.kind === 'section' && entry.key === 'taskHistory'"
+            v-show="!collapsed"
             :current-path="currentPath"
           />
         </li>
@@ -143,44 +129,6 @@ function handleEntryClick(entry: AppNavEntry): void {
 .yj-sidebar--collapsed .yj-sidebar__brand {
   justify-content: center;
   padding-inline: var(--yj-space-3);
-}
-
-.yj-sidebar__toggle {
-  position: absolute;
-  top: 50%;
-  right: calc(var(--yj-space-4) * -1);
-  display: inline-flex;
-  width: var(--yj-space-8);
-  height: var(--yj-space-8);
-  align-items: center;
-  justify-content: center;
-  padding: var(--yj-space-0);
-  transform: translateY(-50%);
-  border: 1px solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-full);
-  color: var(--yj-color-icon-default);
-  background: var(--yj-color-bg-elevated);
-  box-shadow: none;
-  cursor: pointer;
-  transition:
-    color var(--yj-motion-fast) var(--yj-ease-standard),
-    border-color var(--yj-motion-fast) var(--yj-ease-standard),
-    background-color var(--yj-motion-fast) var(--yj-ease-standard);
-}
-
-.yj-sidebar__toggle:hover {
-  border-color: var(--yj-color-border-control-hover);
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-control-hover);
-}
-
-.yj-sidebar__toggle:active {
-  background: var(--yj-color-control-pressed);
-}
-
-.yj-sidebar__toggle:focus-visible {
-  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
-  outline-offset: var(--yj-space-1);
 }
 
 .yj-sidebar__navigation {

@@ -122,7 +122,7 @@ impl AuthorizedConversationApplication {
     pub async fn create_local_session(
         &self,
         context_id: Uuid,
-        project_id: Uuid,
+        project_id: Option<Uuid>,
         input: String,
         operation_id: Uuid,
     ) -> Result<PendingConversation, ChatError> {
@@ -140,7 +140,7 @@ impl AuthorizedConversationApplication {
     pub async fn create_local_session_multimodal(
         &self,
         context_id: Uuid,
-        project_id: Uuid,
+        project_id: Option<Uuid>,
         blocks: Vec<DraftContentBlock>,
         operation_id: Uuid,
     ) -> Result<PendingConversation, ChatError> {
@@ -559,6 +559,7 @@ pub enum CoordinatorOutcome {
     StreamRecovered { session_id: Uuid },
     CleanupRetryScheduled { operation_id: Uuid },
     CleanupComplete(DeletionStatus),
+    CleanupHistoryRemoved(DeletionStatus),
 }
 
 pub struct ConversationCoordinator {
@@ -1195,11 +1196,21 @@ impl ConversationApplication {
 
     pub async fn create_local_session(
         &self,
-        project_id: Uuid,
+        project_id: Option<Uuid>,
         input: String,
         create_operation_id: Uuid,
         authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
+        let project_id = match project_id {
+            Some(project_id) => project_id,
+            None => {
+                self.database
+                    .call(move |repository| {
+                        repository.ensure_projectless_workspace(create_operation_id)
+                    })
+                    .await?
+            }
+        };
         self.database
             .create_session_and_enqueue_with_authority(
                 project_id,
@@ -1212,11 +1223,19 @@ impl ConversationApplication {
 
     pub async fn create_local_session_multimodal(
         &self,
-        project_id: Uuid,
+        project_id: Option<Uuid>,
         blocks: Vec<DraftContentBlock>,
         operation_id: Uuid,
         authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
+        let project_id = match project_id {
+            Some(project_id) => project_id,
+            None => {
+                self.database
+                    .call(move |repository| repository.ensure_projectless_workspace(operation_id))
+                    .await?
+            }
+        };
         self.database
             .create_session_and_enqueue_multimodal(
                 project_id,
@@ -2748,6 +2767,20 @@ impl ConversationApplication {
                         .await?;
                     return Ok(CoordinatorOutcome::CleanupRetryScheduled { operation_id });
                 }
+                Err(error) if error.code() == Some(HostErrorCode::SessionNotFound) => {
+                    let operation_id = claimed.operation_id;
+                    let receipt = self
+                        .database
+                        .call(move |repository| {
+                            repository.complete_missing_host_deletion(
+                                operation_id,
+                                agent_session_id,
+                                now,
+                            )
+                        })
+                        .await?;
+                    return Ok(CoordinatorOutcome::CleanupHistoryRemoved(receipt));
+                }
                 Err(error)
                     if matches!(
                         error.kind(),
@@ -3494,6 +3527,86 @@ mod tests {
             requests
         });
         (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn deletion_recovery_only_typed_missing_host_removes_terminal_local_history() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa1";
+        for missing in [true, false] {
+            let (root, database, pending, turn, _) =
+                prepare_v2_turn_outbox("deletion-missing-host").await;
+            database.fail_outbox(turn.operation_id).await.unwrap();
+            database.call(move |repo| {
+                repo.connection.execute("UPDATE chat_turns SET status='completed',submission_status='submitted' WHERE id=?1",
+                    [pending.turn_id.to_string()]).map_err(|_| ChatError::DatabaseUnavailable)?;
+                Ok(())
+            }).await.unwrap();
+            let token_directory = root.join("host");
+            fs::create_dir(&token_directory).unwrap();
+            fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+            let token_path = token_directory.join("api-token");
+            fs::write(&token_path, "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE\n").unwrap();
+            fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+            let body = if missing {
+                r#"{"error":{"code":"session_not_found","message":"agent session was not found"}}"#
+            } else {
+                r#"{"code":"not_found"}"#
+            };
+            let (port, server) = serve_http(vec![
+                ready_response(NONCE),
+                json_response("404 Not Found", body),
+            ])
+            .await;
+            let application = ConversationApplication::new(
+                database.clone(),
+                Arc::new(
+                    HostBridge::from_connection(HostConnection {
+                        port,
+                        token_path,
+                        instance_nonce: NONCE.into(),
+                    })
+                    .unwrap(),
+                ),
+                Arc::new(FixedPublicTaskControlPlane::new([])),
+            );
+            let now = unix_seconds().unwrap();
+            let operation = Uuid::now_v7();
+            application
+                .begin_session_deletion(pending.session_id, operation)
+                .await
+                .unwrap();
+            let claimed = database
+                .claim_next_deletion(now + 1, 30)
+                .await
+                .unwrap()
+                .unwrap();
+            let result = application.drive_cleanup(claimed, now + 1).await.unwrap();
+            if missing {
+                assert!(
+                    matches!(result, CoordinatorOutcome::CleanupHistoryRemoved(ref receipt)
+                    if receipt.outcome_code == "local_history_deleted" && receipt.runtime_state == CleanupSurfaceState::Incomplete)
+                );
+            } else {
+                assert!(matches!(
+                    result,
+                    CoordinatorOutcome::CleanupRetryScheduled { .. }
+                ));
+            }
+            assert_eq!(
+                database
+                    .list_sessions(None, None)
+                    .await
+                    .unwrap()
+                    .sessions
+                    .is_empty(),
+                missing
+            );
+            assert_eq!(server.await.unwrap().len(), 2);
+            drop(application);
+            drop(database);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -4455,7 +4568,7 @@ mod tests {
         let operation_id = Uuid::now_v7();
         let pending = application
             .create_local_session(
-                Uuid::parse_str(&project.id).unwrap(),
+                Some(Uuid::parse_str(&project.id).unwrap()),
                 "S10P3 synthetic local-only canary".to_owned(),
                 operation_id,
                 projection.authorization_revision,

@@ -1,3 +1,24 @@
+.workflow-card-layout {
+  --workflow-visible-cards: 2;
+  --workflow-card-padding: var(--yj-space-5);
+}
+
+/* The 1268px window leaves 980px after the expanded sidebar and page padding. */
+@container workflow-page (min-width: 960px) {
+  .workflow-card-layout {
+    --workflow-visible-cards: 4;
+    --workflow-card-padding: var(--yj-space-4);
+  }
+}
+
+@container workflow-page (min-width: 1120px) {
+  .workflow-card-layout { --workflow-card-padding: var(--yj-space-5); }
+}
+
+@container workflow-page (max-width: 600px) {
+  .workflow-card-layout { --workflow-visible-cards: 1; }
+}
+
 .workflow-showcase-control {
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   color: var(--yj-color-text-primary);

@@ -73,6 +73,13 @@ const historyResponse = Object.freeze({
 });
 
 describe("private chat IPC v2 JSON Schema", () => {
+  it("accepts an explicit null project for new tasks while requiring the project field", () => {
+    const validate = validator("createSessionPayload");
+    const payload = { projectId: null, contentBlocks: [{type: "text", text: "无项目任务"}], operationId: imageAttachment.attachmentId };
+    expect(validate(payload)).toBe(true);
+    expect(validate({contentBlocks: payload.contentBlocks, operationId: payload.operationId})).toBe(false);
+  });
+
   it("accepts valid attachment and history instances", () => {
     expect(validator("attachment")(imageAttachment), JSON.stringify(validator("attachment").errors)).toBe(true);
     expect(
