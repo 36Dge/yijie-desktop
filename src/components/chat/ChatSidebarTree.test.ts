@@ -12,7 +12,7 @@ import ChatSidebarTree from "./ChatSidebarTree.vue";
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";
 
-async function mountTree() {
+async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => void) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useChatStore(pinia);
@@ -36,6 +36,7 @@ async function mountTree() {
     latestTurnStatus: "completed",
     projectAvailable: true,
   }];
+  prepare?.(store);
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: "/chat/:sessionId", component: { template: "<div />" } }],
@@ -187,33 +188,126 @@ describe("ChatSidebarTree", () => {
     expect(pin).toHaveBeenCalledWith(PROJECT_ID, true);
   });
 
-  it("keeps sessions from removed projects discoverable under the required fallback folder", async () => {
+  it("places all removed-project sessions at the top level after every directory, even when pinned or newest", async () => {
     const { wrapper, store } = await mountTree();
-    store.sessions = [...store.sessions, {
-      sessionId: "019c1a00-0000-7000-8000-000000000003",
-      projectId: "019c1a00-0000-7000-8000-000000000009",
-      title: "Removed Project Session",
-      titleSource: "fallback",
-      pinnedAt: null,
-      lastActivityAt: 1,
-      latestTurnStatus: "completed",
-      projectAvailable: false,
-    }];
+    const session = store.sessions[0]!;
+    store.sessions = [
+      { ...session, sessionId: "removed-pinned", projectId: "removed-a", title: "Removed Pinned", pinnedAt: 9, lastActivityAt: 100, projectAvailable: false },
+      session,
+      { ...session, sessionId: "managed", projectId: "managed", title: "Managed Session" },
+      { ...session, sessionId: "removed-b", projectId: "removed-b", title: "Removed B", projectAvailable: false },
+      { ...session, sessionId: "removed-a", projectId: "removed-a", title: "Removed A", projectAvailable: false },
+    ];
     await flushPromises();
 
-    expect(wrapper.findAll(".chat-tree__project")).toHaveLength(2);
-    expect(wrapper.text()).toContain("项目已移除");
-    expect(wrapper.text()).toContain("Removed Project Session");
-    expect(wrapper.find('[aria-label="项目 项目已移除 的操作菜单"]').exists()).toBe(false);
+    expect(wrapper.findAll(".chat-tree__project-name").map(row => row.text())).toEqual(["Synthetic Workspace", "任务目录"]);
+    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session .chat-tree__session-title").map(row => row.text())).toEqual([
+      "Removed Pinned", "Removed B", "Removed A",
+    ]);
+    expect(wrapper.findAll(".chat-tree__projects > li").map(row => row.classes()[0])).toEqual([
+      "chat-tree__project", "chat-tree__project", "chat-tree__session", "chat-tree__session", "chat-tree__session",
+    ]);
+    expect(wrapper.findAll(".chat-tree__session")).toHaveLength(5);
+    expect(wrapper.text()).not.toContain("项目已移除");
   });
 
-  it("uses an expandable project-first hierarchy and routes only from a conversation", async () => {
-    const { wrapper, router } = await mountTree();
-    const collapse = wrapper.get('[aria-label="折叠项目 Synthetic Workspace"]');
-    await collapse.trigger("click");
-    expect(wrapper.find(".chat-tree__session-link").exists()).toBe(false);
+  it("moves every session out of a collapsed directory after confirming removal", async () => {
+    const { wrapper, store } = await mountTree();
+    store.sessions = [...store.sessions, { ...store.sessions[0]!, sessionId: "second", title: "Second Session" }];
+    const removeProject = vi.spyOn(store, "removeProject").mockImplementation(async (projectId) => {
+      store.projects = store.projects.filter(project => project.projectId !== projectId);
+      store.sessions = store.sessions.map(session => session.projectId === projectId ? { ...session, projectAvailable: false } : session);
+    });
+    await wrapper.get('[aria-label="折叠项目 Synthetic Workspace"]').trigger("click");
+    wrapper.findComponent(NDropdown).vm.$emit("select", "remove");
+    await flushPromises();
+    expect(removeProject).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("历史任务将移至“任务记录”顶层末尾");
+    const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(button => button.textContent === "移除")!;
+    confirm.click();
+    await flushPromises();
 
-    await wrapper.get('[aria-label="展开项目 Synthetic Workspace"]').trigger("click");
+    expect(removeProject).toHaveBeenCalledWith(PROJECT_ID);
+    expect(wrapper.findAllComponents(NModal)[2].props("show")).toBe(false);
+    expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
+    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session")).toHaveLength(2);
+    expect(wrapper.get('[aria-current="page"]').text()).toContain("Synthetic Session");
+    expect(store.sessions.every(session => session.projectId === PROJECT_ID)).toBe(true);
+    expect(wrapper.text()).not.toContain("暂无任务记录");
+    expect(wrapper.text()).not.toContain("项目已移除");
+  });
+
+  it("restores previously removed history directly without folders or false empty/error states", async () => {
+    const { wrapper, store } = await mountTree(store => {
+      store.projects = [];
+      store.sessions = store.sessions.map(session => ({ ...session, projectAvailable: false }));
+    });
+    expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
+    expect(wrapper.findAll(".chat-tree__projects > .chat-tree__session")).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("暂无任务记录");
+
+    store.phase = "unavailable";
+    await flushPromises();
+    expect(wrapper.text()).toContain("任务记录更新失败，已显示上次读取内容");
+    expect(wrapper.text()).not.toContain("任务记录暂不可用");
+    expect(wrapper.text()).toContain("Synthetic Session");
+
+    store.phase = "ready";
+    store.sessions = [];
+    await flushPromises();
+    expect(wrapper.text()).toContain("暂无任务记录");
+  });
+
+  it("keeps paginated removed history last while retaining navigation and session actions", async () => {
+    const { wrapper, store, router } = await mountTree();
+    store.sessionsCursor = "next-page";
+    const loadMore = vi.spyOn(store, "loadMoreSessions").mockImplementation(async () => {
+      const session = store.sessions[0]!;
+      store.sessions = [...store.sessions,
+        { ...session, sessionId: "removed-page", projectId: "removed", title: "Removed Page", projectAvailable: false },
+        { ...session, sessionId: "managed-page", projectId: "managed", title: "Managed Page" },
+      ];
+      store.sessionsCursor = null;
+    });
+    await flushPromises();
+    await wrapper.get(".chat-tree__load-more").trigger("click");
+    await flushPromises();
+    expect(loadMore).toHaveBeenCalledOnce();
+    expect(wrapper.findAll(".chat-tree__projects > li").slice(-1)[0]!.text()).toContain("Removed Page");
+    expect(wrapper.find(".chat-tree__load-more").exists()).toBe(false);
+
+    await wrapper.get(".chat-tree__projects > .chat-tree__session .chat-tree__session-link").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/chat/removed-page");
+    await wrapper.setProps({ currentPath: router.currentRoute.value.path });
+    store.selectedSessionId = "removed-page";
+    const pin = vi.spyOn(store, "setSelectedPinned").mockResolvedValue();
+    const menu = wrapper.findAllComponents(NDropdown).slice(-1)[0]!;
+    expect(menu.props("options")!.filter(option => option.type !== "divider").map(option => option.label)).toEqual(["重命名", "置顶", "永久删除"]);
+    menu.vm.$emit("select", "pin");
+    await flushPromises();
+    expect(pin).toHaveBeenCalledWith(true);
+    expect(wrapper.get('[aria-current="page"]').text()).toContain("Removed Page");
+
+    store.context = { ...store.context!, allowedActions: ["read_sessions", "read_projects"] };
+    await flushPromises();
+    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(0);
+    expect(wrapper.get('[aria-current="page"]').text()).toContain("Removed Page");
+  });
+
+  it("toggles from the directory name and icon without a separate arrow or route change", async () => {
+    const { wrapper, router } = await mountTree();
+    const toggle = wrapper.get(".chat-tree__project-toggle");
+    expect(wrapper.find(".chat-tree__expand").exists()).toBe(false);
+    expect(toggle.element.tagName).toBe("BUTTON");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    await toggle.get(".chat-tree__project-name").trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".chat-tree__session-link").exists()).toBe(false);
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+
+    await toggle.get("svg").trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
     await wrapper.get(".chat-tree__session-link").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);

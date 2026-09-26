@@ -149,7 +149,7 @@
   --yj-layout-chat-entry-max: 760px;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
-  --yj-layout-chat-sidebar-indent: 28px;
+  --yj-layout-chat-sidebar-indent: var(--yj-space-0);
   --yj-layout-permission-menu-width: 380px;
   --yj-layout-permission-confirm-width: 420px;
 

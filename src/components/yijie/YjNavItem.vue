@@ -47,10 +47,10 @@ const accessibleLabel = computed(() =>
 <style scoped>
 .yj-nav-item {
   display: flex;
-  min-height: var(--yj-space-10);
+  min-height: var(--yj-nav-item-height, var(--yj-space-10));
   align-items: center;
   gap: var(--yj-space-3);
-  padding: var(--yj-space-2) var(--yj-space-3);
+  padding: var(--yj-nav-item-padding-block, var(--yj-space-2)) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-body);

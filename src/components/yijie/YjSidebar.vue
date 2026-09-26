@@ -188,7 +188,7 @@ function handleEntryClick(entry: AppNavEntry): void {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  padding: var(--yj-space-5) var(--yj-space-3) var(--yj-space-4);
+  padding: var(--yj-space-3) var(--yj-space-3) var(--yj-space-4);
 }
 
 .yj-sidebar__list {
@@ -201,6 +201,8 @@ function handleEntryClick(entry: AppNavEntry): void {
 }
 
 .yj-sidebar__list--main {
+  --yj-nav-item-height: var(--yj-control-height-md);
+  --yj-nav-item-padding-block: var(--yj-space-1);
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
@@ -217,7 +219,7 @@ function handleEntryClick(entry: AppNavEntry): void {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  margin-top: var(--yj-space-3);
+  margin-top: var(--yj-space-2);
 }
 
 .yj-sidebar__section {

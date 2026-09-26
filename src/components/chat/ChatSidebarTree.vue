@@ -3,9 +3,10 @@ import { computed, nextTick, ref, watch } from "vue";
 import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui";
 import { useRouter } from "vue-router";
 import type { ChatProject, ChatSession } from "../../domain/chat-ipc";
-import { turnStatusLabel } from "../../domain/chat-ui";
+import { buildChatSidebarHistory } from "../../domain/chat-sidebar-history";
 import { useChatStore } from "../../stores/chat.store";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 
 defineProps<{
   currentPath: string;
@@ -23,44 +24,17 @@ const actionError = ref<string | null>(null);
 let lastDialogTrigger: HTMLElement | null = null;
 let knownProjectIds = new Set<string>();
 
-interface ChatHistoryProjectGroup {
-  readonly projectId: string;
-  readonly project: ChatProject | null;
-  readonly label: string;
-  readonly sessions: readonly ChatSession[];
-}
-
-const historyGroups = computed<readonly ChatHistoryProjectGroup[]>(() => {
-  const grouped = new Map<string, ChatSession[]>();
-  for (const session of chatStore.sessions) {
-    const group = grouped.get(session.projectId) ?? [];
-    group.push(session);
-    grouped.set(session.projectId, group);
-  }
-  const availableProjectIds = new Set(chatStore.projects.map((project) => project.projectId));
-  const availableGroups = chatStore.projects.map((project) => ({
-    projectId: project.projectId,
-    project,
-    label: project.safeName,
-    sessions: grouped.get(project.projectId) ?? [],
-  }));
-  const removedGroups = [...grouped.entries()]
-    .filter(([projectId]) => !availableProjectIds.has(projectId))
-    .map(([projectId, sessions]) => ({
-      projectId,
-      project: null,
-      label: sessions.some(session => session.projectAvailable) ? "任务目录" : "项目已移除",
-      sessions,
-    }));
-  return [...availableGroups, ...removedGroups];
-});
+const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions));
+const historyGroups = computed(() => history.value.groups);
+const removedProjectSessions = computed(() => history.value.removedProjectSessions);
+const hasHistory = computed(() => historyGroups.value.length > 0 || removedProjectSessions.value.length > 0);
 const treeLoading = computed(() => chatStore.phase === "binding" || chatStore.phase === "loading");
 const treeError = computed(() => {
   if (chatStore.phase === "permission-denied" && !chatStore.hasAction("read_sessions")) {
     return "无权读取任务记录";
   }
   if (chatStore.phase === "resync-required") return "任务记录需要重新同步，请稍后重试";
-  if (chatStore.phase === "unavailable" && historyGroups.value.length === 0) {
+  if (chatStore.phase === "unavailable" && !hasHistory.value) {
     return "任务记录暂不可用，请稍后重试";
   }
   if (chatStore.phase === "unavailable") return "任务记录更新失败，已显示上次读取内容";
@@ -260,23 +234,22 @@ async function confirmRemoveProject(): Promise<void> {
     <p v-if="treeLoading" class="chat-tree__state" role="status">
       正在读取本地任务…
     </p>
-    <p v-else-if="historyGroups.length === 0 && !treeError" class="chat-tree__state">暂无任务记录</p>
+    <p v-else-if="!hasHistory && !treeError" class="chat-tree__state">暂无任务记录</p>
 
-    <ul v-else-if="historyGroups.length > 0" class="chat-tree__projects">
+    <ul v-else-if="hasHistory" class="chat-tree__projects">
       <li v-for="group in historyGroups" :key="group.projectId" class="chat-tree__project">
         <div class="chat-tree__project-row">
           <button
-            class="chat-tree__expand"
+            class="chat-tree__project-toggle"
             type="button"
             :aria-expanded="expandedProjectIds.has(group.projectId)"
             :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
             @click="toggleProject(group.projectId)"
           >
-            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'chevronDown' : 'chevronRight'" size="xs" />
+            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" />
+            <span class="chat-tree__project-name" :title="group.label">{{ group.label }}</span>
+            <YjIcon v-if="group.project?.pinnedAt !== null && group.project?.pinnedAt !== undefined" name="pin" size="xs" tone="muted" />
           </button>
-          <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" size="sm" tone="muted" />
-          <span class="chat-tree__project-name" :title="group.label">{{ group.label }}</span>
-          <YjIcon v-if="group.project?.pinnedAt !== null && group.project?.pinnedAt !== undefined" name="pin" size="xs" tone="muted" />
           <n-dropdown
             v-if="group.project && projectMenuOptions(group.project).length > 0"
             trigger="click"
@@ -297,41 +270,31 @@ async function confirmRemoveProject(): Promise<void> {
         </div>
 
         <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
-          <li v-for="session in group.sessions" :key="session.sessionId" class="chat-tree__session">
-            <button
-              class="chat-tree__session-link"
-              :class="{ 'chat-tree__session-link--active': currentPath === `/chat/${session.sessionId}` }"
-              type="button"
-              :aria-current="currentPath === `/chat/${session.sessionId}` ? 'page' : undefined"
-              @click="openSession(session)"
-            >
-              <span class="chat-tree__session-title">{{ session.title }}</span>
-              <span v-if="session.latestTurnStatus" class="chat-tree__session-status">
-                {{ turnStatusLabel(session.latestTurnStatus) }}
-              </span>
-            </button>
-            <YjIcon v-if="session.pinnedAt !== null" name="pin" size="xs" tone="muted" />
-            <n-dropdown
-              v-if="currentPath === `/chat/${session.sessionId}` && sessionMenuOptions(session).length > 0"
-              trigger="click"
-              placement="bottom-end"
-              :options="sessionMenuOptions(session)"
-              :disabled="actionPending"
-              @select="handleSessionAction(session, String($event))"
-            >
-              <button
-                class="chat-tree__more chat-tree__more--session"
-                type="button"
-                :aria-label="`任务 ${session.title} 的操作菜单`"
-                @click.stop="rememberTrigger"
-              >
-                <YjIcon name="more" size="sm" />
-              </button>
-            </n-dropdown>
-          </li>
+          <ChatSidebarSessionRow
+            v-for="session in group.sessions"
+            :key="session.sessionId"
+            :session="session"
+            :current-path="currentPath"
+            :options="sessionMenuOptions(session)"
+            :action-pending="actionPending"
+            @open="openSession"
+            @action="handleSessionAction"
+            @remember-trigger="rememberTrigger"
+          />
           <li v-if="group.sessions.length === 0" class="chat-tree__empty-session">暂无对话</li>
         </ul>
       </li>
+      <ChatSidebarSessionRow
+        v-for="session in removedProjectSessions"
+        :key="session.sessionId"
+        :session="session"
+        :current-path="currentPath"
+        :options="sessionMenuOptions(session)"
+        :action-pending="actionPending"
+        @open="openSession"
+        @action="handleSessionAction"
+        @remember-trigger="rememberTrigger"
+      />
     </ul>
 
     <button
@@ -381,7 +344,7 @@ async function confirmRemoveProject(): Promise<void> {
     >
       <n-card class="chat-tree__dialog" title="移除聊天项目？" role="alertdialog" aria-modal="true" :bordered="false">
         <p class="chat-tree__dialog-copy">
-          只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。
+          只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。历史任务将移至“任务记录”顶层末尾。
         </p>
         <div class="chat-tree__dialog-actions">
           <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>
@@ -413,8 +376,7 @@ async function confirmRemoveProject(): Promise<void> {
 
 .chat-tree__project + .chat-tree__project { margin-top: var(--yj-space-1); }
 
-.chat-tree__project-row,
-.chat-tree__session {
+.chat-tree__project-row {
   display: flex;
   min-width: 0;
   min-height: var(--yj-space-8);
@@ -423,10 +385,23 @@ async function confirmRemoveProject(): Promise<void> {
   border-radius: var(--yj-radius-md);
 }
 
-.chat-tree__project-row:hover,
-.chat-tree__session:hover { background: var(--yj-color-bg-subtle); }
+.chat-tree__project-row:hover { background: var(--yj-color-bg-subtle); }
 
-.chat-tree__expand,
+.chat-tree__project-toggle {
+  display: flex;
+  min-width: 0;
+  min-height: var(--yj-space-8);
+  flex: 1;
+  align-items: center;
+  gap: var(--yj-space-3);
+  padding: var(--yj-space-1) var(--yj-space-3);
+  border: 0;
+  border-radius: var(--yj-radius-sm);
+  color: var(--yj-color-text-primary);
+  background: transparent;
+  text-align: left;
+}
+
 .chat-tree__more {
   display: inline-flex;
   width: var(--yj-space-8);
@@ -443,14 +418,12 @@ async function confirmRemoveProject(): Promise<void> {
 
 .chat-tree__more { margin-left: auto; opacity: 0; }
 .chat-tree__project-row:hover .chat-tree__more,
-.chat-tree__session:hover .chat-tree__more,
 .chat-tree__more:focus-visible { opacity: 1; }
 
-.chat-tree__expand:hover,
+.chat-tree__project-toggle:hover,
 .chat-tree__more:hover { color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
-.chat-tree__expand:focus-visible,
+.chat-tree__project-toggle:focus-visible,
 .chat-tree__more:focus-visible,
-.chat-tree__session-link:focus-visible,
 .chat-tree__load-more:focus-visible,
 .chat-tree__dialog-button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 
@@ -466,32 +439,6 @@ async function confirmRemoveProject(): Promise<void> {
 }
 
 .chat-tree__sessions { padding: var(--yj-space-1) 0 var(--yj-space-2) var(--yj-space-6); }
-.chat-tree__session { padding-left: var(--yj-space-1); }
-
-.chat-tree__session-link {
-  display: flex;
-  min-width: 0;
-  min-height: var(--yj-space-8);
-  flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--yj-space-2);
-  padding: var(--yj-space-1) var(--yj-space-2);
-  border: 0;
-  border-radius: var(--yj-radius-sm);
-  color: var(--yj-color-text-primary);
-  background: transparent;
-  text-align: left;
-}
-
-.chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-bg-nav);
-  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
-}
-
-.chat-tree__session-link:hover { background: var(--yj-color-control-hover); }
-.chat-tree__session-link:active { background: var(--yj-color-control-pressed); }
-.chat-tree__session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-tree__session-status { flex: none; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 
 .chat-tree__state,
 .chat-tree__empty-session,
