@@ -33,7 +33,7 @@ it("uses the draft review slot for unclassified output without inventing its pha
     props: { turn, position: 0 },
     slots: { "structured-answer": ({ turnId }: { turnId: string }) => h("button", { "data-turn": turnId }, "查看本轮草案摘要") },
   });
-  await wrapper.get('[aria-expanded="false"]').trigger("click");
+  expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
   expect(wrapper.text()).toContain("草案以校验结果为准");
   expect(wrapper.text()).not.toContain('{"raw":"provider"}');
   expect(wrapper.get("[data-turn]").attributes("data-turn")).toBe(TURN_ID);
@@ -192,8 +192,8 @@ describe("ChatTurnGroup", () => {
         "chat-turn-group__item--final_answer",
         "chat-turn-group__item--unknown",
       ]);
-    expect(itemElements[0]?.text()).toContain("用户消息");
-    expect(itemElements[0]?.text()).toContain("用户内容");
+    expect(itemElements[0]?.text()).toBe("用户内容");
+    expect(itemElements[0]?.get("article").attributes("aria-label")).toBe("用户消息");
     expect(itemElements[1]?.text()).toContain("过程记录");
     expect(itemElements[2]?.text()).toContain("模型回答");
     expect(itemElements[2]?.text()).toContain("回答内容");

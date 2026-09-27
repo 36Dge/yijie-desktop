@@ -38,6 +38,7 @@
   --yj-color-bg-card: #ffffff;
   --yj-color-bg-elevated: #ffffff;
   --yj-color-bg-subtle: #ffffff;
+  --yj-color-chat-user-bg: #f2f2f2;
 
   --yj-color-border-subtle: #eceef0;
   --yj-color-border-default: #e2e5e8;
@@ -216,6 +217,7 @@
   --yj-color-bg-card: #25282b;
   --yj-color-bg-elevated: #2e3237;
   --yj-color-bg-subtle: #22262a;
+  --yj-color-chat-user-bg: var(--yj-color-control-hover);
 
   --yj-color-border-subtle: #30363d;
   --yj-color-border-default: #414850;

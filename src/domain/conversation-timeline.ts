@@ -474,7 +474,6 @@ function projectItem(
           ? projectReasoningContentBlock(identity, block)
           : projectContentBlock(identity, block)));
   const collapsible = presentation === "commentary" ||
-    presentation === "assistant_unclassified" ||
     (presentation === "reasoning" && contentBlocks.length > 0);
 
   const unfinished = item.status === "started" || item.status === "streaming";

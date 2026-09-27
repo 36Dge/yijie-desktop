@@ -39,6 +39,8 @@ const titleId = `${id}-title`;
 const statusId = `${id}-status`;
 const contentId = `${id}-content`;
 const busy = computed(() => props.item.busy === true);
+const isAnswer = computed(() => props.item.presentation === "final_answer" ||
+  props.item.presentation === "assistant_unclassified");
 const iconTone = computed(() => props.item.role === "system"
   ? "warning" as const
   : busy.value
@@ -62,15 +64,17 @@ function toggle(): void {
     :class="[
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
+      { 'chat-timeline-item-shell--answer': isAnswer },
     ]"
-    :aria-labelledby="titleId"
-    :aria-describedby="statusId"
+    :aria-label="item.role === 'user' ? label : undefined"
+    :aria-labelledby="item.role === 'user' ? undefined : titleId"
+    :aria-describedby="item.role === 'user' ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <p v-if="item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
+    <p v-if="item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
       {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整" }}；不代表执行失败。
     </p>
-    <header class="chat-timeline-item-shell__header">
+    <header v-if="item.role !== 'user'" class="chat-timeline-item-shell__header">
       <button
         v-if="collapsible"
         class="chat-timeline-item-shell__disclosure"
@@ -112,7 +116,7 @@ function toggle(): void {
       </div>
 
       <div
-        v-if="slots.actions"
+        v-if="slots.actions && !isAnswer"
         class="chat-timeline-item-shell__actions"
         role="group"
         :aria-label="`${label}操作`"
@@ -127,6 +131,24 @@ function toggle(): void {
       class="chat-timeline-item-shell__body"
     >
       <slot />
+    </div>
+
+    <div
+      v-if="isAnswer && slots.actions"
+      class="chat-timeline-item-shell__actions chat-timeline-item-shell__answer-actions"
+      role="group"
+      :aria-label="`${label}操作`"
+    >
+      <slot name="actions" />
+    </div>
+
+    <div
+      v-if="item.role === 'user' && slots.actions"
+      class="chat-timeline-item-shell__user-meta"
+      role="group"
+      :aria-label="`${label}操作`"
+    >
+      <slot name="actions" />
     </div>
   </article>
 </template>
@@ -146,8 +168,12 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell--user {
+  display: flex;
+  width: fit-content;
+  flex-direction: column;
+  align-items: flex-end;
   margin-inline-start: auto;
-  background: var(--yj-color-bg-subtle);
+  border: 0;
 }
 
 .chat-timeline-item-shell--assistant {
@@ -162,6 +188,16 @@ function toggle(): void {
 
 .chat-timeline-item-shell--active {
   border-color: var(--yj-color-info);
+}
+
+.chat-timeline-item-shell--answer {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-timeline-item-shell--answer .chat-timeline-item-shell__static-header {
+  padding: var(--yj-space-0) var(--yj-space-0) var(--yj-space-3);
 }
 
 .chat-timeline-item-shell__header {
@@ -201,7 +237,8 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell__disclosure:focus-visible,
-.chat-timeline-item-shell__actions :deep(:focus-visible) {
+.chat-timeline-item-shell__actions :deep(:focus-visible),
+.chat-timeline-item-shell__user-meta :deep(:focus-visible) {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
@@ -255,8 +292,56 @@ function toggle(): void {
   padding-inline: var(--yj-space-0);
 }
 
+.chat-timeline-item-shell--answer .chat-timeline-item-shell__body {
+  padding: var(--yj-space-0);
+}
+
+.chat-timeline-item-shell__answer-actions {
+  margin-block-start: var(--yj-space-3);
+  padding-inline-end: var(--yj-space-0);
+}
+
+.chat-timeline-item-shell--user .chat-timeline-item-shell__body {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--yj-space-3);
+  border-radius: var(--yj-radius-xl) var(--yj-radius-xl) 0 var(--yj-radius-xl);
+  background: var(--yj-color-chat-user-bg);
+}
+
+.chat-timeline-item-shell__user-meta {
+  display: flex;
+  min-width: 0;
+  min-height: var(--yj-space-8);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--yj-space-2);
+  padding-block-start: var(--yj-space-1);
+  color: var(--yj-color-text-tertiary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--yj-motion-fast) var(--yj-ease-standard);
+}
+
+.chat-timeline-item-shell--user:hover .chat-timeline-item-shell__user-meta,
+.chat-timeline-item-shell--user:focus-within .chat-timeline-item-shell__user-meta {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .chat-timeline-item-shell__user-meta {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chat-timeline-item-shell__disclosure {
+  .chat-timeline-item-shell__disclosure,
+  .chat-timeline-item-shell__user-meta {
     transition: none;
   }
 }

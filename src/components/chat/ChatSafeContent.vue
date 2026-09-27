@@ -9,7 +9,7 @@ import YjIcon from "../yijie/YjIcon.vue";
 
 type SafeInlineNode = Readonly<{
   key: string;
-  kind: "text" | "strong" | "emphasis" | "inline_code" | "inert_link";
+  kind: "text" | "strong" | "emphasis" | "strikethrough" | "inline_code" | "inert_link";
   text: string;
   destination: string | null;
 }>;
@@ -27,9 +27,18 @@ type SafeContentNode =
     }>
   | Readonly<{
       key: string;
+      kind: "heading";
+      level: number;
+      inlines: readonly SafeInlineNode[];
+    }>
+  | Readonly<{ key: string; kind: "rule" }>
+  | Readonly<{ key: string; kind: "quote"; text: string }>
+  | Readonly<{
+      key: string;
       kind: "list";
       ordered: boolean;
-      items: readonly SafeInlineGroup[];
+      start: number;
+      items: readonly Readonly<{ key: string; text: string }>[];
     }>
   | Readonly<{
       key: string;
@@ -118,6 +127,14 @@ function inlineNodes(source: string, keyBase: string, plain: boolean): readonly 
   }
 
   while (cursor < source.length) {
+    if (source[cursor] === "\\" && /[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/.test(source[cursor + 1] ?? "")) {
+      flushPlain(cursor);
+      append("text", source[cursor + 1]!);
+      cursor += 2;
+      plainStart = cursor;
+      continue;
+    }
+
     if (source[cursor] === "`") {
       const closing = source.indexOf("`", cursor + 1);
       if (closing > cursor + 1) {
@@ -129,19 +146,23 @@ function inlineNodes(source: string, keyBase: string, plain: boolean): readonly 
       }
     }
 
-    if (source.startsWith("**", cursor)) {
-      const closing = source.indexOf("**", cursor + 2);
+    const delimiter = source.startsWith("**", cursor) ? "**"
+      : source.startsWith("__", cursor) ? "__"
+      : source.startsWith("~~", cursor) ? "~~" : null;
+    if (delimiter) {
+      const closing = source.indexOf(delimiter, cursor + 2);
       if (closing > cursor + 2) {
         flushPlain(cursor);
-        append("strong", source.slice(cursor + 2, closing));
+        append(delimiter === "~~" ? "strikethrough" : "strong", source.slice(cursor + 2, closing));
         cursor = closing + 2;
         plainStart = cursor;
         continue;
       }
     }
 
-    if (source[cursor] === "*" && !source.startsWith("**", cursor)) {
-      const closing = source.indexOf("*", cursor + 1);
+    if ((source[cursor] === "*" && !source.startsWith("**", cursor)) ||
+        (source[cursor] === "_" && !source.startsWith("__", cursor) && !/[\p{L}\p{N}]/u.test(source[cursor - 1] ?? ""))) {
+      const closing = source.indexOf(source[cursor]!, cursor + 1);
       if (closing > cursor + 1) {
         flushPlain(cursor);
         append("emphasis", source.slice(cursor + 1, closing));
@@ -197,12 +218,26 @@ function isTableDelimiter(cells: readonly string[] | null): cells is readonly st
   return cells !== null && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
-function unorderedItem(line: string): string | null {
-  return line.match(/^ {0,3}[-+*]\s+(.+)$/)?.[1] ?? null;
+function heading(line: string): { level: number; text: string } | null {
+  const match = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$/);
+  return match ? { level: match[1]!.length, text: (match[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "") } : null;
 }
 
-function orderedItem(line: string): string | null {
-  return line.match(/^ {0,3}\d+[.)]\s+(.+)$/)?.[1] ?? null;
+function isRule(line: string): boolean {
+  return /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line);
+}
+
+function listMarker(line: string): { indent: number; width: number; ordered: boolean; start: number; text: string } | null {
+  const match = line.match(/^( {0,3})([-+*]|\d{1,9}[.)])([ \t]+)(.*)$/);
+  if (!match) return null;
+  const ordered = /^\d/.test(match[2]!);
+  return {
+    indent: match[1]!.length,
+    width: match[1]!.length + match[2]!.length + match[3]!.length,
+    ordered,
+    start: ordered ? parseInt(match[2]!, 10) : 1,
+    text: match[4]!,
+  };
 }
 
 function fenceLanguage(line: string): string | null | undefined {
@@ -228,7 +263,7 @@ function startsBlock(
   const line = lines[index] ?? "";
   if (line.trim().length === 0) return true;
   if (fenceLanguage(line) !== undefined && closingFenceIndexes[index] !== -1) return true;
-  if (unorderedItem(line) !== null || orderedItem(line) !== null) return true;
+  if (heading(line) || isRule(line) || /^ {0,3}>/.test(line) || listMarker(line)) return true;
   const header = tableCells(line);
   return header !== null && isTableDelimiter(tableCells(lines[index + 1] ?? ""));
 }
@@ -278,6 +313,40 @@ function markdownNodes(
       continue;
     }
 
+    const title = heading(line);
+    const underline = lines[index + 1]?.match(/^ {0,3}(=+|-+)[ \t]*$/);
+    if (title || (underline && !listMarker(line) && !/^ {0,3}>/.test(line))) {
+      const key = stableKey(keyBase, "heading", String(nodes.length));
+      nodes.push(Object.freeze({
+        key,
+        kind: "heading" as const,
+        level: title?.level ?? (underline![1]![0] === "=" ? 1 : 2),
+        inlines: inlineNodes(title?.text ?? line.trim(), key, false),
+      }));
+      index += title ? 1 : 2;
+      continue;
+    }
+
+    if (isRule(line)) {
+      nodes.push(Object.freeze({ key: stableKey(keyBase, "rule", String(nodes.length)), kind: "rule" as const }));
+      index += 1;
+      continue;
+    }
+
+    if (/^ {0,3}>/.test(line)) {
+      const quoted: string[] = [];
+      while (index < lines.length && /^ {0,3}>/.test(lines[index]!)) {
+        quoted.push(lines[index]!.replace(/^ {0,3}>[ \t]?/, ""));
+        index += 1;
+      }
+      nodes.push(Object.freeze({
+        key: stableKey(keyBase, "quote", String(nodes.length)),
+        kind: "quote" as const,
+        text: quoted.join("\n"),
+      }));
+      continue;
+    }
+
     const headerCells = tableCells(line);
     const delimiterCells = tableCells(lines[index + 1] ?? "");
     if (
@@ -311,24 +380,44 @@ function markdownNodes(
       continue;
     }
 
-    const unordered = unorderedItem(line);
-    const ordered = orderedItem(line);
-    if (unordered !== null || ordered !== null) {
-      const isOrdered = ordered !== null;
+    const firstMarker = listMarker(line);
+    if (firstMarker) {
       const key = stableKey(keyBase, "list", String(nodes.length));
-      const items: SafeInlineGroup[] = [];
+      const items: { key: string; text: string }[] = [];
       while (index < lines.length) {
-        const value = isOrdered
-          ? orderedItem(lines[index] ?? "")
-          : unorderedItem(lines[index] ?? "");
-        if (value === null) break;
-        items.push(inlineGroup(value, stableKey(key, "item", String(items.length)), false));
+        const marker = listMarker(lines[index]!);
+        if (!marker || marker.ordered !== firstMarker.ordered || marker.indent !== firstMarker.indent || isRule(lines[index]!)) break;
+        const body = [marker.text];
         index += 1;
+        while (index < lines.length) {
+          const nextLine = lines[index]!;
+          if (nextLine.trim().length === 0) {
+            let next = index + 1;
+            while (next < lines.length && lines[next]!.trim().length === 0) next += 1;
+            const following = lines[next] ?? "";
+            if (following.startsWith(" ".repeat(marker.width))) {
+              body.push("");
+              index = next;
+              continue;
+            }
+            const nextMarker = listMarker(following);
+            if (nextMarker?.indent === firstMarker.indent && nextMarker.ordered === firstMarker.ordered) index = next;
+            break;
+          }
+          if (nextLine.startsWith(" ".repeat(marker.width))) {
+            body.push(nextLine.slice(marker.width));
+          } else if (!startsBlock(lines, closingFenceIndexes, index)) {
+            body.push(nextLine);
+          } else break;
+          index += 1;
+        }
+        items.push(Object.freeze({ key: stableKey(key, "item", String(items.length)), text: body.join("\n") }));
       }
       nodes.push(Object.freeze({
         key,
         kind: "list" as const,
-        ordered: isOrdered,
+        ordered: firstMarker.ordered,
+        start: firstMarker.start,
         items: Object.freeze(items),
       }));
       continue;
@@ -343,7 +432,12 @@ function markdownNodes(
     const key = stableKey(keyBase, "paragraph", String(nodes.length));
     const literalFallback = paragraphLines.some((paragraphLine) =>
       fenceLanguage(paragraphLine) !== undefined);
-    const paragraphText = paragraphLines.join(literalFallback ? "\n" : " ");
+    const paragraphText = literalFallback ? paragraphLines.join("\n") : paragraphLines
+      .map((paragraphLine, lineIndex) => {
+        const hardBreak = /(?: {2,}|\\)$/.test(paragraphLine);
+        const content = hardBreak ? paragraphLine.replace(/(?: {2,}|\\)$/, "") : paragraphLine;
+        return content + (lineIndex < paragraphLines.length - 1 ? hardBreak ? "\n" : " " : "");
+      }).join("");
     nodes.push(Object.freeze({
       key,
       kind: "paragraph" as const,
@@ -392,6 +486,10 @@ function contentNodes(
 }
 
 const nodes = computed(() => contentNodes(props.blocks, props.mode));
+
+function nestedBlocks(node: { key: string; text: string }): readonly ConversationTimelineContentBlock[] {
+  return [{ identity: node.key, blockIndex: 0, type: "text", text: node.text }];
+}
 </script>
 
 <template>
@@ -402,6 +500,7 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
           <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
           <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
           <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
+          <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
           <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
             {{ inline.text }}（{{ inline.destination }}）
           </span>
@@ -409,33 +508,47 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
         </template>
       </p>
 
-      <ol v-else-if="node.kind === 'list' && node.ordered" class="chat-safe-content__list">
-        <li v-for="item in node.items" :key="item.key">
-          <template v-for="inline in item.inlines" :key="inline.key">
-            <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-            <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-            <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-            <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-              {{ inline.text }}（{{ inline.destination }}）
-            </span>
-            <span v-else>{{ inline.text }}</span>
-          </template>
-        </li>
-      </ol>
+      <component
+        :is="`h${node.level}`"
+        v-else-if="node.kind === 'heading'"
+        class="chat-safe-content__heading"
+      >
+        <template v-for="inline in node.inlines" :key="inline.key">
+          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
+          <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
+          <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
+          <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
+          <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
+            {{ inline.text }}（{{ inline.destination }}）
+          </span>
+          <span v-else>{{ inline.text }}</span>
+        </template>
+      </component>
 
-      <ul v-else-if="node.kind === 'list'" class="chat-safe-content__list">
-        <li v-for="item in node.items" :key="item.key">
-          <template v-for="inline in item.inlines" :key="inline.key">
-            <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-            <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-            <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-            <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-              {{ inline.text }}（{{ inline.destination }}）
-            </span>
-            <span v-else>{{ inline.text }}</span>
+      <hr v-else-if="node.kind === 'rule'" class="chat-safe-content__rule">
+
+      <blockquote v-else-if="node.kind === 'quote'" class="chat-safe-content__quote">
+        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich">
+          <template v-if="$slots['code-actions']" #code-actions="scope">
+            <slot name="code-actions" v-bind="scope" />
           </template>
+        </ChatSafeContent>
+      </blockquote>
+
+      <component
+        :is="node.ordered ? 'ol' : 'ul'"
+        v-else-if="node.kind === 'list'"
+        :start="node.ordered ? node.start : undefined"
+        class="chat-safe-content__list"
+      >
+        <li v-for="item in node.items" :key="item.key">
+          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich">
+            <template v-if="$slots['code-actions']" #code-actions="scope">
+              <slot name="code-actions" v-bind="scope" />
+            </template>
+          </ChatSafeContent>
         </li>
-      </ul>
+      </component>
 
       <div
         v-else-if="node.kind === 'code'"
@@ -480,6 +593,7 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
                   <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
                   <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
                   <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
+                  <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
                   <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
                     {{ inline.text }}（{{ inline.destination }}）
                   </span>
@@ -495,6 +609,7 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
                   <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
                   <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
                   <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
+                  <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
                   <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
                     {{ inline.text }}（{{ inline.destination }}）
                   </span>
@@ -547,6 +662,46 @@ const nodes = computed(() => contentNodes(props.blocks, props.mode));
 
 .chat-safe-content__paragraph {
   white-space: pre-wrap;
+}
+
+.chat-safe-content__heading {
+  margin: var(--yj-space-0);
+  font-size: var(--yj-font-size-body);
+  font-weight: var(--yj-font-weight-semibold);
+  line-height: var(--yj-line-height-body);
+}
+
+.chat-safe-content__heading:not(:first-child) {
+  margin-block-start: var(--yj-space-3);
+}
+
+h1.chat-safe-content__heading {
+  font-size: var(--yj-font-size-page-title);
+  line-height: var(--yj-line-height-page-title);
+}
+
+h2.chat-safe-content__heading {
+  font-size: var(--yj-font-size-section-title);
+  line-height: var(--yj-line-height-section-title);
+}
+
+h3.chat-safe-content__heading {
+  font-size: var(--yj-font-size-card-title);
+  line-height: var(--yj-line-height-card-title);
+}
+
+.chat-safe-content__rule {
+  width: 100%;
+  margin: var(--yj-space-2) var(--yj-space-0);
+  border: 0;
+  border-block-start: var(--yj-border-width) solid var(--yj-color-border-subtle);
+}
+
+.chat-safe-content__quote {
+  min-width: 0;
+  margin: var(--yj-space-0);
+  padding-inline-start: var(--yj-space-4);
+  border-inline-start: var(--yj-border-width) solid var(--yj-color-border-strong);
 }
 
 .chat-safe-content__list {

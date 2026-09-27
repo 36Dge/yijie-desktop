@@ -18,6 +18,7 @@ import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
+import { conversationMessageItemId } from "../../api/chat-conversation-adapter";
 import YjIcon from "../../components/yijie/YjIcon.vue";
 import { useChatScroll } from "../../composables/useChatScroll";
 import type {
@@ -191,6 +192,30 @@ const conversationTimeline = computed(() => {
         chatStore.conversationApprovalState,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       );
+});
+const userMessageTimes = computed(() => {
+  const times: Record<string, { datetime: string; label: string; title: string }> = {};
+  for (const turn of displayTurns.value) {
+    const messages = turn.messages.filter(message => message.role === "user");
+    // Use the local submission time only when this Turn has one unambiguous input.
+    // Native Items do not provide their own timestamps; never substitute the read time.
+    if (messages.length !== 1 || conversationTimeline.value?.turns
+      .find(candidate => candidate.turnId === turn.turnId)?.items
+      .filter(item => item.presentation === "user_message").length !== 1) continue;
+    const message = messages[0]!;
+    // Persisted history uses epoch seconds; the accepted in-memory placeholder uses milliseconds.
+    const timestamp = message.messageId === conversationMessageItemId(turn.turnId, "user")
+      ? message.createdAt
+      : message.createdAt * 1000;
+    const date = new Date(timestamp);
+    if (timestamp <= 0 || !Number.isFinite(date.getTime())) continue;
+    times[turn.turnId] = {
+      datetime: date.toISOString(),
+      label: date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }),
+      title: date.toLocaleString("zh-CN", { hour12: false }),
+    };
+  }
+  return times;
 });
 const draftLatestTurn = computed(() => {
   if (!routeSessionId.value) return null;
@@ -788,6 +813,11 @@ onBeforeUnmount(() => {
               </template>
             </template>
             <template #item-actions="{ item }">
+              <time
+                v-if="item.presentation === 'user_message' && userMessageTimes[item.turnId]"
+                :datetime="userMessageTimes[item.turnId]!.datetime"
+                :title="userMessageTimes[item.turnId]!.title"
+              >{{ userMessageTimes[item.turnId]!.label }}</time>
               <ChatCopyAction
                 v-if="itemCopyText(item)"
                 :adapter="browserChatClipboardAdapter"
@@ -1034,9 +1064,9 @@ onBeforeUnmount(() => {
 .chat-workspace__header-status--error { color: var(--yj-color-text-primary); background: var(--yj-color-error-soft); }
 
 .chat-workspace__conversation-wrap { position: relative; min-height: 0; }
-.chat-workspace__conversation { width: 100%; height: 100%; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: var(--yj-space-8); }
+.chat-workspace__conversation { width: 100%; height: 100%; padding-inline: var(--yj-space-8); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: var(--yj-space-8); }
 .chat-workspace__conversation:focus { outline: none; }
-.chat-workspace__column { display: flex; width: min(100%, var(--yj-layout-chat-column-max)); min-height: 100%; flex-direction: column; gap: var(--yj-space-5); padding: var(--yj-space-8); margin-inline: auto; }
+.chat-workspace__column { display: flex; width: min(100%, var(--yj-layout-chat-composer-max)); min-height: 100%; flex-direction: column; gap: var(--yj-space-5); padding-block: var(--yj-space-8); margin-inline: auto; }
 
 .chat-workspace__load-history {
   align-self: center;
@@ -1147,7 +1177,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1280px) {
   .chat-workspace__header,
-  .chat-workspace__column,
+  .chat-workspace__conversation,
   .chat-workspace__composer { padding-inline: var(--yj-space-6); }
 }
 

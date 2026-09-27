@@ -69,6 +69,9 @@ describe("ChatTimelineItemShell", () => {
     expect(wrapper.get(".chat-timeline-item-shell__status svg").attributes("aria-hidden"))
       .toBe("true");
     expect(wrapper.get("[role='group']").attributes("aria-label")).toBe("模型回答操作");
+    expect(wrapper.find("header button").exists()).toBe(false);
+    expect(wrapper.get(".chat-timeline-item-shell__body").element.nextElementSibling)
+      .toBe(wrapper.get(".chat-timeline-item-shell__answer-actions").element);
     expect(wrapper.emitted("disclosure-change")).toBeUndefined();
   });
 

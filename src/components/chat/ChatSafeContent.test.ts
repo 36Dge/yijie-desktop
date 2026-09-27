@@ -26,6 +26,65 @@ function textBlock(
 }
 
 describe("ChatSafeContent", () => {
+  it("renders answer sections, nested lists, quotes and explicit line breaks as Markdown", () => {
+    const wrapper = mount(ChatSafeContent, {
+      props: { blocks: [textBlock([
+        "# 老舍简介",
+        "老舍是中国现代作家。",
+        "## 生平简介 ##",
+        "- **早年经历**",
+        "  - 北京求学",
+        "  - 任教",
+        "- 创作经历",
+        "",
+        "### 阅读顺序",
+        "3. 骆驼祥子",
+        "4. 茶馆",
+        "",
+        "> **评价**",
+        ">",
+        "> - 语言朴实",
+        "> - 描写生动",
+        "",
+        "---",
+        "代表作品",
+        "--------",
+        "__小说__、_话剧_与~~旧说明~~。\\*字面星号\\*",
+        "",
+        "第一行  ",
+        "第二行",
+      ].join("\n"))] },
+    });
+
+    expect(wrapper.get("h1").text()).toBe("老舍简介");
+    expect(wrapper.findAll("h2").map(node => node.text())).toEqual(["生平简介", "代表作品"]);
+    expect(wrapper.get("h3").text()).toBe("阅读顺序");
+    expect(wrapper.findAll("ul ul > li").map(node => node.text())).toEqual(["北京求学", "任教"]);
+    expect(wrapper.get("ol").attributes("start")).toBe("3");
+    expect(wrapper.get("blockquote strong").text()).toBe("评价");
+    expect(wrapper.findAll("blockquote li")).toHaveLength(2);
+    expect(wrapper.findAll("hr")).toHaveLength(1);
+    expect(wrapper.get("del").text()).toBe("旧说明");
+    expect(wrapper.findAll("em").map(node => node.text())).toContain("话剧");
+    expect(wrapper.text()).toContain("*字面星号*");
+    const paragraphs = wrapper.findAll("p");
+    expect(paragraphs[paragraphs.length - 1]?.element.textContent).toBe("第一行\n第二行");
+  });
+
+  it("updates streamed headings without formatting the user's plain input or changing code", async () => {
+    const wrapper = mount(ChatSafeContent, { props: { blocks: [textBlock("## 生平")] } });
+    expect(wrapper.get("h2").text()).toBe("生平");
+    const text = "## 生平简介\n\n正文 **重点**\n\n```md\n## 原样代码\n```";
+    await wrapper.setProps({ blocks: [textBlock(text)] });
+    expect(wrapper.findAll("h2")).toHaveLength(1);
+    expect(wrapper.get("h2").text()).toBe("生平简介");
+    expect(wrapper.get("strong").text()).toBe("重点");
+    expect(wrapper.get("pre code").text()).toBe("## 原样代码");
+    await wrapper.setProps({ mode: "plain" });
+    expect(wrapper.find("h2, strong, pre").exists()).toBe(false);
+    expect(wrapper.element.textContent).toBe(text);
+  });
+
   it("renders the supported rich-text subset in source order without executable links", () => {
     const wrapper = mount(ChatSafeContent, {
       props: {

@@ -288,7 +288,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   >
     <header class="chat-turn-group__header">
       <h2 :id="headingId">第 {{ position }} 轮</h2>
-      <span class="chat-turn-group__status">
+      <span v-if="turn.domainStatus !== 'completed'" class="chat-turn-group__status">
         <YjIcon
           :name="turnStatusIcon(turn)"
           size="sm"
@@ -297,7 +297,6 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
         {{ turnStatusLabel(turn) }}
         <span v-if="turn.source === 'legacy_archive'"> · 旧版记录</span>
         <span v-else-if="turn.source === 'native_rebuilt'"> · 历史恢复，内容可能不完整</span>
-        <span v-else-if="turn.source === 'native_observed' && turn.availability !== 'available'"> · 显示内容不完整</span>
       </span>
     </header>
 
@@ -398,7 +397,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
           <ChatSafeContent
             v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
             :blocks="item.contentBlocks"
-            :mode="item.contentMode"
+            :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
           >
             <template
               v-if="slots['artifact-reference']"

@@ -125,8 +125,8 @@ describe("FEAT-134 conversation timeline selector", () => {
         presentation: "assistant_unclassified",
         role: "process",
         contentMode: "rich",
-        collapsible: true,
-        defaultExpanded: false,
+        collapsible: false,
+        defaultExpanded: true,
         copyPolicy: "text_and_code",
       },
       {
@@ -215,7 +215,7 @@ describe("FEAT-134 conversation timeline selector", () => {
     });
     expect(turn.items.find((item) => item.itemId === "unclassified")).toMatchObject({
       presentation: "assistant_unclassified",
-      collapsible: true,
+      collapsible: false,
       defaultExpanded: true,
     });
     expect(turn.items.find((item) => item.itemId === "reasoning")).toMatchObject({
@@ -253,7 +253,7 @@ describe("FEAT-134 conversation timeline selector", () => {
       assistantPhase: "unknown",
       presentation: "assistant_unclassified",
       role: "process",
-      collapsible: true,
+      collapsible: false,
     });
 
     const [itemKey, item] = Object.entries(state.items)[0]!;
