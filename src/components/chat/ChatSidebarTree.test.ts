@@ -71,7 +71,9 @@ describe("ChatSidebarTree", () => {
     const { wrapper } = await mountTree();
     expect(wrapper.text()).toContain("Synthetic Workspace");
     expect(wrapper.text()).toContain("Synthetic Session");
-    expect(wrapper.get('[aria-current="page"]').text()).toContain("Synthetic Session");
+    expect(wrapper.get('[aria-current="page"]').text()).toBe("Synthetic Session");
+    expect(wrapper.text()).not.toContain("已完成");
+    expect(wrapper.find(".chat-tree__more--session").exists()).toBe(false);
   });
 
   it("offers only pin/remove project and rename/pin/delete session actions", async () => {
@@ -98,7 +100,62 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).toContain("Background Session");
     expect(wrapper.findAllComponents(NDropdown)).toHaveLength(2);
     expect(wrapper.find('[aria-label="任务 Background Session 的操作菜单"]').exists()).toBe(false);
-    expect(wrapper.find('[aria-label="任务 Synthetic Session 的操作菜单"]').exists()).toBe(true);
+    const selected = wrapper.get('.chat-tree__session-link[aria-current="page"]');
+    const background = wrapper.findAll(".chat-tree__session-link").find(row => row.text() === "Background Session")!;
+    const menu = wrapper.findAllComponents(NDropdown)[1]!;
+    expect(selected.attributes("aria-haspopup")).toBe("menu");
+    expect(background.attributes("aria-haspopup")).toBeUndefined();
+    await background.trigger("contextmenu", { clientX: 40, clientY: 80 });
+    expect(menu.props("show")).toBe(false);
+    await selected.trigger("contextmenu", { clientX: 50, clientY: 90 });
+    expect(menu.props("show")).toBe(true);
+    expect(menu.props("x")).toBe(50);
+    expect(menu.props("y")).toBe(90);
+    expect(document.activeElement).toBe(selected.element);
+    menu.vm.$emit("clickoutside");
+    await flushPromises();
+    expect(menu.props("show")).toBe(false);
+  });
+
+  it("opens the session menu from the keyboard and restores focus after cancelling rename", async () => {
+    const { wrapper } = await mountTree();
+    const selected = wrapper.get('.chat-tree__session-link[aria-current="page"]');
+    const menu = wrapper.findAllComponents(NDropdown)[1]!;
+    await selected.trigger("keydown", { key: "F10", shiftKey: true });
+    expect(menu.props("show")).toBe(true);
+    await selected.trigger("keydown", { key: "Escape" });
+    expect(menu.props("show")).toBe(false);
+    await selected.trigger("keydown", { key: "ContextMenu" });
+    expect(menu.props("show")).toBe(true);
+    await selected.trigger("keydown", { key: "ArrowDown" });
+    await selected.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(menu.props("show")).toBe(false);
+    expect(wrapper.findAllComponents(NModal)[0]!.props("show")).toBe(true);
+    const cancel = [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === "取消")!;
+    cancel.click();
+    await flushPromises();
+    expect(wrapper.findAllComponents(NModal)[0]!.props("show")).toBe(false);
+    expect(document.activeElement).toBe(selected.element);
+    wrapper.unmount();
+  });
+
+  it("dismisses the session menu on navigation or permission changes", async () => {
+    const { wrapper, store } = await mountTree();
+    const selected = wrapper.get(".chat-tree__session-link");
+    await selected.trigger("contextmenu");
+    expect(selected.attributes("aria-expanded")).toBe("true");
+    await wrapper.setProps({ currentPath: "/chat/other" });
+    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(1);
+    await wrapper.setProps({ currentPath: `/chat/${SESSION_ID}` });
+    expect(selected.attributes("aria-expanded")).toBe("false");
+    await selected.trigger("contextmenu");
+    store.context = { ...store.context!, allowedActions: ["read_sessions", "read_projects"] };
+    await flushPromises();
+    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(0);
+    await selected.trigger("keydown", { key: "F10", shiftKey: true });
+    expect(selected.attributes("aria-expanded")).toBeUndefined();
+    wrapper.unmount();
   });
 
   it("keeps task.read-only history browsable without exposing mutation menus", async () => {
@@ -239,7 +296,7 @@ describe("ChatSidebarTree", () => {
     wrapper.findComponent(NDropdown).vm.$emit("select", "remove");
     await flushPromises();
     expect(removeProject).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("历史任务将移至“任务记录”顶层末尾");
+    expect(document.body.textContent).toContain("历史任务将移至“任务”顶层末尾");
     const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(button => button.textContent === "移除")!;
     confirm.click();
     await flushPromises();
@@ -328,7 +385,7 @@ describe("ChatSidebarTree", () => {
     await wrapper.get(".chat-tree__session-link").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
-    expect(wrapper.get(".chat-tree").attributes("aria-label")).toBe("任务记录：项目与对话");
+    expect(wrapper.get(".chat-tree").attributes("aria-label")).toBe("任务：项目与对话");
   });
 
   it("FEAT-130 keeps scrolling inside the history tree", () => {

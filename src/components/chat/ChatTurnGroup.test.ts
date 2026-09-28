@@ -202,7 +202,8 @@ describe("ChatTurnGroup", () => {
     expect(itemElements[3]?.text()).not.toContain("普通的未来类型占位内容");
 
     const section = wrapper.get("section");
-    expect(wrapper.get(`#${section.attributes("aria-labelledby")}`).text()).toBe("第 1 轮");
+    expect(section.attributes("aria-label")).toBe("对话 1");
+    expect(wrapper.find(".chat-turn-group__header").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__notices").element.parentElement).toBe(section.element);
     expect(wrapper.get(".chat-turn-group__notices").element)
       .not.toBe(wrapper.get(".chat-turn-group__items").element);

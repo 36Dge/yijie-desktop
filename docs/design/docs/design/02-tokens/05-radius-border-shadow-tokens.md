@@ -28,6 +28,7 @@
 | `radius-md` | 8px | 按钮、输入框 |
 | `radius-lg` | 12px | 卡片、表格容器 |
 | `radius-xl` | 16px | 弹窗、抽屉、重要容器 |
+| `radius-chat-composer` | 24px | 新任务首页与活跃会话的输入框；不改变普通表单 |
 | `radius-full` | 999px | 头像、圆形按钮、状态点 |
 
 ## 边框
@@ -48,6 +49,8 @@
 亮色页面、导航与卡片均为纯白；保持既有间距和圆角，通过留白与细边框区分区域，不新增灰底或绿灰底作为空间分层。
 
 ## 阴影
+
+2026-09-27 用户批准的局部例外：活跃会话底部输入框采用浅中性边框、24px 圆角及 `--yj-shadow-chat-composer` 轻投影，亮色为 `0 4px 16px rgba(37,40,43,0.05)`，暗色为 `0 4px 16px rgba(0,0,0,0.16)`。首页输入框圆角同步为 24px；两种 Chat Composer 的 hover/focus 均保持各自默认边框、背景与投影，不加深边框、不叠焦点外环。此例外不扩展到普通表单和卡片。
 
 - `shadow-xs` / `shadow-card`：兼容 token，值为 none；普通卡片与输入所有状态不加投影。
 - `shadow-popover`：Popover、Dropdown。

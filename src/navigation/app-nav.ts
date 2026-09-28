@@ -33,7 +33,6 @@ export interface AppNavSection {
   kind: "section";
   key: "taskHistory";
   label: string;
-  icon: YjIconName;
   placement: "main";
 }
 
@@ -98,8 +97,7 @@ export const APP_NAVIGATION = [
   {
     kind: "section",
     key: "taskHistory",
-    label: "任务记录",
-    icon: "taskHistory",
+    label: "任务",
     placement: "main",
   },
   {

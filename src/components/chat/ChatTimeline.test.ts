@@ -183,10 +183,10 @@ describe("ChatTimeline", () => {
     const turns = wrapper.findAll(".chat-timeline__turn");
 
     expect(turns).toHaveLength(2);
-    expect(turns[0]?.text()).toContain("第 1 轮");
+    expect(turns[0]?.text()).not.toContain("第 1 轮");
     expect(turns[0]?.text()).toContain("第一轮问题");
     expect(turns[0]?.text()).toContain("第一轮回答");
-    expect(turns[1]?.text()).toContain("第 2 轮");
+    expect(turns[1]?.text()).not.toContain("第 2 轮");
     expect(turns[1]?.text()).toContain("第二轮回答");
     expect(wrapper.get("section.chat-timeline").attributes("aria-label")).toBe("对话内容");
     expect(wrapper.get("section.chat-timeline").attributes("aria-busy")).toBe("false");

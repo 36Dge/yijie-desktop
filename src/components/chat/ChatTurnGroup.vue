@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useId } from "vue";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -58,8 +57,6 @@ const slots = defineSlots<{
     language: string | null;
   }): unknown;
 }>();
-
-const headingId = `${useId()}-heading`;
 
 function itemLabel(item: ConversationTimelineItemViewModel): string {
   switch (item.presentation) {
@@ -284,11 +281,10 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   <section
     class="chat-turn-group"
     :class="`chat-turn-group--${turn.phase}`"
-    :aria-labelledby="headingId"
+    :aria-label="`对话 ${position}`"
   >
-    <header class="chat-turn-group__header">
-      <h2 :id="headingId">第 {{ position }} 轮</h2>
-      <span v-if="turn.domainStatus !== 'completed'" class="chat-turn-group__status">
+    <header v-if="turn.domainStatus !== 'completed'" class="chat-turn-group__header">
+      <span class="chat-turn-group__status">
         <YjIcon
           :name="turnStatusIcon(turn)"
           size="sm"
@@ -478,16 +474,8 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   display: flex;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--yj-space-3);
-}
-
-.chat-turn-group__header h2 {
-  margin: var(--yj-space-0);
-  color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-caption);
-  font-weight: var(--yj-font-weight-semibold);
-  line-height: var(--yj-line-height-caption);
 }
 
 .chat-turn-group__status,

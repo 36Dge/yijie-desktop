@@ -76,7 +76,7 @@ describe("YjSidebar permission rendering", () => {
 
     expect(wrapper.text()).toContain("新建任务");
     expect(wrapper.text()).toContain("设置");
-    expect(wrapper.text()).not.toContain("任务记录");
+    expect(wrapper.find(".yj-sidebar__history-entry").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("我的店铺");
     expect(wrapper.text()).not.toContain("插件");
     expect(wrapper.find('[aria-label*="插件"]').exists()).toBe(false);
@@ -153,13 +153,14 @@ describe("YjSidebar permission rendering", () => {
       "定时任务",
       "插件",
       "资料库",
-      "任务记录",
+      "任务",
     ]);
     const history = wrapper.get(".yj-sidebar__history-entry");
-    expect(history.get('[role="heading"]').text()).toBe("任务记录");
+    expect(history.get('[role="heading"]').text()).toBe("任务");
+    expect(history.get('[role="heading"]').find("svg").exists()).toBe(false);
     expect(history.find("a").exists()).toBe(false);
-    expect(history.get('[aria-label="任务记录：项目与对话"]').attributes("aria-busy")).toBe("false");
-    expect(wrapper.findAll("a").some((link) => link.text().includes("任务记录"))).toBe(false);
+    expect(history.get('[aria-label="任务：项目与对话"]').attributes("aria-busy")).toBe("false");
+    expect(wrapper.findAll("a").some((link) => link.text() === "任务")).toBe(false);
   });
 
   it("hides task history in icon mode and preserves collapsed directories when restored", async () => {
@@ -169,6 +170,7 @@ describe("YjSidebar permission rendering", () => {
     const tree = wrapper.get(".chat-tree").element;
     await wrapper.setProps({ collapsed: true });
     expect(wrapper.get(".chat-tree").isVisible()).toBe(false);
+    expect(wrapper.get('[role="heading"]').isVisible()).toBe(false);
     expect(wrapper.find(".yj-sidebar--chat-tree").exists()).toBe(false);
     await wrapper.setProps({ collapsed: false });
     expect(wrapper.get(".chat-tree").element).toBe(tree);
@@ -183,7 +185,7 @@ describe("YjSidebar permission rendering", () => {
     const newTask = wrapper.findAll("a").find((link) => link.text().includes("新建任务"));
     expect(newTask?.attributes("aria-current")).toBeUndefined();
     expect(wrapper.get('.chat-tree__session-link[aria-current="page"]').text()).toContain("Synthetic Session");
-    expect(wrapper.get(".yj-sidebar__section--active").text()).toBe("任务记录");
+    expect(wrapper.get(".yj-sidebar__section--active").text()).toBe("任务");
   });
 
   it("FEAT-130 has no serious or critical axe violations in the expanded history shell", async () => {

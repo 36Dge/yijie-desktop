@@ -22,7 +22,7 @@ describe("app navigation", () => {
       "定时任务",
       "插件",
       "资料库",
-      "任务记录",
+      "任务",
       "设置",
     ]);
   });
@@ -48,7 +48,7 @@ describe("app navigation", () => {
       true,
     );
     const taskHistory = resolveAppNavigation(APP_NAVIGATION).find((entry) => entry.key === "taskHistory");
-    expect(taskHistory).toMatchObject({ kind: "section", label: "任务记录" });
+    expect(taskHistory).toMatchObject({ kind: "section", label: "任务" });
     expect(taskHistory && "to" in taskHistory).toBe(false);
     expect(taskHistory && "disabled" in taskHistory).toBe(false);
   });

@@ -118,6 +118,7 @@
   --yj-radius-md: 8px;
   --yj-radius-lg: 12px;
   --yj-radius-xl: 16px;
+  --yj-radius-chat-composer: 24px;
   --yj-radius-full: 999px;
   --yj-border-width: 1px;
 
@@ -125,6 +126,7 @@
   --yj-shadow-card: none;
   --yj-shadow-popover: 0 6px 20px rgba(37, 40, 43, 0.10);
   --yj-shadow-modal: var(--yj-shadow-popover);
+  --yj-shadow-chat-composer: 0 4px 16px rgba(37, 40, 43, 0.05);
 
   --yj-motion-fast: 120ms;
   --yj-motion-base: 180ms;
@@ -156,6 +158,9 @@
   --yj-layout-chat-entry-max: 760px;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
+  --yj-layout-chat-composer-fade: var(--yj-space-12);
+  --yj-z-chat-fade: 1;
+  --yj-z-chat-scroll-control: 2;
   --yj-layout-chat-sidebar-indent: var(--yj-space-0);
   --yj-layout-permission-menu-width: 340px;
   --yj-layout-permission-confirm-width: 420px;
@@ -182,6 +187,7 @@
   --yj-home-opening-face: #ffffff;
   --yj-home-opening-edge: #a5adb5;
   --yj-home-opening-shadow: rgba(0, 0, 0, .48);
+  --yj-shadow-chat-composer: 0 4px 16px rgba(0, 0, 0, 0.16);
   color-scheme: dark;
   --yj-brand-logo-light-display: none;
   --yj-brand-logo-dark-display: block;

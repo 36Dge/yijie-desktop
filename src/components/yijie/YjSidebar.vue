@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import type { AppNavEntry } from "../../navigation/app-nav";
 import ChatSidebarTree from "../chat/ChatSidebarTree.vue";
-import YjIcon from "./YjIcon.vue";
 import YjLogo from "./YjLogo.vue";
 import YjNavItem from "./YjNavItem.vue";
 
@@ -55,18 +54,15 @@ function handleEntryClick(entry: AppNavEntry): void {
         >
           <div
             v-if="entry.kind === 'section'"
+            v-show="!collapsed"
             class="yj-sidebar__section"
             :class="{
-              'yj-sidebar__section--collapsed': collapsed,
               'yj-sidebar__section--active': currentPath.startsWith('/chat/'),
             }"
             role="heading"
             aria-level="2"
-            :aria-label="collapsed ? entry.label : undefined"
-            :title="collapsed ? entry.label : undefined"
           >
-            <YjIcon :name="entry.icon" :tone="currentPath.startsWith('/chat/') ? 'primary' : 'default'" />
-            <span v-if="!collapsed" class="yj-sidebar__section-label">{{ entry.label }}</span>
+            <span class="yj-sidebar__section-label">{{ entry.label }}</span>
           </div>
           <YjNavItem
             v-else
@@ -186,11 +182,6 @@ function handleEntryClick(entry: AppNavEntry): void {
 
 .yj-sidebar__section--active {
   color: var(--yj-color-text-primary);
-}
-
-.yj-sidebar__section--collapsed {
-  justify-content: center;
-  padding-inline: var(--yj-space-2);
 }
 
 .yj-sidebar__section-label {

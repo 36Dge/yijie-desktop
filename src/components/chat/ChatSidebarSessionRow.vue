@@ -1,55 +1,89 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import { NDropdown, type DropdownOption } from "naive-ui";
 import type { ChatSession } from "../../domain/chat-ipc";
-import { turnStatusLabel } from "../../domain/chat-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 
-defineProps<{
+const props = defineProps<{
   session: ChatSession;
   currentPath: string;
   options: DropdownOption[];
   actionPending: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   open: [session: ChatSession];
   action: [session: ChatSession, key: string];
-  rememberTrigger: [event: MouseEvent];
+  rememberTrigger: [event: MouseEvent | KeyboardEvent];
 }>();
+
+const selected = computed(() => props.currentPath === `/chat/${props.session.sessionId}`);
+const hasMenu = computed(() => selected.value && props.options.length > 0);
+const menuVisible = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
+
+watch([selected, () => props.actionPending, () => props.options.map(option => option.key).join(",")], () => {
+  menuVisible.value = false;
+});
+
+function openMenu(event: MouseEvent | KeyboardEvent): void {
+  if (!hasMenu.value || props.actionPending) return;
+  event.preventDefault();
+  const trigger = event.currentTarget as HTMLButtonElement;
+  const bounds = trigger.getBoundingClientRect();
+  menuX.value = event instanceof MouseEvent ? event.clientX : bounds.left;
+  menuY.value = event instanceof MouseEvent ? event.clientY : bounds.bottom;
+  trigger.focus({ preventScroll: true });
+  emit("rememberTrigger", event);
+  menuVisible.value = true;
+}
+
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    openMenu(event);
+  } else if (menuVisible.value) {
+    // Let Naive UI handle menu navigation without activating the session button.
+    if (event.key === "Enter" || event.key === " ") event.preventDefault();
+    if (event.key === "Tab") menuVisible.value = false;
+  }
+}
+
+function selectAction(key: string | number): void {
+  menuVisible.value = false;
+  if (hasMenu.value && !props.actionPending) emit("action", props.session, String(key));
+}
 </script>
 
 <template>
   <li class="chat-tree__session">
     <button
       class="chat-tree__session-link"
-      :class="{ 'chat-tree__session-link--active': currentPath === `/chat/${session.sessionId}` }"
+      :class="{ 'chat-tree__session-link--active': selected }"
       type="button"
-      :aria-current="currentPath === `/chat/${session.sessionId}` ? 'page' : undefined"
+      :aria-current="selected ? 'page' : undefined"
+      :aria-haspopup="hasMenu ? 'menu' : undefined"
+      :aria-expanded="hasMenu ? menuVisible : undefined"
+      :aria-keyshortcuts="hasMenu ? 'Shift+F10' : undefined"
       @click="$emit('open', session)"
+      @contextmenu="openMenu"
+      @keydown="handleKeydown"
     >
       <span class="chat-tree__session-title">{{ session.title }}</span>
-      <span v-if="session.latestTurnStatus" class="chat-tree__session-status">
-        {{ turnStatusLabel(session.latestTurnStatus) }}
-      </span>
     </button>
     <YjIcon v-if="session.pinnedAt !== null" name="pin" size="xs" tone="muted" />
     <n-dropdown
-      v-if="currentPath === `/chat/${session.sessionId}` && options.length > 0"
-      trigger="click"
-      placement="bottom-end"
+      v-if="hasMenu"
+      v-model:show="menuVisible"
+      trigger="manual"
+      placement="bottom-start"
+      :x="menuX"
+      :y="menuY"
       :options="options"
       :disabled="actionPending"
-      @select="$emit('action', session, String($event))"
-    >
-      <button
-        class="chat-tree__more chat-tree__more--session"
-        type="button"
-        :aria-label="`任务 ${session.title} 的操作菜单`"
-        @click.stop="$emit('rememberTrigger', $event)"
-      >
-        <YjIcon name="more" size="sm" />
-      </button>
-    </n-dropdown>
+      @clickoutside="menuVisible = false"
+      @select="selectAction"
+    />
   </li>
 </template>
 
@@ -63,28 +97,11 @@ defineEmits<{
   padding-left: var(--yj-space-1);
   border-radius: var(--yj-radius-md);
 }
-.chat-tree__session:hover { background: var(--yj-color-bg-subtle); }
 
-.chat-tree__more {
-  display: inline-flex;
-  width: var(--yj-space-8);
-  height: var(--yj-space-8);
-  flex: 0 0 var(--yj-space-8);
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin-left: auto;
-  border: 0;
-  border-radius: var(--yj-radius-sm);
-  color: var(--yj-color-icon-muted);
-  background: transparent;
-  opacity: 0;
+.chat-tree__session-link:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: calc(var(--yj-space-1) * -1);
 }
-.chat-tree__session:hover .chat-tree__more,
-.chat-tree__more:focus-visible { opacity: 1; }
-.chat-tree__more:hover { color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); }
-.chat-tree__more:focus-visible,
-.chat-tree__session-link:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 
 .chat-tree__session-link {
   display: flex;
@@ -96,20 +113,13 @@ defineEmits<{
   gap: var(--yj-space-2);
   padding: var(--yj-space-1) var(--yj-space-2);
   border: 0;
-  border-radius: var(--yj-radius-sm);
+  border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   background: transparent;
   text-align: left;
 }
-.chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-bg-nav);
-  box-shadow: inset 3px 0 0 var(--yj-color-brand-primary);
-}
+.chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-control-hover); }
 .chat-tree__session-link:hover { background: var(--yj-color-control-hover); }
 .chat-tree__session-link:active { background: var(--yj-color-control-pressed); }
 .chat-tree__session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-tree__session-status { flex: none; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-tree__more { transition: none; }
-}
 </style>

@@ -120,7 +120,7 @@ async function ensureSelected(session: ChatSession): Promise<void> {
   if (chatStore.selectedSessionId !== session.sessionId) await chatStore.selectSession(session.sessionId);
 }
 
-function rememberTrigger(event: MouseEvent): void {
+function rememberTrigger(event: MouseEvent | KeyboardEvent): void {
   lastDialogTrigger = event.currentTarget as HTMLElement;
 }
 
@@ -228,7 +228,7 @@ async function confirmRemoveProject(): Promise<void> {
 </script>
 
 <template>
-  <section class="chat-tree" aria-label="任务记录：项目与对话" :aria-busy="treeLoading">
+  <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="treeLoading">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
     <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
     <p v-if="treeLoading" class="chat-tree__state" role="status">
@@ -246,7 +246,7 @@ async function confirmRemoveProject(): Promise<void> {
             :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
             @click="toggleProject(group.projectId)"
           >
-            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" />
+            <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" :stroke-width="1.5" />
             <span class="chat-tree__project-name" :title="group.label">{{ group.label }}</span>
             <YjIcon v-if="group.project?.pinnedAt !== null && group.project?.pinnedAt !== undefined" name="pin" size="xs" tone="muted" />
           </button>
@@ -344,7 +344,7 @@ async function confirmRemoveProject(): Promise<void> {
     >
       <n-card class="chat-tree__dialog" title="移除聊天项目？" role="alertdialog" aria-modal="true" :bordered="false">
         <p class="chat-tree__dialog-copy">
-          只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。历史任务将移至“任务记录”顶层末尾。
+          只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。历史任务将移至“任务”顶层末尾。
         </p>
         <div class="chat-tree__dialog-actions">
           <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>
