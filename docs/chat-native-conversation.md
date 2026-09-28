@@ -88,3 +88,24 @@ Native 以 scoped 本地 session/turn 查精确 Host session、Runtime thread/tu
 折叠仅接受明确的 commentary/reasoning/command/tool 和已知执行计划。final_answer、assistant_unclassified、用户输入、生成内容及未知类型保持可见，不按文本、顺序或 item/completed 猜阶段。待审批、决策核对/错误、异常或不完整项目保持在折叠控制之外，既有审批边界及安全内容投影不变。展开时保留原始条目顺序，用户中途追加输入不被过程分组吞入。
 
 终态/历史默认折叠，当前有效 liveObserved 运行轮次默认展开；未手动选择时终态自动收起。手动展开/收起或在过程区交互后保留用户选择，不被计时刷新、完整 view 替换或新增 Item 覆盖。触发器使用独立稳定键；条目通过可见性控制保留 DOM，避免打断选择和工具详情状态。分隔线仅覆盖内容列，样式复用 yijie tokens。
+
+
+## 日常入口缺少过程数据的排查与标题精简（2026-09-29）
+
+真实日常运行记录确认：截图对应轮次使用 MiniMax-M3、effort=none，原生只记录用户输入与一条 phase 缺省的助手正文，没有 reasoning、commentary 或工具调用，duration_ms=7882。运行中 Runtime 的启动参数同时包含 model_reasoning_effort=none 和 model_reasoning_summary=none；具体轮次的 summary 设置还可能沿用原生会话配置，不能仅凭全局参数判断当轮。
+
+Host 的普通 StartTurnV2 将未指定 effort 归一化为 none，日常 Desktop 请求未显式覆盖。已有 FEAT-134 high/raw 配置属于另一个受约束启动模式；启动器 --stable-api-only 分支才显式选择它，且与实验动态工具能力存在互斥检查。不能只改前端、修改本地运行数据或伪造过程文字来补齐未产生的历史输出。
+
+前一轮过程折叠功能验证使用合成的过程数据，没有证明日常模型入口已启用推理；本次补充真实链路排查，不把 UI 单测当作真实推理输出验收。若要日常入口实际生成推理过程，需要另行实施并验证相应的模型/Host 配置，不通过关闭既有互斥检查直接启用。
+
+本次 UI 精简隐藏 final_answer 和 assistant_unclassified 的助手图标与“模型回答”可见标题，保留无障碍名称、现有消息状态、正文、复制及异常提示。contract-impact=none：只调整前端可见标签；Desktop/API/Host 接口、推理配置和本地持久状态不变。
+
+## 日常推理输出接通（2026-09-29）
+
+`contract-impact = semantic`，部署配置权威为 Host `docs/native-daily-reasoning.md`。日常 sidecar 在真实 MiniMax、local/demo_fast、原生权限启用且不是合成测试环境时，显式传递 `YIJIE_NATIVE_REASONING_ENABLED=true`。Host 的已提交来源由 `contracts/scheduled-host-build.candidate.json` 固定。旧 FEAT-134 隔离模式的工具互斥不变，日常图片注册、原生审批和定时任务权限不变。
+
+Host 为新派发轮次选择已有 `high` effort，复用已有 `show_raw_agent_reasoning` 原生设置并开放既有 summary/content 投影；不增公共 wire、数据库、Tauri command 或 capability，不升级 Runtime。输入摘要保持原请求的归一化值，开关变更不会让既有 accepted operation 重试发生冲突或再次执行。
+
+前端继续依照原生 reasoning Item 与索引接收流式过程，运行时显示，结束后点击耗时展开或收起。普通模型回答仅显示正文及原有状态/复制操作，隐藏可见标题和助手图标。历史中从未产生的推理不会补造；模型未返回过程时仍只显示耗时。
+
+本地来源先固定，再通过 `pnpm tauri:demo-fast:app` 标准构建及正常退出/重开验证；只更新项目可复现开发产物，不覆盖已发布应用，不变更历史数据。真实运行结果另见本次验收记录。

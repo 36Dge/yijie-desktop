@@ -70,8 +70,8 @@ function toggle(): void {
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
       { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
     ]"
-    :aria-label="item.role === 'user' || plainProcess ? label : undefined"
-    :aria-labelledby="item.role === 'user' || plainProcess ? undefined : titleId"
+    :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
+    :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
     :aria-describedby="item.role === 'user' || plainProcess ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
@@ -104,7 +104,7 @@ function toggle(): void {
       </button>
 
       <div v-else class="chat-timeline-item-shell__static-header">
-        <span class="chat-timeline-item-shell__identity">
+        <span v-if="!isAnswer" class="chat-timeline-item-shell__identity">
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
@@ -205,6 +205,7 @@ function toggle(): void {
 }
 
 .chat-timeline-item-shell--answer .chat-timeline-item-shell__static-header {
+  grid-template-columns: minmax(0, 1fr);
   padding: var(--yj-space-0) var(--yj-space-0) var(--yj-space-3);
 }
 

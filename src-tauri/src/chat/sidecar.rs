@@ -253,6 +253,11 @@ impl SidecarConfig {
         skill_roots: Option<&SkillRoots>,
     ) -> Vec<(&'static str, String)> {
         let test_enabled = self.test_profile.is_some();
+        let native_reasoning = demo_fast
+            && self.minimax_provider_enabled
+            && super::runtime_permissions::enabled()
+            && !test_enabled
+            && !self.feat128_s10_profile;
         let mut values = vec![
             ("YIJIE_ENV", "local".to_owned()),
             ("YIJIE_AGENT_HOST_PORT", self.port.to_string()),
@@ -265,6 +270,10 @@ impl SidecarConfig {
                 test_enabled.to_string(),
             ),
             ("YIJIE_AGENT_HOST_V2_TITLE_ENABLED", "false".to_owned()),
+            (
+                "YIJIE_NATIVE_REASONING_ENABLED",
+                native_reasoning.to_string(),
+            ),
             ("YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED", "true".to_owned()),
             (
                 "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
@@ -1917,6 +1926,54 @@ mod tests {
                 Err(ChatError::InvalidConfiguration)
             );
         }
+    }
+
+    #[test]
+    fn native_daily_reasoning_uses_only_the_current_provider_environment() {
+        // Run with the canonical local permission environment. No executable,
+        // credential, permissions mutation, or child process is needed.
+        let permissions = super::super::runtime_permissions::enabled();
+        let config = SidecarConfig {
+            binary: PathBuf::from("/ordinary/host"),
+            host_home: PathBuf::from("/ordinary/home"),
+            port: 18080,
+            codex_binary: None,
+            codex_manifest: None,
+            codex_home: None,
+            test_profile: None,
+            artifact_v3_enabled: true,
+            feat134_streaming_enabled: false,
+            feat136_command_tool_items_enabled: false,
+            feat137_command_approval_enabled: false,
+            feat128_s10_profile: false,
+            minimax_provider_enabled: true,
+            image_generation_enabled: true,
+            minimax_api_key_file: Some(PathBuf::from("/ordinary/key-file")),
+            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
+            sorftime_proxy: None,
+        };
+        for demo in [false, true] {
+            let values = config.environment("native-check", None, None, demo, None);
+            assert!(values
+                .iter()
+                .any(|(key, value)| *key == "YIJIE_NATIVE_REASONING_ENABLED"
+                    && value == &(demo && permissions).to_string()));
+            assert!(!values.iter().any(|(key, _)| *key == FEAT134_STREAMING_ENV));
+            assert!(values.iter().any(|(key, value)| *key
+                == "YIJIE_AGENT_HOST_V2_RAW_REASONING_ENABLED"
+                && value == "false"));
+            assert!(values
+                .iter()
+                .any(|(key, value)| *key == FEAT128_IMAGE_GENERATION_ENV && value == "true"));
+        }
+        let no_provider = SidecarConfig {
+            minimax_provider_enabled: false,
+            ..config
+        };
+        assert!(no_provider
+            .environment("native-check", None, None, true, None)
+            .iter()
+            .any(|(key, value)| *key == "YIJIE_NATIVE_REASONING_ENABLED" && value == "false"));
     }
 
     #[test]

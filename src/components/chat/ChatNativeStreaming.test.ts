@@ -37,7 +37,11 @@ describe("FEAT-134 native streaming presentation", () => {
     const first = timeline(started, "turn");
     const wrapper = mount(ChatTimeline, {props: {timeline: first}});
     expect(first.turns[0]!.items[0]).toMatchObject({busy: true, domainStatus: "streaming", assistantPhase: phase ?? "unknown"});
-    expect(wrapper.text()).toContain(phase === "commentary" ? "处理过程" : "模型回答");
+    if (phase === "commentary") expect(wrapper.text()).toContain("处理过程");
+    else {
+      expect(wrapper.get("article").attributes("aria-label")).toBe("模型回答");
+      expect(wrapper.find(".chat-timeline-item-shell__identity").exists()).toBe(false);
+    }
     expect(wrapper.text()).not.toMatch(/未分类模型消息|未标注阶段/);
     expect(wrapper.get("article").attributes("aria-busy")).toBe("true");
 

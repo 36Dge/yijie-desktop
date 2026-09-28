@@ -37,7 +37,8 @@ it("uses the draft review slot for unclassified output without inventing its pha
   });
   expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
   expect(wrapper.text()).toContain("草案以校验结果为准");
-  expect(wrapper.text()).toContain("模型回答");
+  expect(wrapper.get("article").attributes("aria-label")).toBe("模型回答");
+  expect(wrapper.find(".chat-timeline-item-shell__identity").exists()).toBe(false);
   expect(wrapper.text()).not.toContain("未标注阶段");
   expect(wrapper.text()).not.toContain('{"raw":"provider"}');
   expect(wrapper.get("[data-turn]").attributes("data-turn")).toBe(TURN_ID);
@@ -200,7 +201,7 @@ describe("ChatTurnGroup", () => {
     expect(itemElements[0]?.get("article").attributes("aria-label")).toBe("用户消息");
     expect(itemElements[1]?.get("article").attributes("aria-label")).toBe("过程记录");
     expect(itemElements[1]?.isVisible()).toBe(false);
-    expect(itemElements[2]?.text()).toContain("模型回答");
+    expect(itemElements[2]?.get("article").attributes("aria-label")).toBe("模型回答");
     expect(itemElements[2]?.text()).toContain("回答内容");
     expect(itemElements[3]?.text()).toContain("此内容类型暂不支持");
     expect(itemElements[3]?.text()).toContain("unsupported_content");
@@ -419,7 +420,8 @@ describe("ChatTurnGroup", () => {
     expect(commentary.get(".chat-safe-content strong").text()).toBe("过程说明");
 
     const unclassified = wrapper.get(".chat-turn-group__item--assistant_unclassified");
-    expect(unclassified.text()).toContain("模型回答");
+    expect(unclassified.get("article").attributes("aria-label")).toBe("模型回答");
+    expect(unclassified.text()).not.toContain("模型回答");
     expect(unclassified.text()).not.toContain("未分类模型消息");
     expect(unclassified.text()).not.toContain("未将其视为最终回答");
     expect(unclassified.getComponent(ChatTimelineItemShell).props("icon")).toBe("assistant");

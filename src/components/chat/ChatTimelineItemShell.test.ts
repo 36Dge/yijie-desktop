@@ -64,7 +64,10 @@ describe("ChatTimelineItemShell", () => {
     expect(article.classes()).toContain("chat-timeline-item-shell--assistant");
     expect(article.classes()).toContain("chat-timeline-item-shell--complete");
     expect(article.attributes("aria-busy")).toBe("false");
-    expect(wrapper.get(`#${article.attributes("aria-labelledby")}`).text()).toBe("模型回答");
+    expect(article.attributes("aria-label")).toBe("模型回答");
+    expect(article.attributes("aria-labelledby")).toBeUndefined();
+    expect(wrapper.find(".chat-timeline-item-shell__identity").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("模型回答");
     expect(wrapper.get(`#${article.attributes("aria-describedby")}`).text()).toBe("已完成");
     expect(wrapper.get(".chat-timeline-item-shell__status svg").attributes("aria-hidden"))
       .toBe("true");
