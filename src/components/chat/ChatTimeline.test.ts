@@ -445,10 +445,10 @@ describe("ChatTimeline", () => {
     const reasoningShell = wrapper.findAllComponents(ChatTimelineItemShell)
       .find((shell) => shell.props("item").itemId === "reasoning");
     if (reasoningShell === undefined) throw new Error("fixture_missing_reasoning");
-    await reasoningShell.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     await wrapper.vm.$nextTick();
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
-      itemIdentity: reasoningItem.identity,
+      itemIdentity: timeline.turns.find(turn => turn.items.some(item => item.identity === reasoningItem.identity))!.identity,
       expanded: true,
     });
   });
@@ -514,8 +514,8 @@ describe("ChatTimeline", () => {
     function disclosureFor(itemId: string): HTMLButtonElement {
       const shell = wrapper.findAllComponents(ChatTimelineItemShell)
         .find((candidate) => candidate.props("item").itemId === itemId);
-      const disclosure = shell?.element.querySelector(
-        ".chat-timeline-item-shell__disclosure",
+      const disclosure = shell?.element.closest(".chat-turn-group")?.querySelector(
+        ".chat-turn-group__process-toggle",
       ) as HTMLButtonElement | null | undefined;
       if (disclosure === null || disclosure === undefined) {
         throw new Error("fixture_missing_disclosure");

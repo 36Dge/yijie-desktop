@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-turn-timing-v1.schema.json",
+  "description": "Additive read-only Desktop IPC, using the existing read_sessions permission and pinned native timing contract. No persistence or Runtime lifecycle effects.",
+  "x-yijie-command": "chat_read_turn_timing_v1",
+  "$defs": {
+    "TurnTimingRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/CanonicalID" },
+        "turnId": { "$ref": "#/$defs/CanonicalID" }
+      }
+    },
+    "TurnTimingView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "turnId", "timing"],
+      "properties": {
+        "sessionId": { "$ref": "#/$defs/CanonicalID" },
+        "turnId": { "$ref": "#/$defs/CanonicalID" },
+        "timing": { "anyOf": [{ "$ref": "#/$defs/NativeTurnTiming" }, { "type": "null" }] }
+      }
+    }
+  },
+  "x-yijie-imports": ["../../contracts/native-turn-timing.schema.json"]
+}

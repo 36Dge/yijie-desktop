@@ -6,7 +6,7 @@ import type { ConversationNativeToolExecution } from "../../domain/conversation-
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import ChatTimelineItemShell, { type ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution }>();
+const props = defineProps<{ item: ConversationTimelineItemViewModel; execution: ConversationNativeToolExecution; processPresentation?: boolean }>();
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const native = computed(() => props.execution.native.item);
 const mcp = computed(() => native.value.mcp);
@@ -45,10 +45,11 @@ const diagnosticLabels = {
 
 <template>
   <ChatTimelineItemShell
+    :process-presentation="processPresentation"
     :item="item" label="工具调用" :status-label="status" icon="skillOperations"
     :status-icon="item.busy ? 'pending' : execution.status === 'completed' ? 'check' : 'warning'"
     :status-tone="item.busy ? 'primary' : execution.status === 'completed' ? 'success' : 'muted'"
-    collapsible :default-expanded="item.busy"
+    collapsible :default-expanded="processPresentation ? false : item.busy"
     @disclosure-change="emit('disclosure-change', $event)"
   >
     <div class="native-tool" :aria-busy="item.busy">

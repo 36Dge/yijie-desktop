@@ -1,3 +1,5 @@
+import type { TurnTimingView } from "./generated/chat-turn-timing.gen";
+import { validateTurnTimingView } from "./generated/chat-turn-timing-validator.gen.js";
 import { type SessionPurposeView } from "../domain/chat-session-purpose.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen,type UnlistenFn } from "@tauri-apps/api/event";
@@ -106,6 +108,7 @@ export interface ChatInvalidEventScope {
 }
 
 export interface ChatClient {
+  readTurnTiming(contextId: string, sessionId: string, turnId: string, signal?: AbortSignal): Promise<TurnTimingView>;
   loadNativeHistory(contextId: string, sessionId: string, turnIds: readonly string[], signal?: AbortSignal): Promise<NativeConversationHistory>;
   onNativeView(handler: (event: NativeConversationViewEvent) => void, onInvalid?: (scope?: ChatInvalidEventScope | null) => void): Promise<UnlistenFn>;
 
@@ -603,6 +606,14 @@ export function createChatClient(transport: ChatClientTransport = productionTran
     },
     listSessions: (contextId, cursor, limit, signal) =>
       runRead("chat_list_sessions_v1", contextId, { cursor, limit }, parseSessionPageResponse, signal),
+    readTurnTiming: (contextId, sessionId, turnId, signal) =>
+      runRead("chat_read_turn_timing_v1", contextId, { sessionId, turnId }, value => {
+        if (typeof value !== "object" || value === null || !("schemaVersion" in value) || value.schemaVersion !== 1 ||
+            !("data" in value) || !validateTurnTimingView(value.data) || value.data.sessionId !== sessionId || value.data.turnId !== turnId) {
+          throw new ChatContractError();
+        }
+        return value.data;
+      }, signal),
     getSessionPurpose: (contextId, sessionId, signal) =>
       runRead("chat_get_session_purpose_v1", contextId, { sessionId }, value => {
         const result = parseSessionPurposeResponse(value);

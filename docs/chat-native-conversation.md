@@ -14,7 +14,9 @@
 
 Contracts 已固定 6f632f155eacdaf93df0e0b00b5dab9e369c5442；Host 已固定 9e9d317f7e4ecff5f8aeec94fa467f9bede32139。原生来源使用 native-conversation.lock.json，FEAT-152 既有整体 Host 来源校验保留并更新真实 SHA/digest。canonical runner 强制原生 committed pin，未放宽来源或权限门禁。本次独立授权累计上限25次文本、3次图片；D4实际使用19次文本、1次图片。
 
-固定Runtime可能缺少phase或部分冷历史，界面保留未分类/不完整提示。Host当前只传递Command输出的pending-final提示，原生completed后整体安全投影最终正文，不提供逐字流式Command输出。图片动态工具保留安全unknown展示，Artifact资源独立支持预览、保存与重开。
+固定Runtime可能缺少phase或部分冷历史。2026-09-29 起，单纯缺少可识别phase的正文以普通“模型回答”展示，不再显示未分类警告；内部phase未知及原始记录保持不变，真实内容不完整提示继续保留。Host当前只传递Command输出的pending-final提示，原生completed后整体安全投影最终正文，不提供逐字流式Command输出。图片动态工具保留安全unknown展示，Artifact资源独立支持预览、保存与重开。
+
+本次阶段兼容调整的 `contract-impact = none`：只修改 Desktop 标签、图标及说明文字；Desktop/API/Agent Host 跨进程协议、原生phase、消息/轮次终态、权限保护、本地持久状态及重放格式均无变化。
 
 隔离源码验证可通过 canonical runner 的 `YIJIE_DEMO_FAST_RUNTIME_ROOT` / `YIJIE_DEMO_FAST_PROVIDER_KEY_FILE` 指向同一份已有 Runtime 产物和凭据文件，不复制密钥、不替换产物。两者必须绝对路径，原有 binary/manifest SHA-256、普通文件、非符号链接和 Native owner-only 校验保持；默认路径不变。
 
@@ -64,3 +66,25 @@ FEAT-144 canonical 首次启动发现并修正：固定 Runtime 的 `config/read
 新增独立native-thread-status读取使用Contracts生成DTO，Host直接调用原生thread/read(includeTurns=false)。旧native-thread响应、history格式、SQLCipher表及唯一缓冲均不变。只有本地queued、无原生Turn绑定、同scope/session/operation的失败出站且无可调度出站，结合精确原生idle或notLoaded，才允许保留旧记录并打开新任务。notLoaded仅说明当前Runtime未加载，绝不表示旧请求未执行或已完成。active/systemError/未知/缺失/读取失败或任何原生Turn绑定仍阻断。没有原生状态的新Host接口不能回退成历史猜测。
 
 这个状态读取不resume、不启动MCP、不授予原生verified scope、不写入事实或权限。旧任务仍不能自动续跑；未启用Sorftime的既有权限恢复路径保持原样。新HTTP操作遵守provider-first，实际Contracts→Host→Desktop pin按依赖固定；旧reader与schema15最低回滚基线不因临时状态DTO升级。
+
+
+## 每轮原生耗时（2026-09-29）
+
+`contract-impact = additive`：仅增加 Desktop 私有只读 `chat_read_turn_timing_v1`，源为 `src-tauri/schemas/chat-turn-timing-v1.schema.json`。沿用 `read_sessions` 权限和现有 Host 连接，不启动、恢复或发送 Runtime Turn，不新增 capability、依赖、持久化表或重放字段；现有 IPC 响应不变。旧 Desktop 忽略新增 command，新 Desktop 遇到不支持的 Host 或未知计时数据时省略耗时，不影响正文/执行。回滚只需回滚代码，不做数据库降级。
+
+复用 Contracts `54be9314dce5319b049dc0a236800fd1a1fdd7a1` 的既有 `native-turn-timing` 契约与 `contracts/native-turn-timing.candidate.json` 固定来源。Rust 直接使用既有生成的 `schedules::timing_generated::NativeTurnTiming`；新增 TS 类型/校验器由同一份已固定 schema 生成。公共 wire 变更 N/A：继续调用既有 `GET /v1/agent-sessions/{session}/turns/{turn}/timing`，未修改 Contracts、Host 或 Codex。生成/漂移检查纳入 `generate:native` / `check:native`。
+
+来源检查确认 `yijie-codex/codex-rs/core/src/turn_timing.rs` 已有 `TurnTimingState`：开始时记录 Unix 时间和单调时钟，完成时产生 `completedAt` 与 `durationMs`；后者为整轮经过时间，包含等待，不是模型推理时间或工具耗时求和。Host 已通过稳定 `thread/read` 暴露这些事实，定时任务已有使用，本次仅把它们接到普通对话。
+
+Native 以 scoped 本地 session/turn 查精确 Host session、Runtime thread/turn 绑定；读取前后均验证权限和绑定，删除中的会话不返回计时。UI 只在当前有效订阅的活跃轮次依据原生 `started_at` 刷新“已处理 N秒”，完成/失败/中断后使用原生 `duration_ms` 显示“用时 N秒”，取整与 Codex CLI 一致。绝不以计时结果推断 phase、终态或业务成功，也不以本地发送时间、消息到达时间或两个秒级时间戳相减替代最终耗时。
+
+读取按生命周期键去重，最多两路并发；数据暂缺最多三次有限读取（重试间隔 1秒、2秒），结束状态触发重新读取，秒数刷新仅在前端显示层执行，无每秒 IPC/Host 轮询。切换会话/权限失效/卸载取消请求并隔离迟到结果。原生零值保留；unknown、invalid、旧记录无计时或临时读取失败都不伪造 0秒，不影响正常正文阅读。所有计时事实只保留在当前页面内存。
+
+
+## 整轮过程展开（2026-09-29）
+
+`contract-impact = none`：在上一版计时接口上，仅增加 Desktop 的整轮展示状态；不新增接口、请求、持久化或重放规则，不改 Codex/Host。耗时行有可折叠过程时成为按钮，没有耗时可用时回退“处理过程”；无过程时保留普通耗时文字，不制造空入口。
+
+折叠仅接受明确的 commentary/reasoning/command/tool 和已知执行计划。final_answer、assistant_unclassified、用户输入、生成内容及未知类型保持可见，不按文本、顺序或 item/completed 猜阶段。待审批、决策核对/错误、异常或不完整项目保持在折叠控制之外，既有审批边界及安全内容投影不变。展开时保留原始条目顺序，用户中途追加输入不被过程分组吞入。
+
+终态/历史默认折叠，当前有效 liveObserved 运行轮次默认展开；未手动选择时终态自动收起。手动展开/收起或在过程区交互后保留用户选择，不被计时刷新、完整 view 替换或新增 Item 覆盖。触发器使用独立稳定键；条目通过可见性控制保留 DOM，避免打断选择和工具详情状态。分隔线仅覆盖内容列，样式复用 yijie tokens。

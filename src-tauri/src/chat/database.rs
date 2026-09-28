@@ -8742,6 +8742,51 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_turn_timing_target_is_read_only_scoped_and_deleted_with_session() {
+        let root = std::env::temp_dir().join(format!("ordinary-timing-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repo = open_repository(&root, 49);
+        let project = register_synthetic_project(&mut repo, &root);
+        let chat = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        assert!(repo
+            .turn_timing_target(chat.session_id, chat.turn_id)
+            .unwrap()
+            .is_none());
+        let now = unix_seconds().unwrap();
+        bind_and_accept_first_turn(&mut repo, &chat, now);
+        let before = repo.connection.total_changes();
+        assert!(repo
+            .turn_timing_target(chat.session_id, chat.turn_id)
+            .unwrap()
+            .is_some());
+        assert!(repo
+            .turn_timing_target(chat.session_id, Uuid::now_v7())
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repo.connection.total_changes(),
+            before,
+            "timing lookup must not write"
+        );
+        let owner = repo.scope.clone();
+        repo.scope = scope();
+        assert!(repo
+            .turn_timing_target(chat.session_id, chat.turn_id)
+            .is_err());
+        repo.scope = owner;
+        repo.begin_session_deletion(chat.session_id, Uuid::now_v7(), now)
+            .unwrap();
+        assert_eq!(
+            repo.turn_timing_target(chat.session_id, chat.turn_id),
+            Err(ChatError::NotFound)
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn cancelled_queue_cleanup_remains_compatible_with_base_schema() {
         let root = std::env::temp_dir().join(format!("cancelled-cleanup-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();

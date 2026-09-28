@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { NativeConversationView } from "../../api/generated/native-conversation-private.gen";
 import { composeConversationView, type ConversationSnapshot } from "../../domain/conversation-view";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
+import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import ChatTimeline from "./ChatTimeline.vue";
 
 const archive: ConversationSnapshot = {
@@ -28,6 +29,36 @@ function frozen<T>(value: T): T {
 }
 
 describe("FEAT-134 native streaming presentation", () => {
+  it.each([undefined, "final_answer", "commentary"] as const)("follows CLI phase %s handling while keeping Item and Turn completion separate", async phase => {
+    const started = frozen(native({availability: "available", items: [{
+      ordinal: 0, lastMethod: "item/started",
+      item: {id: "answer", type: "agentMessage", text: "**原始正文**", availability: "available", ...(phase ? {phase} : {})},
+    }]}));
+    const first = timeline(started, "turn");
+    const wrapper = mount(ChatTimeline, {props: {timeline: first}});
+    expect(first.turns[0]!.items[0]).toMatchObject({busy: true, domainStatus: "streaming", assistantPhase: phase ?? "unknown"});
+    expect(wrapper.text()).toContain(phase === "commentary" ? "处理过程" : "模型回答");
+    expect(wrapper.text()).not.toMatch(/未分类模型消息|未标注阶段/);
+    expect(wrapper.get("article").attributes("aria-busy")).toBe("true");
+
+    const messageCompleted = {...started, revision: "2", items: started.items.map(entry => ({...entry, lastMethod: "item/completed" as const}))};
+    const messageDone = timeline(messageCompleted, "turn");
+    await wrapper.setProps({timeline: messageDone});
+    expect(messageDone.turns[0]).toMatchObject({domainStatus: "in_progress", terminalStatus: null, progress: {phase: "active"}});
+    expect(messageDone.turns[0]!.items[0]).toMatchObject({busy: false, domainStatus: "completed", assistantPhase: phase ?? "unknown"});
+    expect(copyableTimelineItemText(messageDone.turns[0]!.items[0]!)).toBe("**原始正文**");
+    expect(wrapper.get(".chat-turn-group__progress").text()).toContain("本轮正在处理中");
+
+    const turnDone = timeline({...messageCompleted, revision: "3", status: "completed", terminalObserved: true}, "turn");
+    await wrapper.setProps({timeline: turnDone});
+    expect(turnDone.turns[0]).toMatchObject({domainStatus: "completed", terminalStatus: "completed", progress: null});
+    expect(turnDone.turns[0]!.items[0]!.assistantPhase).toBe(phase ?? "unknown");
+    expect(wrapper.find(".chat-turn-group__progress").exists()).toBe(false);
+    expect(started.items[0]!.item.phase).toBe(phase);
+    expect(started.terminalObserved).toBe(false);
+    wrapper.unmount();
+  });
+
   it("keeps raw segment identity and DOM when a summary is inserted", async () => {
     const view = frozen(native());
     const before = timeline(view, "turn");
@@ -50,7 +81,7 @@ describe("FEAT-134 native streaming presentation", () => {
     const view = native({status: "completed", terminalObserved: true, items: [{ordinal: 0, lastMethod: "item/completed",
       item: {id: "reasoning", type: "reasoning", summary: ["只有摘要"], content: [], availability: "available"}}]});
     const wrapper = mount(ChatTimeline, {props: {timeline: timeline(view)}});
-    await wrapper.get(".chat-timeline-item-shell__disclosure").trigger("click");
+    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     expect(wrapper.text()).toContain("仅提供推理摘要，未提供原始模型推理正文");
     expect(wrapper.find('[aria-label="模型推理记录"]').exists()).toBe(false);
     expect(wrapper.get('[aria-label="推理摘要"]').text()).toContain("只有摘要");

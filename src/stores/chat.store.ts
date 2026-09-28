@@ -3306,6 +3306,17 @@ export function createChatStoreDefinition(
       }
     }
 
+    async function readTurnTiming(turnId: string, signal: AbortSignal) {
+      const bound = context.value;
+      const sessionId = selectedSessionId.value;
+      const epoch = selectionEpoch;
+      if (!bound || !sessionId || !hasAction("read_sessions") || signal.aborted) return null;
+      const view = await client.readTurnTiming(bound.contextId, sessionId, turnId, signal);
+      if (signal.aborted || selectionEpoch !== epoch || context.value?.contextId !== bound.contextId ||
+          selectedSessionId.value !== sessionId || !hasAction("read_sessions")) return null;
+      return view.timing;
+    }
+
     async function loadReasoning(turnId: string): Promise<readonly ChatReasoningItem[]> {
       const bound = context.value;
       if (!bound) return Object.freeze([]);
@@ -4298,6 +4309,7 @@ export function createChatStoreDefinition(
       loadOlderHistory,
       loadHistoryPage,
       loadReasoning,
+      readTurnTiming,
       pickAttachments,
       importAttachmentPaths,
       removeDraftAttachment,

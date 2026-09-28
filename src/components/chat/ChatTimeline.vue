@@ -18,10 +18,12 @@ import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
 withDefaults(defineProps<{
   timeline: ConversationTimelineViewModel;
+  turnTimingLabels?: Readonly<Record<string, string | null>>;
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
+  turnTimingLabels: () => ({}),
   canDecideApprovals: false,
   approvalAuthorityRevision: 0,
   approvalTransients: () => Object.freeze({}),
@@ -156,6 +158,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
         <ChatTurnGroup
           :turn="turn"
           :position="index + 1"
+          :timing-label="turnTimingLabels[turn.turnId] ?? null"
           :can-decide-approvals="canDecideApprovals"
           :approval-authority-revision="approvalAuthorityRevision"
           :approval-transients="approvalTransients"

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { mount } from "@vue/test-utils";
+import { enableAutoUnmount, mount } from "@vue/test-utils";
 import axe from "axe-core";
 import { readFileSync } from "node:fs";
 import { afterEach,describe,expect,it,vi } from "vitest";
@@ -23,18 +23,22 @@ type ConversationTurnStatus,
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 
+enableAutoUnmount(afterEach);
+
 const THREAD_ID = "thread-demo";
 const TURN_ID = "turn-demo";
 
 it("uses the draft review slot for unclassified output without inventing its phase", async () => {
   const item = { ...message("unclassified", 0, "assistant_message", '{"raw":"provider"}'), agentMessagePhase: null };
   const turn = projectedTurn({ items: [item] });
-  const wrapper = mount(ChatTurnGroup, {
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
     props: { turn, position: 0 },
     slots: { "structured-answer": ({ turnId }: { turnId: string }) => h("button", { "data-turn": turnId }, "查看本轮草案摘要") },
   });
   expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
   expect(wrapper.text()).toContain("草案以校验结果为准");
+  expect(wrapper.text()).toContain("模型回答");
+  expect(wrapper.text()).not.toContain("未标注阶段");
   expect(wrapper.text()).not.toContain('{"raw":"provider"}');
   expect(wrapper.get("[data-turn]").attributes("data-turn")).toBe(TURN_ID);
   expect(turn.items[0]?.presentation).toBe("assistant_unclassified");
@@ -180,7 +184,7 @@ describe("ChatTurnGroup", () => {
         message("reasoning", 1, "reasoning", "过程内容"),
       ],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
     const itemElements = wrapper.findAll(".chat-turn-group__items > .chat-turn-group__item");
 
     expect(itemElements).toHaveLength(4);
@@ -194,7 +198,8 @@ describe("ChatTurnGroup", () => {
       ]);
     expect(itemElements[0]?.text()).toBe("用户内容");
     expect(itemElements[0]?.get("article").attributes("aria-label")).toBe("用户消息");
-    expect(itemElements[1]?.text()).toContain("过程记录");
+    expect(itemElements[1]?.get("article").attributes("aria-label")).toBe("过程记录");
+    expect(itemElements[1]?.isVisible()).toBe(false);
     expect(itemElements[2]?.text()).toContain("模型回答");
     expect(itemElements[2]?.text()).toContain("回答内容");
     expect(itemElements[3]?.text()).toContain("此内容类型暂不支持");
@@ -214,7 +219,7 @@ describe("ChatTurnGroup", () => {
       status: "interrupted",
       items: [message("partial-answer", 0, "assistant_message", "partial", "incomplete")],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
 
     expect(wrapper.get(".chat-timeline-item-shell__status").text()).toBe("未完整结束");
     expect(wrapper.get(".chat-timeline-item-shell").classes())
@@ -225,7 +230,7 @@ describe("ChatTurnGroup", () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.parse("2026-08-30T14:29:00.000Z"));
     const turn = turnWithApproval();
-    const closed = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const closed = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
 
     expect(closed.find(".chat-approval-card").exists()).toBe(true);
     expect(closed.findAll(".chat-approval-card__button")
@@ -233,7 +238,7 @@ describe("ChatTurnGroup", () => {
     expect(closed.text()).toContain("暂时无法确认");
     closed.unmount();
 
-    const wrapper = mount(ChatTurnGroup, {
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
       props: { turn, position: 1, canDecideApprovals: true },
     });
     const buttons = wrapper.findAll(".chat-approval-card__button");
@@ -261,29 +266,29 @@ describe("ChatTurnGroup", () => {
         message("assistant", 2, "assistant_message", assistant),
       ],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
     const reasoningItems = wrapper.findAll(".chat-turn-group__item--reasoning");
 
     expect(reasoningItems).toHaveLength(2);
-    expect(reasoningItems[0]?.get("button").attributes("aria-expanded")).toBe("false");
-    expect(reasoningItems[0]?.find("strong").exists()).toBe(true);
-    expect(reasoningItems[0]?.find(".chat-timeline-item-shell__body").exists()).toBe(false);
-    expect(reasoningItems[1]?.get("button").attributes("aria-expanded")).toBe("false");
-    expect(reasoningItems[1]?.find(".chat-timeline-item-shell__body").exists()).toBe(false);
+    const disclosure = wrapper.get(".chat-turn-group__process-toggle");
+    expect(disclosure.attributes("aria-expanded")).toBe("false");
+    expect(reasoningItems.every(item => !item.isVisible())).toBe(true);
+    expect(reasoningItems.every(item => !item.find("button").exists())).toBe(true);
 
     const assistantItem = wrapper.get(".chat-turn-group__item--final_answer");
     expect(assistantItem.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
     expect(assistantItem.get(".chat-timeline-item-shell__body").text()).toContain("最终回答");
     expect(assistantItem.get(".chat-safe-content strong").text()).toBe("最终回答可使用富文本");
 
-    await reasoningItems[0]?.get("button").trigger("click");
-    expect(reasoningItems[0]?.get("button").attributes("aria-expanded")).toBe("true");
+    await disclosure.trigger("click");
+    expect(disclosure.attributes("aria-expanded")).toBe("true");
+    expect(reasoningItems.every(item => item.isVisible())).toBe(true);
     expect(reasoningItems[0]?.get(".chat-timeline-item-shell__body").text())
       .toContain("**短过程保持字面量**");
     expect(reasoningItems[0]?.find(".chat-safe-content strong").exists()).toBe(false);
     expect(reasoningItems[0]?.find(".chat-safe-content__inert-link").exists()).toBe(false);
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
-      itemIdentity: turn.items[0]?.identity,
+      itemIdentity: turn.identity,
       expanded: true,
     });
   });
@@ -301,9 +306,11 @@ describe("ChatTurnGroup", () => {
         contentBlocks: [],
       }],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
 
-    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+    expect(wrapper.get("article").attributes("aria-label")).toBe("过程记录");
     expect(wrapper.text()).toContain("已完成");
     expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
     expect(wrapper.text()).toContain("模型推理记录已完成，但没有可显示的正文。");
@@ -325,7 +332,7 @@ describe("ChatTurnGroup", () => {
         contentBlocks: [],
       }],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
 
     expect(wrapper.text()).toContain("过程记录");
     expect(wrapper.text()).toContain("仅有已观察记录，当前进度待确认");
@@ -355,7 +362,7 @@ describe("ChatTurnGroup", () => {
         contentBlocks: [],
       }],
     });
-    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 1 } });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
     const reasoningItems = wrapper.findAll(".chat-turn-group__item--reasoning");
 
     expect(reasoningItems.map((item) => item.get(".chat-timeline-item-shell__status").text()))
@@ -391,7 +398,7 @@ describe("ChatTurnGroup", () => {
         agentMessagePhase: "final_answer",
       }],
     });
-    const wrapper = mount(ChatTurnGroup, {
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
       props: { turn, position: 1 },
       slots: {
         "item-actions": ({ item }: { item: ConversationTimelineItemViewModel }) =>
@@ -403,8 +410,7 @@ describe("ChatTurnGroup", () => {
 
     const plan = wrapper.get(".chat-turn-plan");
     const items = wrapper.get(".chat-turn-group__items");
-    expect(plan.element.compareDocumentPosition(items.element) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
+    expect(items.element.contains(plan.element)).toBe(true);
     expect(plan.get("button").attributes("aria-expanded")).toBe("true");
 
     const commentary = wrapper.get(".chat-turn-group__item--commentary");
@@ -413,9 +419,11 @@ describe("ChatTurnGroup", () => {
     expect(commentary.get(".chat-safe-content strong").text()).toBe("过程说明");
 
     const unclassified = wrapper.get(".chat-turn-group__item--assistant_unclassified");
-    expect(unclassified.text()).toContain("未分类模型消息");
-    expect(unclassified.text()).toContain("未将其视为最终回答");
-    expect(unclassified.text()).not.toContain("模型回答");
+    expect(unclassified.text()).toContain("模型回答");
+    expect(unclassified.text()).not.toContain("未分类模型消息");
+    expect(unclassified.text()).not.toContain("未将其视为最终回答");
+    expect(unclassified.getComponent(ChatTimelineItemShell).props("icon")).toBe("assistant");
+    expect(turn.items[1]?.assistantPhase).toBe("unknown");
 
     const reasoning = wrapper.get(".chat-turn-group__item--reasoning");
     expect(reasoning.text()).toContain("模型推理记录");
@@ -433,6 +441,46 @@ describe("ChatTurnGroup", () => {
     expect(wrapper.find(".action-final").exists()).toBe(true);
   });
 
+  it.each([undefined, null, "unknown"] as const)("renders phase %s as a normal answer without completing the turn", async (agentMessagePhase) => {
+    const untagged: ConversationItemSnapshot = {
+      threadId: THREAD_ID, turnId: TURN_ID, itemId: "untagged", ordinal: 0,
+      kind: "assistant_message", status: "completed",
+      contentBlocks: [{ blockIndex: 0, type: "text", text: "## 标题\n\n**普通回答**" }],
+      ...(agentMessagePhase === undefined ? {} : { agentMessagePhase }),
+    };
+    const turn = projectedTurn({ status: "in_progress", items: [untagged] });
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
+      props: { turn, position: 1 },
+      slots: { "item-actions": () => h("button", { type: "button" }, "复制") },
+    });
+    const row = wrapper.get(".chat-turn-group__item--assistant_unclassified");
+    expect(row.getComponent(ChatTimelineItemShell).props()).toMatchObject({ label: "模型回答", icon: "assistant", statusLabel: "已完成" });
+    expect(row.text()).not.toMatch(/未分类|未标注阶段|未将其视为最终回答/);
+    expect(row.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
+    expect(row.get(".chat-safe-content h2").text()).toBe("标题");
+    expect(row.get(".chat-safe-content strong").text()).toBe("普通回答");
+    expect(row.get(".chat-timeline-item-shell__answer-actions").text()).toBe("复制");
+    expect(turn.items[0]).toMatchObject({
+      assistantPhase: agentMessagePhase === undefined ? "unknown" : agentMessagePhase,
+      presentation: "assistant_unclassified",
+      copyPolicy: "text_and_code",
+    });
+    expect(turn.domainStatus).toBe("in_progress");
+    expect(wrapper.classes()).toContain("chat-turn-group--active");
+
+    const completed = projectedTurn({ status: "completed", items: [untagged] });
+    await wrapper.setProps({ turn: completed });
+    expect(wrapper.classes()).toContain("chat-turn-group--complete");
+    expect(completed.items[0]?.assistantPhase).toBe(turn.items[0]?.assistantPhase);
+    expect(wrapper.text()).not.toMatch(/未分类|未标注阶段|未将其视为最终回答/);
+    await wrapper.setProps({ turn: {
+      ...completed,
+      items: completed.items.map(item => ({ ...item, availability: "partial" as const })),
+    } });
+    expect(wrapper.text()).toContain("此项信息不完整");
+    wrapper.unmount();
+  });
+
   it("keeps archived activity idle and renders terminal notes and notices", () => {
     const activeCases: readonly [ConversationTurnStatus, string][] = [
       ["queued", "本轮正在等待处理"],
@@ -440,7 +488,7 @@ describe("ChatTurnGroup", () => {
       ["waiting_approval", "本轮正在等待继续"],
     ];
     for (const [status] of activeCases) {
-      const wrapper = mount(ChatTurnGroup, {
+      const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
         props: { turn: projectedTurn({ status }), position: 2 },
       });
       expect(wrapper.find("[role='status']").exists()).toBe(false);
@@ -455,14 +503,14 @@ describe("ChatTurnGroup", () => {
       ["recovery_required", "本轮状态需要核对"],
     ];
     for (const [status, label] of terminalCases) {
-      const wrapper = mount(ChatTurnGroup, {
+      const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
         props: { turn: projectedTurn({ status }), position: 3 },
       });
       if (label === null) expect(wrapper.find(".chat-turn-group__turn-state").exists()).toBe(false);
       else expect(wrapper.get(".chat-turn-group__turn-state").text()).toContain(label);
     }
 
-    const noticed = mount(ChatTurnGroup, {
+    const noticed = mount(ChatTurnGroup, { attachTo: document.body,
       props: {
         turn: projectedTurn({ notices: [
           { severity: "error", code: "conversation_error" },
@@ -518,7 +566,7 @@ describe("ChatTurnGroup", () => {
     }) => h("span", { class: "attachment-authority" }, scope.block.name));
     const actionSlot = vi.fn((scope: { item: ConversationTimelineItemViewModel }) =>
       h("button", { type: "button", class: "item-authority-action" }, scope.item.itemId));
-    const wrapper = mount(ChatTurnGroup, {
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
       props: { turn, position: 1 },
       slots: {
         "artifact-reference": artifactSlot,
@@ -563,7 +611,7 @@ describe("ChatTurnGroup", () => {
       text: string;
       language: string | null;
     }) => h("button", { type: "button", class: "code-action" }, scope.language ?? "复制代码"));
-    const wrapper = mount(ChatTurnGroup, {
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
       props: { turn, position: 1 },
       slots: { "code-actions": codeAction },
     });
@@ -579,41 +627,20 @@ describe("ChatTurnGroup", () => {
     expect(codeAction.mock.calls[0]?.[0].codeIdentity).toBe(item.contentBlocks[0]?.identity);
   });
 
-  it("keeps disclosure state attached to stable identity when the ViewModel order changes", async () => {
-    const turn = projectedTurn({
-      items: [
-        message("reasoning-a", 0, "reasoning", "A".repeat(321)),
-        message("reasoning-b", 1, "reasoning", "B".repeat(321)),
-      ],
-    });
-    const wrapper = mount(ChatTurnGroup, {
-      props: { turn, position: 1 },
-      slots: {
-        "item-actions": ({ item: projectedItem }: { item: ConversationTimelineItemViewModel }) =>
-          h("span", { class: `identity-${projectedItem.itemId}` }, projectedItem.itemId),
-      },
-    });
-
-    function disclosureFor(itemId: string): HTMLButtonElement {
-      const shell = wrapper.findAllComponents(ChatTimelineItemShell)
-        .find((candidate) => candidate.props("item").itemId === itemId);
-      const button = shell?.element.querySelector(
-        ".chat-timeline-item-shell__disclosure",
-      ) as HTMLButtonElement | null | undefined;
-      if (button === null || button === undefined) throw new Error("fixture_missing_disclosure");
-      return button;
-    }
-
-    disclosureFor("reasoning-a").click();
-    await wrapper.vm.$nextTick();
-    expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
-    expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
-
-    await wrapper.setProps({
-      turn: deepFreeze({ ...turn, items: [...turn.items].reverse() }),
-    });
-    expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
-    expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
+  it("keeps the Turn disclosure choice and process DOM across streamed updates and reordered Items", async () => {
+    const turn = projectedTurn({items: [message("reasoning-a", 0, "reasoning", "甲"), message("reasoning-b", 1, "reasoning", "乙")]});
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,props: {turn, position: 1, timingLabel: "用时 51秒"}});
+    const toggle = wrapper.get(".chat-turn-group__process-toggle");
+    const before = wrapper.findAll("[data-process-item]").map(item => item.element);
+    await toggle.trigger("click");
+    await wrapper.setProps({turn: {...turn, items: [...turn.items].reverse()}, timingLabel: "用时 52秒"});
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(wrapper.findAll("[data-process-item]").map(item => item.element)).toEqual([...before].reverse());
+    await toggle.trigger("click");
+    await wrapper.setProps({turn: {...turn, items: [...turn.items]}, timingLabel: "用时 53秒"});
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.findAll("[data-process-item]").every(item => !item.isVisible())).toBe(true);
+    wrapper.unmount();
   });
 
   it("is accessible and stays inside the Timeline presentation boundary", async () => {
@@ -626,8 +653,7 @@ describe("ChatTurnGroup", () => {
         message("unknown", 3, "unknown", "未来内容"),
       ],
     });
-    const wrapper = mount(ChatTurnGroup, {
-      attachTo: document.body,
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,
       props: { turn, position: 1 },
       slots: {
         "item-actions": () => h("button", { type: "button" }, "复制"),
@@ -642,4 +668,112 @@ describe("ChatTurnGroup", () => {
     expect(source).toContain("ChatSafeContent");
     expect(source).toContain("ChatTimelineItemShell");
   });
+});
+
+
+it("places native turn duration after user input and before model output", () => {
+  const turn = projectedTurn({ items: [message("user", 0, "user_message", "用户输入"), message("assistant", 1, "assistant_message", "模型输出")] });
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "用时 51秒" } });
+  const children = wrapper.get(".chat-turn-group__items").element.children;
+  expect(children[0]!.textContent).toContain("用户输入");
+  expect(children[1]!.textContent).toBe("用时 51秒");
+  expect(children[2]!.textContent).toContain("模型输出");
+  expect(children[1]!.getAttribute("aria-live")).toBeNull();
+  wrapper.unmount();
+});
+
+it("shows turn duration while waiting for the first model item", () => {
+  const turn = projectedTurn({ status: "in_progress", items: [message("user", 0, "user_message", "用户输入")] });
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "已处理 7秒" } });
+  expect(wrapper.get(".chat-turn-group__items").element.lastElementChild!.textContent).toBe("已处理 7秒");
+  wrapper.unmount();
+});
+
+it("uses elapsed time to reveal the entire process while leaving answers and later user input visible", async () => {
+  const doneCommand = command();
+  if (doneCommand.execution?.kind !== "command") throw Error("command fixture missing");
+  const turn = projectedTurn({items: [
+    message("user", 0, "user_message", "检查工作区"),
+    {...message("process", 1, "assistant_message", "**先检查当前状态**"), agentMessagePhase: "commentary"},
+    {...doneCommand, ordinal: 2, status: "completed", execution: {...doneCommand.execution, status: "completed"}},
+    message("follow-up", 3, "user_message", "保留当前设置"),
+    {...message("unclassified", 4, "assistant_message", "兼容模型的回答"), agentMessagePhase: "unknown"},
+    message("final", 5, "assistant_message", "**最终结果**"),
+  ]});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn, position: 1, timingLabel: "用时 1分44秒"}});
+  const toggle = wrapper.get(".chat-turn-group__process-toggle");
+  expect(toggle.element.tagName).toBe("BUTTON");
+  expect(toggle.text()).toBe("用时 1分44秒");
+  expect(toggle.attributes("aria-expanded")).toBe("false");
+  const controlled = toggle.attributes("aria-controls")!.split(" ");
+  expect(controlled).toHaveLength(2);
+  expect(controlled.every(id => document.getElementById(id)?.style.display === "none")).toBe(true);
+  expect(wrapper.findAll(".chat-turn-group__item--user_message").every(item => item.isVisible())).toBe(true);
+  expect(wrapper.get(".chat-turn-group__item--assistant_unclassified").isVisible()).toBe(true);
+  expect(wrapper.get(".chat-turn-group__item--final_answer").isVisible()).toBe(true);
+  await toggle.trigger("click");
+  expect(wrapper.findAll("[data-process-item]").every(item => item.isVisible())).toBe(true);
+  expect(wrapper.get(".chat-turn-group__item--commentary .chat-safe-content strong").text()).toBe("先检查当前状态");
+  expect(wrapper.get(".chat-turn-group__item--command").text()).toContain("运行了命令");
+  expect(wrapper.get(".chat-turn-group__item--commentary article").classes()).toContain("chat-timeline-item-shell--process-inline");
+  await toggle.trigger("click");
+  expect(wrapper.get(".chat-turn-group__item--final_answer").isVisible()).toBe(true);
+});
+
+it("follows live Turn state until the user chooses expansion, without resetting on duration or streamed updates", async () => {
+  const base = projectedTurn({status: "in_progress", items: [
+    {...message("progress", 0, "assistant_message", "开始检查", "streaming"), agentMessagePhase: "commentary"},
+  ]});
+  const active = {...base, source: "native_observed" as const, liveObserved: true, items: base.items.map(item => ({...item, busy: true, activityLabel: undefined}))};
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: active, position: 1, timingLabel: "已处理 7秒"}});
+  const toggle = wrapper.get(".chat-turn-group__process-toggle");
+  expect(toggle.attributes("aria-expanded")).toBe("true");
+  await toggle.trigger("click");
+  await wrapper.setProps({timingLabel: "已处理 8秒", turn: {...active, items: [...active.items, {...active.items[0]!, identity: "new-process", itemId: "new"}]}});
+  expect(toggle.attributes("aria-expanded")).toBe("false");
+  expect(wrapper.findAll("[data-process-item]").every(item => !item.isVisible())).toBe(true);
+  const ended = {...active, domainStatus: "completed" as const, terminalStatus: "completed" as const, phase: "complete" as const};
+  await toggle.trigger("click");
+  await wrapper.setProps({turn: ended, timingLabel: "用时 51秒"});
+  expect(toggle.attributes("aria-expanded")).toBe("true");
+  await wrapper.setProps({turn: {...ended, identity: "another-turn"}});
+  expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+  const automatic = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: active, position: 2}});
+  await automatic.setProps({turn: ended});
+  expect(automatic.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+});
+
+it("keeps pending approvals and failed or incomplete process records outside the folded content", async () => {
+  const approved = turnWithApproval();
+  const normal = projectedTurn({items: [{...message("commentary", 1, "assistant_message", "普通过程"), agentMessagePhase: "commentary"}]}).items[0]!;
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {
+    turn: {...approved, items: [...approved.items.map(item => ({...item, approval: null, activityLabel: undefined})), normal]}, position: 1, timingLabel: "已处理 7秒",
+  }});
+  expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
+  expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(false);
+  await wrapper.setProps({turn: {...approved, items: [...approved.items, normal]}});
+  expect(wrapper.get(".chat-approval-card").isVisible()).toBe(true);
+  expect(wrapper.get(".chat-turn-group__item--commentary").isVisible()).toBe(false);
+  const commandItem = approved.items[0]!;
+  if (!commandItem.execution) throw Error("missing execution");
+  await wrapper.setProps({turn: {...approved, items: [{...commandItem, approval: null, domainStatus: "completed", activityLabel: undefined, execution: {...commandItem.execution, status: "failed"}}, normal]}});
+  expect(wrapper.get(".chat-turn-group__item--command").isVisible()).toBe(true);
+  expect(wrapper.get(".chat-turn-group__item--command").text()).toContain("执行失败");
+  await wrapper.setProps({turn: {...approved, items: [{...normal, availability: "partial"}]}});
+  expect(wrapper.get(".chat-turn-group__item--commentary").isVisible()).toBe(true);
+  expect(wrapper.text()).toContain("此项信息不完整");
+  expect(wrapper.find(".chat-turn-group__process-toggle").exists()).toBe(false);
+});
+
+it("keeps an empty process control out of answer-only Turns and supports plans without duration", async () => {
+  const answerOnly = projectedTurn({items: [message("answer", 0, "assistant_message", "普通答案")]});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: answerOnly, position: 1, timingLabel: "用时 0秒"}});
+  expect(wrapper.find(".chat-turn-group__process-toggle").exists()).toBe(false);
+  expect(wrapper.get(".chat-turn-group__timing").text()).toBe("用时 0秒");
+  const planOnly = projectedTurn({plan: {explanation: "计划说明", steps: [{ordinal: 0, text: "检查状态", status: "completed"}]}});
+  await wrapper.setProps({turn: planOnly, timingLabel: null});
+  expect(wrapper.get(".chat-turn-group__process-toggle").text()).toBe("处理过程");
+  expect(wrapper.get(".chat-turn-plan").isVisible()).toBe(false);
+  await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
+  expect(wrapper.get(".chat-turn-plan").isVisible()).toBe(true);
 });

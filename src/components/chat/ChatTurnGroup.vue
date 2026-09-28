@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref, useId, watch } from "vue";
+import { isCollapsibleProcessItem } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -21,16 +23,49 @@ import ChatTimelineItemShell, {
   type ChatTimelineDisclosureChange,
 } from "./ChatTimelineItemShell.vue";
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   turn: ConversationTimelineTurnViewModel;
   position: number;
+  timingLabel?: string | null;
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
+  timingLabel: null,
   canDecideApprovals: false,
   approvalAuthorityRevision: 0,
   approvalTransients: () => Object.freeze({}),
+});
+
+const processId = `${useId()}-process`;
+const expansionChoice = ref<boolean | null>(null);
+const processItems = computed(() => props.turn.items.filter(item =>
+  isCollapsibleProcessItem(item) && (!item.approval ||
+    !["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle"))));
+const processKeys = computed(() => new Set(processItems.value.map(item => item.identity)));
+const processPlan = computed(() => props.turn.plan && !props.turn.plan.steps.some(step => step.status === "unknown") ? props.turn.plan : null);
+const hasProcess = computed(() => processItems.value.length > 0 || processPlan.value !== null);
+const processExpanded = computed(() => expansionChoice.value ??
+  (props.turn.liveObserved === true && ["in_progress", "waiting_approval"].includes(props.turn.domainStatus)));
+const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
+const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId)].join(" "));
+watch(() => props.turn.identity, () => { expansionChoice.value = null; });
+function toggleProcess() {
+  expansionChoice.value = !processExpanded.value;
+  emit("disclosure-change", { itemIdentity: props.turn.identity, expanded: processExpanded.value });
+}
+function preserveProcessExpansion(item: ConversationTimelineItemViewModel) {
+  if (processKeys.value.has(item.identity) && processExpanded.value) expansionChoice.value = true;
+}
+
+const turnEntries = computed(() => {
+  const entries: { kind: "item" | "timing" | "plan"; identity: string; item: ConversationTimelineItemViewModel | null }[] =
+    props.turn.items.map(item => ({ kind: "item", identity: item.identity, item }));
+  const firstOutput = props.turn.items.findIndex(item => item.presentation !== "user_message");
+  const index = firstOutput < 0 ? entries.length : firstOutput;
+  entries.splice(index, 0, { kind: "timing", identity: `${props.turn.identity}:timing`, item: null });
+  if (processPlan.value) entries.splice(index + 1, 0, { kind: "plan", identity: `${props.turn.identity}:plan`, item: null });
+  return entries;
 });
 
 const emit = defineEmits<{
@@ -65,9 +100,8 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
     case "commentary":
       return "处理过程";
     case "final_answer":
-      return "模型回答";
     case "assistant_unclassified":
-      return "未分类模型消息";
+      return "模型回答";
     case "artifact":
       return "生成内容";
     case "reasoning":
@@ -89,11 +123,10 @@ function itemIcon(item: ConversationTimelineItemViewModel): YjIconName {
     case "user_message":
       return "user";
     case "final_answer":
+    case "assistant_unclassified":
       return "assistant";
     case "commentary":
       return "pending";
-    case "assistant_unclassified":
-      return "warning";
     case "artifact":
       return "file";
     case "reasoning":
@@ -312,123 +345,144 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
     </p>
 
     <slot v-if="turn.source === 'legacy_archive'" name="legacy-records" :turn-id="turn.turnId" />
-    <ChatTurnPlan v-if="turn.plan" :key="turn.plan.identity" :plan="turn.plan" />
+    <ChatTurnPlan v-if="turn.plan && !processPlan" :key="turn.plan.identity" :plan="turn.plan" />
 
-    <ol v-if="turn.items.length > 0" class="chat-turn-group__items" aria-label="本轮对话内容">
-      <li
-        v-for="item in turn.items"
-        :key="item.identity"
-        class="chat-turn-group__item"
-        :class="`chat-turn-group__item--${item.presentation}`"
-      >
-        <ChatCommandItem
-          v-if="item.presentation === 'command' && item.execution?.kind === 'command'"
-          :item="item"
-          :execution="item.execution"
-          :approval="item.approval ?? null"
-          :approval-transient="item.approval
-            ? approvalTransients[item.approval.approvalRequestId] ?? null
-            : null"
-          :can-decide-approval="canDecideApprovals"
-          :approval-authority-revision="approvalAuthorityRevision"
-          @disclosure-change="forwardDisclosure"
-          @approval-decision="forwardApprovalDecision"
-        />
-
-        <ChatNativeToolItem
-          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
-          :item="item"
-          :execution="item.execution"
-          @disclosure-change="forwardDisclosure"
-        />
-        <ChatToolItem
-          v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && !('native' in item.execution)"
-          :item="item"
-          :execution="item.execution"
-          @disclosure-change="forwardDisclosure"
-        />
-
-        <ChatTimelineItemShell
-          v-else
-          :item="item"
-          :label="itemLabel(item)"
-          :status-label="itemStatusLabel(item)"
-          :icon="itemIcon(item)"
-          :collapsible="item.collapsible"
-          :default-expanded="item.defaultExpanded"
-          @disclosure-change="forwardDisclosure"
+    <ol v-if="turn.items.length > 0 || timingLabel || hasProcess" class="chat-turn-group__items" aria-label="本轮对话内容">
+      <template v-for="{ item, kind, identity } in turnEntries" :key="identity">
+        <li v-if="kind === 'timing' && (timingLabel || hasProcess)" class="chat-turn-group__timing">
+          <button v-if="hasProcess" class="chat-turn-group__process-toggle" type="button"
+            :aria-label="`${timingLabel || '处理过程'}，${processExpanded ? '收起' : '展开'}本轮处理过程`"
+            :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
+            <span>{{ timingLabel || '处理过程' }}</span>
+            <YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+          </button>
+          <span v-else aria-label="本轮耗时">{{ timingLabel }}</span>
+        </li>
+        <li v-else-if="kind === 'plan' && processPlan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="expansionChoice = true" @pointerdown="expansionChoice = true">
+          <ChatTurnPlan :key="processPlan.identity" :plan="processPlan" />
+        </li>
+        <li v-else-if="item"
+          :id="processKeys.has(item.identity) ? processItemId(item) : undefined"
+          v-show="!processKeys.has(item.identity) || processExpanded"
+          class="chat-turn-group__item"
+          :class="`chat-turn-group__item--${item.presentation}`"
+          :data-process-item="processKeys.has(item.identity) ? '' : undefined"
+          @focusin="preserveProcessExpansion(item)"
+          @pointerdown="preserveProcessExpansion(item)"
         >
-          <div
-            v-if="item.presentation === 'unknown' || item.presentation === 'command' || item.presentation === 'tool'"
-            class="chat-turn-group__unknown"
-            role="note"
-          >
-            <strong>{{ item.presentation === "unknown" ? "此内容类型暂不支持" : "此执行状态暂不可用" }}</strong>
-            <code>{{ item.presentation === "unknown" ? "unsupported_content" : "unsupported_execution" }}</code>
-          </div>
+          <ChatCommandItem
+            v-if="item.presentation === 'command' && item.execution?.kind === 'command'"
+            :item="item"
+            :process-presentation="processKeys.has(item.identity)"
+            :execution="item.execution"
+            :approval="item.approval ?? null"
+            :approval-transient="item.approval
+              ? approvalTransients[item.approval.approvalRequestId] ?? null
+              : null"
+            :can-decide-approval="canDecideApprovals"
+            :approval-authority-revision="approvalAuthorityRevision"
+            @disclosure-change="forwardDisclosure"
+            @approval-decision="forwardApprovalDecision"
+          />
 
-          <p
-            v-else-if="item.presentation === 'assistant_unclassified'"
-            class="chat-turn-group__unclassified"
-            role="note"
-          >
-            {{ slots['structured-answer'] ? "此消息未标注阶段，草案以校验结果为准。" : "此消息未标注阶段，未将其视为最终回答。" }}
-          </p>
+          <ChatNativeToolItem
+            v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && 'native' in item.execution"
+            :item="item"
+            :process-presentation="processKeys.has(item.identity)"
+            :execution="item.execution"
+            @disclosure-change="forwardDisclosure"
+          />
+          <ChatToolItem
+            v-else-if="item.presentation === 'tool' && item.execution?.kind === 'tool' && !('native' in item.execution)"
+            :item="item"
+            :process-presentation="processKeys.has(item.identity)"
+            :execution="item.execution"
+            @disclosure-change="forwardDisclosure"
+          />
 
-          <p
-            v-if="reasoningStateMessage(item)"
-            class="chat-turn-group__reasoning-state"
-            role="note"
+          <ChatTimelineItemShell
+            v-else
+            :item="item"
+            :label="itemLabel(item)"
+            :status-label="itemStatusLabel(item)"
+            :icon="itemIcon(item)"
+            :collapsible="item.collapsible && !processKeys.has(item.identity)"
+            :process-presentation="processKeys.has(item.identity)"
+            :default-expanded="item.defaultExpanded"
+            @disclosure-change="forwardDisclosure"
           >
-            {{ reasoningStateMessage(item) }}
-          </p>
-
-          <div v-if="item.presentation === 'reasoning'" class="chat-turn-group__reasoning-segments">
-            <section v-for="block in item.contentBlocks" :key="block.identity" :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '推理摘要' : '模型推理记录'">
-              <strong class="chat-turn-group__segment-label">{{ block.type === "text" && block.reasoningSource === "summary" ? "推理摘要" : "模型推理记录" }}</strong>
-              <ChatSafeContent :blocks="[block]" mode="plain" />
-            </section>
-          </div>
-          <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
-          <ChatSafeContent
-            v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
-            :blocks="item.contentBlocks"
-            :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
-          >
-            <template
-              v-if="slots['artifact-reference']"
-              #artifact-reference="{ block }"
+            <div
+              v-if="item.presentation === 'unknown' || item.presentation === 'command' || item.presentation === 'tool'"
+              class="chat-turn-group__unknown"
+              role="note"
             >
-              <slot name="artifact-reference" :item="item" :block="block" />
-            </template>
-            <template
-              v-if="slots['attachment-reference']"
-              #attachment-reference="{ block }"
-            >
-              <slot name="attachment-reference" :item="item" :block="block" />
-            </template>
-            <template
-              v-if="item.copyPolicy === 'text_and_code' && slots['code-actions']"
-              #code-actions="{ codeIdentity, text, language }"
-            >
-              <slot
-                name="code-actions"
-                :item="item"
-                :code-identity="codeIdentity"
-                :text="text"
-                :language="language"
-              />
-            </template>
-          </ChatSafeContent>
+              <strong>{{ item.presentation === "unknown" ? "此内容类型暂不支持" : "此执行状态暂不可用" }}</strong>
+              <code>{{ item.presentation === "unknown" ? "unsupported_content" : "unsupported_execution" }}</code>
+            </div>
 
-          <template
-            v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
-            #actions
-          >
-            <slot name="item-actions" :item="item" />
-          </template>
-        </ChatTimelineItemShell>
-      </li>
+            <p
+              v-else-if="item.presentation === 'assistant_unclassified' && slots['structured-answer']"
+              class="chat-turn-group__draft-note"
+              role="note"
+            >
+              草案以校验结果为准。
+            </p>
+
+            <p
+              v-if="reasoningStateMessage(item)"
+              class="chat-turn-group__reasoning-state"
+              role="note"
+            >
+              {{ reasoningStateMessage(item) }}
+            </p>
+
+            <div v-if="item.presentation === 'reasoning'" class="chat-turn-group__reasoning-segments">
+              <section v-for="block in item.contentBlocks" :key="block.identity" :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '推理摘要' : '模型推理记录'">
+                <strong class="chat-turn-group__segment-label">{{ block.type === "text" && block.reasoningSource === "summary" ? "推理摘要" : "模型推理记录" }}</strong>
+                <ChatSafeContent :blocks="[block]" mode="plain" />
+              </section>
+            </div>
+            <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
+            <ChatSafeContent
+              v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
+              :blocks="item.contentBlocks"
+              :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
+            >
+              <template
+                v-if="slots['artifact-reference']"
+                #artifact-reference="{ block }"
+              >
+                <slot name="artifact-reference" :item="item" :block="block" />
+              </template>
+              <template
+                v-if="slots['attachment-reference']"
+                #attachment-reference="{ block }"
+              >
+                <slot name="attachment-reference" :item="item" :block="block" />
+              </template>
+              <template
+                v-if="item.copyPolicy === 'text_and_code' && slots['code-actions']"
+                #code-actions="{ codeIdentity, text, language }"
+              >
+                <slot
+                  name="code-actions"
+                  :item="item"
+                  :code-identity="codeIdentity"
+                  :text="text"
+                  :language="language"
+                />
+              </template>
+            </ChatSafeContent>
+
+            <template
+              v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
+              #actions
+            >
+              <slot name="item-actions" :item="item" />
+            </template>
+          </ChatTimelineItemShell>
+        </li>
+      </template>
     </ol>
 
     <ul v-if="turn.notices.length > 0" class="chat-turn-group__notices" aria-label="本轮通知">
@@ -453,6 +507,33 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 </template>
 
 <style scoped>
+.chat-turn-group__process-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--yj-space-1);
+  padding: var(--yj-space-1) 0;
+  border: 0;
+  border-radius: var(--yj-radius-sm);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-turn-group__process-toggle:hover { color: var(--yj-color-text-primary); }
+.chat-turn-group__process-toggle:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: var(--yj-space-1);
+}
+.chat-turn-group__timing {
+  padding-bottom: var(--yj-space-2);
+  border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-turn-group__reasoning-segments { display: grid; gap: var(--yj-space-3); }
 .chat-turn-group__segment-label {
   display: block; margin-bottom: var(--yj-space-1);
@@ -537,7 +618,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   line-height: var(--yj-line-height-body);
 }
 
-.chat-turn-group__unclassified,
+.chat-turn-group__draft-note,
 .chat-turn-group__reasoning-state {
   margin: var(--yj-space-0);
   color: var(--yj-color-text-body);
@@ -545,7 +626,6 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   line-height: var(--yj-line-height-caption);
 }
 
-.chat-turn-group__unclassified + .chat-safe-content,
 .chat-turn-group__reasoning-state + .chat-safe-content {
   margin-block-start: var(--yj-space-3);
 }

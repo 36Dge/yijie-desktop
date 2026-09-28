@@ -76,6 +76,23 @@ impl Debug for AuthorizedConversationApplication {
 }
 
 impl AuthorizedConversationApplication {
+    pub async fn turn_timing(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<super::turn_timing_generated::TurnTimingView, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        let result = super::turn_timing::read(
+            &self.application.database,
+            self.application.host.as_deref(),
+            session_id,
+            turn_id,
+        )
+        .await;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        result
+    }
     pub async fn native_history(
         &self,
         context_id: Uuid,

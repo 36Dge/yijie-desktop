@@ -526,6 +526,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
   const client: ChatClient = {
+    readTurnTiming: async (_context, sessionId, turnId) => ({sessionId, turnId, timing: null}),
     getSessionPurpose: async (_context, sessionId) => ({sessionId, purpose: "ordinary"}),
     loadNativeHistory: async () => ({views: [], submissions: [], remainingTurnIds: [], historyAvailability: "unavailable"}),
     onNativeView: async handler => {nativeHandler = handler; return () => undefined;},
@@ -774,6 +775,32 @@ describe("chat view-model store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps turn timing reads scoped without changing conversation state", async () => {
+    const delayed = new Deferred<Awaited<ReturnType<ChatClient["readTurnTiming"]>>>();
+    const readTurnTiming = vi.fn(() => delayed.promise);
+    const { client } = fakeClient({readTurnTiming});
+    const store = createStore(client);
+    const controller = new AbortController();
+    await expect(store.readTurnTiming(TURN_A, controller.signal)).resolves.toBeNull();
+    expect(readTurnTiming).not.toHaveBeenCalled();
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const pending = store.readTurnTiming(TURN_A, controller.signal);
+    expect(readTurnTiming).toHaveBeenCalledWith(CONTEXT, SESSION_A, TURN_A, controller.signal);
+    await store.selectSession(SESSION_B);
+    delayed.resolve({sessionId: SESSION_A, turnId: TURN_A, timing: {
+      schema_version: 1, agent_session_id: SESSION_A, thread_id: SESSION_A, turn_id: TURN_A,
+      source: "runtime_read", started_at: {state: "known", value: 100},
+      completed_at: {state: "known", value: 150}, duration_ms: {state: "known", value: 51345},
+    }});
+    await expect(pending).resolves.toBeNull();
+    expect(store.selectedSessionId).toBe(SESSION_B);
+    controller.abort();
+    await expect(store.readTurnTiming(TURN_A, controller.signal)).resolves.toBeNull();
+    expect(readTurnTiming).toHaveBeenCalledOnce();
+    await store.dispose();
   });
 
   it.each([false, true])("creates a projectless task without native project revalidation (v2=%s)", async (multimodal) => {

@@ -409,6 +409,7 @@ pub fn run() {
         chat::ipc::chat_submit_turn_v2,
         chat::ipc::chat_list_sessions_v1,
         chat::ipc::chat_get_session_purpose_v1,
+        chat::ipc::chat_read_turn_timing_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_native_history_v1,
         chat::ipc::chat_load_native_history_v2,

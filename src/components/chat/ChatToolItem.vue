@@ -18,6 +18,7 @@ type StatusTone = "muted" | "primary" | "success" | "warning" | "error";
 
 const props = defineProps<{
   item: ConversationTimelineItemViewModel;
+  processPresentation?: boolean;
   execution: ConversationToolExecution;
 }>();
 
@@ -89,6 +90,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
 
 <template>
   <ChatTimelineItemShell
+    :process-presentation="processPresentation"
     :item="item"
     label="工具调用"
     :status-label="statusPresentation.label"
@@ -96,7 +98,7 @@ function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
     :status-icon="statusPresentation.icon"
     :status-tone="statusPresentation.tone"
     collapsible
-    :default-expanded="defaultExpanded"
+    :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"
   >
     <span

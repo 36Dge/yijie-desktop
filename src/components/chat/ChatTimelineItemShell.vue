@@ -17,10 +17,12 @@ const props = withDefaults(defineProps<{
   statusIcon?: YjIconName;
   statusTone?: "default" | "muted" | "primary" | "success" | "warning" | "error";
   collapsible?: boolean;
+  processPresentation?: boolean;
   defaultExpanded?: boolean;
 }>(), {
   statusTone: "muted",
   collapsible: false,
+  processPresentation: false,
   defaultExpanded: true,
 });
 
@@ -34,6 +36,8 @@ const slots = defineSlots<{
 }>();
 
 const expanded = ref(props.defaultExpanded);
+const plainProcess = computed(() => props.processPresentation &&
+  (props.item.presentation === "commentary" || props.item.presentation === "reasoning"));
 const id = useId();
 const titleId = `${id}-title`;
 const statusId = `${id}-status`;
@@ -64,17 +68,17 @@ function toggle(): void {
     :class="[
       `chat-timeline-item-shell--${item.role}`,
       `chat-timeline-item-shell--${item.phase === 'active' && !busy ? 'incomplete' : item.phase}`,
-      { 'chat-timeline-item-shell--answer': isAnswer },
+      { 'chat-timeline-item-shell--answer': isAnswer, 'chat-timeline-item-shell--process-inline': processPresentation },
     ]"
-    :aria-label="item.role === 'user' ? label : undefined"
-    :aria-labelledby="item.role === 'user' ? undefined : titleId"
-    :aria-describedby="item.role === 'user' ? undefined : statusId"
+    :aria-label="item.role === 'user' || plainProcess ? label : undefined"
+    :aria-labelledby="item.role === 'user' || plainProcess ? undefined : titleId"
+    :aria-describedby="item.role === 'user' || plainProcess ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
       {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整" }}；不代表执行失败。
     </p>
-    <header v-if="item.role !== 'user'" class="chat-timeline-item-shell__header">
+    <header v-if="item.role !== 'user' && !plainProcess" class="chat-timeline-item-shell__header">
       <button
         v-if="collapsible"
         class="chat-timeline-item-shell__disclosure"
@@ -131,6 +135,10 @@ function toggle(): void {
       class="chat-timeline-item-shell__body"
     >
       <slot />
+    </div>
+
+    <div v-if="plainProcess && slots.actions" class="chat-timeline-item-shell__actions" role="group" :aria-label="`${label}操作`">
+      <slot name="actions" />
     </div>
 
     <div
@@ -331,6 +339,28 @@ function toggle(): void {
   opacity: 1;
   pointer-events: auto;
 }
+
+.chat-timeline-item-shell--process-inline {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__body {
+  padding: var(--yj-space-2) 0;
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__disclosure {
+  display: flex;
+  flex-wrap: wrap;
+  padding: var(--yj-space-1) 0;
+  color: var(--yj-color-text-secondary);
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__identity strong {
+  font-weight: var(--yj-font-weight-regular);
+}
+.chat-timeline-item-shell--process-inline .chat-timeline-item-shell__status {
+  margin-inline-start: auto;
+}
+
 
 @media (hover: none) {
   .chat-timeline-item-shell__user-meta {

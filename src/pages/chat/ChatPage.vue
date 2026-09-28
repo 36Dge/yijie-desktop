@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useChatTurnTiming } from "../../composables/useChatTurnTiming";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -192,6 +193,12 @@ const conversationTimeline = computed(() => {
         chatStore.conversationApprovalState,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
       );
+});
+const turnTimingLabels = useChatTurnTiming({
+  scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
+    ? `${chatStore.context.contextId}:${chatStore.selectedSessionId}` : null,
+  turns: () => conversationTimeline.value?.turns ?? [],
+  read: (turnId, signal) => chatStore.readTurnTiming(turnId, signal),
 });
 const userMessageTimes = computed(() => {
   const times: Record<string, { datetime: string; label: string; title: string }> = {};
@@ -801,6 +808,7 @@ onBeforeUnmount(() => {
           <ChatTimeline
             v-if="conversationTimeline"
             :timeline="conversationTimeline"
+            :turn-timing-labels="turnTimingLabels"
             :can-decide-approvals="chatStore.canDecideApprovals"
             :approval-authority-revision="chatStore.approvalAuthorityRevision"
             :approval-transients="chatStore.approvalTransients"

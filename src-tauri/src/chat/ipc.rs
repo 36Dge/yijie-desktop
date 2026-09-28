@@ -8292,6 +8292,37 @@ pub async fn chat_submit_turn_v2(
 }
 
 #[tauri::command]
+pub async fn chat_read_turn_timing_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::turn_timing_generated::TurnTimingView>, ChatIpcError> {
+    let request: CommandRequest<super::turn_timing_generated::TurnTimingRequest> =
+        decode_request(request)?;
+    if request.payload.session_id.is_nil() || request.payload.turn_id.is_nil() {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)));
+    }
+    let (application, _, manager) = offline_applications(&chat_runtime, request.request_id).await?;
+    let existing_host = chat_runtime.host_bridge.lock().await.clone();
+    let authorized = AuthorizedConversationApplication::new(
+        application.with_history_host(existing_host),
+        manager,
+    );
+    ipc_runtime.begin_read(request.request_id)?;
+    let result = authorized
+        .turn_timing(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.turn_id,
+        )
+        .await;
+    let finished = ipc_runtime.finish_read(request.request_id);
+    let data = result.map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    finished?;
+    Ok(CommandResponse::new(request.request_id, data))
+}
+
+#[tauri::command]
 pub async fn chat_get_session_purpose_v1(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,

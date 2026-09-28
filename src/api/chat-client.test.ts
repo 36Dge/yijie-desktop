@@ -23,6 +23,20 @@ function transport(invoke: ChatClientTransport["invoke"]): ChatClientTransport {
 }
 
 describe("chat client", () => {
+  it("reads native timing using local identities and keeps missing and zero distinct", async () => {
+    const timing = {schema_version: 1, source: "runtime_read", agent_session_id: HOST_STREAM_ID, thread_id: SUBSCRIPTION_ID,
+      turn_id: APPROVAL_ID, started_at: {state: "unknown"}, completed_at: {state: "unknown"}, duration_ms: {state: "known", value: 0}};
+    const data = {sessionId: SESSION_ID, turnId: TURN_ID, timing};
+    const invoke = vi.fn(async () => ({schemaVersion: 1, requestId: REQUEST_ID, data}));
+    const client = createChatClient(transport(invoke));
+    await expect(client.readTurnTiming(CONTEXT_ID, SESSION_ID, TURN_ID)).resolves.toEqual(data);
+    expect(invoke).toHaveBeenCalledWith("chat_read_turn_timing_v1", {request: expect.objectContaining({contextId: CONTEXT_ID, payload: {sessionId: SESSION_ID, turnId: TURN_ID}})});
+    invoke.mockResolvedValueOnce({schemaVersion: 1, requestId: REQUEST_ID, data: {...data, turnId: APPROVAL_ID}});
+    await expect(client.readTurnTiming(CONTEXT_ID, SESSION_ID, TURN_ID)).rejects.toBeDefined();
+    invoke.mockResolvedValueOnce({schemaVersion: 1, requestId: REQUEST_ID, data: {...data, timing: {...timing, duration_ms: {state: "unknown", value: 0}}}});
+    await expect(client.readTurnTiming(CONTEXT_ID, SESSION_ID, TURN_ID)).rejects.toBeDefined();
+  });
+
   it.each([1, 2])("sends an explicit null project using create-session v%s", async (version) => {
     const invoke = vi.fn(async () => ({schemaVersion: version, requestId: REQUEST_ID, data: {sessionId: SESSION_ID, turnId: TURN_ID, operationId: REQUEST_ID}}));
     const client = createChatClient(transport(invoke));

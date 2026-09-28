@@ -192,7 +192,7 @@ describe("ChatToolItem", () => {
       resultSummary: null,
     });
     const wrapper = mount(ChatToolItem, {
-      props: { item: item(running), execution: running },
+      props: { item: {...item(running), busy: true}, execution: running },
     });
 
     const disclosure = wrapper.get(".chat-timeline-item-shell__disclosure");
@@ -210,7 +210,7 @@ describe("ChatToolItem", () => {
       durationMs: null,
       resultSummary: null,
     });
-    await wrapper.setProps({ item: item(updated), execution: updated });
+    await wrapper.setProps({ item: {...item(updated), busy: true}, execution: updated });
     expect(wrapper.text()).toContain("PROGRESS_DELTA_B");
     expect(wrapper.get(".chat-tool-item__status-announcement").text())
       .toBe("工具正在执行。");

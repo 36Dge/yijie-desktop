@@ -45,6 +45,7 @@ export type ChatApprovalDecisionChange = Readonly<{
 
 const props = withDefaults(defineProps<{
   item: ConversationTimelineItemViewModel;
+  processPresentation?: boolean;
   execution: ConversationCommandExecution;
   approval?: ConversationApproval | null;
   approvalTransient?: ChatApprovalTransientState | null;
@@ -105,6 +106,9 @@ const statusPresentation = computed<Readonly<{
 
 const defaultExpanded = computed(() =>
   (native.value ? props.item.busy === true : props.execution.status === "running") || props.approval?.status === "pending");
+
+const approvalNeedsAttention = computed(() => props.approval?.status === "pending" ||
+  ["submitting", "reconciling", "error"].includes(props.approvalTransient?.phase ?? "idle"));
 
 const approvalCardStatus = computed<ChatApprovalCardStatus | null>(() => {
   const approval = props.approval;
@@ -295,14 +299,15 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
 
 <template>
   <ChatTimelineItemShell
+    :process-presentation="processPresentation"
     :item="item"
-    label="命令执行"
+    :label="processPresentation ? (execution.status === 'completed' ? '运行了命令' : '命令执行') : '命令执行'"
     :status-label="statusPresentation.label"
     icon="workspace"
     :status-icon="statusPresentation.icon"
     :status-tone="statusPresentation.tone"
-    collapsible
-    :default-expanded="defaultExpanded"
+    :collapsible="!approvalNeedsAttention"
+    :default-expanded="processPresentation ? false : defaultExpanded"
     @disclosure-change="forwardDisclosure"
   >
     <span
