@@ -16,6 +16,7 @@ import ChatCommandItem, {
   type ChatApprovalTransientState,
 } from "./ChatCommandItem.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
 import ChatTurnPlan from "./ChatTurnPlan.vue";
@@ -45,8 +46,26 @@ const processItems = computed(() => props.turn.items.filter(item =>
 const processKeys = computed(() => new Set(processItems.value.map(item => item.identity)));
 const processPlan = computed(() => props.turn.plan && !props.turn.plan.steps.some(step => step.status === "unknown") ? props.turn.plan : null);
 const hasProcess = computed(() => processItems.value.length > 0 || processPlan.value !== null);
+const answerStarted = computed(() => props.turn.items.some(item =>
+  ["final_answer", "assistant_unclassified"].includes(item.presentation) &&
+  item.contentBlocks.some(block => (block.type === "text" || block.type === "code") && block.text.trim().length > 0)));
 const processExpanded = computed(() => expansionChoice.value ??
-  (props.turn.liveObserved === true && ["in_progress", "waiting_approval"].includes(props.turn.domainStatus)));
+  (props.turn.liveObserved === true && ["in_progress", "waiting_approval"].includes(props.turn.domainStatus) && !answerStarted.value));
+const nativeLiveProgress = computed(() => props.turn.source === "native_observed" &&
+  props.turn.statusSource === "runtime_notification" && props.turn.liveObserved && props.turn.progress !== null);
+const thinking = computed(() => {
+  if (!nativeLiveProgress.value || props.turn.domainStatus !== "in_progress") return false;
+  if (props.turn.items.some(item => item.approval?.status === "pending" ||
+    (item.busy && ["command", "tool"].includes(item.presentation)))) return false;
+  const latest = [...props.turn.items].reverse().find(item => item.presentation !== "user_message");
+  if (latest?.kind === "assistant_message" && latest.contentBlocks.some(block =>
+    (block.type === "text" || block.type === "code") && block.text.length > 0)) {
+    return latest.presentation === "commentary" && latest.domainStatus === "completed";
+  }
+  return !answerStarted.value || latest?.presentation === "reasoning" && latest.busy === true;
+});
+const showProgress = computed(() => props.turn.progress && (!nativeLiveProgress.value ||
+  props.turn.domainStatus !== "in_progress" || thinking.value));
 const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
 const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId)].join(" "));
 watch(() => props.turn.identity, () => { expansionChoice.value = null; });
@@ -279,6 +298,7 @@ function reasoningStateMessage(item: ConversationTimelineItemViewModel): string 
   if (item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "summary") &&
       !item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "content" && b.text.length > 0)) return "仅提供推理摘要，未提供原始模型推理正文。";
   const hasContent = item.contentBlocks.length > 0;
+  if (item.busy && !hasContent) return null;
   if (item.reasoning === null) {
     if (item.domainStatus === "started" || item.domainStatus === "streaming") {
       return hasContent ? null : "正在等待过程记录…";
@@ -316,7 +336,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
     :class="`chat-turn-group--${turn.phase}`"
     :aria-label="`对话 ${position}`"
   >
-    <header v-if="turn.domainStatus !== 'completed'" class="chat-turn-group__header">
+    <header v-if="turn.domainStatus !== 'completed' && !nativeLiveProgress" class="chat-turn-group__header">
       <span class="chat-turn-group__status">
         <YjIcon
           :name="turnStatusIcon(turn)"
@@ -328,17 +348,6 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
         <span v-else-if="turn.source === 'native_rebuilt'"> · 历史恢复，内容可能不完整</span>
       </span>
     </header>
-
-    <div
-      v-if="turn.progress"
-      class="chat-turn-group__progress"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <YjIcon name="pending" size="sm" tone="primary" />
-      <span>{{ progressLabel(turn.progress) }}</span>
-    </div>
 
     <p v-if="turnStateMessage(turn)" class="chat-turn-group__turn-state" role="note">
       {{ turnStateMessage(turn) }}
@@ -439,7 +448,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             <div v-if="item.presentation === 'reasoning'" class="chat-turn-group__reasoning-segments">
               <section v-for="block in item.contentBlocks" :key="block.identity" :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '推理摘要' : '模型推理记录'">
                 <strong class="chat-turn-group__segment-label">{{ block.type === "text" && block.reasoningSource === "summary" ? "推理摘要" : "模型推理记录" }}</strong>
-                <ChatSafeContent :blocks="[block]" mode="plain" />
+                <ChatSafeContent :blocks="[block]" mode="plain" :streaming="item.busy === true && processExpanded" />
               </section>
             </div>
             <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
@@ -447,6 +456,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
               :blocks="item.contentBlocks"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
+              :streaming="item.kind === 'assistant_message' && item.busy === true && (!processKeys.has(item.identity) || processExpanded)"
             >
               <template
                 v-if="slots['artifact-reference']"
@@ -475,7 +485,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             </ChatSafeContent>
 
             <template
-              v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && slots['item-actions']"
+              v-if="!((item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']) && item.presentation !== 'command' && item.presentation !== 'tool' && item.copyPolicy === 'text_and_code' && (item.kind !== 'assistant_message' || item.domainStatus === 'completed') && slots['item-actions']"
               #actions
             >
               <slot name="item-actions" :item="item" />
@@ -484,6 +494,11 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
         </li>
       </template>
     </ol>
+
+    <div v-if="showProgress && turn.progress" class="chat-turn-group__progress" role="status" aria-live="polite" aria-atomic="true">
+      <ChatThinkingIndicator v-if="thinking" />
+      <span v-else>{{ progressLabel(turn.progress) }}</span>
+    </div>
 
     <ul v-if="turn.notices.length > 0" class="chat-turn-group__notices" aria-label="本轮通知">
       <li
@@ -529,8 +544,8 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   padding-bottom: var(--yj-space-2);
   border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
   color: var(--yj-color-text-secondary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -571,10 +586,8 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 
 .chat-turn-group__progress {
   width: fit-content;
-  padding: var(--yj-space-2) var(--yj-space-3);
-  border-radius: var(--yj-radius-md);
-  color: var(--yj-color-semantic-info-ink);
-  background: var(--yj-color-info-soft);
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-line-height-body);
 }
 
 .chat-turn-group__turn-state {

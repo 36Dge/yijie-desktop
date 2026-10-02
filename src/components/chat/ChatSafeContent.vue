@@ -6,6 +6,7 @@ import type {
   ConversationTimelineContentBlock,
 } from "../../domain/conversation-timeline";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatStreamText from "./ChatStreamText.vue";
 
 type SafeInlineNode = Readonly<{
   key: string;
@@ -71,8 +72,10 @@ type SafeContentNode =
 const props = withDefaults(defineProps<{
   blocks: readonly ConversationTimelineContentBlock[];
   mode?: "rich" | "plain";
+  streaming?: boolean;
 }>(), {
   mode: "rich",
+  streaming: false,
 });
 
 defineSlots<{
@@ -144,6 +147,12 @@ function inlineNodes(source: string, keyBase: string, plain: boolean): readonly 
         plainStart = cursor;
         continue;
       }
+      if (props.streaming && closing === -1) {
+        flushPlain(cursor);
+        append("inline_code", source.slice(cursor + 1));
+        plainStart = cursor = source.length;
+        continue;
+      }
     }
 
     const delimiter = source.startsWith("**", cursor) ? "**"
@@ -156,6 +165,16 @@ function inlineNodes(source: string, keyBase: string, plain: boolean): readonly 
         append(delimiter === "~~" ? "strikethrough" : "strong", source.slice(cursor + 2, closing));
         cursor = closing + 2;
         plainStart = cursor;
+        continue;
+      }
+      // A live suffix may not have received its closing marker yet. Keep the
+      // same formatted node as it arrives; settled/malformed text keeps the old fallback.
+      if (props.streaming && closing === -1) {
+        flushPlain(cursor);
+        const suffix = source.slice(cursor + 2);
+        append(delimiter === "~~" ? "strikethrough" : "strong",
+          suffix.endsWith(delimiter[0]!) ? suffix.slice(0, -1) : suffix);
+        plainStart = cursor = source.length;
         continue;
       }
     }
@@ -262,7 +281,7 @@ function startsBlock(
 ): boolean {
   const line = lines[index] ?? "";
   if (line.trim().length === 0) return true;
-  if (fenceLanguage(line) !== undefined && closingFenceIndexes[index] !== -1) return true;
+  if (fenceLanguage(line) !== undefined && (closingFenceIndexes[index] !== -1 || props.streaming)) return true;
   if (heading(line) || isRule(line) || /^ {0,3}>/.test(line) || listMarker(line)) return true;
   const header = tableCells(line);
   return header !== null && isTableDelimiter(tableCells(lines[index + 1] ?? ""));
@@ -300,7 +319,8 @@ function markdownNodes(
     }
 
     const language = fenceLanguage(line);
-    const closingFence = language === undefined ? -1 : (closingFenceIndexes[index] ?? -1);
+    const closingFence = language === undefined ? -1 :
+      (closingFenceIndexes[index] === -1 && props.streaming ? lines.length : (closingFenceIndexes[index] ?? -1));
     if (language !== undefined && closingFence !== -1) {
       const key = stableKey(keyBase, "code", String(nodes.length));
       nodes.push(Object.freeze({
@@ -497,14 +517,14 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
     <template v-for="node in nodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
         <template v-for="inline in node.inlines" :key="inline.key">
-          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-          <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-          <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-          <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
+          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
+          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
+          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
+          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
           <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-            {{ inline.text }}（{{ inline.destination }}）
+            <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
           </span>
-          <span v-else>{{ inline.text }}</span>
+          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
         </template>
       </p>
 
@@ -514,21 +534,21 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         class="chat-safe-content__heading"
       >
         <template v-for="inline in node.inlines" :key="inline.key">
-          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-          <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-          <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-          <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
+          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
+          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
+          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
+          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
           <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-            {{ inline.text }}（{{ inline.destination }}）
+            <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
           </span>
-          <span v-else>{{ inline.text }}</span>
+          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
         </template>
       </component>
 
       <hr v-else-if="node.kind === 'rule'" class="chat-safe-content__rule">
 
       <blockquote v-else-if="node.kind === 'quote'" class="chat-safe-content__quote">
-        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich">
+        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich" :streaming="streaming">
           <template v-if="$slots['code-actions']" #code-actions="scope">
             <slot name="code-actions" v-bind="scope" />
           </template>
@@ -542,7 +562,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         class="chat-safe-content__list"
       >
         <li v-for="item in node.items" :key="item.key">
-          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich">
+          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich" :streaming="streaming">
             <template v-if="$slots['code-actions']" #code-actions="scope">
               <slot name="code-actions" v-bind="scope" />
             </template>
@@ -576,7 +596,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             />
           </div>
         </div>
-        <pre><code>{{ node.text }}</code></pre>
+        <pre><code><ChatStreamText :text="node.text" :streaming="streaming" /></code></pre>
       </div>
 
       <div
@@ -590,14 +610,14 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             <tr>
               <th v-for="header in node.headers" :key="header.key" scope="col">
                 <template v-for="inline in header.inlines" :key="inline.key">
-                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-                  <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-                  <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-                  <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
+                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
+                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
+                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
+                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
                   <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-                    {{ inline.text }}（{{ inline.destination }}）
+                    <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
                   </span>
-                  <span v-else>{{ inline.text }}</span>
+                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
                 </template>
               </th>
             </tr>
@@ -606,14 +626,14 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             <tr v-for="row in node.rows" :key="row[0]?.key">
               <td v-for="cell in row" :key="cell.key">
                 <template v-for="inline in cell.inlines" :key="inline.key">
-                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code">{{ inline.text }}</code>
-                  <strong v-else-if="inline.kind === 'strong'">{{ inline.text }}</strong>
-                  <em v-else-if="inline.kind === 'emphasis'">{{ inline.text }}</em>
-                  <del v-else-if="inline.kind === 'strikethrough'">{{ inline.text }}</del>
+                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
+                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
+                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
+                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
                   <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-                    {{ inline.text }}（{{ inline.destination }}）
+                    <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
                   </span>
-                  <span v-else>{{ inline.text }}</span>
+                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
                 </template>
               </td>
             </tr>

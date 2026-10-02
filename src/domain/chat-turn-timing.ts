@@ -1,4 +1,5 @@
 import type { NativeTurnTiming } from "../api/generated/chat-turn-timing.gen";
+import type { ConversationTimelineTurnViewModel } from "./conversation-timeline";
 
 function elapsedLabel(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -8,10 +9,11 @@ function elapsedLabel(seconds: number): string {
 }
 
 /** Presentation only: final elapsed time always comes from Codex's monotonic durationMs. */
-export function turnTimingLabel(timing: NativeTurnTiming | null | undefined, live: boolean, now: number): string | null {
+export function turnTimingLabel(timing: NativeTurnTiming | null | undefined, live: boolean, now: number, status: ConversationTimelineTurnViewModel["domainStatus"] = "unknown"): string | null {
   if (!timing) return null;
   if (timing.duration_ms.state === "known" && timing.duration_ms.value !== undefined) {
-    return `用时 ${elapsedLabel(Math.floor(timing.duration_ms.value / 1000))}`;
+    const seconds = Math.floor(timing.duration_ms.value / 1000);
+    return status === "completed" ? `已完成 ${seconds}s` : `用时 ${elapsedLabel(seconds)}`;
   }
   if (!live || timing.completed_at.state !== "unknown" || timing.started_at.state !== "known" ||
       timing.started_at.value === undefined) return null;

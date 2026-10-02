@@ -102,3 +102,14 @@ Iconify / Simple Icons 只能作为经过审核的备用来源，不是默认来
 记录卡片操作使用 registry 中 `rerun`（Lucide RotateCcw）和 `arrowUpRight`
 （Lucide ArrowUpRight），分别表示重新执行和查看关联对话。沿用 16px、2px 线宽、
 中性前景及禁用态，不添加装饰背景，不引入新的图标依赖。
+
+## 对话发送操作（2026-09-30）
+
+对话输入框的 `send` 使用既有 Lucide 库的 `SendHorizontal`，在发送按钮内逆时针
+旋转 90°，使纸飞机竖直朝上；停止图标不旋转。
+图标为 `md`（18px）。右侧圆形操作按钮使用 `--yj-control-height-md`（36px），
+发送与停止状态保持相同占位；停止图标沿用原有形状和尺寸。可发送态、禁用态、
+hover、pressed 及键盘焦点继续使用既有 token 和交互规则。
+
+`contract-impact = none`：仅调整 Desktop 图标与按钮尺寸，Desktop/API/Agent Host
+跨进程接口、权限、发送与停止流程及本地持久状态均无变化。

@@ -40,10 +40,10 @@ describe("native turn duration", () => {
     expect(wrapper.text()).toContain("已处理 8秒");
     expect(read).toHaveBeenCalledTimes(1);
     turns.value = [turn("turn", true)]; await flushPromises();
-    expect(wrapper.text()).toContain("用时 51秒");
+    expect(wrapper.text()).toContain("已完成 51s");
     await vi.advanceTimersByTimeAsync(60000);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain("用时 51秒");
+    expect(wrapper.text()).toContain("已完成 51s");
     wrapper.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -83,8 +83,12 @@ describe("native turn duration", () => {
   });
 
   it("preserves native zero, missing, invalid and history semantics", () => {
-    expect(turnTimingLabel(native(0), false, 200000)).toBe("用时 0秒");
-    expect(turnTimingLabel(native(3661000), false, 200000)).toBe("用时 1小时1分1秒");
+    expect(turnTimingLabel(native(0), false, 200000, "completed")).toBe("已完成 0s");
+    expect(turnTimingLabel(native(38999), false, 200000, "completed")).toBe("已完成 38s");
+    for (const status of ["failed", "interrupted", "unknown", "in_progress"] as const) {
+      expect(turnTimingLabel(native(38000), false, 200000, status)).toBe("用时 38秒");
+    }
+    expect(turnTimingLabel(native(3661000), false, 200000, "completed")).toBe("已完成 3661s");
     expect(turnTimingLabel(native(), false, 200000)).toBeNull();
     expect(turnTimingLabel(native(), true, 99000)).toBeNull();
     expect(turnTimingLabel({ ...native(), started_at: {state: "invalid"} }, true, 200000)).toBeNull();

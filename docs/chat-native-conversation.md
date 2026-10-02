@@ -110,6 +110,22 @@ Host 为新派发轮次选择已有 `high` effort，复用已有 `show_raw_agent
 
 本地来源先固定，再通过 `pnpm tauri:demo-fast:app` 标准构建及正常退出/重开验证；只更新项目可复现开发产物，不覆盖已发布应用，不变更历史数据。真实运行结果另见本次验收记录。
 
+## 完成耗时文案与重复状态（2026-09-29）
+
+`contract-impact = none`：仅变更前端呈现，Host/Runtime 接口、原生计时、权限及持久化不变。确认整轮 completed 且原生 duration 已知时，时间行显示“已完成 Ns”（总秒数向下取整），使用 body 14px，较原 caption 12px 增大 2px。失败、中断、未知或仍在运行的轮次不因计时返回而显示成功。
+
+完成的模型回答移除右侧重复“已完成”和空标题行，同时移除失去目标的 aria-describedby；进行中/异常/活动提示保持可见。既有耗时展开箭头、鼠标与键盘操作、正文及复制保持。
+
+## 模型回复底部复制时机（2026-09-29）
+
+`contract-impact = none`：仅在 Timeline 展示边界以已有 Item 状态控制整条消息的操作插槽。assistant_message 在 started/streaming/incomplete 时不显示底部复制按钮，只有 domainStatus=completed 时才显示。该状态沿用原生 item/completed，不以正文非空、busy=false、final_answer 阶段或 turn/completed 代替。用户消息与代码块复制不变，既有复制权限和审批内容保护不变；不修改协议、Runtime、计时或持久化。
+
+
+### 2026-09-30 思考扫光与流式呈现
+
+`contract-impact = none`。只消费当前 native live / progress / Item busy / phase，接口、持久化、权限、原始事件与计时不变。正在思考扫光位于当前输出末尾；不在历史、异常、终态、工具执行或正文输出时假称正在思考。首段回答开始即默认收起过程，用户选择优先。`ChatStreamText` 仅保存动画范围，全文立即呈现；正常 Item completed 立即结束文字动画并沿用既有复制时机。动画不参与 native reducer、阶段判定、Turn 结束或计时。
+
+
 ## FEAT-156 模型选择实施候选（2026-10-02）
 
 新增模型 profile 源与模型感知 Host 路由；原生 SQLite 28 保存会话选择、revision、待查证选择操作与每个提交的不可变模型快照。首轮 operation 在 Host 绑定后才物化 outbox，快照以已预留 operation ID 保存并关联会话，不能以不存在的首轮 outbox 外键阻止新建。Host Store 7 保存 profile 与幂等切换回执。旧计划缺 model_profile 保持旧 MiniMax 语义，旧摘要不重算；新计划将 profile 纳入原授权摘要和 run 快照。

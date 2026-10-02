@@ -105,6 +105,6 @@ export function useChatTurnTiming(options: {
   onScopeDispose(() => { stopped = true; reset(); clearInterval(interval); });
 
   return computed(() => Object.fromEntries(options.turns().map(turn => [
-    turn.turnId, turnTimingLabel(facts.value[turn.turnId], live(turn), now.value),
+    turn.turnId, turnTimingLabel(facts.value[turn.turnId], live(turn), now.value, turn.domainStatus),
   ])));
 }

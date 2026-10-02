@@ -68,9 +68,9 @@ describe("ChatTimelineItemShell", () => {
     expect(article.attributes("aria-labelledby")).toBeUndefined();
     expect(wrapper.find(".chat-timeline-item-shell__identity").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("模型回答");
-    expect(wrapper.get(`#${article.attributes("aria-describedby")}`).text()).toBe("已完成");
-    expect(wrapper.get(".chat-timeline-item-shell__status svg").attributes("aria-hidden"))
-      .toBe("true");
+    expect(article.attributes("aria-describedby")).toBeUndefined();
+    expect(wrapper.find(".chat-timeline-item-shell__header").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("已完成");
     expect(wrapper.get("[role='group']").attributes("aria-label")).toBe("模型回答操作");
     expect(wrapper.find("header button").exists()).toBe(false);
     expect(wrapper.get(".chat-timeline-item-shell__body").element.nextElementSibling)

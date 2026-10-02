@@ -631,15 +631,15 @@ describe("ChatTurnGroup", () => {
 
   it("keeps the Turn disclosure choice and process DOM across streamed updates and reordered Items", async () => {
     const turn = projectedTurn({items: [message("reasoning-a", 0, "reasoning", "甲"), message("reasoning-b", 1, "reasoning", "乙")]});
-    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,props: {turn, position: 1, timingLabel: "用时 51秒"}});
+    const wrapper = mount(ChatTurnGroup, { attachTo: document.body,props: {turn, position: 1, timingLabel: "已完成 51s"}});
     const toggle = wrapper.get(".chat-turn-group__process-toggle");
     const before = wrapper.findAll("[data-process-item]").map(item => item.element);
     await toggle.trigger("click");
-    await wrapper.setProps({turn: {...turn, items: [...turn.items].reverse()}, timingLabel: "用时 52秒"});
+    await wrapper.setProps({turn: {...turn, items: [...turn.items].reverse()}, timingLabel: "已完成 52s"});
     expect(toggle.attributes("aria-expanded")).toBe("true");
     expect(wrapper.findAll("[data-process-item]").map(item => item.element)).toEqual([...before].reverse());
     await toggle.trigger("click");
-    await wrapper.setProps({turn: {...turn, items: [...turn.items]}, timingLabel: "用时 53秒"});
+    await wrapper.setProps({turn: {...turn, items: [...turn.items]}, timingLabel: "已完成 53s"});
     expect(toggle.attributes("aria-expanded")).toBe("false");
     expect(wrapper.findAll("[data-process-item]").every(item => !item.isVisible())).toBe(true);
     wrapper.unmount();
@@ -675,10 +675,10 @@ describe("ChatTurnGroup", () => {
 
 it("places native turn duration after user input and before model output", () => {
   const turn = projectedTurn({ items: [message("user", 0, "user_message", "用户输入"), message("assistant", 1, "assistant_message", "模型输出")] });
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "用时 51秒" } });
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1, timingLabel: "已完成 51s" } });
   const children = wrapper.get(".chat-turn-group__items").element.children;
   expect(children[0]!.textContent).toContain("用户输入");
-  expect(children[1]!.textContent).toBe("用时 51秒");
+  expect(children[1]!.textContent).toBe("已完成 51s");
   expect(children[2]!.textContent).toContain("模型输出");
   expect(children[1]!.getAttribute("aria-live")).toBeNull();
   wrapper.unmount();
@@ -702,10 +702,10 @@ it("uses elapsed time to reveal the entire process while leaving answers and lat
     {...message("unclassified", 4, "assistant_message", "兼容模型的回答"), agentMessagePhase: "unknown"},
     message("final", 5, "assistant_message", "**最终结果**"),
   ]});
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn, position: 1, timingLabel: "用时 1分44秒"}});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn, position: 1, timingLabel: "已完成 104s"}});
   const toggle = wrapper.get(".chat-turn-group__process-toggle");
   expect(toggle.element.tagName).toBe("BUTTON");
-  expect(toggle.text()).toBe("用时 1分44秒");
+  expect(toggle.text()).toBe("已完成 104s");
   expect(toggle.attributes("aria-expanded")).toBe("false");
   const controlled = toggle.attributes("aria-controls")!.split(" ");
   expect(controlled).toHaveLength(2);
@@ -736,7 +736,7 @@ it("follows live Turn state until the user chooses expansion, without resetting 
   expect(wrapper.findAll("[data-process-item]").every(item => !item.isVisible())).toBe(true);
   const ended = {...active, domainStatus: "completed" as const, terminalStatus: "completed" as const, phase: "complete" as const};
   await toggle.trigger("click");
-  await wrapper.setProps({turn: ended, timingLabel: "用时 51秒"});
+  await wrapper.setProps({turn: ended, timingLabel: "已完成 51s"});
   expect(toggle.attributes("aria-expanded")).toBe("true");
   await wrapper.setProps({turn: {...ended, identity: "another-turn"}});
   expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
@@ -769,9 +769,9 @@ it("keeps pending approvals and failed or incomplete process records outside the
 
 it("keeps an empty process control out of answer-only Turns and supports plans without duration", async () => {
   const answerOnly = projectedTurn({items: [message("answer", 0, "assistant_message", "普通答案")]});
-  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: answerOnly, position: 1, timingLabel: "用时 0秒"}});
+  const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: {turn: answerOnly, position: 1, timingLabel: "已完成 0s"}});
   expect(wrapper.find(".chat-turn-group__process-toggle").exists()).toBe(false);
-  expect(wrapper.get(".chat-turn-group__timing").text()).toBe("用时 0秒");
+  expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已完成 0s");
   const planOnly = projectedTurn({plan: {explanation: "计划说明", steps: [{ordinal: 0, text: "检查状态", status: "completed"}]}});
   await wrapper.setProps({turn: planOnly, timingLabel: null});
   expect(wrapper.get(".chat-turn-group__process-toggle").text()).toBe("处理过程");

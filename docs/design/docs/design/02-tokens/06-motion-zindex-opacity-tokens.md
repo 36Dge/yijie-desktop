@@ -33,6 +33,8 @@
 | `motion-base` | 180ms | 弹层、按钮、状态切换 |
 | `motion-slow` | 240ms | 抽屉、页面局部切换 |
 
+2026-09-30 用户指定的思考扫光为局部状态动效例外：`--yj-motion-chat-thinking` 1800ms，仅实时“正在思考”四字循环；隐藏窗口暂停、减少动态效果关闭。流式新文字仍使用 `motion-slow` 240ms，起始透明度 `--yj-opacity-chat-stream-start` 0.35，立即恢复为 1，不降低既有正文透明度。
+
 ## 缓动
 
 - 标准：`cubic-bezier(0.2, 0, 0, 1)`。

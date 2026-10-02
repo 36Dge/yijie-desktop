@@ -444,7 +444,7 @@ function handlePaste(event: ClipboardEvent): void {
           :title="sendLabel"
           @click="submit"
         >
-          <YjIcon name="send" size="lg" />
+          <YjIcon class="chat-composer__send-icon" name="send" size="md" />
         </button>
         </div>
       </div>
@@ -855,9 +855,9 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__send {
   display: inline-flex;
-  flex: 0 0 var(--yj-space-10);
-  width: var(--yj-space-10);
-  height: var(--yj-space-10);
+  flex: 0 0 var(--yj-control-height-md);
+  width: var(--yj-control-height-md);
+  height: var(--yj-control-height-md);
   align-items: center;
   justify-content: center;
   justify-self: end;
@@ -870,6 +870,7 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__send :deep(.yj-icon) { color: inherit; }
+.chat-composer__send-icon { transform: rotate(-90deg); }
 .chat-composer__send:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
 .chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
 .chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }

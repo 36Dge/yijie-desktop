@@ -45,6 +45,8 @@ const contentId = `${id}-content`;
 const busy = computed(() => props.item.busy === true);
 const isAnswer = computed(() => props.item.presentation === "final_answer" ||
   props.item.presentation === "assistant_unclassified");
+const hideNormalAnswerStatus = computed(() => isAnswer.value &&
+  (props.item.domainStatus === "completed" || busy.value) && !props.item.activityLabel);
 const iconTone = computed(() => props.item.role === "system"
   ? "warning" as const
   : busy.value
@@ -72,13 +74,13 @@ function toggle(): void {
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
     :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
-    :aria-describedby="item.role === 'user' || plainProcess ? undefined : statusId"
+    :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
       {{ item.availability === "unavailable" ? "此项内容暂不可用" : "此项信息不完整" }}；不代表执行失败。
     </p>
-    <header v-if="item.role !== 'user' && !plainProcess" class="chat-timeline-item-shell__header">
+    <header v-if="item.role !== 'user' && !plainProcess && !hideNormalAnswerStatus" class="chat-timeline-item-shell__header">
       <button
         v-if="collapsible"
         class="chat-timeline-item-shell__disclosure"
