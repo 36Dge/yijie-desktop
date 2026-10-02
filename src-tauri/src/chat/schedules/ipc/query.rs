@@ -93,6 +93,21 @@ pub(super) fn detail(
 ) -> Result<Value, Code> {
     let p = execution::plan(&repo.connection, &repo.scope, id)?;
     let mut out = json!({"summary":summary(repo,&p,a,n)?,"plan":p});
+    if p.definition.target.mode == super::super::generated::TargetMode::DedicatedChat
+        && sql(repo.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_scheduled_target_bindings')",
+            [], |row| row.get::<_, bool>(0),
+        ))?
+    {
+        let bound: Option<String> = sql(repo.connection.query_row(
+            "SELECT b.conversation_id FROM chat_scheduled_target_bindings b JOIN chat_sessions s ON s.id=b.conversation_id AND s.owner_user_id=b.owner_user_id AND s.tenant_id=b.tenant_id JOIN chat_projects p ON p.id=s.project_id WHERE b.plan_id=?1 AND b.owner_user_id=?2 AND b.tenant_id=?3 AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)",
+            params![id, repo.scope.owner_user_id, repo.scope.tenant_id],
+            |row| row.get(0),
+        ).optional())?;
+        if let Some(bound) = bound {
+            out["bound_conversation_id"] = json!(bound);
+        }
+    }
     if let Some(id) = p.authorization_ref {
         out["grant"] = value(&execution::grant(&repo.connection, &repo.scope, &id, n)?)?;
     }
@@ -335,6 +350,9 @@ pub(super) fn record_detail(
         let snapshot:String=sql(repo.connection.query_row("SELECT snapshot_json FROM chat_scheduled_runs WHERE run_id=?1 AND owner_user_id=?2 AND tenant_id=?3",params![key["run_id"].as_str(),repo.scope.owner_user_id,repo.scope.tenant_id],|r|r.get(0)))?;
         let p: PlanView = serde_json::from_str(&snapshot).map_err(|_| E::FormatUnsupported)?;
         out["configuration"] = json!({"name":p.definition.name,"content":p.definition.content,"rule":p.definition.rule,"target_mode":p.definition.target.mode});
+        if let Some(profile) = p.definition.model_profile {
+            out["configuration"]["model_profile"] = json!(profile);
+        }
     }
     Ok(out)
 }
@@ -422,6 +440,9 @@ pub(super) fn plan_cards(
     page(rows, limit, |b| {
         let p = execution::plan(&repo.connection, &repo.scope, &b.id)?;
         let mut out = json!({"summary":summary(repo,&p,a,n)?,"content_preview":p.definition.content.chars().take(240).collect::<String>(),"rule":p.definition.rule});
+        if let Some(profile) = p.definition.model_profile {
+            out["model_profile"] = json!(profile);
+        }
         // Display identity comes from the same scoped native association. Never
         // infer an existing-chat target from a similarly named conversation.
         if let Some(chat) = &p.definition.target.conversation_id {

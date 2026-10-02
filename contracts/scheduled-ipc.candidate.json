@@ -11,7 +11,7 @@
   "sources": [
     {
       "path": "src-tauri/schemas/scheduled-task-ipc-v1.schema.json",
-      "sha256": "7ae177182c8d4b07c9eeaf0f0660265184944e77b686c802a207c55c66d08a06"
+      "sha256": "f691e8148478f9b5f9c65419a15dfe3dddaf92c4ee37e746fdcd995bf52ce647"
     },
     {
       "path": "scripts/generate-scheduled-ipc.mjs",
@@ -19,27 +19,27 @@
     },
     {
       "path": "contracts/scheduled-plan.schema.json",
-      "sha256": "8ab948f965e5681859d129f91a18a5931cfed89cfd32c0e866db9b5edf9283f4"
+      "sha256": "30b47a02b79936cd91d13cc75b97eaa107c4b4108bbcf50c054d5b9fe3e400ae"
     },
     {
       "path": "src-tauri/src/chat/schedules/generated.rs",
-      "sha256": "1223692af5937b691453edb57b5a8689a419472af9be806b04855247a09a1614"
+      "sha256": "d00301c90deca78d1b23f4997f28cdc3a7d5b7d93f809ddaccc2fc9a889ab317"
     },
     {
       "path": "src/domain/scheduled-plan.generated.ts",
-      "sha256": "34d152ce71516f533b258bf79456d772ca2895bd3925028bdaa21ce445834185"
+      "sha256": "8dee3c487fb806c375f95ff0ccce099dbae7c8738590a178a31e793eb952c5a8"
     },
     {
       "path": "contracts/scheduled-execution.schema.json",
-      "sha256": "b6c9763e00285d75c79c21b195929c52ad997f050ecadeb735f51507c7609df9"
+      "sha256": "708220eca75c148878256029b3bdccbe7c8e4555de02162fa77bdc9c60efc393"
     },
     {
       "path": "src-tauri/src/chat/schedules/execution_generated.rs",
-      "sha256": "f53ed95baf4548dc0ad1eddf4872afffd88975984e1e67af6174834305b7d778"
+      "sha256": "2edc059c2a2ac2b77210f3005ce0602d78a06b7f687924e5b400fd2dd66e87c2"
     },
     {
       "path": "src/domain/scheduled-execution.generated.ts",
-      "sha256": "70184382b025d57155098b8a597e6c3994d903813191188f6532fd7655a612bf"
+      "sha256": "38e9782a18f34e4341b3e4bd63b23ff3c9e05625e513c6c75a5589c1e65e1564"
     },
     {
       "path": "contracts/scheduled-draft.schema.json",
@@ -61,7 +61,7 @@
     },
     {
       "path": "src-tauri/src/chat/schedules/ipc_generated.rs",
-      "sha256": "6bc606b999ebd16e0561224222de856d31d7b3d983eb7e2ad1a174878e7f38f8"
+      "sha256": "4edecbf85c718006d0de9d42eea7e4e1dc88e40779e13f159e7f1ae765878564"
     },
     {
       "path": "src-tauri/src/chat/schedules/ipc_commands_generated.rs",
@@ -69,11 +69,11 @@
     },
     {
       "path": "src/api/generated/scheduled-task-ipc.gen.ts",
-      "sha256": "f4f02685a8a7ad07e7cf1514a95ecde1109b28316397467e2eda1c2a7682c068"
+      "sha256": "403db107087e019530238b87bd2981f02cf75ec05d6ad9c98c44d02f8541c153"
     },
     {
       "path": "src/api/generated/scheduled-task-ipc-validator.gen.js",
-      "sha256": "b99e791cadba93798b732fc9a92ff920d55ec3a2b4309866baff20a41b3e1633"
+      "sha256": "d22c0ef846598039ca93c180a4a649bc4bb82bc1c60a46b23da46537c0ceaabf"
     },
     {
       "path": "src/api/generated/scheduled-task-ipc-validator.gen.d.ts",
@@ -81,7 +81,7 @@
     },
     {
       "path": "src-tauri/schemas/scheduled-task-ipc-resolved.schema.json",
-      "sha256": "0d0265fc75d84ee61f19ad0fcfdfacf42d5f007e50dfbdd6bec48ef7daa27fe8"
+      "sha256": "04b4f995abe979ebebef3962cdf9837894716ba6b6b4a7ca6f186fc11fa3d438"
     }
   ]
 }

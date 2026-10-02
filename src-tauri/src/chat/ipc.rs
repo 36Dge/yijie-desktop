@@ -9998,3 +9998,109 @@ mod projectless_payload_tests {
             .is_some());
     }
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelSelectionPayload {
+    session_id: Uuid,
+    intent: super::models::ModelIntent,
+    operation_id: Uuid,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelSubmissionPayload {
+    project_id: Option<Uuid>,
+    session_id: Option<Uuid>,
+    content_blocks: Vec<TurnContentBlockPayload>,
+    intent: super::models::ModelIntent,
+    operation_id: Uuid,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelSessionPayload {
+    session_id: Uuid,
+}
+#[tauri::command]
+pub async fn chat_model_catalog_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::models_generated::Catalog>, ChatIpcError> {
+    let request: CommandRequest<EmptyPayload> = decode_request(request)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .model_catalog(request.context_id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
+#[tauri::command]
+pub async fn chat_model_state_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::models::ModelState>, ChatIpcError> {
+    let request: CommandRequest<ModelSessionPayload> = decode_request(request)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .model_state(request.context_id, request.payload.session_id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
+#[tauri::command]
+pub async fn chat_select_model_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::models::ModelState>, ChatIpcError> {
+    let request: CommandRequest<ModelSelectionPayload> = decode_request(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .select_model(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.intent,
+            request.payload.operation_id,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
+#[tauri::command]
+pub async fn chat_model_submit_v1(
+    request: Value,
+    app: AppHandle,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<CreatedSessionDto>, ChatIpcError> {
+    let request: CommandRequest<ModelSubmissionPayload> = decode_request(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)?;
+    let blocks = draft_content_blocks(request.payload.content_blocks, request.request_id)?;
+    let (application, authorized, manager) =
+        applications(&chat_runtime, request.request_id).await?;
+    let pending = authorized
+        .model_submit(
+            request.context_id,
+            request.payload.project_id,
+            request.payload.session_id,
+            blocks,
+            request.payload.operation_id,
+            request.payload.intent,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    ipc_runtime
+        .ensure_coordinator(app, application, manager)
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(
+        request.request_id,
+        CreatedSessionDto {
+            session_id: pending.session_id.to_string(),
+            turn_id: pending.turn_id.to_string(),
+            operation_id: request.payload.operation_id.to_string(),
+        },
+    ))
+}

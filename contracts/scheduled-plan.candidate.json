@@ -1,18 +1,22 @@
 {
   "schema_version": 1,
   "contract_version": "0.1.0",
-  "mode": "local_candidate",
+  "mode": "local_worktree_candidate",
   "release": false,
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "base_commit": "db4458fe94572c4df41a114005d54a049bb79b1f",
+  "base_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
   "sources": [
     {
+      "path": "jsonschema/chat/model-selection-v1.schema.json",
+      "sha256": "15586a03e7873bc7c913ea89162cc60d8354effb8c475045920ce609f949169b"
+    },
+    {
       "path": "scripts/scheduled-schema-source.mjs",
-      "sha256": "4afa5abda0bb8fd76a3c01759605a8b1f3c59f5548ac93587750e07cd08f406c"
+      "sha256": "833e22e5c80967d01a0b4f690dacedaffdafd5a1d1c82736fec257b76feaf8ba"
     },
     {
       "path": "jsonschema/scheduled-tasks/plan-storage-v1.schema.json",
-      "sha256": "0883ab69c0cbcda311113fd2a966ea98065ddc47b301e36611e2447620667cd2"
+      "sha256": "4a6e42fcbd5222d58310fd61ec65ab26fb8ceec80702af77063d3894188e6889"
     },
     {
       "path": "jsonschema/scheduled-tasks/plan-draft-v1.schema.json",
@@ -20,35 +24,39 @@
     },
     {
       "path": "scripts/generate-scheduled-plan.mjs",
-      "sha256": "429b9691adcd2aef37986654f172167d5faeed98a17a4b183054295e45a12362"
+      "sha256": "b268740692bf313d82472bc9a58da6ccb68be1e63adc1abd1523092e9ec2663a"
     },
     {
       "path": "scripts/sync-scheduled-plan.mjs",
-      "sha256": "3724df87f56d70d3981aa360eb2e662223764172a34f0e802a1be0c44c590667"
+      "sha256": "b62f28e22f7eeecdd51e3313262169323d6d28c07f4b38b56c3303631c655669"
     },
     {
       "path": "scripts/scheduled-consumer-source.mjs",
       "sha256": "69e7fa6b1b4371d1d6c9456fe68b9ede76cc3a0896253597428729f531fde015"
+    },
+    {
+      "path": "scripts/chat-model-consumer-source.mjs",
+      "sha256": "9930c321840c103b21afa2dcaa8f04d039297e76c30dffb8b18a9096a61546ed"
     }
   ],
   "generated": [
     {
       "path": "sdks/rust/scheduled-plan/types.gen.rs",
-      "sha256": "1223692af5937b691453edb57b5a8689a419472af9be806b04855247a09a1614"
+      "sha256": "d00301c90deca78d1b23f4997f28cdc3a7d5b7d93f809ddaccc2fc9a889ab317"
     },
     {
       "path": "sdks/typescript/src/jsonschema/scheduled-plan.gen.ts",
-      "sha256": "34d152ce71516f533b258bf79456d772ca2895bd3925028bdaa21ce445834185"
+      "sha256": "8dee3c487fb806c375f95ff0ccce099dbae7c8738590a178a31e793eb952c5a8"
     },
     {
       "path": "sdks/jsonschema/scheduled-plan.schema.json",
-      "sha256": "8ab948f965e5681859d129f91a18a5931cfed89cfd32c0e866db9b5edf9283f4"
+      "sha256": "30b47a02b79936cd91d13cc75b97eaa107c4b4108bbcf50c054d5b9fe3e400ae"
     }
   ],
   "generators": {
     "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
     "jsonschema": "canonical context-preserving draft references v2"
   },
-  "source_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
+  "feature": "FEAT-156",
   "source_lock_path": "compatibility/scheduled-plan/source.lock.json"
 }

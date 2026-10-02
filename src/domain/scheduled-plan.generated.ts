@@ -20,6 +20,7 @@ export interface PlanDefinition {
   content: string;
   rule: TimeRule;
   target: TargetReference;
+  model_profile?: PlanDefinitionModelProfile;
 }
 export interface SavePlanRequest {
   request_id: Identity;
@@ -50,3 +51,4 @@ export interface TimePreview {
   tzdb_version: string;
 }
 export type TimeRuleFrequency = "once" | "daily" | "weekdays" | "weekly";
+export type PlanDefinitionModelProfile = "kimi-k3-max-v1" | "minimax-m3-high-v1";

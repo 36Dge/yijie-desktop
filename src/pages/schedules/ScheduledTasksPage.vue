@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
+import { chatModelsEnabled } from "../../api/chat-model-client";
 import { computed, inject, nextTick, ref, shallowRef, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { queueScheduleDraftIntent, clearScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
@@ -67,6 +69,7 @@ const rerunChanges = computed(() => {
   const target = (d: PlanDefinition) => `${targetLabels[d.target.mode]}${d.target.conversation_id ? ` · ${d.target.conversation_id}` : ""}`;
   return [
     { label: "名称", original: p.original.name, current: p.current.name },
+    { label: "执行模型", original: scheduleModelLabel(p.original.model_profile), current: scheduleModelLabel(p.current.model_profile) },
     { label: "任务内容", original: p.original.content, current: p.current.content },
     { label: "时间规则", original: ruleLabel(p.original.rule), current: ruleLabel(p.current.rule) },
     { label: "运行目标", original: target(p.original), current: target(p.current) },
@@ -78,6 +81,7 @@ async function rerunRecord(row: RecordRow) {
   await manual.openRerun(row.record.run.run_id);
 }
 function restoreRunFocus() { document.getElementById(runReturnFocus.value)?.focus(); }
+const editingBoundConversation = ref<string | null>(null);
 const formOpen = ref(false); const editing = shallowRef<PlanView | null>(null); const form = ref<InstanceType<typeof ScheduledPlanForm>>();
 const deleting = shallowRef<PlanSummary | null>(null); const deleteReturnFocus = ref("");
 const deleteDisabled = computed(() => !canManage.value || writing.value || autoBusy.value || autoPending.value || runningAction.value || runPending.value);
@@ -112,7 +116,7 @@ watch([context, () => route.query.plan], async ([bound, id]) => {
   if (!bound || typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) return;
   try { const detail = await m.call("schedule_get_plan_v1", { plan_id: id }); if (context.value === bound && route.query.plan === id) { receipt.value = detail; notice.value = "已定位保存的计划，当前状态以下方记录为准。"; } } catch (e) { report(e); }
 }, { immediate: true });
-function create() { manual.dismissFeedback(); error.value = null; editing.value = null; formOpen.value = true; }
+function create() { manual.dismissFeedback(); error.value = null; editing.value = null; editingBoundConversation.value = null; formOpen.value = true; }
 function viewHistory(plan: PlanSummary) {
   search.value = ""; state.value = "all"; planFilter.value = plan.plan_id;
   if (!planOptions.value.some(p => p.value === plan.plan_id)) planOptions.value.unshift({ value: plan.plan_id, label: plan.name });
@@ -137,7 +141,7 @@ watch([context, () => route.query.run], async ([bound, id]) => {
 async function edit(plan: PlanSummary) {
   manual.dismissFeedback();
   const epoch = ++openingEpoch;
-  try { const detail = await m.call("schedule_get_plan_v1", { plan_id: plan.plan_id }); if (epoch === openingEpoch && canManage.value) { editing.value = detail.plan; formOpen.value = true; } }
+  try { const detail = await m.call("schedule_get_plan_v1", { plan_id: plan.plan_id }); if (epoch === openingEpoch && canManage.value) { editing.value = detail.plan; editingBoundConversation.value = detail.bound_conversation_id ?? null; formOpen.value = true; } }
   catch (e) { report(e); }
 }
 async function save(definition: PlanDefinition) {
@@ -258,6 +262,7 @@ onBeforeRouteLeave(() => {
             <NCard v-for="card in cards" :key="card.summary.plan_id" class="schedule-card schedule-plan-card" content-style="padding: var(--yj-space-5); display: flex; flex-direction: column" :aria-label="card.summary.name" @click="cardClick($event, card.summary)">
               <div class="schedule-card__heading"><h2><button :id="`schedule-plan-${card.summary.plan_id}`" class="schedule-card__title" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click.stop="edit(card.summary)" :aria-label="`编辑 ${card.summary.name}`">{{ card.summary.name }}</button></h2><div class="schedule-card__state" @click.stop><NSwitch class="schedule-switch" :theme-overrides="scheduleSwitchTheme" :id="`schedule-enable-${card.summary.plan_id}`" :value="card.summary.effective_state === 'enabled'" :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`" :loading="writing && pending?.payload.plan_id === card.summary.plan_id" :disabled="!(writing && pending?.payload.plan_id === card.summary.plan_id) && ((card.summary.effective_state === 'enabled' ? !canManage : !canPrepareAutomatic) || writing || !!pending || autoBusy || autoPending || runningAction || runPending || card.summary.target_state === 'missing')" @update:value="value => togglePlan(value, card.summary)" /></div></div>
               <p class="schedule-card__content">{{ card.content_preview }}</p>
+              <p v-if="chatModelsEnabled" class="schedules-meta">执行模型：{{ scheduleModelLabel(card.model_profile) }}</p>
               <div class="schedule-card__footer"><div class="schedule-card__timing">
                 <p :title="ruleLabel(card.rule)"><YjIcon name="pending" size="sm" tone="muted" /><span>{{ ruleLabel(card.rule).split(' · ')[0] }}</span></p>
                 <p><YjIcon :name="card.summary.effective_state === 'enabled' ? 'arrowRight' : 'stop'" size="sm" tone="muted" /><span>{{ card.summary.effective_state === 'enabled' ? `下次执行 ${timeLabel(card.summary.next_at, card.rule.time_zone)}` : card.summary.pause_reason ? pauseReasonLabels[card.summary.pause_reason] : card.summary.effective_state === 'paused' ? '已关闭' : stateLabels[card.summary.effective_state] }}</span></p>
@@ -275,9 +280,9 @@ onBeforeRouteLeave(() => {
       </template>
       <NAlert v-if="capabilities?.automatic.reason === 'runtime_unqualified' && cards.some(c => c.summary.raw_state === 'enabled')" type="warning">本地执行服务尚未就绪，已保存计划暂不能投递。<NButton :disabled="autoBusy || autoPending || runPending || runningAction" @click="prepareAutomatic">重新准备本地执行</NButton></NAlert>
       <NAlert v-if="autoError" type="warning" role="alert">任务已开启，本地执行服务暂未就绪。<NButton :loading="autoBusy" @click="prepareAutomatic">重试准备执行服务</NButton></NAlert>
-      <ScheduledPlanForm v-if="formOpen" ref="form" :plan="editing" :busy="writing" :uncertain="!!pending && !writing" :error="scheduleError(error)" :preview="rule => m.call('schedule_preview_time_v1', { rule })" :targets="(search, cursor) => m.call('schedule_list_targets_v1', { search, limit: 30, ...(cursor ? { cursor } : {}) })" @close="formOpen = false" @save="save" @query="checkReceipt" @retry="retryWrite" />
+      <ScheduledPlanForm v-if="formOpen" ref="form" :plan="editing" :bound-conversation-id="editingBoundConversation" :busy="writing" :uncertain="!!pending && !writing" :error="scheduleError(error)" :preview="rule => m.call('schedule_preview_time_v1', { rule })" :targets="(search, cursor) => m.call('schedule_list_targets_v1', { search, limit: 30, ...(cursor ? { cursor } : {}) })" @close="formOpen = false" @save="save" @query="checkReceipt" @retry="retryWrite" />
       <NModal :show="!!runReview" @after-enter="focusRunCancel" @after-leave="restoreRunFocus" :mask-closable="!runningAction && !runPending" :close-on-esc="!runningAction && !runPending" @update:show="manual.closeReview"><NCard class="scheduled-record-detail scheduled-run-confirmation" content-style="min-height: 0; display: flex; flex-direction: column; overflow: hidden" :title="rerunReview ? '确认重新执行一次' : '确认运行一次'" role="dialog" aria-modal="true" :aria-label="rerunReview ? '确认重新执行一次' : '确认运行一次'">
-        <section class="scheduled-run-body" tabindex="0" aria-label="本次运行配置与差异"><template v-if="runReview"><NAlert v-if="rerunReview" type="info" :show-icon="false">使用当前已保存配置创建一次新运行，保留原记录及其结果。</NAlert><template v-if="rerunReview"><section v-for="change in rerunChanges" :key="change.label" class="scheduled-rerun-change"><h3>{{ change.label }}已变化</h3><p class="schedules-meta">原运行配置</p><p class="scheduled-record-body">{{ change.original }}</p><p class="schedules-meta">本次采用的当前配置</p><p class="scheduled-record-body">{{ change.current }}</p></section><p v-if="!rerunChanges.length">当前配置与原运行快照一致，仍会创建新运行。</p></template><h2>{{ runReview.plan.definition.name }}</h2><p class="schedules-meta">当前版本 {{ runReview.plan.revision }} · 运行于{{ targetLabels[runReview.plan.definition.target.mode] }}</p><p v-if="runReview.plan.definition.target.mode === 'existing_chat'">目标聊天：{{ manual.targetTitle.value || '已选择的聊天' }}<br>使用该聊天的原目录；权限模式固定为 Ask。</p><p v-else>使用应用为计划管理的独立目录；权限模式固定为 Ask。</p><p class="scheduled-record-body">{{ runReview.plan.definition.content }}</p><p>计划当前：{{ stateLabels[runReview.summary.effective_state] }}。{{ runReview.plan.definition.target.mode === 'new_chat_each_run' ? '本次将创建新聊天。' : '沿当前有效聊天关联执行，不恢复已删除的聊天。' }}</p><p v-if="runIntent?.grant">本次许可截止：{{ timeLabel(runIntent.grant.expires_at) }}</p><p>需要审批时，请进入完整对话处理；关闭详情不会停止已开始的任务。</p></template>
+        <section class="scheduled-run-body" tabindex="0" aria-label="本次运行配置与差异"><template v-if="runReview"><NAlert v-if="rerunReview" type="info" :show-icon="false">使用当前已保存配置创建一次新运行，保留原记录及其结果。</NAlert><template v-if="rerunReview"><section v-for="change in rerunChanges" :key="change.label" class="scheduled-rerun-change"><h3>{{ change.label }}已变化</h3><p class="schedules-meta">原运行配置</p><p class="scheduled-record-body">{{ change.original }}</p><p class="schedules-meta">本次采用的当前配置</p><p class="scheduled-record-body">{{ change.current }}</p></section><p v-if="!rerunChanges.length">当前配置与原运行快照一致，仍会创建新运行。</p></template><h2>{{ runReview.plan.definition.name }}</h2><p v-if="chatModelsEnabled">执行模型：{{ scheduleModelLabel(runReview.plan.definition.model_profile) }}</p><p class="schedules-meta">当前版本 {{ runReview.plan.revision }} · 运行于{{ targetLabels[runReview.plan.definition.target.mode] }}</p><p v-if="runReview.plan.definition.target.mode === 'existing_chat'">目标聊天：{{ manual.targetTitle.value || '已选择的聊天' }}<br>使用该聊天的原目录；权限模式固定为 Ask。</p><p v-else>使用应用为计划管理的独立目录；权限模式固定为 Ask。</p><p class="scheduled-record-body">{{ runReview.plan.definition.content }}</p><p>计划当前：{{ stateLabels[runReview.summary.effective_state] }}。{{ runReview.plan.definition.target.mode === 'new_chat_each_run' ? '本次将创建新聊天。' : '沿当前有效聊天关联执行，不恢复已删除的聊天。' }}</p><p v-if="runIntent?.grant">本次许可截止：{{ timeLabel(runIntent.grant.expires_at) }}</p><p>需要审批时，请进入完整对话处理；关闭详情不会停止已开始的任务。</p></template>
         <NAlert v-if="runError" type="error">{{ executionError(runError) }}</NAlert><p v-if="runPending" role="status">{{ runNotice || '正在提交，请稍候。' }}</p></section>
         <template #footer><p v-if="runReview">仅允许本次运行 1 次，许可最长 10 分钟，同时受当前会话授权限制。本次许可不改变计划状态、下一次时间或自动额度。</p><div class="schedules-actions"><NButton id="schedule-run-cancel" autofocus :disabled="runningAction || runPending" @click="manual.closeReview">取消</NButton><NButton v-if="!runPending" type="primary" :loading="runningAction" @click="manual.confirm">确认并运行一次</NButton><template v-else><NButton :disabled="runningAction || !context" @click="manual.query">查证本次原请求</NButton><NButton :disabled="runningAction || !context" @click="manual.retry">{{ runIntent?.grant && !runIntent.manualAttempted ? '继续本次运行' : '重试本次原请求' }}</NButton></template></div></template>
       </NCard></NModal>

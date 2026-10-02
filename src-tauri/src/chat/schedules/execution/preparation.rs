@@ -336,6 +336,43 @@ impl ChatRepository {
                 Some(create.to_string()),
             )
         };
+        if let Some(profile) = p.definition.model_profile {
+            let profile_id = serde_json::from_value(
+                serde_json::to_value(profile).map_err(|_| Error::FormatUnsupported)?,
+            )
+            .map_err(|_| Error::FormatUnsupported)?;
+            let revision: i64 = if create.is_some() {
+                0
+            } else {
+                tx.query_row(
+                    "SELECT revision FROM chat_model_selections WHERE session_id=?1",
+                    [&chat],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| Error::StorageUnavailable)?
+                .unwrap_or(0)
+            };
+            crate::chat::models::freeze_conversation(
+                &tx,
+                Uuid::parse_str(&chat).map_err(|_| Error::FormatUnsupported)?,
+                operation,
+                create
+                    .as_ref()
+                    .map(|v| Uuid::parse_str(v))
+                    .transpose()
+                    .map_err(|_| Error::FormatUnsupported)?,
+                &crate::chat::models::ModelIntent {
+                    profile_id,
+                    expected_revision: revision,
+                },
+            )
+            .map_err(|error| match error {
+                ChatError::ConversationConflict => Error::GrantStale,
+                other => chat_error(other),
+            })?;
+        }
+
         tx.execute("INSERT INTO chat_scheduled_run_bindings(run_id,conversation_id,project_id,create_operation_id,local_turn_id) VALUES(?1,?2,?3,?4,?5)",params![run.run_id,chat,target.project,create,turn]).map_err(|_|Error::StorageUnavailable)?;
         super::super::recovery::initialize(&tx, &run.run_id, create.as_deref())
             .map_err(|_| Error::StorageUnavailable)?;

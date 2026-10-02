@@ -109,3 +109,11 @@ Host 为新派发轮次选择已有 `high` effort，复用已有 `show_raw_agent
 前端继续依照原生 reasoning Item 与索引接收流式过程，运行时显示，结束后点击耗时展开或收起。普通模型回答仅显示正文及原有状态/复制操作，隐藏可见标题和助手图标。历史中从未产生的推理不会补造；模型未返回过程时仍只显示耗时。
 
 本地来源先固定，再通过 `pnpm tauri:demo-fast:app` 标准构建及正常退出/重开验证；只更新项目可复现开发产物，不覆盖已发布应用，不变更历史数据。真实运行结果另见本次验收记录。
+
+## FEAT-156 模型选择实施候选（2026-10-02）
+
+新增模型 profile 源与模型感知 Host 路由；原生 SQLite 28 保存会话选择、revision、待查证选择操作与每个提交的不可变模型快照。首轮 operation 在 Host 绑定后才物化 outbox，快照以已预留 operation ID 保存并关联会话，不能以不存在的首轮 outbox 外键阻止新建。Host Store 7 保存 profile 与幂等切换回执。旧计划缺 model_profile 保持旧 MiniMax 语义，旧摘要不重算；新计划将 profile 纳入原授权摘要和 run 快照。
+
+同一 native thread 的正常 unsubscribe/resume 经真实两 Provider 确认可切换 max/high/max；不复制历史或重建 thread。关闭新 writer 时，新模型 outbox 留存，不回退给旧接口发送。Owner已批准0004恢复上游tool_choice=auto及0005严格承接完整终态工具参数，独立产物保持input-only空工具集、沙箱和权限边界。最终本地D4已完成：两模型对话/文件/工具/图片/受限草案、三目标计划、模型冲突、亮暗视觉、正常重开和缺配置恢复通过；标题沿原有关闭门禁，没有真实标题请求。具体事实与限制见元仓FEAT-156的02-verification.md §8，不表示生产发布。
+
+SQL29为已有无项目聊天的managed_chat工作目录补齐计划grant/run的CHECK闭集；先更新共享scheduled-execution0.2.0源与生成reader，再通过canonical迁移保留旧行、摘要、外键及proof/timing触发器，不修改既有SQL17/28校验值。旧数据无模型回填。已有/已绑定专属目标编辑时读取当前已确认模型；不一致的运行拒绝为grant_stale，模型变更后需新授权，旧运行保留原快照。新默认缺配置时终态聊天历史可读；未结束/未知请求不因此重发或解除恢复限制。

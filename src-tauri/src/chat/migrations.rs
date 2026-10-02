@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 27] = [
+const CATALOG: [CatalogEntry; 29] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -167,6 +167,16 @@ const CATALOG: [CatalogEntry; 27] = [
         name: "0027_projectless_chat",
         sql: include_str!("../../migrations/chat/0027_projectless_chat.sql"),
     },
+    CatalogEntry {
+        version: 28,
+        name: "0028_chat_models",
+        sql: include_str!("../../migrations/chat/0028_chat_models.sql"),
+    },
+    CatalogEntry {
+        version: 29,
+        name: "0029_scheduled_chat_workspaces",
+        sql: include_str!("../../migrations/chat/0029_scheduled_chat_workspaces.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -184,6 +194,8 @@ pub const SCHEDULE_AUTOMATIC_SCHEMA_VERSION: i64 = 24;
 pub const SCHEDULE_SINGLE_RUN_SCHEMA_VERSION: i64 = 25;
 pub const SCHEDULE_TIMING_SCHEMA_VERSION: i64 = 26;
 pub const PROJECTLESS_SCHEMA_VERSION: i64 = 27;
+pub const CHAT_MODELS_SCHEMA_VERSION: i64 = 28;
+pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -218,6 +230,8 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         SCHEDULE_SINGLE_RUN_SCHEMA_VERSION,
         SCHEDULE_TIMING_SCHEMA_VERSION,
         PROJECTLESS_SCHEMA_VERSION,
+        CHAT_MODELS_SCHEMA_VERSION,
+        SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
     ]
     .contains(&target)
     {
@@ -230,11 +244,13 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
     validate_reader(connection)?;
     if current < target {
         // SQLite's documented parent-table replacement procedure. Only the
-        // v18/v27 crossings need this; per-migration foreign_key_check still runs
+        // v18/v27/v29 crossings need this; per-migration foreign_key_check still runs
         // inside the transaction, before commit. Restore enforcement on errors.
         let replace_parent = (current < SCHEDULE_PREPARATION_SCHEMA_VERSION
             && target >= SCHEDULE_PREPARATION_SCHEMA_VERSION)
-            || (current < PROJECTLESS_SCHEMA_VERSION && target >= PROJECTLESS_SCHEMA_VERSION);
+            || (current < PROJECTLESS_SCHEMA_VERSION && target >= PROJECTLESS_SCHEMA_VERSION)
+            || (current < SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION
+                && target >= SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION);
         if !connection.is_autocommit() {
             return Err(ChatError::MigrationFailed);
         }

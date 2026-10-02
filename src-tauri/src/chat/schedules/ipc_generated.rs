@@ -416,6 +416,13 @@ pub struct PlanDetail {
         deserialize_with = "optional_non_null"
     )]
     pub grant: Option<execution::GrantView>,
+    #[serde(
+        rename = "bound_conversation_id",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub bound_conversation_id: Option<plan::Identity>,
 }
 impl std::fmt::Debug for PlanDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -682,6 +689,13 @@ pub struct SavedConfiguration {
     pub rule: plan::TimeRule,
     #[serde(rename = "target_mode")]
     pub target_mode: plan::TargetMode,
+    #[serde(
+        rename = "model_profile",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub model_profile: Option<SavedConfigurationModelProfile>,
 }
 impl std::fmt::Debug for SavedConfiguration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1252,6 +1266,13 @@ pub struct DraftSubmit {
         deserialize_with = "optional_non_null"
     )]
     pub conversation_id: Option<plan::Identity>,
+    #[serde(
+        rename = "model_intent",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub model_intent: Option<DraftModelIntent>,
 }
 impl std::fmt::Debug for DraftSubmit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1675,6 +1696,13 @@ pub struct PlanCard {
         deserialize_with = "optional_non_null"
     )]
     pub target_title: Option<String>,
+    #[serde(
+        rename = "model_profile",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub model_profile: Option<PlanCardModelProfile>,
 }
 impl std::fmt::Debug for PlanCard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2357,6 +2385,19 @@ impl std::fmt::Debug for ImportantUpdatesResponse {
         f.write_str("ImportantUpdatesResponse([redacted])")
     }
 }
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DraftModelIntent {
+    #[serde(rename = "profile_id")]
+    pub profile_id: DraftModelIntentProfileId,
+    #[serde(rename = "expected_revision")]
+    pub expected_revision: i64,
+}
+impl std::fmt::Debug for DraftModelIntent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DraftModelIntent([redacted])")
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AvailabilityDispatch {
     #[serde(rename = "disabled")]
@@ -2439,6 +2480,13 @@ pub enum RunRecordAttention {
     NeedsAttention,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SavedConfigurationModelProfile {
+    #[serde(rename = "kimi-k3-max-v1")]
+    KimiK3MaxV1,
+    #[serde(rename = "minimax-m3-high-v1")]
+    MinimaxM3HighV1,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DraftPreviewStatus {
     #[serde(rename = "candidate")]
     Candidate,
@@ -2465,6 +2513,13 @@ pub enum OperationCapabilityReason {
     RuntimeUnqualified,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlanCardModelProfile {
+    #[serde(rename = "kimi-k3-max-v1")]
+    KimiK3MaxV1,
+    #[serde(rename = "minimax-m3-high-v1")]
+    MinimaxM3HighV1,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionReceiptKeyOperation {
     #[serde(rename = "grant")]
     Grant,
@@ -2476,6 +2531,13 @@ pub enum ExecutionReceiptKeyOperation {
     SingleGrant,
     #[serde(rename = "rerun")]
     Rerun,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DraftModelIntentProfileId {
+    #[serde(rename = "kimi-k3-max-v1")]
+    KimiK3MaxV1,
+    #[serde(rename = "minimax-m3-high-v1")]
+    MinimaxM3HighV1,
 }
 pub(crate) const COMMANDS: &[(&str, &str, &str, &str, bool)] = &[
     (

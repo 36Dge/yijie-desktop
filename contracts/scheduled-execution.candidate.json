@@ -1,54 +1,62 @@
 {
   "schema_version": 1,
-  "contract_version": "0.1.0",
-  "mode": "local_candidate",
+  "contract_version": "0.2.0",
+  "mode": "local_worktree_candidate",
   "release": false,
   "repository": "https://github.com/36Dge/yijie-contracts.git",
-  "base_commit": "db4458fe94572c4df41a114005d54a049bb79b1f",
+  "base_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
   "sources": [
     {
+      "path": "jsonschema/chat/model-selection-v1.schema.json",
+      "sha256": "15586a03e7873bc7c913ea89162cc60d8354effb8c475045920ce609f949169b"
+    },
+    {
       "path": "scripts/scheduled-schema-source.mjs",
-      "sha256": "4afa5abda0bb8fd76a3c01759605a8b1f3c59f5548ac93587750e07cd08f406c"
+      "sha256": "833e22e5c80967d01a0b4f690dacedaffdafd5a1d1c82736fec257b76feaf8ba"
     },
     {
       "path": "jsonschema/scheduled-tasks/execution-v1.schema.json",
-      "sha256": "dec7517a4d7d3cff42eb3058c8c49c7cf5d94db751ccc16b1b7acacf2811ec3e"
+      "sha256": "4975d434c861326b55873c5d00e5ff84935451fe5516e6a85794811c665ccf14"
     },
     {
       "path": "jsonschema/scheduled-tasks/plan-storage-v1.schema.json",
-      "sha256": "0883ab69c0cbcda311113fd2a966ea98065ddc47b301e36611e2447620667cd2"
+      "sha256": "4a6e42fcbd5222d58310fd61ec65ab26fb8ceec80702af77063d3894188e6889"
     },
     {
       "path": "scripts/generate-scheduled-execution.mjs",
-      "sha256": "83b96c91dd33ab79cdbe5dc240f36d505b033073745d7d629a980b217212fa79"
+      "sha256": "eb4dfbc1aeeb574497786e83d72cbf0d967c3e9846964eb57edad769f29518a8"
     },
     {
       "path": "scripts/sync-scheduled-execution.mjs",
-      "sha256": "2b8f149392e01fad7049fdae98b60ecc83bfedb14ed253dfab28b6d2d46be0d3"
+      "sha256": "f5d30e6d7f68df8807deb6161107e315fd964d03b675463a11ce84830bc0829d"
     },
     {
       "path": "scripts/scheduled-consumer-source.mjs",
       "sha256": "69e7fa6b1b4371d1d6c9456fe68b9ede76cc3a0896253597428729f531fde015"
+    },
+    {
+      "path": "scripts/chat-model-consumer-source.mjs",
+      "sha256": "9930c321840c103b21afa2dcaa8f04d039297e76c30dffb8b18a9096a61546ed"
     }
   ],
   "generated": [
     {
       "path": "sdks/rust/scheduled-execution/types.gen.rs",
-      "sha256": "f53ed95baf4548dc0ad1eddf4872afffd88975984e1e67af6174834305b7d778"
+      "sha256": "2edc059c2a2ac2b77210f3005ce0602d78a06b7f687924e5b400fd2dd66e87c2"
     },
     {
       "path": "sdks/typescript/src/jsonschema/scheduled-execution.gen.ts",
-      "sha256": "70184382b025d57155098b8a597e6c3994d903813191188f6532fd7655a612bf"
+      "sha256": "38e9782a18f34e4341b3e4bd63b23ff3c9e05625e513c6c75a5589c1e65e1564"
     },
     {
       "path": "sdks/jsonschema/scheduled-execution.schema.json",
-      "sha256": "b6c9763e00285d75c79c21b195929c52ad997f050ecadeb735f51507c7609df9"
+      "sha256": "708220eca75c148878256029b3bdccbe7c8e4555de02162fa77bdc9c60efc393"
     }
   ],
   "generators": {
     "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
     "jsonschema": "canonical context-preserving storage references v2"
   },
-  "source_commit": "54be9314dce5319b049dc0a236800fd1a1fdd7a1",
+  "feature": "FEAT-156",
   "source_lock_path": "compatibility/scheduled-execution/source.lock.json"
 }

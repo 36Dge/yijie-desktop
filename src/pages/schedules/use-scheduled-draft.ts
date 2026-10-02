@@ -1,3 +1,4 @@
+import { chatModelsEnabled, type ModelIntent } from "../../api/chat-model-client";
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { createScheduledTaskNativeClient, ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
 import type { DraftConfirmation, DraftPreview, DraftReceipt, DraftSubmit, IpcErrorCode, OperationCapabilities, Requests, Responses } from "../../api/generated/scheduled-task-ipc.gen";
@@ -102,10 +103,10 @@ export function useScheduledDraft(
     writing.value = true; error.value = null; notice.value = "";
     try {
       if (action.kind === "confirm") {
-        const result = await call("schedule_confirm_active_draft_v1", action.payload, action.id);
+        const result = await call(chatModelsEnabled ? "schedule_confirm_draft_v1" : "schedule_confirm_active_draft_v1", action.payload, action.id);
         if (pending.value !== action) return null;
         pending.value = null; saved.value = result;
-        notice.value = result.state === "enabled" ? "定时任务已创建并开启，将按设定时间执行。" : "已查回保存的定时任务，当前状态以下方记录为准。";
+        notice.value = result.state === "enabled" ? "定时任务已创建并开启，将按设定时间执行。" : "计划已保存为关闭状态；可审阅后开启或单次执行。";
         await refreshPreview();
         return result;
       }
@@ -122,10 +123,10 @@ export function useScheduledDraft(
       return null;
     } finally { writing.value = false; }
   }
-  async function submit(text: string) {
+  async function submit(text: string, modelIntent?: ModelIntent) {
     if (!canSubmit.value || !scope.value || !text.trim()) return null;
     const conversation = session();
-    pending.value = Object.freeze({ kind: "submit", id: crypto.randomUUID(), scope: scope.value, payload: { text: text.trim(), ...(conversation ? { conversation_id: conversation } : {}) } });
+    pending.value = Object.freeze({ kind: "submit", id: crypto.randomUUID(), scope: scope.value, payload: { text: text.trim(), ...(modelIntent ? { model_intent: {profile_id:modelIntent.profileId,expected_revision:modelIntent.expectedRevision} } : {}), ...(conversation ? { conversation_id: conversation } : {}) } });
     return runPending();
   }
   async function confirm(definition: PlanDefinition, expected: { source: string; digest: string }) {

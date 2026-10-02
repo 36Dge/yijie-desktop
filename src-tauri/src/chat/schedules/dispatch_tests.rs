@@ -392,6 +392,7 @@ impl Fixture {
                     plan_id: None,
                     expected_revision: None,
                     definition: PlanDefinition {
+                        model_profile: None,
                         name: "普通合成计划".into(),
                         content: "普通合成文本".into(),
                         rule: TimeRule {

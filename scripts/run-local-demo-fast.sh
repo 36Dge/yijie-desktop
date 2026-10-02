@@ -127,6 +127,34 @@ export YIJIE_ENV=local
 export YIJIE_LOCAL_PROFILE=demo_fast
 export YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
 export VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true
+# FEAT-156 local candidate. No renderer receives provider credentials.
+chat_models_default="$scheduled_enabled" # Current canonical local entry uses the qualified model family; stable/explicit rollback stays separate.
+chat_models_enabled="${YIJIE_CHAT_MODELS_ENABLED:-$chat_models_default}"
+[[ "$chat_models_enabled" == "true" || "$chat_models_enabled" == "false" ]] || fail "invalid chat model selection"
+export YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
+export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
+if [[ "$chat_models_enabled" == "true" ]]; then
+  [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
+  node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
+  candidate_lock="$desktop_root/contracts/runtime-chat-models.candidate.json"
+  codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/chat-models-stream-args/aarch64-apple-darwin}"
+  codex_binary="$codex_runtime_root/codex"
+  codex_manifest="$codex_runtime_root/runtime-manifest.json"
+  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
+  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
+  # Unset selects the managed default; explicitly empty means not configured.
+  if [[ -z "${YIJIE_KIMI_API_KEY_FILE+x}" && -f "$host_root/.local/secrets/kimi-api-key" ]]; then
+    export YIJIE_KIMI_API_KEY_FILE="$host_root/.local/secrets/kimi-api-key"
+  fi
+  if [[ "$scheduled_candidate" == "true" ]]; then
+    runtime_root="$desktop_root/.local/feat156-candidate"
+    host_home="$runtime_root/host-home"
+    codex_home="$runtime_root/codex-home"
+  fi
+  node "$workspace_root/yijie-contracts/scripts/generate-chat-models.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-chat-models.mjs" --check
+fi
 
 # Detached source verification may reuse the same existing audited Runtime and
 # provider key by absolute path. All original hash/type/protection checks remain.
@@ -267,6 +295,9 @@ exec env \
   -u YIJIE_FEAT128_SYNTHETIC_MANIFEST \
   -u YIJIE_MODEL_PROVIDER \
   -u YIJIE_MINIMAX_API_KEY \
+  -u YIJIE_KIMI_API_KEY \
+  -u KIMI_API_KEY \
+  -u MOONSHOT_API_KEY \
   -u YIJIE_MINIMAX_API_KEY_FILE \
   -u YIJIE_FEAT128_IMAGE_GENERATION_ENABLED \
   -u YIJIE_FEAT131_STABLE_ENTRY \

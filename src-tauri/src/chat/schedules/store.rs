@@ -92,13 +92,27 @@ pub(super) fn read_plan(
     scope: &ChatScope,
     id: &str,
 ) -> Result<PlanView, Error> {
-    let plan = connection.query_row(
+    let mut plan = connection.query_row(
         "SELECT plan_id,revision,schedule_epoch,name,content,rule_json,target_mode,conversation_id,target_state,state,effective_from,next_at,rule_version,tzdb_version,authorization_ref,authorization_expires_at FROM chat_scheduled_plans WHERE plan_id=?1 AND owner_user_id=?2 AND tenant_id=?3",
         params![id, scope.owner_user_id, scope.tenant_id], |row| Ok(PlanView {
             plan_id:row.get(0)?,revision:row.get(1)?,schedule_epoch:row.get(2)?,
-            definition:PlanDefinition {name:row.get(3)?,content:row.get(4)?,rule:decode(row.get(5)?)?,target:TargetReference {mode:decode_word(row.get(6)?)?,conversation_id:row.get(7)?}},
+            definition:PlanDefinition {model_profile:None,name:row.get(3)?,content:row.get(4)?,rule:decode(row.get(5)?)?,target:TargetReference {mode:decode_word(row.get(6)?)?,conversation_id:row.get(7)?}},
             target_state:decode_word(row.get(8)?)?,state:decode_word(row.get(9)?)?,effective_from:row.get(10)?,next_at:row.get(11)?,rule_version:row.get(12)?,tzdb_version:row.get(13)?,authorization_ref:row.get(14)?,authorization_expires_at:row.get(15)?,
         })).optional().map_err(|_| Error::StorageUnavailable)?.ok_or(Error::NotFound)?;
+    if crate::chat::models::table(connection).map_err(|_| Error::StorageUnavailable)? {
+        let profile: Option<String> = connection
+            .query_row(
+                "SELECT profile_id FROM chat_plan_models WHERE plan_id=?1",
+                [&plan.plan_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| Error::StorageUnavailable)?;
+        plan.definition.model_profile = profile
+            .map(|p| serde_json::from_value(serde_json::Value::String(p)))
+            .transpose()
+            .map_err(|_| Error::StorageUnavailable)?;
+    }
     if plan.rule_version != RULE_VERSION || plan.tzdb_version != chrono_tz::IANA_TZDB_VERSION {
         return Err(Error::RuleVersionUnsupported);
     }
@@ -162,11 +176,26 @@ pub(super) fn write_plan(
     plan: &PlanView,
     cursor: i64,
 ) -> Result<(), Error> {
+    if plan.definition.model_profile.is_some()
+        && !crate::chat::models::table(tx).map_err(|_| Error::StorageUnavailable)?
+    {
+        return Err(Error::StorageDisabled);
+    }
     tx.execute("INSERT INTO chat_scheduled_plans(plan_id,owner_user_id,tenant_id,revision,schedule_epoch,name,content,rule_json,rule_version,tzdb_version,target_mode,conversation_id,target_state,state,effective_from,next_at,cursor_at,authorization_ref,authorization_expires_at)
         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
         ON CONFLICT(plan_id) DO UPDATE SET revision=excluded.revision,schedule_epoch=excluded.schedule_epoch,name=excluded.name,content=excluded.content,rule_json=excluded.rule_json,rule_version=excluded.rule_version,tzdb_version=excluded.tzdb_version,target_mode=excluded.target_mode,conversation_id=excluded.conversation_id,target_state=excluded.target_state,state=excluded.state,effective_from=excluded.effective_from,next_at=excluded.next_at,cursor_at=excluded.cursor_at,authorization_ref=excluded.authorization_ref,authorization_expires_at=excluded.authorization_expires_at
         WHERE chat_scheduled_plans.owner_user_id=excluded.owner_user_id AND chat_scheduled_plans.tenant_id=excluded.tenant_id",
         params![plan.plan_id,scope.owner_user_id,scope.tenant_id,plan.revision,plan.schedule_epoch,plan.definition.name,plan.definition.content,encode(&plan.definition.rule)?,plan.rule_version,plan.tzdb_version,word(&plan.definition.target.mode)?,plan.definition.target.conversation_id,word(&plan.target_state)?,word(&plan.state)?,plan.effective_from,plan.next_at,cursor,plan.authorization_ref,plan.authorization_expires_at]).map_err(|_|Error::StorageUnavailable)?;
+    if let Some(profile) = plan.definition.model_profile {
+        let model = word(&profile)?;
+        tx.execute("INSERT INTO chat_plan_models(plan_id,profile_id) VALUES(?1,?2) ON CONFLICT(plan_id) DO UPDATE SET profile_id=excluded.profile_id",params![plan.plan_id,model]).map_err(|_| Error::StorageUnavailable)?;
+    } else if crate::chat::models::table(tx).map_err(|_| Error::StorageUnavailable)? {
+        tx.execute(
+            "DELETE FROM chat_plan_models WHERE plan_id=?1",
+            [&plan.plan_id],
+        )
+        .map_err(|_| Error::StorageUnavailable)?;
+    }
     Ok(())
 }
 pub(super) fn cancel_slots(tx: &Transaction<'_>, scope: &ChatScope, id: &str) -> Result<(), Error> {
@@ -616,6 +645,41 @@ pub(super) fn save_in_transaction(
         }
         if request.expected_revision != Some(plan.revision) {
             return Err(Error::RevisionConflict);
+        }
+    }
+    if let Some(profile) = request.definition.model_profile {
+        if !crate::chat::models::table(tx).map_err(|_| Error::StorageUnavailable)? {
+            return Err(Error::StorageDisabled);
+        }
+        let bound: Option<String> = if request.definition.target.mode == TargetMode::DedicatedChat {
+            prior.as_ref().map(|plan| tx.query_row(
+                "SELECT conversation_id FROM chat_scheduled_target_bindings WHERE plan_id=?1 AND owner_user_id=?2 AND tenant_id=?3",
+                params![plan.plan_id, scope.owner_user_id, scope.tenant_id], |row| row.get::<_, Option<String>>(0),
+            ).optional()).transpose().map_err(|_| Error::StorageUnavailable)?.flatten().flatten()
+        } else {
+            None
+        };
+        if let Some(chat) = request
+            .definition
+            .target
+            .conversation_id
+            .as_ref()
+            .or(bound.as_ref())
+        {
+            let model = word(&profile)?;
+            let selected: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT profile_id,state FROM chat_model_selections WHERE session_id=?1",
+                    [chat],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(|_| Error::StorageUnavailable)?;
+            if !(matches!(selected,Some((ref id,ref state)) if id==&model && state=="ready")
+                || selected.is_none() && model == "minimax-m3-high-v1")
+            {
+                return Err(Error::TargetUnavailable);
+            }
         }
     }
     let target_state = validate_target(tx, scope, &request.definition.target)?;

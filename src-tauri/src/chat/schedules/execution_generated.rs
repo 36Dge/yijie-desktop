@@ -28,6 +28,8 @@ pub enum WorkspaceSource {
     UserProject,
     #[serde(rename = "managed_schedule")]
     ManagedSchedule,
+    #[serde(rename = "managed_chat")]
+    ManagedChat,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

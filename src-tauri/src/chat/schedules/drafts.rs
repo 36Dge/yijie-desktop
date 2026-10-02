@@ -207,6 +207,32 @@ impl ChatRepository {
                 Some(request.to_owned()),
             )
         };
+        if let Some(model) = &input.model_intent {
+            if !crate::chat::models::enabled() {
+                return Err(P::DraftUnavailable.into());
+            }
+            let intent = crate::chat::models::ModelIntent {
+                profile_id: serde_json::from_value(
+                    serde_json::to_value(model.profile_id).map_err(|_| E::InvalidInput)?,
+                )
+                .map_err(|_| E::InvalidInput)?,
+                expected_revision: model.expected_revision,
+            };
+            crate::chat::models::freeze_conversation(
+                &tx,
+                Uuid::parse_str(&conversation).map_err(|_| E::InvalidInput)?,
+                Uuid::parse_str(&operation).map_err(|_| E::InvalidInput)?,
+                create
+                    .as_ref()
+                    .map(|id| Uuid::parse_str(id))
+                    .transpose()
+                    .map_err(|_| E::InvalidInput)?,
+                &intent,
+            )
+            .map_err(chat)?;
+        } else if crate::chat::models::enabled() {
+            return Err(E::InvalidInput.into());
+        }
         let source = Uuid::now_v7().to_string();
         sql(tx.execute("INSERT INTO chat_scheduled_draft_sources(source_id,owner_user_id,tenant_id,request_id,request_digest,conversation_id,local_turn_id,operation_id,create_operation_id,format_version) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,1)",params![source,scope.owner_user_id,scope.tenant_id,request,digest,conversation,turn,operation,create]))?;
         super::ipc::commit_deadline(deadline)?;

@@ -4,12 +4,15 @@ import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NForm, NFormItem, NI
 import type { PlanDefinition, PlanView, TimePreview, TimeRule } from "../../domain/scheduled-plan.generated";
 import type { TargetPage } from "../../api/generated/scheduled-task-ipc.gen";
 import { frequencyLabels, targetLabels, timeLabel } from "../../domain/scheduled-task-ui";
-const props = defineProps<{ plan: PlanView | null; initialDefinition?: PlanDefinition; confirmation?: boolean; busy: boolean; uncertain: boolean; error: string; preview: (rule: TimeRule) => Promise<TimePreview>; targets: (search: string, cursor?: string) => Promise<TargetPage> }>();
+import { chatModelsEnabled, type ProfileId } from "../../api/chat-model-client";
+import { useScheduledPlanModel } from "../../composables/useScheduledPlanModel";
+const props = defineProps<{ plan: PlanView | null; boundConversationId?: string | null; initialDefinition?: PlanDefinition; confirmation?: boolean; busy: boolean; uncertain: boolean; error: string; preview: (rule: TimeRule) => Promise<TimePreview>; targets: (search: string, cursor?: string) => Promise<TargetPage> }>();
 const emit = defineEmits<{ close: []; query: []; retry: []; save: [definition: PlanDefinition] }>();
 const dialog = useDialog();
 const initial = props.plan?.definition ?? props.initialDefinition;
 const title = computed(() => props.confirmation ? "确认定时任务草案" : props.plan ? "编辑定时任务" : "新建定时任务");
-const form = reactive({ name: initial?.name ?? "", content: initial?.content ?? "", frequency: initial?.rule.frequency ?? "daily", timeZone: initial?.rule.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, localTime: initial?.rule.local_time ?? "09:00", localDate: initial?.rule.local_date ?? "", weekdays: initial?.rule.weekdays?.slice() ?? [1], mode: initial?.target.mode ?? "dedicated_chat", conversationId: initial?.target.conversation_id ?? null });
+const form = reactive({ modelProfile: (initial?.model_profile ?? (props.plan ? "minimax-m3-high-v1" : "kimi-k3-max-v1")) as ProfileId, name: initial?.name ?? "", content: initial?.content ?? "", frequency: initial?.rule.frequency ?? "daily", timeZone: initial?.rule.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, localTime: initial?.rule.local_time ?? "09:00", localDate: initial?.rule.local_date ?? "", weekdays: initial?.rule.weekdays?.slice() ?? [1], mode: initial?.target.mode ?? "dedicated_chat", conversationId: initial?.target.conversation_id ?? null });
+const {modelOptions,modelReady,modelNotice,modelLocked}=useScheduledPlanModel(form, () => props.boundConversationId ?? null);
 const formId = useId();
 const targetHelp = computed(() => ({ dedicated_chat: "在专属聊天中持续保存此任务的结果。", new_chat_each_run: "每次执行创建新聊天，分别保存结果。", existing_chat: "使用所选聊天及其目录执行。" })[form.mode]);
 const initialJson = JSON.stringify(form);
@@ -21,7 +24,7 @@ let previewEpoch = 0; let targetEpoch = 0; let alive = true; let previewTimer: R
 const frequencyOptions = Object.entries(frequencyLabels).map(([value,label]) => ({value,label}));
 const modeOptions = Object.entries(targetLabels).map(([value,label]) => ({value,label}));
 const weekLabels = ["一", "二", "三", "四", "五", "六", "日"];
-const valid = computed(() => Array.from(form.name.trim()).length > 0 && Array.from(form.name.trim()).length <= 80 && Array.from(form.content.trim()).length > 0 && Array.from(form.content.trim()).length <= 10000 && previewValid.value && (form.mode !== "existing_chat" || !!form.conversationId));
+const valid = computed(() => (!chatModelsEnabled || (modelReady.value && modelOptions.some(m=>m.value===form.modelProfile && !m.disabled))) && Array.from(form.name.trim()).length > 0 && Array.from(form.name.trim()).length <= 80 && Array.from(form.content.trim()).length > 0 && Array.from(form.content.trim()).length <= 10000 && previewValid.value && (form.mode !== "existing_chat" || !!form.conversationId));
 watch(rule, () => {
   const epoch = ++previewEpoch; previewValid.value = false; previewText.value = "正在计算…";
   clearTimeout(previewTimer);
@@ -53,7 +56,7 @@ function close() {
 }
 function submit() {
   if (!valid.value || blocked.value) return;
-  emit("save", { name: form.name.trim(), content: form.content.trim(), rule: rule.value, target: { mode: form.mode, ...(form.mode === "existing_chat" && form.conversationId ? { conversation_id: form.conversationId } : {}) } });
+  emit("save", { ...(chatModelsEnabled ? {model_profile:form.modelProfile} : {}), name: form.name.trim(), content: form.content.trim(), rule: rule.value, target: { mode: form.mode, ...(form.mode === "existing_chat" && form.conversationId ? { conversation_id: form.conversationId } : {}) } });
 }
 onBeforeUnmount(() => { alive = false; previewEpoch++; targetEpoch++; clearTimeout(previewTimer); clearTimeout(targetTimer); });
 defineExpose({ dirty, close });
@@ -61,7 +64,7 @@ defineExpose({ dirty, close });
 <template>
   <NModal :show="true" :mask-closable="false" :close-on-esc="!blocked" @update:show="close">
     <NCard class="schedule-form" :title="title" :closable="!blocked" :theme-overrides="{ borderRadius: 'var(--yj-radius-xl)', paddingMedium: 'var(--yj-space-6)' }" content-style="min-height: 0; overflow-y: auto" footer-style="border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); padding-top: var(--yj-space-4)" role="dialog" aria-modal="true" :aria-label="title" :aria-describedby="`${formId}-intro`" @close="close">
-      <p :id="`${formId}-intro`" class="schedule-form__intro">{{ plan ? '保存后保留当前开关状态，可随时在任务列表中调整。' : '创建后自动开启，按设定时间执行，可随时关闭。' }}</p>
+      <p :id="`${formId}-intro`" class="schedule-form__intro">{{ plan ? '保存后保留当前开关状态，可随时在任务列表中调整。' : confirmation && chatModelsEnabled ? '确认后仅保存为关闭状态；审阅模型和任务内容后，可另行开启或单次执行。' : '创建后自动开启，按设定时间执行，可随时关闭。' }}</p>
       <NForm :id="formId" class="schedule-form__body" label-placement="top" :show-feedback="false" :disabled="blocked" @submit.prevent="submit">
         <NAlert v-if="error" type="error" role="alert">{{ error }}</NAlert>
         <NAlert v-if="uncertain" type="warning">保存结果待查证。<div class="schedule-form__recovery"><NButton :disabled="busy" @click="emit('query')">查证原请求</NButton><NButton :disabled="busy" @click="emit('retry')">重试同一请求</NButton></div></NAlert>
@@ -77,6 +80,7 @@ defineExpose({ dirty, close });
           <NFormItem v-if="form.frequency === 'weekly'" label="每周运行日" required><NCheckboxGroup v-model:value="form.weekdays" class="schedule-form__weekdays" aria-label="每周运行日"><NCheckbox v-for="(label,index) in weekLabels" :key="label" :value="index+1" :label="`周${label}`" /></NCheckboxGroup></NFormItem>
           <p :id="`${formId}-time-hint`" class="schedule-form__hint">时间格式为 HH:mm。<span role="status">{{ previewText }}</span></p>
         </div>
+        <NFormItem v-if="chatModelsEnabled" label="执行模型" required><div><NSelect v-model:value="form.modelProfile" :options="modelOptions" :disabled="blocked || !modelReady || modelLocked" aria-label="执行模型" /><p class="schedule-form__hint" role="status">{{ modelNotice }}</p></div></NFormItem>
         <NFormItem label="任务内容" required><NInput v-model:value="form.content" type="textarea" placeholder="描述任务要做什么，例如：汇总商品信息，列出价格变化和待优化项。" :autosize="{ minRows: 5, maxRows: 8 }" :maxlength="10000" show-count :input-props="{ 'aria-label': '任务内容' }" /></NFormItem>
         <details class="schedule-form__settings" :open="initial?.target.mode === 'existing_chat'">
           <summary>更多设置<span class="schedule-form__settings-summary">{{ form.timeZone }} · {{ targetLabels[form.mode] }}</span></summary>

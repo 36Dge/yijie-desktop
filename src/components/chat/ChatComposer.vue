@@ -58,6 +58,7 @@ const emit = defineEmits<{
 
 defineSlots<{
   "permission-control"(): unknown;
+  "model-control"(): unknown;
   "active-turn-action"(props: {
     disabled: boolean;
     interrupt: () => void;
@@ -414,6 +415,8 @@ function handlePaste(event: ClipboardEvent): void {
           </button>
           </slot>
         </div>
+        <div class="chat-composer__trailing-actions">
+        <slot name="model-control" />
         <template v-if="streaming">
           <slot
             name="active-turn-action"
@@ -443,6 +446,7 @@ function handlePaste(event: ClipboardEvent): void {
         >
           <YjIcon name="send" size="lg" />
         </button>
+        </div>
       </div>
       <div v-if="dragActive && !attachmentButtonDisabled" class="chat-composer__drop-overlay" aria-hidden="true">
         <YjIcon name="plus" size="lg" />
@@ -790,6 +794,8 @@ function handlePaste(event: ClipboardEvent): void {
   min-width: 0;
   padding: 0 var(--yj-space-3) var(--yj-space-3);
 }
+
+.chat-composer__trailing-actions { display: flex; align-items: center; gap: var(--yj-space-2); flex-shrink: 0; }
 
 .chat-composer__leading-actions {
   display: flex;

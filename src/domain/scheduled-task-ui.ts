@@ -92,7 +92,7 @@ export function executionError(code: IpcErrorCode | null): string {
     reservation_busy: "本次未能开始执行：执行通道暂被占用，可能仍有执行、待确认状态或后台清理尚未结束。请稍后重试；若持续出现，请查看执行记录。",
     grant_missing: "本次运行许可不可用，请重新审阅并确认。",
     grant_expired: "本次运行许可已失效，请重新审阅并确认。",
-    grant_stale: "计划或授权已变化，请重新审阅当前配置。",
+    grant_stale: "计划、授权或聊天模型已变化。请编辑并重新审阅计划，或将聊天切回计划模型后重试。",
     grant_exhausted: "本次许可的一次运行已占用，请查看原运行。",
     revision_conflict: "计划已被修改，请重新审阅最新版本。",
     request_conflict: "本次请求与已有回执不一致，请查证原运行。",
@@ -110,3 +110,7 @@ export const pauseReasonLabels: Record<PauseReason, string> = {
   permission: "执行权限不足，请检查原对话。",
   resource: "本地执行资源不可用，请重新准备。",
 };
+
+export function scheduleModelLabel(profile?: string): string {
+  return profile === "kimi-k3-max-v1" ? "Kimi K3 · max" : profile === "minimax-m3-high-v1" ? "MiniMax M3" : "MiniMax M3（既有配置）";
+}

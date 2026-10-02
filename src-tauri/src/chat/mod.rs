@@ -668,6 +668,14 @@ impl ChatRuntime {
             if draft {
                 continue;
             }
+            let profile = self
+                .database()
+                .await?
+                .call(move |r| r.resume_model_profile(id))
+                .await?;
+            let host = host
+                .with_model_profile(profile)
+                .map_err(|_| ChatError::SidecarUnavailable)?;
             let resumed = host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
                 .await
@@ -725,12 +733,37 @@ impl ChatRuntime {
             }
             return Ok(());
         }
+        let model_catalog = if models::enabled() {
+            Some(
+                host.model_catalog()
+                    .await
+                    .map_err(|_| ChatError::SidecarUnavailable)?,
+            )
+        } else {
+            None
+        };
         for candidate in candidates {
             let id = candidate.session_id;
             let draft = database.call(move |r| r.draft_conversation(id)).await?;
             if draft {
                 continue;
             }
+            // An unresolved selection is recovered explicitly by its original operation.
+            let profile = match database.call(move |r| r.resume_model_profile(id)).await {
+                Ok(profile) => profile,
+                Err(ChatError::ConversationConflict) => continue,
+                Err(error) => return Err(error),
+            };
+            if retain_unconfigured_model_history(
+                &candidate,
+                profile.as_deref(),
+                model_catalog.as_ref(),
+            ) {
+                continue;
+            }
+            let host = host
+                .with_model_profile(profile)
+                .map_err(|_| ChatError::SidecarUnavailable)?;
             let resumed = match host
                 .resume_session(candidate.agent_session_id, &HostTrace::default())
                 .await
@@ -1221,6 +1254,27 @@ fn validate_feat126_resumed_session(
     Ok(())
 }
 
+// Missing credentials do not make terminal local history unreadable. Active or
+// uncertain operations still need the original recovery path and remain blocked.
+fn retain_unconfigured_model_history(
+    candidate: &database::Feat126ResumeCandidate,
+    profile: Option<&str>,
+    catalog: Option<&models_generated::Catalog>,
+) -> bool {
+    candidate.active_local_turn_id.is_none()
+        && candidate.active_runtime_turn_id.is_none()
+        && candidate.active_turn_operation_id.is_none()
+        && profile.is_some_and(|profile| {
+            catalog.is_some_and(|catalog| {
+                catalog.models.iter().any(|entry| {
+                    models::profile_id(entry.profile.profile_id) == profile
+                        && !entry.available
+                        && entry.reason == models_generated::ModelAvailabilityReason::NotConfigured
+                })
+            })
+        })
+}
+
 fn validate_feat137_resumed_session(
     candidate: &database::Feat126ResumeCandidate,
     resumed: &HostSession,
@@ -1453,6 +1507,69 @@ mod tests {
             created_at: "2026-08-15T00:00:00Z".to_owned(),
             updated_at: "2026-08-15T00:00:01Z".to_owned(),
         }
+    }
+
+    #[test]
+    fn feat156_unconfigured_model_history_preserves_unfinished_recovery() {
+        let terminal = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+        };
+        let mut catalog: models_generated::Catalog = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "default_profile": "kimi-k3-max-v1", "models": [{
+                "profile": {"profile_id":"kimi-k3-max-v1", "label":"Kimi K3", "provider":"kimi", "model":"kimi-k3", "effort":"max", "context_window":1048576},
+                "available":false, "reason":"not_configured"
+            }]
+        })).unwrap();
+        let profile = Some("kimi-k3-max-v1");
+        assert!(retain_unconfigured_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
+        assert!(!retain_unconfigured_model_history(
+            &terminal,
+            None,
+            Some(&catalog)
+        ));
+        assert!(!retain_unconfigured_model_history(&terminal, profile, None));
+        assert!(!retain_unconfigured_model_history(
+            &terminal,
+            Some("minimax-m3-high-v1"),
+            Some(&catalog)
+        ));
+        for unfinished in [
+            database::Feat126ResumeCandidate {
+                active_local_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_runtime_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_turn_operation_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+        ] {
+            assert!(!retain_unconfigured_model_history(
+                &unfinished,
+                profile,
+                Some(&catalog)
+            ));
+        }
+        catalog.models[0].available = true;
+        catalog.models[0].reason = models_generated::ModelAvailabilityReason::Ready;
+        assert!(!retain_unconfigured_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
     }
 
     #[test]
@@ -1855,3 +1972,6 @@ mod native_conversation_storage;
 
 mod turn_timing;
 pub(crate) mod turn_timing_generated;
+
+pub(crate) mod models;
+pub(crate) mod models_generated;

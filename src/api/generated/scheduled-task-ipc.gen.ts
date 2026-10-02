@@ -91,6 +91,7 @@ export interface PlanDetail{
 plan:Plan.PlanView;
 summary:PlanSummary;
 grant?:Execution.GrantView;
+bound_conversation_id?:Plan.Identity;
 }
 export interface EnableResult{
 plan:Plan.PlanView;
@@ -158,6 +159,7 @@ name:string;
 content:string;
 rule:Plan.TimeRule;
 target_mode:Plan.TargetMode;
+model_profile?:SavedConfigurationModelProfile;
 }
 export interface RecordDetail{
 record:RecordView;
@@ -343,6 +345,7 @@ data:Execution.RunView;
 export interface DraftSubmit{
 text:Draft.Text;
 conversation_id?:Plan.Identity;
+model_intent?:DraftModelIntent;
 }
 export interface DraftKey{
 source_id:Plan.Identity;
@@ -467,6 +470,7 @@ content_preview:string;
 rule:Plan.TimeRule;
 created_at?:number;
 target_title?:string;
+model_profile?:PlanCardModelProfile;
 }
 export interface RecordRowQuery{
 limit?:number;
@@ -657,6 +661,10 @@ schemaVersion:1;
 requestId:Plan.Identity;
 data:ImportantUpdates;
 }
+export interface DraftModelIntent{
+profile_id:DraftModelIntentProfileId;
+expected_revision:number;
+}
 export type AvailabilityDispatch = "disabled" | "native_candidate";
 export type TargetSummaryExecution = "requires_recheck" | "blocked";
 export type TargetSummaryReason = "target_unavailable" | "permission_denied" | "busy" | "native_identity_unavailable";
@@ -666,9 +674,12 @@ export type TimingDuration = "not_started" | "unknown" | "known" | "in_progress"
 export type TimingSource = "no_execution_clock" | "runtime_read";
 export type TimingDiagnostic = "format_unsupported" | "field_invalid" | "source_conflict" | "history_unavailable" | "identity_mismatch";
 export type RunRecordAttention = "none" | "needs_attention";
+export type SavedConfigurationModelProfile = "kimi-k3-max-v1" | "minimax-m3-high-v1";
 export type DraftPreviewStatus = "candidate" | "needs_clarification" | "unavailable" | "confirmed";
 export type OperationCapabilityReason = "ready" | "storage_disabled" | "storage_read_only" | "authority_missing" | "candidate_disabled" | "runtime_unqualified";
+export type PlanCardModelProfile = "kimi-k3-max-v1" | "minimax-m3-high-v1";
 export type ExecutionReceiptKeyOperation = "grant" | "manual" | "enable" | "single_grant" | "rerun";
+export type DraftModelIntentProfileId = "kimi-k3-max-v1" | "minimax-m3-high-v1";
 export interface Requests {
 "schedule_availability_v1":AvailabilityRequest;
 "schedule_list_plans_v1":ListPlansRequest;

@@ -35,6 +35,7 @@ fn plan_request(mode: TargetMode, conversation: Option<String>) -> SavePlanReque
         plan_id: None,
         expected_revision: None,
         definition: PlanDefinition {
+            model_profile: None,
             name: "合成准备".into(),
             content: "本地事务检查".into(),
             rule: TimeRule {
@@ -1288,4 +1289,280 @@ fn feat155_daily_cancelled_uncreated_dedicated_target_gets_fresh_operation() {
         None
     )
     .is_err());
+}
+
+#[test]
+fn feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot() {
+    let root = Temp::new();
+    let n = now().unwrap();
+    let mut r = open(&root.0, ScheduleStorageMode::LocalPreparation);
+    let (old, _, old_grant) = confirmed(&mut r, TargetMode::NewChatEachRun, None, n, 1);
+    crate::chat::migrations::migrate_to_target(&mut r.connection, 28).unwrap();
+    assert_eq!(
+        grant(&r.connection, &r.scope, &old_grant.grant_id, n)
+            .unwrap()
+            .definition_digest,
+        old_grant.definition_digest
+    );
+    assert!(r
+        .read_schedule(&old.plan_id)
+        .unwrap()
+        .definition
+        .model_profile
+        .is_none());
+    let mut request = plan_request(TargetMode::NewChatEachRun, None);
+    request.definition.model_profile = Some(PlanDefinitionModelProfile::KimiK3MaxV1);
+    let p = r.save_schedule(request, n).unwrap();
+    let g = r
+        .confirm_schedule_grant(
+            &ScheduleAuthority::local(n).unwrap(),
+            GrantConfirmation {
+                request_id: Uuid::now_v7().to_string(),
+                plan_id: p.plan_id.clone(),
+                expected_revision: p.revision,
+                max_runs: 1,
+                expires_at: n + 3600,
+            },
+            n,
+        )
+        .unwrap();
+    let p = r.read_schedule(&p.plan_id).unwrap();
+    let operation = Uuid::now_v7().to_string();
+    let run = r
+        .prepare_manual_local(
+            &ScheduleAuthority::local(n).unwrap(),
+            &g.grant_id,
+            p.revision,
+            &operation,
+            n,
+        )
+        .unwrap();
+    let raw: String = r
+        .connection
+        .query_row(
+            "SELECT snapshot_json FROM chat_scheduled_runs WHERE run_id=?1",
+            [&run.run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let snapshot: PlanView = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        snapshot.definition.model_profile,
+        Some(PlanDefinitionModelProfile::KimiK3MaxV1)
+    );
+    assert_eq!(
+        r.model_operation_profile(Uuid::parse_str(&run.operation_id).unwrap())
+            .unwrap()
+            .as_deref(),
+        Some("kimi-k3-max-v1")
+    );
+    let (_, _, create, _) = binding(&r, &run);
+    assert_eq!(
+        r.model_operation_profile(Uuid::parse_str(&create.unwrap()).unwrap())
+            .unwrap()
+            .as_deref(),
+        Some("kimi-k3-max-v1")
+    );
+    assert_eq!(
+        r.prepare_manual_local(
+            &ScheduleAuthority::local(n).unwrap(),
+            &g.grant_id,
+            p.revision,
+            &operation,
+            n
+        )
+        .unwrap(),
+        run
+    );
+}
+
+#[test]
+#[ignore = "requires explicit local demo_fast model writer environment"]
+fn feat156_bound_targets_reject_changed_model_without_consuming_grant() {
+    assert!(crate::chat::models::enabled());
+    for mode in [TargetMode::DedicatedChat, TargetMode::ExistingChat] {
+        let root = Temp::new();
+        let n = now().unwrap();
+        let mut r = open(&root.0, ScheduleStorageMode::LocalPreparation);
+        crate::chat::migrations::migrate_to_target(&mut r.connection, 28).unwrap();
+        let a = ScheduleAuthority::local(n).unwrap();
+        let mut initial = plan_request(TargetMode::DedicatedChat, None);
+        initial.definition.model_profile = Some(PlanDefinitionModelProfile::KimiK3MaxV1);
+        let original = r.save_schedule(initial, n).unwrap();
+        let approve = |r: &mut ChatRepository, p: &PlanView| {
+            r.confirm_schedule_grant(
+                &a,
+                GrantConfirmation {
+                    request_id: Uuid::now_v7().to_string(),
+                    plan_id: p.plan_id.clone(),
+                    expected_revision: p.revision,
+                    max_runs: 2,
+                    expires_at: n + 3600,
+                },
+                n,
+            )
+            .unwrap()
+        };
+        let g = approve(&mut r, &original);
+        let p = r.read_schedule(&original.plan_id).unwrap();
+        let first = r
+            .prepare_manual_local(&a, &g.grant_id, p.revision, &Uuid::now_v7().to_string(), n)
+            .unwrap();
+        let (chat, _, _, _) = binding(&r, &first);
+        finished_fixture(&mut r, &first, n);
+        let (p, g) = if mode == TargetMode::ExistingChat {
+            let mut request = plan_request(mode, Some(chat.clone()));
+            request.definition.model_profile = Some(PlanDefinitionModelProfile::KimiK3MaxV1);
+            let p = r.save_schedule(request, n).unwrap();
+            let g = approve(&mut r, &p);
+            (r.read_schedule(&p.plan_id).unwrap(), g)
+        } else {
+            (p, g)
+        };
+        let chat_id = Uuid::parse_str(&chat).unwrap();
+        let host = r
+            .agent_session_id_for_session_optional_model(chat_id)
+            .unwrap()
+            .unwrap();
+        r.sync_model_selection(
+            chat_id,
+            crate::chat::models_generated::Selection {
+                schema_version: 1,
+                agent_session_id: host.to_string(),
+                revision: 2,
+                profile_id: Some(crate::chat::models_generated::ProfileId::MinimaxM3HighV1),
+                state: crate::chat::models_generated::SelectionState::Ready,
+                operation_id: None,
+            },
+        )
+        .unwrap();
+        let before = grant(&r.connection, &r.scope, &g.grant_id, n).unwrap();
+        let rejected = Uuid::now_v7().to_string();
+        assert_eq!(
+            r.prepare_manual_local(&a, &g.grant_id, p.revision, &rejected, n),
+            Err(Error::GrantStale)
+        );
+        assert_eq!(
+            grant(&r.connection, &r.scope, &g.grant_id, n).unwrap(),
+            before
+        );
+        assert_eq!(
+            r.connection
+                .query_row(
+                    "SELECT count(*) FROM chat_scheduled_runs WHERE request_id=?1",
+                    [&rejected],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            r.model_operation_profile(Uuid::parse_str(&first.operation_id).unwrap())
+                .unwrap()
+                .as_deref(),
+            Some("kimi-k3-max-v1")
+        );
+        let mut update = SavePlanRequest {
+            request_id: Uuid::now_v7().to_string(),
+            plan_id: Some(p.plan_id.clone()),
+            expected_revision: Some(p.revision),
+            definition: p.definition.clone(),
+        };
+        assert_eq!(
+            r.save_schedule(update.clone(), n),
+            Err(ScheduleErrorCode::TargetUnavailable)
+        );
+        update.definition.model_profile = Some(PlanDefinitionModelProfile::MinimaxM3HighV1);
+        let changed = r.save_schedule(update, n).unwrap();
+        assert!(r
+            .prepare_manual_local(
+                &a,
+                &g.grant_id,
+                changed.revision,
+                &Uuid::now_v7().to_string(),
+                n
+            )
+            .is_err());
+        let renewed = approve(&mut r, &changed);
+        let changed = r.read_schedule(&changed.plan_id).unwrap();
+        let next = r
+            .prepare_manual_local(
+                &a,
+                &renewed.grant_id,
+                changed.revision,
+                &Uuid::now_v7().to_string(),
+                n,
+            )
+            .unwrap();
+        assert_eq!(binding(&r, &next).0, chat);
+        assert_eq!(
+            r.model_operation_profile(Uuid::parse_str(&next.operation_id).unwrap())
+                .unwrap()
+                .as_deref(),
+            Some("minimax-m3-high-v1")
+        );
+    }
+}
+
+#[test]
+fn feat156_workspace_migration_retains_prior_grant_run_and_proofs() {
+    let root = Temp::new();
+    let n = now().unwrap();
+    let mut r = open(&root.0, ScheduleStorageMode::TimingFoundation);
+    let (p, _, g) = confirmed(&mut r, TargetMode::DedicatedChat, None, n, 2);
+    let a = ScheduleAuthority::local(n).unwrap();
+    let run = r
+        .prepare_manual_local(&a, &g.grant_id, p.revision, &Uuid::now_v7().to_string(), n)
+        .unwrap();
+    finished_fixture(&mut r, &run, n);
+    let before_grant = grant(&r.connection, &r.scope, &g.grant_id, n).unwrap();
+    let before_run = read_run(&r.connection, &r.scope, &run.run_id).unwrap();
+    let before_snapshot: String = r
+        .connection
+        .query_row(
+            "SELECT snapshot_json FROM chat_scheduled_runs WHERE run_id=?1",
+            [&run.run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    crate::chat::migrations::migrate_to_target(&mut r.connection, 29).unwrap();
+    assert_eq!(
+        grant(&r.connection, &r.scope, &g.grant_id, n).unwrap(),
+        before_grant
+    );
+    assert_eq!(
+        read_run(&r.connection, &r.scope, &run.run_id).unwrap(),
+        before_run
+    );
+    assert_eq!(
+        r.connection
+            .query_row(
+                "SELECT snapshot_json FROM chat_scheduled_runs WHERE run_id=?1",
+                [&run.run_id],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        before_snapshot
+    );
+    assert_eq!(
+        r.connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        r.connection
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+        0
+    );
+    assert_eq!(r.connection.query_row("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN ('chat_scheduled_quiescent_proof','chat_scheduled_timing_ended')", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
+    crate::chat::migrations::migrate_to_target(&mut r.connection, 28).unwrap();
+    assert_eq!(r.schema_version().unwrap(), 29);
+    assert_eq!(
+        read_run(&r.connection, &r.scope, &run.run_id).unwrap(),
+        before_run
+    );
 }

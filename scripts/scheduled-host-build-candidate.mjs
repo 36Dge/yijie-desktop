@@ -14,6 +14,10 @@ export function isScheduledHostCandidate(env = process.env) {
 // A committed local source snapshot, never an arbitrary dirty-tree exception
 // or release qualification. FEAT-152 wire pins are checked separately.
 export async function verifyScheduledHostCandidate(desktopRoot, contractsRoot, hostRoot) {
+  if (process.env.YIJIE_CHAT_MODELS_ENABLED === "true") {
+    const {verifyChatModelBuildCandidate}=await import("./chat-model-build-candidate.mjs");
+    return verifyChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot);
+  }
   const lock = JSON.parse(await readFile(path.join(desktopRoot, "contracts/scheduled-host-build.candidate.json"), "utf8"));
   const [{stdout: head}, {stdout: origin}, {stdout: names}] = await Promise.all([
     exec("git", ["-C", hostRoot, "rev-parse", "HEAD"]),

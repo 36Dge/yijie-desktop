@@ -418,6 +418,10 @@
         },
         "grant": {
           "$ref": "#/$defs/execution_GrantView"
+        },
+        "bound_conversation_id": {
+          "$ref": "#/$defs/plan_Identity",
+          "description": "Read-only current dedicated-chat binding in this native scope; omitted when unbound or unavailable. Used to review current model without changing the target."
         }
       }
     },
@@ -833,6 +837,9 @@
         },
         "target_mode": {
           "$ref": "#/$defs/plan_TargetMode"
+        },
+        "model_profile": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/model_profile"
         }
       }
     },
@@ -1607,6 +1614,9 @@
         },
         "conversation_id": {
           "$ref": "#/$defs/plan_Identity"
+        },
+        "model_intent": {
+          "$ref": "#/$defs/DraftModelIntent"
         }
       },
       "required": [
@@ -2307,6 +2317,9 @@
         "target_title": {
           "type": "string",
           "maxLength": 240
+        },
+        "model_profile": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/model_profile"
         }
       }
     },
@@ -3224,6 +3237,24 @@
         }
       }
     },
+    "DraftModelIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "expected_revision"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/plan_PlanDefinition/properties/model_profile"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
     "plan_Identity": {
       "type": "string",
       "format": "uuid",
@@ -3413,6 +3444,13 @@
         },
         "target": {
           "$ref": "#/$defs/plan_TargetReference"
+        },
+        "model_profile": {
+          "type": "string",
+          "enum": [
+            "kimi-k3-max-v1",
+            "minimax-m3-high-v1"
+          ]
         }
       }
     },
@@ -3647,10 +3685,12 @@
       ]
     },
     "execution_WorkspaceSource": {
+      "description": "Native-owned workspace origin. managed_chat is the existing app-owned ordinary-chat directory (SQL27); it is neither a user bookmark nor a new plan directory. Readers must support this value before such existing chats are admitted to a grant/run.",
       "type": "string",
       "enum": [
         "user_project",
-        "managed_schedule"
+        "managed_schedule",
+        "managed_chat"
       ]
     },
     "execution_WorkspaceReference": {

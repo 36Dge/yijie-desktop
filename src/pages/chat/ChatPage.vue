@@ -12,6 +12,9 @@ import { usePermissionStore } from "../../stores/permission.store";
 import ChatPermissionControl from "../../components/chat/ChatPermissionControl.vue";
 import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
+import ChatModelControl from "../../components/chat/ChatModelControl.vue";
+import { useChatModels } from "../../composables/useChatModels";
+import { chatModelsEnabled } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
@@ -268,6 +271,16 @@ const permissions = useRuntimePermissions(
 );
 const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
 
+const modelBusy = computed(() => isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.busy.value || draft.writing.value || Boolean(draft.pending.value));
+const modelReadOnly = computed(() => !chatStore.hasAction(isSessionRoute.value ? "submit_turn" : "create_session") || (isSessionRoute.value && chatStore.selectedAccessMode !== "live"));
+const modelBlocked = computed(() => modelBusy.value || modelReadOnly.value);
+const modelDisabledReason = computed(() => modelReadOnly.value ? "当前聊天仅可查看或操作权限尚未就绪，无法切换模型" : "当前任务结束后可切换模型");
+const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value);
+watch(isNewDraftMode, (active, previous) => {
+  // Match the existing new-draft discard lifecycle, including its model intent.
+  if (previous && !active) models.resetNew();
+}, { flush: "post" });
+
 const isHistoryLoading = computed(() =>
   isSessionRoute.value &&
   chatStore.history === null &&
@@ -456,12 +469,13 @@ async function pickProject(): Promise<void> {
 }
 
 async function submit(): Promise<void> {
-  if (submitting.value) return;
+  if (submitting.value || !models.ready.value) return;
   if (isDraftMode.value) {
     const target = composerDraftTargetKey.value;
-    const result = await draft.submit(prompt.value);
+    const result = await draft.submit(prompt.value, models.intent.value);
     if (result && "conversation_id" in result) {
       composerDrafts.value = clearChatComposerDraft(composerDrafts.value, target);
+      models.resetNew();
       await openDraftConversation(result.conversation_id);
     }
     return;
@@ -476,7 +490,7 @@ async function submit(): Promise<void> {
   const input = prompt.value.trim();
   try {
     if (isSessionRoute.value) {
-      const result = await chatStore.submitTurnWithResult(input);
+      const result = await (models.intent.value ? chatStore.submitTurnWithResult(input, models.intent.value) : chatStore.submitTurnWithResult(input));
       if (result.status !== "local_durable_accepted") {
         actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
         return;
@@ -490,7 +504,7 @@ async function submit(): Promise<void> {
       scrollToBottom();
       return;
     }
-    const result = await chatStore.createSessionWithResult(availableProjectId.value, input);
+    const result = await (models.intent.value ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value) : chatStore.createSessionWithResult(availableProjectId.value, input));
     if (result.status !== "local_durable_accepted") {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
@@ -500,6 +514,7 @@ async function submit(): Promise<void> {
       composerDraftTargetKey.value !== draftTargetAtStart
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+    models.resetNew();
     await router.push(`/chat/${result.sessionId}`);
     focusRestoreTarget = chatComposerDraftKey(result.sessionId);
   } catch (error: unknown) {
@@ -721,6 +736,7 @@ onBeforeUnmount(() => {
 
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
+      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -729,7 +745,7 @@ onBeforeUnmount(() => {
         :selected-project-id="availableProjectId"
         :readiness="readiness"
         :text-only="isDraftMode"
-        :can-send="isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend"
+        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -748,6 +764,9 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="chatModelsEnabled" #model-control>
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
+        </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>
@@ -941,6 +960,7 @@ onBeforeUnmount(() => {
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
+      <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
@@ -950,7 +970,7 @@ onBeforeUnmount(() => {
         :active-project-name="activeProject?.safeName"
         :readiness="readiness"
         :text-only="isDraftMode"
-        :can-send="isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend"
+        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="isStreaming"
@@ -970,6 +990,9 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="chatModelsEnabled" #model-control>
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
+        </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
         </template>

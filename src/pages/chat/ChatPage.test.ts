@@ -16,6 +16,9 @@ import { runtimePermissionClient } from "../../api/runtime-permission-client";
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatModelControl from "../../components/chat/ChatModelControl.vue";
+import { chatModelClient, chatModelsEnabled } from "../../api/chat-model-client";
+import { modelDefinitions } from "../../domain/chat-models.generated";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import {
 CHAT_NEW_DRAFT_TARGET,
@@ -199,6 +202,7 @@ async function mountPage(
   activeHistory: ChatHistoryPage = HISTORY,
   retryChatAuthority: () => Promise<boolean> = async () => false,
   throughRouter = false,
+  stubs: Record<string, boolean> = {},
 ) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   const pinia = createPinia();
@@ -241,6 +245,7 @@ async function mountPage(
   const wrapper = mount(throughRouter ? defineComponent({ render: () => h(RouterView) }) : ChatPage, {
     attachTo: document.body,
     global: {
+      stubs,
       plugins: [pinia, router],
       provide: {
         [CHAT_AUTHORITY_RETRY_KEY as symbol]: retryChatAuthority,
@@ -362,6 +367,47 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("标题检查完成");
     expect(wrapper.text()).not.toContain("正在读取本地对话");
+  });
+
+  // Run explicitly with VITE_YIJIE_CHAT_MODELS_ENABLED=true; the legacy suite
+  // keeps its original feature-off behavior and assertions.
+  it.skipIf(!chatModelsEnabled)("blocks the model selector and stale selection events for history-only or denied tasks", async () => {
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:1,default_profile:"kimi-k3-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))});
+    vi.spyOn(chatModelClient, "state").mockResolvedValue({profileId:"minimax-m3-high-v1",revision:0,state:"ready"});
+    const select = vi.spyOn(chatModelClient, "select");
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    await flushPromises();
+    const control = wrapper.getComponent(ChatModelControl);
+    expect(control.props("disabled")).toBe(false);
+    store.selectedAccessMode = "history-only";
+    await flushPromises();
+    expect(control.props("disabled")).toBe(true);
+    expect(control.props("disabledReason")).toContain("仅可查看");
+    control.vm.$emit("select", "kimi-k3-max-v1");
+    await flushPromises();
+    expect(select).not.toHaveBeenCalled();
+    store.selectedAccessMode = "live";
+    store.context = {...store.context!, allowedActions:["read_sessions"]};
+    await flushPromises();
+    expect(control.props("disabled")).toBe(true);
+    control.vm.$emit("select", "kimi-k3-max-v1");
+    await flushPromises();
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!chatModelsEnabled)("resets the model when leaving a discarded new scheduled draft", async () => {
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:1,default_profile:"kimi-k3-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))});
+    const select = vi.spyOn(chatModelClient, "select");
+    const {wrapper,router} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
+    await flushPromises();
+    wrapper.getComponent(ChatModelControl).vm.$emit("select", "minimax-m3-high-v1");
+    await flushPromises();
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("minimax-m3-high-v1");
+    await router.push("/chat");
+    await flushPromises();
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-max-v1");
+    expect(select).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("shows stale terminal tasks as local read-only history without a protocol error", async () => {

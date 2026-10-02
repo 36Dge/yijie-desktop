@@ -1765,14 +1765,22 @@ impl ConversationApplication {
     }
 
     async fn dispatch_host(&self, operation: Uuid, epoch: u64) -> Result<HostBridge, ChatError> {
-        super::schedules::dispatch::admitted_host(
+        let host = super::schedules::dispatch::admitted_host(
             &self.database,
             self.host()?,
             &self.lifecycle,
             epoch,
             operation,
         )
-        .await
+        .await?;
+        let profile = self
+            .database
+            .call(move |r| r.model_operation_profile(operation))
+            .await?;
+        if profile.is_some() && !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        host.with_model_profile(profile).map_err(map_host_error)
     }
     async fn scheduled_dispatch_error(
         &self,
@@ -4954,3 +4962,136 @@ mod tests {
 #[cfg(test)]
 #[path = "schedules/dispatch_tests.rs"]
 mod scheduled_dispatch_tests;
+
+impl AuthorizedConversationApplication {
+    pub async fn model_catalog(
+        &self,
+        context: Uuid,
+    ) -> Result<super::models_generated::Catalog, ChatError> {
+        self.authorize(context, ChatAction::ReadSessions)?;
+        if !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let out = self
+            .application
+            .host()?
+            .model_catalog()
+            .await
+            .map_err(map_host_error)?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        Ok(out)
+    }
+    pub async fn model_state(
+        &self,
+        context: Uuid,
+        session: Uuid,
+    ) -> Result<super::models::ModelState, ChatError> {
+        self.authorize(context, ChatAction::ReadSessions)?;
+        let host = self
+            .application
+            .database
+            .call(move |r| r.agent_session_id_for_session_optional_model(session))
+            .await?;
+        if let Some(host) = host {
+            let value = self
+                .application
+                .host()?
+                .model_selection(host)
+                .await
+                .map_err(map_host_error)?;
+            self.authorize(context, ChatAction::ReadSessions)?;
+            self.application
+                .database
+                .call(move |r| r.sync_model_selection(session, value))
+                .await
+        } else {
+            self.application
+                .database
+                .call(move |r| r.model_state(session))
+                .await
+        }
+    }
+    pub async fn select_model(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        intent: super::models::ModelIntent,
+        op: Uuid,
+    ) -> Result<super::models::ModelState, ChatError> {
+        self.authorize(context, ChatAction::SubmitTurn)?;
+        if !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let request = super::models_generated::SelectRequest {
+            schema_version: 1,
+            profile_id: intent.profile_id,
+            expected_revision: intent.expected_revision,
+            operation_id: op.to_string(),
+        };
+        let host = self
+            .application
+            .database
+            .call(move |r| r.begin_model_selection(session, intent, op))
+            .await?;
+        self.authorize(context, ChatAction::SubmitTurn)?;
+        let result = self.application.host()?.select_model(host, request).await;
+        match result {
+            Ok(value) => {
+                self.authorize(context, ChatAction::SubmitTurn)?;
+                self.application
+                    .database
+                    .call(move |r| r.sync_model_selection(session, value))
+                    .await
+            }
+            Err(error) => {
+                self.application
+                    .database
+                    .call(move |r| r.model_selection_unknown(session, op))
+                    .await?;
+                Err(map_host_error(error))
+            }
+        }
+    }
+    pub async fn model_submit(
+        &self,
+        context: Uuid,
+        project: Option<Uuid>,
+        session: Option<Uuid>,
+        blocks: Vec<DraftContentBlock>,
+        op: Uuid,
+        intent: super::models::ModelIntent,
+    ) -> Result<super::models::ModelSubmission, ChatError> {
+        if !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        if let Some(session) = session {
+            self.authorize(context, ChatAction::SubmitTurn)?;
+            let turn = self
+                .application
+                .database
+                .call(move |r| r.enqueue_model_turn(session, blocks, op, intent))
+                .await?;
+            Ok(super::models::ModelSubmission {
+                session_id: session,
+                turn_id: turn,
+                turn_operation_id: op,
+            })
+        } else {
+            self.authorize(context, ChatAction::UseProject)?;
+            self.authorize(context, ChatAction::CreateSession)?;
+            let revision = self
+                .authorization
+                .authorization_revision(context, ChatAction::CreateSession, unix_seconds()?)
+                .map_err(|_| ChatError::ScopeDenied)?;
+            self.application
+                .database
+                .call(move |r| r.create_model_session(project, blocks, op, revision, intent))
+                .await
+                .map(|r| super::models::ModelSubmission {
+                    session_id: r.session_id,
+                    turn_id: r.turn_id,
+                    turn_operation_id: r.turn_operation_id,
+                })
+        }
+    }
+}

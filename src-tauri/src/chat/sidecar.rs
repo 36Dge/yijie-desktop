@@ -81,6 +81,8 @@ pub struct SidecarConfig {
     feat136_command_tool_items_enabled: bool,
     feat137_command_approval_enabled: bool,
     minimax_api_key_file: Option<PathBuf>,
+    chat_models_enabled: bool,
+    kimi_api_key_file: Option<PathBuf>,
     sorftime_token: std::sync::Arc<Mutex<Option<zeroize::Zeroizing<String>>>>,
     sorftime_proxy: Option<String>,
 }
@@ -183,6 +185,15 @@ impl SidecarConfig {
         )?;
         let minimax_provider_enabled =
             parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
+        let chat_models_enabled = super::models::enabled();
+        let kimi_api_key_file = if chat_models_enabled {
+            optional_owner_only_provider_key_file("YIJIE_KIMI_API_KEY_FILE")?
+        } else {
+            None
+        };
+        if std::env::var_os("YIJIE_KIMI_API_KEY").is_some() {
+            return Err(ChatError::InvalidConfiguration);
+        }
         let minimax_api_key_file = optional_owner_only_provider_key_file(MINIMAX_API_KEY_FILE_ENV)?;
         validate_minimax_provider_configuration(
             minimax_provider_enabled,
@@ -235,6 +246,8 @@ impl SidecarConfig {
             feat136_command_tool_items_enabled,
             feat137_command_approval_enabled,
             minimax_api_key_file,
+            chat_models_enabled,
+            kimi_api_key_file,
             sorftime_token: std::sync::Arc::new(Mutex::new(sorftime_token)),
             sorftime_proxy,
         }))
@@ -373,6 +386,15 @@ impl SidecarConfig {
                 ),
             ]);
         }
+        if self.chat_models_enabled {
+            values.push(("YIJIE_CHAT_MODELS_ENABLED", "true".to_owned()));
+            if let Some(file) = &self.kimi_api_key_file {
+                values.push((
+                    "YIJIE_KIMI_API_KEY_FILE",
+                    file.to_string_lossy().into_owned(),
+                ));
+            }
+        }
         if let Some(value) = &self.codex_binary {
             values.push(("YIJIE_CODEX_BINARY", value.to_string_lossy().into_owned()));
         }
@@ -386,6 +408,11 @@ impl SidecarConfig {
     }
 
     fn validate_provider_key_file(&self) -> Result<(), ChatError> {
+        if let Some(file) = &self.kimi_api_key_file {
+            if validate_owner_only_provider_key_file(file)? != *file {
+                return Err(ChatError::InvalidConfiguration);
+            }
+        }
         if !self.minimax_provider_enabled {
             return Ok(());
         }
@@ -1822,6 +1849,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -1949,6 +1978,8 @@ mod tests {
             minimax_provider_enabled: true,
             image_generation_enabled: true,
             minimax_api_key_file: Some(PathBuf::from("/ordinary/key-file")),
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -1994,6 +2025,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -2081,6 +2114,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -2141,6 +2176,8 @@ mod tests {
             minimax_provider_enabled: true,
             image_generation_enabled: true,
             minimax_api_key_file: Some(canonical.clone()),
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -2360,6 +2397,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -2444,6 +2483,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -2570,6 +2611,8 @@ mod tests {
                 minimax_provider_enabled: false,
                 image_generation_enabled: false,
                 minimax_api_key_file: None,
+                chat_models_enabled: false,
+                kimi_api_key_file: None,
                 sorftime_token: std::sync::Arc::new(Mutex::new(None)),
                 sorftime_proxy: None,
             };
@@ -2665,6 +2708,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };
@@ -3033,6 +3078,8 @@ mod tests {
             minimax_provider_enabled: false,
             image_generation_enabled: false,
             minimax_api_key_file: None,
+            chat_models_enabled: false,
+            kimi_api_key_file: None,
             sorftime_token: std::sync::Arc::new(Mutex::new(None)),
             sorftime_proxy: None,
         };

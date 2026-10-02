@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
+import { chatModelsEnabled } from "../../api/chat-model-client";
 import { computed } from "vue";
 import { NButton, NCard, NModal } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -25,6 +27,7 @@ const note = computed(() => {
     <NCard class="scheduled-record-dialog" title="执行记录详情" closable role="dialog" aria-modal="true" aria-label="执行记录详情" @close="emit('close')">
       <dl v-if="detail" class="scheduled-record-dialog__fields">
         <dt>任务名称</dt><dd class="scheduled-record-dialog__name">{{ name }}</dd>
+        <template v-if="chatModelsEnabled && detail.configuration"><dt>执行模型</dt><dd>{{ scheduleModelLabel(detail.configuration.model_profile) }}</dd></template>
         <dt>执行状态</dt><dd><span class="scheduled-record-dialog__status" :data-tone="recordTone(detail.record)">{{ recordStatus(detail.record) }}</span></dd>
         <dt>触发方式</dt><dd>{{ trigger }}</dd>
         <dt>执行时间</dt><dd :title="executionTimeLabel(detail.record.timing)">{{ executionTimeLabel(detail.record.timing, true) }}</dd>

@@ -1,7 +1,7 @@
 // Generated from scheduled execution source; DO NOT EDIT.
 export type Identity = string;
 export type ScheduleCapability = "schedule.read" | "schedule.manage" | "schedule.run";
-export type WorkspaceSource = "user_project" | "managed_schedule";
+export type WorkspaceSource = "user_project" | "managed_schedule" | "managed_chat";
 export interface WorkspaceReference {
   source: WorkspaceSource;
   resource_id: Identity;

@@ -915,6 +915,12 @@ impl ChatRepository {
         } else {
             migrations::migrate(&mut connection)?;
         }
+        if super::models::enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
+            )?;
+        }
         protect_database_files(&database_path)?;
         let mut repository = Self {
             schedule_background_only: false,
@@ -2374,6 +2380,7 @@ impl ChatRepository {
             }
             return parse_uuid_value(&turn_id);
         }
+        super::models::require_writer(&transaction, session_id, &self.scope)?;
         let session_ready: bool = transaction
             .query_row(
                 "SELECT EXISTS(
@@ -2539,6 +2546,7 @@ impl ChatRepository {
             }
             return parse_uuid_value(&turn_id);
         }
+        super::models::require_writer(transaction, session_id, scope)?;
         let session_ready: bool = transaction
             .query_row(
                 "SELECT EXISTS(
@@ -2661,6 +2669,7 @@ impl ChatRepository {
             self.schedule_trigger_lifecycle.as_ref(),
             &self.manual_runtime,
         )?;
+        let model_exhaustion_gate = super::models::dispatch_predicate(&transaction, "chat_outbox")?;
         let gate = if self.schedule_background_only {
             "0".to_owned()
         } else {
@@ -2671,7 +2680,7 @@ impl ChatRepository {
                 &format!("UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE kind IN ('start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
-                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate}"),
+                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate} AND {model_exhaustion_gate}"),
                 params![OUTBOX_MAX_ATTEMPTS, now],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -2692,6 +2701,7 @@ impl ChatRepository {
             Some(id) => format!("({normal} OR o.operation_id='{id}')"),
             None => normal,
         };
+        let model_gate = super::models::dispatch_predicate(&transaction, "o")?;
         let row: Option<(String, String, String, i64)> = transaction
             .query_row(
                 &format!("SELECT o.operation_id, o.session_id, o.kind, o.attempt_count
@@ -2709,7 +2719,7 @@ impl ChatRepository {
                    AND o.attempt_count < ?3
                    AND ((o.state='pending' AND (o.next_attempt_at IS NULL OR o.next_attempt_at<=?4))
                      OR (o.state='inflight' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?4))
-                 AND {gate}
+                 AND {gate} AND {model_gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
                  LIMIT 1"),
                 params![
@@ -6578,7 +6588,7 @@ fn next_draft_attachment_ordinal(
         .ok_or(ChatError::DatabaseUnavailable)
 }
 
-fn validate_draft_blocks(blocks: &[DraftContentBlock]) -> Result<(), ChatError> {
+pub(super) fn validate_draft_blocks(blocks: &[DraftContentBlock]) -> Result<(), ChatError> {
     if blocks.is_empty() || blocks.len() > 16 {
         return Err(ChatError::InvalidInput);
     }
@@ -8868,7 +8878,7 @@ mod tests {
             deletion,
             CleanupSurfaceState::Complete,
             CleanupSurfaceState::Complete,
-            "cleanup_complete".into(),
+            "cleanup_complete",
             now + 2,
         )
         .unwrap();

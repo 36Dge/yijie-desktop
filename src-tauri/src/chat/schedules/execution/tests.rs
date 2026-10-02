@@ -44,6 +44,7 @@ fn request() -> SavePlanRequest {
         plan_id: None,
         expected_revision: None,
         definition: PlanDefinition {
+            model_profile: None,
             name: "合成定时计划".into(),
             content: "只验证本地数据".into(),
             rule: TimeRule {

@@ -13,6 +13,7 @@ fn definition(
 ) -> PlanDefinition {
     let dt = Utc.timestamp_opt(at, 0).unwrap();
     PlanDefinition {
+        model_profile: None,
         name: "自动合成".into(),
         content: "只用于进程内组合检查".into(),
         target: TargetReference {

@@ -5,6 +5,84 @@ use crate::chat::{
 };
 
 #[tokio::test]
+#[ignore = "requires the explicit local demo_fast model writer environment"]
+async fn feat156_model_draft_enters_original_claim_and_recovery_path() {
+    assert!(crate::chat::models::enabled());
+    let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
+    f.worker
+        .call(|r| {
+            crate::chat::migrations::migrate_to_target(&mut r.connection, 28)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let receipt = f
+        .call(
+            "schedule_submit_draft_v1",
+            json!({
+                "text":"每天北京时间九点回复验收完成，不调用工具。",
+                "model_intent":{"profile_id":"kimi-k3-max-v1","expected_revision":0}
+            }),
+        )
+        .await
+        .unwrap();
+    let source = receipt["source_id"].as_str().unwrap().to_owned();
+    f.worker
+        .call(move |r| {
+            let context = r
+                .draft_source_context(&source)
+                .expect("draft source context");
+            let create = context.create.unwrap();
+            assert_eq!(
+                r.model_operation_profile(create)?.as_deref(),
+                Some("kimi-k3-max-v1")
+            );
+            assert_eq!(
+                r.model_operation_profile(context.operation)?.as_deref(),
+                Some("kimi-k3-max-v1")
+            );
+            r.schedule_draft_dispatch_authority = Some(auth());
+            let claimed = r
+                .claim_next_conversation_outbox(execution::now().unwrap() + 1, 30)?
+                .expect("draft create claim");
+            assert_eq!(claimed.operation_id, create);
+            r.guard_conversation_dispatch(create)?;
+            assert!(!context.create_attempted && !context.turn_attempted);
+            let n = execution::now().unwrap();
+            r.bind_public_task(create, context.conversation, n)
+                .expect("draft public task binding");
+            let bound = r
+                .draft_source_context(&source)
+                .expect("bound draft context");
+            assert_eq!(bound.task, Some(context.conversation));
+            let dispatch = r
+                .load_create_session_dispatch(create)
+                .expect("draft create dispatch");
+            r.resolve_schedule_project(&dispatch.project_id.to_string())
+                .expect("draft directory");
+            r.mark_draft_attempt(create)
+                .expect("draft create admission");
+            r.bind_host_session_and_enqueue_turn(
+                create,
+                context.conversation,
+                Uuid::now_v7(),
+                Uuid::now_v7(),
+            )
+            .expect("draft host binding");
+            let turn = r
+                .claim_next_conversation_outbox(n + 1, 30)?
+                .expect("draft turn claim");
+            assert_eq!(turn.operation_id, context.operation);
+            r.mark_draft_attempt(turn.operation_id)
+                .expect("draft turn admission");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
 async fn feat155_4b_receipt_and_purpose_are_scoped_reads_without_host() {
     use crate::chat::application::{AuthorizedConversationApplication, ConversationApplication};
     use crate::chat::session_purpose_generated::SessionPurpose;
@@ -567,5 +645,83 @@ async fn confirmed_draft_is_enabled_once_without_a_second_authorization() {
             .unwrap(),
         paused
     );
+    f.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires the explicit local demo_fast model writer environment"]
+async fn feat156_projectless_chat_is_a_valid_target_and_grant_workspace() {
+    assert!(crate::chat::models::enabled());
+    let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
+    let chat = f
+        .worker
+        .call(|r| {
+            crate::chat::migrations::migrate_to_target(&mut r.connection, 29)?;
+            let pending = r.create_model_session(
+                None,
+                vec![DraftContentBlock::Text("普通无项目聊天".into())],
+                Uuid::now_v7(),
+                1,
+                crate::chat::models::ModelIntent {
+                    profile_id: crate::chat::models_generated::ProfileId::KimiK3MaxV1,
+                    expected_revision: 0,
+                },
+            )?;
+            Ok(pending.session_id.to_string())
+        })
+        .await
+        .unwrap();
+    let page = f
+        .call("schedule_list_targets_v1", json!({"limit":20}))
+        .await
+        .unwrap();
+    assert_eq!(page["items"][0]["conversation_id"], chat);
+    assert_eq!(page["items"][0]["workspace_source"], "managed_chat");
+    assert_eq!(page["items"][0]["can_save"], true);
+    f.worker
+        .call(move |r| {
+            let n = execution::now().unwrap();
+            let definition: PlanDefinition = serde_json::from_value(json!({
+                "name":"普通聊天目标", "content":"不调用工具", "model_profile":"kimi-k3-max-v1",
+                "rule":{"frequency":"daily","time_zone":"Asia/Shanghai","local_time":"09:00"},
+                "target":{"mode":"existing_chat","conversation_id":chat}
+            }))
+            .unwrap();
+            let p = r
+                .save_schedule(
+                    SavePlanRequest {
+                        request_id: Uuid::now_v7().to_string(),
+                        plan_id: None,
+                        expected_revision: None,
+                        definition,
+                    },
+                    n,
+                )
+                .unwrap();
+            let g = r
+                .confirm_schedule_grant(
+                    &ScheduleAuthority::local(n).unwrap(),
+                    super::super::super::execution_generated::GrantConfirmation {
+                        request_id: Uuid::now_v7().to_string(),
+                        plan_id: p.plan_id.clone(),
+                        expected_revision: p.revision,
+                        max_runs: 1,
+                        expires_at: n + 600,
+                    },
+                    n,
+                )
+                .unwrap();
+            assert_eq!(
+                g.workspace.source,
+                super::super::super::execution_generated::WorkspaceSource::ManagedChat
+            );
+            assert!(r
+                .resolve_schedule_project(&g.workspace.resource_id)
+                .unwrap()
+                .is_dir());
+            Ok(())
+        })
+        .await
+        .unwrap();
     f.close().await;
 }

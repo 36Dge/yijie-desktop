@@ -1,3 +1,4 @@
+mod models;
 use super::artifact::{
     ArtifactCommit, ArtifactKind, ArtifactManifest, DownloadedArtifact, DownloadedResource,
     MAX_ARTIFACT_BYTES, MAX_IMAGE_BYTES,
@@ -73,6 +74,7 @@ impl Debug for HostTrace {
 
 #[derive(Clone)]
 pub struct HostBridge {
+    model_profile: Option<String>,
     schedule_admission: Option<super::schedules::dispatch::Admission>,
     draft_admission: Option<super::schedules::draft_admission::Admission>,
     lifecycle: super::lifecycle::Lifecycle,
@@ -511,6 +513,7 @@ impl HostBridge {
             .build()
             .map_err(|_| configuration_error())?;
         Ok(Self {
+            model_profile: None,
             schedule_admission: None,
             draft_admission: None,
             lifecycle: super::lifecycle::Lifecycle::default(),
@@ -573,7 +576,12 @@ impl HostBridge {
                 &StartSessionRequest { trace, cwd },
             )
             .await?;
-        parse_session_response(response, StatusCode::CREATED).await
+        parse_session_response_for_model(
+            response,
+            StatusCode::CREATED,
+            self.model_profile.as_deref(),
+        )
+        .await
     }
 
     pub async fn resume_session(
@@ -590,7 +598,8 @@ impl HostBridge {
                 &TraceRequest { trace },
             )
             .await?;
-        parse_session_response(response, StatusCode::OK).await
+        parse_session_response_for_model(response, StatusCode::OK, self.model_profile.as_deref())
+            .await
     }
 
     pub async fn get_session(&self, session_id: Uuid) -> Result<HostSession, HostBridgeError> {
@@ -602,7 +611,8 @@ impl HostBridge {
             .send()
             .await
             .map_err(|_| transport_error())?;
-        parse_session_response(response, StatusCode::OK).await
+        parse_session_response_for_model(response, StatusCode::OK, self.model_profile.as_deref())
+            .await
     }
 
     pub async fn start_turn(
@@ -1361,6 +1371,7 @@ impl HostBridge {
                 || path_and_query.ends_with("/permission-turns")
                 || path_and_query.ends_with("/agent-sessions")
                 || path_and_query.ends_with("/interrupt")
+                || path_and_query.ends_with("/model")
                 || path_and_query.starts_with("/v1/scheduled-plan-draft-sessions"));
         let permit = if execution {
             Some(
@@ -1372,7 +1383,16 @@ impl HostBridge {
             None
         };
         self.ensure_ready().await?;
-        let request = self.bearer_request(method, path_and_query).await?;
+        let mapped = self
+            .model_profile
+            .as_ref()
+            .and_then(|_| models::route(path_and_query));
+        let mut request = self
+            .bearer_request(method, mapped.as_deref().unwrap_or(path_and_query))
+            .await?;
+        if let Some(profile) = &self.model_profile {
+            request = request.header("X-Yijie-Model-Profile", profile);
+        }
         if let Some(epoch) = permit {
             self.lifecycle
                 .validate(epoch)
@@ -1570,6 +1590,31 @@ async fn parse_session_response(
     wire.session.try_into()
 }
 
+async fn parse_session_response_for_model(
+    response: Response,
+    expected_status: StatusCode,
+    profile: Option<&str>,
+) -> Result<HostSession, HostBridgeError> {
+    if profile.is_none() {
+        return parse_session_response(response, expected_status).await;
+    }
+    let body = expect_json_status(response, expected_status).await?;
+    let wire: SessionEnvelope = serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+    let expected = match profile {
+        Some("kimi-k3-max-v1") => ("kimi-k3", "kimi"),
+        Some("minimax-m3-high-v1") => ("MiniMax-M3", "minimax"),
+        _ => return Err(protocol_error()),
+    };
+    if (
+        wire.session.model.as_str(),
+        wire.session.model_provider.as_str(),
+    ) != expected
+    {
+        return Err(accepted_response_invalid());
+    }
+    wire.session.try_into()
+}
+
 impl TryFrom<WireSession> for HostSession {
     type Error = HostBridgeError;
 
@@ -1586,7 +1631,7 @@ impl TryFrom<WireSession> for HostSession {
         }
         let model_ready = match (wire.model.as_str(), wire.model_provider.as_str()) {
             ("", "") => false,
-            ("MiniMax-M3", "minimax") => true,
+            ("MiniMax-M3", "minimax") | ("kimi-k3", "kimi") => true,
             _ => return Err(protocol_error()),
         };
         let failure_code = match wire.failure_code.as_str() {

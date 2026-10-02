@@ -117,6 +117,12 @@ pub struct PlanDefinition {
     pub content: String,
     pub rule: TimeRule,
     pub target: TargetReference,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub model_profile: Option<PlanDefinitionModelProfile>,
 }
 impl std::fmt::Debug for PlanDefinition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -221,4 +227,12 @@ pub enum TimeRuleFrequency {
     Weekdays,
     #[serde(rename = "weekly")]
     Weekly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlanDefinitionModelProfile {
+    #[serde(rename = "kimi-k3-max-v1")]
+    KimiK3MaxV1,
+    #[serde(rename = "minimax-m3-high-v1")]
+    MinimaxM3HighV1,
 }

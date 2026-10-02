@@ -56,7 +56,9 @@ impl Selection {
         self != Self::Disabled
     }
     pub(crate) fn data_directory(self) -> &'static str {
-        if self == Self::Isolated {
+        if self == Self::Isolated && crate::chat::models::enabled() {
+            "demo-fast-model-candidate-v1"
+        } else if self == Self::Isolated {
             "demo-fast-scheduled-candidate-v1"
         } else {
             "demo-fast-v1"

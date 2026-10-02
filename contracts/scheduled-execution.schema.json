@@ -21,10 +21,12 @@
       ]
     },
     "WorkspaceSource": {
+      "description": "Native-owned workspace origin. managed_chat is the existing app-owned ordinary-chat directory (SQL27); it is neither a user bookmark nor a new plan directory. Readers must support this value before such existing chats are admitted to a grant/run.",
       "type": "string",
       "enum": [
         "user_project",
-        "managed_schedule"
+        "managed_schedule",
+        "managed_chat"
       ]
     },
     "WorkspaceReference": {

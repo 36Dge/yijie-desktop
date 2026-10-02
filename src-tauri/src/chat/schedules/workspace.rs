@@ -46,6 +46,14 @@ pub(crate) fn reference(
                 resource_id: resource,
             })
         }
+        ("managed_chat", Some(resource))
+            if resource == project && Uuid::parse_str(&resource).is_ok() =>
+        {
+            Ok(WorkspaceReference {
+                source: WorkspaceSource::ManagedChat,
+                resource_id: resource,
+            })
+        }
         _ => Err(ChatError::ProjectUnavailable),
     }
 }
@@ -151,6 +159,7 @@ impl ChatRepository {
                 &w.resource_id,
                 false,
             ),
+            WorkspaceSource::ManagedChat => Err(ChatError::ProjectUnavailable), // Must resolve through the scoped projectless path above.
         }
     }
 }

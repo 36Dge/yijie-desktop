@@ -50,6 +50,7 @@ fn request() -> SavePlanRequest {
         plan_id: None,
         expected_revision: None,
         definition: PlanDefinition {
+            model_profile: None,
             name: "每日检查".into(),
             content: "公开信息合成检查".into(),
             rule: rule(),
