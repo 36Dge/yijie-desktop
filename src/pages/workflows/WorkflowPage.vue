@@ -82,7 +82,7 @@ onMounted(async () => {
   if (workflowLocalUiEnabled) void state.refresh();
   if (route.query.create === "1") { openCreate(); return; }
   await nextTick();
-  if (workflowLocalUiEnabled && !showCreate.value) enterCreateGuide();
+  if (!showCreate.value) enterCreateGuide();
 });
 const sortOptions = [
   { value: "modified", label: "最近修改" },

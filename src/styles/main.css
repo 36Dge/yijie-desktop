@@ -1,4 +1,5 @@
 @import "./component-metrics.css";
+@import "./chat-control-menu.css";
 
 :root {
   color: var(--yj-color-text-primary);

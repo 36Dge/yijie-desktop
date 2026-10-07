@@ -1,3 +1,5 @@
+pub(crate) mod workspaces;
+
 use super::application::{
     ArtifactResyncReason, AuthorizedConversationApplication, ConversationApplication,
     ConversationCoordinator, CoordinatorOutcome, DispatchOutcome, LiveTurnProjection,

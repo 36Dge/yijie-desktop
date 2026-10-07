@@ -1366,7 +1366,7 @@ export function parseBoundContextResponse(value: unknown): BoundChatContext {
   });
 }
 
-function parseProject(value: unknown): ChatProject {
+export function parseProject(value: unknown): ChatProject {
   const project = exactObject(value, ["projectId", "safeName", "pinnedAt", "lastUsedAt", "available"]);
   if (typeof project.available !== "boolean") throw new ChatContractError();
   return Object.freeze({

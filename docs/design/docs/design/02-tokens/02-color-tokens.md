@@ -56,6 +56,7 @@
 | `--yj-color-bg-card` | `#FFFFFF` | `#25282B` | 卡片、输入区 |
 | `--yj-color-bg-elevated` | `#FFFFFF` | `#2E3237` | 弹层 |
 | `--yj-color-bg-subtle` | `#FFFFFF` | `#22262A` | 兼容内嵌表面，不代替普通表格/卡片背景 |
+| `--yj-color-bg-composer-tray` | `#F4F5F6` | `#22262A` | 用户指定的 Chat Composer 圆角底座，仅带工作空间与权限底栏时使用 |
 | `--yj-color-control-hover` | `#F7F8F9` | `#30363D` | 小控件/可操作行 hover |
 | `--yj-color-control-pressed` | `#ECEEF0` | `#414850` | 小控件 pressed |
 | `--yj-color-control-disabled-bg` | `#F7F8F9` | `#30363D` | 局部 disabled 底 |

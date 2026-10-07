@@ -2,29 +2,35 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui";
 import { useRouter } from "vue-router";
-import type { ChatProject, ChatSession } from "../../domain/chat-ipc";
-import { buildChatSidebarHistory } from "../../domain/chat-sidebar-history";
+import type { ChatSession } from "../../domain/chat-ipc";
+import { buildChatSidebarHistory, type ChatHistoryProjectGroup } from "../../domain/chat-sidebar-history";
 import { useChatStore } from "../../stores/chat.store";
+import { useSidebarStore } from "../../stores/sidebar.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 
-defineProps<{
+const props = defineProps<{
   currentPath: string;
 }>();
 
 const chatStore = useChatStore();
+const sidebarStore = useSidebarStore();
 const router = useRouter();
 const expandedProjectIds = ref<ReadonlySet<string>>(new Set());
 const renameSession = ref<ChatSession | null>(null);
 const deleteSession = ref<ChatSession | null>(null);
-const removeProjectTarget = ref<ChatProject | null>(null);
+const removeProjectTarget = ref<ChatHistoryProjectGroup | null>(null);
+const projectMenuId = ref<string | null>(null);
+const projectMenuX = ref(0);
+const projectMenuY = ref(0);
+const projectMenuOverlay = ref<HTMLElement | null>(null);
 const renameValue = ref("");
 const actionPending = ref(false);
 const actionError = ref<string | null>(null);
 let lastDialogTrigger: HTMLElement | null = null;
 let knownProjectIds = new Set<string>();
 
-const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions));
+const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions, sidebarStore.taskDirectoryPreferences));
 const historyGroups = computed(() => history.value.groups);
 const topLevelSessions = computed(() => [...history.value.projectlessSessions, ...history.value.removedProjectSessions]);
 const hasHistory = computed(() => historyGroups.value.length > 0 || topLevelSessions.value.length > 0);
@@ -57,6 +63,14 @@ watch(
   { immediate: true },
 );
 
+watch([() => props.currentPath, () => chatStore.context?.allowedActions, actionPending], () => {
+  projectMenuId.value = null;
+});
+watch(() => chatStore.context?.contextId, () => {
+  projectMenuId.value = null;
+  removeProjectTarget.value = null;
+});
+
 watch(
   () => chatStore.context?.allowedActions,
   () => {
@@ -86,7 +100,7 @@ function toggleProject(projectId: string): void {
   expandedProjectIds.value = next;
 }
 
-function projectMenuOptions(project: ChatProject): DropdownOption[] {
+function projectMenuOptions(project: ChatHistoryProjectGroup): DropdownOption[] {
   const options: DropdownOption[] = [];
   if (chatStore.hasAction("pin_project")) {
     options.push({ label: project.pinnedAt === null ? "置顶项目" : "取消置顶", key: "pin" });
@@ -96,6 +110,30 @@ function projectMenuOptions(project: ChatProject): DropdownOption[] {
     options.push({ label: "移除", key: "remove" });
   }
   return options;
+}
+
+function openProjectMenu(group: ChatHistoryProjectGroup, event: MouseEvent | KeyboardEvent): void {
+  if (actionPending.value || projectMenuOptions(group).length === 0) return;
+  event.preventDefault();
+  const element = event.currentTarget as HTMLElement;
+  const trigger = element instanceof HTMLButtonElement ? element : element.querySelector<HTMLButtonElement>("button");
+  if (!trigger) return;
+  const bounds = trigger.getBoundingClientRect();
+  const pointer = event instanceof MouseEvent && event.type === "contextmenu";
+  projectMenuX.value = pointer ? event.clientX : bounds.right;
+  projectMenuY.value = pointer ? event.clientY : bounds.bottom;
+  trigger.focus({ preventScroll: true });
+  lastDialogTrigger = trigger;
+  projectMenuId.value = group.projectId;
+}
+
+function projectKeydown(group: ChatHistoryProjectGroup, event: KeyboardEvent): void {
+  if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    openProjectMenu(group, event);
+  } else if (projectMenuId.value === group.projectId) {
+    if (event.key === "Enter" || event.key === " ") event.preventDefault();
+    if (event.key === "Tab" || event.key === "Escape") projectMenuId.value = null;
+  }
 }
 
 function sessionMenuOptions(session: ChatSession): DropdownOption[] {
@@ -130,12 +168,16 @@ async function restoreDialogTrigger(): Promise<void> {
   lastDialogTrigger = null;
 }
 
-async function handleProjectAction(project: ChatProject, key: string): Promise<void> {
+async function handleProjectAction(target: ChatHistoryProjectGroup, key: string): Promise<void> {
+  projectMenuId.value = null;
+  const project = historyGroups.value.find((group) => group.projectId === target.projectId);
+  if (!project || actionPending.value || !projectMenuOptions(project).some((option) => option.key === key)) return;
   actionError.value = null;
   if (key === "pin") {
     actionPending.value = true;
     try {
-      await chatStore.setProjectPinned(project.projectId, project.pinnedAt === null);
+      if (project.project) await chatStore.setProjectPinned(project.projectId, project.pinnedAt === null);
+      else sidebarStore.setTaskDirectoryPinned(project.projectId, project.pinnedAt === null);
     } catch {
       actionError.value = "项目状态更新失败，请稍后重试";
     } finally {
@@ -212,11 +254,14 @@ async function confirmDelete(): Promise<void> {
 
 async function confirmRemoveProject(): Promise<void> {
   const project = removeProjectTarget.value;
-  if (!project) return;
+  if (!project || actionPending.value || !chatStore.hasAction("remove_project")) return;
+  const current = historyGroups.value.find((group) => group.projectId === project.projectId);
+  if (!current) { removeProjectTarget.value = null; return; }
   actionPending.value = true;
   actionError.value = null;
   try {
-    await chatStore.removeProject(project.projectId);
+    if (current.project) await chatStore.removeProject(project.projectId);
+    else sidebarStore.removeTaskDirectory(project.projectId);
     removeProjectTarget.value = null;
     await restoreDialogTrigger();
   } catch {
@@ -228,6 +273,7 @@ async function confirmRemoveProject(): Promise<void> {
 </script>
 
 <template>
+  <Teleport to="body"><div ref="projectMenuOverlay" class="chat-control-overlay" /></Teleport>
   <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="treeLoading">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
     <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
@@ -238,35 +284,49 @@ async function confirmRemoveProject(): Promise<void> {
 
     <ul v-else-if="hasHistory" class="chat-tree__projects">
       <li v-for="group in historyGroups" :key="group.projectId" class="chat-tree__project">
-        <div class="chat-tree__project-row">
+        <div class="chat-tree__project-row" @contextmenu="openProjectMenu(group, $event)">
           <button
             class="chat-tree__project-toggle"
             type="button"
             :aria-expanded="expandedProjectIds.has(group.projectId)"
             :aria-label="`${expandedProjectIds.has(group.projectId) ? '折叠' : '展开'}项目 ${group.label}`"
+            :aria-haspopup="projectMenuOptions(group).length ? 'menu' : undefined"
+            :aria-keyshortcuts="projectMenuOptions(group).length ? 'Shift+F10' : undefined"
             @click="toggleProject(group.projectId)"
+            @keydown="projectKeydown(group, $event)"
           >
             <YjIcon :name="expandedProjectIds.has(group.projectId) ? 'folderOpen' : 'folder'" tone="muted" :stroke-width="1.5" />
             <span class="chat-tree__project-name" :title="group.label">{{ group.label }}</span>
-            <YjIcon v-if="group.project?.pinnedAt !== null && group.project?.pinnedAt !== undefined" name="pin" size="xs" tone="muted" />
+            <YjIcon v-if="group.pinnedAt !== null" name="pin" size="xs" tone="muted" />
           </button>
           <n-dropdown
-            v-if="group.project && projectMenuOptions(group.project).length > 0"
-            trigger="click"
+            v-if="projectMenuOptions(group).length > 0"
+            :to="projectMenuOverlay ?? false"
+            :style="{ zoom: 'var(--yj-ui-scale, 1)' }"
+            trigger="manual"
             placement="bottom-end"
-            :options="projectMenuOptions(group.project)"
+            :show="projectMenuId === group.projectId"
+            :x="projectMenuX"
+            :y="projectMenuY"
+            :options="projectMenuOptions(group)"
             :disabled="actionPending"
-            @select="handleProjectAction(group.project, String($event))"
+            @update:show="!$event && (projectMenuId = null)"
+            @clickoutside="projectMenuId = null"
+            @select="handleProjectAction(group, String($event))"
+          />
+          <button
+            v-if="projectMenuOptions(group).length > 0"
+            class="chat-tree__more"
+            type="button"
+            :aria-label="`项目 ${group.label} 的操作菜单`"
+            aria-haspopup="menu"
+            :aria-expanded="projectMenuId === group.projectId"
+            :disabled="actionPending"
+            @click.stop="openProjectMenu(group, $event)"
+            @keydown="projectKeydown(group, $event)"
           >
-            <button
-              class="chat-tree__more"
-              type="button"
-              :aria-label="`项目 ${group.label} 的操作菜单`"
-              @click.stop="rememberTrigger"
-            >
-              <YjIcon name="more" size="sm" />
-            </button>
-          </n-dropdown>
+            <YjIcon name="more" size="sm" />
+          </button>
         </div>
 
         <ul v-if="expandedProjectIds.has(group.projectId)" class="chat-tree__sessions">
@@ -344,7 +404,9 @@ async function confirmRemoveProject(): Promise<void> {
     >
       <n-card class="chat-tree__dialog" title="移除聊天项目？" role="alertdialog" aria-modal="true" :bordered="false">
         <p class="chat-tree__dialog-copy">
-          只会移除“{{ removeProjectTarget?.safeName }}”的本地项目引用，不会删除文件或历史任务。历史任务将移至“任务”顶层末尾。
+          <template v-if="removeProjectTarget?.project">只会移除“{{ removeProjectTarget.label }}”的本地项目引用，不会删除文件或历史任务。</template>
+          <template v-else>只会移除侧栏中的“任务目录”分组，不会删除文件或历史任务，也不会停止定时任务。</template>
+          历史任务将移至“任务”顶层末尾。
         </p>
         <div class="chat-tree__dialog-actions">
           <button class="chat-tree__dialog-button yj-control yj-control--regular" type="button" @click="removeProjectTarget = null; restoreDialogTrigger()">取消</button>

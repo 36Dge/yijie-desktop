@@ -7,6 +7,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chat.store";
+import { useSidebarStore } from "../../stores/sidebar.store";
 import ChatSidebarTree from "./ChatSidebarTree.vue";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
@@ -16,6 +17,9 @@ async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => v
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useChatStore(pinia);
+  const savedPreferences = new Map<string, string>();
+  const sidebar = useSidebarStore(pinia);
+  sidebar.hydrate({ getItem: (key) => savedPreferences.get(key) ?? null, setItem: (key, value) => { savedPreferences.set(key, value); } });
   store.phase = "ready";
   store.context = {
     contextId: "019c1a00-0000-7000-8000-000000000010",
@@ -49,7 +53,7 @@ async function mountTree(prepare?: (store: ReturnType<typeof useChatStore>) => v
     global: { plugins: [pinia, router] },
   });
   await flushPromises();
-  return { wrapper, store, router };
+  return { wrapper, store, router, sidebar };
 }
 
 afterEach(() => {
@@ -65,7 +69,7 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).toContain("任务目录");
     expect(wrapper.text()).not.toContain("项目已移除");
     expect(wrapper.text()).toContain("Synthetic Session");
-    expect(wrapper.find('[aria-label="项目 任务目录 的操作菜单"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="项目 任务目录 的操作菜单"]').exists()).toBe(true);
   });
   it("renders project/session metadata from the authoritative store", async () => {
     const { wrapper } = await mountTree();
@@ -243,6 +247,74 @@ describe("ChatSidebarTree", () => {
     wrapper.findAllComponents(NDropdown)[0].vm.$emit("select", "pin");
     await flushPromises();
     expect(pin).toHaveBeenCalledWith(PROJECT_ID, true);
+  });
+
+  it("opens the same managed-directory menu from right click and keyboard, and pins without native project mutation", async () => {
+    const managed = "019c1a00-0000-7000-8000-000000000020";
+    const { wrapper, store, sidebar } = await mountTree((state) => {
+      state.sessions = [...state.sessions, { ...state.sessions[0]!, projectId: managed, sessionId: "managed-session" }];
+    });
+    const nativePin = vi.spyOn(store, "setProjectPinned").mockResolvedValue();
+    const row = wrapper.get('[aria-label="折叠项目 任务目录"]');
+    await row.trigger("contextmenu", { clientX: 48, clientY: 120 });
+    const menu = wrapper.findAllComponents(NDropdown).find((entry) => entry.props("show"))!;
+    expect(menu.props("x")).toBe(48);
+    expect(menu.props("y")).toBe(120);
+    expect((menu.props("options") ?? []).filter((entry) => entry.type !== "divider").map((entry) => entry.label)).toEqual(["置顶项目", "移除"]);
+    menu.vm.$emit("select", "pin");
+    await flushPromises();
+    expect(nativePin).not.toHaveBeenCalled();
+    expect(sidebar.taskDirectoryPreferences[0]?.projectId).toBe(managed);
+    expect(wrapper.findAll(".chat-tree__project-name").map((entry) => entry.text())).toEqual(["任务目录", "Synthetic Workspace"]);
+    await row.trigger("keydown", { key: "F10", shiftKey: true });
+    const pinnedMenu = wrapper.findAllComponents(NDropdown).find((entry) => entry.props("show"))!;
+    expect(pinnedMenu.props("options")?.[0]?.label).toBe("取消置顶");
+    pinnedMenu.vm.$emit("select", "pin");
+    await flushPromises();
+    expect(sidebar.taskDirectoryPreferences).toEqual([]);
+    expect(nativePin).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("removes only the managed directory grouping after confirmation and keeps native task availability", async () => {
+    const { wrapper, store, sidebar } = await mountTree((state) => { state.projects = []; });
+    const nativeRemove = vi.spyOn(store, "removeProject").mockResolvedValue();
+    const original = JSON.stringify(store.sessions);
+    await wrapper.get('[aria-label="项目 任务目录 的操作菜单"]').trigger("click");
+    wrapper.findAllComponents(NDropdown).find((entry) => entry.props("show"))!.vm.$emit("select", "remove");
+    await flushPromises();
+    expect(sidebar.taskDirectoryPreferences).toEqual([]);
+    expect(document.body.textContent).toContain("也不会停止定时任务");
+    const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find((button) => button.textContent === "移除")!;
+    confirm.click();
+    await flushPromises();
+    expect(nativeRemove).not.toHaveBeenCalled();
+    expect(JSON.stringify(store.sessions)).toBe(original);
+    expect(wrapper.find(".chat-tree__project").exists()).toBe(false);
+    expect(wrapper.get(".chat-tree__projects > .chat-tree__session").text()).toContain("Synthetic Session");
+    expect(sidebar.taskDirectoryPreferences).toEqual([{ projectId: PROJECT_ID, pinnedAt: null, removed: true }]);
+    wrapper.unmount();
+  });
+
+  it("closes managed directory actions on permission or context changes", async () => {
+    const { wrapper, store, sidebar } = await mountTree((state) => { state.projects = []; });
+    const row = wrapper.get('[aria-label="折叠项目 任务目录"]');
+    await row.trigger("contextmenu");
+    store.context = { ...store.context!, allowedActions: ["read_projects", "read_sessions"] };
+    await flushPromises();
+    expect(wrapper.find('[aria-label="项目 任务目录 的操作菜单"]').exists()).toBe(false);
+    expect(sidebar.taskDirectoryPreferences).toEqual([]);
+    store.context = { ...store.context!, allowedActions: ["read_projects", "read_sessions", "remove_project"] };
+    await flushPromises();
+    await row.trigger("contextmenu");
+    wrapper.findComponent(NDropdown).vm.$emit("select", "remove");
+    await flushPromises();
+    expect(wrapper.findAllComponents(NModal)[2]!.props("show")).toBe(true);
+    store.context = { ...store.context!, contextId: "019c1a00-0000-7000-8000-000000000030" };
+    await flushPromises();
+    expect(wrapper.findAllComponents(NModal)[2]!.props("show")).toBe(false);
+    expect(sidebar.taskDirectoryPreferences).toEqual([]);
+    wrapper.unmount();
   });
 
   it("places all removed-project sessions at the top level after every directory, even when pinned or newest", async () => {

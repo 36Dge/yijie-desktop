@@ -39,7 +39,7 @@ export async function runDefaultTauriBuild(arguments_ = [], environment = proces
   }
   const resourceRoots = {
     channel: "desktop-release",
-    skillsRoot: path.resolve(repositoryRoot, environment.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills"),
+    skillsRoot: environment.YIJIE_DESKTOP_SKILLS_DIR,
     contractsRoot: path.resolve(repositoryRoot, environment.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
     agentHostRoot: path.resolve(repositoryRoot, environment.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
   };

@@ -1,0 +1,45 @@
+/* Shared surface and row rhythm for composer selection menus. */
+.chat-control-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  zoom: calc(1 / var(--yj-ui-scale, 1));
+  z-index: var(--yj-z-popover);
+}
+
+.chat-control-menu {
+  pointer-events: auto;
+  zoom: var(--yj-ui-scale, 1);
+  box-sizing: border-box;
+  padding: var(--yj-space-2);
+  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  border-radius: var(--yj-radius-lg);
+  background: var(--yj-color-bg-elevated);
+  box-shadow: var(--yj-shadow-popover);
+}
+
+.chat-control-option {
+  display: flex;
+  align-items: center;
+  gap: var(--yj-space-3);
+  width: 100%;
+  padding: var(--yj-space-3);
+  border: 0;
+  border-radius: var(--yj-radius-md);
+  background: transparent;
+  color: var(--yj-color-text-primary);
+  text-align: left;
+  font: inherit;
+  font-size: var(--yj-font-size-body);
+  line-height: var(--yj-control-line-height);
+  cursor: pointer;
+}
+
+.chat-control-option:hover:not(:disabled),
+.chat-control-option[aria-checked="true"] { background: var(--yj-color-control-hover); }
+.chat-control-option:active:not(:disabled) { background: var(--yj-color-control-pressed); }
+.chat-control-option:disabled { color: var(--yj-color-text-disabled); cursor: default; }
+.chat-control-option:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: calc(-1 * var(--yj-focus-ring-width));
+}

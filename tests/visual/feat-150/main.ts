@@ -16,6 +16,11 @@ const router = createRouter({
   routes: [
     { path: "/store", component: StorePage },
     { path: "/chat", component: { template: "<div>新建任务</div>" } },
+    { path: "/workflows", component: { template: "<div>工作流</div>" } },
+    {
+      path: "/scheduled-tasks",
+      component: { template: "<div>定时任务</div>" },
+    },
     { path: "/plugins", component: { template: "<div>插件</div>" } },
     { path: "/settings", component: { template: "<div>设置</div>" } },
   ],
@@ -29,9 +34,20 @@ declare global {
   }
 }
 
-window.__FEAT150_RUN_AXE__ = () => axe.run(document, {
-  rules: { region: { enabled: false } },
-});
+window.__FEAT150_RUN_AXE__ = async () => {
+  await new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
+  await Promise.allSettled(
+    document
+      .getAnimations()
+      .filter(
+        (animation) => animation.effect?.getTiming().iterations !== Infinity,
+      )
+      .map((animation) => animation.finished),
+  );
+  return axe.run(document, { rules: { region: { enabled: false } } });
+};
 
 createApp(StoreVisualHarness, { dark }).use(router).mount("#app");
 
@@ -39,7 +55,7 @@ const axeEvidence = document.createElement("script");
 axeEvidence.id = "feat150-axe-results";
 axeEvidence.type = "application/json";
 document.body.append(axeEvidence);
-void window.__FEAT150_RUN_AXE__().then((results) => {
+function saveAxeResults(results: AxeResults) {
   axeEvidence.textContent = JSON.stringify({
     violations: results.violations.map((violation) => ({
       id: violation.id,
@@ -52,4 +68,23 @@ void window.__FEAT150_RUN_AXE__().then((results) => {
     })),
   });
   axeEvidence.dataset.ready = "true";
-});
+}
+void window.__FEAT150_RUN_AXE__().then(saveAxeResults);
+
+// Explicit visual-harness control; absent from the product and normal preview.
+if (query.get("audit") === "1") {
+  const auditButton = document.createElement("button");
+  auditButton.textContent = "检查当前视图";
+  auditButton.style.cssText =
+    "position:fixed;right:12px;bottom:12px;z-index:9999;padding:8px;background:var(--yj-color-bg-card);color:var(--yj-color-text-primary);border:1px solid var(--yj-color-border-default);border-radius:8px";
+  auditButton.addEventListener("click", async () => {
+    auditButton.disabled = true;
+    axeEvidence.dataset.ready = "false";
+    try {
+      saveAxeResults(await window.__FEAT150_RUN_AXE__());
+    } finally {
+      auditButton.disabled = false;
+    }
+  });
+  document.body.append(auditButton);
+}

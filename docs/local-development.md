@@ -31,8 +31,24 @@ pnpm tauri:demo-fast:app
 
 `contracts/runtime-permissions.lock.json` 独立固定 FEAT-152 的 Contracts/Host 完整提交和来源摘要；
 本地入口同时验证对应 Git 对象、消费文件以及 Host 实际构建输入。旧 v4、Skills 和 Runtime 的锁继续保留。
-Skills sibling 已前进时，未显式配置路径的本地入口使用已存在的 `.local/skills-pinned-<固定提交前7位>`，
-并按旧 Skills 锁重新核对干净状态、origin 和完整提交；不会静默改用新 Skills 版本。
+Skills 来源选择统一由 `scripts/resolve-skills-checkout.mjs` 承接：显式 `YIJIE_DESKTOP_SKILLS_DIR`
+或 `--skills-root` 优先，指定来源不合格时直接失败，不自动替换。未指定时，优先使用 HEAD 与锁定
+完整提交相同的 sibling；sibling 已前进或不存在时，使用已存在且 HEAD 精确匹配的
+`.local/skills-pinned-<固定提交前7位>`。总检查、资源同步与默认构建遵循同一规则，
+后续继续严格核对干净状态、canonical origin、provider 锁与文件摘要；不自动 checkout、下载或修改锁。
+固定副本缺失时会提示准备该精确版本副本，或显式设置路径，不能用更新 digest 绕过。
+
+2026-10-03 修复原因：本机 Skills sibling 在 `10c45bec29603b002e861e1499d5b4e684251af5`
+后增加了空的备份提交 `488714a8d96f40806a257aae097683815b1dd458`，tree 完全相同，
+但原总检查只选择 sibling，因严格 HEAD 校验被阻断。现复用已有固定版本副本；不回退 sibling，
+不变更已评审的 Skills 版本。`contract-impact = none`：仅统一开发工具的固定依赖来源选择；
+Desktop/API/Agent Host 跨进程接口、本地持久状态及实际消费的固定资源字节均无变化。
+
+本次验证：未设置临时 Skills 路径的 `make lint` 全部通过（契约、ESLint、Vue/TS、Rust fmt、
+all-targets Clippy）；`pnpm skills:check` 与 `pnpm skills:release-boundary` 通过；
+6 项来源选择回归及 2 项真实固定契约/实现校验通过。显式指定已前进的 sibling 时仍按预期拒绝。
+未执行包含强杀、权限破坏及攻击 fixture 的未筛选 `make test`，遵守用户长期安全条款；
+因此以上结果不代表全库测试通过。此次未重新打包、签名或启动发布 App。
 App 包仍通过本地启动器提供 Native 的 local/demo_fast 环境，直接双击裸开发包不等于完整本地启动。
 
 Agent Host 的 owner-only loopback token 由 Desktop 自动管理；MiniMax API Key 由 owner-only

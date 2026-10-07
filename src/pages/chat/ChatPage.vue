@@ -16,6 +16,10 @@ import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { useChatModels } from "../../composables/useChatModels";
 import { chatModelsEnabled } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatShopControl from "../../components/chat/ChatShopControl.vue";
+import { useChatShopPreview } from "../../composables/useChatShopPreview";
+import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
+import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
 import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
@@ -127,12 +131,21 @@ watch(isNewDraftMode, (active, previous) => {
   if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, chatComposerDraftKey(null));
 }, { flush: "post" });
 const selectedProjectId = ref<string | null>(null);
+const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? null, () => routeSessionId.value ?? "new");
 // A new task owns its picker state. Historical session projects may be removed
 // or internal, and must never become a hidden destination for a new submission.
 const availableProjectId = computed(() => chatStore.projects.find(project =>
   project.projectId === selectedProjectId.value && project.available,
 )?.projectId ?? null);
 const submitting = ref(false);
+const workspacePicker = useChatWorkspaces({
+  context: () => chatStore.context?.contextId ?? null,
+  enabled: () => routeSessionId.value === null && !isDraftMode.value,
+  projects: () => chatStore.projects,
+  selected: () => selectedProjectId.value,
+  select: id => { selectedProjectId.value = id; },
+  create: name => chatStore.createWorkspace(name),
+});
 const composer = ref<ChatComposerHandle | null>(null);
 const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
 function handleEntryFocus(event: FocusEvent): void {
@@ -462,7 +475,10 @@ async function pickProject(): Promise<void> {
   transientNotice.value = null;
   try {
     const project = await chatStore.pickProject();
-    if (project) selectedProjectId.value = project.projectId;
+    if (project && routeSessionId.value === null && !isDraftMode.value) {
+      selectedProjectId.value = project.projectId;
+      void workspacePicker.refresh();
+    }
   } catch (error: unknown) {
     captureError(error);
   }
@@ -515,6 +531,7 @@ async function submit(): Promise<void> {
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
     models.resetNew();
+    shopPreview.adoptNewChat(result.sessionId);
     await router.push(`/chat/${result.sessionId}`);
     focusRestoreTarget = chatComposerDraftKey(result.sessionId);
   } catch (error: unknown) {
@@ -745,7 +762,7 @@ onBeforeUnmount(() => {
         :selected-project-id="availableProjectId"
         :readiness="readiness"
         :text-only="isDraftMode"
-        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
+        :can-send="!workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -764,6 +781,19 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="!isDraftMode" #workspace-control>
+          <ChatWorkspaceControl
+            :entries="workspacePicker.entries.value" :selected-project-id="availableProjectId"
+            :disabled="composerSubmissionState !== 'idle' || workspacePicker.creating.value || !chatStore.context?.allowedActions.includes('use_project')"
+            :loading="workspacePicker.loading.value" :error="workspacePicker.error.value" :root-path="workspacePicker.rootPath.value"
+            :create-open="workspacePicker.createOpen.value" :creating="workspacePicker.creating.value" :create-error="workspacePicker.createError.value"
+            @refresh="workspacePicker.refresh" @select="selectedProjectId = $event" @open-local="pickProject"
+            @update:create-open="workspacePicker.setCreateOpen" @create="workspacePicker.create"
+          />
+        </template>
+        <template v-if="!isDraftMode" #shop-control>
+          <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
+        </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
         </template>
@@ -919,7 +949,7 @@ onBeforeUnmount(() => {
             <div v-else class="chat-empty" role="status">
               <YjIcon name="assistant" size="xl" tone="muted" />
               <strong>{{ chatStore.selectedSessionId ? "正在同步对话状态" : "对话正在准备" }}</strong>
-              <span>{{ chatStore.selectedSessionId ? "已确认内容会在领域状态就绪后显示。" : "选择本地项目并输入任务，内容会按轮次显示在这里。" }}</span>
+              <span>{{ chatStore.selectedSessionId ? "已确认内容会在领域状态就绪后显示。" : "选择工作空间并输入任务，内容会按轮次显示在这里。" }}</span>
             </div>
           </template>
 
@@ -990,6 +1020,9 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="!isDraftMode" #shop-control>
+          <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
+        </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
         </template>

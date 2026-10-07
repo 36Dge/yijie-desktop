@@ -38,6 +38,7 @@
   --yj-color-bg-card: #ffffff;
   --yj-color-bg-elevated: #ffffff;
   --yj-color-bg-subtle: #ffffff;
+  --yj-color-bg-composer-tray: #f4f5f6;
   --yj-color-chat-user-bg: #f2f2f2;
 
   --yj-color-border-subtle: #eceef0;
@@ -159,14 +160,24 @@
   --yj-layout-composer-height: 176px;
   --yj-layout-chat-entry-top-offset: 96px;
   --yj-layout-chat-entry-max: 760px;
+  --yj-layout-chat-workspace-control-max: 320px;
+  --yj-layout-workspace-menu-width: 280px;
+  --yj-layout-shop-menu-width: 360px;
+  --yj-layout-shop-trigger-max: 200px;
+  --yj-layout-shop-list-max: 288px;
+  --yj-layout-workspace-list-max: 240px;
+  --yj-layout-workspace-create-width: 480px;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-composer-fade: var(--yj-space-12);
   --yj-z-chat-fade: 1;
   --yj-z-chat-scroll-control: 2;
   --yj-layout-chat-sidebar-indent: var(--yj-space-0);
-  --yj-layout-permission-menu-width: 340px;
+  --yj-layout-permission-menu-width: 400px;
+  --yj-layout-model-menu-width: 240px;
   --yj-layout-permission-confirm-width: 420px;
+  --yj-color-model-kimi-bg: #000000;
+  --yj-color-model-kimi-ink: #ffffff;
 
   /* Home brand opening on each page entry. */
   --yj-motion-home-opening: 2200ms;
@@ -226,6 +237,7 @@
   --yj-color-bg-card: #25282b;
   --yj-color-bg-elevated: #2e3237;
   --yj-color-bg-subtle: #22262a;
+  --yj-color-bg-composer-tray: #22262a;
   --yj-color-chat-user-bg: var(--yj-color-control-hover);
 
   --yj-color-border-subtle: #30363d;

@@ -50,6 +50,20 @@ src/icons/registry.ts
 
 默认线宽为 2。单页不得混用明显不同线宽。
 
+2026-10-03 关联店铺入口使用既有 `store`（Lucide Store）门面轮廓，遵从用户要求不使用链条。
+演示店铺改为名称意象图标：拾光家居 `shopHome`（House）、山海户外 `shopOutdoors`（Mountain）、
+晴日生活 `shopSunny`（Sun）、Northstar Home `shopNorthstar`（Sparkle 四芒星）、
+Luma Living `shopLighting`（Lamp）。全部来自既有 Lucide 依赖，经 registry / YjIcon 使用。
+列表与成功卡片使用 20px 图标、40px 中性圆角容器，已关联入口使用同款 16px 图标；
+统一圆端点、单色描线，平台仅使用次级文字，不冒充官方 Logo。
+`search`、`loading` 分别使用 Lucide Search 与 LoaderCircle。
+此组入口与浮层图标均采用 1.5 线宽；加载旋转遵从减少动态效果设置。
+
+2026-10-03 用户指定的 Chat Composer 底栏例外：工作空间文件夹与权限入口的主图标
+统一使用 `sm`（16px）、1.5 线宽。权限菜单内三个选项的主图标及选中勾号同步使用
+1.5 线宽，尺寸保持原规格。仍通过 `YjIcon` 的 `strokeWidth` 属性消费既有 registry，
+不改变全局默认线宽；入口下拉箭头及其他页面沿用原规格。
+
 ## Skill 广场分类图标（2026-09-07 用户确认）
 
 五个分类标题使用 `skillCategory*` registry 条目：在原有 Lucide 轮廓上，以品牌青柠 token 绘制局部笔画，与中性主体共同构成图标；背景透明，不添加青柠底板。包裹封口、趋势线、扩音器分隔线、点击射线、扳手柄分别作为强调细节。沿用 `lg` 20px、2 单位线宽、圆端点。

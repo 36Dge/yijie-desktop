@@ -38,7 +38,7 @@ it("prefills only, hides ordinary project/attachment/permission controls, and qu
   expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe(SCHEDULE_DRAFT_GUIDE);
   expect(root.find('[aria-label="定时任务草案"]').exists()).toBe(false);
   expect(root.find('[aria-label="添加图片或文件"]').exists()).toBe(false);
-  expect(root.find('[aria-label="选择本地项目"]').exists()).toBe(false);
+  expect(root.find('[aria-label="选择工作空间"]').exists()).toBe(false);
   expect(root.find('.chat-composer__permission').exists()).toBe(false);
   expect(native.calls).toEqual(["schedule_operation_capabilities_v1"]);
   await root.get("textarea").setValue("每个工作日生成文本摘要，请询问缺少的时间");

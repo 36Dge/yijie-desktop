@@ -93,6 +93,12 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 
 ### 3.2 输入框、搜索框与 Chat Composer
 
+2026-10-03 Chat Composer 底座局部覆盖：按用户截图，带工作空间与权限底栏的输入区
+使用 `--yj-color-bg-composer-tray` 圆角底座；输入框保持 card 背景与默认细边框，
+首页和会话均使用 `--yj-shadow-chat-composer` 轻投影。底座不裁切入口焦点，
+hover/pressed/focus 不改变输入框外壳的背景、边框或阴影。此例外仅用于带底栏的 Composer，
+不扩展到普通输入框、卡片或页面背景。
+
 2026-09-27 Chat Composer 局部覆盖：按用户要求，首页和会话页输入框外壳在 hover、pressed、focus 时均保持各自 default 的边框、背景和阴影，不再加深轮廓；两处圆角统一为 24px。文本域继续显示输入光标，内部按钮保留键盘焦点，拖放及附件错误反馈不变。以下输入框状态表和通用焦点优先级不覆盖这一明确的 Composer 外观例外。
 
 2026-09-25 用户调整：所有输入框统一采用当前 Chat Composer 的细描边效果。文本、搜索、多行、数字、日期/时间入口及选择框聚焦时使用单层 1 px 中性边框（`--yj-border-width` / `--yj-color-focus-ring`），不叠加外圈、outline 或阴影。错误/警告字段使用相应 semantic ink 的 1 px 边框，继续显示错误消息。此规则覆盖输入类控件的通用 2 px F 规则；按钮、导航、Checkbox、Radio、Switch 等仍保留各自键盘焦点。
@@ -127,6 +133,8 @@ SI/WI/EI/II 是 2.1.0 新增的可读语义前景，分别映射到 `--yj-color-
 | error | 当前项颜色不替换；错误放内容区/可访问描述 | 错误信息独立，保留筛选值 | 错误由面板内显示，tab 的 selected 仍保留 |
 
 2026-09-08 用户调整：侧栏以中性灰底表达位置，2 px F 表达键盘焦点，二者必须共存。选择导航只改变路由状态；颜色规范不改变权限过滤、disabled、当前路由或导航顺序。可见 selected 文案与 `aria-current` / `aria-selected` 仍是状态依据，不只依靠颜色。
+
+2026-10-03 用户指定：关联店铺面板的平台筛选使用透明底、主文字色与 2 px 品牌青柠色下划线（`--yj-color-brand-primary`）表达选中；禁用时下划线使用 disabled 色。语义保持筛选按钮的 `aria-pressed`，保留中性 hover 与可见键盘焦点。其他小型筛选仍遵循上表。
 
 ### 3.4 Checkbox、Radio、Switch、Select
 

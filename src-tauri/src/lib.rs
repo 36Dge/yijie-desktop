@@ -390,6 +390,8 @@ pub fn run() {
         chat::ipc::chat_bind_management_context_v1,
         chat::ipc::chat_list_projects_v1,
         chat::ipc::chat_pick_project_v1,
+        chat::ipc::workspaces::chat_workspace_catalog_v1,
+        chat::ipc::workspaces::chat_create_workspace_v1,
         chat::ipc::chat_revalidate_project_v1,
         chat::ipc::chat_set_project_pinned_v1,
         chat::ipc::chat_remove_project_v1,

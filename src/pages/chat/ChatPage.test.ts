@@ -16,6 +16,10 @@ import { runtimePermissionClient } from "../../api/runtime-permission-client";
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatShopControl from "../../components/chat/ChatShopControl.vue";
+import { PREVIEW_SHOPS, SHOP_PREVIEW_TIMING } from "../../domain/chat-shop-preview";
+import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
+import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { chatModelClient, chatModelsEnabled } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models.generated";
@@ -257,6 +261,7 @@ async function mountPage(
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   dragDropMock.handler = null;
   dragDropMock.unlisten.mockClear();
   document.body.innerHTML = "";
@@ -933,7 +938,7 @@ describe("FEAT-126 ChatPage", () => {
     store.projects = [];
     const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await flushPromises();
-    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择工作空间");
     await wrapper.get("textarea").setValue("无项目任务");
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
@@ -959,7 +964,7 @@ describe("FEAT-126 ChatPage", () => {
     store.draftTargetReady = true;
     const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await flushPromises();
-    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择工作空间");
     await wrapper.get("textarea").setValue("今天周几？");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
@@ -999,7 +1004,8 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
-  it("uses the project strip as the native project selection entry", async () => {
+  it("opens the workspace menu before using the native project selection entry", async () => {
+    vi.spyOn(chatWorkspaceClient, "catalog").mockResolvedValue({ rootPath: "/Users/example/Yijie/Workspaces", workspaces: [] });
     const { wrapper, store, router } = await mountPage("/chat");
     const pickProject = vi.spyOn(store, "pickProject").mockImplementation(async () => {
       store.projects = [PROJECT, SECOND_PROJECT];
@@ -1007,9 +1013,12 @@ describe("FEAT-126 ChatPage", () => {
     });
     const createSession = vi.spyOn(store, "createSessionWithResult")
       .mockResolvedValue(acceptedSubmission());
-    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择工作空间");
     expect(wrapper.find("select").exists()).toBe(false);
     await wrapper.get(".chat-composer__project--button").trigger("click");
+    await flushPromises();
+    expect(pickProject).not.toHaveBeenCalled();
+    [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent?.includes("打开本地文件夹"))!.click();
     await flushPromises();
     expect(pickProject).toHaveBeenCalledTimes(1);
     expect(wrapper.get(".chat-composer__project").text()).toBe("Second Synthetic Workspace");
@@ -1021,15 +1030,49 @@ describe("FEAT-126 ChatPage", () => {
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
+  it("keeps shop association as UI-only state without changing the submitted message", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    const control = wrapper.getComponent(ChatShopControl);
+    const model = control.props("model");
+    expect(wrapper.get('.chat-composer__leading-actions .shop-trigger').text()).toContain('关联店铺');
+    vi.useFakeTimers(); model.authorize(); await vi.advanceTimersByTimeAsync(SHOP_PREVIEW_TIMING.authorization);
+    model.choose(PREVIEW_SHOPS[0]!.id); model.link(); await vi.advanceTimersByTimeAsync(SHOP_PREVIEW_TIMING.linking);
+    vi.useRealTimers(); await flushPromises();
+    const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await wrapper.get("textarea").setValue("分析最近一周的差评");
+    await wrapper.get('[aria-label="发送任务"]').trigger('click'); await flushPromises();
+    expect(create).toHaveBeenCalledWith(null, "分析最近一周的差评");
+    expect(model.current.value?.id).toBe(PREVIEW_SHOPS[0]!.id);
+    wrapper.unmount();
+  });
+
+  it("automatically selects a newly created workspace for the next submission", async () => {
+    const { wrapper, store } = await mountPage("/chat");
+    vi.spyOn(chatWorkspaceClient, "create").mockResolvedValue({ status: "created", workspace: { project: SECOND_PROJECT, path: "/Users/example/Yijie/Workspaces/Second Synthetic Workspace" } });
+    const picker = wrapper.getComponent(ChatWorkspaceControl);
+    picker.vm.$emit("update:createOpen", true); await flushPromises();
+    picker.vm.$emit("create", SECOND_PROJECT.safeName); await flushPromises();
+    expect(picker.props("createOpen")).toBe(false);
+    expect(picker.props("selectedProjectId")).toBe(SECOND_PROJECT.projectId);
+    expect(store.projects).toContainEqual(SECOND_PROJECT);
+    expect(wrapper.get(".workspace-trigger").attributes("title")).toBe("/Users/example/Yijie/Workspaces/Second Synthetic Workspace");
+    const createSession = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await wrapper.get("textarea").setValue("使用新建空间");
+    await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+    expect(createSession).toHaveBeenCalledWith(SECOND_PROJECT.projectId, "使用新建空间");
+    wrapper.unmount();
+  });
+
   it("clears an unavailable chosen directory without silently selecting another saved project", async () => {
+    vi.spyOn(chatWorkspaceClient, "catalog").mockResolvedValue({ rootPath: "/Users/example/Yijie/Workspaces", workspaces: [] });
     const { wrapper, store } = await mountPage("/chat");
     vi.spyOn(store, "pickProject").mockResolvedValue(PROJECT);
-    await wrapper.get(".chat-composer__project--button").trigger("click");
+    wrapper.getComponent(ChatWorkspaceControl).vm.$emit("open-local");
     await flushPromises();
     expect(wrapper.get(".chat-composer__project").text()).toBe("Synthetic Workspace");
     store.projects = [{ ...PROJECT, available: false }, SECOND_PROJECT];
     await flushPromises();
-    expect(wrapper.get(".chat-composer__project").text()).toBe("选择本地项目");
+    expect(wrapper.get(".chat-composer__project").text()).toBe("选择工作空间");
     const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
     await wrapper.get("textarea").setValue("无目录继续发送");
     await wrapper.get('[aria-label="发送任务"]').trigger("click");

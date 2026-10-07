@@ -1,0 +1,19 @@
+diff --git a/lib/core/Scheduler.js b/lib/core/Scheduler.js
+index 1b70d94393f48c8b27ac711d9afcf5a4b8931bea..639c796974b773f6eff1ae48bba05562e52953d0 100644
+--- a/lib/core/Scheduler.js
++++ b/lib/core/Scheduler.js
+@@ -465,7 +465,13 @@ function mockMethods(target, Clz) {
+   /* eslint-disable */
+   for (var name_1 in Clz.prototype) {
+     // Do not use hasOwnProperty
+-    target[name_1] = noop;
++    // Create an own property even when Object.prototype is frozen by the host.
++    Object.defineProperty(target, name_1, {
++      value: noop,
++      writable: true,
++      configurable: true,
++      enumerable: true
++    });
+   }
+   /* eslint-enable */
+ }

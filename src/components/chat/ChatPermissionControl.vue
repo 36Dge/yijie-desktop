@@ -9,6 +9,7 @@ const props = defineProps<{ state: ChatPermissionState | null; disabled: boolean
 const emit = defineEmits<{ select: [mode: PermissionMode, confirmFullAccess: boolean] }>();
 const open = ref(false);
 const confirm = ref(false);
+const overlay = ref<HTMLElement | null>(null);
 const triggerElement = ref<HTMLButtonElement | null>(null);
 const menuElement = ref<HTMLElement | null>(null);
 const options: { mode: PermissionMode; label: string; description: string; icon: YjIconName }[] = [
@@ -20,8 +21,8 @@ const selected = computed(() => options.find((o) => o.mode === props.state?.mode
 watch(() => props.disabled, (value) => { if (value) { open.value = false; confirm.value = false; } });
 watch(open, async (value) => {
   await nextTick();
-  if (value && open.value) menuElement.value?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
-  else if (!value && !props.disabled) triggerElement.value?.focus();
+  if (value && open.value) menuElement.value?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
+  else if (!value && !props.disabled) triggerElement.value?.focus({ preventScroll: true });
 });
 function choose(mode: PermissionMode): void {
   if (props.disabled || !props.state) return;
@@ -36,23 +37,25 @@ function navigate(event: KeyboardEvent): void {
   const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>("[role=menuitemradio]")];
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
   const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
-  buttons[next]?.focus();
+  buttons[next]?.focus({ preventScroll: true });
 }
 </script>
 
 <template>
-  <NPopover v-model:show="open" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
+  <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
+  <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
-        <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" /></span>
+      <button ref="triggerElement" class="permission-trigger yj-control" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
+        <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" :stroke-width="1.5" /></span>
         <span>{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
+        <YjIcon name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
-    <div ref="menuElement" class="permission-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">
-      <button v-for="option in options" :key="option.mode" type="button" role="menuitemradio" :aria-checked="state?.mode === option.mode" :class="{ 'is-full': option.mode === 'full' }" @click="choose(option.mode)">
-        <YjIcon :name="option.icon" size="sm" :tone="option.mode === 'full' ? 'warning' : 'default'" />
+    <div ref="menuElement" class="permission-menu chat-control-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">
+      <button v-for="option in options" :key="option.mode" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="state?.mode === option.mode" :class="{ 'is-full': option.mode === 'full' }" @click="choose(option.mode)">
+        <YjIcon :name="option.icon" size="sm" :stroke-width="1.5" :tone="option.mode === 'full' ? 'warning' : 'default'" />
         <span class="permission-option-copy"><span class="permission-option-label">{{ option.label }}</span><span class="permission-option-description">{{ option.description }}</span></span>
-        <span class="permission-option-check" aria-hidden="true"><YjIcon v-if="state?.mode === option.mode" name="permissionCheck" size="xs" /></span>
+        <span class="permission-option-check" aria-hidden="true"><YjIcon v-if="state?.mode === option.mode" name="permissionCheck" size="xs" :stroke-width="1.5" /></span>
       </button>
     </div>
   </NPopover>
@@ -66,9 +69,8 @@ function navigate(event: KeyboardEvent): void {
 
 <style scoped>
 .permission-trigger {
-  padding-inline-start: var(--yj-space-1);
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
-  background: var(--yj-color-bg-card);
+  border: 0;
+  background: transparent;
   color: var(--yj-color-text-primary);
   cursor: pointer;
 }
@@ -77,58 +79,21 @@ function navigate(event: KeyboardEvent): void {
   align-items: center;
   justify-content: center;
   flex: none;
-  width: var(--yj-space-6);
-  height: var(--yj-space-6);
-  border-radius: var(--yj-radius-full);
-  background: var(--yj-color-brand-primary);
-  color: var(--yj-color-on-brand);
+  width: var(--yj-space-4);
+  height: var(--yj-space-4);
+  color: inherit;
 }
 .permission-trigger-icon .yj-icon { color: inherit; }
-.permission-trigger:hover:not(:disabled) { background: var(--yj-color-control-hover); }
+.permission-trigger:hover:not(:disabled),
+.permission-trigger[aria-expanded="true"] { background: var(--yj-color-control-hover); }
 .permission-trigger:active:not(:disabled) { background: var(--yj-color-control-pressed); }
-.permission-trigger[aria-expanded="true"]:not(.is-full) {
-  background: var(--yj-color-brand-primary);
-  border-color: var(--yj-color-brand-primary);
-  color: var(--yj-color-on-brand);
-}
 .permission-trigger.is-full { color: var(--yj-color-semantic-warning-ink); }
-.permission-trigger.is-full .permission-trigger-icon {
-  background: var(--yj-color-warning-soft);
-  color: var(--yj-color-semantic-warning-ink);
-}
 .permission-trigger:disabled { color: var(--yj-color-text-disabled); cursor: default; }
-.permission-trigger:disabled .permission-trigger-icon {
-  background: var(--yj-color-control-disabled-bg);
-  color: var(--yj-color-text-disabled);
-}
+.permission-trigger:disabled > .yj-icon { color: inherit; }
 .permission-menu {
-  width: min(var(--yj-layout-permission-menu-width), calc(100vw - var(--yj-space-10)));
-  padding: var(--yj-space-1);
-  background: var(--yj-color-bg-elevated);
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-lg);
-  box-shadow: var(--yj-shadow-popover);
+  width: min(var(--yj-layout-permission-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-10)));
 }
-.permission-menu button {
-  display: flex;
-  align-items: center;
-  gap: var(--yj-space-2);
-  width: 100%;
-  padding: var(--yj-space-1) var(--yj-space-2);
-  border: 0;
-  border-radius: var(--yj-radius-md);
-  text-align: left;
-  color: var(--yj-color-text-primary);
-  background: transparent;
-  font: inherit;
-  font-size: var(--yj-font-size-body);
-  line-height: var(--yj-control-line-height);
-  cursor: pointer;
-}
-.permission-menu button:hover,
-.permission-menu button[aria-checked="true"] { background: var(--yj-color-control-hover); }
-.permission-menu button:active { background: var(--yj-color-control-pressed); }
-.permission-option-copy { display: grid; flex: 1; min-width: 0; }
+.permission-option-copy { display: grid; gap: var(--yj-space-1); flex: 1; min-width: 0; }
 .permission-option-label { font-weight: var(--yj-font-weight-regular); }
 .permission-option-description {
   color: color-mix(in srgb, var(--yj-color-text-tertiary) 75%, var(--yj-color-text-secondary));

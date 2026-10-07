@@ -54,6 +54,9 @@
 - 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。
 - 定时任务页签与筛选工具栏同排：搜索、状态、排序的标准宽度为 240 / 112 / 112px（`--yj-layout-schedule-search-width` / `--yj-layout-schedule-state-width` / `--yj-layout-schedule-sort-width`）；状态与排序组件等宽，排序显示“最新优先”或“最早优先”。执行记录页的任务筛选与状态筛选同为 112px（`--yj-layout-schedule-plan-filter-width` 引用状态宽度 token），占位文字为“全部任务”，下拉仅显示任务标题；下拉菜单可随标题内容展开，宽度不超过可用视口。可用宽度不足时换行。列表空状态最小高度为 360px（`--yj-layout-schedule-empty-min-height`）。
 - 新建任务内容列最大宽度：760px（`--yj-layout-chat-entry-max`）；活跃会话正文与输入区同为 760px，在 `.chat-workspace` 内复用该 token 覆盖内容列和输入框宽度，保持居中与等宽。
+- 输入框下方工作空间名称最大宽度 320px（`--yj-layout-chat-workspace-control-max`），同时受设置行可用宽度约束；长名称省略，权限入口在不足一行时换行。
+- 工作空间菜单宽 280px（`--yj-layout-workspace-menu-width`）、列表最大高度 240px（`--yj-layout-workspace-list-max`）、新建弹窗宽 480px（`--yj-layout-workspace-create-width`）；均受缩放后的可用视口约束。
+- 店铺关联原型面板宽 360px（`--yj-layout-shop-menu-width`），入口最长 200px（`--yj-layout-shop-trigger-max`），列表最大高度 288px（`--yj-layout-shop-list-max`）；弹层按触发入口上下可用空间限制高度，列表滚动时底部操作保持可见。
 - 详情页主内容建议最大宽度：1120px。
 
 ## AI / Codex 必须遵守

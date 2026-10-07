@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import { isLocalPermissionCandidate, verifyLocalPermissionCandidate } from "./local-permission-candidate.mjs";
+import { resolveSkillsCheckout } from "./resolve-skills-checkout.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -358,20 +359,9 @@ async function packageProducerChannels(skillsRoot, producerExecutor) {
   await producerExecutor("pnpm", ["--dir", skillsRoot, "package:desktop-release"], { cwd: repositoryRoot, maxBuffer: 16 * 1024 * 1024 });
 }
 
-async function defaultLocalSkillsRoot() {
-  const sibling = path.resolve(repositoryRoot, "../yijie-skills");
-  if (!isLocalPermissionCandidate()) return sibling;
-  const lock = validateResourceLock(JSON.parse(await readFile(lockPath, "utf8")));
-  const { stdout } = await exec("git", ["-C", sibling, "rev-parse", "HEAD"]);
-  if (stdout.trim() === lock.producer.full_commit) return sibling;
-  const pinned = path.join(repositoryRoot, ".local", `skills-pinned-${lock.producer.full_commit.slice(0, 7)}`);
-  await verifyRepository(pinned, lock.producer.repository, lock.producer.full_commit, { requireHead: true });
-  return pinned;
-}
-
 export async function syncDesktopSkillResources({
   channel = "local-development", allChannels = false,
-  skillsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills"),
+  skillsRoot = process.env.YIJIE_DESKTOP_SKILLS_DIR,
   contractsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
   agentHostRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
   outputRoot, check = false, packageProducer = false, producerExecutor = exec,
@@ -384,6 +374,7 @@ export async function syncDesktopSkillResources({
     await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
   }
   const lock = validateResourceLock(JSON.parse(await readFile(lockPath, "utf8")));
+  skillsRoot = await resolveSkillsCheckout({ repositoryRoot, fullCommit: lock.producer.full_commit, explicitRoot: skillsRoot });
   if (packageProducer) {
     await verifySourceChain(skillsRoot, contractsRoot, agentHostRoot, lock);
     await packageProducerChannels(skillsRoot, producerExecutor);
@@ -415,7 +406,7 @@ if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
   }
   const explicitSkillsRoot = argument("--skills-root") ?? process.env.YIJIE_DESKTOP_SKILLS_DIR;
   syncDesktopSkillResources({ channel, allChannels,
-    skillsRoot: explicitSkillsRoot ? path.resolve(repositoryRoot, explicitSkillsRoot) : await defaultLocalSkillsRoot(),
+    skillsRoot: explicitSkillsRoot,
     contractsRoot: path.resolve(repositoryRoot, argument("--contracts-root") ?? process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
     agentHostRoot: path.resolve(repositoryRoot, argument("--agent-host-root") ?? process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
     outputRoot, check, packageProducer: !process.argv.includes("--skip-package") && !check,

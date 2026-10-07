@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import { loadPinnedOpenApiParser } from "./check-agent-host-contract.mjs";
+import { resolveSkillsCheckout } from "./resolve-skills-checkout.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -398,7 +399,9 @@ export async function checkAgentHostSkillsContract({ requireImplementation = tru
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
   const contractsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts");
   const agentHostRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host");
-  const skillsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_SKILLS_DIR ?? "../yijie-skills");
+  const skillsRoot = await resolveSkillsCheckout({
+    repositoryRoot, fullCommit: lock.providers.skills.full_commit, explicitRoot: process.env.YIJIE_DESKTOP_SKILLS_DIR,
+  });
   await Promise.all([verifyContractsCheckout(lock, contractsRoot), verifyProviders(lock, agentHostRoot, skillsRoot)]);
   const [openApiBytes, runtimeBytes, manifestSchemaBytes, parseYaml] = await Promise.all([
     verifyPinnedBytes(contractsRoot, lock.full_commit, lock.sources.openapi.path, lock.sources.openapi.sha256),

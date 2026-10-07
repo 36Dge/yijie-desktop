@@ -9,6 +9,9 @@ overrides:
   postcss: 8.5.18
   vitepress>vite: 6.4.3
 
+patchedDependencies:
+  echarts@6.1.0: 41a2f8f5d09f7ae2d6e799f0c198d684a7e2ad23c9b34afd03f96fb2fcc36c18
+
 importers:
 
   .:
@@ -21,7 +24,7 @@ importers:
         version: 2.11.1
       echarts:
         specifier: 6.1.0
-        version: 6.1.0
+        version: 6.1.0(patch_hash=41a2f8f5d09f7ae2d6e799f0c198d684a7e2ad23c9b34afd03f96fb2fcc36c18)
       naive-ui:
         specifier: ^2.44.1
         version: 2.44.1(vue@3.5.39(typescript@6.0.3))
@@ -3603,7 +3606,7 @@ snapshots:
 
   eastasianwidth@0.2.0: {}
 
-  echarts@6.1.0:
+  echarts@6.1.0(patch_hash=41a2f8f5d09f7ae2d6e799f0c198d684a7e2ad23c9b34afd03f96fb2fcc36c18):
     dependencies:
       tslib: 2.3.0
       zrender: 6.1.0

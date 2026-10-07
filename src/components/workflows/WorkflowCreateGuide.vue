@@ -113,7 +113,7 @@ onBeforeUnmount(stop);
             <button type="button" class="workflow-create-guide__close yj-control yj-control--icon" aria-label="关闭新手引导" @click="dismiss(true)"><YjIcon name="dismiss" size="sm" /></button>
           </header>
           <p id="workflow-guide-description" class="workflow-create-guide__description">点击高亮的“创建工作流”，填写名称和描述，开始编排你的流程。</p>
-          <p class="workflow-create-guide__hint">可按 Esc 关闭，之后不再提示。</p>
+          <p class="workflow-create-guide__hint">可按 Esc 关闭，本次启动内不再提示；重启客户端后再次显示。</p>
       </NCard>
     </div>
   </Teleport>

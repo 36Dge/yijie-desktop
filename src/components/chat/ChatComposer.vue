@@ -57,6 +57,8 @@ const emit = defineEmits<{
 }>();
 
 defineSlots<{
+  "shop-control"(): unknown;
+  "workspace-control"(): unknown;
   "permission-control"(): unknown;
   "model-control"(): unknown;
   "active-turn-action"(props: {
@@ -74,8 +76,8 @@ const selectedProject = computed(() => props.projects.find((project) =>
   project.projectId === props.selectedProjectId && project.available,
 ) ?? null);
 const projectName = computed(() => props.mode === "new"
-  ? selectedProject.value?.safeName ?? "选择本地项目"
-  : props.activeProjectName ?? "本地项目");
+  ? selectedProject.value?.safeName ?? "选择工作空间"
+  : props.activeProjectName ?? "工作空间");
 const validationMessage = computed(() => {
   const message = inputValidationMessage(props.modelValue);
   return message === "请输入任务需求" && props.attachments.length > 0 ? null : message;
@@ -267,23 +269,6 @@ function handlePaste(event: ClipboardEvent): void {
     aria-label="任务输入区"
     :aria-busy="submissionBusy ? 'true' : undefined"
   >
-    <button
-      v-if="mode === 'new' && !textOnly"
-      class="chat-composer__project chat-composer__project--button"
-      type="button"
-      :disabled="submissionBusy || streaming"
-      :aria-label="selectedProject ? `更换项目，当前项目 ${projectName}` : '选择本地项目'"
-      :title="selectedProject ? `更换项目：${projectName}` : '选择本地项目'"
-      @click="emit('pick-project')"
-    >
-      <YjIcon name="folder" size="sm" tone="muted" />
-      <span class="chat-composer__project-name">{{ projectName }}</span>
-    </button>
-    <div v-else-if="!textOnly && selectedProjectId !== null" class="chat-composer__project" :aria-label="`当前聊天项目：${projectName}`">
-      <YjIcon name="folder" size="sm" tone="muted" />
-      <span class="chat-composer__project-name">{{ projectName }}</span>
-    </div>
-
     <div
       v-if="showReadiness"
       class="chat-composer__readiness"
@@ -307,150 +292,177 @@ function handlePaste(event: ClipboardEvent): void {
       </button>
     </div>
 
-    <div
-      class="chat-composer__field"
-      :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
-    >
-      <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
-      <ul
-        v-if="attachments.length > 0 || attachmentImportAttempt"
-        class="chat-composer__attachments"
-        aria-label="待发送附件"
+    <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly }">
+      <div
+        class="chat-composer__field"
+        :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
       >
-        <li
-          v-if="attachmentImportAttempt"
-          :key="`import-${attachmentImportAttempt.operationId}`"
-          class="chat-composer__attachment"
-          :class="`chat-composer__attachment--${attachmentImportAttempt.stage}`"
+        <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
+        <ul
+          v-if="attachments.length > 0 || attachmentImportAttempt"
+          class="chat-composer__attachments"
+          aria-label="待发送附件"
         >
-          <span class="chat-composer__attachment-icon" aria-hidden="true">
-            <YjIcon name="file" size="sm" />
-          </span>
-          <span class="chat-composer__attachment-copy">
-            <strong>{{ attachmentImportAttempt.itemCount }} 个附件</strong>
-            <span>{{ attachmentImportDetails(attachmentImportAttempt) }}</span>
-          </span>
-          <span class="chat-composer__attachment-actions">
-            <button
-              v-if="attachmentImportAttempt.stage === 'error_terminal'"
-              type="button"
-              class="chat-composer__attachment-action"
-              aria-label="移除失败的附件选择"
-              title="移除失败的附件选择"
-              :disabled="submissionBusy || attachmentImporting"
-              @click="emit('dismiss-attachment-import', attachmentImportAttempt.operationId)"
-            >
-              <YjIcon name="dismiss" size="sm" />
-            </button>
-          </span>
-        </li>
-        <li
-          v-for="attachment in attachments"
-          :key="attachment.attachmentId"
-          class="chat-composer__attachment"
-          :class="`chat-composer__attachment--${attachment.status}`"
-        >
-          <span class="chat-composer__attachment-icon" aria-hidden="true">
-            <YjIcon :name="attachment.type === 'image' ? 'image' : 'file'" size="sm" />
-          </span>
-          <span class="chat-composer__attachment-copy">
-            <strong :title="attachment.name">{{ attachment.name }}</strong>
-            <span>{{ attachmentSize(attachment.sizeBytes) }} · {{ attachmentStatus(attachment) }}</span>
-          </span>
-          <span class="chat-composer__attachment-actions">
-            <button
-              type="button"
-              class="chat-composer__attachment-action"
-              :aria-label="`移除 ${attachment.name}`"
-              :title="`移除 ${attachment.name}`"
-              :disabled="submissionBusy"
-              @click="emit('remove-attachment', attachment.attachmentId)"
-            >
-              <YjIcon name="dismiss" size="sm" />
-            </button>
-          </span>
-        </li>
-      </ul>
-      <textarea
-        ref="textareaElement"
-        id="chat-task-input"
-        class="chat-composer__textarea"
-        :value="modelValue"
-        :readonly="submissionBusy"
-        :placeholder="textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
-        :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
-        :aria-invalid="visibleValidationMessage ? 'true' : undefined"
-        autocomplete="off"
-        spellcheck="true"
-        @input="updateInput"
-        @keydown="handleKeydown"
-        @paste="handlePaste"
-        @compositionstart="composing = true"
-        @compositionend="composing = false"
-      />
-      <div class="chat-composer__actions">
-        <div class="chat-composer__leading-actions">
-          <button
-            v-if="!textOnly"
-            class="chat-composer__add"
-            type="button"
-            :disabled="attachmentButtonDisabled"
-            aria-label="添加图片或文件"
-            title="添加图片或文件"
-            @click="emit('pick-attachments')"
+          <li
+            v-if="attachmentImportAttempt"
+            :key="`import-${attachmentImportAttempt.operationId}`"
+            class="chat-composer__attachment"
+            :class="`chat-composer__attachment--${attachmentImportAttempt.stage}`"
           >
-            <YjIcon name="plus" size="lg" />
+            <span class="chat-composer__attachment-icon" aria-hidden="true">
+              <YjIcon name="file" size="sm" />
+            </span>
+            <span class="chat-composer__attachment-copy">
+              <strong>{{ attachmentImportAttempt.itemCount }} 个附件</strong>
+              <span>{{ attachmentImportDetails(attachmentImportAttempt) }}</span>
+            </span>
+            <span class="chat-composer__attachment-actions">
+              <button
+                v-if="attachmentImportAttempt.stage === 'error_terminal'"
+                type="button"
+                class="chat-composer__attachment-action"
+                aria-label="移除失败的附件选择"
+                title="移除失败的附件选择"
+                :disabled="submissionBusy || attachmentImporting"
+                @click="emit('dismiss-attachment-import', attachmentImportAttempt.operationId)"
+              >
+                <YjIcon name="dismiss" size="sm" />
+              </button>
+            </span>
+          </li>
+          <li
+            v-for="attachment in attachments"
+            :key="attachment.attachmentId"
+            class="chat-composer__attachment"
+            :class="`chat-composer__attachment--${attachment.status}`"
+          >
+            <span class="chat-composer__attachment-icon" aria-hidden="true">
+              <YjIcon :name="attachment.type === 'image' ? 'image' : 'file'" size="sm" />
+            </span>
+            <span class="chat-composer__attachment-copy">
+              <strong :title="attachment.name">{{ attachment.name }}</strong>
+              <span>{{ attachmentSize(attachment.sizeBytes) }} · {{ attachmentStatus(attachment) }}</span>
+            </span>
+            <span class="chat-composer__attachment-actions">
+              <button
+                type="button"
+                class="chat-composer__attachment-action"
+                :aria-label="`移除 ${attachment.name}`"
+                :title="`移除 ${attachment.name}`"
+                :disabled="submissionBusy"
+                @click="emit('remove-attachment', attachment.attachmentId)"
+              >
+                <YjIcon name="dismiss" size="sm" />
+              </button>
+            </span>
+          </li>
+        </ul>
+        <textarea
+          ref="textareaElement"
+          id="chat-task-input"
+          class="chat-composer__textarea"
+          :value="modelValue"
+          :readonly="submissionBusy"
+          :placeholder="textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
+          :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
+          :aria-invalid="visibleValidationMessage ? 'true' : undefined"
+          autocomplete="off"
+          spellcheck="true"
+          @input="updateInput"
+          @keydown="handleKeydown"
+          @paste="handlePaste"
+          @compositionstart="composing = true"
+          @compositionend="composing = false"
+        />
+        <div class="chat-composer__actions">
+          <div class="chat-composer__leading-actions">
+            <button
+              v-if="!textOnly"
+              class="chat-composer__add"
+              type="button"
+              :disabled="attachmentButtonDisabled"
+              aria-label="添加图片或文件"
+              title="添加图片或文件"
+              @click="emit('pick-attachments')"
+            >
+              <YjIcon name="plus" size="lg" />
+            </button>
+            <slot v-if="!textOnly" name="shop-control" />
+          </div>
+          <div class="chat-composer__trailing-actions">
+          <slot name="model-control" />
+          <template v-if="streaming">
+            <slot
+              name="active-turn-action"
+              :disabled="submissionBusy"
+              :interrupt="requestActiveTurnInterrupt"
+            >
+              <button
+                class="chat-composer__send chat-composer__send--stop"
+                type="button"
+                :disabled="submissionBusy"
+                aria-label="停止生成"
+                title="停止生成"
+                @click="requestActiveTurnInterrupt"
+              >
+                <YjIcon name="stop" size="lg" />
+              </button>
+            </slot>
+          </template>
+          <button
+            v-else
+            class="chat-composer__send"
+            type="button"
+            :disabled="sendDisabled"
+            :aria-label="sendLabel"
+            :title="sendLabel"
+            @click="submit"
+          >
+            <YjIcon class="chat-composer__send-icon" name="send" size="md" />
           </button>
-          <slot v-if="!textOnly" name="permission-control">
+          </div>
+        </div>
+        <div v-if="dragActive && !attachmentButtonDisabled" class="chat-composer__drop-overlay" aria-hidden="true">
+          <YjIcon name="plus" size="lg" />
+          <span>松开以添加图片或文件</span>
+        </div>
+      </div>
+      <div v-if="!textOnly" class="chat-composer__settings" role="group" aria-label="工作空间与权限">
+        <slot name="workspace-control">
+          <button
+            v-if="mode === 'new'"
+            class="chat-composer__project chat-composer__project--button yj-control"
+            type="button"
+            :disabled="submissionBusy || streaming"
+            :aria-label="selectedProject ? `更换工作空间，当前工作空间 ${projectName}` : '选择工作空间'"
+            :title="selectedProject ? `更换工作空间：${projectName}` : '选择工作空间'"
+            aria-haspopup="dialog"
+            @click="emit('pick-project')"
+          >
+            <YjIcon name="folder" size="sm" :stroke-width="1.5" />
+            <span class="chat-composer__project-name">{{ projectName }}</span>
+            <YjIcon name="chevronDown" size="xs" tone="muted" />
+          </button>
+          <div v-else-if="selectedProjectId !== null" class="chat-composer__project yj-control" :aria-label="`当前聊天工作空间：${projectName}`" :title="projectName">
+            <YjIcon name="folder" size="sm" :stroke-width="1.5" />
+            <span class="chat-composer__project-name">{{ projectName }}</span>
+          </div>
+        </slot>
+        <slot name="permission-control">
           <button
             class="chat-composer__permission yj-control"
             type="button"
             aria-label="查看权限审批：只读访问，禁止写入"
             title="权限审批：只读访问，禁止写入"
+            aria-haspopup="dialog"
             @click="emit('show-permission')"
           >
-            <YjIcon name="shield" size="sm" tone="primary" />
+            <YjIcon name="shield" size="sm" :stroke-width="1.5" />
             <span class="chat-composer__permission-label">权限审批</span>
             <span class="chat-composer__permission-value">只读 · 禁止写入</span>
+            <YjIcon name="chevronDown" size="xs" tone="muted" />
           </button>
-          </slot>
-        </div>
-        <div class="chat-composer__trailing-actions">
-        <slot name="model-control" />
-        <template v-if="streaming">
-          <slot
-            name="active-turn-action"
-            :disabled="submissionBusy"
-            :interrupt="requestActiveTurnInterrupt"
-          >
-            <button
-              class="chat-composer__send chat-composer__send--stop"
-              type="button"
-              :disabled="submissionBusy"
-              aria-label="停止生成"
-              title="停止生成"
-              @click="requestActiveTurnInterrupt"
-            >
-              <YjIcon name="stop" size="lg" />
-            </button>
-          </slot>
-        </template>
-        <button
-          v-else
-          class="chat-composer__send"
-          type="button"
-          :disabled="sendDisabled"
-          :aria-label="sendLabel"
-          :title="sendLabel"
-          @click="submit"
-        >
-          <YjIcon class="chat-composer__send-icon" name="send" size="md" />
-        </button>
-        </div>
-      </div>
-      <div v-if="dragActive && !attachmentButtonDisabled" class="chat-composer__drop-overlay" aria-hidden="true">
-        <YjIcon name="plus" size="lg" />
-        <span>松开以添加图片或文件</span>
+        </slot>
       </div>
     </div>
     <p
@@ -499,6 +511,13 @@ function handlePaste(event: ClipboardEvent): void {
   --chat-composer-field-shadow: var(--yj-shadow-chat-composer);
 }
 
+.chat-composer__surface--with-settings {
+  --chat-composer-field-shadow: var(--yj-shadow-chat-composer);
+
+  border-radius: var(--yj-radius-chat-composer);
+  background: var(--yj-color-bg-composer-tray);
+}
+
 .chat-composer__submission-status {
   position: absolute;
   width: 1px;
@@ -511,29 +530,26 @@ function handlePaste(event: ClipboardEvent): void {
   white-space: nowrap;
 }
 
-.chat-composer__project {
-  position: relative;
+.chat-composer__settings {
   display: flex;
-  width: calc(100% - var(--yj-space-6));
-  min-height: var(--yj-space-12);
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
-  gap: var(--yj-space-2);
-  padding: var(--yj-space-2) var(--yj-space-4);
-  border: var(--yj-border-width) solid transparent;
-  border-radius: var(--yj-radius-md);
-  margin-inline: auto;
+  gap: var(--yj-space-1) var(--yj-space-2);
+  padding: var(--yj-space-1) var(--yj-space-2);
+}
+
+.chat-composer__project {
+  min-width: 0;
+  max-width: min(100%, var(--yj-layout-chat-workspace-control-max));
+  flex: 0 1 auto;
+  border: 0;
   color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-app);
-  font: inherit;
-  font-size: var(--yj-font-size-body);
+  background: transparent;
   text-align: left;
 }
 
-.chat-composer--new .chat-composer__project {
-  border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-bg-app);
-}
+.chat-composer__project > .yj-icon { color: inherit; }
 
 .chat-composer__project--button {
   cursor: pointer;
@@ -543,6 +559,8 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__project--button:hover:not(:disabled) {
   background: var(--yj-color-control-hover);
 }
+.chat-composer__project--button:active:not(:disabled) { background: var(--yj-color-control-pressed); }
+.chat-composer__project--button:disabled { color: var(--yj-color-text-disabled); opacity: 1; }
 
 .chat-composer__project-name {
   min-width: 0;
@@ -597,11 +615,12 @@ function handlePaste(event: ClipboardEvent): void {
   background: var(--yj-color-bg-subtle);
 }
 
-.chat-composer__permission:hover,
 .chat-composer__recovery:hover {
   border-color: var(--yj-color-border-default);
   background: var(--yj-color-bg-subtle);
 }
+.chat-composer__permission:hover { background: var(--yj-color-control-hover); }
+.chat-composer__permission:active { background: var(--yj-color-control-pressed); }
 
 .chat-composer__project--button:focus-visible,
 .chat-composer__add:focus-visible,
@@ -668,11 +687,11 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__field {
+  container: chat-composer / inline-size;
   position: relative;
   z-index: 1;
   min-width: 0;
   overflow: hidden;
-  margin-top: calc(var(--yj-space-2) * -1);
   border: var(--yj-border-width) solid var(--yj-color-border-default);
   border-radius: var(--yj-radius-chat-composer);
   background: var(--yj-color-bg-card);
@@ -680,7 +699,7 @@ function handlePaste(event: ClipboardEvent): void {
   transition: border-color var(--yj-motion-fast) var(--yj-ease-standard), box-shadow var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
-.chat-composer__readiness + .chat-composer__field { margin-top: var(--yj-space-2); }
+.chat-composer__readiness + .chat-composer__surface { margin-top: var(--yj-space-2); }
 
 .chat-composer__field--drag-active {
   border-color: var(--yj-color-text-primary);
@@ -808,7 +827,9 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__permission {
   min-width: 0;
-  flex: 1 1 auto;
+  max-width: 100%;
+  flex: 0 1 auto;
+  border: 0;
   overflow: hidden;
 }
 
@@ -881,17 +902,6 @@ button:disabled { cursor: not-allowed; opacity: 0.64; }
 @media (max-width: 560px) {
   .chat-composer__permission-value { display: none; }
   .chat-composer__attachments { grid-template-columns: minmax(0, 1fr); }
-}
-
-@media (max-width: 480px) {
-  .chat-composer__permission {
-    width: var(--yj-space-8);
-    flex: 0 0 var(--yj-space-8);
-    justify-content: center;
-    padding: 0;
-  }
-
-  .chat-composer__permission-label { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

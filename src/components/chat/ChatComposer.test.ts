@@ -70,17 +70,23 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
-  it("renders the project strip and keeps permission and send actions inside the input panel", async () => {
+  it("places workspace and permission settings below the panel while keeping attachment and send actions inside", async () => {
     const wrapper = mountComposer();
     const projectButton = wrapper.get(".chat-composer__project--button");
     expect(projectButton.text()).toBe("Synthetic Project");
-    expect(projectButton.attributes("aria-label")).toBe("更换项目，当前项目 Synthetic Project");
+    expect(projectButton.attributes("aria-label")).toBe("更换工作空间，当前工作空间 Synthetic Project");
     await projectButton.trigger("click");
     expect(wrapper.emitted("pick-project")).toHaveLength(1);
 
-    expect(wrapper.get(".chat-composer__field").find(".chat-composer__permission").exists()).toBe(true);
+    const field = wrapper.get(".chat-composer__field");
+    const settings = wrapper.get('[aria-label="工作空间与权限"]');
+    expect(field.find(".chat-composer__permission").exists()).toBe(false);
+    expect(field.find(".chat-composer__project").exists()).toBe(false);
+    expect(field.element.nextElementSibling).toBe(settings.element);
+    expect(settings.get(".chat-composer__project").element).toBe(projectButton.element);
+    expect(settings.find(".chat-composer__permission").exists()).toBe(true);
     const addButton = wrapper.get('[aria-label="添加图片或文件"]');
-    expect(addButton.element.nextElementSibling).toBe(wrapper.get(".chat-composer__permission").element);
+    expect(field.get('[aria-label="添加图片或文件"]').element).toBe(addButton.element);
     expect(addButton.attributes("title")).toBe("添加图片或文件");
     await addButton.trigger("click");
     expect(wrapper.emitted("pick-attachments")).toHaveLength(1);
@@ -96,15 +102,13 @@ describe("ChatComposer", () => {
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音|附件/);
   });
 
-  it("FEAT-130 preserves the new-task radius and uses the approved neutral hover token", () => {
-    const source = readFileSync("src/components/chat/ChatComposer.vue", "utf8");
-    expect(source).toContain(`.chat-composer--new .chat-composer__project {
-  border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-bg-app);
-}`);
-    expect(source).toContain(`.chat-composer__project--button:hover:not(:disabled) {
-  background: var(--yj-color-control-hover);
-}`);
+  it("labels the optional workspace choice and keeps an existing conversation workspace read-only", async () => {
+    const wrapper = mountComposer({ projects: [], selectedProjectId: null });
+    expect(wrapper.get('[aria-label="选择工作空间"]').text()).toBe("选择工作空间");
+    await wrapper.setProps({ mode: "reply", selectedProjectId: PROJECT.projectId, activeProjectName: PROJECT.safeName });
+    expect(wrapper.find(".chat-composer__project--button").exists()).toBe(false);
+    expect(wrapper.get('[aria-label="工作空间与权限"]').text()).toContain(PROJECT.safeName);
+    expect(wrapper.get(".chat-composer__project").attributes("aria-label")).toBe("当前聊天工作空间：Synthetic Project");
   });
 
   it("caps local scrolling against the zoom-adjusted viewport", () => {
@@ -134,7 +138,6 @@ describe("ChatComposer", () => {
       /\.chat-composer__actions\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/s,
     );
     expect(source).toMatch(/\.chat-composer__leading-actions\s*\{[^}]*overflow: hidden;/s);
-    expect(source).toMatch(/\.chat-composer__permission\s*\{[^}]*flex: 1 1 auto;/s);
     expect(source).toMatch(/\.chat-composer__send\s*\{[^}]*justify-self: end;/s);
   });
 
@@ -506,9 +509,9 @@ describe("ChatComposer", () => {
       {
         "action": "发送任务",
         "permission": "权限审批只读 · 禁止写入",
-        "permissionParent": "chat-composer__leading-actions",
+        "permissionParent": "chat-composer__settings",
         "project": "Synthetic Project",
-        "projectLabel": "更换项目，当前项目 Synthetic Project",
+        "projectLabel": "更换工作空间，当前工作空间 Synthetic Project",
         "readinessVisible": false,
         "root": [
           "chat-composer",

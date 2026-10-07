@@ -1,4 +1,6 @@
 import { chatModelClient, type ModelIntent } from "../api/chat-model-client";
+import { chatWorkspaceClient } from "../api/chat-workspace-client";
+import type { WorkspaceCreation } from "../domain/chat-workspace";
 import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
 import {conversationMessageItemId} from "../api/chat-conversation-adapter";
 import {selectConversationItem} from "../domain/conversation-view";
@@ -4212,6 +4214,18 @@ export function createChatStoreDefinition(
       return selected;
     }
 
+    async function createWorkspace(name: string): Promise<WorkspaceCreation | null> {
+      const bound = context.value;
+      if (!bound || !hasAction("use_project")) return null;
+      const result = await chatWorkspaceClient.create(bound.contextId, name);
+      if (context.value?.contextId !== bound.contextId) return null;
+      if (result.status === "created") {
+        const project = result.workspace.project;
+        projects.value = Object.freeze([project, ...projects.value.filter(entry => entry.projectId !== project.projectId)]);
+      }
+      return result;
+    }
+
     async function revalidateProject(projectId: string): Promise<ChatProject | null> {
       const bound = context.value;
       if (!bound || !hasAction("use_project")) return null;
@@ -4337,6 +4351,7 @@ export function createChatStoreDefinition(
       refreshSelectedCleanup,
       refreshControlPlane,
       pickProject,
+      createWorkspace,
       revalidateProject,
       setProjectPinned,
       removeProject,
