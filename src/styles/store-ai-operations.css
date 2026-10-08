@@ -18,28 +18,12 @@
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
-.aiops .aiops-eyebrow {
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-  letter-spacing: 0.1em;
-  color: var(--yj-color-text-secondary);
-  margin-bottom: var(--yj-space-2);
-}
 .aiops-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--yj-space-5);
   padding: var(--yj-space-2) 0 var(--yj-space-1);
-}
-.aiops-heading > div:first-child {
-  display: flex;
-  gap: var(--yj-space-4);
-  align-items: baseline;
-  flex-wrap: wrap;
-}
-.aiops-heading .aiops-eyebrow {
-  margin-bottom: 0;
 }
 .aiops-heading h2 {
   font-size: var(--yj-font-size-section-title);

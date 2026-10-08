@@ -59,7 +59,7 @@ describe("workflow showcase model", () => {
     ]);
   });
 
-  it("FEAT-151 preserves all recommended workflow copy, nodes, usage, and actions", () => {
+  it("FEAT-151 presents complementary cross-border workflow recommendations", () => {
     expect(RECOMMENDED_WORKFLOWS).toHaveLength(4);
     expect(RECOMMENDED_WORKFLOWS.map((workflow) => ({
       title: workflow.title,
@@ -70,34 +70,34 @@ describe("workflow showcase model", () => {
       actions: workflow.actions,
     }))).toEqual([
       {
-        title: "智能抖音获客工作流",
+        title: "Listing 多语种本地化",
         badge: "热门",
-        description: "精准挖掘抖音潜在客户，自动化触达转化",
-        nodes: ["抖音", "AI", "私信"],
+        description: "结合目标市场与搜索词，生成地道的多语言商品文案",
+        nodes: ["商品卖点", "目标市场", "本地化文案"],
         usage: "3.2k",
         actions: ["演示", "执行"],
       },
       {
-        title: "电商商品批量出图工作流",
+        title: "广告搜索词优化",
         badge: "热门",
-        description: "批量生成多平台商品图，提升运营效率",
-        nodes: ["商品", "批量出图", "商品图"],
+        description: "识别高消耗低转化词，整理否词与竞价调整建议",
+        nodes: ["搜索词报告", "表现分析", "调整建议"],
         usage: "2.8k",
         actions: ["演示", "执行"],
       },
       {
-        title: "全网比价监控工作流",
+        title: "FBA 智能补货规划",
         badge: "推荐",
-        description: "实时监控全网价格，智能推送低价信息",
-        nodes: ["全网价格", "比价", "数据"],
+        description: "结合销量、在途与交期，生成补货数量和发货计划",
+        nodes: ["库存与销量", "补货测算", "发货计划"],
         usage: "1.9k",
         actions: ["演示", "执行"],
       },
       {
-        title: "小红书爆款内容生成工作流",
+        title: "海外买家评价洞察",
         badge: "推荐",
-        description: "AI生成爆款笔记，图文排版一键搞定",
-        nodes: ["小红书", "AI", "图文"],
+        description: "归纳评价中的体验问题，提炼产品与页面改进方向",
+        nodes: ["买家评价", "主题归纳", "改进方向"],
         usage: "1.6k",
         actions: ["演示", "执行"],
       },

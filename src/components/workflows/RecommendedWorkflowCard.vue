@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import type { RecommendedWorkflow } from "../../domain/workflow-showcase";
+import YjIcon from "../yijie/YjIcon.vue";
 defineProps<{ workflow: RecommendedWorkflow }>();
 const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 </script>
@@ -8,18 +9,21 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 <template>
   <article class="recommended-workflow-card workflow-showcase-card">
     <header class="recommended-workflow-card__header">
-      <h3 class="recommended-workflow-card__title">{{ workflow.title }}</h3>
+      <span class="recommended-workflow-card__icon" aria-hidden="true"><YjIcon :name="workflow.icon" size="xl" /></span>
       <span class="recommended-workflow-card__badge yj-badge">{{ workflow.badge }}</span>
     </header>
-    <p class="recommended-workflow-card__description">{{ workflow.description }}</p>
+    <div class="recommended-workflow-card__body">
+      <h3 class="recommended-workflow-card__title">{{ workflow.title }}</h3>
+      <p class="recommended-workflow-card__description">{{ workflow.description }}</p>
+    </div>
 
     <footer class="recommended-workflow-card__footer">
-      <p class="recommended-workflow-card__usage">使用量 <strong>{{ workflow.usage }}</strong></p>
+      <p class="recommended-workflow-card__usage"><strong>{{ workflow.usage }}</strong><span>使用量</span></p>
       <div class="recommended-workflow-card__actions" role="group" :aria-label="`${workflow.title}操作`">
         <button v-for="action in workflow.actions" :key="action" type="button"
           class="recommended-workflow-card__action workflow-showcase-control yj-control"
           :class="action === '执行' ? 'recommended-workflow-card__action--primary' : 'recommended-workflow-card__action--secondary'"
-          :aria-pressed="selectedAction === action" @click="selectedAction = selectedAction === action ? null : action">{{ action }}</button>
+          :aria-pressed="selectedAction === action" @click="selectedAction = selectedAction === action ? null : action">{{ action }}<YjIcon v-if="action === '执行'" name="arrowRight" size="xs" /></button>
       </div>
     </footer>
   </article>
@@ -29,9 +33,10 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 .recommended-workflow-card {
   display: flex;
   min-width: 0;
-  min-height: calc(var(--yj-space-16) * 3);
+  height: 100%;
+  min-height: calc(var(--yj-space-16) * 4);
   flex-direction: column;
-  gap: var(--yj-space-4);
+  gap: var(--yj-space-5);
   padding: var(--workflow-card-padding, var(--yj-space-5));
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
@@ -48,7 +53,21 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 }
 
 .recommended-workflow-card__header {
-  align-items: flex-start;
+  gap: var(--yj-space-2);
+}
+
+.recommended-workflow-card__icon {
+  display: inline-flex;
+  width: var(--yj-space-6);
+  height: var(--yj-space-10);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--yj-color-text-primary);
+}
+
+.recommended-workflow-card__body {
+  display: grid;
   gap: var(--yj-space-2);
 }
 
@@ -65,7 +84,6 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-card-title);
   overflow-wrap: anywhere;
-  text-wrap: balance;
 }
 
 .recommended-workflow-card__badge {
@@ -74,7 +92,7 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 }
 
 .recommended-workflow-card__description {
-  color: var(--yj-color-text-body);
+  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   overflow-wrap: anywhere;
@@ -89,6 +107,8 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 }
 
 .recommended-workflow-card__usage {
+  display: grid;
+  gap: var(--yj-space-1);
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
@@ -97,8 +117,8 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
 }
 
 .recommended-workflow-card__usage strong {
-  margin-left: var(--yj-space-1);
-  font-size: var(--yj-font-size-body);
+  color: var(--yj-color-text-primary);
+  font-size: var(--yj-font-size-card-title);
   font-weight: var(--yj-font-weight-semibold);
 }
 
@@ -106,6 +126,10 @@ const selectedAction = ref<RecommendedWorkflow["actions"][number] | null>(null);
   display: flex;
   gap: var(--yj-space-2);
   margin-left: auto;
+}
+
+.recommended-workflow-card__action {
+  gap: var(--yj-space-1);
 }
 
 .recommended-workflow-card .recommended-workflow-card__action--primary {

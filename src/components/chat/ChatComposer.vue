@@ -299,7 +299,7 @@ function handlePaste(event: ClipboardEvent): void {
       </button>
     </div>
 
-    <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly }">
+    <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly && mode === 'new' }">
       <div
         class="chat-composer__field"
         :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
@@ -395,6 +395,21 @@ function handlePaste(event: ClipboardEvent): void {
             >
               <YjIcon name="plus" size="lg" />
             </button>
+            <slot v-if="!textOnly && mode === 'reply'" name="permission-control">
+              <button
+                class="chat-composer__permission yj-control"
+                type="button"
+                aria-label="查看权限审批：只读访问，禁止写入"
+                title="权限审批：只读访问，禁止写入"
+                aria-haspopup="dialog"
+                @click="emit('show-permission')"
+              >
+                <YjIcon name="shield" size="sm" :stroke-width="1.5" />
+                <span class="chat-composer__permission-label">权限审批</span>
+                <span class="chat-composer__permission-value">只读 · 禁止写入</span>
+                <YjIcon name="chevronDown" size="xs" tone="muted" />
+              </button>
+            </slot>
             <slot v-if="!textOnly" name="shop-control" />
             <slot v-if="!textOnly" name="connector-control" />
           </div>
@@ -436,10 +451,9 @@ function handlePaste(event: ClipboardEvent): void {
           <span>松开以添加图片或文件</span>
         </div>
       </div>
-      <div v-if="!textOnly" class="chat-composer__settings" role="group" aria-label="工作空间与权限">
+      <div v-if="!textOnly && mode === 'new'" class="chat-composer__settings" role="group" aria-label="工作空间与权限">
         <slot name="workspace-control">
           <button
-            v-if="mode === 'new'"
             class="chat-composer__project chat-composer__project--button yj-control"
             type="button"
             :disabled="submissionBusy || streaming"
@@ -452,10 +466,6 @@ function handlePaste(event: ClipboardEvent): void {
             <span class="chat-composer__project-name">{{ projectName }}</span>
             <YjIcon name="chevronDown" size="xs" tone="muted" />
           </button>
-          <div v-else-if="selectedProjectId !== null" class="chat-composer__project yj-control" :aria-label="`当前聊天工作空间：${projectName}`" :title="projectName">
-            <YjIcon name="folder" size="sm" :stroke-width="1.5" />
-            <span class="chat-composer__project-name">{{ projectName }}</span>
-          </div>
         </slot>
         <slot name="permission-control">
           <button
@@ -835,6 +845,20 @@ function handlePaste(event: ClipboardEvent): void {
   align-items: center;
   gap: var(--yj-space-1);
   overflow: hidden;
+}
+
+.chat-composer--reply .chat-composer__leading-actions {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+@container chat-composer (max-width: 680px) {
+  .chat-composer--reply .chat-composer__actions {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--yj-space-2);
+  }
+
+  .chat-composer--reply .chat-composer__trailing-actions { justify-self: end; }
 }
 
 .chat-composer__permission {

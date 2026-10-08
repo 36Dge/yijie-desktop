@@ -177,10 +177,7 @@ function inspect(selection: ChartInspection): void {
 <template>
   <div class="aiops">
     <header class="aiops-heading">
-      <div>
-        <p class="aiops-eyebrow">AI OPERATIONS</p>
-        <h2>运营成效与增长机会</h2>
-      </div>
+      <h2>运营成效与增长机会</h2>
       <div class="aiops-heading__actions">
         <span class="aiops-status"><i />{{ pendingCount }} 个机会待处理</span>
         <button class="aiops-button" type="button" @click="emit('report')">

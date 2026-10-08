@@ -35,6 +35,7 @@ export interface RecommendedWorkflowNode {
 
 export interface RecommendedWorkflow {
   readonly id: string;
+  readonly icon: YjIconName;
   readonly title: string;
   readonly badge: "热门" | "推荐";
   readonly description: string;
@@ -72,7 +73,7 @@ export const MY_WORKFLOWS: readonly MyWorkflow[] = [
     badge: "电商获客",
     description: "通过关键词挖掘潜在客户，自动私信触达",
     modifiedAt: "2026-05-14 14:30",
-    icon: "workflow",
+    icon: "workflowAcquisition",
     accent: "purple",
   },
   {
@@ -81,7 +82,7 @@ export const MY_WORKFLOWS: readonly MyWorkflow[] = [
     badge: "批量出图",
     description: "批量生成商品图，支持多种风格模板",
     modifiedAt: "2026-05-12 10:20",
-    icon: "image",
+    icon: "workflowBatchImages",
     accent: "orange",
   },
   {
@@ -90,7 +91,7 @@ export const MY_WORKFLOWS: readonly MyWorkflow[] = [
     badge: "全网比价",
     description: "监控全网价格变动，自动推送低价信息",
     modifiedAt: "2026-05-10 09:15",
-    icon: "scanSearch",
+    icon: "workflowPriceMonitor",
     accent: "green",
   },
   {
@@ -99,60 +100,64 @@ export const MY_WORKFLOWS: readonly MyWorkflow[] = [
     badge: "内容创作",
     description: "生成爆款笔记内容，支持图文自动排版",
     modifiedAt: "2026-05-08 16:45",
-    icon: "edit",
+    icon: "workflowSocialContent",
     accent: "blue",
   },
 ];
 
 export const RECOMMENDED_WORKFLOWS: readonly RecommendedWorkflow[] = [
   {
-    id: "smart-douyin-acquisition",
-    title: "智能抖音获客工作流",
+    id: "listing-localization",
+    icon: "workflowLocalization",
+    title: "Listing 多语种本地化",
     badge: "热门",
-    description: "精准挖掘抖音潜在客户，自动化触达转化",
+    description: "结合目标市场与搜索词，生成地道的多语言商品文案",
     nodes: [
-      { label: "抖音", icon: "video", accent: "blue" },
-      { label: "AI", icon: "assistant", accent: "green" },
-      { label: "私信", icon: "message", accent: "cyan" },
+      { label: "商品卖点", icon: "skillProductDescription", accent: "brand" },
+      { label: "目标市场", icon: "skillCrossBorderSelection", accent: "brand" },
+      { label: "本地化文案", icon: "workflowLocalization", accent: "brand" },
     ],
     usage: "3.2k",
     actions: ["演示", "执行"],
   },
   {
-    id: "ecommerce-batch-image",
-    title: "电商商品批量出图工作流",
+    id: "ad-search-term-optimization",
+    icon: "workflowAdOptimization",
+    title: "广告搜索词优化",
     badge: "热门",
-    description: "批量生成多平台商品图，提升运营效率",
+    description: "识别高消耗低转化词，整理否词与竞价调整建议",
     nodes: [
-      { label: "商品", icon: "store", accent: "purple" },
-      { label: "批量出图", icon: "image", accent: "orange" },
-      { label: "商品图", icon: "fileImage", accent: "blue" },
+      { label: "搜索词报告", icon: "skillKeywordResearch", accent: "brand" },
+      { label: "表现分析", icon: "skillResearch", accent: "brand" },
+      { label: "调整建议", icon: "workflowAdOptimization", accent: "brand" },
     ],
     usage: "2.8k",
     actions: ["演示", "执行"],
   },
   {
-    id: "network-price-compare",
-    title: "全网比价监控工作流",
+    id: "fba-replenishment-planning",
+    icon: "workflowReplenishment",
+    title: "FBA 智能补货规划",
     badge: "推荐",
-    description: "实时监控全网价格，智能推送低价信息",
+    description: "结合销量、在途与交期，生成补货数量和发货计划",
     nodes: [
-      { label: "全网价格", icon: "skillResearch", accent: "blue" },
-      { label: "比价", icon: "scanSearch", accent: "orange" },
-      { label: "数据", icon: "skillResearch", accent: "green" },
+      { label: "库存与销量", icon: "skillInventorySync", accent: "brand" },
+      { label: "补货测算", icon: "workflowReplenishment", accent: "brand" },
+      { label: "发货计划", icon: "skillDropshipping", accent: "brand" },
     ],
     usage: "1.9k",
     actions: ["演示", "执行"],
   },
   {
-    id: "xiaohongshu-viral-content",
-    title: "小红书爆款内容生成工作流",
+    id: "overseas-review-insights",
+    icon: "workflowReviewInsights",
+    title: "海外买家评价洞察",
     badge: "推荐",
-    description: "AI生成爆款笔记，图文排版一键搞定",
+    description: "归纳评价中的体验问题，提炼产品与页面改进方向",
     nodes: [
-      { label: "小红书", icon: "edit", accent: "orange" },
-      { label: "AI", icon: "assistant", accent: "green" },
-      { label: "图文", icon: "fileImage", accent: "blue" },
+      { label: "买家评价", icon: "workflowReviewInsights", accent: "brand" },
+      { label: "主题归纳", icon: "skillContentBreakdown", accent: "brand" },
+      { label: "改进方向", icon: "skillProductOptimization", accent: "brand" },
     ],
     usage: "1.6k",
     actions: ["演示", "执行"],

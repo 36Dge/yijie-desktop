@@ -20,8 +20,10 @@ function select(key: string) {
   <article class="workflow-summary-card workflow-showcase-card">
     <header class="workflow-summary-card__header">
       <span class="workflow-summary-card__icon" aria-hidden="true"><YjIcon :name="workflow.icon" size="xl" /></span>
-      <span class="workflow-summary-card__badge yj-badge">{{ workflow.badge }}</span>
-      <span v-if="example" class="workflow-summary-card__example">示例</span>
+      <div class="workflow-summary-card__labels">
+        <span class="workflow-summary-card__badge yj-badge">{{ workflow.badge }}</span>
+        <span v-if="example" class="workflow-summary-card__example">示例</span>
+      </div>
       <NDropdown v-if="to" role="menu" aria-label="工作流操作" :options="menuOptions" trigger="click" placement="bottom-end" :show="menuVisible" @update:show="menuVisible = $event" @select="select">
         <button ref="moreButton" type="button" class="workflow-summary-card__more workflow-showcase-control yj-control yj-control--icon"
           :aria-label="`${workflow.title}，更多`" aria-haspopup="menu" :aria-expanded="menuVisible" @click.stop="moreButton?.focus()"><YjIcon name="more" size="sm" /></button>
@@ -36,10 +38,6 @@ function select(key: string) {
       </h3>
       <p class="workflow-summary-card__description">{{ workflow.description }}</p>
     </div>
-    <p class="workflow-summary-card__modified">
-      <YjIcon name="pending" size="xs" />
-      <span>修改于 <time :datetime="workflow.modifiedAt.replace(' ', 'T')">{{ workflow.modifiedAt }}</time></span>
-    </p>
   </article>
 </template>
 
@@ -49,9 +47,9 @@ function select(key: string) {
   isolation: isolate;
   display: flex;
   min-width: 0;
-  min-height: calc(var(--yj-space-16) * 3 + var(--yj-space-8));
+  min-height: calc(var(--yj-space-16) * 3 + var(--yj-space-2));
   flex-direction: column;
-  gap: var(--yj-space-4);
+  gap: var(--yj-space-5);
   padding: var(--workflow-card-padding, var(--yj-space-5));
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
@@ -63,22 +61,29 @@ function select(key: string) {
 .workflow-summary-card__link::after { position: absolute; inset: 0; content: ""; border-radius: var(--yj-radius-lg); }
 .workflow-summary-card__link:focus-visible { outline: none; }
 .workflow-summary-card__link:focus-visible::after { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
-.workflow-summary-card__example { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
+.workflow-summary-card__example { color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
 
 .workflow-summary-card__header {
   display: flex;
   align-items: center;
-  gap: var(--yj-space-2);
+  gap: var(--yj-space-3);
+}
+
+.workflow-summary-card__labels {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--yj-space-1) var(--yj-space-2);
 }
 
 .workflow-summary-card__icon {
   display: inline-flex;
-  width: var(--yj-space-10);
+  width: var(--yj-space-6);
   height: var(--yj-space-10);
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: var(--yj-radius-lg);
   color: var(--yj-color-text-primary);
   background: transparent;
 }
@@ -91,7 +96,8 @@ function select(key: string) {
   position: relative;
   z-index: var(--yj-z-workflow-card-action);
   margin-left: auto;
-  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  flex: none;
+  border: var(--yj-border-width) solid transparent;
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-bg-card);
 }
@@ -107,8 +113,7 @@ function select(key: string) {
 }
 
 .workflow-summary-card__title,
-.workflow-summary-card__description,
-.workflow-summary-card__modified {
+.workflow-summary-card__description {
   margin: 0;
 }
 
@@ -118,11 +123,10 @@ function select(key: string) {
   font-weight: var(--yj-font-weight-semibold);
   line-height: var(--yj-line-height-card-title);
   overflow-wrap: anywhere;
-  text-wrap: balance;
 }
 
 .workflow-summary-card__badge {
-  color: var(--yj-color-text-primary);
+  color: var(--yj-color-text-secondary);
   background: var(--yj-color-control-hover);
 }
 
@@ -131,25 +135,9 @@ function select(key: string) {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  color: var(--yj-color-text-body);
+  color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   overflow-wrap: anywhere;
-}
-
-.workflow-summary-card__modified {
-  display: flex;
-  align-items: center;
-  gap: var(--yj-space-2);
-  margin-top: auto;
-  padding-top: var(--yj-space-4);
-  color: var(--yj-color-text-secondary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-  font-variant-numeric: tabular-nums;
-}
-
-.workflow-summary-card__modified :deep(.yj-icon) {
-  color: inherit;
 }
 </style>

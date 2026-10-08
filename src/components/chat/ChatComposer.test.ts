@@ -117,13 +117,54 @@ describe("ChatComposer", () => {
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音|附件/);
   });
 
-  it("labels the optional workspace choice and keeps an existing conversation workspace read-only", async () => {
+  it("keeps workspace selection on new tasks and removes the settings tray from replies", async () => {
     const wrapper = mountComposer({ projects: [], selectedProjectId: null });
     expect(wrapper.get('[aria-label="选择工作空间"]').text()).toBe("选择工作空间");
     await wrapper.setProps({ mode: "reply", selectedProjectId: PROJECT.projectId, activeProjectName: PROJECT.safeName });
     expect(wrapper.find(".chat-composer__project--button").exists()).toBe(false);
-    expect(wrapper.get('[aria-label="工作空间与权限"]').text()).toContain(PROJECT.safeName);
-    expect(wrapper.get(".chat-composer__project").attributes("aria-label")).toBe("当前聊天工作空间：Synthetic Project");
+    expect(wrapper.find('[aria-label="工作空间与权限"]').exists()).toBe(false);
+    expect(wrapper.find(".chat-composer__project").exists()).toBe(false);
+    expect(wrapper.find(".chat-composer__surface--with-settings").exists()).toBe(false);
+    expect(wrapper.get('[aria-label="添加图片或文件"]').element.nextElementSibling)
+      .toBe(wrapper.get(".chat-composer__permission").element);
+    await wrapper.get(".chat-composer__permission").trigger("click");
+    expect(wrapper.emitted("show-permission")).toHaveLength(1);
+  });
+
+  it("relocates the supplied permission control only in replies without duplicating controls", async () => {
+    const onPermission = vi.fn();
+    const wrapper = mountComposer({}, {
+      "workspace-control": () => h("button", { "data-workspace": "" }, "选择工作空间"),
+      "permission-control": () => h("button", { "data-permission": "", onClick: onPermission }, "请求批准"),
+      "shop-control": () => h("button", { "data-shop": "" }, "关联店铺"),
+      "connector-control": () => h("button", { "data-connectors": "" }, "连接器"),
+    });
+    const settings = wrapper.get(".chat-composer__settings");
+    expect(settings.find('[data-workspace]').exists()).toBe(true);
+    expect(settings.find('[data-permission]').exists()).toBe(true);
+    expect(wrapper.get(".chat-composer__field").find('[data-permission]').exists()).toBe(false);
+
+    await wrapper.setProps({ mode: "reply" });
+    expect(wrapper.findAll('[data-permission]')).toHaveLength(1);
+    expect(wrapper.find('[data-workspace]').exists()).toBe(false);
+    expect(wrapper.find(".chat-composer__settings").exists()).toBe(false);
+    const add = wrapper.get('[aria-label="添加图片或文件"]');
+    const permission = wrapper.get('[data-permission]');
+    expect(add.element.nextElementSibling).toBe(permission.element);
+    expect(permission.element.nextElementSibling).toBe(wrapper.get('[data-shop]').element);
+    expect(wrapper.get('[data-shop]').element.nextElementSibling).toBe(wrapper.get('[data-connectors]').element);
+    await permission.trigger("click");
+    expect(onPermission).toHaveBeenCalledOnce();
+
+    await wrapper.setProps({ mode: "new" });
+    expect(wrapper.get(".chat-composer__settings").find('[data-permission]').exists()).toBe(true);
+    expect(wrapper.findAll('[data-permission]')).toHaveLength(1);
+    expect(wrapper.find(".chat-composer__surface--with-settings").exists()).toBe(true);
+    await wrapper.setProps({ mode: "reply", textOnly: true });
+    expect(wrapper.find('[data-permission]').exists()).toBe(false);
+    expect(wrapper.find('[data-workspace]').exists()).toBe(false);
+    expect(wrapper.find(".chat-composer__settings").exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("caps local scrolling against the zoom-adjusted viewport", () => {

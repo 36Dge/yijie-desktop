@@ -48,20 +48,17 @@ describe("WorkflowPage", () => {
 
     for (const expected of [
       "抖音电商获客工作流",
-      "2026-05-14 14:30",
       "商品批量出图工作流",
-      "2026-05-12 10:20",
       "全网比价监控工作流",
-      "2026-05-10 09:15",
       "小红书内容创作工作流",
-      "2026-05-08 16:45",
-      "智能抖音获客工作流",
-      "精准挖掘抖音潜在客户，自动化触达转化",
-      "电商商品批量出图工作流",
-      "批量生成多平台商品图，提升运营效率",
-      "实时监控全网价格，智能推送低价信息",
-      "小红书爆款内容生成工作流",
-      "AI生成爆款笔记，图文排版一键搞定",
+      "Listing 多语种本地化",
+      "结合目标市场与搜索词，生成地道的多语言商品文案",
+      "广告搜索词优化",
+      "识别高消耗低转化词，整理否词与竞价调整建议",
+      "FBA 智能补货规划",
+      "结合销量、在途与交期，生成补货数量和发货计划",
+      "海外买家评价洞察",
+      "归纳评价中的体验问题，提炼产品与页面改进方向",
       "3.2k",
       "2.8k",
       "1.9k",
@@ -70,6 +67,8 @@ describe("WorkflowPage", () => {
       expect(wrapper.text()).toContain(expected);
     }
 
+    expect(wrapper.get('[aria-label="我的工作流列表"]').text()).not.toContain("修改于");
+    expect(wrapper.get('[aria-label="我的工作流列表"]').findAll("time")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__flow")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__node")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__action").map((action) => action.text()))
