@@ -7,6 +7,7 @@ defineProps<{
   title: string;
   description?: string;
   count?: number;
+  countLabel?: string;
   icon?: YjIconName;
   actionsPlacement?: "inline" | "below";
 }>();
@@ -20,7 +21,7 @@ const titleId = useId();
       <div class="yj-section__heading">
         <YjIcon v-if="icon" :name="icon" size="lg" tone="default" />
         <h2 :id="titleId" class="yj-section__title">{{ title }}</h2>
-        <span v-if="count !== undefined" class="yj-section__count yj-badge yj-badge--count" :aria-label="`${count} 个 Skill`">
+        <span v-if="count !== undefined" class="yj-section__count yj-badge yj-badge--count" :aria-label="countLabel ?? `${count} 个 Skill`">
           {{ count }}
         </span>
       </div>

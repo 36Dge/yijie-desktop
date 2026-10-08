@@ -17,6 +17,15 @@ import { useChatModels } from "../../composables/useChatModels";
 import { chatModelsEnabled } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
+import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
+import MarketChatActivity from "../../components/chat/MarketChatActivity.vue";
+import { useMarketChat } from "../../composables/useMarketChat";
+import { MarketChatError, marketChatErrorMessage } from "../../api/market-host-native-client";
+import { marketConnectorsEnabled } from "../../api/market-connectors-client";
+import { useMarketConnectorStore } from "../../stores/market-connectors.store";
+import { useMarketConnectorBinding } from "../../composables/useMarketConnectorBinding";
+import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
+import type { ConnectorChipView } from "../../domain/connector-ui";
 import { useChatShopPreview } from "../../composables/useChatShopPreview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
@@ -86,7 +95,13 @@ const permissionScope = usePermissionStore();
 const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
 
 const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
-const composerDrafts = shallowRef(createChatComposerDrafts());
+const localComposerDrafts = shallowRef(createChatComposerDrafts());
+const sharedDrafts = useChatComposerDraftStore();
+const connectors = useMarketConnectorStore();
+const composerDrafts = computed({
+  get: () => marketConnectorsEnabled ? sharedDrafts.texts : localComposerDrafts.value,
+  set: value => { if (marketConnectorsEnabled) sharedDrafts.texts = value; else localComposerDrafts.value = value; },
+});
 const leaveScheduledOpen = ref(false);
 let resolveScheduledLeave: ((leave: boolean) => void) | null = null;
 function finishScheduledLeave(leave: boolean) { leaveScheduledOpen.value = false; resolveScheduledLeave?.(leave); resolveScheduledLeave = null; }
@@ -116,7 +131,7 @@ let locationEpoch = 0;
 const isNewDraftMode = computed(() => routeSessionId.value === null && route.query.create === "schedule");
 const isDraftMode = computed(() => isNewDraftMode.value || (routeSessionId.value !== null && chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "scheduled_plan_draft"));
 const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "ordinary"));
-const composerDraftTargetKey = computed(() => chatComposerDraftKey(routeSessionId.value));
+const composerDraftTargetKey = computed(() => marketConnectorsEnabled && isNewDraftMode.value ? "plan:new" as const : chatComposerDraftKey(routeSessionId.value));
 const prompt = computed({
   get: () => chatComposerDraftValue(composerDrafts.value, composerDraftTargetKey.value),
   set: (value: string) => {
@@ -128,15 +143,21 @@ const prompt = computed({
   },
 });
 watch(isNewDraftMode, (active, previous) => {
-  if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, chatComposerDraftKey(null));
+  if (marketConnectorsEnabled && active && !previous) sharedDrafts.preparePlanDraft();
+  if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, marketConnectorsEnabled ? "plan:new" : chatComposerDraftKey(null));
 }, { flush: "post" });
-const selectedProjectId = ref<string | null>(null);
+const localSelectedProjectId = ref<string | null>(null);
+const selectedProjectId = computed({
+  get: () => marketConnectorsEnabled ? sharedDrafts.workspaceId : localSelectedProjectId.value,
+  set: value => { if (marketConnectorsEnabled) sharedDrafts.workspaceId = value; else localSelectedProjectId.value = value; },
+});
 const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? null, () => routeSessionId.value ?? "new");
 // A new task owns its picker state. Historical session projects may be removed
 // or internal, and must never become a hidden destination for a new submission.
 const availableProjectId = computed(() => chatStore.projects.find(project =>
   project.projectId === selectedProjectId.value && project.available,
 )?.projectId ?? null);
+const workspaceSelectionValid = computed(() => isDraftMode.value || !marketConnectorsEnabled || routeSessionId.value !== null || selectedProjectId.value === null || availableProjectId.value !== null);
 const submitting = ref(false);
 const workspacePicker = useChatWorkspaces({
   context: () => chatStore.context?.contextId ?? null,
@@ -288,11 +309,63 @@ const modelBusy = computed(() => isStreaming.value || composerSubmissionState.va
 const modelReadOnly = computed(() => !chatStore.hasAction(isSessionRoute.value ? "submit_turn" : "create_session") || (isSessionRoute.value && chatStore.selectedAccessMode !== "live"));
 const modelBlocked = computed(() => modelBusy.value || modelReadOnly.value);
 const modelDisabledReason = computed(() => modelReadOnly.value ? "当前聊天仅可查看或操作权限尚未就绪，无法切换模型" : "当前任务结束后可切换模型");
-const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value);
+const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value, marketConnectorsEnabled ? {
+  get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
+  set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
+} : undefined);
 watch(isNewDraftMode, (active, previous) => {
   // Match the existing new-draft discard lifecycle, including its model intent.
-  if (previous && !active) models.resetNew();
+  if (previous && !active) { if (marketConnectorsEnabled) sharedDrafts.planProfile = "kimi-k3-max-v1"; else models.resetNew(); }
 }, { flush: "post" });
+
+const marketChat = useMarketChat(
+  () => marketConnectorsEnabled && !isDraftMode.value && normalPurposeReady.value ? chatStore.context?.contextId ?? null : null,
+  () => routeSessionId.value,
+  () => isStreaming.value,
+);
+const connectorSelection = computed(() => marketConnectorsEnabled && !isDraftMode.value ? sharedDrafts.selection(composerDraftTargetKey.value) : []);
+const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSelection.value.map(selected => {
+  const entry = connectors.entries.find(item => item.id === selected.serviceId);
+  const installation = connectors.installation(selected.serviceId);
+  const sameConnection = installation?.installationId === selected.reference.installationId && installation.revision === selected.reference.revision && installation.generation === selected.reference.generation;
+  return { id: selected.serviceId, name: selected.displayName, iconAssetId: entry?.iconAssetId ?? selected.serviceId,
+    unavailableReason: !sameConnection ? "连接已变化，请重新选择" : !entry?.selectable ? entry?.status.label === "已启用" ? "当前环境暂不支持" : entry?.status.label ?? "状态待确认" : null };
+}));
+if (marketConnectorsEnabled) useMarketConnectorBinding(computed(() => !isDraftMode.value ? chatStore.context?.contextId ?? null : null));
+function toggleConnector(serviceId: string): void {
+  if (modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
+  const target = composerDraftTargetKey.value, current = sharedDrafts.selection(target);
+  if (current.some(item => item.serviceId === serviceId)) { sharedDrafts.setSelection(target, current.filter(item => item.serviceId !== serviceId)); return; }
+  const entry = connectors.entries.find(item => item.id === serviceId), installation = connectors.installation(serviceId);
+  if (!entry?.selectable || !installation || current.length >= 51) return;
+  sharedDrafts.setSelection(target, [...current, { serviceId, displayName: entry.name, reference: { installationId: installation.installationId, revision: installation.revision, generation: installation.generation } }]);
+}
+function manageConnectors(serviceId?: string): void {
+  void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
+}
+function connectorEnabledChange(id: string, enabled: boolean): void { if (enabled) manageConnectors(id); else void connectors.execute("disable", id); }
+function prepareConnectorSubmit(): boolean {
+  if (!marketConnectorsEnabled) return true;
+  if (routeSessionId.value && !marketChat.ready.value) {
+    transientNotice.value = "正在核对会话的连接器状态，请稍后重试。";
+    void marketChat.refresh();
+    return false;
+  }
+  if (marketChat.pending.value || marketChat.deciding.value) {
+    transientNotice.value = "请先处理当前连接器操作的审批。";
+    return false;
+  }
+  if (connectorSelection.value.length === 0) return true;
+  if (permissions.state.value?.mode !== "ask") {
+    transientNotice.value = "连接器任务暂仅支持“请求批准”。请在权限菜单中手动切换后发送。";
+    return false;
+  }
+  if (!connectors.selectionAvailable || connectorChips.value.some(chip => chip.unavailableReason)) {
+    transientNotice.value = "所选连接器尚未就绪或已变化，请在管理连接器中检查后重新选择。";
+    return false;
+  }
+  return true;
+}
 
 const isHistoryLoading = computed(() =>
   isSessionRoute.value &&
@@ -340,6 +413,7 @@ function flushTimelineAfterSelection(): void {
 watch(
   () => chatStore.projects,
   (projects) => {
+    if (marketConnectorsEnabled) return;
     if (!projects.some(project => project.projectId === selectedProjectId.value && project.available)) {
       selectedProjectId.value = null;
     }
@@ -350,6 +424,7 @@ watch(
 watch(
   () => chatStore.context?.contextId ?? null,
   (contextId, previousContextId) => {
+    if (marketConnectorsEnabled) return;
     if (contextId === previousContextId) return;
     if (previousContextId === null && contextId !== null) return;
     selectedProjectId.value = null;
@@ -369,7 +444,7 @@ watch(
     reasoningFailed.value = new Set();
     actionErrorCode.value = null;
     transientNotice.value = null;
-    if (sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
+    if (!marketConnectorsEnabled && sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
     if (!requestedTurn.value) void nextTick(() => scrollToBottom());
   },
 );
@@ -416,6 +491,7 @@ watch([requestedTurn, routeSessionId, () => chatStore.context?.contextId, () => 
 onBeforeUnmount(() => { locationEpoch++; });
 
 function captureError(error: unknown): void {
+  if (error instanceof MarketChatError) { transientNotice.value = marketChatErrorMessage(error); return; }
   actionErrorCode.value = error instanceof ChatClientError
     ? error.shape.code
     : "chat_temporarily_unavailable";
@@ -497,6 +573,8 @@ async function submit(): Promise<void> {
     return;
   }
   if (!normalPurposeReady.value || !permissionCanSend.value) return;
+  if (!workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
+  if (!prepareConnectorSubmit()) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
@@ -504,9 +582,13 @@ async function submit(): Promise<void> {
   const draftTargetAtStart = composerDraftTargetKey.value;
   let focusRestoreTarget = draftTargetAtStart;
   const input = prompt.value.trim();
+  const marketSelection = marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
+    ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined;
   try {
     if (isSessionRoute.value) {
-      const result = await (models.intent.value ? chatStore.submitTurnWithResult(input, models.intent.value) : chatStore.submitTurnWithResult(input));
+      const result = await (marketSelection !== undefined
+        ? chatStore.submitTurnWithResult(input, models.intent.value ?? undefined, marketSelection)
+        : models.intent.value ? chatStore.submitTurnWithResult(input, models.intent.value) : chatStore.submitTurnWithResult(input));
       if (result.status !== "local_durable_accepted") {
         actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
         return;
@@ -516,11 +598,14 @@ async function submit(): Promise<void> {
         composerDraftTargetKey.value !== draftTargetAtStart
       ) return;
       composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+      if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
       await nextTick();
       scrollToBottom();
       return;
     }
-    const result = await (models.intent.value ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value) : chatStore.createSessionWithResult(availableProjectId.value, input));
+    const result = await (marketSelection !== undefined
+      ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value ?? undefined, marketSelection)
+      : models.intent.value ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value) : chatStore.createSessionWithResult(availableProjectId.value, input));
     if (result.status !== "local_durable_accepted") {
       actionErrorCode.value = chatStore.lastErrorCode ?? "chat_host_not_ready";
       return;
@@ -530,6 +615,7 @@ async function submit(): Promise<void> {
       composerDraftTargetKey.value !== draftTargetAtStart
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+    if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
     models.resetNew();
     shopPreview.adoptNewChat(result.sessionId);
     await router.push(`/chat/${result.sessionId}`);
@@ -752,6 +838,7 @@ onBeforeUnmount(() => {
       <p v-if="transientNotice" class="chat-entry__unsupported" role="alert">{{ transientNotice }}</p>
 
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
       <ChatComposer
@@ -762,7 +849,9 @@ onBeforeUnmount(() => {
         :selected-project-id="availableProjectId"
         :readiness="readiness"
         :text-only="isDraftMode"
-        :can-send="!workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
+        :connectors="connectorChips"
+        @remove-connector="toggleConnector"
+        :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -793,6 +882,9 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
+        </template>
+        <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control>
+          <ChatConnectorControl :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
@@ -961,6 +1053,7 @@ onBeforeUnmount(() => {
             </div>
             <button v-if="cleanup.actionLabel" class="chat-notice__action yj-control" type="button" @click="refreshCleanup">{{ cleanup.actionLabel }}</button>
           </div>
+          <MarketChatActivity v-if="!isDraftMode && marketConnectorsEnabled" :observation="marketChat.observation.value" :connected="marketChat.connected.value" :refreshing="marketChat.refreshing.value" :deciding="marketChat.deciding.value" :error="marketChat.error.value" :actionable="marketChat.actionable" :tool-observation="marketChat.toolObservation.value" :selected-turn-id="marketChat.selectedTurnId.value" :history-refreshing="marketChat.historyRefreshing.value" :history-error="marketChat.historyError.value" @refresh="marketChat.refresh" @decision="marketChat.decide" @select-turn="marketChat.selectTurn" />
           <RuntimeApprovalList v-if="!isDraftMode && runtimePermissionsEnabled" :requests="permissions.approvals.value" :deciding="permissions.deciding.value" :connected="permissions.approvalsConnected.value" @decision="permissions.decide" />
         </div>
       </div>
@@ -989,6 +1082,7 @@ onBeforeUnmount(() => {
       </p>
       <p v-if="transientNotice" class="chat-workspace__composer-error" role="alert">{{ transientNotice }}</p>
       <p v-if="!isDraftMode && runtimePermissionsEnabled && permissions.error.value" class="chat-workspace__composer-error" role="alert">{{ permissions.error.value }} <button type="button" @click="permissions.refresh">重试</button></p>
+      <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
       <ChatComposer
@@ -1000,6 +1094,8 @@ onBeforeUnmount(() => {
         :active-project-name="activeProject?.safeName"
         :readiness="readiness"
         :text-only="isDraftMode"
+        :connectors="connectorChips"
+        @remove-connector="toggleConnector"
         :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
@@ -1022,6 +1118,9 @@ onBeforeUnmount(() => {
       >
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
+        </template>
+        <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control>
+          <ChatConnectorControl :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />

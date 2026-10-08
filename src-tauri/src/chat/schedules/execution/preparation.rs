@@ -304,6 +304,7 @@ impl ChatRepository {
             scope: &scope,
             now: timestamp,
             draft: false,
+            market: false,
             scheduled: Some(ScheduledEnqueue {
                 run_id: &run.run_id,
                 operation_id: operation,

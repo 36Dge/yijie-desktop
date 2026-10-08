@@ -2,6 +2,7 @@ export interface ChatAuthoritySnapshot {
   readonly ready: boolean;
   readonly managementOnly?: boolean;
   readonly canReadSchedule?: boolean;
+  readonly canReadConnector?: boolean;
   readonly tenantId: string | null;
   readonly authorizationRevision: number | null;
   readonly expiresAt: string | null;
@@ -43,7 +44,7 @@ export function createChatPermissionLifecycle(
       !snapshot.ready ||
       snapshot.tenantId === null ||
       snapshot.authorizationRevision === null ||
-      (!snapshot.canCreateTask && !snapshot.canReadTask && !snapshot.canReadSchedule)
+      (!snapshot.canCreateTask && !snapshot.canReadTask && !snapshot.canReadSchedule && !snapshot.canReadConnector)
     ) {
       return null;
     }
@@ -54,6 +55,7 @@ export function createChatPermissionLifecycle(
       snapshot.canCreateTask ? "create" : "",
       snapshot.canReadTask ? "read" : "",
       snapshot.canReadSchedule ? "schedule" : "",
+      snapshot.canReadConnector ? "connector" : "",
     ].join(":");
   }
 

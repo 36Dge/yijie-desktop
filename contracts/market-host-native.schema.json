@@ -1,0 +1,763 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/market-host/v1/native",
+  "$defs": {
+    "NativeObserveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/NativeObservePayload"
+        }
+      }
+    },
+    "NativeObserveResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/NativeObservation"
+        }
+      }
+    },
+    "NativeApprovalDecideRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/NativeApprovalDecidePayload"
+        }
+      }
+    },
+    "NativeApprovalDecideResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/MarketApproval"
+        }
+      }
+    },
+    "NativeError": {
+      "$ref": "#/$defs/Error"
+    },
+    "CanonicalId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "NativeObservePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "nativeTurnId": {
+          "$ref": "#/$defs/NativeId"
+        }
+      }
+    },
+    "NativeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "NativeObservation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "managed",
+        "selectionDisplay"
+      ],
+      "properties": {
+        "managed": {
+          "type": "boolean"
+        },
+        "selectionDisplay": {
+          "type": "array",
+          "maxItems": 51,
+          "items": {
+            "$ref": "#/$defs/SelectionDisplay"
+          }
+        },
+        "approvals": {
+          "$ref": "#/$defs/ApprovalSnapshot"
+        },
+        "tools": {
+          "$ref": "#/$defs/ToolSnapshot"
+        },
+        "availableTurns": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ObservedTurn"
+          }
+        },
+        "turnsTruncated": {
+          "type": "boolean"
+        }
+      },
+      "description": "Safe scoped Native observation. Optional availableTurns is the latest 128 known native bindings in descending submission order, each with its original selectionDisplay; turnsTruncated reports older bindings omitted from the index. A known requested nativeTurnId is read with its own display snapshot, never the latest selection. Without a current Host, omit remote facts without starting/probing/reconstructing authority. With a current owned Host, historical tool reads validate scope/agent/thread/turn, not the original Host nonce. Approvals always require the current Host nonce. Current remote read failures stay typed errors. Recheck task.read and local view after awaits. Unmanaged sessions need no Host access. Old producers may omit the new index, and old readers may ignore it. No history read restores execution or approval."
+    },
+    "SelectionDisplay": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "reference",
+        "serviceId",
+        "displayName"
+      ],
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/SelectionRef"
+        },
+        "serviceId": {
+          "$ref": "#/$defs/ServiceId"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "description": "Safe display snapshot only, not a turn grant; old history cannot restore authority."
+    },
+    "SelectionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId",
+        "revision",
+        "generation"
+      ],
+      "properties": {
+        "installationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "generation": {
+          "$ref": "#/$defs/Revision"
+        }
+      },
+      "description": "No service label or secret is accepted as authority. Native and Host revalidate exact scope, generation, ready state and connector.use before a versioned turn is admitted."
+    },
+    "Revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "ServiceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+      "description": "Original case-sensitive catalog serverName. Syntactic acceptance does not replace exact registry lookup."
+    },
+    "ApprovalSnapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "agentSessionId",
+        "requests"
+      ],
+      "properties": {
+        "agentSessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "requests": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/MarketApproval"
+          }
+        }
+      }
+    },
+    "MarketApproval": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "approvalId",
+        "agentSessionId",
+        "kind",
+        "revision",
+        "state",
+        "identity",
+        "review",
+        "expiresAtUnixMs"
+      ],
+      "properties": {
+        "approvalId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "agentSessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "kind": {
+          "type": "string",
+          "const": "mcp_market"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        },
+        "identity": {
+          "$ref": "#/$defs/CallIdentity"
+        },
+        "review": {
+          "$ref": "#/$defs/ReviewProjection"
+        },
+        "expiresAtUnixMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "decisionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        }
+      },
+      "description": "Independent market approval projection. identity is obtained by trusted Broker query for the real tools/call; never synthesized from metadata/tool title/last Item. Approval state is not provider execution success."
+    },
+    "ApprovalState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "cancelled",
+        "expired",
+        "unavailable"
+      ]
+    },
+    "CallIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding",
+        "nativeTurnId",
+        "callRef",
+        "serviceId",
+        "reference",
+        "toolName",
+        "argsDigest",
+        "argsEncoding",
+        "nativeThreadId"
+      ],
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/CapabilityBinding"
+        },
+        "nativeTurnId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "callRef": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "serviceId": {
+          "$ref": "#/$defs/ServiceId"
+        },
+        "reference": {
+          "$ref": "#/$defs/SelectionRef"
+        },
+        "toolName": {
+          "$ref": "#/$defs/ToolName"
+        },
+        "argsDigest": {
+          "$ref": "#/$defs/ArgsDigest"
+        },
+        "argsEncoding": {
+          "type": "string",
+          "const": "worker-json-v1"
+        },
+        "nativeThreadId": {
+          "$ref": "#/$defs/NativeId"
+        }
+      },
+      "description": "Created only by the Broker from a real admitted tools/call and frozen parsed argument snapshot. Native MCP request IDs and Tool Item IDs are not this identity. Query/decision do not create records; metadata merely locates an existing record."
+    },
+    "CapabilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "capabilityRef",
+        "turnOperationId",
+        "selectionDigest"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/ContextBinding"
+        },
+        "capabilityRef": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "turnOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "selectionDigest": {
+          "$ref": "#/$defs/SelectionDigest"
+        }
+      },
+      "description": "Non-secret immutable association. capabilityRef cannot authenticate any request or create a grant. Bind to one original actual turn operation, context and selection digest for the whole lifetime."
+    },
+    "ContextBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "process",
+        "scope",
+        "agentSessionId",
+        "nativeThreadId"
+      ],
+      "properties": {
+        "process": {
+          "$ref": "#/$defs/ProcessBinding"
+        },
+        "scope": {
+          "$ref": "#/$defs/ScopeBinding"
+        },
+        "agentSessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "nativeThreadId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Immutable prepare intent: nativeThreadId is required. Null explicitly means a new not-yet-created thread; non-null is an existing actual thread. Never use a fabricated thread identifier or a model bootstrap Turn. bind_turn later freezes the actual thread and Turn together without rewriting this context."
+    },
+    "ProcessBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostInstanceId",
+        "runtimeGeneration"
+      ],
+      "properties": {
+        "hostInstanceId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "runtimeGeneration": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      },
+      "description": "Set once by the Host-owned process assembly. Never accept these values from Runtime, renderer or MCP metadata as proof of ownership."
+    },
+    "ScopeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownerUserId",
+        "tenantId",
+        "nativeProcessEpoch",
+        "authorizationRevision",
+        "authorizationExpiresAtUnixMs"
+      ],
+      "properties": {
+        "ownerUserId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "nativeProcessEpoch": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "authorizationRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "authorizationExpiresAtUnixMs": {
+          "$ref": "#/$defs/UnixMilliseconds"
+        }
+      },
+      "description": "Trusted Native authorization projection after Host verification; process epoch/revision are fences, not bearer credentials. Native adapter is not yet exposed to the versioned Host provider. A structurally valid JSON object alone does not authorize a product request."
+    },
+    "UnixMilliseconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "SelectionDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ToolName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "ArgsDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ReviewProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "summary",
+        "risk"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "argumentsJson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16384,
+          "description": "Complete frozen generic-tool arguments encoded as JSON, never truncated or changed. No credentials. Render as inert text; display is not execution authority."
+        },
+        "schemaDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "description": "Exact call review. Legacy reviewed tools use title/summary/risk. generic-mcp-v1 additionally requires complete credential-free argumentsJson and the frozen input schema digest, shown as inert text; unreviewable, oversized or credential-bearing inputs are denied. Undeclared read semantics uses risk=write and explicit high-risk warning. Never infer approval from tool annotations, names or OAuth consent."
+    },
+    "Decision": {
+      "type": "string",
+      "enum": [
+        "approve_once",
+        "reject",
+        "cancel"
+      ]
+    },
+    "ToolSnapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "agentSessionId",
+        "nativeTurnId",
+        "items",
+        "truncated"
+      ],
+      "properties": {
+        "agentSessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "nativeTurnId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/ToolObservation"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ToolObservation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "nativeItemId",
+        "nativeThreadId",
+        "nativeTurnId",
+        "serverName",
+        "toolName",
+        "state",
+        "truncated"
+      ],
+      "properties": {
+        "nativeItemId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "nativeThreadId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "nativeTurnId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "serverName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "toolName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "in_progress",
+            "completed",
+            "failed"
+          ]
+        },
+        "service": {
+          "$ref": "#/$defs/ServiceBinding"
+        },
+        "callRef": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "resultText": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "errorCode": {
+          "type": "string",
+          "enum": [
+            "tool_failed",
+            "cancelled",
+            "runtime_unavailable",
+            "unsupported_result"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "description": "Minimal observation from actual native MCP Tool Item facts. Optional service/callRef require explicit trusted correlation; never guess matching Item by latest item, same tool or args. resultText is safe bounded text from actual native output, never raw platform credentials/transport/config. Approval acceptance is not result completion. failed is an unsuccessful native tool observation, not proof that a provider request was sent, not sent or executed. Fixed Gateway error text may distinguish known pre-dispatch rejection from unverified outcome; do not infer this distinction from a generic code or guess callRef linkage."
+    },
+    "ServiceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "serviceId",
+        "credentialRef"
+      ],
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/SelectionRef"
+        },
+        "serviceId": {
+          "$ref": "#/$defs/ServiceId"
+        },
+        "credentialRef": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      },
+      "description": "Native-created non-secret credential reference for the exact installation generation and revision. Keyring alias derives stable owner/tenant/service/installation/generation/credentialRef, excludes Native process epoch and display revision. Native authoritative probe may advance only the same generation revision; never treat a ready flag or OAuth completion as tool qualification."
+    },
+    "ObservedTurn": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "nativeTurnId",
+        "selectionDisplay"
+      ],
+      "properties": {
+        "nativeTurnId": {
+          "$ref": "#/$defs/NativeId"
+        },
+        "selectionDisplay": {
+          "type": "array",
+          "maxItems": 51,
+          "items": {
+            "$ref": "#/$defs/SelectionDisplay"
+          }
+        }
+      },
+      "description": "Read-only original turn identity and submitted display snapshot. Never an approval or execution grant."
+    },
+    "NativeApprovalDecidePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "approvalId",
+        "decisionId",
+        "expectedRevision",
+        "decision"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "approvalId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "decisionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schemaVersion",
+        "code",
+        "retryable"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "retryable": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "ErrorCode": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "not_ready",
+            "authority_mismatch",
+            "scope_expired",
+            "permission_denied",
+            "grant_not_found",
+            "grant_expired",
+            "capacity_exceeded",
+            "request_conflict",
+            "revision_conflict",
+            "selection_stale",
+            "execution_unavailable",
+            "model_unavailable",
+            "permission_mode_unavailable",
+            "session_not_found",
+            "busy",
+            "operation_uncertain",
+            "approval_not_found",
+            "approval_stale",
+            "approval_expired",
+            "approval_resolved",
+            "cleanup_pending",
+            "temporarily_unavailable",
+            "context_invalid"
+          ]
+        },
+        {
+          "$ref": "#/$defs/ReferencedErrorCode"
+        }
+      ],
+      "description": "Safe Host-specific errors plus the exact referenced provider error set. Provider error codes are not copied or independently widened."
+    },
+    "ReferencedErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "authority_mismatch",
+        "scope_expired",
+        "binding_mismatch",
+        "not_found",
+        "request_conflict",
+        "capacity_exceeded",
+        "unknown_service",
+        "unsupported_auth",
+        "keyring_unavailable",
+        "metadata_unavailable",
+        "authorization_rejected",
+        "authorization_timeout",
+        "not_qualified",
+        "cleanup_pending",
+        "temporarily_unavailable"
+      ]
+    }
+  }
+}

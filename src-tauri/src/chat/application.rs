@@ -47,6 +47,7 @@ const PROGRESS_FLUSH_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone)]
 pub struct ConversationApplication {
+    market_authority: Option<ChatAuthorizationManager>,
     database: DatabaseWorker,
     host: Option<Arc<HostBridge>>,
     public_tasks: Option<Arc<dyn PublicTaskControlPlane>>,
@@ -989,6 +990,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: false,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1006,6 +1008,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: false,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1029,6 +1032,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: false,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1049,6 +1053,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: false,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1069,6 +1074,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: true,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1085,6 +1091,7 @@ impl ConversationApplication {
             feat137_streaming_enabled: false,
             lifecycle: super::lifecycle::Lifecycle::default(),
             schedule_authority: None,
+            market_authority: None,
             coordinator_stopping: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             recovery_poll: Arc::new(std::sync::Mutex::new(None)),
             schedule_poll: Arc::new(std::sync::Mutex::new(None)),
@@ -1103,6 +1110,14 @@ impl ConversationApplication {
             Ok(())
         }
     }
+    pub(crate) fn with_market_authority(
+        mut self,
+        authority: Option<ChatAuthorizationManager>,
+    ) -> Self {
+        self.market_authority = authority;
+        self
+    }
+
     pub(crate) fn with_native_lifecycle(
         mut self,
         lifecycle: super::lifecycle::Lifecycle,
@@ -1715,6 +1730,25 @@ impl ConversationApplication {
             return Ok(DispatchOutcome::Idle);
         };
         let now = unix_seconds()?;
+        if super::connectors::enabled() {
+            if let (Some(authority), Some(host), Some(public_tasks)) =
+                (&self.market_authority, &self.host, &self.public_tasks)
+            {
+                if let Some(outcome) = super::connectors::dispatch::next(
+                    &self.database,
+                    host,
+                    authority,
+                    public_tasks.as_ref(),
+                    &self.lifecycle,
+                    epoch,
+                    now,
+                )
+                .await?
+                {
+                    return Ok(outcome);
+                }
+            }
+        }
         if self.feat137_streaming_enabled {
             if let Some(status) = self
                 .database

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "wire_authority": "compatibility/market-host/wire.schema.json",
+  "contextBinding": "chat_bind_context_v1",
+  "commands": [
+    {
+      "command": "chat_market_observe_v1",
+      "request": "NativeObserveRequest",
+      "response": "NativeObserveResponse",
+      "requiredPermission": "task.read"
+    },
+    {
+      "command": "chat_market_approval_decide_v1",
+      "request": "NativeApprovalDecideRequest",
+      "response": "NativeApprovalDecideResponse",
+      "requiredPermission": "task.read, task.create, connector.use"
+    }
+  ],
+  "error": "NativeError",
+  "semantics": "Renderer may select only a known local session and pending approval identity. Native derives scope, Host session, callRef, complete CallIdentity and installation authority from its database and trusted Host read. Renderer cannot register grants or invoke private control/provider actions. Native maps host/provider failures to this safe source; permission_mode_unavailable directs the user to request approval mode."
+}

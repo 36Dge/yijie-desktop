@@ -11,7 +11,7 @@ describe("app navigation", () => {
       "workspace",
       "scheduledTask",
       "plugin",
-      "knowledge",
+      "connectors",
       "taskHistory",
       "settings",
     ]);
@@ -21,7 +21,7 @@ describe("app navigation", () => {
       "工作流",
       "定时任务",
       "插件",
-      "资料库",
+      "连接器",
       "任务",
       "设置",
     ]);
@@ -42,6 +42,7 @@ describe("app navigation", () => {
       { key: "workspace", to: "/workflows" },
       { key: "scheduledTask", to: "/scheduled-tasks" },
       { key: "plugin", to: "/plugins" },
+      { key: "connectors", to: "/connectors" },
       { key: "settings", to: "/settings" },
     ]);
     expect(resolvedItems.filter((item) => item.disabled).every((item) => !("to" in item))).toBe(
@@ -65,7 +66,7 @@ describe("app navigation", () => {
 
   it("NAV-004 keeps the task history section after hidden business modules", () => {
     const resolved = resolveAppNavigation(APP_NAVIGATION, {
-      knowledge: false,
+      connectors: false,
       plugin: false,
       scheduledTask: false,
       store: false,

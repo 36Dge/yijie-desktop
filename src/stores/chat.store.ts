@@ -1,3 +1,5 @@
+import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
+import type { SelectionRef } from "../domain/market-selection.generated";
 import { chatModelClient, type ModelIntent } from "../api/chat-model-client";
 import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
@@ -541,8 +543,9 @@ export function createChatStoreDefinition(
       input: string,
       blocks: readonly ChatTurnContentBlock[],
       modelIntent?: ModelIntent,
+      marketSelection?: readonly SelectionRef[],
     ): string {
-      return JSON.stringify({ kind, targetId, input: input.trim(), blocks, modelIntent });
+      return JSON.stringify({ kind, targetId, input: input.trim(), blocks, modelIntent, marketSelection });
     }
 
     function clearSubmissionAttempt(): void {
@@ -3679,10 +3682,24 @@ export function createChatStoreDefinition(
       ));
     }
 
+    async function submitMarket(contextId: string, projectId: string | null, sessionId: string | null,
+      contentBlocks: readonly ChatTurnContentBlock[], operationId: string, intent: ModelIntent | undefined,
+      selection: readonly SelectionRef[]) {
+      if (!intent) throw new MarketChatError("model_unavailable");
+      const result = await marketHostNativeClient.submit(contextId, {
+        operationId, projectId, ...(sessionId ? { sessionId } : {}), contentBlocks: [...contentBlocks], intent,
+        selection: [...selection],
+      });
+      // This is local durability only. The existing queued projection and
+      // Coordinator stream establish actual Runtime acceptance later.
+      return { sessionId: result.sessionId, turnId: result.localTurnId, operationId: result.submissionOperationId };
+    }
+
     async function createSessionWithResult(
       projectId: string | null,
       input: string,
       modelIntent?: ModelIntent,
+      marketSelection?: readonly SelectionRef[],
     ): Promise<ChatSubmissionResult> {
       const bound = context.value;
       if (
@@ -3694,7 +3711,7 @@ export function createChatStoreDefinition(
       const submissionToken = beginSubmission();
       if (submissionToken === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       try {
-        const attemptKey = submissionKey("create", projectId, input, blocks, modelIntent);
+        const attemptKey = submissionKey("create", projectId, input, blocks, modelIntent, marketSelection);
         const attemptAuthorityEpoch = authorityEpoch;
         const attemptSelectionEpoch = selectionEpoch;
         const attemptDraftEpoch = draftEpoch;
@@ -3727,11 +3744,13 @@ export function createChatStoreDefinition(
         const currentBlocks = turnContentBlocks(input);
         if (
           currentBlocks === null ||
-          submissionKey("create", projectId, input, currentBlocks, modelIntent) !== attemptKey
+          submissionKey("create", projectId, input, currentBlocks, modelIntent, marketSelection) !== attemptKey
         ) return CHAT_SUBMISSION_NOT_ACCEPTED;
         const attemptOperationId = submissionOperation(attemptKey);
         if (!markSubmissionDispatching(submissionToken)) return CHAT_SUBMISSION_NOT_ACCEPTED;
-        const created = modelIntent
+        const created = marketSelection !== undefined
+          ? await submitMarket(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent, marketSelection)
+          : modelIntent
           ? await chatModelClient.submit(bound.contextId, projectId, null, currentBlocks, attemptOperationId, modelIntent)
           : streamingV4Enabled || draftAttachments.value.length > 0
           ? await client.createSessionV2(bound.contextId, projectId, currentBlocks, attemptOperationId)
@@ -3740,7 +3759,7 @@ export function createChatStoreDefinition(
         if (
           !isCurrentCreateAuthority() ||
           settledBlocks === null ||
-          submissionKey("create", projectId, input, settledBlocks, modelIntent) !== attemptKey
+          submissionKey("create", projectId, input, settledBlocks, modelIntent, marketSelection) !== attemptKey
         ) return CHAT_SUBMISSION_NOT_ACCEPTED;
         if (created.operationId !== attemptOperationId) {
           throw new ChatClientError({
@@ -3803,7 +3822,7 @@ export function createChatStoreDefinition(
       return result.status === "local_durable_accepted" ? result.sessionId : null;
     }
 
-    async function submitTurnWithResult(input: string, modelIntent?: ModelIntent): Promise<ChatSubmissionResult> {
+    async function submitTurnWithResult(input: string, modelIntent?: ModelIntent, marketSelection?: readonly SelectionRef[]): Promise<ChatSubmissionResult> {
       const bound = context.value;
       const sessionId = selectedSessionId.value;
       if (!bound || !sessionId || !canSend.value || !hasAction("submit_turn")) {
@@ -3814,7 +3833,7 @@ export function createChatStoreDefinition(
       const submissionToken = beginSubmission();
       if (submissionToken === null) return CHAT_SUBMISSION_NOT_ACCEPTED;
       try {
-        const attemptKey = submissionKey("submit", sessionId, input, blocks, modelIntent);
+        const attemptKey = submissionKey("submit", sessionId, input, blocks, modelIntent, marketSelection);
         const attemptAuthorityEpoch = authorityEpoch;
         const attemptSelectionEpoch = selectionEpoch;
         const attemptDraftEpoch = draftEpoch;
@@ -3830,7 +3849,9 @@ export function createChatStoreDefinition(
         const attemptOperationId = submissionOperation(attemptKey);
         if (!markSubmissionDispatching(submissionToken)) return CHAT_SUBMISSION_NOT_ACCEPTED;
         let created;
-        if (modelIntent) {
+        if (marketSelection !== undefined) {
+          created = await submitMarket(bound.contextId, null, sessionId, blocks, attemptOperationId, modelIntent, marketSelection);
+        } else if (modelIntent) {
           created = await chatModelClient.submit(bound.contextId, null, sessionId, blocks, attemptOperationId, modelIntent);
         } else if (streamingV4Enabled || draftAttachments.value.length > 0) {
           created = await client.submitTurnV2(bound.contextId, sessionId, blocks, attemptOperationId);
@@ -3841,7 +3862,7 @@ export function createChatStoreDefinition(
         if (
           !isCurrentSubmitAuthority() ||
           settledBlocks === null ||
-          submissionKey("submit", sessionId, input, settledBlocks, modelIntent) !== attemptKey
+          submissionKey("submit", sessionId, input, settledBlocks, modelIntent, marketSelection) !== attemptKey
         ) return CHAT_SUBMISSION_NOT_ACCEPTED;
         if (created.operationId !== attemptOperationId) {
           throw new ChatClientError({

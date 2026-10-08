@@ -156,6 +156,32 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-chat-models.mjs" --check
 fi
 
+# FEAT-157 is an explicit local development opt-in until service qualification.
+# It selects the Native-owned market Host/worker path; it is not an execution grant.
+market_connectors_enabled="${YIJIE_MARKET_CONNECTORS_ENABLED:-false}"
+[[ "$market_connectors_enabled" == "true" || "$market_connectors_enabled" == "false" ]] || fail "invalid market connector selection"
+export YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
+export VITE_YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
+if [[ "$market_connectors_enabled" == "true" ]]; then
+  [[ "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "market connectors require the current native runtime"
+  node "$workspace_root/yijie-contracts/scripts/generate-market-connectors.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-market-connectors.mjs" --consumer=desktop --check
+  node "$desktop_root/scripts/sync-market-catalog.mjs" --check
+  node "$workspace_root/yijie-contracts/scripts/sync-market-selection.mjs" --consumer=desktop --check
+  node "$workspace_root/yijie-contracts/scripts/sync-market-host.mjs" --consumer=desktop --check
+  node "$workspace_root/yijie-contracts/scripts/sync-market-provider.mjs" --consumer=desktop --check
+  bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+  export YIJIE_MARKET_WORKER_MANIFEST="$workspace_root/yijie-connectors/bin/market-worker/current.json"
+fi
+market_provider_only="false"
+provider_environment=(YIJIE_MODEL_PROVIDER=minimax "YIJIE_MINIMAX_API_KEY_FILE=$provider_key_file")
+if [[ "$market_connectors_enabled" == "true" && ! -e "$provider_key_file" ]]; then
+  market_provider_only="true"
+  image_generation_enabled="false"
+  provider_environment=()
+fi
+export YIJIE_MARKET_PROVIDER_ONLY="$market_provider_only"
+
 # Detached source verification may reuse the same existing audited Runtime and
 # provider key by absolute path. All original hash/type/protection checks remain.
 [[ "$codex_runtime_root" == /* && "$provider_key_file" == /* ]] || fail "Runtime and provider key sources must be absolute paths"
@@ -165,7 +191,9 @@ fi
   fail "Codex Runtime binary differs from the selected pinned artifact"
 [[ "$(sha256_file "$codex_manifest")" == "$runtime_manifest_sha256" ]] ||
   fail "Codex Runtime manifest differs from the selected pinned artifact"
-[[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
+if [[ "$market_provider_only" != "true" ]]; then
+  [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
+fi
 
 # FEAT-134 first verifies its exact Contracts/Host v4 authority. The Skill
 # resource chain then retains its independent legacy immutable pins.
@@ -330,8 +358,7 @@ exec env \
   YIJIE_CHAT_LOCAL_OWNER_USER_ID=12500000-0000-4000-8000-000000000001 \
   YIJIE_CHAT_LOCAL_TENANT_ID=12500000-0000-4000-8000-100000000001 \
   YIJIE_CHAT_ARTIFACTS_V3_ENABLED=true \
-  YIJIE_MODEL_PROVIDER=minimax \
-  YIJIE_MINIMAX_API_KEY_FILE="$provider_key_file" \
+  "${provider_environment[@]+"${provider_environment[@]}"}" \
   YIJIE_FEAT128_IMAGE_GENERATION_ENABLED="$image_generation_enabled" \
   YIJIE_FEAT131_STABLE_ENTRY="$stable_api_only" \
   YIJIE_AGENT_HOST_BINARY="$host_binary" \

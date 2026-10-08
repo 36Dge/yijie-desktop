@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/chat/market-selection/v1",
+  "$defs": {
+    "CanonicalId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "SelectionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId",
+        "revision",
+        "generation"
+      ],
+      "properties": {
+        "installationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "generation": {
+          "$ref": "#/$defs/Revision"
+        }
+      },
+      "description": "No service label or secret is accepted as authority. Native and Host revalidate exact scope, generation, ready state and connector.use before a versioned turn is admitted."
+    },
+    "ProfileId": {
+      "type": "string",
+      "enum": [
+        "kimi-k3-max-v1",
+        "minimax-m3-high-v1"
+      ]
+    },
+    "ModelRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "SelectionDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Selection": {
+      "type": "array",
+      "maxItems": 51,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/SelectionRef"
+      },
+      "description": "Unique installationId required even when revisions differ. Native freezes canonical ASCII installationId order; requests may use any order."
+    },
+    "ModelIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "expectedRevision"
+      ],
+      "properties": {
+        "profileId": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/ModelRevision"
+        }
+      }
+    },
+    "TextInput": {
+      "title": "ChatTextContentBlock",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "FileInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attachmentId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "file"
+        },
+        "attachmentId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "ImageInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attachmentId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "image"
+        },
+        "attachmentId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "ContentBlock": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TextInput"
+        },
+        {
+          "$ref": "#/$defs/FileInput"
+        },
+        {
+          "$ref": "#/$defs/ImageInput"
+        }
+      ]
+    },
+    "SubmitPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "projectId",
+        "contentBlocks",
+        "intent",
+        "selection"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CanonicalId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contentBlocks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          }
+        },
+        "intent": {
+          "$ref": "#/$defs/ModelIntent"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "sessionId"
+            ],
+            "properties": {
+              "sessionId": {}
+            }
+          },
+          "then": {
+            "properties": {
+              "projectId": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Ordinary chat only. New chat omits sessionId and uses nullable projectId; an existing session requires projectId=null. Input attachment references use existing Native scoped attachment validation, never arbitrary paths. At most 10 attachment blocks and nonblank text require Native conformance. operationId is renderer submission identity, not necessarily the first actual turn operation. Nonempty selections must be rejected before any durable outbox or Runtime work when execution qualification is unavailable; no implicit fallback to empty. Before a versioned Host provider is qualified, all selections including empty must return execution_unavailable before persistence; do not dispatch via a legacy fallback. Idempotency compares full original content, target, model intent and connector references, not only selectionDigest."
+    },
+    "SelectionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "turnOperationId",
+        "selection",
+        "selectionDigest"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "turnOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection"
+        },
+        "selectionDigest": {
+          "$ref": "#/$defs/SelectionDigest"
+        }
+      },
+      "description": "Native-only durable immutable snapshot. Freeze inside the same transaction as the outbox using its actual turnOperationId. selection must be sorted by installationId ASCII, contain unique installation identities and match selectionDigest. Receipt replay reads this original snapshot, never current UI/catalog. No credentials or execution capability."
+    },
+    "SubmissionReceipt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "outcome",
+        "sessionId",
+        "localTurnId",
+        "submissionOperationId",
+        "turnOperationId",
+        "selectionDigest"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "local_durable_accepted"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "localTurnId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "submissionOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "turnOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "selectionDigest": {
+          "$ref": "#/$defs/SelectionDigest"
+        }
+      },
+      "description": "Durable Native receipt only, not proof of Runtime acceptance. Coordinator wake-up failure after commit must not change this accepted result; original receipt remains queryable/replayable."
+    },
+    "SubmitRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/SubmitPayload"
+        }
+      }
+    },
+    "SubmitResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/SubmissionReceipt"
+        }
+      }
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "context_invalid",
+        "permission_denied",
+        "not_found",
+        "request_conflict",
+        "selection_stale",
+        "execution_unavailable",
+        "temporarily_unavailable"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schemaVersion",
+        "code",
+        "retryable"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "description": "requestId is echoed only when a real canonical non-nil request UUID can be decoded; malformed input errors omit it, never fabricate identity. Optional fields reject explicit null."
+    },
+    "Revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

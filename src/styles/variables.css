@@ -165,6 +165,15 @@
   --yj-layout-shop-menu-width: 360px;
   --yj-layout-shop-trigger-max: 200px;
   --yj-layout-shop-list-max: 288px;
+  --yj-layout-connector-modal-width: 480px;
+  /* Provider artwork includes dark text and stays on a neutral white plate. */
+  --yj-color-bg-connector-artwork: #ffffff;
+  --yj-layout-connector-menu-width: 400px;
+  --yj-layout-connector-list-max: 320px;
+  --yj-layout-connector-search-width: 280px;
+  --yj-layout-connector-chip-max: 248px;
+  --yj-layout-connector-chip-list-max: 128px;
+  --yj-motion-connector-loading: 960ms;
   --yj-layout-workspace-list-max: 240px;
   --yj-layout-workspace-create-width: 480px;
   --yj-layout-chat-column-max: 880px;

@@ -327,7 +327,7 @@ impl ChatIpcRuntime {
         }
     }
 
-    async fn ensure_coordinator(
+    pub(crate) async fn ensure_coordinator(
         &self,
         app: AppHandle,
         application: ConversationApplication,
@@ -7542,7 +7542,11 @@ pub async fn chat_bind_management_context_v1(
         .chat_projection(&request.payload.tenant_selector, now)
         .await
         .map_err(|e| map_native_projection_error(e, request.request_id))?;
-    if !native.capabilities.iter().any(|c| c == "schedule.read") {
+    if !native
+        .capabilities
+        .iter()
+        .any(|c| c == "schedule.read" || (super::connectors::enabled() && c == "connector.read"))
+    {
         return Err(ChatIpcError::capability_denied(Some(request.request_id)));
     }
     let projection = AuthoritativeChatProjection::from_trusted_native_projection(

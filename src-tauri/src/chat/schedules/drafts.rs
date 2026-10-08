@@ -159,6 +159,7 @@ impl ChatRepository {
             now: n,
             scheduled: None,
             draft: true,
+            market: false,
         };
         let (conversation, turn, operation, create) = if let Some(id) = input.conversation_id {
             guard_conversation(&tx, &scope, &id, true).map_err(chat)?;

@@ -55,6 +55,11 @@ pub(crate) fn outbox_predicate(db: &Connection, alias: &str) -> Result<String, C
 /// control-plane awaits. A held foreground outbox itself blocks new reservations.
 impl ChatRepository {
     pub fn guard_conversation_dispatch(&self, operation_id: Uuid) -> Result<(), ChatError> {
+        crate::chat::connectors::selection::require_legacy_operation(
+            &self.connection,
+            &self.scope,
+            operation_id,
+        )?;
         if self.guard_draft_dispatch(operation_id)? {
             return Ok(());
         }

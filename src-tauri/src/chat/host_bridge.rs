@@ -1,3 +1,4 @@
+mod market;
 mod models;
 use super::artifact::{
     ArtifactCommit, ArtifactKind, ArtifactManifest, DownloadedArtifact, DownloadedResource,
@@ -74,6 +75,7 @@ impl Debug for HostTrace {
 
 #[derive(Clone)]
 pub struct HostBridge {
+    market_control: Option<super::connectors::control::MarketControl>,
     model_profile: Option<String>,
     schedule_admission: Option<super::schedules::dispatch::Admission>,
     draft_admission: Option<super::schedules::draft_admission::Admission>,
@@ -513,6 +515,7 @@ impl HostBridge {
             .build()
             .map_err(|_| configuration_error())?;
         Ok(Self {
+            market_control: None,
             model_profile: None,
             schedule_admission: None,
             draft_admission: None,
@@ -522,6 +525,20 @@ impl HostBridge {
             expected_nonce: connection.instance_nonce,
             client,
         })
+    }
+
+    pub(crate) fn with_market_control(
+        mut self,
+        control: Option<super::connectors::control::MarketControl>,
+    ) -> Self {
+        self.market_control = control;
+        self
+    }
+
+    pub(crate) fn market_control(&self) -> Option<super::connectors::control::MarketControl> {
+        self.market_control
+            .clone()
+            .filter(|control| control.is_open())
     }
 
     pub(crate) fn with_lifecycle(mut self, lifecycle: super::lifecycle::Lifecycle) -> Self {
@@ -1372,7 +1389,8 @@ impl HostBridge {
                 || path_and_query.ends_with("/agent-sessions")
                 || path_and_query.ends_with("/interrupt")
                 || path_and_query.ends_with("/model")
-                || path_and_query.starts_with("/v1/scheduled-plan-draft-sessions"));
+                || path_and_query.starts_with("/v1/scheduled-plan-draft-sessions")
+                || path_and_query == "/v1/market-chat/submissions");
         let permit = if execution {
             Some(
                 self.lifecycle

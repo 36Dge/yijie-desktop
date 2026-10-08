@@ -120,6 +120,11 @@ impl ChatRepository {
             .transpose()
     }
     pub(super) fn resume_model_profile(&self, session: Uuid) -> Result<Option<String>, ChatError> {
+        super::connectors::selection::require_legacy_session(
+            &self.connection,
+            &self.scope,
+            session,
+        )?;
         if !table(&self.connection)? {
             return Ok(None);
         }
@@ -152,6 +157,7 @@ impl ChatRepository {
         if op.is_nil() || revision == 0 || intent.expected_revision != 0 {
             return Err(ChatError::InvalidInput);
         }
+        super::connectors::selection::require_legacy_operation(&self.connection, &self.scope, op)?;
         let project = match project {
             Some(p) => p,
             None => self.ensure_projectless_workspace(op)?,
@@ -173,6 +179,7 @@ impl ChatRepository {
                 now,
                 scheduled: None,
                 draft: false,
+                market: false,
             },
             project,
             &blocks,
@@ -193,6 +200,12 @@ impl ChatRepository {
         intent: ModelIntent,
     ) -> Result<Uuid, ChatError> {
         self.require_model_storage()?;
+        super::connectors::selection::require_legacy_session(
+            &self.connection,
+            &self.scope,
+            session,
+        )?;
+        super::connectors::selection::require_legacy_operation(&self.connection, &self.scope, op)?;
         self.agent_session_id_for_session_optional_model(session)?;
         super::database::validate_draft_blocks(&blocks)?;
         if session.is_nil() || op.is_nil() || intent.expected_revision < 0 {
@@ -220,6 +233,7 @@ impl ChatRepository {
                 now,
                 scheduled: None,
                 draft: false,
+                market: false,
             },
             session,
             &blocks,
@@ -271,6 +285,16 @@ impl ChatRepository {
         op: Uuid,
     ) -> Result<Uuid, ChatError> {
         self.require_model_storage()?;
+        // The versioned Host model path clears market capability/configuration
+        // before its existing idle model switch. Legacy turn/resume stay fenced.
+        if !super::connectors::enabled() {
+            super::connectors::selection::require_legacy_session(
+                &self.connection,
+                &self.scope,
+                session,
+            )?;
+        }
+        super::connectors::selection::require_legacy_operation(&self.connection, &self.scope, op)?;
         let host = self
             .agent_session_id_for_session_optional_model(session)?
             .ok_or(ChatError::ConversationConflict)?;

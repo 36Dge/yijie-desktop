@@ -27,7 +27,7 @@ describe("app permission policy", () => {
       workspace: false,
       scheduledTask: false,
       plugin: false,
-      knowledge: false,
+      connectors: false,
       settings: true,
     });
     expect(resolveNavigationVisibility(snapshot([], { ready: false }))).toEqual(
@@ -38,7 +38,7 @@ describe("app permission policy", () => {
   it("POLICY-002 maps every published and unpublished module to its exact capability", () => {
     expect(
       resolveNavigationVisibility(
-        snapshot(["task.create", "store.read", "schedule.read", "knowledge.read"]),
+        snapshot(["task.create", "store.read", "schedule.read", "connector.read"]),
       ),
     ).toEqual({
       newTask: true,
@@ -47,7 +47,7 @@ describe("app permission policy", () => {
       workspace: false,
       scheduledTask: true,
       plugin: false,
-      knowledge: true,
+      connectors: true,
       settings: true,
     });
   });
@@ -123,4 +123,14 @@ it("FEAT-155 requires schedule.read for management navigation and deep links", (
   expect(requiredCapabilityForPath("/scheduled-tasks")).toBe("schedule.read");
   expect(canRenderProtectedPath("/scheduled-tasks", snapshot(["schedule.read"]))).toBe(true);
   expect(canRenderProtectedPath("/scheduled-tasks", snapshot(["task.read"]))).toBe(false);
+});
+
+
+it("FEAT-157 protects connectors independently of knowledge and plugin access", () => {
+  const allowed = snapshot(["connector.read"]);
+  expect(requiredCapabilityForPath("/connectors")).toBe("connector.read");
+  expect(canRenderProtectedPath("/connectors", allowed)).toBe(true);
+  expect(canRenderProtectedPath("/connectors", snapshot(["knowledge.read", "plugin.manage"]))).toBe(false);
+  expect(canRenderProtectedPath("/connectors", { ...allowed, connectorsUiEnabled: false })).toBe(false);
+  expect(resolveNavigationVisibility({ ...allowed, connectorsUiEnabled: false }).connectors).toBe(false);
 });

@@ -566,6 +566,8 @@ struct SupervisorState {
     capture: Option<ProcessCapture>,
     cleanup_unknown: bool,
     last_stopped_nonce: Option<String>,
+    market_control: Option<super::connectors::control::MarketControl>,
+    market_hello: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -636,6 +638,9 @@ pub(super) struct HostConnection {
 }
 
 pub struct SidecarSupervisor {
+    // Frozen at Native assembly, not re-read from ambient state during retries.
+    market_provider_only: bool,
+    market_authority: Option<super::authorization::ChatAuthorizationManager>,
     scheduled_candidate: Option<(super::schedules::candidate::Launch, bool)>,
     config: Option<SidecarConfig>,
     demo_fast: bool,
@@ -666,6 +671,8 @@ impl SidecarSupervisor {
             .build()
             .map_err(|_| ChatError::InvalidConfiguration)?;
         Ok(Self {
+            market_provider_only: false,
+            market_authority: None,
             scheduled_candidate: None,
             config,
             demo_fast,
@@ -679,8 +686,45 @@ impl SidecarSupervisor {
                 capture: None,
                 cleanup_unknown: false,
                 last_stopped_nonce: None,
+                market_control: None,
+                market_hello: false,
             }),
         })
+    }
+
+    pub(crate) fn with_market_authority(
+        mut self,
+        authority: super::authorization::ChatAuthorizationManager,
+    ) -> Result<Self, ChatError> {
+        if !super::connectors::enabled()
+            || !self.demo_fast
+            || self
+                .config
+                .as_ref()
+                .is_none_or(|config| config.test_profile.is_some())
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        let provider_only = read_exact_boolean_environment("YIJIE_MARKET_PROVIDER_ONLY")?;
+        if provider_only
+            && self.config.as_ref().is_some_and(|config| {
+                config.minimax_provider_enabled || config.minimax_api_key_file.is_some()
+            })
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
+        self.market_provider_only = provider_only;
+        self.market_authority = Some(authority);
+        Ok(self)
+    }
+
+    fn market_management_only(&self) -> bool {
+        self.market_authority.is_some()
+            && self.market_provider_only
+            && self
+                .config
+                .as_ref()
+                .is_some_and(|config| !config.minimax_provider_enabled)
     }
 
     pub(crate) fn with_scheduled_tasks(
@@ -727,7 +771,29 @@ impl SidecarSupervisor {
             return Err(ChatError::CleanupIncomplete);
         }
         if state.state == SidecarState::RuntimeReady {
+            if state
+                .market_control
+                .as_ref()
+                .is_some_and(|pipe| !pipe.is_open())
+            {
+                return Err(ChatError::CleanupIncomplete);
+            }
             return Ok(state.state);
+        }
+        if state.state == SidecarState::HostLive
+            && state.market_hello
+            && state
+                .market_control
+                .as_ref()
+                .is_some_and(|pipe| pipe.is_open())
+        {
+            let nonce = state
+                .instance_nonce
+                .clone()
+                .ok_or(ChatError::SidecarUnavailable)?;
+            // Continue waiting on this same owned child after an interrupted
+            // start. A completed control hello does not make the model ready.
+            return self.wait_for_startup(config, &mut state, &nonce).await;
         }
         if state.child.is_some() {
             return Err(ChatError::SidecarUnavailable);
@@ -769,6 +835,26 @@ impl SidecarSupervisor {
         } else {
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
+        if self.market_authority.is_some() {
+            let manifest = std::env::var("YIJIE_MARKET_WORKER_MANIFEST")
+                .ok()
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute() && p.is_file())
+                .ok_or(ChatError::InvalidConfiguration)?;
+            command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(false)
+                .env("YIJIE_MARKET_CONNECTORS_ENABLED", "true")
+                .env("YIJIE_MARKET_WORKER_MANIFEST", manifest);
+            if self.market_management_only() {
+                if config.minimax_provider_enabled || config.minimax_api_key_file.is_some() {
+                    return Err(ChatError::InvalidConfiguration);
+                }
+                command.env("YIJIE_MARKET_PROVIDER_ONLY", "true");
+            }
+        }
         if let Some((candidate, _)) = &self.scheduled_candidate {
             command.env(super::schedules::candidate::CHILD_ENV, candidate.encode()?);
         }
@@ -794,6 +880,28 @@ impl SidecarSupervisor {
                 command.env(SORFTIME_PROXY_ENV, proxy);
             }
         }
+        if self.market_management_only() {
+            let manifest = optional_absolute_regular_file("YIJIE_MARKET_WORKER_MANIFEST")?
+                .ok_or(ChatError::InvalidConfiguration)?;
+            command.env_clear().envs([
+                ("YIJIE_ENV", "local".to_owned()),
+                ("YIJIE_LOCAL_PROFILE", "demo_fast".to_owned()),
+                (
+                    "YIJIE_AGENT_HOST_HOME",
+                    config.host_home.to_string_lossy().into_owned(),
+                ),
+                ("YIJIE_AGENT_HOST_PORT", config.port.to_string()),
+                ("YIJIE_AGENT_HOST_INSTANCE_NONCE", instance_nonce.clone()),
+                (AGENT_HOST_PARENT_PID_ENV, std::process::id().to_string()),
+                ("YIJIE_MARKET_CONNECTORS_ENABLED", "true".to_owned()),
+                ("YIJIE_MARKET_PROVIDER_ONLY", "true".to_owned()),
+                (
+                    "YIJIE_MARKET_WORKER_MANIFEST",
+                    manifest.to_string_lossy().into_owned(),
+                ),
+                ("PATH", "/usr/bin:/bin".to_owned()),
+            ]);
+        }
         let spawned = command.spawn();
         sorftime_token.take();
         drop(sorftime_token);
@@ -812,6 +920,15 @@ impl SidecarSupervisor {
             }
         };
         let child_pid = child.id().ok_or(ChatError::SidecarUnavailable)?;
+        state.market_control = if self.market_authority.is_some() {
+            Some(super::connectors::control::MarketControl::new(
+                child.stdin.take().ok_or(ChatError::SidecarUnavailable)?,
+                child.stdout.take().ok_or(ChatError::SidecarUnavailable)?,
+            ))
+        } else {
+            None
+        };
+        state.market_hello = false;
         let capture = if let Some(mut prepared) = prepared {
             prepared.evidence.pid = child.id();
             prepared.evidence.state = "starting".to_owned();
@@ -856,6 +973,16 @@ impl SidecarSupervisor {
             }
         };
         state.child_identity = Some(child_identity);
+        self.wait_for_startup(config, &mut state, &instance_nonce)
+            .await
+    }
+
+    async fn wait_for_startup(
+        &self,
+        config: &SidecarConfig,
+        state: &mut SupervisorState,
+        instance_nonce: &str,
+    ) -> Result<SidecarState, ChatError> {
         let deadline = tokio::time::Instant::now() + STARTUP_TIMEOUT;
         loop {
             let child_status = match state.child.as_mut() {
@@ -867,19 +994,58 @@ impl SidecarSupervisor {
                     state.child = None;
                     state.child_identity = None;
                     state.instance_nonce = None;
-                    finalize_capture(&mut state, Some(exit_status), "exited_during_startup").await;
+                    finalize_capture(state, Some(exit_status), "exited_during_startup").await;
                     state.state = SidecarState::Failed;
                     return Err(ChatError::SidecarUnavailable);
                 }
                 Err(_) => {
-                    retain_unknown_child(&mut state, "startup_status_unknown");
+                    retain_unknown_child(state, "startup_status_unknown");
                     return Err(ChatError::CleanupIncomplete);
                 }
                 Ok(None) => {}
             }
-            if self.liveness(config, &instance_nonce).await {
+            if self.liveness(config, instance_nonce).await {
                 state.state = SidecarState::HostLive;
-                if self.runtime_ready(config, &instance_nonce).await {
+                if let Some(authority) = &self.market_authority {
+                    if !state.market_hello {
+                        use super::connectors::host_generated as wire;
+                        let request = wire::HelloRequest {
+                            schema_version: 1,
+                            request_id: uuid::Uuid::now_v7().to_string(),
+                            method: "hello".into(),
+                            payload: authority.market_identity(instance_nonce.to_owned()),
+                        };
+                        let pipe = state
+                            .market_control
+                            .clone()
+                            .ok_or(ChatError::SidecarUnavailable)?;
+                        let response = pipe
+                            .request::<_, wire::HelloResponse>(&request.request_id, &request)
+                            .await;
+                        let matches = response.is_ok_and(|response| {
+                            let actual = response.data;
+                            actual.ready
+                                && actual.host_instance_id == request.payload.host_instance_id
+                                && actual.native_process_epoch
+                                    == request.payload.native_process_epoch
+                                && actual.owner_user_id == request.payload.owner_user_id
+                                && actual.tenant_id == request.payload.tenant_id
+                        });
+                        if !matches {
+                            pipe.close().await;
+                            retain_unknown_child(state, "market_control_handshake_unavailable");
+                            return Err(ChatError::CleanupIncomplete);
+                        }
+                        authority.bind_market_control(pipe)?;
+                        state.market_hello = true;
+                    }
+                }
+                if state.market_hello && self.market_management_only() {
+                    // This explicit mode starts no Runtime. OAuth readiness is
+                    // the owned Host and control hello, independent of models.
+                    return Ok(state.state);
+                }
+                if self.runtime_ready(config, instance_nonce).await {
                     if let Some(capture) = state.capture.as_mut() {
                         capture.evidence.state = "ready".to_owned();
                         write_process_evidence(&capture.evidence_path, &capture.evidence)?;
@@ -890,21 +1056,37 @@ impl SidecarSupervisor {
             }
             if tokio::time::Instant::now() >= deadline {
                 let identity = state.child_identity.clone();
-                let exit_status = match (state.child.as_mut(), identity.as_ref()) {
-                    (Some(child), Some(identity)) => {
-                        terminate_child(child, identity, config.forceful_child_cleanup_enabled())
+                let exit_status = if let Some(pipe) = state.market_control.take() {
+                    pipe.close().await;
+                    state.market_hello = false;
+                    match state.child.as_mut() {
+                        Some(child) => tokio::time::timeout(Duration::from_secs(3), child.wait())
                             .await
+                            .ok()
+                            .and_then(Result::ok),
+                        None => None,
                     }
-                    _ => None,
+                } else {
+                    match (state.child.as_mut(), identity.as_ref()) {
+                        (Some(child), Some(identity)) => {
+                            terminate_child(
+                                child,
+                                identity,
+                                config.forceful_child_cleanup_enabled(),
+                            )
+                            .await
+                        }
+                        _ => None,
+                    }
                 };
                 if exit_status.is_none() && state.child.is_some() {
-                    retain_unknown_child(&mut state, "startup_timeout_cleanup_unknown");
+                    retain_unknown_child(state, "startup_timeout_cleanup_unknown");
                     return Err(ChatError::CleanupIncomplete);
                 }
                 state.child = None;
                 state.child_identity = None;
                 state.instance_nonce = None;
-                finalize_capture(&mut state, exit_status, "startup_timeout").await;
+                finalize_capture(state, exit_status, "startup_timeout").await;
                 state.state = SidecarState::Failed;
                 return Err(ChatError::SidecarUnavailable);
             }
@@ -915,10 +1097,15 @@ impl SidecarSupervisor {
     pub async fn stop(&self) -> Result<SidecarState, ChatError> {
         let mut state = self.inner.lock().await;
         let already_stopping = state.cleanup_unknown;
+        let market_stopping = state.market_control.is_some();
+        if let Some(pipe) = state.market_control.take() {
+            pipe.close().await;
+        }
+        state.market_hello = false;
         let identity = state.child_identity.clone();
         let had_child = state.child.is_some();
         let exit_status = match (state.child.as_mut(), identity.as_ref()) {
-            (Some(child), Some(_)) if already_stopping => {
+            (Some(child), Some(_)) if already_stopping || market_stopping => {
                 tokio::time::timeout(Duration::from_secs(3), child.wait())
                     .await
                     .ok()
@@ -1015,6 +1202,33 @@ impl SidecarSupervisor {
         })
     }
 
+    pub(crate) async fn market_connection(
+        &self,
+    ) -> Result<(HostConnection, super::connectors::control::MarketControl), ChatError> {
+        self.refresh_child_state().await;
+        let state = self.inner.lock().await;
+        let config = self.config.as_ref().ok_or(ChatError::Disabled)?;
+        if !state.market_hello || state.child.is_none() || state.cleanup_unknown {
+            return Err(ChatError::SidecarUnavailable);
+        }
+        let pipe = state
+            .market_control
+            .clone()
+            .filter(|pipe| pipe.is_open())
+            .ok_or(ChatError::SidecarUnavailable)?;
+        Ok((
+            HostConnection {
+                port: config.port,
+                token_path: config.host_home.join("api-token"),
+                instance_nonce: state
+                    .instance_nonce
+                    .clone()
+                    .ok_or(ChatError::SidecarUnavailable)?,
+            },
+            pipe,
+        ))
+    }
+
     async fn refresh_child_state(&self) {
         let mut state = self.inner.lock().await;
         let child_status = match state.child.as_mut() {
@@ -1023,6 +1237,10 @@ impl SidecarSupervisor {
         };
         match child_status {
             Ok(Some(exit_status)) => {
+                if let Some(pipe) = state.market_control.take() {
+                    pipe.close().await;
+                }
+                state.market_hello = false;
                 state.child = None;
                 state.child_identity = None;
                 state.instance_nonce = None;
@@ -2617,6 +2835,8 @@ mod tests {
                 sorftime_proxy: None,
             };
             let supervisor = SidecarSupervisor {
+                market_provider_only: false,
+                market_authority: None,
                 scheduled_candidate: None,
                 config: Some(config),
                 demo_fast: false,
@@ -2630,6 +2850,8 @@ mod tests {
                     capture: None,
                     cleanup_unknown: false,
                     last_stopped_nonce: None,
+                    market_control: None,
+                    market_hello: false,
                 }),
             };
             assert_eq!(supervisor.start().await, Err(ChatError::SidecarUnavailable));
@@ -2714,6 +2936,8 @@ mod tests {
             sorftime_proxy: None,
         };
         let supervisor = SidecarSupervisor {
+            market_provider_only: false,
+            market_authority: None,
             scheduled_candidate: None,
             config: Some(config),
             demo_fast: false,
@@ -2733,6 +2957,8 @@ mod tests {
                 capture: None,
                 cleanup_unknown: false,
                 last_stopped_nonce: None,
+                market_control: None,
+                market_hello: false,
             }),
         };
         assert_eq!(
@@ -3088,6 +3314,8 @@ mod tests {
             .build()
             .unwrap();
         let supervisor = SidecarSupervisor {
+            market_provider_only: false,
+            market_authority: None,
             scheduled_candidate: None,
             config: None,
             demo_fast: false,
@@ -3101,9 +3329,125 @@ mod tests {
                 capture: None,
                 cleanup_unknown: false,
                 last_stopped_nonce: None,
+                market_control: None,
+                market_hello: false,
             }),
         };
         (config, supervisor)
+    }
+
+    // Ordinary loopback readiness transitions only. These tests do not spawn,
+    // modify or replace any executable and close their listener normally.
+    async fn market_startup_probe(
+        ready_after: Option<usize>,
+    ) -> (
+        u16,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        tokio::sync::oneshot::Sender<()>,
+        JoinHandle<()>,
+    ) {
+        const NONCE: &str = "15700000-0000-4000-8000-000000000001";
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = polls.clone();
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            loop {
+                let incoming = tokio::select! {
+                    _ = &mut stopped => break,
+                    incoming = listener.accept() => incoming,
+                };
+                let (mut stream, _) = incoming.unwrap();
+                let mut request = [0_u8; 1024];
+                let bytes = stream.read(&mut request).await.unwrap();
+                let (status, body) = if request[..bytes].starts_with(b"GET /readyz ") {
+                    let attempt = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                    if ready_after.is_some_and(|target| attempt >= target) {
+                        ("200 OK", r#"{"status":"ready","runtime_state":"ready"}"#)
+                    } else {
+                        (
+                            "503 Service Unavailable",
+                            r#"{"status":"not_ready","runtime_state":"starting"}"#,
+                        )
+                    }
+                } else {
+                    assert!(request[..bytes].starts_with(b"GET /healthz "));
+                    ("200 OK", r#"{"service":"yijie-agent-host","status":"ok"}"#)
+                };
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nX-Yijie-Host-Instance-Nonce: {NONCE}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).await.unwrap();
+                stream.shutdown().await.unwrap();
+            }
+        });
+        (port, polls, stop, server)
+    }
+
+    fn market_probe_authority() -> super::super::authorization::ChatAuthorizationManager {
+        let scope = super::super::database::ChatScope::new(
+            "15700000-0000-4000-8000-000000000002".into(),
+            "15700000-0000-4000-8000-000000000003".into(),
+        )
+        .unwrap();
+        super::super::authorization::ChatAuthorizationManager::new(&scope).unwrap()
+    }
+
+    #[tokio::test]
+    async fn native_market_startup_full_model_waits_beyond_control_hello() {
+        let (port, polls, stop, server) = market_startup_probe(Some(3)).await;
+        let (mut config, mut supervisor) = probe(port);
+        config.minimax_provider_enabled = true;
+        config.chat_models_enabled = true;
+        supervisor.config = Some(config.clone());
+        supervisor.market_authority = Some(market_probe_authority());
+        let mut state = supervisor.inner.lock().await;
+        state.state = SidecarState::HostLive;
+        state.market_hello = true; // The preceding, separate hello already passed.
+        let result = supervisor
+            .wait_for_startup(&config, &mut state, "15700000-0000-4000-8000-000000000001")
+            .await;
+        stop.send(()).unwrap();
+        server.await.unwrap();
+        assert_eq!(result, Ok(SidecarState::RuntimeReady));
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert!(state.child.is_none()); // This verifies probes, not a surrogate process.
+    }
+
+    #[tokio::test]
+    async fn native_market_startup_provider_only_returns_without_model_probe() {
+        let (port, polls, stop, server) = market_startup_probe(None).await;
+        let (config, mut supervisor) = probe(port);
+        supervisor.config = Some(config.clone());
+        supervisor.market_authority = Some(market_probe_authority());
+        supervisor.market_provider_only = true;
+        let mut state = supervisor.inner.lock().await;
+        state.state = SidecarState::HostLive;
+        state.market_hello = true;
+        let result = supervisor
+            .wait_for_startup(&config, &mut state, "15700000-0000-4000-8000-000000000001")
+            .await;
+        stop.send(()).unwrap();
+        server.await.unwrap();
+        assert_eq!(result, Ok(SidecarState::HostLive));
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn native_market_startup_provider_only_flag_without_authority_is_not_ready() {
+        let (port, polls, stop, server) = market_startup_probe(Some(2)).await;
+        let (config, mut supervisor) = probe(port);
+        supervisor.config = Some(config.clone());
+        supervisor.market_provider_only = true;
+        let mut state = supervisor.inner.lock().await;
+        state.state = SidecarState::HostLive;
+        state.market_hello = true;
+        let result = supervisor
+            .wait_for_startup(&config, &mut state, "15700000-0000-4000-8000-000000000001")
+            .await;
+        stop.send(()).unwrap();
+        server.await.unwrap();
+        assert_eq!(result, Ok(SidecarState::RuntimeReady));
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

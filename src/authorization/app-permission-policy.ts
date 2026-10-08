@@ -12,6 +12,7 @@ export interface PermissionPolicySnapshot {
   skillMarketplaceUiEnabled?: boolean;
   storeShowcaseUiEnabled?: boolean;
   workflowShowcaseUiEnabled?: boolean;
+  connectorsUiEnabled?: boolean;
   hasCapability(capability: KnownCapability): boolean;
 }
 
@@ -22,7 +23,7 @@ export const NAVIGATION_CAPABILITIES = {
   workspace: "workspace.use",
   scheduledTask: "schedule.read",
   plugin: "plugin.read",
-  knowledge: "knowledge.read",
+  connectors: "connector.read",
 } as const satisfies Readonly<
   Record<Exclude<AppNavItemKey, "settings">, KnownCapability>
 >;
@@ -33,6 +34,7 @@ export const ROUTE_CAPABILITIES = {
   "/store": "store.read",
   "/workflows": "workspace.use",
   "/plugins": "plugin.read",
+  "/connectors": "connector.read",
 } as const satisfies Readonly<Record<Exclude<AppRoutePath, "/settings">, KnownCapability>>;
 
 export function resolveNavigationVisibility(
@@ -45,7 +47,7 @@ export function resolveNavigationVisibility(
     workspace: false,
     scheduledTask: false,
     plugin: false,
-    knowledge: false,
+    connectors: false,
     settings: true,
   };
 
@@ -65,6 +67,7 @@ export function resolveNavigationVisibility(
   if (snapshot.skillMarketplaceUiEnabled === false) visibility.plugin = false;
   if (snapshot.storeShowcaseUiEnabled === false) visibility.store = false;
   if (snapshot.workflowShowcaseUiEnabled === false) visibility.workspace = false;
+  if (snapshot.connectorsUiEnabled === false) visibility.connectors = false;
 
   return visibility;
 }
@@ -99,8 +102,9 @@ export function canRenderProtectedPath(
   const skillUiAllowed = snapshot.skillMarketplaceUiEnabled !== false || path !== "/plugins";
   const storeUiAllowed = snapshot.storeShowcaseUiEnabled !== false || path !== "/store";
   const workflowUiAllowed = snapshot.workflowShowcaseUiEnabled !== false || (path !== "/workflows" && !path.startsWith("/workflows/"));
+  const connectorsUiAllowed = snapshot.connectorsUiEnabled !== false || path !== "/connectors";
   return (
-    chatUiAllowed && skillUiAllowed && storeUiAllowed && workflowUiAllowed && (capability === null ||
+    chatUiAllowed && skillUiAllowed && storeUiAllowed && workflowUiAllowed && connectorsUiAllowed && (capability === null ||
     (snapshot.enabled && snapshot.ready && snapshot.hasCapability(capability))
     )
   );
