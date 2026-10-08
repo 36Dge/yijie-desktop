@@ -157,6 +157,7 @@ struct AuthorizationState {
     highest_revision: u64,
     highest_capabilities: Option<HashSet<String>>,
     contexts: HashMap<Uuid, ContextRecord>,
+    market_control: Option<super::connectors::control::MarketControl>,
 }
 
 struct AuthorizationInner {
@@ -164,6 +165,7 @@ struct AuthorizationInner {
     tenant_id: Uuid,
     process_epoch: Uuid,
     state: Mutex<AuthorizationState>,
+    market_admission: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone)]
@@ -188,10 +190,12 @@ impl ChatAuthorizationManager {
                 owner_user_id: scope.owner_user_id.clone(),
                 tenant_id: scope.tenant_uuid()?,
                 process_epoch: Uuid::now_v7(),
+                market_admission: Arc::new(tokio::sync::Mutex::new(())),
                 state: Mutex::new(AuthorizationState {
                     highest_revision: 0,
                     highest_capabilities: None,
                     contexts: HashMap::new(),
+                    market_control: None,
                 }),
             }),
         })
@@ -243,6 +247,95 @@ impl ChatAuthorizationManager {
         Ok(result)
     }
 
+    /// Keep a connector mutation inside the current native permission lease.
+    pub(crate) fn with_connector_context<T>(
+        &self,
+        context: Uuid,
+        scope: &ChatScope,
+        permission: &str,
+        now: i64,
+        operation: impl FnOnce(&HashSet<String>) -> T,
+    ) -> Result<T, AuthorizationFailure> {
+        self.with_scoped_capabilities(
+            context,
+            scope,
+            &["connector.read", permission],
+            now,
+            |caps, _, _| operation(caps),
+        )
+    }
+
+    pub(crate) fn with_market_submit_context<T>(
+        &self,
+        context: Uuid,
+        scope: &ChatScope,
+        create: bool,
+        has_selection: bool,
+        now: i64,
+        operation: impl FnOnce(u64) -> T,
+    ) -> Result<T, AuthorizationFailure> {
+        let action = if create {
+            ChatAction::CreateSession
+        } else {
+            ChatAction::SubmitTurn
+        };
+        let mut required = action.required_capabilities().to_vec();
+        if create {
+            required.extend_from_slice(ChatAction::UseProject.required_capabilities());
+        }
+        if has_selection {
+            required.push("connector.use");
+        }
+        self.with_scoped_capabilities(context, scope, &required, now, |_, revision, _| {
+            operation(revision)
+        })
+    }
+
+    fn with_scoped_capabilities<T>(
+        &self,
+        context: Uuid,
+        scope: &ChatScope,
+        required: &[&str],
+        now: i64,
+        operation: impl FnOnce(&HashSet<String>, u64, i64) -> T,
+    ) -> Result<T, AuthorizationFailure> {
+        if self.inner.owner_user_id != scope.owner_user_id
+            || scope.tenant_uuid().ok() != Some(self.inner.tenant_id)
+            || context.is_nil()
+            || now < 0
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        let state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?;
+        let record = state
+            .contexts
+            .get(&context)
+            .ok_or(AuthorizationFailure::ContextInvalid)?;
+        if record.expires_at <= now
+            || record.process_epoch != self.inner.process_epoch
+            || record.authorization_revision != state.highest_revision
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        if !required
+            .iter()
+            .all(|cap| record.capabilities.contains(*cap))
+        {
+            return Err(AuthorizationFailure::CapabilityDenied);
+        }
+        let result = operation(
+            &record.capabilities,
+            record.authorization_revision,
+            record.expires_at,
+        );
+        drop(state);
+        Ok(result)
+    }
+
     pub fn bind(
         &self,
         projection: AuthoritativeChatProjection,
@@ -264,6 +357,11 @@ impl ChatAuthorizationManager {
             return Err(ChatError::ScopeDenied);
         }
         if projection.authorization_revision > state.highest_revision {
+            if state.highest_revision > 0 {
+                if let Some(control) = state.market_control.take() {
+                    control.retire();
+                }
+            }
             state.highest_revision = projection.authorization_revision;
             state.highest_capabilities = Some(projection.capabilities.clone());
         } else if state
@@ -404,13 +502,133 @@ impl ChatAuthorizationManager {
     }
 
     pub fn invalidate_all(&self) -> Result<(), ChatError> {
-        self.inner
+        let mut state = self
+            .inner
             .state
             .lock()
-            .map_err(|_| ChatError::ScopeDenied)?
-            .contexts
-            .clear();
+            .map_err(|_| ChatError::ScopeDenied)?;
+        state.contexts.clear();
+        if let Some(control) = state.market_control.take() {
+            control.retire();
+        }
         Ok(())
+    }
+
+    pub(crate) fn bind_market_control(
+        &self,
+        control: super::connectors::control::MarketControl,
+    ) -> Result<(), ChatError> {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| ChatError::ScopeDenied)?;
+        state.market_control = Some(control);
+        Ok(())
+    }
+
+    /// Serialize installation changes with the final selection check, grant
+    /// registration and execution trigger. Global authority invalidation stays
+    /// synchronous and retires the pipe without waiting for this gate.
+    pub(crate) async fn market_admission_lock(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.inner.market_admission.clone().lock_owned().await
+    }
+
+    pub(crate) fn market_identity(
+        &self,
+        host_instance: String,
+    ) -> super::connectors::host_generated::HelloPayload {
+        super::connectors::host_generated::HelloPayload {
+            host_instance_id: host_instance,
+            native_process_epoch: self.inner.process_epoch.to_string(),
+            owner_user_id: self.inner.owner_user_id.clone(),
+            tenant_id: self.inner.tenant_id.to_string(),
+        }
+    }
+
+    fn market_scope(
+        &self,
+        revision: u64,
+        expires_at: i64,
+    ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
+        let scope = super::connectors::broker_generated::ScopeBinding {
+            owner_user_id: self.inner.owner_user_id.clone(),
+            tenant_id: self.inner.tenant_id.to_string(),
+            native_process_epoch: self.inner.process_epoch.to_string(),
+            authorization_revision: i64::try_from(revision)
+                .map_err(|_| AuthorizationFailure::ContextInvalid)?,
+            authorization_expires_at_unix_ms: expires_at
+                .checked_mul(1000)
+                .ok_or(AuthorizationFailure::ContextInvalid)?,
+        };
+        scope
+            .validate()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?;
+        Ok(scope)
+    }
+
+    /// Export only while holding the same native lease that authorizes the
+    /// local operation. The renderer never supplies this projection.
+    pub(crate) fn with_market_authority<T>(
+        &self,
+        context: Uuid,
+        scope: &ChatScope,
+        required: &[&str],
+        now: i64,
+        operation: impl FnOnce(super::connectors::broker_generated::ScopeBinding) -> T,
+    ) -> Result<T, AuthorizationFailure> {
+        self.with_scoped_capabilities(context, scope, required, now, |_, revision, expiry| {
+            self.market_scope(revision, expiry).map(operation)
+        })?
+    }
+
+    /// A renewed UI context may replace the old context ID, but it cannot
+    /// re-authorize an outbox accepted under a different authority revision.
+    pub(crate) fn market_dispatch_authority(
+        &self,
+        scope: &ChatScope,
+        expected_revision: u64,
+        create: bool,
+        has_selection: bool,
+        now: i64,
+    ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
+        if self.inner.owner_user_id != scope.owner_user_id
+            || scope.tenant_uuid().ok() != Some(self.inner.tenant_id)
+            || expected_revision == 0
+            || now < 0
+        {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        let state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?;
+        if state.highest_revision != expected_revision {
+            return Err(AuthorizationFailure::ContextInvalid);
+        }
+        let mut required = ChatAction::SubmitTurn.required_capabilities().to_vec();
+        if create {
+            required.extend_from_slice(ChatAction::UseProject.required_capabilities());
+        }
+        if has_selection {
+            required.push("connector.use");
+        }
+        let expiry = state
+            .contexts
+            .values()
+            .filter(|record| {
+                record.process_epoch == self.inner.process_epoch
+                    && record.authorization_revision == expected_revision
+                    && record.expires_at > now
+                    && required
+                        .iter()
+                        .all(|cap| record.capabilities.contains(*cap))
+            })
+            .map(|record| record.expires_at)
+            .max()
+            .ok_or(AuthorizationFailure::ContextInvalid)?;
+        self.market_scope(expected_revision, expiry)
     }
 }
 

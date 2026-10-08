@@ -1,4 +1,6 @@
+import { CONNECTOR_CAPABILITIES } from "./market-connectors.generated";
 export const KNOWN_CAPABILITIES = [
+  ...CONNECTOR_CAPABILITIES,
   "knowledge.read",
   "plugin.manage",
   "plugin.read",

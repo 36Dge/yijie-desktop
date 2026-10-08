@@ -1,6 +1,6 @@
 import type { YjIconName } from "../icons/registry";
 
-export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/settings" | "/scheduled-tasks";
+export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/connectors" | "/settings" | "/scheduled-tasks";
 export type AppNavPlacement = "main" | "bottom";
 export type AppNavItemKey =
   | "newTask"
@@ -9,7 +9,7 @@ export type AppNavItemKey =
   | "workspace"
   | "scheduledTask"
   | "plugin"
-  | "knowledge"
+  | "connectors"
   | "settings";
 
 interface AppNavItemBase {
@@ -88,11 +88,12 @@ export const APP_NAVIGATION = [
   },
   {
     kind: "item",
-    key: "knowledge",
-    label: "资料库",
-    icon: "knowledge",
+    key: "connectors",
+    label: "连接器",
+    icon: "connector",
     placement: "main",
-    disabled: true,
+    disabled: false,
+    to: "/connectors",
   },
   {
     kind: "section",

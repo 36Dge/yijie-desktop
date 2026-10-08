@@ -36,7 +36,7 @@ impl LocalRuntimeProfile {
 }
 
 pub(crate) fn demo_fast_capabilities() -> Vec<String> {
-    vec![
+    let mut capabilities = vec![
         "knowledge.read".to_owned(),
         "plugin.manage".to_owned(),
         "plugin.read".to_owned(),
@@ -45,7 +45,13 @@ pub(crate) fn demo_fast_capabilities() -> Vec<String> {
         "task.create".to_owned(),
         "task.read".to_owned(),
         "workspace.use".to_owned(),
-    ]
+    ];
+    if crate::chat::connectors::enabled() {
+        capabilities
+            .extend(crate::chat::connectors::generated::CONNECTOR_CAPABILITIES.map(str::to_owned));
+    }
+    capabilities.sort();
+    capabilities
 }
 
 #[cfg(test)]

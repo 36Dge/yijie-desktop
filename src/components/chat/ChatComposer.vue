@@ -14,6 +14,8 @@ import {
   type ChatUiNotice,
 } from "../../domain/chat-ui";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatConnectorChips from "./ChatConnectorChips.vue";
+import type { ConnectorChipView } from "../../domain/connector-ui";
 
 const props = withDefaults(defineProps<{
   modelValue: string;
@@ -33,6 +35,7 @@ const props = withDefaults(defineProps<{
   attachmentImporting?: boolean;
   attachmentErrorCode?: string | null;
   dragActive?: boolean;
+  connectors?: readonly ConnectorChipView[];
 }>(), {
   activeProjectName: null,
   attachments: () => Object.freeze([]),
@@ -41,6 +44,7 @@ const props = withDefaults(defineProps<{
   attachmentErrorCode: null,
   dragActive: false,
   textOnly: false,
+  connectors: () => Object.freeze([]),
 });
 
 const emit = defineEmits<{
@@ -54,10 +58,12 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
+  "remove-connector": [id: string];
 }>();
 
 defineSlots<{
   "shop-control"(): unknown;
+  "connector-control"(): unknown;
   "workspace-control"(): unknown;
   "permission-control"(): unknown;
   "model-control"(): unknown;
@@ -96,6 +102,7 @@ const sendDisabled = computed(() =>
   submissionBusy.value || props.streaming || !props.canSend || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
+  (!props.textOnly && props.connectors.some((connector) => Boolean(connector.unavailableReason))) ||
   attachmentConstraintMessage.value !== null,
 );
 const sendLabel = computed(() => {
@@ -298,6 +305,7 @@ function handlePaste(event: ClipboardEvent): void {
         :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
       >
         <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
+        <ChatConnectorChips v-if="!textOnly" :entries="connectors" :disabled="submissionBusy || streaming || !canSend" @remove="emit('remove-connector', $event)" />
         <ul
           v-if="attachments.length > 0 || attachmentImportAttempt"
           class="chat-composer__attachments"
@@ -388,6 +396,7 @@ function handlePaste(event: ClipboardEvent): void {
               <YjIcon name="plus" size="lg" />
             </button>
             <slot v-if="!textOnly" name="shop-control" />
+            <slot v-if="!textOnly" name="connector-control" />
           </div>
           <div class="chat-composer__trailing-actions">
           <slot name="model-control" />
@@ -496,6 +505,9 @@ function handlePaste(event: ClipboardEvent): void {
     </p>
     <p v-if="attachmentConstraintMessage" class="chat-composer__validation" role="alert">
       {{ attachmentConstraintMessage }}
+    </p>
+    <p v-if="!textOnly && connectors.some(connector => connector.unavailableReason)" class="chat-composer__validation" role="alert">
+      部分连接器暂不可用，请移除或重新连接后发送。
     </p>
   </section>
 </template>

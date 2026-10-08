@@ -2,6 +2,7 @@ export const CHAT_COMPOSER_NEW_DRAFT_KEY = "new" as const;
 
 export type ChatComposerDraftKey =
   | typeof CHAT_COMPOSER_NEW_DRAFT_KEY
+  | "plan:new"
   | `session:${string}`;
 
 export type ChatComposerDrafts = Readonly<Record<ChatComposerDraftKey, string>>;

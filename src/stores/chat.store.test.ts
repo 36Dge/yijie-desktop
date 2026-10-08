@@ -1,3 +1,4 @@
+import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
 import type {NativeConversationViewEvent} from "../api/generated/native-conversation-private.gen";
 import { createPinia,setActivePinia } from "pinia";
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
@@ -775,6 +776,37 @@ describe("chat view-model store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("market selection uses Native submission and keeps only local durable acceptance", async () => {
+    const { client } = fakeClient();
+    const legacy = vi.spyOn(client, "createSession");
+    const submit = vi.spyOn(marketHostNativeClient, "submit").mockImplementation(async (_context, payload) => ({
+      outcome: "local_durable_accepted", sessionId: SESSION_A, localTurnId: TURN_A,
+      submissionOperationId: payload.operationId, turnOperationId: TURN_A, selectionDigest: "a".repeat(64),
+    }));
+    const store = createStore(client); await store.bind(TENANT);
+    try {
+      const selection = [{ installationId: ARTIFACT_A, revision: 2, generation: 1 }];
+      const accepted = await store.createSessionWithResult(null, "普通合成查询", { profileId: "kimi-k3-max-v1", expectedRevision: 0 }, selection);
+      expect(accepted.status).toBe("local_durable_accepted");
+      expect(submit).toHaveBeenCalledWith(CONTEXT, expect.objectContaining({ projectId: null, selection, contentBlocks: [{ type: "text", text: "普通合成查询" }] }));
+      expect(legacy).not.toHaveBeenCalled();
+      expect(store.liveTurnStatus).toBe("queued");
+    } finally { submit.mockRestore(); legacy.mockRestore(); await store.dispose(); }
+  });
+
+  it("market managed continuation keeps empty selection on its versioned route", async () => {
+    const { client } = fakeClient();
+    const legacy = vi.spyOn(client, "submitTurn");
+    const submit = vi.spyOn(marketHostNativeClient, "submit").mockRejectedValueOnce(new MarketChatError("operation_uncertain", true));
+    const store = createStore(client); await store.bind(TENANT); await store.selectSession(SESSION_A);
+    try {
+      await expect(store.submitTurnWithResult("普通合成后续任务", { profileId: "kimi-k3-max-v1", expectedRevision: 1 }, [])).rejects.toMatchObject({ code: "operation_uncertain" });
+      expect(submit).toHaveBeenCalledWith(CONTEXT, expect.objectContaining({ sessionId: SESSION_A, selection: [] }));
+      expect(legacy).not.toHaveBeenCalled();
+      expect(store.submissionState).toBe("idle");
+    } finally { submit.mockRestore(); legacy.mockRestore(); await store.dispose(); }
   });
 
   it("keeps turn timing reads scoped without changing conversation state", async () => {

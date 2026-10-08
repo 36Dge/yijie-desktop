@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "source": "FEAT-157 user-provided icons; source bytes preserved except documented SVG whitespace normalization",
+  "items": [
+    {
+      "iconAssetId": "cue",
+      "file": "cue.png",
+      "mimeType": "image/png",
+      "sha256": "493f90b5d62ad1c81e23418fc8cc7b65f015423ed740942603da5e21634f7013"
+    },
+    {
+      "iconAssetId": "baixiao-mcp",
+      "file": "baixiao-mcp.png",
+      "mimeType": "image/png",
+      "sha256": "febe5bcc29ade6b1ebe629f4e9dc33f2344e8ad0083ab2857fb5ae007990cdcf"
+    },
+    {
+      "iconAssetId": "dxe-mcp-server",
+      "file": "dxe-mcp-server.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "e1379d90c0b61c136d0730fc6d2f98d88e7051e772d4b67194d0d19cfc1f6bd5",
+      "sourceSha256": "46397c19db66026ae1c11d1e55142e784d67734bc4bc45d34fd8ea37d5a5de13",
+      "normalization": "Trim line-end whitespace only; SVG element structure and normalized path attributes unchanged."
+    },
+    {
+      "iconAssetId": "Hologrow",
+      "file": "Hologrow.png",
+      "mimeType": "image/png",
+      "sha256": "ff7cfc24c49ee8b7ff9cfe9a6fecc29a6c2707d5e6a8687308c69d5e9b137ebf"
+    },
+    {
+      "iconAssetId": "X-Store",
+      "file": "X-Store.png",
+      "mimeType": "image/png",
+      "sha256": "edd069be99412d42a64ef266f9a6238aff44dbdaed0c1d0cc3cd06565f394f8b"
+    },
+    {
+      "iconAssetId": "yintai-open-platform",
+      "file": "yintai-open-platform.png",
+      "mimeType": "image/png",
+      "sha256": "79738bc92b07c786e873ff7674afbfeefc708a9ab7bf93ac67f617c3b58ce5a1"
+    },
+    {
+      "iconAssetId": "yuyidata",
+      "file": "yuyidata.png",
+      "mimeType": "image/png",
+      "sha256": "a12588b0f710ec00429fd3d2df2b039528a5f748f2ff20380994413e80bf45ff"
+    },
+    {
+      "iconAssetId": "taobao-flash-sale-retail",
+      "file": "taobao-flash-sale-retail.png",
+      "mimeType": "image/png",
+      "sha256": "fbd25b0994fe30d7887607b9c7362b7210e66d9b6e83e17acbc42afd88f65fa0"
+    },
+    {
+      "iconAssetId": "FTShare",
+      "file": "FTShare.png",
+      "mimeType": "image/png",
+      "sha256": "721348499e4908bb5e6b2d6a988d68e1a2c1db069b58e1b6ac2976d86ed62f46"
+    },
+    {
+      "iconAssetId": "yunting-consumerlens",
+      "file": "yunting-consumerlens.png",
+      "mimeType": "image/png",
+      "sha256": "392761cb09837a70f83f9760176c71f862be0164f57831c6d8327a8ae30758c3"
+    },
+    {
+      "iconAssetId": "google-calendar",
+      "file": "google-calendar.png",
+      "mimeType": "image/png",
+      "sha256": "78f5c56c7b6ce0ead72e4e98cc904ee2637d77eb8a40c318e129fabf67d0c2f3"
+    },
+    {
+      "iconAssetId": "google-maps",
+      "file": "google-maps.png",
+      "mimeType": "image/png",
+      "sha256": "39b51a27ad4a3735f787a411df93ddd7438ab813af014cecd52bc0e2be019805"
+    },
+    {
+      "iconAssetId": "speechclaw",
+      "file": "speechclaw.png",
+      "mimeType": "image/png",
+      "sha256": "ebbd69e94cac045065095796915eb150a7b9132b62e6e4435509b0fe957f7232"
+    },
+    {
+      "iconAssetId": "caoliao",
+      "file": "caoliao.png",
+      "mimeType": "image/png",
+      "sha256": "eaeaf7a06c09b15593227875ff0062363916a0323e8741705a6e6510a9021d7b"
+    },
+    {
+      "iconAssetId": "wavenote",
+      "file": "wavenote.png",
+      "mimeType": "image/png",
+      "sha256": "acaf65b59edfd47acf7d5bcdb3b470b1312853d77d0287abb1f280d999e1b1f4"
+    },
+    {
+      "iconAssetId": "yida",
+      "file": "yida.png",
+      "mimeType": "image/png",
+      "sha256": "9790baa0574cb32c16e20580a4e53e2e25e2ed2e5d0b51b21fc9a5e8d6723337"
+    },
+    {
+      "iconAssetId": "qingflow",
+      "file": "qingflow.png",
+      "mimeType": "image/png",
+      "sha256": "efa5065d6eb36664313a001325129ab46999ff9fdf6858dc1f5b3e2835827e9c"
+    },
+    {
+      "iconAssetId": "uupt",
+      "file": "uupt.png",
+      "mimeType": "image/png",
+      "sha256": "75a37c5acd6b0c13451b03508566b4b1cdce48a2fcd5660b58803d87a35a127b"
+    },
+    {
+      "iconAssetId": "fenbeitong",
+      "file": "fenbeitong.png",
+      "mimeType": "image/png",
+      "sha256": "fec2cee30867bcde1f150fd57032e07a6927fb3e768b78003d751004b3590c5f"
+    },
+    {
+      "iconAssetId": "bazhuayu",
+      "file": "bazhuayu.png",
+      "mimeType": "image/png",
+      "sha256": "57da3e70e5000329d56955f151e3ea96b34ae70818c558cc39be7e6308a15ab5"
+    },
+    {
+      "iconAssetId": "camscanner-mcp",
+      "file": "camscanner-mcp.png",
+      "mimeType": "image/png",
+      "sha256": "cd7e35067b48e1838bb43d88c0f8a037171e876296ef1f92144232e42a7974ac"
+    },
+    {
+      "iconAssetId": "todoist",
+      "file": "todoist.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "00f9e20f8fe18cd7a3b16444d6065b5d743b33d00c071b68e93dfe1a9d2d18ce"
+    },
+    {
+      "iconAssetId": "agentkey-qwen",
+      "file": "agentkey-qwen.png",
+      "mimeType": "image/png",
+      "sha256": "79628320a201fd15d60f91569ea68205ced75387c38042b40675667adeb91129"
+    },
+    {
+      "iconAssetId": "huida-erp",
+      "file": "huida-erp.png",
+      "mimeType": "image/png",
+      "sha256": "307342684b9c57820f05589110e4dc93599cb74ea9820597f2267101896511de"
+    },
+    {
+      "iconAssetId": "FastMoss",
+      "file": "FastMoss.png",
+      "mimeType": "image/png",
+      "sha256": "73f17ca896a329d0ccd5579f84513c74972895bdffdf3dd9222d863d561b82d0"
+    },
+    {
+      "iconAssetId": "smartsalary",
+      "file": "smartsalary.png",
+      "mimeType": "image/png",
+      "sha256": "54ca94ebb10ff4e8e03265f799db44d9597d3c55ef921ae4c3f4d216918c4757"
+    },
+    {
+      "iconAssetId": "qixin_insight",
+      "file": "qixin_insight.png",
+      "mimeType": "image/png",
+      "sha256": "246c47e8b9f2feb3fb0de35bdb50a3ec5d0ee6f554b49f990ebfb3c8b30def12"
+    },
+    {
+      "iconAssetId": "zerone",
+      "file": "zerone.png",
+      "mimeType": "image/png",
+      "sha256": "959918edd1226b5e241f8e46b84920c2e798e3aea1595bbb9c4ce7b5af3e0189"
+    },
+    {
+      "iconAssetId": "patent-analysis",
+      "file": "patent-analysis.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "5b869112cf5dc084ebedf1db6dcb88a2f4c293f88e30ce274f602e90c6eae7fb"
+    },
+    {
+      "iconAssetId": "thinkingdata",
+      "file": "thinkingdata.jpg",
+      "mimeType": "image/jpeg",
+      "sha256": "06b68b53ccaf287c174c308d4206f4a948669c6e55a3d12d688e549e0dde6631"
+    },
+    {
+      "iconAssetId": "morningstar",
+      "file": "morningstar.png",
+      "mimeType": "image/png",
+      "sha256": "e1a28992a7d504868e389fdae817a7aa1fd012d293f798db21253408220b6ae0"
+    },
+    {
+      "iconAssetId": "dichanai-mcp",
+      "file": "dichanai-mcp.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "a3fa8f15abb0bd5dd33b57a7fc4ae0cf7b9082e43d7e910afd13524cef5b91c0"
+    },
+    {
+      "iconAssetId": "Yingmi",
+      "file": "Yingmi.png",
+      "mimeType": "image/png",
+      "sha256": "7763998144316ab5da364a3b819327b75f799ae76b1b6dc8117c763eb663de81"
+    },
+    {
+      "iconAssetId": "wind",
+      "file": "wind.png",
+      "mimeType": "image/png",
+      "sha256": "d4be1348e9a23ed46eeb69f6650fb115225f2656431564c5aeba9af04a7010ab"
+    },
+    {
+      "iconAssetId": "yidian-company",
+      "file": "yidian-company.png",
+      "mimeType": "image/png",
+      "sha256": "2b3a2d9788a2112afa5f62eacdeae4d50f9840dc64c2311062f9b580cbdd7879"
+    },
+    {
+      "iconAssetId": "investoday",
+      "file": "investoday.png",
+      "mimeType": "image/png",
+      "sha256": "3bb1600f3022981c46ca887b9fdfd86eb3267844c21025ec6623eb59271f6989"
+    },
+    {
+      "iconAssetId": "dzh-mcp",
+      "file": "dzh-mcp.png",
+      "mimeType": "image/png",
+      "sha256": "2714e86e01b48d31503b3b2e62894eefa252bbf4a61e672f3da99b1f1d54a12f"
+    },
+    {
+      "iconAssetId": "Octoparse-data-hub",
+      "file": "Octoparse-data-hub.png",
+      "mimeType": "image/png",
+      "sha256": "57da3e70e5000329d56955f151e3ea96b34ae70818c558cc39be7e6308a15ab5"
+    },
+    {
+      "iconAssetId": "doukou-doctor",
+      "file": "doukou-doctor.png",
+      "mimeType": "image/png",
+      "sha256": "9427486a418331fb3ac0e87a2a47a337b682990398ba513f43e91d5de1162099"
+    },
+    {
+      "iconAssetId": "tushareMcp",
+      "file": "tushareMcp.png",
+      "mimeType": "image/png",
+      "sha256": "29713ebc41d0fa43902d16a6bf2feb5e11e62ddbb106d29edc5b515bb76c813e"
+    },
+    {
+      "iconAssetId": "eastmoney",
+      "file": "eastmoney.png",
+      "mimeType": "image/png",
+      "sha256": "f2d8578d2635dced8d3ae4ce2502c30e3404b15f523de18106d3a353370914ea"
+    },
+    {
+      "iconAssetId": "gildata_finance_data_qwen",
+      "file": "gildata_finance_data_qwen.png",
+      "mimeType": "image/png",
+      "sha256": "e77b2b6f4c93d298d54f33119dffaa231f6a47a2f9f28b02ec45186d410aee48"
+    },
+    {
+      "iconAssetId": "fanruan-growth-advisor",
+      "file": "fanruan-growth-advisor.png",
+      "mimeType": "image/png",
+      "sha256": "de41d024a29b5a94d827c0974f282a8348ba1f255e1918583ec57248e504aeaa"
+    },
+    {
+      "iconAssetId": "weibo",
+      "file": "weibo.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "8197e77671e391565834da3a084ed6716982da2f9fc20c36f56c891f2af9fe47"
+    },
+    {
+      "iconAssetId": "jinshuju",
+      "file": "jinshuju.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "d19ec240ea821aefdd40624b69fd3f4a0f9bd40a045d65a6b7103fcb05a8f3f7"
+    },
+    {
+      "iconAssetId": "xiaoe-mcp",
+      "file": "xiaoe-mcp.png",
+      "mimeType": "image/png",
+      "sha256": "0189398529c822593cbdc255794f62ac530383ddf6b7b617a12e3daea548e959"
+    },
+    {
+      "iconAssetId": "feisentry",
+      "file": "feisentry.png",
+      "mimeType": "image/png",
+      "sha256": "d26ee5ffa3a07f9f0ddbb33069434942cec5b31d1dd93680d2bceb85a9c3cd70"
+    },
+    {
+      "iconAssetId": "xiaoliebian",
+      "file": "xiaoliebian.png",
+      "mimeType": "image/png",
+      "sha256": "b94544f399f255e8ef5b11b386793d95d6c140dd14ed8e5c97452088ad4e5546"
+    },
+    {
+      "iconAssetId": "ysk_mcp_3f824505d1faf80bc60c052729620929",
+      "file": "ysk_mcp_3f824505d1faf80bc60c052729620929.png",
+      "mimeType": "image/png",
+      "sha256": "c83a3a6942d812e92f006b18deb2ed698dba84d1c5f7f602c0ff08be6fd2482c"
+    },
+    {
+      "iconAssetId": "3chat",
+      "file": "3chat.png",
+      "mimeType": "image/png",
+      "sha256": "63547b71c5a9cf917ed66ce8432f5c188de79886e1d08e0386886e78fa34c369"
+    },
+    {
+      "iconAssetId": "xiaoliebian-geo",
+      "file": "xiaoliebian-geo.png",
+      "mimeType": "image/png",
+      "sha256": "7bbba3a2179add20aa647093a42eefbc67275c5ad09f34f7d06d7debd57c3d9f"
+    }
+  ]
+}

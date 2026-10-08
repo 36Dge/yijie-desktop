@@ -6,6 +6,7 @@ pub(crate) mod artifact_report_native;
 pub(crate) mod artifact_video_native;
 mod attachment;
 mod authorization;
+pub(crate) mod connectors;
 mod database;
 mod error;
 pub(crate) mod exit_owner;
@@ -395,12 +396,17 @@ impl ChatRuntime {
                 _ => RuntimeMode::Invalid,
             }
         };
+        let authorization = match &mode {
+            RuntimeMode::Local(config) => ChatAuthorizationManager::new(&config.scope).ok(),
+            RuntimeMode::Disabled | RuntimeMode::Invalid => None,
+        };
         let sidecar = match SidecarSupervisor::from_environment_for_desktop(
             local_profile.is_demo_fast(),
             skill_roots,
         ) {
             Ok(supervisor) => {
-                let prepared = (|| {
+                let prepared: Result<SidecarSupervisor, ChatError> = (|| {
+                    let mut supervisor = supervisor;
                     if let RuntimeMode::Local(config) = &mode {
                         if config.schedule_selection.enabled() {
                             let base = config
@@ -420,8 +426,15 @@ impl ChatRuntime {
                                 &config.chat_directory,
                                 &config.scope,
                             )?;
-                            return supervisor.with_scheduled_tasks(base, launch, isolated);
+                            supervisor = supervisor.with_scheduled_tasks(base, launch, isolated)?;
                         }
+                    }
+                    if connectors::enabled() {
+                        supervisor = supervisor.with_market_authority(
+                            authorization
+                                .clone()
+                                .ok_or(ChatError::InvalidConfiguration)?,
+                        )?;
                     }
                     Ok(supervisor)
                 })();
@@ -437,10 +450,6 @@ impl ChatRuntime {
                 mode = RuntimeMode::Invalid;
                 None
             }
-        };
-        let authorization = match &mode {
-            RuntimeMode::Local(config) => ChatAuthorizationManager::new(&config.scope).ok(),
-            RuntimeMode::Disabled | RuntimeMode::Invalid => None,
         };
         Self {
             mode,
@@ -1004,9 +1013,15 @@ impl ChatRuntime {
                     .as_ref()
                     .ok_or(ChatError::InvalidConfiguration)?;
                 let state = supervisor.start().await?;
-                let connection = supervisor.connection().await?;
+                let (connection, market_control) = if connectors::enabled() {
+                    let (connection, control) = supervisor.market_connection().await?;
+                    (connection, Some(control))
+                } else {
+                    (supervisor.connection().await?, None)
+                };
                 let bridge = HostBridge::from_connection(connection)
-                    .map_err(|_| ChatError::SidecarUnavailable)?;
+                    .map_err(|_| ChatError::SidecarUnavailable)?
+                    .with_market_control(market_control);
                 self.lifecycle.host(bridge.instance_nonce());
                 let bridge = bridge.with_lifecycle(self.lifecycle.clone());
                 *self.host_bridge.lock().await = Some(Arc::new(bridge));
@@ -1152,7 +1167,8 @@ impl ChatRuntime {
         Ok(self
             .build_local_conversation_application()
             .await?
-            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone()))
+            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone())
+            .with_market_authority(self.authorization.clone()))
     }
     async fn build_local_conversation_application(
         &self,
@@ -1210,7 +1226,8 @@ impl ChatRuntime {
         &self,
     ) -> Result<ConversationApplication, ChatError> {
         Ok(ConversationApplication::new_offline(self.database().await?)
-            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone()))
+            .with_native_lifecycle(self.lifecycle.clone(), self.schedule_authority.clone())
+            .with_market_authority(self.authorization.clone()))
     }
 
     pub async fn local_authorized_conversation_application(

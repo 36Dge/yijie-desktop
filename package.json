@@ -39,11 +39,19 @@
     "tauri:build:demo-fast": "env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true pnpm skills:sync:local && env -u YIJIE_FEAT134_STREAMING_ENABLED -u VITE_YIJIE_FEAT134_STREAMING_ENABLED -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.demo-fast.conf.json",
     "tauri:build:demo-fast:stable": "env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true node scripts/check-agent-host-v4-contract.mjs && node scripts/check-approval-retirement.mjs && env YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true pnpm skills:sync:local && env -u YIJIE_FEAT134_STREAMING_ENABLED -u VITE_YIJIE_FEAT134_STREAMING_ENABLED -u YIJIE_FEAT136_COMMAND_TOOL_ITEMS_ENABLED -u VITE_YIJIE_FEAT136_EXECUTION_ENABLED -u YIJIE_FEAT137_COMMAND_APPROVAL_ENABLED -u VITE_YIJIE_FEAT137_APPROVAL_ENABLED VITE_YIJIE_FEAT134_STREAMING_ENABLED=true VITE_YIJIE_FEAT136_EXECUTION_ENABLED=true VITE_YIJIE_RUNTIME_PERMISSIONS_ENABLED=true VITE_YIJIE_ENV=local VITE_YIJIE_LOCAL_PROFILE=demo_fast VITE_YIJIE_CHAT_LOCAL_UI_ENABLED=true VITE_YIJIE_AUTHORITATIVE_PERMISSION_UI_ENABLED=true VITE_YIJIE_LOCAL_WHITELIST_LOGIN_ENABLED=false tauri build --debug --bundles app --no-sign --config src-tauri/tauri.feat131-stable.conf.json",
     "tauri": "tauri",
-    "generate:native": "node scripts/generate-chat-turn-timing.mjs && node scripts/generate-chat-session-purpose.mjs && node scripts/generate-native-conversation.mjs && pnpm generate:scheduled-ipc",
-    "check:native": "node scripts/generate-chat-turn-timing.mjs --check && node scripts/generate-chat-session-purpose.mjs --check && node scripts/generate-native-conversation.mjs --check && node scripts/check-native-conversation.mjs && pnpm check:scheduled-ipc",
+    "generate:native": "node scripts/generate-chat-turn-timing.mjs && node scripts/generate-chat-session-purpose.mjs && node scripts/generate-native-conversation.mjs && pnpm generate:scheduled-ipc && pnpm generate:market-connectors && pnpm generate:market-selection && pnpm generate:market-provider && pnpm generate:market-host",
+    "check:native": "node scripts/generate-chat-turn-timing.mjs --check && node scripts/generate-chat-session-purpose.mjs --check && node scripts/generate-native-conversation.mjs --check && node scripts/check-native-conversation.mjs && pnpm check:scheduled-ipc && pnpm check:market-connectors && pnpm check:market-selection && pnpm check:market-provider && pnpm check:market-host",
     "check:native-integration": "node scripts/check-native-conversation-integration.mjs",
     "generate:scheduled-ipc": "node scripts/generate-scheduled-ipc.mjs",
-    "check:scheduled-ipc": "node scripts/generate-scheduled-ipc.mjs --check"
+    "check:scheduled-ipc": "node scripts/generate-scheduled-ipc.mjs --check",
+    "generate:market-connectors": "node ../yijie-contracts/scripts/sync-market-connectors.mjs --consumer=desktop && node scripts/sync-market-catalog.mjs",
+    "check:market-connectors": "node ../yijie-contracts/scripts/sync-market-connectors.mjs --consumer=desktop --check && node scripts/sync-market-catalog.mjs --check",
+    "generate:market-selection": "node ../yijie-contracts/scripts/sync-market-selection.mjs --consumer=desktop",
+    "check:market-selection": "node ../yijie-contracts/scripts/sync-market-selection.mjs --consumer=desktop --check",
+    "generate:market-provider": "node ../yijie-contracts/scripts/sync-market-provider.mjs --consumer=desktop",
+    "check:market-provider": "node ../yijie-contracts/scripts/sync-market-provider.mjs --consumer=desktop --check",
+    "generate:market-host": "node ../yijie-contracts/scripts/sync-market-host.mjs --consumer=desktop",
+    "check:market-host": "node ../yijie-contracts/scripts/sync-market-host.mjs --consumer=desktop --check"
   },
   "dependencies": {
     "@lucide/vue": "1.27.0",

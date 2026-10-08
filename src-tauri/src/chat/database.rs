@@ -701,6 +701,7 @@ pub(super) struct ConversationEnqueueContext<'a> {
     pub now: i64,
     pub scheduled: Option<ScheduledEnqueue<'a>>,
     pub draft: bool,
+    pub market: bool,
 }
 
 #[cfg(feature = "feat126-s10-driver")]
@@ -776,6 +777,10 @@ impl std::fmt::Debug for ReasoningItem {
 }
 
 impl ChatRepository {
+    pub(super) fn market_intent_digest(&self, bytes: &[u8]) -> String {
+        format!("{:x}", hmac_sha256(self.receipt_key.expose(), bytes))
+    }
+
     pub fn database_exists(chat_directory: &Path) -> bool {
         chat_directory.join(DATABASE_FILE_NAME).exists()
     }
@@ -919,6 +924,12 @@ impl ChatRepository {
             migrations::migrate_to_target(
                 &mut connection,
                 migrations::SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
+            )?;
+        }
+        if super::connectors::enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::MARKET_PROVIDER_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;
@@ -1897,6 +1908,11 @@ impl ChatRepository {
             &project_id.to_string(),
         )?;
         validate_non_nil(create_operation_id)?;
+        super::connectors::selection::require_legacy_operation(
+            &self.connection,
+            &self.scope,
+            create_operation_id,
+        )?;
         if authorization_revision == 0 {
             return Err(ChatError::InvalidInput);
         }
@@ -2098,6 +2114,7 @@ impl ChatRepository {
                 now,
                 scheduled: None,
                 draft: false,
+                market: false,
             },
             project_id,
             blocks,
@@ -2117,6 +2134,13 @@ impl ChatRepository {
         authorization_revision: u64,
     ) -> Result<PendingConversation, ChatError> {
         let scope = context.scope;
+        if !context.market {
+            super::connectors::selection::require_legacy_operation(
+                transaction,
+                scope,
+                create_operation_id,
+            )?;
+        }
         let now = context.now;
         let text_projection = draft_text_projection(blocks);
         if context.scheduled.is_none() {
@@ -2344,6 +2368,16 @@ impl ChatRepository {
     ) -> Result<Uuid, ChatError> {
         validate_non_nil(session_id)?;
         validate_non_nil(operation_id)?;
+        super::connectors::selection::require_legacy_session(
+            &self.connection,
+            &self.scope,
+            session_id,
+        )?;
+        super::connectors::selection::require_legacy_operation(
+            &self.connection,
+            &self.scope,
+            operation_id,
+        )?;
         validate_message(input)?;
         super::schedules::drafts::guard_conversation(
             &self.connection,
@@ -2481,6 +2515,7 @@ impl ChatRepository {
                 now,
                 scheduled: None,
                 draft: false,
+                market: false,
             },
             session_id,
             blocks,
@@ -2497,6 +2532,18 @@ impl ChatRepository {
         blocks: &[DraftContentBlock],
         operation_id: Uuid,
     ) -> Result<Uuid, ChatError> {
+        if !context.market {
+            super::connectors::selection::require_legacy_session(
+                transaction,
+                context.scope,
+                session_id,
+            )?;
+            super::connectors::selection::require_legacy_operation(
+                transaction,
+                context.scope,
+                operation_id,
+            )?;
+        }
         super::schedules::drafts::guard_conversation(
             transaction,
             context.scope,
@@ -2670,6 +2717,8 @@ impl ChatRepository {
             &self.manual_runtime,
         )?;
         let model_exhaustion_gate = super::models::dispatch_predicate(&transaction, "chat_outbox")?;
+        let market_exhaustion_gate =
+            super::connectors::selection::dispatch_predicate(&transaction, "chat_outbox")?;
         let gate = if self.schedule_background_only {
             "0".to_owned()
         } else {
@@ -2680,7 +2729,7 @@ impl ChatRepository {
                 &format!("UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE kind IN ('start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
-                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate} AND {model_exhaustion_gate}"),
+                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate} AND {model_exhaustion_gate} AND {market_exhaustion_gate}"),
                 params![OUTBOX_MAX_ATTEMPTS, now],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -2702,6 +2751,7 @@ impl ChatRepository {
             None => normal,
         };
         let model_gate = super::models::dispatch_predicate(&transaction, "o")?;
+        let market_gate = super::connectors::selection::dispatch_predicate(&transaction, "o")?;
         let row: Option<(String, String, String, i64)> = transaction
             .query_row(
                 &format!("SELECT o.operation_id, o.session_id, o.kind, o.attempt_count
@@ -2719,7 +2769,7 @@ impl ChatRepository {
                    AND o.attempt_count < ?3
                    AND ((o.state='pending' AND (o.next_attempt_at IS NULL OR o.next_attempt_at<=?4))
                      OR (o.state='inflight' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?4))
-                 AND {gate} AND {model_gate}
+                 AND {gate} AND {model_gate} AND {market_gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
                  LIMIT 1"),
                 params![
@@ -2795,6 +2845,7 @@ impl ChatRepository {
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let gate = super::schedules::execution_guard::outbox_predicate(&transaction, "o")?;
+        let market_gate = super::connectors::selection::dispatch_predicate(&transaction, "o")?;
         let row: Option<(String, String)> = transaction
             .query_row(
                 &format!(
@@ -2811,7 +2862,7 @@ impl ChatRepository {
                    AND (b.state!='bound' OR (
                      s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL
                    ))
-                 AND {gate}
+                 AND {gate} AND {market_gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
                  LIMIT 1"
                 ),
@@ -3223,9 +3274,16 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let market_binding_gate = super::connectors::selection::dispatch_predicate(
+            &transaction,
+            "chat_public_task_bindings",
+        )?;
+        let market_outbox_gate =
+            super::connectors::selection::dispatch_predicate(&transaction, "chat_outbox")?;
         let changed = transaction
             .execute(
-                "UPDATE chat_public_task_bindings
+                &format!(
+                    "UPDATE chat_public_task_bindings
                  SET state='pending', authorization_revision=?1, attempt_count=0,
                      lease_expires_at=NULL, next_attempt_at=NULL, last_error_code=NULL,
                      updated_at=?2
@@ -3234,7 +3292,8 @@ impl ChatRepository {
                  ) AND NOT EXISTS(
                    SELECT 1 FROM chat_deletion_jobs d
                    WHERE d.session_id=chat_public_task_bindings.session_id
-                 )",
+                 ) AND {market_binding_gate}"
+                ),
                 params![
                     i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?,
                     now,
@@ -3245,11 +3304,13 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         transaction
             .execute(
-                "UPDATE chat_outbox SET state='pending', attempt_count=0, next_attempt_at=?1
+                &format!(
+                    "UPDATE chat_outbox SET state='pending', attempt_count=0, next_attempt_at=?1
                  WHERE kind='create_session' AND operation_id IN (
                    SELECT create_operation_id FROM chat_public_task_bindings
                    WHERE state='pending' AND authorization_revision=?2
-                 )",
+                 ) AND {market_outbox_gate}"
+                ),
                 params![
                     now,
                     i64::try_from(authorization_revision).map_err(|_| ChatError::InvalidInput)?
@@ -3569,11 +3630,30 @@ impl ChatRepository {
         {
             return Err(ChatError::DatabaseUnavailable);
         }
+        let content_blocks = self.materialize_turn_blocks(&message_id, now)?;
+        Ok(StartTurnDispatchV2 {
+            operation_id,
+            session_id: parse_uuid_value(&session_id)?,
+            task_id: parse_uuid_value(&task_id)?,
+            turn_id: parsed_turn,
+            agent_session_id: parse_uuid_value(&agent_session_id)?,
+            codex_thread_id: parse_uuid_value(&codex_thread_id)?,
+            content_blocks,
+        })
+    }
+
+    /// Shared attachment materialization for ordinary and market submissions.
+    /// The caller must first validate the original outbox/message digest.
+    pub(crate) fn materialize_turn_blocks(
+        &self,
+        message_id: &str,
+        now: i64,
+    ) -> Result<Vec<HostTurnInputBlock>, ChatError> {
         let query_text: String = self
             .connection
             .query_row(
                 "SELECT content FROM chat_messages WHERE id=?1",
-                [message_id.clone()],
+                [message_id],
                 |row| row.get(0),
             )
             .map_err(map_sqlite_error)?;
@@ -3603,7 +3683,7 @@ impl ChatRepository {
                 )
                 .map_err(map_sqlite_error)?;
             let rows = statement
-                .query_map([message_id.clone()], |row| {
+                .query_map([message_id], |row| {
                     Ok((
                         row.get(0)?,
                         row.get(1)?,
@@ -3712,15 +3792,7 @@ impl ChatRepository {
                 _ => return Err(ChatError::DatabaseUnavailable),
             }
         }
-        Ok(StartTurnDispatchV2 {
-            operation_id,
-            session_id: parse_uuid_value(&session_id)?,
-            task_id: parse_uuid_value(&task_id)?,
-            turn_id: parsed_turn,
-            agent_session_id: parse_uuid_value(&agent_session_id)?,
-            codex_thread_id: parse_uuid_value(&codex_thread_id)?,
-            content_blocks,
-        })
+        Ok(content_blocks)
     }
 
     pub fn enqueue_interrupt(
@@ -3951,6 +4023,29 @@ impl ChatRepository {
             .connection
             .transaction()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
+        Self::bind_started_turn_parts(
+            &transaction,
+            &self.scope,
+            operation_id,
+            runtime_turn_id,
+            host_instance_nonce,
+            recovered,
+        )?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)
+    }
+
+    pub(crate) fn bind_started_turn_parts(
+        transaction: &rusqlite::Transaction<'_>,
+        scope: &ChatScope,
+        operation_id: Uuid,
+        runtime_turn_id: Uuid,
+        host_instance_nonce: Option<&str>,
+        recovered: bool,
+    ) -> Result<(), ChatError> {
+        validate_non_nil(operation_id)?;
+        validate_non_nil(runtime_turn_id)?;
         let row: Option<(String, String, Option<String>)> = transaction
             .query_row(
                 "SELECT t.id, t.status, t.runtime_turn_id
@@ -3960,8 +4055,8 @@ impl ChatRepository {
                    AND o.kind='start_turn' AND (o.state IN ('inflight', 'done') OR (?4=1 AND o.state IN ('pending','failed')))",
                 params![
                     operation_id.to_string(),
-                    self.scope.owner_user_id,
-                    self.scope.tenant_id, recovered
+                    scope.owner_user_id,
+                    scope.tenant_id, recovered
                 ],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -4027,12 +4122,10 @@ impl ChatRepository {
                 .map_err(map_constraint_or_database)?;
         }
         transaction.execute("INSERT OR IGNORE INTO chat_native_bindings(turn_id,session_id,runtime_thread_id,runtime_turn_id,host_instance_nonce) SELECT t.id,t.session_id,s.runtime_thread_id,t.runtime_turn_id,?2 FROM chat_turns t JOIN chat_sessions s ON s.id=t.session_id WHERE t.id=?1",params![turn_id,host_instance_nonce]).map_err(|_|ChatError::DatabaseUnavailable)?;
-        if super::schedules::recovery::present(&transaction)? {
+        if super::schedules::recovery::present(transaction)? {
             transaction.execute("UPDATE chat_scheduled_runs SET delivery_state='accepted',needs_attention=0 WHERE operation_id=?1 AND format_version=1 AND EXISTS(SELECT 1 FROM chat_scheduled_recovery e WHERE e.run_id=chat_scheduled_runs.run_id AND e.format_version=1 AND e.release_kind IS NULL)",[operation_id.to_string()]).map_err(map_sqlite_error)?;
         }
-        transaction
-            .commit()
-            .map_err(|_| ChatError::DatabaseUnavailable)
+        Ok(())
     }
 
     pub fn reschedule_outbox(
@@ -5960,8 +6053,20 @@ impl ChatRepository {
                         .transpose()?,
                 })
             })
-            .collect();
-        candidates
+            .collect::<Result<Vec<_>, ChatError>>()?;
+        let mut legacy_candidates = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            match super::connectors::selection::require_legacy_session(
+                &self.connection,
+                &self.scope,
+                candidate.session_id,
+            ) {
+                Ok(()) => legacy_candidates.push(candidate),
+                Err(ChatError::OrchestrationUnavailable) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(legacy_candidates)
     }
 
     pub(crate) fn sorftime_read_only_failed_submission(
@@ -6794,7 +6899,7 @@ fn bind_draft_blocks(
     stored_content_block_digest(transaction, message_id)
 }
 
-fn stored_content_block_digest(
+pub(crate) fn stored_content_block_digest(
     connection: &Connection,
     message_id: Uuid,
 ) -> Result<String, ChatError> {

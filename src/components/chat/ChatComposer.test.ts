@@ -70,6 +70,21 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it("places connectors after shops and keeps unavailable chips out of legacy submission", async () => {
+    const wrapper = mountComposer({ connectors: [{ id: "sample", name: "普通合成服务", iconAssetId: "cue", unavailableReason: "需要重新连接" }] }, {
+      "shop-control": () => h("button", { "data-shop": "" }, "关联店铺"),
+      "connector-control": () => h("button", { "data-connectors": "" }, "连接器"),
+    });
+    expect(wrapper.get('[data-shop]').element.nextElementSibling).toBe(wrapper.get('[data-connectors]').element);
+    expect(wrapper.get('[aria-label="本轮使用的连接器"]').text()).toContain("需要重新连接");
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+    await wrapper.get('[aria-label="移除 普通合成服务"]').trigger("click");
+    expect(wrapper.emitted("remove-connector")).toEqual([["sample"]]);
+    await wrapper.setProps({ textOnly: true });
+    expect(wrapper.find('[data-connectors]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="本轮使用的连接器"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
   it("places workspace and permission settings below the panel while keeping attachment and send actions inside", async () => {
     const wrapper = mountComposer();
     const projectButton = wrapper.get(".chat-composer__project--button");

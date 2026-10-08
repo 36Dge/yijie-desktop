@@ -1,8 +1,9 @@
 import { computed, ref, watch } from "vue";
 import { chatModelClient, chatModelsEnabled, type Catalog, type ModelIntent, type ModelState, type ProfileId } from "../api/chat-model-client";
-export function useChatModels(context:()=>string|null,target:()=>string|null,busy:()=>boolean){
+export function useChatModels(context:()=>string|null,target:()=>string|null,busy:()=>boolean,newDraft?:{get:()=>ProfileId;set:(profile:ProfileId)=>void}){
  const catalog=ref<Catalog|null>(null),state=ref<ModelState|null>(null),loading=ref(false),saving=ref(false),error=ref("");
- const newProfile=ref<ProfileId>("kimi-k3-max-v1");
+ const localNewProfile=ref<ProfileId>("kimi-k3-max-v1");
+ const newProfile=computed({get:()=>newDraft?.get()??localNewProfile.value,set:(profile:ProfileId)=>{if(newDraft)newDraft.set(profile);else localNewProfile.value=profile;}});
  let epoch=0;let pending:{target:string;intent:ModelIntent;operationId:string}|null=null;
  const profile=computed(()=>target()===null?newProfile.value:state.value?.profileId??null);
  const available=computed(()=>catalog.value?.models.some(m=>m.profile.profile_id===profile.value&&m.available)??false);
@@ -31,7 +32,7 @@ export function useChatModels(context:()=>string|null,target:()=>string|null,bus
   finally{if(epoch===current)saving.value=false;}
  }
  async function retry(){if(pending){await select(pending.intent.profileId);}else await refresh();}
- watch([context,target],([ctx],[oldCtx])=>{epoch++;state.value=null;saving.value=false;loading.value=false;pending=null;if(ctx!==oldCtx)newProfile.value="kimi-k3-max-v1";void refresh();},{immediate:true});
+ watch([context,target],([ctx],[oldCtx])=>{epoch++;state.value=null;saving.value=false;loading.value=false;pending=null;if(ctx!==oldCtx&&!newDraft)newProfile.value="kimi-k3-max-v1";void refresh();},{immediate:true});
  watch(busy,(v,old)=>{if(old&&!v)void refresh();});
  return {catalog,state,profile,loading,saving,error,ready,intent,refresh,select,retry,resetNew:()=>{newProfile.value="kimi-k3-max-v1";}};
 }

@@ -7,6 +7,7 @@ import {
 } from "./authorization/app-permission-policy";
 import { createPermissionLifecycle, type PermissionLifecycle } from "./authorization/permission-lifecycle";
 import { authoritativePermissionUiEnabled } from "./authorization/permission-ui-config";
+import { marketConnectorsEnabled } from "./api/market-connectors-client";
 import { localChatUiEnabled } from "./authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "./authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "./authorization/store-showcase-ui-config";
@@ -59,6 +60,7 @@ const permissionSnapshot = computed(() => ({
   skillMarketplaceUiEnabled,
   storeShowcaseUiEnabled,
   workflowShowcaseUiEnabled,
+  connectorsUiEnabled: marketConnectorsEnabled,
   hasCapability: permissionStore.hasCapability,
 }));
 
@@ -71,7 +73,8 @@ async function synchronizeChatAuthority(): Promise<void> {
     canCreateTask: permissionStore.hasCapability("task.create"),
     canReadTask: permissionStore.hasCapability("task.read"),
     canReadSchedule: permissionStore.hasCapability("schedule.read"),
-    managementOnly: route.path === "/scheduled-tasks",
+    canReadConnector: permissionStore.hasCapability("connector.read"),
+    managementOnly: route.path === "/scheduled-tasks" || route.path === "/connectors",
   });
 }
 

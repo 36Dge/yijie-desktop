@@ -7,6 +7,7 @@ import { localChatUiEnabled } from "../../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "../../authorization/store-showcase-ui-config";
 import { workflowShowcaseUiEnabled } from "../../authorization/workflow-showcase-ui-config";
+import { marketConnectorsEnabled } from "../../api/market-connectors-client";
 import { resolveAppNavigation } from "../../navigation/app-nav";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -31,6 +32,7 @@ const navigationEntries = computed(() =>
       skillMarketplaceUiEnabled,
       storeShowcaseUiEnabled,
       workflowShowcaseUiEnabled,
+      connectorsUiEnabled: marketConnectorsEnabled,
       hasCapability: permissionStore.hasCapability,
     }),
   ),

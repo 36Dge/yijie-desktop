@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 29] = [
+const CATALOG: [CatalogEntry; 33] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -177,6 +177,26 @@ const CATALOG: [CatalogEntry; 29] = [
         name: "0029_scheduled_chat_workspaces",
         sql: include_str!("../../migrations/chat/0029_scheduled_chat_workspaces.sql"),
     },
+    CatalogEntry {
+        version: 30,
+        name: "0030_market_connectors",
+        sql: include_str!("../../migrations/chat/0030_market_connectors.sql"),
+    },
+    CatalogEntry {
+        version: 31,
+        name: "0031_market_selection",
+        sql: include_str!("../../migrations/chat/0031_market_selection.sql"),
+    },
+    CatalogEntry {
+        version: 32,
+        name: "0032_market_dispatch_authority",
+        sql: include_str!("../../migrations/chat/0032_market_dispatch_authority.sql"),
+    },
+    CatalogEntry {
+        version: 33,
+        name: "0033_market_provider_operations",
+        sql: include_str!("../../migrations/chat/0033_market_provider_operations.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -196,6 +216,10 @@ pub const SCHEDULE_TIMING_SCHEMA_VERSION: i64 = 26;
 pub const PROJECTLESS_SCHEMA_VERSION: i64 = 27;
 pub const CHAT_MODELS_SCHEMA_VERSION: i64 = 28;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
+pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
+pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
+pub const MARKET_DISPATCH_SCHEMA_VERSION: i64 = 32;
+pub const MARKET_PROVIDER_SCHEMA_VERSION: i64 = 33;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -232,6 +256,10 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         PROJECTLESS_SCHEMA_VERSION,
         CHAT_MODELS_SCHEMA_VERSION,
         SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
+        MARKET_CONNECTORS_SCHEMA_VERSION,
+        MARKET_SELECTION_SCHEMA_VERSION,
+        MARKET_DISPATCH_SCHEMA_VERSION,
+        MARKET_PROVIDER_SCHEMA_VERSION,
     ]
     .contains(&target)
     {

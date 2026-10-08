@@ -17,6 +17,7 @@ import { localChatUiEnabled } from "../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "../authorization/store-showcase-ui-config";
 import { workflowShowcaseUiEnabled } from "../authorization/workflow-showcase-ui-config";
+import { marketConnectorsEnabled } from "../api/market-connectors-client";
 import type { KnownCapability } from "../domain/permissions";
 import { usePermissionStore } from "../stores/permission.store";
 
@@ -29,6 +30,7 @@ export interface AppPageLoaders {
   workflows: () => Promise<Component>;
   workflowEditor?: () => Promise<Component>;
   plugins: () => Promise<Component>;
+  connectors?: () => Promise<Component>;
   settings: () => Promise<Component>;
   accessDenied: () => Promise<Component>;
 }
@@ -40,6 +42,7 @@ const APP_PAGE_LOADERS: AppPageLoaders = {
   workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
   workflowEditor: async () => (await import("../pages/workflows/WorkflowEditorPage.vue")).default,
   plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
+  connectors: async () => (await import("../pages/connectors/ConnectorPage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
 };
@@ -80,6 +83,7 @@ export function createAppRouteRecords(
   skillUiEnabled = skillMarketplaceUiEnabled,
   storeUiEnabled = storeShowcaseUiEnabled,
   workflowUiEnabled = workflowShowcaseUiEnabled,
+  connectorsUiEnabled = marketConnectorsEnabled,
 ): readonly RouteRecordRaw[] {
   const records: RouteRecordRaw[] = [
     {
@@ -118,6 +122,12 @@ export function createAppRouteRecords(
       navKey: "plugin",
       documentTitle: "Skill 广场 · 易界 AI",
     },
+  });
+  if (connectorsUiEnabled) records.push({
+    path: "/connectors",
+    name: "connectors",
+    component: pageLoaders.connectors ?? APP_PAGE_LOADERS.connectors!,
+    meta: { navKey: "connectors", documentTitle: "连接器 · 易界 AI" },
   });
   if (storeUiEnabled) records.push({
     path: "/store",
@@ -192,6 +202,7 @@ export function createAppRouter(
   skillUiEnabled = skillMarketplaceUiEnabled,
   storeUiEnabled = storeShowcaseUiEnabled,
   workflowUiEnabled = workflowShowcaseUiEnabled,
+  connectorsUiEnabled = marketConnectorsEnabled,
 ) {
   const appRouter = createRouter({
     history,
@@ -201,6 +212,7 @@ export function createAppRouter(
       skillUiEnabled,
       storeUiEnabled,
       workflowUiEnabled,
+      connectorsUiEnabled,
     ),
   });
 
@@ -224,6 +236,7 @@ export function createAppRouter(
     if (!workflowUiEnabled && (route.path === "/workflows" || route.path.startsWith("/workflows/"))) {
       return { path: "/settings", replace: true };
     }
+    if (!connectorsUiEnabled && route.path === "/connectors") return { path: "/settings", replace: true };
 
     const requiredCapability = requiredCapabilityForPath(route.path);
     if (requiredCapability === null) {
