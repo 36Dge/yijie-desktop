@@ -57,13 +57,6 @@ const detail = ref<{
   value: string;
   description: string;
 } | null>(null);
-const periodLabel = computed(() =>
-  period.value === 7
-    ? "09.28 – 10.04"
-    : period.value === 30
-      ? "09.05 – 10.04"
-      : "07.07 – 10.04",
-);
 const shopLabel = computed(
   () =>
     dashboardShops.find((item) => item.id === shop.value)?.label ?? "全部店铺",
@@ -778,9 +771,10 @@ function changeState(event: Event) {
 
   <NDrawer :show="reportOpen" :width="520" @update:show="reportOpen = $event"
     ><NDrawerContent title="经营简报" closable class="store-dashboard-dialog"
-      ><p class="sd-eyebrow">YIJIE INTELLIGENCE · {{ periodLabel }}</p>
-      <h2>增长稳健，利润还有提升空间。</h2>
-      <p class="sd-muted">{{ shopLabel }} · 最近 {{ period }} 天 · 演示分析</p>
+      ><header class="sd-report-intro">
+        <h2>增长稳健，利润还有提升空间。</h2>
+        <p class="sd-muted">{{ shopLabel }} · 最近 {{ period }} 天</p>
+      </header>
       <div class="sd-report-metrics">
         <div>
           <span>销售额</span><strong>${{ money(stats.sales) }}</strong>

@@ -982,6 +982,15 @@
   font-size: var(--yj-font-size-caption);
   padding-top: var(--yj-space-3);
 }
+.sd-report-intro {
+  display: grid;
+  gap: var(--yj-space-3);
+  padding-block: var(--yj-space-1) var(--yj-space-5);
+}
+.store-dashboard-dialog .sd-report-intro h2,
+.sd-report-intro p {
+  margin: 0;
+}
 .sd-report-metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;
