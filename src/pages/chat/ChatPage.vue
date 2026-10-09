@@ -334,6 +334,11 @@ const marketChat = useMarketChat(
   () => routeSessionId.value,
   () => isStreaming.value,
 );
+// Labels come from each accepted turn's immutable display snapshot, never the
+// current composer selection or renamed/uninstalled catalog entries.
+const connectorNamesByTurn = computed(() => Object.fromEntries(
+  (marketChat.observation.value?.availableTurns ?? []).map(turn => [turn.nativeTurnId, turn.selectionDisplay.map(item => item.displayName)]),
+));
 const connectorSelection = computed(() => marketConnectorsEnabled && !isDraftMode.value ? sharedDrafts.selection(composerDraftTargetKey.value) : []);
 const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSelection.value.map(selected => {
   const entry = connectors.entries.find(item => item.id === selected.serviceId);
@@ -964,6 +969,7 @@ onBeforeUnmount(() => {
             v-if="conversationTimeline"
             :timeline="conversationTimeline"
             :turn-timing-labels="turnTimingLabels"
+            :connector-names-by-turn="connectorNamesByTurn"
             :can-decide-approvals="chatStore.canDecideApprovals"
             :approval-authority-revision="chatStore.approvalAuthorityRevision"
             :approval-transients="chatStore.approvalTransients"

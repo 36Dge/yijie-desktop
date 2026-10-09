@@ -57,7 +57,7 @@ onMounted(() => { emit("refresh"); });
       <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择本轮连接器">
         <li v-for="entry in filtered" :key="entry.id" :aria-busy="entry.busy">
           <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :aria-pressed="selectedIds.includes(entry.id)" :aria-label="`${entry.selectable && selectionAvailable ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
-            <ConnectorIcon :asset-id="entry.iconAssetId" size="sm" /><span class="connector-menu__copy"><span :title="entry.name">{{ entry.name }}</span><span v-if="!entry.selectable || entry.busy" class="connector-menu__status" :class="`connector-menu__status--${entry.status.tone}`">{{ entry.status.label }}</span></span><YjIcon v-if="selectedIds.includes(entry.id)" name="permissionCheck" size="sm" />
+            <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" /><span class="connector-menu__copy"><span :title="entry.name">{{ entry.name }}</span><span v-if="!entry.selectable || entry.busy" class="connector-menu__status" :class="`connector-menu__status--${entry.status.tone}`">{{ entry.status.label }}</span></span><YjIcon v-if="selectedIds.includes(entry.id)" name="permissionCheck" size="sm" />
           </button>
           <NSwitch size="small" :value="entry.enabled" :loading="entry.busy" :disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`" @update:value="$emit('enabled-change', entry.id, $event)" />
         </li>
@@ -70,7 +70,7 @@ onMounted(() => { emit("refresh"); });
 <style scoped>
 .connector-menu__list { list-style: none; padding: var(--yj-space-1) var(--yj-space-3); margin: 0; overflow-y: auto; overscroll-behavior: contain; min-height: 0; max-height: var(--yj-layout-connector-list-max); }
 .connector-menu__list li { display: flex; align-items: center; gap: var(--yj-space-2); }
-.connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-lg); padding: var(--yj-space-2) var(--yj-space-1); border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding: var(--yj-space-1); border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-menu__option:hover:not(:disabled), .connector-menu__option[aria-pressed="true"] { background: var(--yj-color-control-hover); }
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
 .connector-menu__option:disabled { cursor: default; }

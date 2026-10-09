@@ -7,6 +7,7 @@
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
+  --yj-color-connector-mention: #5f7f0f;
   --yj-color-workflow-create-ink: #4b651d;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;
@@ -184,7 +185,9 @@
   --yj-z-chat-fade: 1;
   --yj-z-chat-scroll-control: 2;
   --yj-layout-chat-sidebar-indent: var(--yj-space-0);
-  --yj-layout-permission-menu-width: 400px;
+  --yj-layout-chat-action-size: var(--yj-control-height-sm);
+  --yj-layout-chat-stop-square-size: 9.5px;
+  --yj-layout-permission-menu-width: 320px;
   --yj-layout-model-menu-width: 240px;
   --yj-layout-permission-confirm-width: 420px;
   --yj-color-model-kimi-bg: #000000;
@@ -219,6 +222,7 @@
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
+  --yj-color-connector-mention: #c3f35b;
   --yj-color-workflow-create-ink: #c3f35b;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;

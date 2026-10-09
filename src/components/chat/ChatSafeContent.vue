@@ -79,6 +79,7 @@ const props = withDefaults(defineProps<{
 });
 
 defineSlots<{
+  "text-prefix"(): unknown;
   "artifact-reference"(props: {
     block: ConversationTimelineArtifactReferenceContentBlock;
   }): unknown;
@@ -506,6 +507,7 @@ function contentNodes(
 }
 
 const nodes = computed(() => contentNodes(props.blocks, props.mode));
+const firstParagraphKey = computed(() => nodes.value.find(node => node.kind === "paragraph")?.key);
 
 function nestedBlocks(node: { key: string; text: string }): readonly ConversationTimelineContentBlock[] {
   return [{ identity: node.key, blockIndex: 0, type: "text", text: node.text }];
@@ -514,8 +516,10 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
 
 <template>
   <div class="chat-safe-content">
+    <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in nodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
+        <slot v-if="node.key === firstParagraphKey" name="text-prefix" />
         <template v-for="inline in node.inlines" :key="inline.key">
           <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
           <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>

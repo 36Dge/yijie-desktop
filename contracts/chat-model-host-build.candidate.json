@@ -4,7 +4,7 @@
   "mode": "local_worktree_candidate",
   "release": false,
   "host": {
-    "base_commit": "379542c1b3adedfc1dda007f942beb2dd40803ac",
+    "base_commit": "dce7a3c4e51e08c74e009a0ce3eeee256d929b3e",
     "repository": "https://github.com/36Dge/yijie-agent-host.git",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",

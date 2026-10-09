@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { connectorIconUrl } from "../../icons/connector-icons";
 import YjIcon from "../yijie/YjIcon.vue";
 
-const props = withDefaults(defineProps<{ assetId: string; size?: "sm" | "md" | "lg" }>(), { size: "md" });
+const props = withDefaults(defineProps<{ assetId: string; size?: "xs" | "sm" | "md" | "lg" }>(), { size: "md" });
 const failed = ref(false);
 const url = computed(() => connectorIconUrl(props.assetId));
 watch(() => props.assetId, () => { failed.value = false; });
@@ -21,6 +21,8 @@ watch(() => props.assetId, () => { failed.value = false; });
 .connector-icon img { display: block; width: 100%; height: 100%; padding: var(--yj-space-1); object-fit: contain; }
 .connector-icon :deep(.yj-icon) { color: var(--yj-color-on-brand); }
 .connector-icon--sm { width: var(--yj-space-6); height: var(--yj-space-6); border-radius: var(--yj-radius-sm); }
+.connector-icon--xs { width: var(--yj-space-5); height: var(--yj-space-5); border: 0; border-radius: var(--yj-radius-sm); }
+.connector-icon--xs img { padding: 0; }
 .connector-icon--sm img { padding: var(--yj-space-0); }
 .connector-icon--lg { width: var(--yj-space-16); height: var(--yj-space-16); border-radius: var(--yj-radius-xl); }
 </style>

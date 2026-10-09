@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   ChatComposerFocusSnapshot,
   ChatComposerSubmissionState,
@@ -78,6 +78,9 @@ defineSlots<{
 const composing = ref(false);
 const composerElement = ref<HTMLElement | null>(null);
 const textareaElement = ref<HTMLTextAreaElement | null>(null);
+const connectorPrefixElement = ref<HTMLElement | null>(null);
+const connectorPrefixWidth = ref(0);
+const inputScrollTop = ref(0);
 let resizeObserver: ResizeObserver | null = null;
 let observedComposerWidth: number | null = null;
 const selectedProject = computed(() => props.projects.find((project) =>
@@ -184,6 +187,25 @@ function syncTextareaHeight(textarea = textareaElement.value): void {
   if (contentHeight > 0) textarea.style.height = `${contentHeight}px`;
   else textarea.style.removeProperty("height");
   textarea.style.overflowY = contentHeight > textarea.clientHeight + 1 ? "auto" : "hidden";
+  inputScrollTop.value = textarea.scrollTop;
+}
+
+function syncInputLayout(): void {
+  const textarea = textareaElement.value, prefix = connectorPrefixElement.value;
+  let width = 0;
+  if (textarea && prefix) {
+    const style = getComputedStyle(textarea);
+    const line = Number.parseFloat(style.lineHeight) || 20;
+    const gap = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--yj-space-2")) || 8;
+    const available = textarea.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+    // Keep the native textarea (IME, undo and selection). Only its first line
+    // is indented; long/multiple prefixes get a separate wrapped line.
+    if (prefix.offsetHeight <= line + 1 && prefix.offsetWidth + gap + line * 4 <= available) width = prefix.offsetWidth + gap;
+  }
+  const changed = connectorPrefixWidth.value !== width;
+  connectorPrefixWidth.value = width;
+  if (changed) void nextTick(() => syncTextareaHeight());
+  else syncTextareaHeight();
 }
 
 function captureInputFocus(): ChatComposerFocusSnapshot | null {
@@ -218,28 +240,44 @@ function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
 
 defineExpose({ captureInputFocus, restoreInputFocus });
 
+async function removeConnector(id: string): Promise<void> {
+  const snapshot = captureInputFocus();
+  emit("remove-connector", id);
+  await nextTick();
+  if (snapshot) restoreInputFocus(snapshot);
+}
+
 watch(
   [
     () => props.modelValue,
     () => props.mode,
     () => props.attachments.length,
     () => props.attachmentImportAttempt?.operationId ?? null,
+    () => props.connectors,
+    () => props.textOnly,
   ],
-  () => syncTextareaHeight(),
+  syncInputLayout,
   { flush: "post" },
 );
 
 onMounted(() => {
-  syncTextareaHeight();
+  syncInputLayout();
   if (typeof ResizeObserver === "undefined" || composerElement.value === null) return;
   resizeObserver = new ResizeObserver((entries) => {
-    const width = entries[0]?.contentRect.width;
-    if (width === undefined || width === observedComposerWidth) return;
-    observedComposerWidth = width;
-    syncTextareaHeight();
+    const width = entries.find(entry => entry.target === composerElement.value)?.contentRect.width;
+    if (width === undefined && !entries.some(entry => entry.target === connectorPrefixElement.value)) return;
+    if (width === observedComposerWidth && !entries.some(entry => entry.target === connectorPrefixElement.value)) return;
+    if (width !== undefined) observedComposerWidth = width;
+    syncInputLayout();
   });
   resizeObserver.observe(composerElement.value);
+  if (connectorPrefixElement.value) resizeObserver.observe(connectorPrefixElement.value);
 });
+watch(connectorPrefixElement, (value, previous) => {
+  if (previous) resizeObserver?.unobserve(previous);
+  if (value) resizeObserver?.observe(value);
+  syncInputLayout();
+}, { flush: "post" });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
@@ -255,6 +293,10 @@ function requestActiveTurnInterrupt(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  const textarea = textareaElement.value;
+  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly && !submissionBusy.value && !props.streaming && props.canSend && textarea?.selectionStart === 0 && textarea.selectionEnd === 0 && props.connectors.length) {
+    event.preventDefault(); emit("remove-connector", props.connectors[props.connectors.length - 1]!.id); return;
+  }
   if (event.key !== "Enter" || event.shiftKey || composing.value || event.isComposing) return;
   event.preventDefault();
   submit();
@@ -307,7 +349,6 @@ function handlePaste(event: ClipboardEvent): void {
         :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
       >
         <label class="chat-composer__label" for="chat-task-input">输入你的任务需求</label>
-        <ChatConnectorChips v-if="!textOnly" :entries="connectors" :disabled="submissionBusy || streaming || !canSend" @remove="emit('remove-connector', $event)" />
         <ul
           v-if="attachments.length > 0 || attachmentImportAttempt"
           class="chat-composer__attachments"
@@ -367,23 +408,29 @@ function handlePaste(event: ClipboardEvent): void {
             </span>
           </li>
         </ul>
-        <textarea
+        <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0 }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
+          <div v-if="!textOnly && connectors.length" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
+            <ChatConnectorChips :entries="connectors" :disabled="submissionBusy || streaming || !canSend" @remove="removeConnector" />
+          </div>
+          <textarea
           ref="textareaElement"
           id="chat-task-input"
           class="chat-composer__textarea"
           :value="modelValue"
           :readonly="submissionBusy"
-          :placeholder="textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
+          :placeholder="!textOnly && connectors.length ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
           :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
           :aria-invalid="visibleValidationMessage ? 'true' : undefined"
           autocomplete="off"
           spellcheck="true"
           @input="updateInput"
+          @scroll="inputScrollTop = ($event.target as HTMLTextAreaElement).scrollTop"
           @keydown="handleKeydown"
           @paste="handlePaste"
           @compositionstart="composing = true"
           @compositionend="composing = false"
         />
+        </div>
         <div class="chat-composer__actions">
           <div class="chat-composer__leading-actions">
             <ChatAddControl
@@ -430,7 +477,7 @@ function handlePaste(event: ClipboardEvent): void {
                 title="停止生成"
                 @click="requestActiveTurnInterrupt"
               >
-                <YjIcon name="stop" size="lg" />
+                <YjIcon class="chat-composer__stop-icon" name="stopFilled" size="xs" :stroke-width="0" />
               </button>
             </slot>
           </template>
@@ -815,7 +862,12 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer--reply .chat-composer__textarea { min-height: calc(112px - var(--chat-composer-action-row-height)); }
-.chat-composer__attachments + .chat-composer__textarea { min-height: calc(96px - var(--chat-composer-action-row-height)); padding-top: var(--yj-space-3); }
+.chat-composer__attachments + .chat-composer__input .chat-composer__textarea { min-height: calc(96px - var(--chat-composer-action-row-height)); }
+.chat-composer__input { position: relative; min-width: 0; border-radius: inherit; }
+.chat-composer__connector-prefix { width: max-content; max-width: calc(100% - var(--yj-space-8)); margin: var(--yj-space-4) var(--yj-space-4) 0; }
+.chat-composer__connector-prefix + .chat-composer__textarea { padding-top: var(--yj-space-2); }
+.chat-composer__input--inline-prefix .chat-composer__connector-prefix { position: absolute; top: var(--yj-space-4); left: var(--yj-space-4); margin: 0; }
+.chat-composer__input--inline-prefix .chat-composer__textarea { padding-top: var(--yj-space-4); text-indent: var(--connector-prefix-width); }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
 
 .chat-composer__actions {
@@ -904,9 +956,9 @@ function handlePaste(event: ClipboardEvent): void {
 
 .chat-composer__send {
   display: inline-flex;
-  flex: 0 0 var(--yj-control-height-md);
-  width: var(--yj-control-height-md);
-  height: var(--yj-control-height-md);
+  flex: 0 0 var(--yj-layout-chat-action-size);
+  width: var(--yj-layout-chat-action-size);
+  height: var(--yj-layout-chat-action-size);
   align-items: center;
   justify-content: center;
   justify-self: end;
@@ -923,7 +975,12 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__send:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
 .chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
 .chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }
-.chat-composer__send--stop { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }
+.chat-composer__send--stop { color: var(--yj-color-bg-card); background: var(--yj-color-text-primary); }
+.chat-composer__send--stop:hover:not(:disabled) { background: var(--yj-color-text-secondary); }
+.chat-composer__send--stop:active:not(:disabled) { background: var(--yj-color-text-tertiary); }
+/* Lucide Square occupies 18 of its 24 viewBox units. */
+.chat-composer__stop-icon { width: calc(var(--yj-layout-chat-stop-square-size) * 4 / 3); height: calc(var(--yj-layout-chat-stop-square-size) * 4 / 3); fill: currentColor; }
+.chat-composer__stop-icon :deep(rect) { rx: calc(var(--yj-radius-xs) / 2); }
 
 button:disabled { cursor: not-allowed; opacity: 0.64; }
 

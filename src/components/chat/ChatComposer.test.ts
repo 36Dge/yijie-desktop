@@ -88,6 +88,26 @@ describe("ChatComposer", () => {
     expect(wrapper.find('[aria-label="本轮使用的连接器"]').exists()).toBe(false);
     wrapper.unmount();
   });
+  it("removes a connector at the start without changing text, selection, or IME input", async () => {
+    const wrapper = mountComposer({ modelValue: "今天数据如何", connectors: [{ id: "sorftime", name: "Sorftime", iconAssetId: "sorftime" }] });
+    const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
+    expect(input.attributes("placeholder")).toBe("");
+    element.setSelectionRange(0, 2);
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
+    element.setSelectionRange(0, 0);
+    await input.trigger("compositionstart");
+    await input.trigger("keydown", { key: "Backspace", isComposing: true });
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
+    await input.trigger("compositionend");
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-connector")).toEqual([["sorftime"]]);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(element.value).toBe("今天数据如何");
+    await wrapper.setProps({ submissionState: "submitting" });
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-connector")).toHaveLength(1);
+  });
   it("places workspace and permission settings below the panel while keeping attachment and send actions inside", async () => {
     const wrapper = mountComposer();
     const projectButton = wrapper.get(".chat-composer__project--button");
@@ -328,7 +348,7 @@ describe("ChatComposer", () => {
     Object.defineProperty(textarea, "scrollHeight", { configurable: true, get: () => scrollHeight });
     Object.defineProperty(textarea, "clientHeight", { configurable: true, get: () => clientHeight });
     const notifyWidth = (width: number) => resizeCallback(
-      [{ contentRect: { width } } as ResizeObserverEntry],
+      [{ target: wrapper.get('.chat-composer').element, contentRect: { width } } as ResizeObserverEntry],
       {} as ResizeObserver,
     );
 
