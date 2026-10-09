@@ -22,10 +22,10 @@ fn install_request(service: &str) -> wire::InstallPayload {
     }
 }
 #[test]
-fn feat157_catalog_preserves_49_distinct_non_secret_services() {
+fn feat157_catalog_preserves_58_distinct_non_secret_services() {
     let product = catalog();
-    assert_eq!(product.catalog_revision, 5);
-    assert_eq!(product.catalog.len(), 49);
+    assert_eq!(product.catalog_revision, 7);
+    assert_eq!(product.catalog.len(), 58);
     assert_eq!(
         product
             .catalog
@@ -33,7 +33,7 @@ fn feat157_catalog_preserves_49_distinct_non_secret_services() {
             .map(|e| &e.service_id)
             .collect::<HashSet<_>>()
             .len(),
-        49
+        58
     );
     assert_eq!(
         product
@@ -41,11 +41,71 @@ fn feat157_catalog_preserves_49_distinct_non_secret_services() {
             .iter()
             .filter(|e| e.transport == wire::Transport::Http)
             .count(),
-        49
+        58
     );
     assert!(product.catalog.iter().all(
         |e| e.service_id == e.icon_asset_id && e.availability != wire::Availability::Available
     ));
+}
+#[test]
+fn feat157_cross_border_installations_fit_snapshot_and_keyless_enable_keeps_live_gate() {
+    let mut db = database();
+    crate::chat::migrations::migrate_to_target(
+        &mut db,
+        crate::chat::migrations::MARKET_PROVIDER_SCHEMA_VERSION,
+    )
+    .unwrap();
+    let owner = scope();
+    for entry in &catalog().catalog {
+        store::install(
+            &mut db,
+            &owner,
+            entry,
+            catalog().catalog_revision,
+            install_request(&entry.service_id),
+            100,
+        )
+        .unwrap();
+    }
+    let items = store::list(&db, &owner, &catalog().catalog).unwrap();
+    assert_eq!(items.len(), 58);
+    let snapshot = wire::Snapshot {
+        catalog_revision: 7,
+        catalog: projected_catalog(true),
+        installations: items.clone(),
+        capabilities: vec![],
+        execution_available: false,
+    };
+    snapshot.validate().unwrap();
+    let public = items.iter().find(|i| i.service_id == "shopify").unwrap();
+    assert_eq!(
+        public.authorization_status,
+        wire::AuthorizationStatus::NotRequired
+    );
+    assert_eq!(
+        public.configuration_status,
+        wire::ConfigurationStatus::Configured
+    );
+    assert!(
+        !public.effective_enabled && !public.desired_enabled && public.credential_ref.is_none()
+    );
+    for service in ["shopify", "sorftime"] {
+        let item = items.iter().find(|i| i.service_id == service).unwrap();
+        let key = wire::InstallationOperationPayload {
+            installation_id: item.installation_id.clone(),
+            operation_id: Uuid::now_v7().to_string(),
+            expected_revision: item.revision,
+        };
+        let result = store::check_provider_change(
+            &db,
+            &owner,
+            &catalog().catalog,
+            &key,
+            Some(item.generation),
+            wire::OperationAction::Enable,
+        );
+        assert_eq!(result.is_ok(), service == "shopify");
+    }
 }
 #[test]
 fn feat157_retired_service_installation_is_hidden_without_erasing_history() {
@@ -79,12 +139,10 @@ fn feat157_retired_service_installation_is_hidden_without_erasing_history() {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].service_id, current.service_id);
         assert!(!supports_provider(&retired.service_id));
-        assert!(
-            catalog()
-                .catalog
-                .iter()
-                .all(|entry| entry.service_id != retired.service_id)
-        );
+        assert!(catalog()
+            .catalog
+            .iter()
+            .all(|entry| entry.service_id != retired.service_id));
         // Ordinary retained data is still present; catalogue retirement is not a
         // destructive migration or a rewrite of a historical receipt.
         assert_eq!(
@@ -109,11 +167,9 @@ fn feat157_install_receipt_is_atomic_scoped_and_survives_replay() {
     assert!(first.installation.credential_ref.is_none());
     let again = store::install(&mut db, &owner, entry, 1, request, 101).unwrap();
     assert_eq!(encode(&first).unwrap(), encode(&again).unwrap());
-    assert!(
-        store::list(&db, &other, &catalog().catalog)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(store::list(&db, &other, &catalog().catalog)
+        .unwrap()
+        .is_empty());
     assert_eq!(
         store::operation(&db, &other, &first.operation.operation_id).unwrap_err(),
         Error::NotFound
@@ -161,11 +217,9 @@ fn feat157_uninstall_reinstall_fences_old_generation_without_erasing_receipts() 
         removed.installation.status,
         wire::InstallationStatus::Removed
     );
-    assert!(
-        store::list(&db, &owner, &catalog().catalog)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(store::list(&db, &owner, &catalog().catalog)
+        .unwrap()
+        .is_empty());
     let renewed = store::install(
         &mut db,
         &owner,
@@ -261,16 +315,12 @@ fn feat157_connector_permission_lease_fences_context_and_keeps_read_only_scope()
     )
     .unwrap();
     let context = manager.bind(projection, 100).unwrap();
-    assert!(
-        manager
-            .with_connector_context(context.context_id, &owner, "connector.read", 101, |_| ())
-            .is_ok()
-    );
-    assert!(
-        manager
-            .with_connector_context(context.context_id, &owner, "connector.manage", 101, |_| ())
-            .is_err()
-    );
+    assert!(manager
+        .with_connector_context(context.context_id, &owner, "connector.read", 101, |_| ())
+        .is_ok());
+    assert!(manager
+        .with_connector_context(context.context_id, &owner, "connector.manage", 101, |_| ())
+        .is_err());
     let replacement = manager
         .bind(
             crate::chat::AuthoritativeChatProjection::from_trusted_native_projection(
@@ -283,22 +333,18 @@ fn feat157_connector_permission_lease_fences_context_and_keeps_read_only_scope()
             101,
         )
         .unwrap();
-    assert!(
-        manager
-            .with_connector_context(context.context_id, &owner, "connector.read", 102, |_| ())
-            .is_err()
-    );
-    assert!(
-        manager
-            .with_connector_context(
-                replacement.context_id,
-                &owner,
-                "connector.read",
-                102,
-                |_| ()
-            )
-            .is_ok()
-    );
+    assert!(manager
+        .with_connector_context(context.context_id, &owner, "connector.read", 102, |_| ())
+        .is_err());
+    assert!(manager
+        .with_connector_context(
+            replacement.context_id,
+            &owner,
+            "connector.read",
+            102,
+            |_| ()
+        )
+        .is_ok());
 }
 
 #[test]
@@ -313,7 +359,7 @@ fn feat157_snapshot_and_mutation_follow_the_generated_wire_contract() {
     let response =
         serde_json::json!({"schemaVersion":1,"requestId":Uuid::now_v7().to_string(),"data":data});
     let validated: wire::SnapshotResponse = serde_json::from_value(response).unwrap();
-    assert_eq!(validated.data.catalog.len(), 49);
+    assert_eq!(validated.data.catalog.len(), 58);
     assert!(!validated.data.execution_available);
     let installed = apply(
         &mut db,
@@ -393,25 +439,23 @@ fn feat157_sql30_expands_sql29_preserving_existing_rows_and_ledger() {
 #[test]
 fn feat157_authorization_adapter_availability_does_not_claim_execution_readiness() {
     let disabled = projected_catalog(false);
-    assert!(
-        disabled
-            .iter()
-            .all(|entry| entry.authorization_available == Some(false))
-    );
+    assert!(disabled
+        .iter()
+        .all(|entry| entry.authorization_available == Some(false)));
     let enabled = projected_catalog(true);
     assert_eq!(
         enabled
             .iter()
             .filter(|entry| entry.availability == wire::Availability::Available)
             .count(),
-        49
+        58
     );
     assert_eq!(
         enabled
             .iter()
             .filter(|entry| entry.authorization_available == Some(true))
             .count(),
-        45
+        48
     );
     for entry in enabled {
         assert_eq!(
@@ -420,11 +464,9 @@ fn feat157_authorization_adapter_availability_does_not_claim_execution_readiness
         );
         if supports_provider(&entry.service_id) {
             assert_eq!(entry.availability, wire::Availability::Available);
-            assert!(
-                !entry
-                    .blocker_codes
-                    .contains(&Error::ProviderOnboardingRequired)
-            );
+            assert!(!entry
+                .blocker_codes
+                .contains(&Error::ProviderOnboardingRequired));
         } else {
             assert_eq!(
                 entry.availability,

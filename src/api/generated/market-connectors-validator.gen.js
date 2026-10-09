@@ -437,7 +437,7 @@ return errors === 0;
 validate59.evaluated = {"dynamicProps":false,"dynamicItems":false};
 
 export const validateCategoryId = validate60;
-const schema27 = {"type":"string","enum":["knowledge_docs","ecommerce_retail","data_analytics","productivity","industry_data","marketing"]};
+const schema27 = {"type":"string","enum":["knowledge_docs","ecommerce_retail","cross_border_ecommerce","data_analytics","productivity","industry_data","marketing"]};
 
 function validate60(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -459,7 +459,7 @@ vErrors.push(err0);
 }
 errors++;
 }
-if(!((((((data === "knowledge_docs") || (data === "ecommerce_retail")) || (data === "data_analytics")) || (data === "productivity")) || (data === "industry_data")) || (data === "marketing"))){
+if(!(((((((data === "knowledge_docs") || (data === "ecommerce_retail")) || (data === "cross_border_ecommerce")) || (data === "data_analytics")) || (data === "productivity")) || (data === "industry_data")) || (data === "marketing"))){
 const err1 = {instancePath,schemaPath:"#/enum",keyword:"enum",params:{allowedValues: schema27.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err1];
@@ -513,7 +513,7 @@ return errors === 0;
 validate61.evaluated = {"dynamicProps":false,"dynamicItems":false};
 
 export const validateAuthMode = validate62;
-const schema29 = {"type":"string","enum":["oauth","api_key","provider_credentials","local_oauth","stdio_api_key","provider_gateway","unknown"]};
+const schema29 = {"type":"string","enum":["oauth","api_key","provider_credentials","local_oauth","stdio_api_key","provider_gateway","none","unknown"]};
 
 function validate62(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -535,7 +535,7 @@ vErrors.push(err0);
 }
 errors++;
 }
-if(!(((((((data === "oauth") || (data === "api_key")) || (data === "provider_credentials")) || (data === "local_oauth")) || (data === "stdio_api_key")) || (data === "provider_gateway")) || (data === "unknown"))){
+if(!((((((((data === "oauth") || (data === "api_key")) || (data === "provider_credentials")) || (data === "local_oauth")) || (data === "stdio_api_key")) || (data === "provider_gateway")) || (data === "none")) || (data === "unknown"))){
 const err1 = {instancePath,schemaPath:"#/enum",keyword:"enum",params:{allowedValues: schema29.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err1];
@@ -1560,7 +1560,7 @@ return errors === 0;
 validate88.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateSnapshot = validate100;
-const schema41 = {"type":"object","additionalProperties":true,"required":["catalogRevision","catalog","installations","capabilities","executionAvailable"],"properties":{"catalogRevision":{"$ref":"#/$defs/Revision"},"catalog":{"type":"array","items":{"$ref":"#/$defs/CatalogEntry"},"maxItems":51},"installations":{"type":"array","items":{"$ref":"#/$defs/Installation"},"maxItems":51},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Permission"},"maxItems":4,"uniqueItems":true},"executionAvailable":{"type":"boolean"}},"description":"executionAvailable=false makes every connector unselectable even if cached states are ready. Exact catalog membership/count is verified against the Connectors product source, not inferred from a request."};
+const schema41 = {"type":"object","additionalProperties":true,"required":["catalogRevision","catalog","installations","capabilities","executionAvailable"],"properties":{"catalogRevision":{"$ref":"#/$defs/Revision"},"catalog":{"type":"array","items":{"$ref":"#/$defs/CatalogEntry"},"maxItems":58},"installations":{"type":"array","items":{"$ref":"#/$defs/Installation"},"maxItems":58},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Permission"},"maxItems":4,"uniqueItems":true},"executionAvailable":{"type":"boolean"}},"description":"executionAvailable=false makes every connector unselectable even if cached states are ready. Exact catalog membership/count is verified against the Connectors product source, not inferred from a request."};
 const func0 = (function equal(a, b) {
   if (a === b) return true;
 
@@ -1672,8 +1672,8 @@ errors = vErrors.length;
 if(data.catalog !== undefined){
 let data1 = data.catalog;
 if(Array.isArray(data1)){
-if(data1.length > 51){
-const err5 = {instancePath:instancePath+"/catalog",schemaPath:"#/properties/catalog/maxItems",keyword:"maxItems",params:{limit: 51},message:"must NOT have more than 51 items"};
+if(data1.length > 58){
+const err5 = {instancePath:instancePath+"/catalog",schemaPath:"#/properties/catalog/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
 if(vErrors === null){
 vErrors = [err5];
 }
@@ -1704,8 +1704,8 @@ errors++;
 if(data.installations !== undefined){
 let data3 = data.installations;
 if(Array.isArray(data3)){
-if(data3.length > 51){
-const err7 = {instancePath:instancePath+"/installations",schemaPath:"#/properties/installations/maxItems",keyword:"maxItems",params:{limit: 51},message:"must NOT have more than 51 items"};
+if(data3.length > 58){
+const err7 = {instancePath:instancePath+"/installations",schemaPath:"#/properties/installations/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
 if(vErrors === null){
 vErrors = [err7];
 }
@@ -2073,7 +2073,7 @@ return errors === 0;
 validate112.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateSelectionValidation = validate115;
-const schema45 = {"type":"object","additionalProperties":true,"required":["selection","executionAvailable"],"properties":{"selection":{"type":"array","items":{"$ref":"#/$defs/SelectionDisplay"},"maxItems":51},"executionAvailable":{"type":"boolean"}},"description":"Successful validation is observational only. Does not mint a grant or authorize external side effects; submit must recheck atomically. Empty selection remains valid with execution unavailable."};
+const schema45 = {"type":"object","additionalProperties":true,"required":["selection","executionAvailable"],"properties":{"selection":{"type":"array","items":{"$ref":"#/$defs/SelectionDisplay"},"maxItems":58},"executionAvailable":{"type":"boolean"}},"description":"Successful validation is observational only. Does not mint a grant or authorize external side effects; submit must recheck atomically. Empty selection remains valid with execution unavailable."};
 
 function validate115(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -2109,8 +2109,8 @@ errors++;
 if(data.selection !== undefined){
 let data0 = data.selection;
 if(Array.isArray(data0)){
-if(data0.length > 51){
-const err2 = {instancePath:instancePath+"/selection",schemaPath:"#/properties/selection/maxItems",keyword:"maxItems",params:{limit: 51},message:"must NOT have more than 51 items"};
+if(data0.length > 58){
+const err2 = {instancePath:instancePath+"/selection",schemaPath:"#/properties/selection/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
 if(vErrors === null){
 vErrors = [err2];
 }
@@ -2860,7 +2860,7 @@ return errors === 0;
 validate141.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateSelectionValidatePayload = validate144;
-const schema54 = {"type":"object","additionalProperties":false,"required":["selection"],"properties":{"selection":{"type":"array","items":{"$ref":"#/$defs/SelectionRef"},"maxItems":51,"uniqueItems":true}},"description":"Duplicate installation IDs with different revisions are a semantic error even though JSON uniqueItems alone cannot detect them."};
+const schema54 = {"type":"object","additionalProperties":false,"required":["selection"],"properties":{"selection":{"type":"array","items":{"$ref":"#/$defs/SelectionRef"},"maxItems":58,"uniqueItems":true}},"description":"Duplicate installation IDs with different revisions are a semantic error even though JSON uniqueItems alone cannot detect them."};
 
 function validate144(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -2898,8 +2898,8 @@ errors++;
 if(data.selection !== undefined){
 let data0 = data.selection;
 if(Array.isArray(data0)){
-if(data0.length > 51){
-const err2 = {instancePath:instancePath+"/selection",schemaPath:"#/properties/selection/maxItems",keyword:"maxItems",params:{limit: 51},message:"must NOT have more than 51 items"};
+if(data0.length > 58){
+const err2 = {instancePath:instancePath+"/selection",schemaPath:"#/properties/selection/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
 if(vErrors === null){
 vErrors = [err2];
 }

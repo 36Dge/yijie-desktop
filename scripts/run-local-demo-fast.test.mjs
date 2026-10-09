@@ -10,6 +10,37 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const runnerPath = path.join(repositoryRoot, "scripts/run-local-demo-fast.sh");
 
 describe("local demo launcher profiles", () => {
+  it.each([
+    ["daily default", "true", "true", "unset", "true"],
+    ["daily explicit rollback", "true", "true", "false", "false"],
+    ["legacy model rollback", "true", "false", "unset", "false"],
+    ["isolated model candidate", "false", "true", "unset", "false"],
+    ["stable entry", "false", "false", "unset", "false"],
+    ["explicit candidate opt-in", "false", "true", "true", "true"],
+  ])("keeps native and renderer connector selection aligned for %s", async (_label, daily, models, override, expected) => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('market_connectors_default="false"');
+    const end = runner.indexOf('  [[ "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]]', start);
+    const selectionEnd = runner.lastIndexOf('if [[ "$market_connectors_enabled" == "true" ]]; then', end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    // Execute only the launcher's pure profile selection, without builds,
+    // services, credentials, database access or changes to the running app.
+    const { stdout } = await exec("/bin/bash", ["-c", `
+      set -euo pipefail
+      fail() { exit 1; }
+      scheduled_daily="$1"
+      chat_models_enabled="$2"
+      image_generation_enabled="true"
+      unset YIJIE_MARKET_CONNECTORS_ENABLED
+      export VITE_YIJIE_MARKET_CONNECTORS_ENABLED=stale
+      if [[ "$3" != "unset" ]]; then export YIJIE_MARKET_CONNECTORS_ENABLED="$3"; fi
+      ${runner.slice(start, selectionEnd)}
+      printf '%s:%s:%s' "$YIJIE_MARKET_CONNECTORS_ENABLED" "$VITE_YIJIE_MARKET_CONNECTORS_ENABLED" "$image_generation_enabled"
+    `, "connector-profile", daily, models, override]);
+    expect(stdout).toBe(`${expected}:${expected}:${expected === "true" ? "false" : "true"}`);
+  });
+
   it("keeps the default commands and adds one explicit stable API entry", async () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
 
@@ -38,7 +69,7 @@ describe("local demo launcher profiles", () => {
     );
   });
 
-  it("maps the exact stable argument to image=false while retaining image=true by default", async () => {
+  it("maps the exact stable argument to image=false while retaining the legacy image profile", async () => {
     const runner = await readFile(runnerPath, "utf8");
     const argumentStart = runner.indexOf('image_generation_enabled="true"');
     const argumentEnd = runner.indexOf(
@@ -220,8 +251,8 @@ describe("local demo launcher profiles", () => {
     ]) {
       expect(envBoundary).toContain(`-u ${name} \\`);
     }
-    expect(envBoundary).toContain("YIJIE_MODEL_PROVIDER=minimax \\");
-    expect(envBoundary).toContain('YIJIE_MINIMAX_API_KEY_FILE="$provider_key_file" \\');
+    expect(runner).toContain('provider_environment=(YIJIE_MODEL_PROVIDER=minimax "YIJIE_MINIMAX_API_KEY_FILE=$provider_key_file")');
+    expect(envBoundary).toContain('"${provider_environment[@]+"${provider_environment[@]}"}"');
     expect(envBoundary).toContain('YIJIE_FEAT128_IMAGE_GENERATION_ENABLED="$image_generation_enabled" \\');
     expect(envBoundary).not.toContain("YIJIE_MINIMAX_API_KEY=\"");
   });
@@ -238,4 +269,13 @@ describe("local demo launcher profiles", () => {
       ),
     });
   });
+});
+
+// The user-retired FEAT-144 entry cannot collect or export credentials.
+it("retires Sorftime startup input while retaining environment scrubbing", async () => {
+  const entry = await readFile(runnerPath, "utf8");
+  expect(entry).toContain("unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK");
+  expect(entry).not.toContain("sorftime_requested=");
+  expect(entry).not.toContain("display dialog");
+  expect(entry).not.toContain("export YIJIE_FEAT144");
 });

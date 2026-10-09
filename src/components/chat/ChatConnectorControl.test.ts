@@ -14,7 +14,7 @@ afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); docu
 describe("chat connector menu intent separation", () => {
   it("keeps global switch and current-turn selection as independent controls", async () => {
     const wrapper = setup();
-    await wrapper.get('.connector-trigger').trigger('click'); await flushPromises();
+    await flushPromises();
     const row = new DOMWrapper(document.querySelector<HTMLButtonElement>('[data-connector-option]')!);
     await row.trigger('click');
     expect(wrapper.emitted('select')).toEqual([["sample"]]);
@@ -26,15 +26,15 @@ describe("chat connector menu intent separation", () => {
   });
   it("routes an unavailable entry to configuration without selecting it", async () => {
     const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: "待配置", tone: "warning" }, actions: ["configure"] }]);
-    await wrapper.get('.connector-trigger').trigger('keydown', { key: 'ArrowDown' }); await flushPromises();
+    await flushPromises();
     await new DOMWrapper(document.querySelector<HTMLButtonElement>('[data-connector-option]')!).trigger('click');
     expect(wrapper.emitted('configure')).toEqual([["sample"]]); expect(wrapper.emitted('select')).toBeUndefined();
-    await new DOMWrapper(document.querySelector<HTMLElement>('[role="dialog"]')!).trigger('keydown', { key: 'Escape' });
-    await flushPromises(); expect(wrapper.get('.connector-trigger').attributes('aria-expanded')).toBe('false');
+    await wrapper.get('footer button').trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
   });
   it("offers management from the empty state without fabricating an installed app", async () => {
     const wrapper = setup([]);
-    await wrapper.get('.connector-trigger').trigger('click'); await flushPromises();
+    await flushPromises();
     expect(document.body.textContent).toContain('还没有安装连接器');
     expect(document.querySelector('[role="switch"]')).toBeNull();
     const manage = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === '管理连接器')!;

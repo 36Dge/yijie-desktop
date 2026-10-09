@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import schema from "../../contracts/market-connectors.schema.json";
+import catalog from "../../contracts/market-catalog.json";
 import { MARKET_CONNECTOR_IPC, type ErrorCode, type Installation, type IpcRequestMap, type IpcResponseMap, type SelectionRef, type MutationResult, type Operation } from "../domain/market-connectors.generated";
 import * as validators from "./generated/market-connectors-validator.gen";
 
@@ -101,7 +102,7 @@ export function createMarketConnectorClient(
       const result = await call("market_connectors_snapshot_v1", context, {});
       const services = new Set(result.catalog.map(entry => entry.serviceId));
       const installations = new Set(result.installations.map(item => item.installationId));
-      if (result.catalog.length !== 49 || services.size !== 49 || installations.size !== result.installations.length ||
+      if (result.catalog.length !== catalog.catalog.length || services.size !== catalog.catalog.length || installations.size !== result.installations.length ||
           new Set(result.installations.map(item => item.serviceId)).size !== result.installations.length ||
           result.installations.some(item => !services.has(item.serviceId) || item.status === "removed" ||
             (item.effectiveEnabled && (!item.desiredEnabled || item.connectionStatus !== "ready" || item.configurationStatus !== "configured" ||

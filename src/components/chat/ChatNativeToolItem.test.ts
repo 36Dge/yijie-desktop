@@ -21,6 +21,8 @@ describe("native Tool display",()=>{
     expect(props.execution).not.toHaveProperty("resultSummary");
     const wrapper=mount(ChatNativeToolItem,{props});
     expect(wrapper.text()).toContain("sorftime / product_detail");
+    expect(wrapper.text()).toContain("仅供查看");
+    expect(wrapper.text()).not.toContain("重新启动");
     expect(wrapper.text()).toContain("空文本块");
     expect(wrapper.findAll("[data-native-content-index]").map(v=>v.attributes("data-native-content-index"))).toEqual(["0","2"]);
     expect(wrapper.find("a").exists()).toBe(false);

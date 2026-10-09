@@ -28,9 +28,9 @@ describe("market connector source-driven IPC", () => {
     await api.reopen(context, operation, 3);
     expect(calls).toEqual([{ command: "market_connectors_operation_reopen_v1", payload: { operationId: operation, expectedRevision: 3 } }]);
   });
-  it("reads the exact non-secret 49-service catalog without enabling execution", async () => {
+  it("reads the exact non-secret 58-service catalog without enabling execution", async () => {
     const result = await client(snapshot()).snapshot(context);
-    expect(result.catalog).toHaveLength(49);
+    expect(result.catalog).toHaveLength(58);
     expect(result.catalog.some(entry => ["taobao-flash-sale-retail", "doukou-doctor"].includes(entry.serviceId))).toBe(false);
     expect(result.executionAvailable).toBe(false);
   });

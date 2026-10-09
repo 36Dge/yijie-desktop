@@ -4,6 +4,6 @@
   "release": false,
   "authority": "yijie-connectors/catalog/market-catalog.v1.json",
   "base_commit": "629d3975b793c6a147e8b1027c9035ad870a4fc6",
-  "source_sha256": "400621e346e94ef7115a1f7dc7562d8614fb24cc1ebe653c6152f44416d089d3",
+  "source_sha256": "aee73f10ccf044ecc492853839697736e43717c2a7d9125ab75dbadfb2005a28",
   "generated": "contracts/market-catalog.json"
 }

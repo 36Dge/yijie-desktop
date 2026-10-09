@@ -55,10 +55,10 @@ async function openByKeyboard() { if (props.disabled) return; open.value = true;
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <NPopover v-model:show="open" :to="overlay ?? false" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control" type="button" :disabled="disabled" :aria-label="triggerLabel" :title="selected?.path ?? triggerLabel" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
+      <button ref="trigger" class="workspace-trigger chat-composer__project chat-composer__project--button yj-control yj-control--pill" type="button" :disabled="disabled" :aria-label="triggerLabel" :title="selected?.path ?? triggerLabel" aria-haspopup="menu" :aria-expanded="open" @keydown.down.prevent="openByKeyboard" @keydown.esc="open = false">
         <YjIcon name="folder" size="sm" :stroke-width="1.5" />
         <span class="workspace-name">{{ selected?.project.safeName ?? '选择工作空间' }}</span>
-        <YjIcon name="chevronDown" size="xs" tone="muted" />
+        <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
     <div ref="menu" class="workspace-menu chat-control-menu" role="menu" aria-label="选择工作空间" :aria-busy="loading" @keydown="navigate">

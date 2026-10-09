@@ -25,12 +25,6 @@ import { useScheduledManagement } from "./use-scheduled-management";
 import { useScheduledManual } from "./use-scheduled-manual";
 
 const router = useRouter(); const route = useRoute();
-// Resolve the live brand token exactly like the Skill install action.
-const scheduleSwitchTheme = {
-  railColorActive: "var(--yj-color-brand-primary)",
-  buttonColor: "var(--schedule-switch-thumb)",
-  loadingColor: "var(--schedule-switch-loading)",
-};
 const m = useScheduledManagement();
 const { tab, search, state, order, planFilter, cards, records, capabilities, cursor, loading, writing, error, notice, pending, receipt, context, canManage } = m;
 const permissions = usePermissionStore(); const message = useMessage();
@@ -260,7 +254,7 @@ onBeforeRouteLeave(() => {
           <YjEmpty v-else-if="!(tab === 'plans' ? cards.length : records.length) && !error" class="schedules-empty" :title="search || state !== 'all' || planFilter ? '没有匹配的记录' : tab === 'plans' ? '还没有定时任务' : '还没有执行记录'" :description="tab === 'plans' ? '通过对话或手动设置创建计划，保存后可随时调整。' : '计划保存和未来时间预览不会产生执行记录。'" icon="scheduledTask"><template #actions><NButton v-if="search || state !== 'all' || planFilter" @click="search = ''; state = 'all'; planFilter = null">清空筛选</NButton><NButton v-else-if="tab === 'plans'" type="primary" :disabled="!canManage" @click="create">新建定时任务</NButton></template></YjEmpty>
           <div v-else-if="tab === 'plans'" class="schedules-grid">
             <NCard v-for="card in cards" :key="card.summary.plan_id" class="schedule-card schedule-plan-card" content-style="padding: var(--yj-space-5); display: flex; flex-direction: column" :aria-label="card.summary.name" @click="cardClick($event, card.summary)">
-              <div class="schedule-card__heading"><h2><button :id="`schedule-plan-${card.summary.plan_id}`" class="schedule-card__title" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click.stop="edit(card.summary)" :aria-label="`编辑 ${card.summary.name}`">{{ card.summary.name }}</button></h2><div class="schedule-card__state" @click.stop><NSwitch class="schedule-switch" :theme-overrides="scheduleSwitchTheme" :id="`schedule-enable-${card.summary.plan_id}`" :value="card.summary.effective_state === 'enabled'" :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`" :loading="writing && pending?.payload.plan_id === card.summary.plan_id" :disabled="!(writing && pending?.payload.plan_id === card.summary.plan_id) && ((card.summary.effective_state === 'enabled' ? !canManage : !canPrepareAutomatic) || writing || !!pending || autoBusy || autoPending || runningAction || runPending || card.summary.target_state === 'missing')" @update:value="value => togglePlan(value, card.summary)" /></div></div>
+              <div class="schedule-card__heading"><h2><button :id="`schedule-plan-${card.summary.plan_id}`" class="schedule-card__title" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click.stop="edit(card.summary)" :aria-label="`编辑 ${card.summary.name}`">{{ card.summary.name }}</button></h2><div class="schedule-card__state" @click.stop><NSwitch class="schedule-switch" :id="`schedule-enable-${card.summary.plan_id}`" :value="card.summary.effective_state === 'enabled'" :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`" :loading="writing && pending?.payload.plan_id === card.summary.plan_id" :disabled="!(writing && pending?.payload.plan_id === card.summary.plan_id) && ((card.summary.effective_state === 'enabled' ? !canManage : !canPrepareAutomatic) || writing || !!pending || autoBusy || autoPending || runningAction || runPending || card.summary.target_state === 'missing')" @update:value="value => togglePlan(value, card.summary)" /></div></div>
               <p class="schedule-card__content">{{ card.content_preview }}</p>
               <p v-if="chatModelsEnabled" class="schedules-meta">执行模型：{{ scheduleModelLabel(card.model_profile) }}</p>
               <div class="schedule-card__footer"><div class="schedule-card__timing">
@@ -316,8 +310,7 @@ onBeforeRouteLeave(() => {
 .schedule-card__timing { flex: 1; min-width: 0; color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); }
 .schedule-card__timing p { display: flex; align-items: center; gap: var(--yj-space-2); margin: var(--yj-space-2) 0 0; }
 .schedule-card__timing span { overflow-wrap: anywhere; }
-.schedule-switch { --schedule-switch-thumb: var(--yj-color-text-primary); --schedule-switch-loading: var(--yj-color-bg-card); border: none; padding: 0; background: transparent; }
-.schedule-switch[aria-checked="true"] { --schedule-switch-thumb: var(--yj-color-on-brand); --schedule-switch-loading: var(--yj-color-brand-primary); }
+.schedule-switch { border: none; padding: 0; background: transparent; }
 .schedules-meta { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); overflow-wrap: anywhere; }
 .schedules-actions { display: flex; flex-wrap: wrap; gap: var(--yj-space-2); margin-top: var(--yj-space-3); }
 .schedules-more { display: flex; justify-content: center; padding: var(--yj-space-4); }

@@ -21,7 +21,10 @@ describe("shop picker UI", () => {
     expect(trigger.find('svg.lucide-store').exists()).toBe(true);
     await trigger.trigger('click'); await flushPromises();
     expect(document.body.textContent).toContain('还没有授权店铺');
-    expect(document.body.textContent).toContain('不连接真实店铺与数据');
+    expect(document.querySelector('.shop-panel')?.getAttribute('aria-label')).toBe('选择关联店铺');
+    expect(document.querySelector('.shop-panel-header')).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector('.shop-panel'));
+    expect(document.body.textContent).not.toContain('不连接真实店铺与数据');
     button('授权店铺').click(); await nextTick(); expect(document.body.textContent).toContain('正在准备店铺授权');
     await vi.advanceTimersByTimeAsync(SHOP_PREVIEW_TIMING.authorization); await flushPromises();
     const choices = document.querySelectorAll<HTMLButtonElement>('[role="radio"]');
@@ -36,6 +39,7 @@ describe("shop picker UI", () => {
   it("filters the list, supports arrow selection and discards an unconfirmed choice with Escape", async () => {
     const view = setup(); view.model.authorize(); await vi.runAllTimersAsync();
     await view.wrapper.get('.shop-trigger').trigger('keydown', { key: 'ArrowDown' }); await flushPromises();
+    expect(document.activeElement).toBe(document.querySelector('.shop-panel'));
     const input = new DOMWrapper(document.querySelector<HTMLInputElement>('[aria-label="搜索店铺"]')!);
     await input.setValue('找不到'); expect(document.body.textContent).toContain('没有找到匹配的店铺');
     await input.setValue(''); const options = document.querySelectorAll<HTMLButtonElement>('[role="radio"]');

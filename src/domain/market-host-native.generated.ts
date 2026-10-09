@@ -90,7 +90,7 @@ export interface NativeObserveResponse {
 export interface NativeObservation {
   managed: boolean;
   /**
-   * @maxItems 51
+   * @maxItems 58
    */
   selectionDisplay: SelectionDisplay[];
   approvals?: ApprovalSnapshot;
@@ -246,7 +246,7 @@ export interface ServiceBinding {
 export interface ObservedTurn {
   nativeTurnId: NativeId;
   /**
-   * @maxItems 51
+   * @maxItems 58
    */
   selectionDisplay: SelectionDisplay[];
   [k: string]: unknown;

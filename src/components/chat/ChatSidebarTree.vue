@@ -302,7 +302,7 @@ async function confirmRemoveProject(): Promise<void> {
           <n-dropdown
             v-if="projectMenuOptions(group).length > 0"
             :to="projectMenuOverlay ?? false"
-            :style="{ zoom: 'var(--yj-ui-scale, 1)' }"
+            :style="{ zoom: 'var(--yj-ui-scale, 1)', width: 'min(var(--yj-layout-chat-context-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
             trigger="manual"
             placement="bottom-end"
             :show="projectMenuId === group.projectId"

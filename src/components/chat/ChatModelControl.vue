@@ -65,7 +65,7 @@ function key(event: KeyboardEvent): void {
       <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" :title="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? '模型未配置，请选择可用模型' : label" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
         <span v-if="selected" class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected.icon === 'modelKimi' }"><YjIcon :name="selected.icon" size="sm" /></span>
         <span>{{ label }}</span>
-        <YjIcon name="chevronDown" size="xs" tone="muted" />
+        <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
     <div ref="menu" class="model-menu chat-control-menu" role="menu" aria-label="对话模型" @keydown="key">

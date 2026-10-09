@@ -10,9 +10,9 @@ const sourceRoot = path.resolve(root, "../yijie-connectors");
 const source = "catalog/market-catalog.v1.json";
 const bytes = readFileSync(path.join(sourceRoot, source));
 const catalog = JSON.parse(bytes);
-assert.equal(catalog.catalogRevision, 5);
-assert.equal(catalog.catalog.length, 49);
-assert.equal(new Set(catalog.catalog.map(item => item.serviceId)).size, 49);
+assert.equal(catalog.catalogRevision, 7);
+assert.equal(catalog.catalog.length, 58);
+assert.equal(new Set(catalog.catalog.map(item => item.serviceId)).size, 58);
 for (const entry of catalog.catalog) {
   assert.ok(validateCatalogEntry(entry), "Invalid catalog entry");
   assert.equal(entry.serviceId, entry.serverName);
@@ -33,4 +33,4 @@ for (const [name, data] of [[output, bytes], ["contracts/market-catalog.candidat
   if (process.argv.includes("--check")) assert.deepEqual(readFileSync(file), data, name);
   else writeFileSync(file, data);
 }
-console.log("49-entry non-secret Connectors catalog " + (process.argv.includes("--check") ? "verified" : "synchronized") + "; no provider activation.");
+console.log("58-entry non-secret Connectors catalog " + (process.argv.includes("--check") ? "verified" : "synchronized") + "; no provider activation.");

@@ -62,7 +62,15 @@ Luma Living `shopLighting`（Lamp）。全部来自既有 Lucide 依赖，经 re
 2026-10-03 用户指定的 Chat Composer 底栏例外：工作空间文件夹与权限入口的主图标
 统一使用 `sm`（16px）、1.5 线宽。权限菜单内三个选项的主图标及选中勾号同步使用
 1.5 线宽，尺寸保持原规格。仍通过 `YjIcon` 的 `strokeWidth` 属性消费既有 registry，
-不改变全局默认线宽；入口下拉箭头及其他页面沿用原规格。
+不改变全局默认线宽；其他页面沿用原规格。
+
+2026-10-08：对话输入区关联店铺、模型、工作空间和权限入口的下拉箭头统一使用
+`yj-control__chevron`，尺寸为 `--yj-space-3`（12px），覆盖紧凑控件默认的 16px 图标规则。
+主图标、按钮命中区、线宽及打开菜单的行为不变；Composer 的备用入口使用相同规则。
+侧栏“技能”使用现有 `skillOperations`（Lucide Wrench），与加号菜单一致。
+
+`contract-impact = none`：本次仅改变图标尺寸、导航显示名称及图标。Desktop 跨进程接口、
+API / Agent Host、路由与权限语义、本地持久状态均无变化。
 
 ## Skill 广场分类图标（2026-09-07 用户确认）
 

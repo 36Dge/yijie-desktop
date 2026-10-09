@@ -27,7 +27,7 @@ export type SelectionDigest = string;
 /**
  * Unique installationId required even when revisions differ. Native freezes canonical ASCII installationId order; requests may use any order.
  *
- * @maxItems 51
+ * @maxItems 58
  */
 export type Selection = SelectionRef[];
 export type ContentBlock = TextInput | FileInput | ImageInput;

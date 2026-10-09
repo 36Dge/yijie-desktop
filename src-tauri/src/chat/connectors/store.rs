@@ -2,7 +2,7 @@
 //! SQLCipher connection. Live credentials/connection readiness belong to Broker.
 use super::generated as wire;
 use crate::chat::database::ChatScope;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -44,6 +44,7 @@ fn require_storage(db: &Connection) -> Result<()> {
 }
 fn auth_status(entry: &wire::CatalogEntry) -> wire::AuthorizationStatus {
     match entry.auth_mode {
+        wire::AuthMode::None => wire::AuthorizationStatus::NotRequired,
         wire::AuthMode::Oauth | wire::AuthMode::LocalOauth | wire::AuthMode::ProviderGateway => {
             wire::AuthorizationStatus::Required
         }
@@ -66,7 +67,9 @@ fn row(r: &rusqlite::Row<'_>, entry: &wire::CatalogEntry) -> rusqlite::Result<wi
         desired_enabled: r.get(5)?,
         // Persisted user intent is never evidence of a live connection.
         effective_enabled: false,
-        configuration_status: if credential_ref.is_some() {
+        configuration_status: if super::keyless_provider(&entry.service_id) {
+            wire::ConfigurationStatus::Configured
+        } else if credential_ref.is_some() {
             wire::ConfigurationStatus::Unknown
         } else {
             wire::ConfigurationStatus::Unconfigured
@@ -400,6 +403,7 @@ pub(super) fn check_provider_change(
         action,
         wire::OperationAction::Authorize | wire::OperationAction::Configure
     ) && item.credential_ref.is_none()
+        && !(action == wire::OperationAction::Enable && super::keyless_provider(&item.service_id))
     {
         return Err(Error::NotConfigured);
     }
@@ -506,6 +510,10 @@ fn project_provider(
         p::AuthorizationStatus::Error => wire::AuthorizationStatus::Failed,
         p::AuthorizationStatus::Unknown => wire::AuthorizationStatus::Unknown,
     };
+    if super::keyless_provider(&item.service_id) {
+        item.configuration_status = wire::ConfigurationStatus::Configured;
+        item.authorization_status = wire::AuthorizationStatus::NotRequired;
+    }
     item.connection_status = match status.connection_status {
         p::ConnectionStatus::Connected => wire::ConnectionStatus::Ready,
         p::ConnectionStatus::Connecting => wire::ConnectionStatus::Connecting,

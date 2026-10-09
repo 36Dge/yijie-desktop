@@ -56,7 +56,7 @@
 - 新建任务内容列最大宽度：760px（`--yj-layout-chat-entry-max`）；活跃会话正文与输入区同为 760px，在 `.chat-workspace` 内复用该 token 覆盖内容列和输入框宽度，保持居中与等宽。
 - 输入框下方工作空间名称最大宽度 320px（`--yj-layout-chat-workspace-control-max`），同时受设置行可用宽度约束；长名称省略，权限入口在不足一行时换行。
 - 工作空间菜单宽 280px（`--yj-layout-workspace-menu-width`）、列表最大高度 240px（`--yj-layout-workspace-list-max`）、新建弹窗宽 480px（`--yj-layout-workspace-create-width`）；均受缩放后的可用视口约束。
-- 店铺关联原型面板宽 360px（`--yj-layout-shop-menu-width`），入口最长 200px（`--yj-layout-shop-trigger-max`），列表最大高度 288px（`--yj-layout-shop-list-max`）；弹层按触发入口上下可用空间限制高度，列表滚动时底部操作保持可见。
+- 店铺关联原型面板宽 340px（`--yj-layout-shop-menu-width`，由原 360px 小幅收窄），入口最长 200px（`--yj-layout-shop-trigger-max`），列表最大高度 288px（`--yj-layout-shop-list-max`）；弹层按触发入口上下可用空间限制高度，列表滚动时底部操作保持可见。
 - 详情页主内容建议最大宽度：1120px。
 
 ## AI / Codex 必须遵守
@@ -84,3 +84,5 @@
 - 定时任务执行记录详情：520px（`--yj-layout-schedule-record-width`），五项标签/值布局，底部操作右对齐；窗口不足时保留 16px 两侧安全间距，长内容在弹窗内滚动。
 
 - 定时任务记录卡片：双栏、16px 间距、20px 内边距，容器不足 720px 时单栏。标题预留两行 24px 行高，普通卡片及加载骨架约 176px 高（`--yj-layout-schedule-record-skeleton-height`），特殊说明允许自然增高；底部允许换行，不能压缩图标操作。
+
+- 任务和项目的右键操作菜单统一宽 175px（`--yj-layout-chat-context-menu-width`，按用户要求从 200px 缩小 25px），受可用视口约束，不再按短文案收窄。

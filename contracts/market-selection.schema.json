@@ -49,7 +49,7 @@
     },
     "Selection": {
       "type": "array",
-      "maxItems": 51,
+      "maxItems": 58,
       "uniqueItems": true,
       "items": {
         "$ref": "#/$defs/SelectionRef"

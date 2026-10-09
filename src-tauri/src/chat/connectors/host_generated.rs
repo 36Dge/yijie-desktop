@@ -225,7 +225,7 @@ impl Submission {
         }
         {
             let value_services = &self.services;
-            if value_services.len() > 51 {
+            if value_services.len() > 58 {
                 return Err("invalid broker collection");
             }
             for item in value_services.iter() {
@@ -3209,7 +3209,7 @@ impl NativeObservation {
     pub fn validate(&self) -> Result<(), &'static str> {
         {
             let value_selection_display = &self.selection_display;
-            if value_selection_display.len() > 51 {
+            if value_selection_display.len() > 58 {
                 return Err("invalid broker collection");
             }
             for item in value_selection_display.iter() {
@@ -3612,7 +3612,7 @@ impl ObservedTurn {
         }
         {
             let value_selection_display = &self.selection_display;
-            if value_selection_display.len() > 51 {
+            if value_selection_display.len() > 58 {
                 return Err("invalid broker collection");
             }
             for item in value_selection_display.iter() {

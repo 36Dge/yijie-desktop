@@ -54,7 +54,7 @@ const diagnosticLabels = {
   >
     <div class="native-tool" :aria-busy="item.busy">
       <strong>{{ identity }}</strong>
-      <p class="native-tool__source">Sorftime 仅在“请求批准”模式可用。切换其他权限模式后，需要正常退出并重新启动应用才能再次启用。</p>
+      <p v-if="mcp?.server === 'sorftime'" class="native-tool__source">这是旧版 Sorftime 工具记录，仅供查看。新调用请从连接器页面配置并在聊天中选择 Sorftime。</p>
       <p class="native-tool__source">{{ execution.native.source === 'native_observed' ? '已观察到的原生记录' : '原生历史读取' }}</p>
       <p v-if="item.activityLabel" role="note">{{ item.activityLabel }}</p>
       <section aria-label="工具参数"><h3>查询参数</h3><pre>{{ native.argumentsSummary ?? '参数信息不可用。' }}</pre></section>

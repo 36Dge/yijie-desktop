@@ -32,15 +32,14 @@ defineEmits<{
 </template>
 
 <style scoped>
-.connector-installed { display: flex; flex-direction: column; list-style: none; margin: 0; padding: var(--yj-space-1) var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); }
-.connector-installed__row { display: flex; min-width: 0; align-items: center; gap: var(--yj-space-3); }
-.connector-installed__row + .connector-installed__row { border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); }
-.connector-installed__details { display: flex; flex: 1; align-items: center; gap: var(--yj-space-3); min-width: 0; padding: var(--yj-space-4) 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
-.connector-installed__details:hover { background: var(--yj-color-control-hover); }
+.connector-installed { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--yj-space-3); list-style: none; margin: 0; padding: 0; }
+.connector-installed__row { display: flex; min-width: 0; align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
+.connector-installed__row:not([aria-busy="true"]):is(:hover, :focus-within) { border-color: var(--yj-color-brand-primary); }
+.connector-installed__details { display: flex; flex: 1; align-items: center; gap: var(--yj-space-3); min-width: 0; padding: 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-installed__details:focus-visible, .connector-installed__remove:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .connector-installed__copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--yj-space-1); }
 .connector-installed__copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-semibold); }
-.connector-installed__description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
+.connector-installed__description { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .connector-installed__status { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .connector-installed__status--warning { color: var(--yj-color-semantic-warning-ink); }
 .connector-installed__status--error { color: var(--yj-color-semantic-error-ink); }
@@ -51,4 +50,7 @@ defineEmits<{
 .connector-installed__remove :deep(.yj-icon) { color: inherit; }
 .connector-installed__remove:disabled { color: var(--yj-color-text-disabled); cursor: default; }
 @media (hover: none) { .connector-installed__remove { opacity: 1; pointer-events: auto; } }
+@container connector-market (max-width: 720px) { .connector-installed { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container connector-market (max-width: 480px) { .connector-installed { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .connector-installed__row { transition: none; } }
 </style>

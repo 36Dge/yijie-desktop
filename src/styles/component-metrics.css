@@ -31,6 +31,11 @@
   flex: none;
 }
 
+.yj-control > .yj-control__chevron {
+  width: var(--yj-space-3);
+  height: var(--yj-space-3);
+}
+
 .yj-badge {
   display: inline-flex;
   height: var(--yj-badge-height);

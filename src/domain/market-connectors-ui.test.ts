@@ -86,3 +86,14 @@ describe("connector presentation projection", () => {
     expect(connectorViews(data)[0]?.actions).toEqual(["configure"]);
   });
 });
+
+
+it("enables keyless Shopify without credentials while requiring fresh readiness for selection", () => {
+  const data = connectorSnapshot([{ ...installation, serviceId: "shopify", configurationStatus: "configured", authorizationStatus: "not_required" }]);
+  data.catalog = [{ ...catalogEntry, serviceId: "shopify", authMode: "none" }];
+  data.capabilities = ["connector.read", "connector.manage", "connector.use"];
+  const view = connectorViews(data)[0]!;
+  expect(view.actions).toContain("enable");
+  expect(view.actions).not.toContain("configure"); expect(view.actions).not.toContain("authorize");
+  expect(view.selectable).toBe(false); expect(view.enabled).toBe(false);
+});

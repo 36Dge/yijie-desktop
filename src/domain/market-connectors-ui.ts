@@ -71,6 +71,7 @@ function statusFor(entry: CatalogEntry, installation: Installation | undefined, 
 function configurationLabel(entry: CatalogEntry): string {
   const unavailable = entry.availability === "blocked" || entry.availability === "unverified";
   switch (entry.authMode) {
+    case "none": return "无需账号密钥。启用时检查公开商品目录与支持工具，每次调用仍需批准。";
     case "oauth": return entry.authorizationAvailable ? "点击“授权连接”后，将在浏览器中完成服务账户授权。授权完成后仍需确认支持工具与连接状态。" : "此服务使用账户授权，当前版本尚未开放授权入口。";
     case "local_oauth": return unavailable ? "此服务需要本地运行依赖和账户授权，当前版本尚未提供完整接入。" : "需要准备本地运行依赖，并完成服务账户授权。";
     case "api_key":

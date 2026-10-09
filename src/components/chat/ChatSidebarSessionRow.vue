@@ -77,6 +77,7 @@ function selectAction(key: string | number): void {
       v-model:show="menuVisible"
       trigger="manual"
       placement="bottom-start"
+      :style="{ width: 'min(var(--yj-layout-chat-context-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
       :x="menuX"
       :y="menuY"
       :options="options"

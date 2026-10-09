@@ -2,7 +2,7 @@
 import { defineComponent, h } from "vue";
 import { RouterView } from "vue-router";
 
-import { flushPromises,mount } from "@vue/test-utils";
+import { DOMWrapper,flushPromises,mount } from "@vue/test-utils";
 import axe from "axe-core";
 import { createPinia,setActivePinia } from "pinia";
 import { afterEach,describe,expect,it,vi } from "vitest";
@@ -929,7 +929,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
     expect(document.activeElement).toBe(wrapper.get("textarea").element);
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
-    expect(wrapper.find('[aria-label="添加图片或文件"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="可添加文件、技能、连接器"]').exists()).toBe(true);
     expect(wrapper.text()).not.toMatch(/模型选择|推理强度|语音输入/);
   });
 
@@ -999,7 +999,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(clearSelectedSession).toHaveBeenCalledOnce();
     expect(wrapper.text()).not.toContain("任务不可用");
     expect(wrapper.text()).not.toContain("附件处理失败");
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeUndefined();
     await wrapper.get("textarea").setValue("重新开始任务");
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
@@ -1109,12 +1109,12 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
 
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
     await wrapper.get(".chat-notice__action").trigger("click");
     await flushPromises();
 
     expect(retryDraftRecovery).toHaveBeenCalledOnce();
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeUndefined();
   });
 
   it("routes a bind-stage storage retry through the authority lifecycle", async () => {
@@ -1176,7 +1176,9 @@ describe("FEAT-126 ChatPage", () => {
     const createSession = vi.spyOn(store, "createSessionWithResult")
       .mockResolvedValue(acceptedSubmission());
 
-    await wrapper.get('[aria-label="添加图片或文件"]').trigger("click");
+    await wrapper.get('[aria-label="可添加文件、技能、连接器"]').trigger("click");
+    await flushPromises();
+    await new DOMWrapper(document.querySelector<HTMLElement>('[role="menuitem"]')!).trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
@@ -1202,7 +1204,7 @@ describe("FEAT-126 ChatPage", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("3 个附件 · 正在建立索引");
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
   });
 
   it("keeps attachment rejection guidance local to the composer", async () => {
@@ -1218,7 +1220,9 @@ describe("FEAT-126 ChatPage", () => {
       });
     });
 
-    await wrapper.get('[aria-label="添加图片或文件"]').trigger("click");
+    await wrapper.get('[aria-label="可添加文件、技能、连接器"]').trigger("click");
+    await flushPromises();
+    await new DOMWrapper(document.querySelector<HTMLElement>('[role="menuitem"]')!).trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("暂不支持压缩包，请先解压后选择文件");
     expect(wrapper.text()).not.toContain("请检查文本长度后重试");
@@ -1243,7 +1247,7 @@ describe("FEAT-126 ChatPage", () => {
     };
     await flushPromises();
 
-    const addButton = wrapper.get('[aria-label="添加图片或文件"]');
+    const addButton = wrapper.get('[aria-label="可添加文件、技能、连接器"]');
     expect(addButton.attributes("disabled")).toBeDefined();
     expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
     await addButton.trigger("click");
@@ -1270,7 +1274,7 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
 
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
     dragDropMock.handler?.({ payload: { type: "enter", paths: [], position: { x: 400, y: 300 } } });
     dragDropMock.handler?.({
       payload: { type: "drop", paths: ["/private/during-submit.pdf"], position: { x: 400, y: 300 } },
@@ -1578,7 +1582,7 @@ describe("FEAT-126 ChatPage", () => {
     };
     await flushPromises();
 
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
     dragDropMock.handler?.({
       payload: { type: "drop", paths: ["/private/denied.pdf"], position: { x: 400, y: 300 } },
     });

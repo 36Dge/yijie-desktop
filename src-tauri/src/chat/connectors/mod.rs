@@ -20,7 +20,7 @@ mod store;
 #[cfg(test)]
 mod tests;
 
-use super::{ChatRuntime, RuntimeMode, authorization::AuthorizationFailure, database::ChatScope};
+use super::{authorization::AuthorizationFailure, database::ChatScope, ChatRuntime, RuntimeMode};
 use generated as wire;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,7 +46,7 @@ fn catalog() -> &'static Catalog {
         let value: Catalog =
             serde_json::from_str(include_str!("../../../../contracts/market-catalog.json"))
                 .expect("validated Connectors catalog");
-        assert_eq!(value.catalog.len(), 49);
+        assert_eq!(value.catalog.len(), 58);
         value
     })
 }
@@ -60,8 +60,16 @@ fn supports_provider(service: &str) -> bool {
                 wire::AuthMode::Oauth
                     | wire::AuthMode::ApiKey
                     | wire::AuthMode::ProviderCredentials
+                    | wire::AuthMode::None
             )
     })
+}
+fn keyless_provider(service: &str) -> bool {
+    service == "shopify"
+        && catalog()
+            .catalog
+            .iter()
+            .any(|entry| entry.service_id == service && entry.auth_mode == wire::AuthMode::None)
 }
 fn uses_credential_form(service: &str) -> bool {
     service == "google-calendar"

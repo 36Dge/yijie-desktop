@@ -45,10 +45,10 @@ function navigate(event: KeyboardEvent): void {
   <Teleport to="body"><div ref="overlay" class="chat-control-overlay" /></Teleport>
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-start" :disabled="disabled" :show-arrow="false" raw>
     <template #trigger>
-      <button ref="triggerElement" class="permission-trigger yj-control" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
+      <button ref="triggerElement" class="permission-trigger yj-control yj-control--pill" :class="{ 'is-full': state?.mode === 'full' }" type="button" :disabled="disabled" :aria-label="`权限审批：${state ? selected.label : '读取中'}`" aria-haspopup="menu" :aria-expanded="open" :title="disabled ? '任务运行、等待审批或同步期间不能切换权限' : '更改当前任务的权限审批模式'" @keydown.down.prevent="open = !disabled" @keydown.esc="open = false">
         <span class="permission-trigger-icon"><YjIcon :name="selected.icon" size="sm" :stroke-width="1.5" /></span>
         <span>{{ saving ? '正在保存' : state ? selected.label : '读取权限' }}</span>
-        <YjIcon name="chevronDown" size="xs" tone="muted" />
+        <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
     <div ref="menuElement" class="permission-menu chat-control-menu" role="menu" aria-label="权限审批" @keydown="navigate" @keydown.esc.stop.prevent="open = false">

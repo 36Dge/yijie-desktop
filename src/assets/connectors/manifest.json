@@ -309,6 +309,60 @@
       "file": "xiaoliebian-geo.png",
       "mimeType": "image/png",
       "sha256": "7bbba3a2179add20aa647093a42eefbc67275c5ad09f34f7d06d7debd57c3d9f"
+    },
+    {
+      "iconAssetId": "lingxing",
+      "file": "lingxing.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "998139ca8d47194193b53c83d3f977d71201b925f9d01916491030e5f7c92a62"
+    },
+    {
+      "iconAssetId": "sif",
+      "file": "sif.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "314ce33ba7b02820196fcba9f633393ba7518b784208495e1fe8776a47ca4433"
+    },
+    {
+      "iconAssetId": "keepa",
+      "file": "keepa.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "361745562bec017bc0e1fe8e5693acd94803238adcefd61f8e56ae43b93119fe"
+    },
+    {
+      "iconAssetId": "pangolinfo",
+      "file": "pangolinfo.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "dccbed1cfda07aee40ca0a685b4564c2466ac087da7fef36d63079d3480016e6"
+    },
+    {
+      "iconAssetId": "datahawk",
+      "file": "datahawk.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "2a3c131c35e2ac3423fce83cd927be8e1f80b104e6f63739220dcdd9ccb563c7"
+    },
+    {
+      "iconAssetId": "seller-labs",
+      "file": "seller-labs.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "770e7c1cc54f92d33ef29de6fa266d138cef1edbb31b4ad5211a8064c8230a1f"
+    },
+    {
+      "iconAssetId": "shopify",
+      "file": "shopify.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "d4bf6a986afcdae6f1222ccbdc138a8313e230d0c72d036b0413b1653fb18e40"
+    },
+    {
+      "iconAssetId": "sellersprite",
+      "file": "sellersprite.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "88ee778b8fb94bc4573809b894c3e93bfbe939e4b118aa36260b41a8f70d2805"
+    },
+    {
+      "iconAssetId": "sorftime",
+      "file": "sorftime.svg",
+      "mimeType": "image/svg+xml",
+      "sha256": "d2f2d0c9315815939b4ea20bea952f77f1622d4d68a81ed9e9a2eb17b3295f25"
     }
   ]
 }

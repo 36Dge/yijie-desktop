@@ -37,7 +37,7 @@ it("prefills only, hides ordinary project/attachment/permission controls, and qu
   const {root}=await page(true);
   expect((root.get("textarea").element as HTMLTextAreaElement).value).toBe(SCHEDULE_DRAFT_GUIDE);
   expect(root.find('[aria-label="定时任务草案"]').exists()).toBe(false);
-  expect(root.find('[aria-label="添加图片或文件"]').exists()).toBe(false);
+  expect(root.find('[aria-label="可添加文件、技能、连接器"]').exists()).toBe(false);
   expect(root.find('[aria-label="选择工作空间"]').exists()).toBe(false);
   expect(root.find('.chat-composer__permission').exists()).toBe(false);
   expect(native.calls).toEqual(["schedule_operation_capabilities_v1"]);

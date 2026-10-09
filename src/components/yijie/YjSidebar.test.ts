@@ -78,17 +78,17 @@ describe("YjSidebar permission rendering", () => {
     expect(wrapper.text()).toContain("设置");
     expect(wrapper.find(".yj-sidebar__history-entry").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("我的店铺");
-    expect(wrapper.text()).not.toContain("插件");
-    expect(wrapper.find('[aria-label*="插件"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("技能");
+    expect(wrapper.find('[aria-label*="技能"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label*="我的店铺"]').exists()).toBe(false);
   });
 
   it("A11Y-002 renders the allowed Skill marketplace as an enabled route", async () => {
     const wrapper = await mountSidebar(["plugin.read"]);
-    const pluginLink = wrapper.findAll("a").find((link) => link.text().includes("插件"));
+    const pluginLink = wrapper.findAll("a").find((link) => link.text().includes("技能"));
 
     expect(pluginLink?.attributes("href")).toBe("/plugins");
-    expect(wrapper.find('[aria-label="插件，即将开放"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="技能，即将开放"]').exists()).toBe(false);
   });
 
   it("FEAT-150 renders the allowed store showcase as an enabled selected route", async () => {
@@ -151,7 +151,7 @@ describe("YjSidebar permission rendering", () => {
       "我的店铺",
       "工作流",
       "定时任务",
-      "插件",
+      "技能",
       "资料库",
       "任务",
     ]);

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-# Secrets are collected only after builds and are never traced.
+# Retired Sorftime inputs are never read, prompted for, or forwarded.
 set +x
-unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEAT144_HTTPS_PROXY
+unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEAT144_HTTPS_PROXY YIJIE_DEMO_FAST_SORFTIME_ENABLED
 # Keep the workflow machine credential path out of the preparation processes.
 # This launcher never reads or places K_NA itself in an environment variable.
 workflow_requested="${YIJIE_WORKFLOW_ENABLED:-false}"
@@ -38,8 +38,6 @@ image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
 feat134_environment=()
-sorftime_requested="${YIJIE_DEMO_FAST_SORFTIME_ENABLED:-false}"
-[[ "$sorftime_requested" == "true" || "$sorftime_requested" == "false" ]] || fail "invalid Sorftime opt-in"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" == "1" && "$1" == "--packaged" ]]; then
   packaged_app="true"
@@ -91,7 +89,7 @@ if [[ "$scheduled_candidate" == "true" || "$scheduled_daily" == "true" ]]; then
   runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
 fi
 if [[ "$scheduled_candidate" == "true" ]]; then
-  [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" && "$sorftime_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
+  [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
   image_generation_enabled="false"
   runtime_root="$desktop_root/.local/feat155-candidate"
   host_home="$runtime_root/host-home"
@@ -117,9 +115,6 @@ if [[ "$workflow_requested" == "true" ]]; then
   unset workflow_file_info workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size
 fi
 
-if [[ "$sorftime_requested" == "true" && "$packaged_app" != "true" && "$stable_api_only" != "true" ]]; then
-  fail "Sorftime hidden input requires a packaged canonical build"
-fi
 
 # FEAT-152 is part of the completed local Demo. Keep renderer/native admission
 # together, including the preflight source checks and the stable bundle build.
@@ -156,12 +151,22 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-chat-models.mjs" --check
 fi
 
-# FEAT-157 is an explicit local development opt-in until service qualification.
+# FEAT-157 belongs to the normal daily client. Keep stable, legacy-model and
+# isolated qualification profiles opt-in, and preserve an explicit false rollback.
 # It selects the Native-owned market Host/worker path; it is not an execution grant.
-market_connectors_enabled="${YIJIE_MARKET_CONNECTORS_ENABLED:-false}"
+market_connectors_default="false"
+if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" ]]; then
+  market_connectors_default="true"
+fi
+market_connectors_enabled="${YIJIE_MARKET_CONNECTORS_ENABLED:-$market_connectors_default}"
 [[ "$market_connectors_enabled" == "true" || "$market_connectors_enabled" == "false" ]] || fail "invalid market connector selection"
 export YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
 export VITE_YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
+# Host market admission excludes the legacy FEAT-128 dynamic-tool profile.
+# Keep that profile available through the explicit connector rollback above.
+if [[ "$market_connectors_enabled" == "true" ]]; then
+  image_generation_enabled="false"
+fi
 if [[ "$market_connectors_enabled" == "true" ]]; then
   [[ "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "market connectors require the current native runtime"
   node "$workspace_root/yijie-contracts/scripts/generate-market-connectors.mjs" --check
@@ -251,44 +256,6 @@ if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
-fi
-
-# Public opt-in only; the credential never appears in shell arguments, files,
-# build/Vite processes, or WebView. A cancelled prompt leaves Sorftime disabled.
-if [[ "$sorftime_requested" == "true" ]]; then
-  # Reuse the current system HTTPS proxy, without PAC/auth URL forwarding or
-  # changing OS networking. No local proxy address is a product default.
-  sorftime_proxy_config="$(/usr/sbin/scutil --proxy)" || fail "system HTTPS proxy configuration is unavailable"
-  sorftime_proxy_enabled="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSEnable" {print $3}')"
-  sorftime_proxy_url=""
-  if [[ "$sorftime_proxy_enabled" == "1" ]]; then
-    sorftime_proxy_host="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSProxy" {print $3}')"
-    sorftime_proxy_port="$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "HTTPSPort" {print $3}')"
-    [[ "$sorftime_proxy_host" =~ ^[A-Za-z0-9.-]+$ && "$sorftime_proxy_port" =~ ^[0-9]+$ ]] || fail "unsupported system HTTPS proxy configuration"
-    [[ "$sorftime_proxy_port" -ge 1 && "$sorftime_proxy_port" -le 65535 ]] || fail "invalid system HTTPS proxy port"
-    sorftime_proxy_url="http://$sorftime_proxy_host:$sorftime_proxy_port"
-  elif [[ "$(printf '%s\n' "$sorftime_proxy_config" | awk '$1 == "ProxyAutoConfigEnable" || $1 == "SOCKSEnable" {if ($3 == "1") print "unsupported"}')" == *unsupported* ]]; then
-    fail "current PAC or SOCKS proxy has not been verified for this native entry"
-  fi
-  unset sorftime_proxy_config sorftime_proxy_host sorftime_proxy_port sorftime_proxy_enabled
-  sorftime_input=""
-  if sorftime_input="$(/usr/bin/osascript 2>/dev/null <<'APPLESCRIPT'
-try
-  set result to display dialog "输入本次启动使用的 Sorftime MCP Account-SK（仅保存在内存，退出后需重新输入）" default answer "" with hidden answer with title "易界 AI · Sorftime" buttons {"暂不启用", "启用本次"} default button "启用本次" cancel button "暂不启用"
-  return text returned of result
-on error number -128
-  return ""
-end try
-APPLESCRIPT
-)"; then
-    if [[ -n "$sorftime_input" ]]; then
-      [[ "${#sorftime_input}" -le 4096 && ! "$sorftime_input" =~ [[:space:]] ]] || fail "invalid Sorftime credential input"
-      export YIJIE_FEAT144_SORFTIME_ACCOUNT_SK="$sorftime_input"
-      export YIJIE_FEAT144_SORFTIME_ENABLED=true
-      if [[ -n "$sorftime_proxy_url" ]]; then export YIJIE_FEAT144_HTTPS_PROXY="$sorftime_proxy_url"; fi
-    fi
-  fi
-  unset sorftime_input sorftime_proxy_url
 fi
 
 exec env \

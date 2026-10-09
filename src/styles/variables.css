@@ -162,13 +162,15 @@
   --yj-layout-chat-entry-max: 760px;
   --yj-layout-chat-workspace-control-max: 320px;
   --yj-layout-workspace-menu-width: 280px;
-  --yj-layout-shop-menu-width: 360px;
+  --yj-layout-chat-context-menu-width: 175px;
+  --yj-layout-shop-menu-width: 340px;
   --yj-layout-shop-trigger-max: 200px;
   --yj-layout-shop-list-max: 288px;
   --yj-layout-connector-modal-width: 480px;
   /* Provider artwork includes dark text and stays on a neutral white plate. */
   --yj-color-bg-connector-artwork: #ffffff;
-  --yj-layout-connector-menu-width: 400px;
+  --yj-layout-composer-add-menu-width: 200px;
+  --yj-layout-connector-menu-width: 260px;
   --yj-layout-connector-list-max: 320px;
   --yj-layout-connector-search-width: 280px;
   --yj-layout-connector-chip-max: 248px;

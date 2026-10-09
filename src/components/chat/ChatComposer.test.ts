@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { mount } from "@vue/test-utils";
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { h } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,8 @@ import type {
   ChatProject,
 } from "../../domain/chat-ipc";
 import ChatComposer from "./ChatComposer.vue";
+
+enableAutoUnmount(afterEach);
 
 const PROJECT: ChatProject = {
   projectId: "019c1a00-0000-7000-8000-000000000001",
@@ -61,6 +63,7 @@ function mountComposer(overrides: Record<string, unknown> = {}, slots = {}) {
       ...overrides,
     },
     slots,
+    attachTo: document.body,
   });
 }
 
@@ -70,12 +73,12 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
-  it("places connectors after shops and keeps unavailable chips out of legacy submission", async () => {
+  it("moves connectors into the add menu and keeps unavailable chips out of legacy submission", async () => {
     const wrapper = mountComposer({ connectors: [{ id: "sample", name: "普通合成服务", iconAssetId: "cue", unavailableReason: "需要重新连接" }] }, {
       "shop-control": () => h("button", { "data-shop": "" }, "关联店铺"),
       "connector-control": () => h("button", { "data-connectors": "" }, "连接器"),
     });
-    expect(wrapper.get('[data-shop]').element.nextElementSibling).toBe(wrapper.get('[data-connectors]').element);
+    expect(wrapper.find('[data-connectors]').exists()).toBe(false);
     expect(wrapper.get('[aria-label="本轮使用的连接器"]').text()).toContain("需要重新连接");
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     await wrapper.get('[aria-label="移除 普通合成服务"]').trigger("click");
@@ -100,10 +103,13 @@ describe("ChatComposer", () => {
     expect(field.element.nextElementSibling).toBe(settings.element);
     expect(settings.get(".chat-composer__project").element).toBe(projectButton.element);
     expect(settings.find(".chat-composer__permission").exists()).toBe(true);
-    const addButton = wrapper.get('[aria-label="添加图片或文件"]');
-    expect(field.get('[aria-label="添加图片或文件"]').element).toBe(addButton.element);
-    expect(addButton.attributes("title")).toBe("添加图片或文件");
+    const addButton = wrapper.get('[aria-label="可添加文件、技能、连接器"]');
+    expect(field.get('[aria-label="可添加文件、技能、连接器"]').element).toBe(addButton.element);
+    expect(addButton.attributes("aria-expanded")).toBe("false");
     await addButton.trigger("click");
+    await flushPromises();
+    expect(wrapper.emitted("pick-attachments")).toBeUndefined();
+    await new DOMWrapper(document.querySelector<HTMLElement>('[role="menuitem"]')!).trigger("click");
     expect(wrapper.emitted("pick-attachments")).toHaveLength(1);
     expect(wrapper.find('[aria-label="发送任务"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("权限审批");
@@ -125,7 +131,7 @@ describe("ChatComposer", () => {
     expect(wrapper.find('[aria-label="工作空间与权限"]').exists()).toBe(false);
     expect(wrapper.find(".chat-composer__project").exists()).toBe(false);
     expect(wrapper.find(".chat-composer__surface--with-settings").exists()).toBe(false);
-    expect(wrapper.get('[aria-label="添加图片或文件"]').element.nextElementSibling)
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').element.nextElementSibling)
       .toBe(wrapper.get(".chat-composer__permission").element);
     await wrapper.get(".chat-composer__permission").trigger("click");
     expect(wrapper.emitted("show-permission")).toHaveLength(1);
@@ -148,11 +154,11 @@ describe("ChatComposer", () => {
     expect(wrapper.findAll('[data-permission]')).toHaveLength(1);
     expect(wrapper.find('[data-workspace]').exists()).toBe(false);
     expect(wrapper.find(".chat-composer__settings").exists()).toBe(false);
-    const add = wrapper.get('[aria-label="添加图片或文件"]');
+    const add = wrapper.get('[aria-label="可添加文件、技能、连接器"]');
     const permission = wrapper.get('[data-permission]');
     expect(add.element.nextElementSibling).toBe(permission.element);
     expect(permission.element.nextElementSibling).toBe(wrapper.get('[data-shop]').element);
-    expect(wrapper.get('[data-shop]').element.nextElementSibling).toBe(wrapper.get('[data-connectors]').element);
+    expect(wrapper.find('[data-connectors]').exists()).toBe(false);
     await permission.trigger("click");
     expect(onPermission).toHaveBeenCalledOnce();
 
@@ -479,12 +485,12 @@ describe("ChatComposer", () => {
 
   it("disables the unified entry and hides drag feedback when sending is unavailable", () => {
     const wrapper = mountComposer({ canSend: false, dragActive: true });
-    expect(wrapper.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
     expect(wrapper.find(".chat-composer__drop-overlay").exists()).toBe(false);
     expect(wrapper.find(".chat-composer__field--drag-active").exists()).toBe(false);
 
     const attachmentBlocked = mountComposer({ canAttach: false, dragActive: true });
-    expect(attachmentBlocked.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+    expect(attachmentBlocked.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
     expect(attachmentBlocked.find(".chat-composer__drop-overlay").exists()).toBe(false);
 
     for (const props of [
@@ -497,7 +503,7 @@ describe("ChatComposer", () => {
       })) },
     ]) {
       const unavailable = mountComposer({ ...props, dragActive: true });
-      expect(unavailable.get('[aria-label="添加图片或文件"]').attributes("disabled")).toBeDefined();
+      expect(unavailable.get('[aria-label="可添加文件、技能、连接器"]').attributes("disabled")).toBeDefined();
       expect(unavailable.find(".chat-composer__drop-overlay").exists()).toBe(false);
     }
   });

@@ -10,6 +10,8 @@ import { createMarketConnectorStoreDefinition } from "../../stores/market-connec
 import ConnectorMarketView from "./ConnectorMarketView.vue";
 import ConnectorInstalledList from "./ConnectorInstalledList.vue";
 import ConnectorDetailsDialog from "./ConnectorDetailsDialog.vue";
+import catalog from "../../../contracts/market-catalog.json";
+import { connectorIconUrl } from "../../icons/connector-icons";
 import { connectorViews } from "../../domain/market-connectors-ui";
 
 const service: CatalogEntry = { serviceId: "sample", serverName: "sample", displayName: "普通合成服务", description: "仅验证本地界面", categoryId: "productivity", categoryLabel: "效率工具", iconAssetId: "cue", transport: "http", authMode: "oauth", availability: "unverified", blockerCodes: ["provider_onboarding_required"] };
@@ -149,5 +151,29 @@ describe("independent OAuth authorization entry", () => {
     await button("授权连接").trigger("click"); await flushPromises();
     expect(client.authorize).toHaveBeenCalledExactlyOnceWith("context-a", installed, expect.any(String));
     expect(client.setEnabled).not.toHaveBeenCalled(); expect(store.entries[0]?.enabled).toBe(false); expect(store.entries[0]?.selectable).toBe(false);
+  });
+});
+
+
+describe("cross-border catalog", () => {
+  it("renders ten cross-border icons with category search and the existing detail entry", async () => {
+    const data: Snapshot = { ...snapshot([]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
+    const entries = connectorViews(data);
+    const cross = entries.filter(entry => entry.categoryId === "cross_border_ecommerce");
+    expect(entries).toHaveLength(58);
+    expect(cross.map(entry => entry.id)).toEqual(["lingxing", "sif", "keepa", "pangolinfo", "datahawk", "seller-labs", "shopify", "sellersprite", "sorftime", "FastMoss"]);
+    const wrapper = mount(ConnectorMarketView, { props: { model: { phase: "ready", entries, canManage: true, refreshing: false, error: null } }, attachTo: document.body });
+    wrappers.push(wrapper);
+    expect(wrapper.findAll(".connector-card")).toHaveLength(58);
+    await wrapper.get("input").setValue("跨境电商");
+    expect(wrapper.findAll(".connector-card")).toHaveLength(10);
+    for (const entry of cross) {
+      expect(connectorIconUrl(entry.iconAssetId)).toBeTruthy();
+      expect(wrapper.findAll(".connector-card img").some(img => img.attributes("src") === connectorIconUrl(entry.iconAssetId))).toBe(true);
+    }
+    await wrapper.get("input").setValue("领星");
+    expect(wrapper.findAll(".connector-card")).toHaveLength(1);
+    await wrapper.get(".connector-card").trigger("click"); await flushPromises();
+    expect(document.body.textContent).toContain("安装 领星 ERP");
   });
 });

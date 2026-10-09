@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { NButton, NInput, NPopover } from "naive-ui";
 import type { ChatShopPreview } from "../../composables/useChatShopPreview";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import { chatSearchTheme } from "../../design/theme/chat-search-theme";
 
 // Shop identity stays in the presentation layer and is shared by every selected state.
 const shopIcons: Readonly<Record<string, YjIconName>> = {
@@ -19,7 +20,7 @@ const props = defineProps<{ model: ChatShopPreview; disabled: boolean }>();
 const state = reactive(props.model);
 const open = ref(false);
 const overlay = ref<HTMLElement | null>(null), panel = ref<HTMLElement | null>(null), trigger = ref<HTMLButtonElement | null>(null);
-const titleId = useId();
+
 const panelHeight = ref(560);
 const panelShift = ref(0);
 const placement = ref<"top-start" | "bottom-start">("top-start");
@@ -28,9 +29,10 @@ function measureAvailableSpace() {
   const rootStyle = getComputedStyle(document.documentElement);
   const scale = Number.parseFloat(rootStyle.getPropertyValue("--yj-ui-scale")) || 1;
   const inset = Number.parseFloat(rootStyle.getPropertyValue("--yj-space-4")) || 16;
+  const gap = Number.parseFloat(rootStyle.getPropertyValue("--yj-space-2")) || 8;
   const bounds = trigger.value.getBoundingClientRect();
-  const above = bounds.top / scale - inset;
-  const below = (window.innerHeight - bounds.bottom) / scale - inset;
+  const above = bounds.top / scale - inset - gap;
+  const below = (window.innerHeight - bounds.bottom) / scale - inset - gap;
   placement.value = above >= below ? "top-start" : "bottom-start";
   const available = Math.max(above, below);
   // At large UI scales use the viewport's height and allow overlap with the composer,
@@ -52,7 +54,7 @@ async function setOpen(value: boolean) {
     state.cancel(); await nextTick(); if (!props.disabled) trigger.value?.focus({ preventScroll: true });
   }
 }
-function focusPanel() { panel.value?.querySelector<HTMLElement>('input, [data-primary]:not(:disabled)')?.focus({ preventScroll: true }); }
+function focusPanel() { if (open.value) panel.value?.focus({ preventScroll: true }); }
 watch(() => props.disabled, disabled => { if (disabled) void setOpen(false); });
 watch(() => state.scopeRevision, () => { open.value = false; });
 watch(() => state.stage, async () => { if (open.value) { await nextTick(); measureAvailableSpace(); focusPanel(); } });
@@ -77,17 +79,10 @@ function navigate(event: KeyboardEvent) {
         <YjIcon :name="state.current ? shopIcon(state.current.id) : 'store'" size="sm" :stroke-width="1.5" />
         <span class="shop-trigger-name">{{ state.current?.name ?? '关联店铺' }}</span>
         <span v-if="state.current" class="shop-trigger-check" aria-hidden="true"><YjIcon name="permissionCheck" size="xs" :stroke-width="1.5" /></span>
-        <YjIcon v-else class="shop-trigger-chevron" name="chevronDown" size="xs" tone="muted" />
+        <YjIcon v-else class="shop-trigger-chevron yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
       </button>
     </template>
-    <div ref="panel" class="shop-panel chat-control-menu" :class="{ 'is-compact': panelHeight < 430 }" :style="{ '--shop-panel-available-height': `${panelHeight}px`, '--shop-panel-offset-y': `${panelShift}px` }" role="dialog" :aria-labelledby="titleId" :aria-busy="state.busy" @keydown.esc.stop.prevent="setOpen(false)" @keydown="navigate">
-      <header class="shop-panel-header">
-        <h2 :id="titleId">选择关联店铺</h2>
-        <span v-if="state.authorized && state.stage === 'list'" class="shop-count">{{ state.available.length }} 家可用</span>
-        <button v-if="state.authorized && state.stage === 'list'" class="shop-icon-button" type="button" :disabled="state.busy" aria-label="刷新店铺状态" title="刷新店铺状态" @click="state.refresh"><YjIcon name="refresh" size="sm" :stroke-width="1.5" :class="{ 'shop-spin': state.refreshing }" /></button>
-        <button class="shop-icon-button" type="button" aria-label="关闭店铺选择" @click="setOpen(false)"><YjIcon name="dismiss" size="sm" :stroke-width="1.5" /></button>
-      </header>
-
+    <div ref="panel" class="shop-panel chat-control-menu" :class="{ 'is-compact': panelHeight < 430 }" :style="{ '--shop-panel-available-height': `${panelHeight}px`, '--shop-panel-offset-y': `${panelShift}px` }" role="dialog" tabindex="-1" aria-label="选择关联店铺" :aria-busy="state.busy" @keydown.esc.stop.prevent="setOpen(false)" @keydown="navigate">
       <div v-if="state.stage === 'empty'" class="shop-state">
         <span class="shop-state-visual"><YjIcon name="store" size="xl" :stroke-width="1.5" /><span class="shop-state-mini"><YjIcon name="plus" size="xs" :stroke-width="1.5" /></span></span>
         <h3>还没有授权店铺</h3>
@@ -103,7 +98,7 @@ function navigate(event: KeyboardEvent) {
 
       <template v-else-if="state.stage === 'list'">
         <div class="shop-filter-area">
-          <NInput v-model:value="state.query" :input-props="{ 'aria-label': '搜索店铺' }" placeholder="搜索店铺名称、平台或站点" clearable :disabled="state.busy"><template #prefix><YjIcon name="search" size="sm" :stroke-width="1.5" tone="muted" /></template></NInput>
+          <NInput v-model:value="state.query" size="small" :theme-overrides="chatSearchTheme" :input-props="{ 'aria-label': '搜索店铺' }" placeholder="搜索店铺" clearable :disabled="state.busy"><template #prefix><YjIcon name="search" size="sm" :stroke-width="1.5" tone="muted" /></template></NInput>
           <div class="shop-filters" role="group" aria-label="店铺平台筛选"><button v-for="filter in filters" :key="filter" type="button" :aria-pressed="state.platform === filter" :disabled="state.busy" @click="state.platform = filter">{{ filter === 'all' ? '全部' : filter === 'TikTok Shop' ? 'TikTok' : filter }} <span>{{ filter === 'all' ? state.available.length : state.available.filter(shop => shop.platform === filter).length }}</span></button></div>
         </div>
         <div v-if="state.expiredIds.length" class="shop-warning" role="status"><YjIcon name="warning" size="sm" :stroke-width="1.5" /><span>{{ state.expiredIds.length }} 家店铺授权已失效，已从可选列表移除。</span><button type="button" @click="state.authorize">重新授权</button></div>
@@ -117,7 +112,7 @@ function navigate(event: KeyboardEvent) {
         </div>
         <footer class="shop-selection-footer">
           <p class="shop-selection-summary">{{ state.chosen ? `已选择「${state.chosen.name}」` : '每次仅关联 1 家店铺' }}</p>
-          <div class="shop-selection-actions"><NButton v-if="state.current" quaternary :disabled="state.busy" @click="state.unlink">解除关联</NButton><NButton type="primary" :disabled="!canLink" @click="state.link">{{ state.draftId && state.draftId === state.current?.id ? '已关联此店铺' : state.current ? '切换关联' : '关联店铺' }}</NButton></div>
+          <div class="shop-selection-actions"><NButton v-if="state.current" quaternary :disabled="state.busy" @click="state.unlink">解除关联</NButton><NButton type="primary" size="small" :bordered="false" :disabled="!canLink" @click="state.link">{{ state.draftId && state.draftId === state.current?.id ? '已关联此店铺' : state.current ? '切换关联' : '关联店铺' }}</NButton></div>
           <p v-if="state.notice" class="shop-notice" role="status">{{ state.notice }}</p>
         </footer>
       </template>
@@ -141,13 +136,12 @@ function navigate(event: KeyboardEvent) {
         <p>请稍后重试。<br />{{ state.current ? '已关联的店铺会为你保留。' : '你也可以先关闭窗口，稍后再关联。' }}</p>
       </div>
       <footer v-if="state.stage !== 'list'" class="shop-state-footer">
-        <NButton v-if="state.stage === 'empty'" type="primary" block data-primary @click="state.authorize">授权店铺<template #icon><YjIcon name="shield" size="sm" :stroke-width="1.5" /></template></NButton>
+        <NButton v-if="state.stage === 'empty'" type="primary" :bordered="false" block data-primary @click="state.authorize">授权店铺<template #icon><YjIcon name="shield" size="sm" :stroke-width="1.5" /></template></NButton>
         <NButton v-else-if="state.stage === 'authorizing' || state.stage === 'linking'" quaternary data-primary @click="state.cancel">取消</NButton>
         <template v-else-if="state.stage === 'success'"><NButton @click="state.showList">切换店铺</NButton><NButton type="primary" data-primary @click="setOpen(false)">继续对话</NButton></template>
         <template v-else-if="state.stage === 'expired'"><NButton @click="state.showList">选择其他</NButton><NButton type="primary" data-primary @click="state.authorize">重新授权</NButton></template>
         <template v-else><NButton @click="setOpen(false)">稍后再说</NButton><NButton type="primary" data-primary @click="state.retry">重试</NButton></template>
       </footer>
-      <p class="shop-demo-note"><YjIcon name="shield" size="xs" :stroke-width="1.5" /><span>交互演示 · 不连接真实店铺与数据</span></p>
     </div>
   </NPopover>
 </template>
@@ -164,13 +158,7 @@ function navigate(event: KeyboardEvent) {
 .shop-trigger-check .yj-icon { color: var(--yj-color-on-brand); }
 .shop-panel { display: flex; flex-direction: column; width: min(var(--yj-layout-shop-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8))); max-height: min(var(--shop-panel-available-height), calc(var(--yj-ui-viewport-height, 100vh) - var(--yj-space-8))); padding: 0; overflow: hidden; }
 .shop-panel { translate: 0 var(--shop-panel-offset-y); }
-.shop-panel-header { display: flex; align-items: center; gap: var(--yj-space-1); padding: var(--yj-space-3) var(--yj-space-3) var(--yj-space-2) var(--yj-space-4); flex: none; }
-.shop-panel-header h2 { flex: 1; margin: 0; color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-semibold); }
-.shop-count { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); white-space: nowrap; }
-.shop-icon-button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--yj-space-8); height: var(--yj-space-8); padding: 0; border: 0; border-radius: var(--yj-radius-md); background: transparent; color: var(--yj-color-text-secondary); }
-.shop-icon-button:hover:not(:disabled) { background: var(--yj-color-control-hover); color: var(--yj-color-text-primary); }
-.shop-icon-button:disabled { color: var(--yj-color-text-disabled); cursor: default; }
-.shop-icon-button .yj-icon { color: inherit; }
+.shop-panel:focus { outline: none; }
 .shop-state { display: flex; flex-direction: column; align-items: center; gap: var(--yj-space-4); padding: var(--yj-space-5) var(--yj-space-6) var(--yj-space-6); min-height: 0; overflow-y: auto; text-align: center; }
 .shop-state-visual { position: relative; display: flex; align-items: center; justify-content: center; flex: none; width: var(--yj-space-16); height: var(--yj-space-16); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-xl); background: var(--yj-color-bg-card); }
 .shop-state-mini { position: absolute; display: flex; align-items: center; justify-content: center; right: calc(-1 * var(--yj-space-1)); bottom: calc(-1 * var(--yj-space-1)); width: var(--yj-space-6); height: var(--yj-space-6); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-full); background: var(--yj-color-bg-elevated); }
@@ -180,9 +168,9 @@ function navigate(event: KeyboardEvent) {
 .shop-state--success .shop-state-visual .yj-icon { color: var(--yj-color-on-brand); }
 .shop-state--warning .shop-state-visual { background: var(--yj-color-warning-soft); border-color: transparent; }
 .shop-state--warning .shop-state-visual .yj-icon, .shop-state--warning .shop-state-mini .yj-icon { color: var(--yj-color-semantic-warning-ink); }
-.shop-filter-area { padding: 0 var(--yj-space-4) var(--yj-space-2); flex: none; }
+.shop-filter-area { padding: var(--yj-space-3) var(--yj-space-3) var(--yj-space-2); flex: none; }
 .shop-filters { display: flex; gap: var(--yj-space-2); margin-top: var(--yj-space-2); }
-.shop-filters button { position: relative; display: inline-flex; align-items: center; gap: var(--yj-space-1); min-height: var(--yj-space-8); padding: var(--yj-space-1) var(--yj-space-3); border: 0; border-radius: var(--yj-radius-sm); background: transparent; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
+.shop-filters button { position: relative; display: inline-flex; align-items: center; gap: var(--yj-space-1); min-height: var(--yj-space-8); padding: var(--yj-space-1) var(--yj-space-3); border: 0; border-radius: var(--yj-radius-sm); background: transparent; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); font-weight: var(--yj-font-weight-semibold); }
 .shop-filters button::after { content: ""; position: absolute; inset-inline: var(--yj-space-3); bottom: 0; height: calc(2 * var(--yj-border-width)); border-radius: var(--yj-radius-full); background: transparent; }
 .shop-filters button:hover:not(:disabled) { background: var(--yj-color-control-hover); color: var(--yj-color-text-primary); }
 .shop-filters button[aria-pressed="true"] { color: var(--yj-color-text-primary); }
@@ -201,7 +189,7 @@ function navigate(event: KeyboardEvent) {
 .shop-radio { display: flex; align-items: center; justify-content: center; flex: none; width: var(--yj-space-4); height: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-control); border-radius: var(--yj-radius-full); }
 .is-selected .shop-radio { background: var(--yj-color-brand-primary); border-color: var(--yj-color-brand-primary); }
 .shop-radio .yj-icon { color: var(--yj-color-on-brand); }
-.shop-selection-footer { padding: var(--yj-space-3) var(--yj-space-4); border-top: var(--yj-border-width) solid var(--yj-color-border-default); flex: none; }
+.shop-selection-footer { padding: var(--yj-space-2); border-top: var(--yj-border-width) solid var(--yj-color-border-default); flex: none; }
 .shop-selection-summary { margin: 0 0 var(--yj-space-2); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .shop-selection-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--yj-space-2); }
 .shop-selection-actions > :last-child { flex: 1; }
@@ -213,8 +201,6 @@ function navigate(event: KeyboardEvent) {
 .shop-linked-card > span:last-child { display: flex; flex-direction: column; gap: var(--yj-space-1); min-width: 0; }
 .shop-linked-card strong { color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); overflow-wrap: anywhere; }
 .shop-linked-card span span { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
-.shop-demo-note { display: flex; align-items: center; justify-content: center; gap: var(--yj-space-1); margin: 0; padding: var(--yj-space-2) var(--yj-space-3); border-top: var(--yj-border-width) solid var(--yj-color-border-subtle); color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); flex: none; }
-.shop-demo-note .yj-icon { color: inherit; }
 .shop-warning { display: flex; align-items: flex-start; gap: var(--yj-space-2); padding: var(--yj-space-2) var(--yj-space-4); color: var(--yj-color-semantic-warning-ink); font-size: var(--yj-font-size-caption); }
 .shop-warning .yj-icon { color: inherit; }
 .shop-warning span { flex: 1; }
@@ -230,7 +216,6 @@ function navigate(event: KeyboardEvent) {
 .is-compact .shop-filters { margin-top: var(--yj-space-1); }
 .is-compact .shop-filter-area { padding-bottom: var(--yj-space-1); }
 .is-compact .shop-selection-footer { padding-block: var(--yj-space-2); }
-.is-compact .shop-demo-note { padding-block: var(--yj-space-1); }
 .is-compact .shop-selection-summary { display: none; }
 .is-compact .shop-notice { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .shop-panel button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }

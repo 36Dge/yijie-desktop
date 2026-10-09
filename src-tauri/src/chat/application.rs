@@ -1174,12 +1174,6 @@ impl ConversationApplication {
         {
             return Err(ChatError::ScopeDenied);
         }
-        if std::env::var("YIJIE_FEAT144_SORFTIME_ENABLED").as_deref() == Ok("true") {
-            self.host()?
-                .prepare_mcp_permission_scope(mode)
-                .await
-                .map_err(map_host_error)?;
-        }
         self.database
             .set_permission_mode(session_id, mode, confirm_full)
             .await

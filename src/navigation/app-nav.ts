@@ -80,8 +80,8 @@ export const APP_NAVIGATION = [
   {
     kind: "item",
     key: "plugin",
-    label: "插件",
-    icon: "plugin",
+    label: "技能",
+    icon: "skillOperations",
     placement: "main",
     disabled: false,
     to: "/plugins",

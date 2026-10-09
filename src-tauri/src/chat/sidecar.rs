@@ -83,31 +83,18 @@ pub struct SidecarConfig {
     minimax_api_key_file: Option<PathBuf>,
     chat_models_enabled: bool,
     kimi_api_key_file: Option<PathBuf>,
-    sorftime_token: std::sync::Arc<Mutex<Option<zeroize::Zeroizing<String>>>>,
-    sorftime_proxy: Option<String>,
 }
 
 impl SidecarConfig {
     pub fn from_environment() -> Result<Option<Self>, ChatError> {
-        let sorftime_token = std::env::var(SORFTIME_SECRET_ENV)
-            .ok()
-            .map(zeroize::Zeroizing::new);
-        std::env::remove_var(SORFTIME_SECRET_ENV);
-        let sorftime_requested = std::env::var(SORFTIME_ENABLED_ENV).ok();
-        let sorftime_proxy = std::env::var(SORFTIME_PROXY_ENV).ok();
-        std::env::remove_var(SORFTIME_PROXY_ENV);
-        if (sorftime_requested.is_some() || sorftime_token.is_some() || sorftime_proxy.is_some())
-            && (sorftime_requested.as_deref() != Some("true")
-                || !super::runtime_permissions::enabled()
-                || std::env::var("YIJIE_CHAT_LOCAL_HOST_ENABLED").as_deref() != Ok("true")
-                || std::env::var(MODEL_PROVIDER_ENV).as_deref() != Ok(MINIMAX_PROVIDER_ID)
-                || sorftime_token.as_ref().is_none_or(|token| {
-                    token.is_empty()
-                        || token.len() > 4096
-                        || token.bytes().any(|b| b.is_ascii_whitespace() || b == 0)
-                }))
-        {
-            return Err(ChatError::InvalidConfiguration);
+        // Legacy inputs have no authority. New Sorftime credentials stay in the
+        // Connectors worker; never read or retain their old environment values.
+        for key in [
+            SORFTIME_SECRET_ENV,
+            SORFTIME_PROXY_ENV,
+            SORFTIME_ENABLED_ENV,
+        ] {
+            std::env::remove_var(key);
         }
 
         if std::env::var("YIJIE_CHAT_LOCAL_HOST_ENABLED").as_deref() != Ok("true") {
@@ -248,8 +235,6 @@ impl SidecarConfig {
             minimax_api_key_file,
             chat_models_enabled,
             kimi_api_key_file,
-            sorftime_token: std::sync::Arc::new(Mutex::new(sorftime_token)),
-            sorftime_proxy,
         }))
     }
 
@@ -739,7 +724,7 @@ impl SidecarSupervisor {
             .ok_or(ChatError::InvalidConfiguration)?;
         if !self.demo_fast
             || config.test_profile.is_some()
-            || (isolated && (config.image_generation_enabled || config.sorftime_proxy.is_some()))
+            || (isolated && config.image_generation_enabled)
         {
             return Err(ChatError::InvalidConfiguration);
         }
@@ -858,28 +843,6 @@ impl SidecarSupervisor {
         if let Some((candidate, _)) = &self.scheduled_candidate {
             command.env(super::schedules::candidate::CHILD_ENV, candidate.encode()?);
         }
-        // One-time, explicit environment handoff after env_clear. Do not add
-        // the credential to the generic environment projection or log capture.
-        let mut sorftime_token = config.sorftime_token.lock().await;
-        if self
-            .scheduled_candidate
-            .as_ref()
-            .is_some_and(|(_, isolated)| *isolated)
-            && sorftime_token.is_some()
-        {
-            return Err(ChatError::OrchestrationUnavailable);
-        }
-        if let Some(token) = sorftime_token.as_ref() {
-            if prepared.is_some() || !self.demo_fast || !config.minimax_provider_enabled {
-                return Err(ChatError::InvalidConfiguration);
-            }
-            command
-                .env(SORFTIME_ENABLED_ENV, "true")
-                .env(SORFTIME_SECRET_ENV, token.as_str());
-            if let Some(proxy) = &config.sorftime_proxy {
-                command.env(SORFTIME_PROXY_ENV, proxy);
-            }
-        }
         if self.market_management_only() {
             let manifest = optional_absolute_regular_file("YIJIE_MARKET_WORKER_MANIFEST")?
                 .ok_or(ChatError::InvalidConfiguration)?;
@@ -903,8 +866,6 @@ impl SidecarSupervisor {
             ]);
         }
         let spawned = command.spawn();
-        sorftime_token.take();
-        drop(sorftime_token);
         // Drop Command's transient environment copy promptly, before polling.
         drop(command);
         let mut child = match spawned {
@@ -2069,8 +2030,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let environment = config.environment(
             "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
@@ -2198,8 +2157,6 @@ mod tests {
             minimax_api_key_file: Some(PathBuf::from("/ordinary/key-file")),
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         for demo in [false, true] {
             let values = config.environment("native-check", None, None, demo, None);
@@ -2245,8 +2202,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let child_environment = |config: &SidecarConfig| {
             config.environment(
@@ -2334,8 +2289,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let roots = SkillRoots {
             bundle_root: PathBuf::from("/Applications/YiJie.app/Contents/Resources/skill-packages"),
@@ -2396,8 +2349,6 @@ mod tests {
             minimax_api_key_file: Some(canonical.clone()),
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         assert_eq!(config.validate_provider_key_file(), Ok(()));
         let environment = config.environment(
@@ -2617,8 +2568,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -2703,8 +2652,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let host_root = create_private_directory(&root.join("host")).unwrap();
         let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
@@ -2831,8 +2778,6 @@ mod tests {
                 minimax_api_key_file: None,
                 chat_models_enabled: false,
                 kimi_api_key_file: None,
-                sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-                sorftime_proxy: None,
             };
             let supervisor = SidecarSupervisor {
                 market_provider_only: false,
@@ -2932,8 +2877,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let supervisor = SidecarSupervisor {
             market_provider_only: false,
@@ -3306,8 +3249,6 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
-            sorftime_token: std::sync::Arc::new(Mutex::new(None)),
-            sorftime_proxy: None,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

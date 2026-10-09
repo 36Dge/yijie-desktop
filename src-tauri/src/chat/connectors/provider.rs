@@ -1,9 +1,9 @@
 //! Native provider management uses the private Host owner pipe. Only fixed,
 //! checked authorization URLs reach the OS browser; none reach IPC or SQLite.
 use super::{
-    Action, Error, auth_error, catalog, encode, generated as ui, host_generated as host, now, store,
+    auth_error, catalog, encode, generated as ui, host_generated as host, now, store, Action, Error,
 };
-use crate::chat::{ChatRuntime, authorization::ChatAuthorizationManager, database::ChatScope};
+use crate::chat::{authorization::ChatAuthorizationManager, database::ChatScope, ChatRuntime};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -1213,7 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn current_enable_poll_projects_readiness_and_normal_close_removes_it() {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, duplex, split};
+        use tokio::io::{duplex, split, AsyncBufReadExt, AsyncWriteExt, BufReader};
         let (mut db, scope, item, host_id, authority) = setup();
         let enabled = qualified_enable(&mut db, &scope, &item, &host_id, authority.clone());
         let refs = vec![enabled.payload.binding.reference.clone()];
@@ -1409,7 +1409,11 @@ impl ProviderAdmission {
         {
             item.effective_enabled = true;
             item.configuration_status = ui::ConfigurationStatus::Configured;
-            item.authorization_status = ui::AuthorizationStatus::Authorized;
+            item.authorization_status = if super::keyless_provider(&item.service_id) {
+                ui::AuthorizationStatus::NotRequired
+            } else {
+                ui::AuthorizationStatus::Authorized
+            };
             item.connection_status = ui::ConnectionStatus::Ready;
             item.error_code = None;
         }

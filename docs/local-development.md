@@ -17,6 +17,16 @@ pnpm tauri:demo-fast:app
 该命令复用同一个本地启动器，先核验固定来源并构建 `易界 AI.app`，再携带 Native 所需环境启动；
 无需验收代理或手工填写 Skills 路径。`tauri:demo-fast:stable` 仍保留为独立验收应用入口。
 
+2026-10-08 起，以上普通日常入口在当前 chat-models Runtime 下默认启用连接器，
+同时显示聊天输入框与侧栏入口。Native 与 Vite 的开关由启动器统一赋值，
+无需每次手动追加环境变量。显式设置 `YIJIE_MARKET_CONNECTORS_ENABLED=false` 可关闭；
+stable、旧模型回退和隔离候选不自动开启，public/production 不变。
+当前 Host 不支持连接器与旧 FEAT-128 图片工具并用，连接器启动配置会关闭该旧工具。
+如需使用原有图片工具，可显式关闭连接器后正常启动：
+`YIJIE_MARKET_CONNECTORS_ENABLED=false pnpm tauri:demo-fast:app`。
+此开关只打开已有连接器能力与入口，不自动安装、启用、授权服务或执行外部请求。
+已有服务配置和逐次审批规则保持不变，详见 `docs/market-connectors-local-candidate.md`。
+
 `pnpm tauri:demo-fast` 是同一入口的显式别名。该入口固定使用
 `YIJIE_ENV=local + YIJIE_LOCAL_PROFILE=demo_fast`，自动绑定本地 Demo
 身份和工作空间，启动 Desktop 管理的 Agent Host / Codex Runtime sidecar，并直达 `/chat`。

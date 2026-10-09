@@ -710,7 +710,7 @@ impl std::fmt::Debug for Error {
     }
 }
 pub fn validate_selection(refs: &[SelectionRef]) -> Result<(), &'static str> {
-    if refs.len() > 51 {
+    if refs.len() > 58 {
         return Err("too many connector references");
     }
     for (i, r) in refs.iter().enumerate() {

@@ -49,7 +49,27 @@ import icon48 from "../assets/connectors/ysk_mcp_3f824505d1faf80bc60c05272962092
 import icon49 from "../assets/connectors/3chat.png?url";
 import icon50 from "../assets/connectors/xiaoliebian-geo.png?url";
 
+import crossBorder0 from "../assets/connectors/lingxing.svg?url";
+import crossBorder1 from "../assets/connectors/sif.svg?url";
+import crossBorder2 from "../assets/connectors/keepa.svg?url";
+import crossBorder3 from "../assets/connectors/pangolinfo.svg?url";
+import crossBorder4 from "../assets/connectors/datahawk.svg?url";
+import crossBorder5 from "../assets/connectors/seller-labs.svg?url";
+import crossBorder6 from "../assets/connectors/shopify.svg?url";
+import crossBorder7 from "../assets/connectors/sellersprite.svg?url";
+import crossBorder8 from "../assets/connectors/sorftime.svg?url";
+
 const connectorIcons: Readonly<Record<string, string>> = Object.freeze({
+  "lingxing": crossBorder0,
+  "sif": crossBorder1,
+  "keepa": crossBorder2,
+  "pangolinfo": crossBorder3,
+  "datahawk": crossBorder4,
+  "seller-labs": crossBorder5,
+  "shopify": crossBorder6,
+  "sellersprite": crossBorder7,
+  "sorftime": crossBorder8,
+
   "cue": icon0,
   "baixiao-mcp": icon1,
   "dxe-mcp-server": icon2,
