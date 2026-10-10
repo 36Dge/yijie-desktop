@@ -81,6 +81,7 @@
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --yj-font-size-caption: 12px;
   --yj-font-size-body: 14px;
+  --yj-font-size-workflow-description: 13px;
   --yj-font-size-card-title: 16px;
   --yj-font-size-section-title: 18px;
   --yj-font-size-metric-md: 22px;
@@ -88,6 +89,7 @@
   --yj-font-size-display: 32px;
   --yj-line-height-caption: 18px;
   --yj-line-height-body: 22px;
+  --yj-line-height-workflow-description: 20px;
   --yj-line-height-card-title: 24px;
   --yj-line-height-section-title: 26px;
   --yj-line-height-page-title: 32px;
@@ -144,7 +146,7 @@
   --yj-layout-titlebar-height: var(--yj-space-8);
   --yj-layout-titlebar-controls-inset: calc(var(--yj-space-16) + var(--yj-space-8));
   --yj-layout-form-max: 960px;
-  --yj-layout-workflow-create-width: 560px;
+  --yj-layout-workflow-create-width: 440px;
   --yj-layout-schedule-form-width: 520px;
   --yj-layout-schedule-record-width: 520px;
   --yj-layout-schedule-record-skeleton-height: 176px;

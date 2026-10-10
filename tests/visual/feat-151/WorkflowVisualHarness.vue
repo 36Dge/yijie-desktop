@@ -5,16 +5,19 @@ import { useRoute } from "vue-router";
 import YjWindowTitlebar from "../../../src/components/yijie/YjWindowTitlebar.vue";
 import YjSidebar from "../../../src/components/yijie/YjSidebar.vue";
 import { resolveAppNavigation } from "../../../src/navigation/app-nav";
+import { createNaiveThemeOverrides } from "../../../src/design/theme/naive-theme";
 
 defineProps<{ dark: boolean }>();
 
 const route = useRoute();
 const collapsed = ref(false);
 const entries = resolveAppNavigation();
+const rootStyles = getComputedStyle(document.documentElement);
+const themeOverrides = createNaiveThemeOverrides(name => rootStyles.getPropertyValue(name));
 </script>
 
 <template>
-  <n-config-provider :theme="dark ? darkTheme : null">
+  <n-config-provider :theme="dark ? darkTheme : null" :theme-overrides="themeOverrides">
     <div class="workflow-visual-shell">
       <YjWindowTitlebar :collapsed="collapsed" @toggle="collapsed = !collapsed" />
       <div class="workflow-visual-shell__body">

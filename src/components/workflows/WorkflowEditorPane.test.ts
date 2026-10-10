@@ -9,9 +9,10 @@ import WorkflowEditorPane from "./WorkflowEditorPane.vue";
 const channels = vi.hoisted(() => ({ hooks: [] as EditorChannelHooks[], close: vi.fn() }));
 vi.mock("../../api/workflow-editor-channel", () => ({
   WORKFLOW_EDITOR_URL: "about:blank",
-  WorkflowEditorChannel: vi.fn(function (_frame: unknown, _view: unknown, _native: unknown, hooks: EditorChannelHooks) {
-    channels.hooks.push(hooks);
-    return { close: channels.close };
+  WorkflowEditorChannel: vi.fn(function (_frame: unknown, _view: EditorOpenedView, _native: unknown, hooks: EditorChannelHooks) {
+    let owned = _view;
+    channels.hooks.push({ ...hooks, renewed: (value) => { hooks.renewed?.(value); owned = value; } });
+    return { close: channels.close, ownsView: (value: EditorOpenedView) => value.bridge_id === owned.bridge_id && value.generation === owned.generation };
   }),
 }));
 
@@ -26,7 +27,7 @@ afterEach(() => { wrapper?.unmount(); wrapper = undefined; channels.hooks.length
 const props = { view, reconnecting: false, closing: false, dirty: false, pendingWrites: 0, parentFailure: null };
 
 describe("native Coze page carrier", () => {
-  it("gives the full page to Coze while loading and expiry retain return and reconnect", async () => {
+  it("gives the full page to Coze and only shows recovery for a real connection failure", async () => {
     wrapper = mount(WorkflowEditorPane, { props: { ...props, fullPage: true } });
     expect(wrapper.find("header").exists()).toBe(false);
     expect(wrapper.text()).toContain("返回工作流");
@@ -41,10 +42,23 @@ describe("native Coze page carrier", () => {
         message_bytes: 524288, max_active_runs: 1, execution_budget_seconds: 30, editor_ttl_seconds: 300 },
     } });
     await wrapper.vm.$nextTick();
+    await wrapper.setProps({ view: { ...view, expires_at_ms: Date.now() - 1 } });
+    expect(wrapper.find(".workflow-editor-pane__overlay").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("会话已到期");
+    await wrapper.setProps({ view });
     expect(wrapper.find(".workflow-editor-pane__overlay").exists()).toBe(false);
     expect(wrapper.find("header").exists()).toBe(false);
     binding.requestHistory();
     expect(wrapper.emitted("history")).toHaveLength(1);
+
+    const renewed = { ...view, bridge_id: "quietly-renewed", generation: 2, expires_at_ms: Date.now() + 300_000 };
+    binding.renewed?.(renewed);
+    expect(wrapper.emitted("renewed")).toEqual([[renewed]]);
+    await wrapper.setProps({ view: renewed, dirty: true });
+    expect(wrapper.get("iframe").element).toBe(frame.element);
+    expect(channels.hooks).toHaveLength(1);
+    expect(channels.close).not.toHaveBeenCalled();
+    expect(wrapper.find(".workflow-editor-pane__overlay").exists()).toBe(false);
 
     await wrapper.setProps({ parentFailure: new WorkflowNativeError("session_expired") });
     expect(wrapper.text()).toContain("当前画布和未保存内容仍保留");

@@ -17,11 +17,10 @@ import YjIcon from "../../components/yijie/YjIcon.vue";
 import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
-import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS, WORKFLOW_CATEGORIES } from "../../domain/workflow-showcase";
+import { MY_WORKFLOW_FILTERS, MY_WORKFLOWS, RECOMMENDED_WORKFLOWS } from "../../domain/workflow-showcase";
 import "../../components/workflows/workflow-showcase.css";
 
 // The existing showcase filters remain local selection feedback.
-const selectedCategory = ref("all");
 const selectedFilter = ref("all");
 const selectedView = ref("grid");
 const selectedSort = ref("modified");
@@ -47,17 +46,20 @@ const { loading, error, nextCursor, creating, createUncertain, pendingCreate, cr
 const router = useRouter();
 const route = useRoute();
 const showCreate = ref(false);
+let createReturnTarget: HTMLButtonElement | null = null;
 const { show: showCreateGuide, enter: enterCreateGuide, dismiss: dismissCreateGuide } = useWorkflowCreateGuide();
 const createTrigger = ref<HTMLButtonElement | null>(null);
 watch(() => route.query.create, value => { if (value === "1") openCreate(); });
 function openCreate() {
   dismissCreateGuide();
   // macOS mouse activation does not focus buttons; give the modal a real return target.
-  createTrigger.value?.focus();
+  createReturnTarget = createTrigger.value;
+  createReturnTarget?.focus();
   state.error.value = null;
   state.createdWorkflowId.value = null;
   showCreate.value = true;
 }
+function restoreCreateFocus() { (createReturnTarget?.isConnected ? createReturnTarget : createTrigger.value)?.focus(); }
 function cancelCreate() {
   if (creating.value || createUncertain.value) return;
   showCreate.value = false;
@@ -95,21 +97,8 @@ const sortOptions = [
   <YjPage>
     <div class="workflow-page">
       <YjPageHeader title="工作流">
-        <template #description><template v-if="workflowLocalUiEnabled">集中管理和编排本地文本流程，点击<mark class="workflow-page__create-highlight">创建工作流</mark>开始。</template><template v-else>集中查看常用自动化流程与推荐方案，点击<mark class="workflow-page__create-highlight">创建工作流</mark>按钮开始。</template>下方电商工作流方案为展示作用，并无实际实现。</template>
+        <template #description><template v-if="workflowLocalUiEnabled">集中管理和编排本地文本流程，点击创建工作流开始。</template><template v-else>集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。</template></template>
       </YjPageHeader>
-
-      <section class="workflow-page__categories" aria-label="工作流能力分类">
-        <ul class="workflow-page__category-list">
-          <li v-for="category in WORKFLOW_CATEGORIES" :key="category.id">
-            <button type="button" class="workflow-page__category workflow-showcase-control yj-control yj-control--pill"
-              :aria-pressed="selectedCategory === category.id"
-              @click="selectedCategory = category.id">
-              <YjIcon :name="category.icon" size="sm" />
-              <span>{{ category.label }}</span>
-            </button>
-          </li>
-        </ul>
-      </section>
 
       <YjSection title="我的工作流" icon="workflow">
         <template #actions>
@@ -152,7 +141,7 @@ const sortOptions = [
         </div>
         <p v-if="deletion.notice.value" role="status" class="workflow-page__notice">{{ deletion.notice.value }}</p>
         <WorkflowCardRail :count="cards.length">
-          <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="workflowLocalUiEnabled && card.example" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
+          <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="card.example" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
         </WorkflowCardRail>
         <button v-if="workflowLocalUiEnabled && nextCursor" type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh(true)">加载更多工作流</button>
       </YjSection>
@@ -171,7 +160,8 @@ const sortOptions = [
     </div>
     <WorkflowDeleteDialog :target="deletion.target.value" :busy="deletion.busy.value" :uncertain="deletion.uncertain.value" :error="deletion.error.value" @cancel="cancelDelete" @confirm="deletion.confirm" @closed="restoreDeleteFocus" />
     <WorkflowCreateDialog :show="showCreate" :busy="creating" :uncertain="createUncertain" :queryable="!!pendingCreate" :created="!!createdWorkflowId"
-      :available="workflowLocalUiEnabled" :error="error?.message" @closed="createTrigger?.focus()" @cancel="cancelCreate" @confirm="confirmCreate" @query="queryCreate" @enter="enterCreated" />
+      :available="workflowLocalUiEnabled" :error="error?.message"
+      @closed="restoreCreateFocus" @cancel="cancelCreate" @confirm="confirmCreate" @query="queryCreate" @enter="enterCreated" />
     <WorkflowCreateGuide :show="showCreateGuide" :target="createTrigger" @dismiss="dismissCreateGuide" />
   </YjPage>
 </template>
@@ -184,12 +174,6 @@ const sortOptions = [
   container: workflow-page / inline-size;
 }
 
-.workflow-page__categories {
-  padding-bottom: var(--yj-space-6);
-  border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
-}
-
-.workflow-page__category-list,
 .workflow-page__filter-list,
 .workflow-page__recommended-grid {
   padding: 0;
@@ -197,18 +181,10 @@ const sortOptions = [
   list-style: none;
 }
 
-.workflow-page__category-list,
 .workflow-page__filter-list {
   display: flex;
   flex-wrap: wrap;
   gap: var(--yj-space-2);
-}
-
-.workflow-page__create-highlight {
-  color: var(--yj-color-on-brand);
-  background: var(--yj-color-brand-primary);
-  font-weight: var(--yj-font-weight-semibold);
-  white-space: nowrap;
 }
 
 .workflow-page__sort-wrapper {

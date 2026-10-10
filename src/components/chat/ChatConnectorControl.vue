@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NSwitch } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
-import { connectorSwitchDisabled, filterConnectors, type ConnectorView } from "../../domain/connector-ui";
+import { connectorSwitchDisabled, filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
 import ConnectorIcon from "../connectors/ConnectorIcon.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -27,7 +27,33 @@ const emit = defineEmits<{
 const query = ref("");
 const panel = ref<HTMLElement | null>(null);
 const installed = computed(() => props.entries.filter(entry => entry.installed));
-const filtered = computed(() => filterConnectors(installed.value, query.value));
+const compactStatusLabels: Readonly<Record<string, string>> = {
+  "连接待恢复": "待连接",
+  "连接未完成": "待连接",
+  "需要重新授权": "待授权",
+  "已授权，工具待验证": "待验证",
+  "接入待完成": "待接入",
+  "清理待完成": "待清理",
+  "状态待确认": "待确认",
+  "操作结果待确认": "待确认",
+  "未找到操作回执": "待确认",
+  "正在提交操作": "处理中",
+  "正在授权，请在浏览器中完成": "授权中",
+  "正在连接": "连接中",
+  "正在启用": "启用中",
+  "正在停用": "停用中",
+  "正在安装": "安装中",
+  "正在卸载": "卸载中",
+  "待配置": "待配置",
+  "待授权": "待授权",
+  "已启用": "不可用",
+};
+function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
+  if (!entry.busy && (entry.selectable || entry.status.label === "未启用")) return null;
+  const label = compactStatusLabels[entry.status.label] ?? (entry.busy ? "处理中" : "待确认");
+  return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
+}
+const filtered = computed(() => filterConnectors(installed.value, query.value).map(entry => ({ entry, status: compactStatus(entry) })));
 function choose(entry: ConnectorView): void {
   if (props.disabled || entry.busy) return;
   if (props.selectedIds.includes(entry.id) || (props.selectionAvailable && entry.selectable)) emit("select", entry.id);
@@ -55,9 +81,12 @@ onMounted(() => { emit("refresh"); });
       <div v-if="error" class="connector-menu__notice" role="alert"><p>{{ error }}</p><NButton size="small" :disabled="loading" @click="$emit('refresh')">重试</NButton></div>
       <p v-if="!selectionAvailable && !loading && installed.some(entry => entry.enabled)" class="connector-menu__notice">当前无法选用，请前往管理页检查。</p>
       <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择本轮连接器">
-        <li v-for="entry in filtered" :key="entry.id" :aria-busy="entry.busy">
+        <li v-for="{ entry, status } in filtered" :key="entry.id" :aria-busy="entry.busy" :class="{ 'connector-menu__row--selected': selectedIds.includes(entry.id), 'connector-menu__row--blocked': disabled || entry.busy }">
           <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :aria-pressed="selectedIds.includes(entry.id)" :aria-label="`${entry.selectable && selectionAvailable ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
-            <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" /><span class="connector-menu__copy"><span :title="entry.name">{{ entry.name }}</span><span v-if="!entry.selectable || entry.busy" class="connector-menu__status" :class="`connector-menu__status--${entry.status.tone}`">{{ entry.status.label }}</span></span><YjIcon v-if="selectedIds.includes(entry.id)" name="permissionCheck" size="sm" />
+            <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
+            <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
+            <YjIcon v-if="selectedIds.includes(entry.id)" name="permissionCheck" size="sm" />
+            <span v-if="status" class="connector-menu__status" :class="`connector-menu__status--${status.tone}`" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
           </button>
           <NSwitch size="small" :value="entry.enabled" :loading="entry.busy" :disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`" @update:value="$emit('enabled-change', entry.id, $event)" />
         </li>
@@ -69,16 +98,16 @@ onMounted(() => { emit("refresh"); });
 
 <style scoped>
 .connector-menu__list { list-style: none; padding: var(--yj-space-1) var(--yj-space-3); margin: 0; overflow-y: auto; overscroll-behavior: contain; min-height: 0; max-height: var(--yj-layout-connector-list-max); }
-.connector-menu__list li { display: flex; align-items: center; gap: var(--yj-space-2); }
-.connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding: var(--yj-space-1); border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
-.connector-menu__option:hover:not(:disabled), .connector-menu__option[aria-pressed="true"] { background: var(--yj-color-control-hover); }
+.connector-menu__list li { display: flex; align-items: center; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-md); }
+.connector-menu__list li:not(.connector-menu__row--blocked):is(:hover, :focus-within), .connector-menu__row--selected { background: var(--yj-color-control-hover); }
+.connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding: var(--yj-space-1) 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
 .connector-menu__option:disabled { cursor: default; }
-.connector-menu__copy { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: var(--yj-space-1); font-size: var(--yj-font-size-body); }
-.connector-menu__copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.connector-menu__status { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
-.connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); }
-.connector-menu__status--error { color: var(--yj-color-semantic-error-ink); }
+.connector-menu__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--yj-font-size-body); }
+.connector-menu__status { flex: none; padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-xs); color: var(--yj-color-text-secondary); background: var(--yj-color-control-hover); font-size: var(--yj-font-size-caption); line-height: var(--yj-badge-line-height); white-space: nowrap; }
+.connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); background: var(--yj-color-warning-soft); }
+.connector-menu__status--error { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }
+.connector-menu__status--success { color: var(--yj-color-semantic-success-ink); background: var(--yj-color-success-soft); }
 .connector-menu__notice { margin: 0; padding: var(--yj-space-2) var(--yj-space-4); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); flex: none; }
 .connector-menu__notice p { margin: 0 0 var(--yj-space-2); }
 .connector-menu__empty { display: flex; flex-direction: column; align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-5) var(--yj-space-3); text-align: center; min-height: 0; overflow-y: auto; }

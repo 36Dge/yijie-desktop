@@ -74,6 +74,7 @@ function requestClose() { void router.push({ name: "workflows" }); }
       :reconnecting="reconnecting" :closing="closing" :dirty="dirty" :pending-writes="pendingWrites" :parent-failure="error"
       @close="requestClose" @history="showHistory = true" @reconnect="state.openWorkflow(editor.workflow.workflow_id, true)"
       @dirty="dirty = $event" @busy="pendingWrites = $event"
+      @renewed="state.acceptEditorRenewal"
       @result="acceptResult" @failure="state.acceptEditorFailure" />
     <div v-else class="workflow-local-workspace__landing">
       <YjPageHeader :title="workflowId === 'new' ? '创建工作流' : '打开工作流'">

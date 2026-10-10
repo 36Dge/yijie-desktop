@@ -12,7 +12,7 @@ const messages: Record<WorkflowErrorCode, string> = {
   profile_disabled: "本地工作流尚未启用，请通过工作流演示入口打开应用。",
   service_unavailable: "工作流服务暂不可用，完成本地启动后可重试。",
   unauthorized: "当前本地身份无法访问此工作流。",
-  session_expired: "编辑会话已到期，草稿已保留，请重新连接。",
+  session_expired: "工作流连接暂不可用，当前画布已保留，请重试连接。",
   resource_not_found: "工作流不存在或当前身份无法访问。",
   revision_conflict: "草稿已在其他位置更新，请保留当前修改并核对版本。",
   operation_conflict: "此操作已登记，请查询原操作后继续。",

@@ -52,7 +52,7 @@ function submit() {
       <div class="workflow-create-dialog__field">
         <label for="workflow-create-description">工作流描述 <span class="workflow-create-dialog__required" aria-hidden="true">*</span></label>
         <NInput v-model:value="description" type="textarea" placeholder="请描述这个工作流的用途与使用场景" :disabled="locked"
-          :autosize="{ minRows: 5, maxRows: 7 }" :status="descriptionTouched && descriptionError ? 'error' : undefined"
+          :autosize="{ minRows: 4, maxRows: 6 }" :status="descriptionTouched && descriptionError ? 'error' : undefined"
           :input-props="{ id: 'workflow-create-description', 'aria-required': 'true', 'aria-invalid': descriptionTouched && !!descriptionError, 'aria-describedby': 'workflow-create-description-hint workflow-create-description-count' }"
           @blur="descriptionTouched = true" />
         <div class="workflow-create-dialog__description-hint">
@@ -60,7 +60,6 @@ function submit() {
           <span id="workflow-create-description-count" class="workflow-create-dialog__count">{{ count(description) }}/600</span>
         </div>
       </div>
-      <p v-if="!available" role="status">工作流服务尚未启用，请通过本地工作流入口启动应用。</p>
       <p v-if="error" class="workflow-create-dialog__error" role="alert">{{ error }}</p>
       <p v-if="busy" role="status">正在确认创建结果…</p>
       <p v-if="uncertain" role="status">{{ queryable ? '创建结果尚未确认，请查询原操作后继续，避免重复创建。' : '创建结果尚未确认，尚未取得可查询的操作标识，请保留此页面。' }}</p>
@@ -79,10 +78,10 @@ function submit() {
 .workflow-create-dialog { width: min(var(--yj-layout-workflow-create-width), calc(100vw - var(--yj-space-8))); max-height: calc(100vh - var(--yj-space-8)); overflow: auto; }
 </style>
 <style scoped>
-.workflow-create-dialog__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--yj-space-4); }
+.workflow-create-dialog__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--yj-space-3); }
 .workflow-create-dialog__header h2 { margin: 0; font-size: var(--yj-font-size-section-title); font-weight: var(--yj-font-weight-semibold); }
-.workflow-create-dialog__form { display: grid; gap: var(--yj-space-5); }
-.workflow-create-dialog__symbol { justify-self: center; display: grid; place-items: center; width: var(--yj-space-16); height: var(--yj-space-16); border-radius: var(--yj-radius-xl); background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); margin-block: var(--yj-space-2); }
+.workflow-create-dialog__form { display: grid; gap: var(--yj-space-4); }
+.workflow-create-dialog__symbol { justify-self: center; display: grid; place-items: center; width: var(--yj-space-12); height: var(--yj-space-12); border-radius: var(--yj-radius-lg); background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); margin-block: var(--yj-space-1); }
 .workflow-create-dialog__symbol :deep(.yj-icon) { color: inherit; }
 .workflow-create-dialog__field { display: grid; gap: var(--yj-space-2); min-width: 0; }
 .workflow-create-dialog__field label { font-weight: var(--yj-font-weight-semibold); color: var(--yj-color-text-primary); }
@@ -90,5 +89,5 @@ function submit() {
 .workflow-create-dialog__description-hint { display: flex; justify-content: space-between; gap: var(--yj-space-3); }
 .workflow-create-dialog__count { white-space: nowrap; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .workflow-create-dialog__required, .workflow-create-dialog__error, .workflow-create-dialog__field p.workflow-create-dialog__error { color: var(--yj-color-semantic-error-ink); }
-.workflow-create-dialog__actions { display: flex; justify-content: flex-end; gap: var(--yj-space-3); padding-top: var(--yj-space-3); }
+.workflow-create-dialog__actions { display: flex; justify-content: flex-end; gap: var(--yj-space-3); padding-top: var(--yj-space-2); }
 </style>

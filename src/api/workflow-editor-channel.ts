@@ -1,4 +1,5 @@
 import type { WorkflowEditorBridgeV1 } from "../domain/workflow-editor-bridge.generated";
+import { WorkflowEditorSession } from "./workflow-editor-session";
 import { validateBridge } from "./generated/workflow-local-validator.gen.js";
 import {
   WorkflowNativeError,
@@ -20,6 +21,7 @@ export interface EditorChannelHooks {
   result(value: WorkflowSchemas["EditorExchangeResult"]): void;
   failure(value: WorkflowNativeError): void;
   busy(writes: number): void;
+  renewed?(view: EditorOpenedView): void;
 }
 
 export function validEditorEnvelope(value: unknown): value is WorkflowEditorBridgeV1 {
@@ -39,16 +41,20 @@ export class WorkflowEditorChannel {
   private disposed = false;
   private connected = false;
   private readonly handshakeTimer: ReturnType<typeof setTimeout>;
+  private readonly session: WorkflowEditorSession;
 
   constructor(
     frame: HTMLIFrameElement,
     private readonly view: EditorOpenedView,
-    private readonly native: WorkflowNativeClient,
+    native: WorkflowNativeClient,
     private readonly hooks: EditorChannelHooks,
   ) {
     if (frame.src !== WORKFLOW_EDITOR_URL || !frame.contentWindow) {
       throw new WorkflowNativeError("protocol_mismatch");
     }
+    this.session = new WorkflowEditorSession(view, native,
+      opened => { if (!this.disposed) this.hooks.renewed?.(opened); },
+      failure => { if (!this.disposed) this.hooks.failure(failure); });
     const channel = new MessageChannel();
     this.port = channel.port1;
     this.port.onmessage = (event: MessageEvent<unknown>) => { void this.receive(event.data); };
@@ -73,10 +79,13 @@ export class WorkflowEditorChannel {
     this.disposed = true;
     this.connected = false;
     clearTimeout(this.handshakeTimer);
+    this.session.close();
     this.port.onmessage = null;
     this.port.onmessageerror = null;
     this.port.close();
   }
+
+  ownsView(view: EditorOpenedView): boolean { return this.session.owns(view); }
 
   private reply(value: WorkflowEditorBridgeV1): void {
     if (this.disposed) return;
@@ -100,6 +109,7 @@ export class WorkflowEditorChannel {
       this.connected = true;
       clearTimeout(this.handshakeTimer);
       this.hooks.ready();
+      this.session.start();
       return;
     }
     if (!this.connected) return;
@@ -132,7 +142,6 @@ export class WorkflowEditorChannel {
         || input.generation !== value.generation) {
         throw new WorkflowNativeError("protocol_mismatch");
       }
-      if (Date.now() >= this.view.expires_at_ms) throw new WorkflowNativeError("session_expired");
       if (this.requests.has(value.request_id) || this.requests.size >= 2048) {
         throw new WorkflowNativeError("operation_conflict");
       }
@@ -142,7 +151,7 @@ export class WorkflowEditorChannel {
         this.writes.add(value.request_id);
         this.hooks.busy(this.writes.size);
       }
-      const result = await this.native.exchange(input);
+      const result = await this.session.exchange(input);
       if (this.disposed) return;
       if (result.request_id !== value.request_id
         || (result.workflow && result.workflow.workflow_id !== this.view.workflow.workflow_id)

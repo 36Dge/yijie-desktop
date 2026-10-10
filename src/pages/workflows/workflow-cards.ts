@@ -13,6 +13,10 @@ export function workflowCards(workflows: readonly WorkflowSummary[], examples: r
       id: row.workflow_id, title: row.name, icon: "workflow", accent: "brand", badge: "文本处理",
       description: row.description?.trim() || (row.runnable ? "编排文本处理节点，完成输入到输出的自动化流程" : "从开始、文本处理和结束节点搭建工作流"),
       modifiedAt: date.format(new Date(row.updated_at_ms)),
+      // The bounded summary does not expose graph nodes yet; keep the requested
+      // placeholder in this view projection instead of changing the wire schema.
+      nodeCount: 3,
+      status: row.published_version ? "published" : "unpublished",
     },
     to: `/workflows/${encodeURIComponent(row.workflow_id)}`,
   }));

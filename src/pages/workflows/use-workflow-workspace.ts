@@ -175,6 +175,13 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
     error.value = failure;
   }
 
+  function acceptEditorRenewal(view: EditorOpenedView) {
+    if (disposed || editor.value?.workflow.workflow_id !== view.workflow.workflow_id) return;
+    // Only update the native lease used for close/manual reconnect. The iframe
+    // owns its current canvas, dirty state and pending operation receipts.
+    editor.value = view;
+  }
+
   onBeforeUnmount(() => {
     disposed = true;
     ++navigation;
@@ -187,6 +194,6 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
     workflows, status, error, loading, creating, opening, openPending, reconnecting, closing,
     editor, dirty, pendingWrites, pendingCreate, createUncertain, createdWorkflowId, nextCursor,
     refresh, create, openWorkflow, cancelOpening, queryPendingCreate, closeEditor,
-    acceptEditorResult, acceptEditorFailure,
+    acceptEditorResult, acceptEditorFailure, acceptEditorRenewal,
   };
 }

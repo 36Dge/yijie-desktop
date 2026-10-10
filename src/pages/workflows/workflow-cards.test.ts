@@ -13,4 +13,14 @@ describe("workflow overview projection", () => {
     expect(rows.slice(2).map(row => row.workflow)).toEqual(MY_WORKFLOWS);
     expect(rows.slice(2).every(row => row.example && row.to === undefined)).toBe(true);
   });
+
+  it("uses publication versions independently of draft runnability", () => {
+    const base = { revision: "revision", name: "文本流程", workflow_id: "100", updated_at_ms: 1000 };
+    const rows = workflowCards([
+      { ...base, runnable: false, published_version: "v0.0.1" },
+      { ...base, workflow_id: "101", runnable: true },
+    ], []);
+    expect(rows.find(row => row.workflow.id === "100")?.workflow.status).toBe("published");
+    expect(rows.find(row => row.workflow.id === "101")?.workflow.status).toBe("unpublished");
+  });
 });

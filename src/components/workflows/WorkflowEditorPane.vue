@@ -29,24 +29,22 @@ const emit = defineEmits<{
   result: [value: WorkflowSchemas["EditorExchangeResult"]];
   failure: [value: WorkflowNativeError];
   busy: [writes: number];
+  renewed: [value: EditorOpenedView];
 }>();
 
 const frame = ref<HTMLIFrameElement | null>(null);
 const reconnectButton = ref<HTMLButtonElement | null>(null);
-const now = ref(Date.now());
 const ready = ref(false);
 const failure = shallowRef<WorkflowNativeError | null>(null);
 const loaded = ref(false);
 let connection: WorkflowEditorChannel | null = null;
 const visibleFailure = computed(() => props.parentFailure ?? failure.value);
-const expired = computed(() => now.value >= props.view.expires_at_ms || visibleFailure.value?.code === "session_expired");
-const interrupted = computed(() => visibleFailure.value?.code === "service_unavailable" || visibleFailure.value?.code === "protocol_mismatch");
+const interrupted = computed(() => ["service_unavailable", "protocol_mismatch", "session_expired", "unauthorized", "resource_not_found"].includes(visibleFailure.value?.code ?? ""));
 const bootstrapFailed = computed(() => !ready.value && visibleFailure.value !== null);
-const recoveryRequired = computed(() => expired.value || interrupted.value || bootstrapFailed.value);
+const recoveryRequired = computed(() => interrupted.value || bootstrapFailed.value);
 const blocked = computed(() => !ready.value || recoveryRequired.value || props.reconnecting || props.closing);
 const canReconnect = computed(() => recoveryRequired.value && !props.closing && !props.reconnecting && props.pendingWrites === 0);
 
-const timer = setInterval(() => { now.value = Date.now(); }, 250);
 watch(canReconnect, async (allowed) => {
   if (allowed) {
     await nextTick();
@@ -56,15 +54,16 @@ watch(canReconnect, async (allowed) => {
 
 function bind() {
   if (!loaded.value || !frame.value) return;
+  // Credential rotation belongs to the current page channel; do not reload or
+  // rebootstrap the iframe and overwrite its in-memory editing state.
+  if (connection?.ownsView(props.view)) return;
   connection?.close();
   ready.value = false;
   failure.value = null;
-  now.value = Date.now();
-  const bridgeId = props.view.bridge_id;
-  const generation = props.view.generation;
-  const current = () => bridgeId === props.view.bridge_id && generation === props.view.generation;
+  let binding: WorkflowEditorChannel;
+  const current = () => connection === binding && binding.ownsView(props.view);
   try {
-    connection = new WorkflowEditorChannel(frame.value, props.view, workflowNativeClient, {
+    binding = new WorkflowEditorChannel(frame.value, props.view, workflowNativeClient, {
       ready: () => { /* The real bootstrap result marks the editor usable. */ },
       dirty: (value) => { if (current()) emit("dirty", value); },
       requestClose: () => { if (current()) emit("close"); },
@@ -81,7 +80,9 @@ function bind() {
         emit("failure", value);
       },
       busy: (count) => { if (current()) emit("busy", count); },
+      renewed: (view) => { if (current()) emit("renewed", view); },
     });
+    connection = binding;
   } catch (error) {
     failure.value = workflowFailure(error);
     emit("failure", failure.value);
@@ -93,10 +94,16 @@ function frameLoaded() {
   bind();
 }
 
+function reconnect() {
+  if (!canReconnect.value) return;
+  connection?.close();
+  connection = null;
+  emit("reconnect");
+}
+
 // Only the binding changes during reconnect; the iframe DOM and draft stay alive.
 watch([() => props.view.bridge_id, () => props.view.generation], bind, { flush: "post" });
 onBeforeUnmount(() => {
-  clearInterval(timer);
   connection?.close();
 });
 </script>
@@ -111,11 +118,11 @@ onBeforeUnmount(() => {
         <component :is="fullPage ? 'h1' : 'h2'">{{ view.workflow.name }}</component>
         <span class="workflow-editor-pane__meta">{{ dirty ? '未保存的修改' : '草稿已读取' }}</span>
       </div>
-      <span class="workflow-editor-pane__meta">{{ expired ? '会话已到期' : ready ? '编辑器已连接' : '正在连接编辑器…' }}</span>
+      <span class="workflow-editor-pane__meta">{{ ready ? '编辑器已连接' : '正在连接编辑器…' }}</span>
       <slot name="actions" />
     </header>
 
-    <div v-if="visibleFailure && !expired && !interrupted" class="workflow-editor-pane__notice" role="alert">{{ visibleFailure.message }}</div>
+    <div v-if="visibleFailure && !interrupted" class="workflow-editor-pane__notice" role="alert">{{ visibleFailure.message }}</div>
     <div class="workflow-editor-pane__canvas">
       <iframe ref="frame" :src="WORKFLOW_EDITOR_URL" title="Coze 工作流画布"
         sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"
@@ -124,13 +131,13 @@ onBeforeUnmount(() => {
         @load="frameLoaded" />
       <div v-if="blocked" class="workflow-editor-pane__overlay">
         <div class="workflow-editor-pane__notice" role="status">
-          <strong>{{ closing ? '正在关闭编辑会话…' : reconnecting ? '正在重新连接…' : expired ? '编辑会话已到期' : recoveryRequired ? '编辑器连接暂不可用' : '正在连接编辑器…' }}</strong>
+          <strong>{{ closing ? '正在关闭编辑会话…' : reconnecting ? '正在重新连接…' : recoveryRequired ? '编辑器连接暂不可用' : '正在连接编辑器…' }}</strong>
           <p v-if="recoveryRequired">当前画布和未保存内容仍保留在此页面，重新连接后可继续编辑。</p>
           <p v-else-if="!closing">正在读取并核对服务端草稿，请稍候。</p>
           <p v-if="parentFailure" role="alert">{{ parentFailure.message }}</p>
           <p v-if="pendingWrites">正在确认已发出的操作，结果返回后再重新连接。</p>
           <button v-if="recoveryRequired && !closing" ref="reconnectButton" type="button" class="workflow-showcase-control yj-control workflow-editor-pane__primary"
-            :disabled="!canReconnect" @click="emit('reconnect')">{{ reconnecting ? '正在连接…' : '重新连接' }}</button>
+            :disabled="!canReconnect" @click="reconnect">{{ reconnecting ? '正在连接…' : '重新连接' }}</button>
           <button v-if="fullPage" type="button" class="workflow-showcase-control yj-control"
             :disabled="closing" @click="emit('close')">返回工作流</button>
         </div>

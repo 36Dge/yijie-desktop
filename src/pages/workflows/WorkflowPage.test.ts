@@ -29,16 +29,15 @@ describe("WorkflowPage", () => {
       "我的工作流",
       "推荐工作流",
     ]);
-    expect(wrapper.get(".yj-page-header__description").text()).toBe("集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。下方电商工作流方案为展示作用，并无实际实现。");
-    expect(wrapper.get(".workflow-page__create-highlight").text()).toBe("创建工作流");
-    expect(wrapper.get('[aria-label="工作流能力分类"] li').text()).toContain("全部");
-    expect(wrapper.findAll('[aria-label="工作流能力分类"] li').map((item) => item.text()))
-      .toEqual(["全部", "电商获客", "批量出图", "全网比价", "内容创作", "视频生成", "数据分析", "私域运营", "更多"]);
+    expect(wrapper.get(".yj-page-header__description").text()).toBe("集中查看常用自动化流程与推荐方案，点击创建工作流按钮开始。");
     expect(wrapper.findAll('[aria-label="我的工作流分类"] li').map((item) => item.text().trim()))
       .toEqual(["全部", "获客引流", "内容创作", "图片处理", "数据分析", "运营管理", "新建分类"]);
     expect(wrapper.text()).toContain("最近修改");
     expect(wrapper.get(".workflow-page__create-card").element.tagName).toBe("BUTTON");
     expect(wrapper.findAll(".workflow-summary-card")).toHaveLength(4);
+    expect(wrapper.findAll(".workflow-summary-card__status").map(status => status.text())).toEqual(["已发布", "已发布", "已发布", "未发布"]);
+    expect(wrapper.findAll(".workflow-summary-card__action").map(action => action.text())).toEqual(["进入工作流", "进入工作流", "进入工作流", "进入编辑"]);
+    expect(wrapper.findAll(".workflow-summary-card__nodes").map(nodes => nodes.text())).toEqual(["6 个节点", "4 个节点", "5 个节点", "7 个节点"]);
     expect(wrapper.findAll(".recommended-workflow-card")).toHaveLength(4);
     expect(wrapper.text()).toContain("查看全部");
   });
@@ -72,7 +71,7 @@ describe("WorkflowPage", () => {
     expect(wrapper.findAll(".recommended-workflow-card__flow")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__node")).toHaveLength(0);
     expect(wrapper.findAll(".recommended-workflow-card__action").map((action) => action.text()))
-      .toEqual(["演示", "执行", "演示", "执行", "演示", "执行", "演示", "执行"]);
+      .toEqual(["预览", "使用工作流", "预览", "使用工作流", "预览", "使用工作流", "预览", "使用工作流"]);
   });
 
   it("FEAT-151 switches local controls independently while retaining every card and its order", async () => {
@@ -80,10 +79,9 @@ describe("WorkflowPage", () => {
     const cardContent = () => wrapper.findAll("article").map((card) => card.text());
     const originalContent = cardContent();
 
-    const category = wrapper.get('[aria-label="工作流能力分类"]');
     const filters = wrapper.get('[aria-label="我的工作流分类"]');
     const views = wrapper.get('[aria-label="排序和视图"]');
-    for (const group of [category, filters, views]) {
+    for (const group of [filters, views]) {
       const buttons = group.findAll("button");
       expect(buttons[0]!.attributes("aria-pressed")).toBe("true");
       for (const button of buttons) {
@@ -93,7 +91,6 @@ describe("WorkflowPage", () => {
         expect(cardContent()).toEqual(originalContent);
       }
     }
-    expect(category.findAll('[aria-pressed="true"]')[0]!.text()).toBe("更多");
     expect(filters.findAll('[aria-pressed="true"]')[0]!.text()).toBe("新建分类");
     expect(views.get('[aria-label="列表视图"]').attributes("aria-pressed")).toBe("true");
 
@@ -111,26 +108,10 @@ describe("WorkflowPage", () => {
       await button.trigger("click");
       expect(button.attributes("aria-pressed")).toBe("false");
     }
-    for (const more of wrapper.findAll(".workflow-summary-card__more")) {
-      const beforeClick = more.html();
-      await more.trigger("click");
-      expect(more.html()).toBe(beforeClick);
-      expect(more.attributes("role")).toBe("img");
-      expect(more.attributes("aria-pressed")).toBeUndefined();
-      expect(more.attributes("tabindex")).toBeUndefined();
-    }
-    for (const card of wrapper.findAll(".recommended-workflow-card")) {
-      const [demo, execute] = card.findAll("button");
-      await demo!.trigger("click");
-      expect(demo!.attributes("aria-pressed")).toBe("true");
-      await execute!.trigger("click");
-      expect(demo!.attributes("aria-pressed")).toBe("false");
-      expect(execute!.attributes("aria-pressed")).toBe("true");
-      expect(cardContent()).toEqual(originalContent);
-    }
+    expect(wrapper.findAll(".workflow-summary-card__more")).toHaveLength(0);
+    expect(wrapper.findAll('.recommended-workflow-card [aria-pressed]')).toHaveLength(0);
     wrapper.unmount();
     const remounted = mountPage();
-    expect(remounted.get('[aria-label="工作流能力分类"] button').attributes("aria-pressed")).toBe("true");
     expect(remounted.get('[aria-label="列表视图"]').attributes("aria-pressed")).toBe("false");
     expect(remounted.get<HTMLSelectElement>("select").element.value).toBe("modified");
     expect(remounted.findAll('.recommended-workflow-card [aria-pressed="true"]')).toHaveLength(0);

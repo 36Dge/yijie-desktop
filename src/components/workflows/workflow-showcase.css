@@ -54,20 +54,117 @@
 }
 
 .workflow-showcase-card {
-  transition: border-color var(--yj-motion-base) var(--yj-ease-standard),
-    transform var(--yj-motion-base) var(--yj-ease-standard);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-width: 0;
+  min-height: calc(var(--yj-space-16) * 4 + var(--yj-space-6));
+  flex-direction: column;
+  gap: var(--yj-space-3);
+  padding: var(--workflow-card-padding, var(--yj-space-5));
+  border: var(--yj-border-width) solid var(--yj-color-border-subtle);
+  border-radius: var(--yj-radius-lg);
+  background: var(--yj-color-bg-card);
+  box-shadow: none;
+  transition: border-color var(--yj-motion-base) var(--yj-ease-standard);
+}
+
+.workflow-showcase-card__header {
+  display: flex;
+  min-height: var(--yj-control-height-sm);
+  align-items: center;
+  gap: var(--yj-space-3);
+}
+
+.workflow-showcase-card__icon {
+  display: inline-flex;
+  width: var(--yj-space-6);
+  height: var(--yj-control-height-sm);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--yj-color-text-primary);
+}
+
+.workflow-showcase-card__icon .yj-icon { color: inherit; }
+.workflow-showcase-card__body { display: grid; min-width: 0; gap: var(--yj-space-2); }
+
+.workflow-showcase-card__title {
+  margin: 0;
+  color: var(--yj-color-text-primary);
+  font-size: var(--yj-font-size-card-title);
+  font-weight: var(--yj-font-weight-semibold);
+  line-height: var(--yj-line-height-card-title);
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.workflow-showcase-card__description {
+  display: -webkit-box;
+  min-height: calc(var(--yj-line-height-workflow-description) * 2);
+  margin: 0;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-workflow-description);
+  line-height: var(--yj-line-height-workflow-description);
+  overflow-wrap: anywhere;
+}
+
+.workflow-showcase-card__metadata {
+  display: flex;
+  min-height: var(--yj-badge-height);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--yj-space-1) var(--yj-space-2);
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+}
+
+.workflow-showcase-card__badge { color: var(--yj-color-text-secondary); background: var(--yj-color-control-hover); }
+
+.workflow-showcase-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--yj-space-2);
+  margin-top: auto;
+  padding-top: var(--yj-space-2);
+}
+
+.workflow-showcase-card .workflow-card-action {
+  gap: var(--yj-space-1);
+  border-color: var(--yj-color-border-default);
+}
+.workflow-page .workflow-showcase-card .workflow-card-action:hover { border-color: var(--yj-color-border-control-hover); }
+
+.workflow-showcase-card .workflow-card-action--primary {
+  border-color: var(--yj-color-brand-primary);
+  color: var(--yj-color-on-brand);
+  background: var(--yj-color-brand-primary);
+  font-weight: var(--yj-font-weight-semibold);
+}
+
+.workflow-page .workflow-showcase-card .workflow-card-action--primary:hover {
+  border-color: var(--yj-color-brand-hover);
+  background: var(--yj-color-brand-hover);
+}
+
+.workflow-page .workflow-showcase-card .workflow-card-action--primary:active {
+  border-color: var(--yj-color-brand-active);
+  background: var(--yj-color-brand-active);
 }
 
 .workflow-page .workflow-showcase-card:hover,
 .workflow-page .workflow-showcase-card:focus-within {
   border-color: var(--yj-color-brand-primary);
-  transform: translateY(calc(var(--yj-space-1) / -2));
 }
 
 @media (prefers-reduced-motion: reduce) {
   .workflow-showcase-control,
   .workflow-showcase-card { transition: none; }
 
-  .workflow-page .workflow-showcase-card:hover,
-  .workflow-page .workflow-showcase-card:focus-within { transform: none; }
 }
