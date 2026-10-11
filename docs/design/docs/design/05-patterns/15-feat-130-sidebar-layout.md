@@ -35,6 +35,15 @@
 `skillOperations`（Lucide Wrench）。展开文案、收起态 tooltip 和辅助名称使用同一导航配置；
 保留 `/plugins` 路由、`plugin` 导航键和既有权限判断。
 
+2026-10-11：菜单默认文字与每条任务标题统一使用 `--yj-font-weight-regular`（400）
+及 `--yj-color-text-primary`；选中菜单按用户补充要求使用 `--yj-font-weight-semibold`（600）。
+图标保持 18px，采用与 chatbox
+一致的 1.5 线宽；图标与文字间距改为 `--yj-space-2`（8px）。
+“我的店铺”保留 Store 造型，其余五项使用图标规范中的新共用映射。
+“任务”分组标题保留独立层级，折叠态图标继续居中，禁用与焦点状态沿用原规则。
+本次 `contract-impact = none`：仅改变 Desktop 视觉，API / Agent Host、
+跨进程交互、导航及权限语义、本地持久状态均无变化。
+
 ## 2. 任务记录信息架构
 
 - “任务”是无前置图标的静态分组标题，不是链接、按钮或 disabled 导航项；点击标题不得改变路由。

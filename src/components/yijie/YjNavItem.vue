@@ -26,7 +26,7 @@ const accessibleLabel = computed(() =>
     :aria-label="collapsed ? accessibleLabel : undefined"
     :title="collapsed ? accessibleLabel : undefined"
   >
-    <YjIcon :name="item.icon" :tone="selected ? 'primary' : 'default'" />
+    <YjIcon :name="item.icon" tone="primary" :stroke-width="1.5" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
   </RouterLink>
 
@@ -38,7 +38,7 @@ const accessibleLabel = computed(() =>
     :aria-label="accessibleLabel"
     :title="collapsed ? accessibleLabel : undefined"
   >
-    <YjIcon :name="item.icon" tone="muted" />
+    <YjIcon :name="item.icon" tone="muted" :stroke-width="1.5" />
     <span v-if="!collapsed" class="yj-nav-item__label">{{ item.label }}</span>
     <span v-if="!collapsed" class="yj-nav-item__status">即将开放</span>
   </div>
@@ -49,12 +49,12 @@ const accessibleLabel = computed(() =>
   display: flex;
   min-height: var(--yj-nav-item-height, var(--yj-space-10));
   align-items: center;
-  gap: var(--yj-space-3);
+  gap: var(--yj-space-2);
   padding: var(--yj-nav-item-padding-block, var(--yj-space-2)) var(--yj-space-3);
   border-radius: var(--yj-radius-md);
   color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-body);
-  font-weight: 500;
+  font-weight: var(--yj-font-weight-regular);
   line-height: var(--yj-line-height-body);
   text-decoration: none;
   transition:
@@ -75,6 +75,7 @@ const accessibleLabel = computed(() =>
 .yj-nav-item--selected {
   color: var(--yj-color-text-primary);
   background: var(--yj-color-control-hover);
+  font-weight: var(--yj-font-weight-semibold);
 }
 
 .yj-nav-item:not(.yj-nav-item--disabled):active {

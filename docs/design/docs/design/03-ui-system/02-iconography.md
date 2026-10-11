@@ -69,6 +69,16 @@ Luma Living `shopLighting`（Lamp）。全部来自既有 Lucide 依赖，经 re
 主图标、按钮命中区、线宽及打开菜单的行为不变；Composer 的备用入口使用相同规则。
 侧栏“技能”使用现有 `skillOperations`（Lucide Wrench），与加号菜单一致。
 
+2026-10-11：主导航及应用内相同语义图标统一更新为既有 Lucide 依赖中的
+`newTask` → SquarePen（按参考图采用开口方框与铅笔）、`workspace` / `workflow` → GitBranch、
+`scheduledTask` → CalendarDays、`skillOperations` → Blocks、
+`connector` / `plugin`（连接器回退图标）→ Cable。此规则取代上述“技能”使用 Wrench 的约定。
+这些 registry 条目的默认线宽统一为 1.5，由 `YjIcon` 消费，覆盖对话加号菜单、
+连接器标签、工具调用、工作流卡片及创建弹窗等复用位置；显式线宽仍优先。
+侧栏图标保持 18px，统一 1.5 线宽、圆端点、中性文字前景，图文间距为 8px。
+“我的店铺”保留 Store 门面轮廓，与 chatbox 同用 1.5 线宽。
+其他图标维持既有默认值及显式变体，Skill 分类双色图标与品牌图标沿用专用规范。
+
 `contract-impact = none`：本次仅改变图标尺寸、导航显示名称及图标。Desktop 跨进程接口、
 API / Agent Host、路由与权限语义、本地持久状态均无变化。
 

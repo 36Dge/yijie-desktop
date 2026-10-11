@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { iconRegistry, type YjIconName } from "../../icons/registry";
+import { iconRegistry, iconStrokeWidths, type YjIconName } from "../../icons/registry";
 
 const sizeMap = {
   xs: 14,
@@ -21,11 +21,11 @@ const props = withDefaults(
   {
     size: "md",
     tone: "default",
-    strokeWidth: 2,
   },
 );
 
 const iconComponent = computed(() => iconRegistry[props.name]);
+const resolvedStrokeWidth = computed(() => props.strokeWidth ?? iconStrokeWidths[props.name] ?? 2);
 const toneClass = computed(() => `yj-icon--${props.tone}`);
 </script>
 
@@ -35,7 +35,7 @@ const toneClass = computed(() => `yj-icon--${props.tone}`);
     class="yj-icon"
     :class="toneClass"
     :size="sizeMap[props.size]"
-    :stroke-width="props.strokeWidth"
+    :stroke-width="resolvedStrokeWidth"
     :aria-hidden="props.label ? undefined : 'true'"
     :aria-label="props.label"
     :role="props.label ? 'img' : undefined"
