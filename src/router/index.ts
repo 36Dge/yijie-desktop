@@ -3,6 +3,7 @@ import {
   createMemoryHistory,
   createRouter,
   createWebHistory,
+  type RouteLocationNormalized,
   type RouteMeta,
   type RouteRecordRaw,
   type RouterHistory,
@@ -15,6 +16,7 @@ import {
 import { authoritativePermissionUiEnabled } from "../authorization/permission-ui-config";
 import { localChatUiEnabled } from "../authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "../authorization/skill-marketplace-ui-config";
+import { expertsUiEnabled } from "../authorization/experts-ui-config";
 import { storeShowcaseUiEnabled } from "../authorization/store-showcase-ui-config";
 import { workflowShowcaseUiEnabled } from "../authorization/workflow-showcase-ui-config";
 import { marketConnectorsEnabled } from "../api/market-connectors-client";
@@ -41,7 +43,9 @@ const APP_PAGE_LOADERS: AppPageLoaders = {
   store: async () => (await import("../pages/store/StorePage.vue")).default,
   workflows: async () => (await import("../pages/workflows/WorkflowPage.vue")).default,
   workflowEditor: async () => (await import("../pages/workflows/WorkflowEditorPage.vue")).default,
-  plugins: async () => (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
+  plugins: async () => expertsUiEnabled
+    ? (await import("../pages/plugins/ExtensionsPage.vue")).default
+    : (await import("../pages/plugins/SkillMarketplacePage.vue")).default,
   connectors: async () => (await import("../pages/connectors/ConnectorPage.vue")).default,
   settings: async () => (await import("../pages/settings/SettingsPage.vue")).default,
   accessDenied: async () => (await import("../pages/access/AccessDeniedPage.vue")).default,
@@ -120,7 +124,7 @@ export function createAppRouteRecords(
     component: pageLoaders.plugins,
     meta: {
       navKey: "plugin",
-      documentTitle: "Skill 广场 · 易界 AI",
+      documentTitle: expertsUiEnabled ? "扩展 · 易界 AI" : "Skill 广场 · 易界 AI",
     },
   });
   if (connectorsUiEnabled) records.push({
@@ -194,6 +198,14 @@ export function focusRouteHeading(routeDocument: Document): void {
   heading.focus({ preventScroll: true });
 }
 
+function isExtensionTabNavigation(to: RouteLocationNormalized, from: RouteLocationNormalized): boolean {
+  if (to.path !== "/plugins" || from.path !== to.path || to.hash !== from.hash) return false;
+  if (to.query.tab !== "skills" && to.query.tab !== "experts") return false;
+  if (from.query.tab !== undefined && from.query.tab !== "skills" && from.query.tab !== "experts") return false;
+  const keys = new Set([...Object.keys(to.query), ...Object.keys(from.query)]);
+  return [...keys].every(key => key === "tab" || JSON.stringify(to.query[key]) === JSON.stringify(from.query[key]));
+}
+
 export function createAppRouter(
   history: RouterHistory,
   permissionBoundary: RouterPermissionBoundary = productionPermissionBoundary,
@@ -260,12 +272,15 @@ export function createAppRouter(
     return true;
   });
 
-  appRouter.afterEach((route, _from, failure) => {
+  appRouter.afterEach((route, from, failure) => {
     if (failure || typeof document === "undefined") {
       return;
     }
 
     syncRouteTitle(route.meta, document);
+    // The page-owned tab control already manages focus for this in-page change.
+    // Context/deep-link changes and all other navigation still focus the heading.
+    if (expertsUiEnabled && isExtensionTabNavigation(route, from)) return;
     void nextTick(() => focusRouteHeading(document));
   });
 

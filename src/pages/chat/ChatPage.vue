@@ -20,6 +20,14 @@ import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
+import { expertsUiEnabled } from "../../authorization/experts-ui-config";
+import ChatExpertChip from "../../components/experts/ChatExpertChip.vue";
+import { bindingTurnIntent, useChatExpertsStore, type ExpertTurnIntent } from "../../stores/chat-experts.store";
+import { useExpertsStore } from "../../stores/experts.store";
+import { useChatExpertsBinding } from "../../composables/useChatExpertsBinding";
+import { useExpertsBinding } from "../../composables/useExpertsBinding";
+import { ExpertClientError } from "../../api/expert-native-client";
+import { expertErrorMessage } from "../../domain/expert-ui";
 import { skillNativeFailureMessage, useSkillStore } from "../../stores/skill.store";
 import MarketChatActivity from "../../components/chat/MarketChatActivity.vue";
 import { useMarketChat } from "../../composables/useMarketChat";
@@ -100,6 +108,8 @@ const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
 const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const localComposerDrafts = shallowRef(createChatComposerDrafts());
 const sharedDrafts = useChatComposerDraftStore();
+const chatExperts = useChatExpertsStore(), expertResources = useExpertsStore();
+const sharedComposerDraftsEnabled = marketConnectorsEnabled || expertsUiEnabled;
 const connectors = useMarketConnectorStore();
 const skills = useSkillStore();
 const canManageSkills = computed(() => permissionScope.hasCapability("plugin.manage"));
@@ -110,8 +120,8 @@ function skillEnabledChange(id: string, enabled: boolean): void {
   void skills.setEnabled(id, enabled);
 }
 const composerDrafts = computed({
-  get: () => marketConnectorsEnabled ? sharedDrafts.texts : localComposerDrafts.value,
-  set: value => { if (marketConnectorsEnabled) sharedDrafts.texts = value; else localComposerDrafts.value = value; },
+  get: () => sharedComposerDraftsEnabled ? sharedDrafts.texts : localComposerDrafts.value,
+  set: value => { if (sharedComposerDraftsEnabled) sharedDrafts.texts = value; else localComposerDrafts.value = value; },
 });
 const leaveScheduledOpen = ref(false);
 let resolveScheduledLeave: ((leave: boolean) => void) | null = null;
@@ -142,7 +152,7 @@ let locationEpoch = 0;
 const isNewDraftMode = computed(() => routeSessionId.value === null && route.query.create === "schedule");
 const isDraftMode = computed(() => isNewDraftMode.value || (routeSessionId.value !== null && chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "scheduled_plan_draft"));
 const normalPurposeReady = computed(() => routeSessionId.value === null || (chatStore.selectedSessionId === routeSessionId.value && chatStore.selectedSessionPurpose === "ordinary"));
-const composerDraftTargetKey = computed(() => marketConnectorsEnabled && isNewDraftMode.value ? "plan:new" as const : chatComposerDraftKey(routeSessionId.value));
+const composerDraftTargetKey = computed(() => sharedComposerDraftsEnabled && isNewDraftMode.value ? "plan:new" as const : chatComposerDraftKey(routeSessionId.value));
 const prompt = computed({
   get: () => chatComposerDraftValue(composerDrafts.value, composerDraftTargetKey.value),
   set: (value: string) => {
@@ -154,13 +164,71 @@ const prompt = computed({
   },
 });
 watch(isNewDraftMode, (active, previous) => {
-  if (marketConnectorsEnabled && active && !previous) sharedDrafts.preparePlanDraft();
-  if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, marketConnectorsEnabled ? "plan:new" : chatComposerDraftKey(null));
+  if (sharedComposerDraftsEnabled && active && !previous) sharedDrafts.preparePlanDraft();
+  if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, sharedComposerDraftsEnabled ? "plan:new" : chatComposerDraftKey(null));
 }, { flush: "post" });
+if (expertsUiEnabled) {
+  const context = computed(() => !isDraftMode.value ? chatStore.context?.contextId ?? null : null);
+  useChatExpertsBinding(context, routeSessionId);
+  useExpertsBinding(context);
+}
+const expertBinding = computed(() => routeSessionId.value ? chatExperts.bindings[routeSessionId.value] : null);
+const expertSubmission = computed(() => expertsUiEnabled ? chatExperts.submissions[routeSessionId.value ?? "new"] : undefined);
+const selectedExpert = computed(() => !expertsUiEnabled || isDraftMode.value ? null : routeSessionId.value ? expertBinding.value?.expert ?? null : sharedDrafts.expert("new"));
+const expertContextBlocked = computed(() => expertsUiEnabled && !isDraftMode.value && !!routeSessionId.value && (
+  !expertBinding.value || chatExperts.busy.has(routeSessionId.value) || !!chatExperts.errors[routeSessionId.value] || !["none", "ready"].includes(expertBinding.value.state)
+));
+const expertBusy = computed(() => expertContextBlocked.value || !!expertSubmission.value);
+const expertSendReady = computed(() => !expertBusy.value && (!selectedExpert.value || (expertResources.snapshot?.executionAvailable === true && expertResources.entries.some(entry => entry.display.expertId === selectedExpert.value?.expertId && entry.display.version === selectedExpert.value?.version && entry.state === "ready"))));
+const expertIntent = computed<ExpertTurnIntent | undefined>(() => {
+  if (!expertsUiEnabled || isDraftMode.value) return undefined;
+  if (routeSessionId.value) return bindingTurnIntent(expertBinding.value);
+  return selectedExpert.value ? { expectedBindingRevision: 0, expert: { expertId: selectedExpert.value.expertId, version: selectedExpert.value.version } } : undefined;
+});
+const expertNotice = computed(() => {
+  if (!expertsUiEnabled || isDraftMode.value) return null;
+  if (expertSubmission.value) return "原提交结果待确认。已保留完整请求，请确认原提交后再编辑或切换。";
+  if (routeSessionId.value && chatExperts.errors[routeSessionId.value]) return chatExperts.errors[routeSessionId.value];
+  if (expertContextBlocked.value) return "正在确认会话专家状态，确认前不能发送或切换。";
+  if (selectedExpert.value && !expertSendReady.value) return "所选专家资源或执行环境暂不可用，请重新读取或移除专家。";
+  return null;
+});
+const expertRecoveryOperation = computed(() => {
+  const session = routeSessionId.value;
+  if (!expertsUiEnabled || !session || expertSubmission.value || !expertBinding.value || !["applying", "unknown"].includes(expertBinding.value.state)) return null;
+  const operation = chatExperts.pending[session]?.operationId ?? expertBinding.value.operationId;
+  return operation ? { session, operation } : null;
+});
+const expertRecoveryBlocked = computed(() => {
+  const original = expertRecoveryOperation.value;
+  return !original || submitting.value || chatExperts.busy.has(original.session) || isStreaming.value ||
+    permissions.saving.value || permissions.deciding.value !== null || permissions.state.value?.busy === true || permissions.approvals.value.some(item => item.status === "pending") ||
+    !permissionScope.hasCapability("task.read") || !permissionScope.hasCapability("task.create") ||
+    (chatExperts.pending[original.session]?.expert !== null && !permissionScope.hasCapability("plugin.read"));
+});
+async function recoverExpertBinding(): Promise<void> {
+  const original = expertRecoveryOperation.value;
+  if (!original || expertRecoveryBlocked.value) return;
+  await chatExperts.recover(original.session, original.operation);
+}
+async function refreshExpert(): Promise<void> {
+  if (expertSubmission.value) { await submit(true); return; }
+  await expertResources.refresh();
+  if (routeSessionId.value) await chatExperts.refresh(routeSessionId.value);
+}
+async function removeExpert(): Promise<void> {
+  if (expertRemovalBlocked.value) return;
+  if (routeSessionId.value) await chatExperts.select(routeSessionId.value, null);
+  else sharedDrafts.setExpert("new", null);
+}
+function showExpertDetails(): void {
+  if (!selectedExpert.value) return;
+  void router.push({ path: "/plugins", query: { tab: "experts", from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", expert: selectedExpert.value.expertId, expertVersion: selectedExpert.value.version } });
+}
 const localSelectedProjectId = ref<string | null>(null);
 const selectedProjectId = computed({
-  get: () => marketConnectorsEnabled ? sharedDrafts.workspaceId : localSelectedProjectId.value,
-  set: value => { if (marketConnectorsEnabled) sharedDrafts.workspaceId = value; else localSelectedProjectId.value = value; },
+  get: () => sharedComposerDraftsEnabled ? sharedDrafts.workspaceId : localSelectedProjectId.value,
+  set: value => { if (sharedComposerDraftsEnabled) sharedDrafts.workspaceId = value; else localSelectedProjectId.value = value; },
 });
 const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? null, () => routeSessionId.value ?? "new");
 // A new task owns its picker state. Historical session projects may be removed
@@ -168,7 +236,7 @@ const shopPreview = useChatShopPreview(() => chatStore.context?.contextId ?? nul
 const availableProjectId = computed(() => chatStore.projects.find(project =>
   project.projectId === selectedProjectId.value && project.available,
 )?.projectId ?? null);
-const workspaceSelectionValid = computed(() => isDraftMode.value || !marketConnectorsEnabled || routeSessionId.value !== null || selectedProjectId.value === null || availableProjectId.value !== null);
+const workspaceSelectionValid = computed(() => isDraftMode.value || !sharedComposerDraftsEnabled || routeSessionId.value !== null || selectedProjectId.value === null || availableProjectId.value !== null);
 const submitting = ref(false);
 const workspacePicker = useChatWorkspaces({
   context: () => chatStore.context?.contextId ?? null,
@@ -180,6 +248,12 @@ const workspacePicker = useChatWorkspaces({
 });
 const composer = ref<ChatComposerHandle | null>(null);
 const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
+watch([() => route.query.focus, () => composer.value], async ([focus]) => {
+  if (focus !== "composer" || !composer.value) return;
+  await nextTick();
+  await nextTick(); // Follow the existing route heading focus after navigation.
+  composer.value?.focusInput?.();
+}, { flush: "post" });
 function handleEntryFocus(event: FocusEvent): void {
   // Route navigation focuses the heading for accessibility; only controls interrupt the opening.
   if (event.target instanceof Element && event.target.closest("button, input, textarea, select, a[href], [contenteditable]")) {
@@ -282,6 +356,9 @@ const draftExecutionPending = computed(() => Object.values(chatStore.conversatio
   turn.threadId === routeSessionId.value && ["queued", "in_progress", "waiting_approval", "unknown", "recovery_required"].includes(turn.status) &&
   !(turn.source === "local_submission" && (turn.submissionStatus === "failed" || turn.submissionStatus === "cancelled")),
 ));
+const uncertainLocalSubmission = computed(() => !isDraftMode.value && Object.values(chatStore.conversationState.turns).some(turn =>
+  turn.threadId === routeSessionId.value && turn.source === "local_submission" && turn.submissionStatus === "uncertain",
+));
 const draft = useScheduledDraft(() => isDraftMode.value, () => routeSessionId.value, () => draftLatestTurn.value, () => draftExecutionPending.value);
 let entryPrefilled = false;
 watch([isNewDraftMode, () => chatStore.context?.contextId, () => permissionScope.selectedTenantId, () => permissionScope.authorizationRevision], () => {
@@ -312,21 +389,24 @@ const runtimePermissionsEnabled = import.meta.env.VITE_YIJIE_RUNTIME_PERMISSIONS
 const permissions = useRuntimePermissions(
   () => runtimePermissionsEnabled && !isDraftMode.value && normalPurposeReady.value ? chatStore.context?.contextId ?? null : null,
   () => chatStore.selectedSessionId,
-  () => isStreaming.value || composerSubmissionState.value !== "idle",
+  () => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle",
 );
 const permissionCanSend = computed(() => !runtimePermissionsEnabled || (permissions.ready.value && !permissions.saving.value && !permissions.deciding.value && !permissions.approvals.value.some((r) => r.status === "pending")));
 
-const modelBusy = computed(() => isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.busy.value || draft.writing.value || Boolean(draft.pending.value));
+const modelBusy = computed(() => expertBusy.value || isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.busy.value || draft.writing.value || Boolean(draft.pending.value));
+const expertRemovalBlocked = computed(() => modelReadOnly.value || !!expertSubmission.value || isStreaming.value || composerSubmissionState.value !== "idle" || draftExecutionPending.value || permissions.saving.value || permissions.deciding.value !== null || permissions.state.value?.busy === true || permissions.approvals.value.some(item => item.status === "pending") || marketChat.pending.value || !!marketChat.deciding.value || (!!routeSessionId.value && (
+  !expertBinding.value || chatExperts.busy.has(routeSessionId.value) || !!chatExperts.pending[routeSessionId.value] || ["applying", "unknown"].includes(expertBinding.value.state) || (!!chatExperts.errors[routeSessionId.value] && expertBinding.value.state !== "unavailable")
+)));
 const modelReadOnly = computed(() => !chatStore.hasAction(isSessionRoute.value ? "submit_turn" : "create_session") || (isSessionRoute.value && chatStore.selectedAccessMode !== "live"));
 const modelBlocked = computed(() => modelBusy.value || modelReadOnly.value);
 const modelDisabledReason = computed(() => modelReadOnly.value ? "当前聊天仅可查看或操作权限尚未就绪，无法切换模型" : "当前任务结束后可切换模型");
-const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value, marketConnectorsEnabled ? {
+const models = useChatModels(() => chatStore.context?.contextId ?? null, () => routeSessionId.value, () => modelBlocked.value, sharedComposerDraftsEnabled ? {
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
 watch(isNewDraftMode, (active, previous) => {
   // Match the existing new-draft discard lifecycle, including its model intent.
-  if (previous && !active) { if (marketConnectorsEnabled) sharedDrafts.planProfile = "kimi-k3-max-v1"; else models.resetNew(); }
+  if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = "kimi-k3-max-v1"; else models.resetNew(); }
 }, { flush: "post" });
 
 const marketChat = useMarketChat(
@@ -359,6 +439,10 @@ function toggleConnector(serviceId: string): void {
 function manageConnectors(serviceId?: string): void {
   void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
 }
+function browseExperts(): void {
+  if (!expertsUiEnabled || isDraftMode.value || modelBusy.value || !permissionScope.hasCapability("plugin.read")) return;
+  void router.push({ path: "/plugins", query: { tab: "experts", from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat" } });
+}
 function connectorEnabledChange(id: string, enabled: boolean): void { if (enabled) manageConnectors(id); else void connectors.execute("disable", id); }
 function prepareConnectorSubmit(): boolean {
   if (!marketConnectorsEnabled) return true;
@@ -390,7 +474,7 @@ const isHistoryLoading = computed(() =>
 );
 const canRecoverReadiness = computed(() => readiness.value.actionLabel !== null);
 const attachmentInteractionAllowed = computed(() =>
-  !isDraftMode.value && normalPurposeReady.value && chatStore.canAttach && composerSubmissionState.value === "idle" && !isStreaming.value,
+  !expertBusy.value && !isDraftMode.value && normalPurposeReady.value && chatStore.canAttach && composerSubmissionState.value === "idle" && !isStreaming.value,
 );
 const permissionDenied = computed(() =>
   chatStore.lastErrorCode === "chat_capability_denied" ||
@@ -429,7 +513,7 @@ function flushTimelineAfterSelection(): void {
 watch(
   () => chatStore.projects,
   (projects) => {
-    if (marketConnectorsEnabled) return;
+    if (sharedComposerDraftsEnabled) return;
     if (!projects.some(project => project.projectId === selectedProjectId.value && project.available)) {
       selectedProjectId.value = null;
     }
@@ -440,7 +524,7 @@ watch(
 watch(
   () => chatStore.context?.contextId ?? null,
   (contextId, previousContextId) => {
-    if (marketConnectorsEnabled) return;
+    if (sharedComposerDraftsEnabled) return;
     if (contextId === previousContextId) return;
     if (previousContextId === null && contextId !== null) return;
     selectedProjectId.value = null;
@@ -460,7 +544,7 @@ watch(
     reasoningFailed.value = new Set();
     actionErrorCode.value = null;
     transientNotice.value = null;
-    if (!marketConnectorsEnabled && sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
+    if (!sharedComposerDraftsEnabled && sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
     if (!requestedTurn.value) void nextTick(() => scrollToBottom());
   },
 );
@@ -507,6 +591,7 @@ watch([requestedTurn, routeSessionId, () => chatStore.context?.contextId, () => 
 onBeforeUnmount(() => { locationEpoch++; });
 
 function captureError(error: unknown): void {
+  if (error instanceof ExpertClientError) { transientNotice.value = expertErrorMessage(error.code); return; }
   if (error instanceof MarketChatError) { transientNotice.value = marketChatErrorMessage(error); return; }
   actionErrorCode.value = error instanceof ChatClientError
     ? error.shape.code
@@ -576,8 +661,8 @@ async function pickProject(): Promise<void> {
   }
 }
 
-async function submit(): Promise<void> {
-  if (submitting.value || !models.ready.value) return;
+async function submit(recoverExpert = false): Promise<void> {
+  if (submitting.value || (!recoverExpert && !models.ready.value)) return;
   if (isDraftMode.value) {
     const target = composerDraftTargetKey.value;
     const result = await draft.submit(prompt.value, models.intent.value);
@@ -588,9 +673,11 @@ async function submit(): Promise<void> {
     }
     return;
   }
-  if (!normalPurposeReady.value || !permissionCanSend.value) return;
-  if (!workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
-  if (!prepareConnectorSubmit()) return;
+  if (!normalPurposeReady.value || (!recoverExpert && !permissionCanSend.value)) return;
+  if (!recoverExpert && !expertSendReady.value) return;
+  if (recoverExpert && !expertSubmission.value) return;
+  if (!recoverExpert && !workspaceSelectionValid.value) { transientNotice.value = "所选工作空间已不可用，请重新选择或取消工作空间后发送。"; return; }
+  if (!recoverExpert && !prepareConnectorSubmit()) return;
   const focusSnapshot: ChatComposerFocusSnapshot | null = composer.value?.captureInputFocus() ?? null;
   submitting.value = true;
   actionErrorCode.value = null;
@@ -598,11 +685,15 @@ async function submit(): Promise<void> {
   const draftTargetAtStart = composerDraftTargetKey.value;
   let focusRestoreTarget = draftTargetAtStart;
   const input = prompt.value.trim();
-  const marketSelection = marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
-    ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined;
+  const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
+  const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
+  const marketSelection = frozenExpert?.submission.selection ?? (marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
+    ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined);
   try {
     if (isSessionRoute.value) {
-      const result = await (marketSelection !== undefined
+      const result = await (turnExpert !== undefined
+        ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
+        : marketSelection !== undefined
         ? chatStore.submitTurnWithResult(input, models.intent.value ?? undefined, marketSelection)
         : models.intent.value ? chatStore.submitTurnWithResult(input, models.intent.value) : chatStore.submitTurnWithResult(input));
       if (result.status !== "local_durable_accepted") {
@@ -615,11 +706,14 @@ async function submit(): Promise<void> {
       ) return;
       composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
       if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
+      if (turnExpert) chatExperts.acknowledgeSubmission(result.operationId);
       await nextTick();
       scrollToBottom();
       return;
     }
-    const result = await (marketSelection !== undefined
+    const result = await (turnExpert !== undefined
+      ? chatStore.createSessionWithResult(frozenExpert ? frozenExpert.submission.projectId : availableProjectId.value, input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
+      : marketSelection !== undefined
       ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value ?? undefined, marketSelection)
       : models.intent.value ? chatStore.createSessionWithResult(availableProjectId.value, input, models.intent.value) : chatStore.createSessionWithResult(availableProjectId.value, input));
     if (result.status !== "local_durable_accepted") {
@@ -632,6 +726,7 @@ async function submit(): Promise<void> {
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
     if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
+    if (turnExpert) { sharedDrafts.setExpert("new", null); chatExperts.acknowledgeSubmission(result.operationId); }
     models.resetNew();
     shopPreview.adoptNewChat(result.sessionId);
     await router.push(`/chat/${result.sessionId}`);
@@ -857,17 +952,22 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
+      <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
         mode="new"
+        :text-locked="!!expertSubmission"
+        :experts-available="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')"
+        @browse-experts="browseExperts"
         :projects="chatStore.projects"
         :selected-project-id="availableProjectId"
         :readiness="readiness"
         :text-only="isDraftMode"
         :connectors="connectorChips"
         @remove-connector="toggleConnector"
-        :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
+        :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="false"
@@ -889,13 +989,14 @@ onBeforeUnmount(() => {
         <template v-if="!isDraftMode" #workspace-control>
           <ChatWorkspaceControl
             :entries="workspacePicker.entries.value" :selected-project-id="availableProjectId"
-            :disabled="composerSubmissionState !== 'idle' || workspacePicker.creating.value || !chatStore.context?.allowedActions.includes('use_project')"
+            :disabled="expertBusy || composerSubmissionState !== 'idle' || workspacePicker.creating.value || !chatStore.context?.allowedActions.includes('use_project')"
             :loading="workspacePicker.loading.value" :error="workspacePicker.error.value" :root-path="workspacePicker.rootPath.value"
             :create-open="workspacePicker.createOpen.value" :creating="workspacePicker.creating.value" :create-error="workspacePicker.createError.value"
             @refresh="workspacePicker.refresh" @select="selectedProjectId = $event" @open-local="pickProject"
             @update:create-open="workspacePicker.setCreateOpen" @create="workspacePicker.create"
           />
         </template>
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
@@ -1105,10 +1206,15 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
+      <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
         ref="composer"
         v-model="prompt"
         mode="reply"
+        :text-locked="!!expertSubmission"
+        :experts-available="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')"
+        @browse-experts="browseExperts"
         :projects="chatStore.projects"
         :selected-project-id="selectedSession?.projectId ?? null"
         :active-project-name="activeProject?.safeName"
@@ -1116,7 +1222,7 @@ onBeforeUnmount(() => {
         :text-only="isDraftMode"
         :connectors="connectorChips"
         @remove-connector="toggleConnector"
-        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend)"
+        :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
         :streaming="isStreaming"
@@ -1136,6 +1242,7 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>

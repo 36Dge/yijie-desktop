@@ -118,24 +118,26 @@ async fn get_my_capabilities(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
     #[cfg(target_os = "macos")]
-    let _single_instance = match single_instance::acquire() {
-        Ok(guard) => guard,
-        Err(single_instance::AcquireError::AlreadyRunning)
-            if std::env::var("YIJIE_FEAT131_STABLE_ENTRY").as_deref() == Ok("true") =>
-        {
-            eprintln!("yijie desktop instance is already running");
-            std::process::exit(1);
-        }
-        Err(single_instance::AcquireError::AlreadyRunning) => return,
-        Err(
-            single_instance::AcquireError::UnsafeLockFile
-            | single_instance::AcquireError::Unavailable,
-        ) => {
-            eprintln!("yijie desktop single-instance guard unavailable");
-            std::process::exit(1);
-        }
-    };
+    let _single_instance =
+        match single_instance::acquire(&context.config().identifier, chat::experts::enabled()) {
+            Ok(guard) => guard,
+            Err(single_instance::AcquireError::AlreadyRunning)
+                if std::env::var("YIJIE_FEAT131_STABLE_ENTRY").as_deref() == Ok("true") =>
+            {
+                eprintln!("yijie desktop instance is already running");
+                std::process::exit(1);
+            }
+            Err(single_instance::AcquireError::AlreadyRunning) => return,
+            Err(
+                single_instance::AcquireError::UnsafeLockFile
+                | single_instance::AcquireError::Unavailable,
+            ) => {
+                eprintln!("yijie desktop single-instance guard unavailable");
+                std::process::exit(1);
+            }
+        };
     #[cfg(feature = "feat126-s10-driver")]
     chat::feat126_s10_driver_unregistered_command_guard();
     let secure_storage = feat126_secure_storage::Feat126SecureStorageBootstrap::from_environment();
@@ -275,13 +277,22 @@ pub fn run() {
                 }
             };
             let skill_runtime = if local_profile.is_demo_fast() {
+                let experts_enabled = chat::experts::enabled();
                 match app
                     .path()
                     .resource_dir()
                     .map_err(|_| skills::SkillRootsError::PathUnavailable)
                     .and_then(|resource_directory| {
-                        skills::resolve_skill_roots(&resource_directory, &app_data_directory)
+                        if experts_enabled {
+                            skills::resolve_expert_skill_roots(
+                                &resource_directory,
+                                &app_data_directory,
+                            )
+                        } else {
+                            skills::resolve_skill_roots(&resource_directory, &app_data_directory)
+                        }
                     }) {
+                    Ok(roots) if experts_enabled => SkillRuntime::from_expert_roots(roots),
                     Ok(roots) => SkillRuntime::from_roots(roots),
                     Err(_) => SkillRuntime::unavailable(),
                 }
@@ -422,6 +433,16 @@ pub fn run() {
         chat::connectors::market_connectors_operation_reopen_v1,
         chat::connectors::market_connectors_selection_validate_v1,
         chat::connectors::selection::chat_market_submit_v1,
+        chat::connectors::selection::chat_expert_submit_v1,
+        chat::experts::commands::experts_snapshot_v1,
+        chat::experts::commands::experts_prepare_v1,
+        chat::experts::commands::experts_remove_v1,
+        chat::experts::commands::experts_operation_read_v1,
+        chat::experts::commands::experts_operation_recover_v1,
+        chat::experts::commands::chat_expert_binding_read_v1,
+        chat::experts::commands::chat_expert_binding_set_v1,
+        chat::experts::commands::chat_expert_binding_operation_read_v1,
+        chat::experts::commands::chat_expert_binding_recover_v1,
         chat::connectors::observe::chat_market_observe_v1,
         chat::connectors::observe::chat_market_approval_decide_v1,
         chat::ipc::chat_create_session_v2,
@@ -523,13 +544,13 @@ pub fn run() {
         feat126_s10_driver::feat126_s10_driver_fail_closed
     ]);
     #[cfg(feature = "feat126-s10-driver")]
-    if builder.run(tauri::generate_context!()).is_err() {
+    if builder.run(context).is_err() {
         startup_failure_driver.emit_startup_failure("driver_tauri_startup_invalid");
         std::process::exit(1);
     }
     #[cfg(not(feature = "feat126-s10-driver"))]
     builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::WindowEvent {

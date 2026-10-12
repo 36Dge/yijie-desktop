@@ -24,6 +24,8 @@ import YjPage from "../../components/yijie/YjPage.vue";
 import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
 
+const props = withDefaults(defineProps<{ title?: string; embedded?: boolean; active?: boolean }>(), { title: "Skill 广场", embedded: false, active: true });
+
 const CATEGORY_ICONS = {
   "sourcing-selection": "skillCategorySourcing",
   "market-research": "skillCategoryResearch",
@@ -57,25 +59,32 @@ async function loadPage(): Promise<void> {
 }
 
 async function retry(): Promise<void> {
+  if (!props.active) return;
   await skillStore.refresh(canManage.value, "user_retry");
 }
 
+defineExpose({
+  rescan: retry,
+  refreshing: computed(() => skillStore.refreshing),
+  rescanDisabled: computed(() => skillStore.phase === "loading" || Object.keys(skillStore.operations).length > 0),
+});
+
 async function handleInstall(skillId: string): Promise<void> {
-  if (!canManage.value) return;
+  if (!props.active || !canManage.value) return;
   const installed = await skillStore.install(skillId);
   if (installed) message.success("Skill 已安装并默认启用。", { duration: 3000 });
   else message.error(skillStore.operationErrors[skillId] ?? "Skill 安装未完成，请稍后重试。");
 }
 
 async function handleEnabledChange(skillId: string, enabled: boolean): Promise<void> {
-  if (!canManage.value) return;
+  if (!props.active || !canManage.value) return;
   const updated = await skillStore.setEnabled(skillId, enabled);
   if (updated) message.success(enabled ? "Skill 已启用。" : "Skill 已停用。");
   else message.error(skillStore.operationErrors[skillId] ?? "Skill 状态更新失败，请稍后重试。");
 }
 
 function requestUninstall(skillId: string, trigger: HTMLElement): void {
-  if (!canManage.value) return;
+  if (!props.active || !canManage.value) return;
   skillStore.clearOperationError(skillId);
   uninstallTrigger = trigger;
   uninstallTargetId.value = skillId;
@@ -94,6 +103,7 @@ async function closeUninstallDialog(): Promise<void> {
 }
 
 async function confirmUninstall(): Promise<void> {
+  if (!props.active) return;
   const target = uninstallTarget.value;
   if (target === null || !canManage.value) return;
   const uninstalled = await skillStore.uninstall(target.id);
@@ -107,6 +117,7 @@ async function confirmUninstall(): Promise<void> {
 }
 
 function handleWindowFocus(): void {
+  if (!props.active) return;
   if (skillStore.phase === "idle" || skillStore.phase === "loading") return;
   void skillStore.refresh(canManage.value, "window_resume");
 }
@@ -114,7 +125,7 @@ function handleWindowFocus(): void {
 async function subscribeDirectoryChanges(): Promise<void> {
   try {
     const unlisten = await skillNativeClient.subscribeDirectoryChanged(() => {
-      if (pageUnmounted) return;
+      if (pageUnmounted || !props.active) return;
       void skillStore.refresh(canManage.value, "directory_changed");
     });
     if (pageUnmounted) {
@@ -129,16 +140,21 @@ async function subscribeDirectoryChanges(): Promise<void> {
 
 watch(canManage, (allowed, previous) => {
   if (!allowed && previous) void closeUninstallDialog();
-  if (allowed !== previous && skillStore.phase !== "idle") {
+  if (props.active && allowed !== previous && skillStore.phase !== "idle") {
     void skillStore.refresh(allowed, "user_retry");
   }
+});
+
+watch(() => props.active, (active) => {
+  if (active) void loadPage();
+  else { uninstallTargetId.value = null; uninstallTrigger = null; }
 });
 
 onMounted(() => {
   pageUnmounted = false;
   window.addEventListener("focus", handleWindowFocus);
   void subscribeDirectoryChanges();
-  void loadPage();
+  if (props.active) void loadPage();
 });
 
 onBeforeUnmount(() => {
@@ -150,9 +166,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <YjPage width="full" class="skill-marketplace">
+  <component :is="embedded ? 'section' : YjPage" :width="embedded ? undefined : 'full'" class="skill-marketplace">
     <YjPageHeader
-      title="Skill 广场"
+      v-if="!embedded"
+      :title="title"
       description="发现、离线安装和管理跨境电商 Skill。只有已安装且已启用的 Skill 才会向模型开放。"
     >
       <template #actions>
@@ -168,6 +185,8 @@ onBeforeUnmount(() => {
         </n-button>
       </template>
     </YjPageHeader>
+
+    <slot />
 
     <n-alert v-if="!canManage && skillStore.phase === 'ready'" type="info" :bordered="false">
       当前仅可查看 Skill；安装、启停和卸载需要插件管理权限。
@@ -299,7 +318,7 @@ onBeforeUnmount(() => {
         </div>
       </n-card>
     </n-modal>
-  </YjPage>
+  </component>
 </template>
 
 <style scoped>

@@ -5,6 +5,7 @@ use super::{generated as management, selection_generated as wire};
 use crate::chat::{
     database::{ChatRepository, ChatScope, ConversationEnqueueContext, DraftContentBlock},
     error::ChatError,
+    experts::{generated as expert_wire, store as expert_store},
     models,
 };
 use rusqlite::{params, Connection, OptionalExtension};
@@ -21,6 +22,38 @@ fn id(value: &str) -> Result<Uuid, ChatError> {
 }
 fn table(db: &Connection) -> Result<bool, ChatError> {
     db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_market_submissions')", [], |r| r.get(0)).map_err(db_error)
+}
+pub(super) fn expert_storage_available(db: &Connection) -> Result<bool, ChatError> {
+    let exists: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='chat_expert_bindings')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(db_error)?;
+    Ok(exists)
+}
+pub(super) fn expert_managed(db: &Connection, session: &str) -> Result<bool, ChatError> {
+    if !expert_storage_available(db)? {
+        return Ok(false);
+    }
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chat_expert_bindings WHERE session_id=?1)",
+        [session],
+        |r| r.get(0),
+    )
+    .map_err(db_error)
+}
+fn expert_storage_error(error: expert_wire::ErrorCode) -> ChatError {
+    match error {
+        expert_wire::ErrorCode::InvalidRequest => ChatError::InvalidInput,
+        expert_wire::ErrorCode::NotFound => ChatError::NotFound,
+        expert_wire::ErrorCode::RevisionConflict | expert_wire::ErrorCode::RequestConflict => {
+            ChatError::ConversationConflict
+        }
+        expert_wire::ErrorCode::TemporarilyUnavailable => ChatError::DatabaseUnavailable,
+        _ => ChatError::OrchestrationUnavailable,
+    }
 }
 pub(crate) fn dispatch_predicate(db: &Connection, alias: &str) -> Result<String, ChatError> {
     if !table(db)? {
@@ -43,7 +76,7 @@ pub(crate) fn require_legacy_session(
         return Ok(());
     }
     let marked: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM chat_market_submissions m JOIN chat_sessions s ON s.id=m.session_id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3)", params![session.to_string(),scope.owner_user_id,scope.tenant_id], |r|r.get(0)).map_err(db_error)?;
-    if marked {
+    if marked || expert_managed(db, &session.to_string())? {
         Err(ChatError::OrchestrationUnavailable)
     } else {
         Ok(())
@@ -128,6 +161,79 @@ fn require_execution_provider() -> Result<ExecutionAdmission, ChatError> {
 }
 
 impl ChatRepository {
+    fn expert_digest(
+        &self,
+        payload: &expert_wire::NativeSubmitPayload,
+    ) -> Result<String, ChatError> {
+        let value = serde_json::to_vec(&(
+            "yijie.expert-intent/v1",
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            payload,
+        ))
+        .map_err(invalid)?;
+        Ok(self.market_intent_digest(&value))
+    }
+
+    pub(crate) fn expert_submission_replay(
+        &self,
+        payload: &expert_wire::NativeSubmitPayload,
+    ) -> Result<Option<expert_wire::NativeSubmissionResult>, ChatError> {
+        payload.validate().map_err(invalid)?;
+        let mut payload = payload.clone();
+        payload.submission = normalize(&payload.submission)?;
+        if !table(&self.connection)? {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let digest = self.expert_digest(&payload)?;
+        replay(&self.connection, &self.scope, &payload.submission, &digest)?
+            .map(|receipt| self.expert_native_receipt(receipt, &payload))
+            .transpose()
+    }
+
+    fn expert_native_receipt(
+        &self,
+        receipt: wire::SubmissionReceipt,
+        request: &expert_wire::NativeSubmitPayload,
+    ) -> Result<expert_wire::NativeSubmissionResult, ChatError> {
+        let (snapshot, display) = expert_store::submission(
+            &self.connection,
+            &self.scope,
+            &receipt.submission_operation_id,
+        )
+        .map_err(expert_storage_error)?
+        .ok_or(ChatError::DatabaseUnavailable)?;
+        if snapshot.turn_operation_id != receipt.turn_operation_id
+            || snapshot.binding_revision != request.expected_binding_revision
+            || snapshot.expert.as_ref().map(|e| (&e.expert_id, &e.version))
+                != request.expert.as_ref().map(|e| (&e.expert_id, &e.version))
+        {
+            return Err(ChatError::ConversationConflict);
+        }
+        Ok(expert_wire::NativeSubmissionResult {
+            receipt,
+            expert: display,
+            binding_revision: snapshot.binding_revision,
+        })
+    }
+
+    pub(crate) fn expert_submission_admitted(
+        &mut self,
+        mut request: expert_wire::NativeSubmitPayload,
+        revision: u64,
+        admission: ExecutionAdmission,
+        resolved: Option<expert_store::ResolvedExpert>,
+    ) -> Result<expert_wire::NativeSubmissionResult, ChatError> {
+        request.validate().map_err(invalid)?;
+        request.submission = normalize(&request.submission)?;
+        let receipt = self.freeze_submission(
+            request.submission.clone(),
+            revision,
+            admission,
+            Some((&request, resolved.as_ref())),
+        )?;
+        self.expert_native_receipt(receipt, &request)
+    }
     fn market_digest(&self, payload: &wire::SubmitPayload) -> Result<String, ChatError> {
         let value = serde_json::to_vec(&(
             "yijie.market-intent/v1",
@@ -186,15 +292,40 @@ impl ChatRepository {
         authorization_revision: u64,
         admission: ExecutionAdmission,
     ) -> Result<wire::SubmissionReceipt, ChatError> {
+        self.freeze_submission(payload, authorization_revision, admission, None)
+    }
+
+    fn freeze_submission(
+        &mut self,
+        payload: wire::SubmitPayload,
+        authorization_revision: u64,
+        admission: ExecutionAdmission,
+        expert: Option<(
+            &expert_wire::NativeSubmitPayload,
+            Option<&expert_store::ResolvedExpert>,
+        )>,
+    ) -> Result<wire::SubmissionReceipt, ChatError> {
         if !table(&self.connection)? {
             return Err(ChatError::OrchestrationUnavailable);
         }
         let payload = normalize(&payload)?;
-        let request_digest = self.market_digest(&payload)?;
+        let request_digest = if let Some((request, _)) = expert {
+            self.expert_digest(request)?
+        } else {
+            self.market_digest(&payload)?
+        };
         if let Some(receipt) = replay(&self.connection, &self.scope, &payload, &request_digest)? {
             return Ok(receipt);
         }
         require_unused_operation(&self.connection, &payload.operation_id)?;
+        if let Some((request, resolved)) = expert {
+            expert_store::admit_submission(&self.connection, &self.scope, request, resolved)
+                .map_err(expert_storage_error)?;
+        } else if let Some(session) = &payload.session_id {
+            if expert_managed(&self.connection, session)? {
+                return Err(ChatError::OrchestrationUnavailable);
+            }
+        }
         #[cfg(test)]
         let require_qualification = !admission.storage_only;
         #[cfg(not(test))]
@@ -253,6 +384,14 @@ impl ChatRepository {
             return Ok(receipt);
         }
         require_unused_operation(&tx, &payload.operation_id)?;
+        if let Some((request, resolved)) = expert {
+            expert_store::admit_submission(&tx, &self.scope, request, resolved)
+                .map_err(expert_storage_error)?;
+        } else if let Some(session) = &payload.session_id {
+            if expert_managed(&tx, session)? {
+                return Err(ChatError::OrchestrationUnavailable);
+            }
+        }
         let display = display_snapshot(&tx, &self.scope, &payload.selection)?;
         let context = ConversationEnqueueContext {
             scope: &self.scope,
@@ -303,6 +442,10 @@ impl ChatRepository {
         };
         receipt.validate().map_err(invalid)?;
         tx.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at,authorization_revision,permission_mode,native_process_epoch) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?8,?9,?10,?11,?12)",params![receipt.submission_operation_id,receipt.session_id,receipt.local_turn_id,receipt.turn_operation_id,request_digest,serde_json::to_string(&snapshot).map_err(invalid)?,serde_json::to_string(&display).map_err(invalid)?,serde_json::to_string(&receipt).map_err(invalid)?,now,i64::try_from(authorization_revision).map_err(invalid)?,permission_mode,admission.native_process_epoch]).map_err(db_error)?;
+        if let Some((request, resolved)) = expert {
+            expert_store::freeze_submission(&tx, &self.scope, request, resolved, &receipt, now)
+                .map_err(expert_storage_error)?;
+        }
         tx.execute("INSERT INTO chat_market_dispatch(submission_operation_id,format_version,state,updated_at) VALUES(?1,1,'pending',?2)",params![receipt.submission_operation_id,now]).map_err(db_error)?;
         for alias in std::iter::once(op).chain((op != turn_operation).then_some(turn_operation)) {
             tx.execute("INSERT INTO chat_market_operation_refs(operation_id,submission_operation_id) VALUES(?1,?2)",params![alias.to_string(),op.to_string()]).map_err(db_error)?;
@@ -386,6 +529,206 @@ fn submission_error(error: ChatError) -> wire::ErrorCode {
         ChatError::OrchestrationUnavailable => wire::ErrorCode::ExecutionUnavailable,
         _ => wire::ErrorCode::TemporarilyUnavailable,
     }
+}
+
+fn expert_submission_error(error: ChatError) -> expert_wire::ErrorCode {
+    match error {
+        ChatError::InvalidInput => expert_wire::ErrorCode::InvalidRequest,
+        ChatError::ConversationConflict => expert_wire::ErrorCode::RequestConflict,
+        ChatError::NotFound => expert_wire::ErrorCode::NotFound,
+        ChatError::ScopeDenied => expert_wire::ErrorCode::PermissionDenied,
+        ChatError::OrchestrationUnavailable | ChatError::SidecarUnavailable => {
+            expert_wire::ErrorCode::QualificationRequired
+        }
+        _ => expert_wire::ErrorCode::TemporarilyUnavailable,
+    }
+}
+
+/// FEAT-158 wraps the existing admitted queue. A local durable replay is read
+/// before resources/Host/provider work and never creates a second turn.
+#[tauri::command]
+pub(crate) async fn chat_expert_submit_v1(
+    request: serde_json::Value,
+    app: tauri::AppHandle,
+    chat_runtime: tauri::State<'_, crate::chat::ChatRuntime>,
+    ipc_runtime: tauri::State<'_, crate::chat::ipc::ChatIpcRuntime>,
+    skill_runtime: tauri::State<'_, crate::skills::SkillRuntime>,
+) -> Result<expert_wire::NativeSubmitResponse, expert_wire::Error> {
+    use crate::chat::{authorization::AuthorizationFailure, RuntimeMode};
+    use expert_wire::ErrorCode as Code;
+    let auth_error = |error| match error {
+        AuthorizationFailure::ContextInvalid => Code::ContextInvalid,
+        AuthorizationFailure::CapabilityDenied => Code::PermissionDenied,
+    };
+    let known_id = request
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| super::store::id(s).is_ok())
+        .map(str::to_owned);
+    let result = async {
+        let request: expert_wire::NativeSubmitRequest =
+            serde_json::from_value(request).map_err(|_| Code::InvalidRequest)?;
+        if !crate::chat::experts::enabled() {
+            return Err(Code::QualificationRequired);
+        }
+        let scope = match &chat_runtime.mode {
+            RuntimeMode::Local(config) => config.scope.clone(),
+            _ => return Err(Code::PermissionDenied),
+        };
+        let context = id(&request.context_id).map_err(|_| Code::ContextInvalid)?;
+        let create = request.payload.submission.session_id.is_none();
+        let selected = !request.payload.submission.selection.is_empty();
+        let mut required = vec!["task.read", "task.create"];
+        if create {
+            required.push("workspace.use");
+        }
+        if selected {
+            required.push("connector.use");
+        }
+        if request.payload.expert.is_some() {
+            required.push("plugin.read");
+        }
+        let authority = chat_runtime
+            .authorization_manager()
+            .map_err(|_| Code::ContextInvalid)?;
+        authority
+            .with_market_authority(
+                context,
+                &scope,
+                &required,
+                super::now().map_err(|_| Code::TemporarilyUnavailable)?,
+                |_| (),
+            )
+            .map_err(auth_error)?;
+        let database = chat_runtime
+            .database()
+            .await
+            .map_err(|_| Code::TemporarilyUnavailable)?;
+        let admission_gate = authority.market_admission_lock().await;
+        let replay_scope = scope.clone();
+        let replay_authority = authority.clone();
+        let replay_required = required.clone();
+        let replay_payload = request.payload.clone();
+        let previous = database
+            .call(move |repo| {
+                Ok(replay_authority
+                    .with_market_authority(
+                        context,
+                        &replay_scope,
+                        &replay_required,
+                        super::now().map_err(|_| ChatError::DatabaseUnavailable)?,
+                        |_| {
+                            repo.expert_submission_replay(&replay_payload)
+                                .map_err(expert_submission_error)
+                        },
+                    )
+                    .map_err(auth_error)
+                    .and_then(|v| v))
+            })
+            .await
+            .map_err(|_| Code::TemporarilyUnavailable)??;
+        if let Some(data) = previous {
+            return Ok(expert_wire::NativeSubmitResponse {
+                schema_version: 1,
+                request_id: request.request_id,
+                data,
+            });
+        }
+
+        chat_runtime
+            .ensure_demo_fast_sidecar()
+            .await
+            .map_err(|_| Code::QualificationRequired)?;
+        let host = chat_runtime
+            .local_host_bridge()
+            .await
+            .map_err(|_| Code::QualificationRequired)?;
+        let native_scope = authority
+            .with_market_authority(
+                context,
+                &scope,
+                &required,
+                super::now().map_err(|_| Code::TemporarilyUnavailable)?,
+                |value| value,
+            )
+            .map_err(auth_error)?;
+        crate::chat::experts::require_execution(
+            &chat_runtime,
+            &skill_runtime,
+            &host,
+            native_scope.clone(),
+        )
+        .await?;
+        let resolved = match &request.payload.expert {
+            Some(selection) => Some(
+                skill_runtime
+                    .expert_resolve(&chat_runtime, selection)
+                    .await?,
+            ),
+            None => None,
+        };
+        let provider = super::provider::read_admission(
+            &database,
+            &host,
+            &scope,
+            native_scope,
+            &request.payload.submission.selection,
+        )
+        .await
+        .map_err(|_| Code::SelectionStale)?;
+        let admission = ExecutionAdmission::from_host(&host, &authority, provider)
+            .map_err(|_| Code::QualificationRequired)?;
+        let wake_authority = authority.clone();
+        let data = database
+            .call(move |repo| {
+                Ok(authority
+                    .with_market_authority(
+                        context,
+                        &scope,
+                        &required,
+                        super::now().map_err(|_| ChatError::DatabaseUnavailable)?,
+                        |current| {
+                            expert_store::admit_submission(
+                                &repo.connection,
+                                &scope,
+                                &request.payload,
+                                resolved.as_ref(),
+                            )?;
+                            let revision = u64::try_from(current.authorization_revision)
+                                .map_err(|_| Code::ContextInvalid)?;
+                            repo.expert_submission_admitted(
+                                request.payload,
+                                revision,
+                                admission,
+                                resolved,
+                            )
+                            .map_err(expert_submission_error)
+                        },
+                    )
+                    .map_err(auth_error)
+                    .and_then(|v| v))
+            })
+            .await
+            .map_err(|_| Code::TemporarilyUnavailable)??;
+        drop(admission_gate);
+        if let Ok(application) = chat_runtime.local_conversation_application().await {
+            let _ = ipc_runtime
+                .ensure_coordinator(app, application, wake_authority)
+                .await;
+        }
+        Ok(expert_wire::NativeSubmitResponse {
+            schema_version: 1,
+            request_id: request.request_id,
+            data,
+        })
+    }
+    .await;
+    result.map_err(|code| expert_wire::Error {
+        schema_version: 1,
+        request_id: known_id,
+        retryable: code == expert_wire::ErrorCode::TemporarilyUnavailable,
+        code,
+    })
 }
 
 #[tauri::command]
@@ -537,3 +880,7 @@ pub(crate) async fn chat_market_submit_v1(
 #[cfg(test)]
 #[path = "selection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "selection_expert_tests.rs"]
+mod expert_tests;

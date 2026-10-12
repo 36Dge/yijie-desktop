@@ -1412,7 +1412,8 @@ where
         .filter_map(|(subscription_id, record)| {
             if !matches!(
                 record.schema_version,
-                CHAT_IPC_V4_SCHEMA_VERSION
+                CHAT_IPC_SCHEMA_VERSION
+                    | CHAT_IPC_V4_SCHEMA_VERSION
                     | CHAT_IPC_V5_SCHEMA_VERSION
                     | CHAT_IPC_V6_SCHEMA_VERSION
             ) || record.session_id != session_id
@@ -6161,6 +6162,53 @@ mod tests {
     }
 
     #[test]
+    fn feat158_ordinary_subscription_receives_uncertain_submission_resync() {
+        let subscription_id = Uuid::now_v7();
+        let context_id = Uuid::now_v7();
+        let session_id = Uuid::now_v7();
+        let turn_id = Uuid::now_v7();
+        let mut subscriptions = HashMap::from([(
+            subscription_id,
+            SubscriptionRecord {
+                schema_version: CHAT_IPC_SCHEMA_VERSION,
+                context_id,
+                session_id,
+                projection_sequence: 0,
+                assistant_text: String::new(),
+                reasoning: HashMap::new(),
+                terminal: false,
+                blocked: false,
+                artifact_turn_id: None,
+                artifact_notifications: ArtifactNotificationQueue::default(),
+            },
+        )]);
+        let plan = turn_resync_subscription_plan(&subscriptions, session_id, |_| true);
+        assert_eq!(
+            plan,
+            vec![(
+                subscription_id,
+                TurnResyncSubscriptionAction::ResyncRequired
+            )]
+        );
+        let event = turn_resync_control_event(
+            subscription_id,
+            subscriptions.get_mut(&subscription_id).unwrap(),
+            turn_id,
+            plan[0].1,
+        )
+        .unwrap();
+        let encoded = serde_json::to_value(event).unwrap();
+        assert_eq!(encoded["schemaVersion"], 1);
+        assert_eq!(encoded["kind"], "resync_required");
+        assert_eq!(encoded["payload"], json!({"reason":"protocol_error"}));
+        assert_eq!(encoded["sessionId"], session_id.to_string());
+        assert_eq!(encoded["turnId"], turn_id.to_string());
+        assert_eq!(encoded["projectionSequence"], "1");
+        assert!(encoded.get("durableSequence").is_none());
+        assert!(turn_resync_subscription_plan(&subscriptions, session_id, |_| true).is_empty());
+    }
+
+    #[test]
     fn feat134_reconciliation_outcome_requests_resync_without_projecting_failed_status() {
         let operation_id = Uuid::from_u128(0x400);
         let session_id = Uuid::from_u128(0x401);
@@ -6255,7 +6303,7 @@ mod tests {
     }
 
     #[test]
-    fn feat134_failed_turn_subscription_plan_filters_exact_v4_authority_and_invalidates_denied() {
+    fn turn_submission_resync_plan_filters_scope_and_invalidates_denied() {
         let target_session_id = Uuid::from_u128(0x100);
         let other_session_id = Uuid::from_u128(0x101);
         let authorized_context_id = Uuid::from_u128(0x200);
@@ -6356,12 +6404,20 @@ mod tests {
                     denied_v4_id,
                     TurnResyncSubscriptionAction::ContextInvalidated,
                 ),
+                (
+                    same_session_v1_id,
+                    TurnResyncSubscriptionAction::ResyncRequired
+                ),
             ]
         );
         authorization_checks.sort_unstable();
         assert_eq!(
             authorization_checks,
-            vec![authorized_context_id, denied_context_id]
+            vec![
+                authorized_context_id,
+                authorized_context_id,
+                denied_context_id
+            ]
         );
 
         let turn_id = Uuid::from_u128(0x300);
@@ -6379,18 +6435,13 @@ mod tests {
         assert_eq!(events[0]["payload"], json!({"reason":"protocol_error"}));
         assert_eq!(events[1]["kind"], "context_invalidated");
         assert_eq!(events[1]["payload"], json!({"reason":"authority_changed"}));
-        for subscription_id in [matching_v4_id, denied_v4_id] {
+        assert_eq!(events[2]["schemaVersion"], CHAT_IPC_SCHEMA_VERSION);
+        assert_eq!(events[2]["kind"], "resync_required");
+        for subscription_id in [matching_v4_id, denied_v4_id, same_session_v1_id] {
             let record = subscriptions.get(&subscription_id).unwrap();
             assert_eq!(record.projection_sequence, 1);
             assert!(record.blocked);
         }
-        assert_eq!(
-            subscriptions
-                .get(&same_session_v1_id)
-                .unwrap()
-                .projection_sequence,
-            0
-        );
         assert_eq!(
             subscriptions
                 .get(&other_session_v4_id)
@@ -9870,6 +9921,7 @@ pub async fn chat_set_permissions_v1(
         },
         r.request_id,
     )?;
+    let _expert_gate = manager.market_admission_lock().await;
     let value = app
         .set_permission_mode(
             r.payload.session_id,

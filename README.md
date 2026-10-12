@@ -4,6 +4,8 @@
 
 易界 AI Mac 桌面端，使用 Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI 和 pnpm。
 
+2026-10-13：FEAT-158接入普通canonical本地客户端，保留原应用身份、数据和会话；日常“扩展”入口提供技能与专家。启动、同构建重开及关闭专家后的兼容读取方式见 [本地开发](docs/local-development.md)。
+
 ## 仓库职责
 
 - 卖家登录和店铺授权引导；

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "contract_id": "experts/1",
+  "contract_version": "0.1.0",
+  "wire_authority": "compatibility/experts/wire.schema.json",
+  "contextBinding": "existing chat_bind_context_v1 or chat_bind_management_context_v1; Native resolves current scope and exact required existing permissions",
+  "commands": [
+    {
+      "command": "experts_snapshot_v1",
+      "request": "SnapshotRequest",
+      "response": "SnapshotResponse",
+      "requiredPermission": "plugin.read"
+    },
+    {
+      "command": "experts_prepare_v1",
+      "request": "PrepareRequest",
+      "response": "PrepareResponse",
+      "requiredPermission": "plugin.manage"
+    },
+    {
+      "command": "experts_remove_v1",
+      "request": "RemoveRequest",
+      "response": "RemoveResponse",
+      "requiredPermission": "plugin.manage"
+    },
+    {
+      "command": "experts_operation_read_v1",
+      "request": "ResourceOperationReadRequest",
+      "response": "ResourceOperationReadResponse",
+      "requiredPermission": "plugin.read"
+    },
+    {
+      "command": "chat_expert_binding_read_v1",
+      "request": "BindingReadRequest",
+      "response": "BindingReadResponse",
+      "requiredPermission": "task.read"
+    },
+    {
+      "command": "chat_expert_binding_set_v1",
+      "request": "BindingSetRequest",
+      "response": "BindingSetResponse",
+      "requiredPermission": "task.read and task.create; plugin.read for nonnull expert"
+    },
+    {
+      "command": "chat_expert_binding_operation_read_v1",
+      "request": "BindingOperationReadRequest",
+      "response": "BindingOperationReadResponse",
+      "requiredPermission": "task.read"
+    },
+    {
+      "command": "chat_expert_submit_v1",
+      "request": "NativeSubmitRequest",
+      "response": "NativeSubmitResponse",
+      "requiredPermission": "existing chat permissions and connector.use for nonempty market selection; plugin.read for nonnull expert"
+    },
+    {
+      "command": "chat_expert_binding_recover_v1",
+      "request": "BindingRecoverRequest",
+      "response": "BindingRecoverResponse",
+      "requiredPermission": "task.read and task.create; plugin.read for nonnull original expert"
+    },
+    {
+      "command": "experts_operation_recover_v1",
+      "request": "ResourceOperationRecoverRequest",
+      "response": "ResourceOperationRecoverResponse",
+      "requiredPermission": "plugin.manage"
+    }
+  ],
+  "error": "Error"
+}

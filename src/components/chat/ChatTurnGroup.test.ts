@@ -14,6 +14,7 @@ type ConversationTimelineItemViewModel,
 type ConversationTimelineTurnViewModel,
 } from "../../domain/conversation-timeline";
 import {
+composeConversationView,
 viewFromLegacySnapshot,
 type ConversationItemSnapshot,
 type ConversationNotice,
@@ -48,6 +49,20 @@ it("uses the draft review slot for unclassified output without inventing its pha
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+it("FEAT158 uncertain local submission keeps its status without implying a queued execution", () => {
+  const state = composeConversationView({
+    threads: [{ threadId: THREAD_ID, status: "active" }],
+    turns: [{ threadId: THREAD_ID, turnId: TURN_ID, ordinal: 0, status: "queued", terminalStatus: null }],
+    items: [],
+  }, [], [{ turnId: TURN_ID, operationId: "original-operation", status: "uncertain" }]);
+  const turn = selectConversationTimeline(state, THREAD_ID)!.turns[0]!;
+  const wrapper = mount(ChatTurnGroup, { props: { turn, position: 0 } });
+  expect(wrapper.text()).toContain("提交结果待确认");
+  expect(wrapper.get('[role="status"]').text()).toBe("原提交结果尚未确认，正在查询原操作，请勿重复发送。");
+  expect(wrapper.text()).not.toContain("本轮正在等待处理");
+  expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
 });
 
 function deepFreeze<T>(value: T): T {

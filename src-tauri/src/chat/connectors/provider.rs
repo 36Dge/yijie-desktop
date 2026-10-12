@@ -637,10 +637,12 @@ async fn observe(
         None
     } else {
         match runtime.local_host_bridge().await {
+            Ok(host) if matches!(action, Action::Snapshot) => {
+                read_snapshot_admission(&db, &host, &scope, authority.clone(), &selection).await
+            }
             Ok(host) => {
                 match read_admission(&db, &host, &scope, authority.clone(), &selection).await {
                     Ok(admission) => Some(admission),
-                    Err(_) if matches!(action, Action::Snapshot) => None,
                     Err(error) => return Err(error),
                 }
             }
@@ -1325,6 +1327,158 @@ mod tests {
         assert!(!item.effective_enabled);
     }
 
+    #[tokio::test]
+    async fn snapshot_keeps_current_shopify_when_another_installation_has_an_old_host() {
+        use tokio::io::{duplex, split, AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (mut db, scope, old_item, old_host, authority) = setup();
+        let old = qualified_enable(&mut db, &scope, &old_item, &old_host, authority.clone());
+        let host_id = Uuid::now_v7().to_string();
+        let entry = catalog()
+            .catalog
+            .iter()
+            .find(|e| e.service_id == "shopify")
+            .unwrap();
+        let item = store::install(
+            &mut db,
+            &scope,
+            entry,
+            1,
+            ui::InstallPayload {
+                service_id: entry.service_id.clone(),
+                operation_id: Uuid::now_v7().to_string(),
+                expected_revision: 0,
+            },
+            100,
+        )
+        .unwrap()
+        .installation;
+        let enabled = begin(
+            &mut db,
+            &scope,
+            &item,
+            &host_id,
+            authority.clone(),
+            ui::OperationAction::Enable,
+        );
+        let mut ready = status(&enabled, p::OperationState::Succeeded);
+        ready.qualification = p::Qualification::Qualified;
+        ready.execution_available = true;
+        let enabled = store::finish_provider(&mut db, &scope, &enabled, ready, 105).unwrap();
+        let refs = vec![
+            old.payload.binding.reference.clone(),
+            enabled.payload.binding.reference.clone(),
+        ];
+        let (native, peer) = duplex(65536);
+        let (read, write) = split(native);
+        let control =
+            super::super::control::MarketControl::from_test_io(Box::new(write), Box::new(read));
+        let host = crate::chat::host_bridge::HostBridge::from_connection(
+            crate::chat::sidecar::HostConnection {
+                port: 1,
+                token_path: std::env::temp_dir().join("shopify-snapshot-unused-bearer"),
+                instance_nonce: host_id,
+            },
+        )
+        .unwrap()
+        .with_market_control(Some(control.clone()));
+        let original = enabled.payload.operation_id.clone();
+        let peer = tokio::spawn(async move {
+            let (read, mut write) = split(peer);
+            let mut read = BufReader::new(read);
+            let mut line = String::new();
+            read.read_line(&mut line).await.unwrap();
+            let request: host::AuthPollRequest = serde_json::from_str(&line).unwrap();
+            assert_eq!(request.method, "provider_auth_poll");
+            assert_eq!(request.payload.operation_id, original);
+            let response = host::AuthPollResponse {
+                schema_version: 1,
+                request_id: request.request_id,
+                data: p::ProviderStatus {
+                    operation_id: request.payload.operation_id,
+                    host_instance_id: request.payload.host_instance_id,
+                    scope: request.payload.scope,
+                    binding: request.payload.binding,
+                    operation_state: p::OperationState::Succeeded,
+                    authorization_status: p::AuthorizationStatus::Authorized,
+                    connection_status: p::ConnectionStatus::Connected,
+                    qualification: p::Qualification::Qualified,
+                    execution_available: true,
+                    authorization_url: None,
+                    error_code: None,
+                },
+            };
+            write
+                .write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes())
+                .await
+                .unwrap();
+            write.flush().await.unwrap();
+            line.clear();
+            assert_eq!(read.read_line(&mut line).await.unwrap(), 0);
+        });
+        // Explicit selection remains all-or-nothing, even when SQL rows exist.
+        let operations = store::enabled_provider_operations(&db, &scope, &refs).unwrap();
+        assert!(matches!(
+            poll_admission(&host, &scope, authority.clone(), operations).await,
+            Err(Error::ExecutionUnavailable)
+        ));
+        assert!(
+            poll_snapshot_admission(&host, &scope, authority.clone(), vec![old])
+                .await
+                .is_none()
+        );
+        // A missing original locator is also independent of the current item.
+        let mut snapshot_refs = refs.clone();
+        snapshot_refs.push(ui::SelectionRef {
+            installation_id: Uuid::now_v7().to_string(),
+            revision: 1,
+            generation: 1,
+        });
+        let operations = snapshot_operations(&db, &scope, &snapshot_refs);
+        assert_eq!(operations.len(), 2);
+        let admission = poll_snapshot_admission(&host, &scope, authority, operations)
+            .await
+            .unwrap();
+        let caps = ui::CONNECTOR_CAPABILITIES
+            .map(str::to_owned)
+            .into_iter()
+            .collect();
+        let snapshot: ui::Snapshot = serde_json::from_value(
+            super::super::apply_observation(
+                &mut db,
+                &scope,
+                Action::Snapshot,
+                &caps,
+                106,
+                Some(&admission),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(snapshot.execution_available);
+        let current = snapshot
+            .installations
+            .iter()
+            .find(|i| i.service_id == "shopify")
+            .unwrap();
+        assert!(current.effective_enabled);
+        assert_eq!(current.connection_status, ui::ConnectionStatus::Ready);
+        assert!(
+            !snapshot
+                .installations
+                .iter()
+                .find(|i| i.installation_id == old_item.installation_id)
+                .unwrap()
+                .effective_enabled
+        );
+        assert!(preflight(&db, &scope, &refs[1..], &admission).is_ok());
+        assert_eq!(
+            preflight(&db, &scope, &refs, &admission),
+            Err(Error::SelectionStale)
+        );
+        control.close().await;
+        peer.await.unwrap();
+    }
+
     #[test]
     fn disable_revision_supersedes_original_enable_locator() {
         let (mut db, scope, item, host, authority) = setup();
@@ -1418,6 +1572,67 @@ impl ProviderAdmission {
             item.error_code = None;
         }
     }
+}
+
+/// A snapshot observes independent installations, not an atomic tool selection.
+/// Keep each successful proof even if another installation has an old locator.
+async fn read_snapshot_admission(
+    database: &crate::chat::worker::DatabaseWorker,
+    host: &crate::chat::host_bridge::HostBridge,
+    scope: &ChatScope,
+    authority: super::broker_generated::ScopeBinding,
+    selection: &[ui::SelectionRef],
+) -> Option<ProviderAdmission> {
+    authority.validate().ok()?;
+    let selected = selection.to_vec();
+    let query_scope = scope.clone();
+    let operations = database
+        .call(move |repo| {
+            Ok(snapshot_operations(
+                &repo.connection,
+                &query_scope,
+                &selected,
+            ))
+        })
+        .await
+        .ok()?;
+    poll_snapshot_admission(host, scope, authority, operations).await
+}
+
+fn snapshot_operations(
+    db: &rusqlite::Connection,
+    scope: &ChatScope,
+    selection: &[ui::SelectionRef],
+) -> Vec<store::ProviderOperation> {
+    selection
+        .iter()
+        .filter_map(|reference| {
+            store::enabled_provider_operations(db, scope, std::slice::from_ref(reference)).ok()
+        })
+        .flatten()
+        .collect()
+}
+
+async fn poll_snapshot_admission(
+    host: &crate::chat::host_bridge::HostBridge,
+    scope: &ChatScope,
+    authority: super::broker_generated::ScopeBinding,
+    operations: Vec<store::ProviderOperation>,
+) -> Option<ProviderAdmission> {
+    let mut observed: Option<ProviderAdmission> = None;
+    for operation in operations {
+        if let Ok(current) = poll_admission(host, scope, authority.clone(), vec![operation]).await {
+            if let Some(observed) = &mut observed {
+                // All proofs use the same captured authority and owned Host.
+                // Later observations must not extend an earlier proof's lease.
+                observed.deadline = observed.deadline.min(current.deadline);
+                observed.bindings.extend(current.bindings);
+            } else {
+                observed = Some(current);
+            }
+        }
+    }
+    observed.filter(|admission| admission.live(scope))
 }
 
 pub(crate) async fn read_admission(

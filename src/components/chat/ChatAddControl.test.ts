@@ -18,6 +18,16 @@ function setup(attachmentDisabled = false) {
 function menu() { return new DOMWrapper(document.querySelector<HTMLElement>('.composer-add-menu')!); }
 
 describe("composer add menu", () => {
+  it("only exposes expert browsing when enabled and never sends a message", async () => {
+    const wrapper = setup();
+    await wrapper.setProps({ expertsAvailable: true });
+    await wrapper.get('button').trigger('click'); await flushPromises();
+    const experts = menu().findAll('[role="menuitem"]').find(item => item.text() === "选择专家")!;
+    await experts.trigger('click'); await flushPromises();
+    expect(wrapper.emitted('browse-experts')).toEqual([[]]);
+    expect(wrapper.emitted('pick-attachments')).toBeUndefined();
+    expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
+  });
   it("opens without invoking the picker, then forwards the existing file action once", async () => {
     const wrapper = setup();
     await wrapper.get('button').trigger('click'); await flushPromises();

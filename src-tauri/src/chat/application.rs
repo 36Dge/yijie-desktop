@@ -5050,6 +5050,7 @@ impl AuthorizedConversationApplication {
         if !super::models::enabled() {
             return Err(ChatError::OrchestrationUnavailable);
         }
+        let _expert_gate = self.authorization.market_admission_lock().await;
         let request = super::models_generated::SelectRequest {
             schema_version: 1,
             profile_id: intent.profile_id,

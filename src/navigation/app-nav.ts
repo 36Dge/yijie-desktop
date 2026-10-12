@@ -1,4 +1,5 @@
 import type { YjIconName } from "../icons/registry";
+import { expertsUiEnabled } from "../authorization/experts-ui-config";
 
 export type AppRoutePath = "/chat" | "/store" | "/workflows" | "/plugins" | "/connectors" | "/settings" | "/scheduled-tasks";
 export type AppNavPlacement = "main" | "bottom";
@@ -80,7 +81,7 @@ export const APP_NAVIGATION = [
   {
     kind: "item",
     key: "plugin",
-    label: "技能",
+    label: expertsUiEnabled ? "扩展" : "技能",
     icon: "skillOperations",
     placement: "main",
     disabled: false,

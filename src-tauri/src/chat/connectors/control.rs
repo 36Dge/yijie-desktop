@@ -1,6 +1,7 @@
 //! Native-owned Host control pipe. HTTP bearer access cannot grant a submission
 //! or approve a market call; only this parent-owned channel carries authority.
 use super::host_generated as wire;
+use crate::chat::experts::generated as expert_wire;
 use serde::{de::DeserializeOwned, Serialize};
 use std::fmt;
 use std::sync::{
@@ -38,22 +39,24 @@ impl fmt::Debug for MarketControl {
     }
 }
 
-pub(crate) enum ControlError {
+pub(crate) enum RequestError<E> {
     Closed,
     Busy,
     InvalidRequest,
     OutcomeUnknown,
-    Rejected(wire::Error),
+    Rejected(E),
 }
+pub(crate) type ControlError = RequestError<wire::Error>;
+pub(crate) type ExpertControlError = RequestError<expert_wire::Error>;
 
-impl fmt::Debug for ControlError {
+impl<E> fmt::Debug for RequestError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Closed => f.write_str("ControlClosed"),
             Self::Busy => f.write_str("ControlBusy"),
             Self::InvalidRequest => f.write_str("ControlInvalidRequest"),
             Self::OutcomeUnknown => f.write_str("ControlOutcomeUnknown"),
-            Self::Rejected(error) => f.debug_tuple("ControlRejected").field(&error.code).finish(),
+            Self::Rejected(_) => f.write_str("ControlRejected([private receipt])"),
         }
     }
 }
@@ -123,27 +126,68 @@ impl MarketControl {
         request_id: &str,
         request: &R,
     ) -> Result<T, ControlError> {
-        if !self.is_open() {
-            return Err(ControlError::Closed);
+        self.exchange(request_id, request, CONTROL_TIMEOUT).await
+    }
+
+    /// Same owner transport and handshake; only the source-defined expert
+    /// methods get the longer Native response allowance. Old methods keep 5s.
+    pub(crate) async fn expert_request<R: Serialize, T: DeserializeOwned>(
+        &self,
+        request_id: &str,
+        request: &R,
+        method: &str,
+    ) -> Result<T, ExpertControlError> {
+        if !matches!(
+            method,
+            "expert_apply_binding"
+                | "expert_operation_read"
+                | "expert_grant_register"
+                | "expert_submit"
+                | "expert_submission_read"
+                | "expert_status"
+                | "expert_resources_prepare"
+                | "expert_resources_remove"
+                | "expert_resources_operation_read"
+                | "expert_binding_recover"
+                | "expert_resources_recover"
+        ) {
+            return Err(RequestError::InvalidRequest);
         }
-        let mut bytes = serde_json::to_vec(request).map_err(|_| ControlError::InvalidRequest)?;
+        self.exchange(
+            request_id,
+            request,
+            Duration::from_millis(expert_wire::NATIVE_RESPONSE_TIMEOUT_MS),
+        )
+        .await
+    }
+
+    async fn exchange<R: Serialize, T: DeserializeOwned, E: DeserializeOwned>(
+        &self,
+        request_id: &str,
+        request: &R,
+        response_timeout: Duration,
+    ) -> Result<T, RequestError<E>> {
+        if !self.is_open() {
+            return Err(RequestError::Closed);
+        }
+        let mut bytes = serde_json::to_vec(request).map_err(|_| RequestError::InvalidRequest)?;
         if bytes.len() + 1 > MAX_REQUEST_BYTES {
-            return Err(ControlError::InvalidRequest);
+            return Err(RequestError::InvalidRequest);
         }
         bytes.push(b'\n');
         let guard = tokio::time::timeout(CONTROL_TIMEOUT, self.0.transport.lock())
             .await
-            .map_err(|_| ControlError::Busy)?;
+            .map_err(|_| RequestError::Busy)?;
         if !self.is_open() || guard.is_none() {
-            return Err(ControlError::Closed);
+            return Err(RequestError::Closed);
         }
         let mut exchange = Exchange {
             guard,
             closed: &self.0.closed,
             complete: false,
         };
-        let transport = exchange.guard.as_mut().ok_or(ControlError::Closed)?;
-        let observed = tokio::time::timeout(CONTROL_TIMEOUT, async {
+        let transport = exchange.guard.as_mut().ok_or(RequestError::Closed)?;
+        let observed = tokio::time::timeout(response_timeout, async {
             transport.input.write_all(&bytes).await?;
             transport.input.flush().await?;
             let mut response = Vec::new();
@@ -157,26 +201,26 @@ impl MarketControl {
             Ok(response)
         })
         .await
-        .map_err(|_| ControlError::OutcomeUnknown)?
-        .map_err(|_| ControlError::OutcomeUnknown)?;
+        .map_err(|_| RequestError::OutcomeUnknown)?
+        .map_err(|_| RequestError::OutcomeUnknown)?;
         let value: serde_json::Value =
-            serde_json::from_slice(&observed).map_err(|_| ControlError::OutcomeUnknown)?;
+            serde_json::from_slice(&observed).map_err(|_| RequestError::OutcomeUnknown)?;
         if value.get("requestId").and_then(|v| v.as_str()) != Some(request_id)
             || value.get("schemaVersion").and_then(|v| v.as_u64()) != Some(1)
         {
-            return Err(ControlError::OutcomeUnknown);
+            return Err(RequestError::OutcomeUnknown);
         }
         let result = if value.get("code").is_some() {
             if value.get("data").is_some() {
-                return Err(ControlError::OutcomeUnknown);
+                return Err(RequestError::OutcomeUnknown);
             }
-            let error = serde_json::from_value(value).map_err(|_| ControlError::OutcomeUnknown)?;
-            Err(ControlError::Rejected(error))
+            let error = serde_json::from_value(value).map_err(|_| RequestError::OutcomeUnknown)?;
+            Err(RequestError::Rejected(error))
         } else {
-            Ok(serde_json::from_value(value).map_err(|_| ControlError::OutcomeUnknown)?)
+            Ok(serde_json::from_value(value).map_err(|_| RequestError::OutcomeUnknown)?)
         };
         if !self.is_open() {
-            return Err(ControlError::Closed);
+            return Err(RequestError::Closed);
         }
         exchange.complete = true;
         result
@@ -232,5 +276,80 @@ mod tests {
         assert!(matches!(result.await, Err(ControlError::Closed)));
         let mut bytes = [0; 1];
         assert_eq!(host.read(&mut bytes).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn feat158_typed_expert_error_preserves_shared_pipe_for_normal_exchange() {
+        let (native, host) = duplex(4096);
+        let (read, write) = split(native);
+        let control = MarketControl::from_io(Box::new(write), Box::new(read));
+        let peer = tokio::spawn(async move {
+            let (read, mut write) = split(host);
+            let mut read = BufReader::new(read);
+            let mut line = String::new();
+            read.read_line(&mut line).await.unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let response = expert_wire::Error {
+                schema_version: 1,
+                request_id: Some(request["requestId"].as_str().unwrap().into()),
+                code: expert_wire::ErrorCode::QualificationRequired,
+                retryable: false,
+            };
+            write
+                .write_all(format!("{}\n", serde_json::to_string(&response).unwrap()).as_bytes())
+                .await
+                .unwrap();
+            line.clear();
+            read.read_line(&mut line).await.unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            write.write_all(format!("{}\n",serde_json::json!({"schemaVersion":1,"requestId":request["requestId"],"data":{"observed":true}})).as_bytes()).await.unwrap();
+            line.clear();
+            assert_eq!(read.read_line(&mut line).await.unwrap(), 0);
+        });
+        let request_id = uuid::Uuid::now_v7().to_string();
+        let request = expert_wire::SubmissionReadRequest {
+            schema_version: 1,
+            request_id: request_id.clone(),
+            method: "expert_submission_read".into(),
+            payload: expert_wire::SubmissionReadPayload {
+                host_instance_id: uuid::Uuid::now_v7().to_string(),
+                scope: expert_wire::ScopeBinding {
+                    owner_user_id: uuid::Uuid::now_v7().to_string(),
+                    tenant_id: uuid::Uuid::now_v7().to_string(),
+                    native_process_epoch: uuid::Uuid::now_v7().to_string(),
+                    authorization_revision: 1,
+                    authorization_expires_at_unix_ms: 2_000_000_000_000,
+                },
+                task_id: uuid::Uuid::now_v7().to_string(),
+                local_session_id: uuid::Uuid::now_v7().to_string(),
+                turn_operation_id: uuid::Uuid::now_v7().to_string(),
+            },
+        };
+        request.validate().unwrap();
+        let result = control
+            .expert_request::<_, expert_wire::SubmissionReadResponse>(
+                &request_id,
+                &request,
+                &request.method,
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(ExpertControlError::Rejected(expert_wire::Error {
+                code: expert_wire::ErrorCode::QualificationRequired,
+                ..
+            }))
+        ));
+        assert!(control.is_open());
+        let response: serde_json::Value = control
+            .request(
+                "ordinary-request",
+                &serde_json::json!({"requestId":"ordinary-request"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response["data"]["observed"], true);
+        control.close().await;
+        peer.await.unwrap();
     }
 }

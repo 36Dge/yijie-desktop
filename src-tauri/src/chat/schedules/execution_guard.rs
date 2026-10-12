@@ -157,6 +157,9 @@ pub(super) const ACTIVE_CLEANUP: &str =
 /// turn/outbox. This preserves foreground/foreground behavior and closes the
 /// accepted-but-not-yet-recorded and create-session I/O windows.
 pub(super) fn foreground_busy(db: &Connection) -> Result<bool, ChatError> {
+    if crate::chat::experts::store::any_unsettled(db).map_err(|_| ChatError::DatabaseUnavailable)? {
+        return Ok(true);
+    }
     let turn = super::recovery::effective_turn(db, "t")?;
     let outbox = super::recovery::unreleased(db, "o.scheduled_run_id")?;
     let interrupt = interrupt_eligible(db, "o")?;
@@ -177,6 +180,10 @@ pub(super) fn foreground_busy(db: &Connection) -> Result<bool, ChatError> {
       OR EXISTS(SELECT 1 FROM chat_deletion_jobs WHERE {cleanup})"),
       [], |r|r.get(0)).map_err(|_|ChatError::DatabaseUnavailable)
 }
+
+#[cfg(test)]
+#[path = "execution_guard_expert_tests.rs"]
+mod expert_tests;
 pub(super) fn interrupt_eligible(db: &Connection, alias: &str) -> Result<String, ChatError> {
     Ok(if super::recovery::present(db)? {
         // The old interrupt payload identifies a local turn. A new turn in the

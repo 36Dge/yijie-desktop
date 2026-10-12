@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "key": "daily",
+      "productName": "易界 AI",
+      "identifier": "com.yijie.ai",
+      "runtimeDirectory": "demo-fast",
+      "hostPort": 18081,
+      "overlay": "tauri.experts-daily.conf.json"
+    },
+    {
+      "key": "default",
+      "productName": "易界 AI FEAT-158",
+      "identifier": "com.yijie.ai.feat158-local",
+      "runtimeDirectory": "feat158-candidate",
+      "hostPort": 18158,
+      "overlay": "tauri.experts-local.conf.json"
+    },
+    {
+      "key": "content-v011",
+      "productName": "易界 AI FEAT-158 内容 0.1.1",
+      "identifier": "com.yijie.ai.feat158-content-v011",
+      "runtimeDirectory": "feat158-content-v011-candidate",
+      "hostPort": 18159,
+      "overlay": "tauri.experts-content-v011.conf.json"
+    },
+    {
+      "key": "content-v012",
+      "productName": "易界 AI FEAT-158 内容 0.1.2",
+      "identifier": "com.yijie.ai.feat158-content-v012",
+      "runtimeDirectory": "feat158-content-v012-candidate",
+      "hostPort": 18160,
+      "overlay": "tauri.experts-content-v012.conf.json"
+    },
+    {
+      "key": "content-v013",
+      "productName": "易界 AI FEAT-158 内容 0.1.3",
+      "identifier": "com.yijie.ai.feat158-content-v013",
+      "runtimeDirectory": "feat158-content-v013-candidate",
+      "hostPort": 18161,
+      "overlay": "tauri.experts-content-v013.conf.json"
+    }
+  ]
+}

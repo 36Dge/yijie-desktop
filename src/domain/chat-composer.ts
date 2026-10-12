@@ -7,6 +7,7 @@ export type ChatComposerFocusSnapshot = Readonly<{
 }>;
 
 export interface ChatComposerHandle {
+  focusInput?(): boolean;
   captureInputFocus(): ChatComposerFocusSnapshot | null;
   restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean;
 }

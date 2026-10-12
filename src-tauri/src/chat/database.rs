@@ -932,6 +932,12 @@ impl ChatRepository {
                 migrations::MARKET_PROVIDER_SCHEMA_VERSION,
             )?;
         }
+        if super::experts::enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION,
+            )?;
+        }
         protect_database_files(&database_path)?;
         let mut repository = Self {
             schedule_background_only: false,
@@ -4382,6 +4388,10 @@ impl ChatRepository {
                 false,
             )?;
         }
+        if let Some(id) = session_id {
+            super::experts::store::require_settled(&self.connection, &id.to_string())
+                .map_err(|_| ChatError::ConversationConflict)?;
+        }
         let current = self.permission_state(session_id)?;
         if current.busy {
             return Err(ChatError::ConversationConflict);
@@ -5335,6 +5345,8 @@ impl ChatRepository {
         if now < 0 {
             return Err(ChatError::InvalidInput);
         }
+        super::experts::store::require_settled(&self.connection, &session_id.to_string())
+            .map_err(|_| ChatError::ConversationConflict)?;
         super::schedules::workspace::guard_deletion(
             &self.connection,
             &self.scope,

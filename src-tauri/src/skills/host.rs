@@ -1,4 +1,6 @@
-use super::catalog::{load_catalog, CatalogError, SkillCatalog, SkillCatalogEntry};
+use super::catalog::{
+    load_catalog, load_expert_catalog, CatalogError, SkillCatalog, SkillCatalogEntry,
+};
 use super::SkillRoots;
 use crate::chat::{
     ChatError, ChatRuntime, HostBridge, HostBridgeError, HostBridgeErrorKind, HostErrorCode,
@@ -48,6 +50,14 @@ impl SkillRuntime {
         Self { mode }
     }
 
+    pub(crate) fn from_expert_roots(roots: SkillRoots) -> Self {
+        let mode = match load_expert_catalog(&roots) {
+            Ok(catalog) => SkillRuntimeMode::Ready { roots, catalog },
+            Err(_) => SkillRuntimeMode::Unavailable,
+        };
+        Self { mode }
+    }
+
     pub(crate) fn roots(&self) -> Option<SkillRoots> {
         match &self.mode {
             SkillRuntimeMode::Ready { roots, .. } => Some(roots.clone()),
@@ -55,7 +65,7 @@ impl SkillRuntime {
         }
     }
 
-    fn catalog(&self) -> Result<&SkillCatalog, SkillCommandError> {
+    pub(super) fn catalog(&self) -> Result<&SkillCatalog, SkillCommandError> {
         match &self.mode {
             SkillRuntimeMode::Ready { catalog, .. } => Ok(catalog),
             SkillRuntimeMode::Disabled => Err(SkillCommandError::disabled()),
@@ -63,7 +73,7 @@ impl SkillRuntime {
         }
     }
 
-    async fn host(
+    pub(super) async fn host(
         &self,
         chat: &ChatRuntime,
     ) -> Result<std::sync::Arc<HostBridge>, SkillCommandError> {
@@ -133,7 +143,7 @@ impl SkillRuntime {
         let entry = catalog
             .entries
             .iter()
-            .find(|entry| entry.id == skill_id)
+            .find(|entry| entry.id == skill_id && entry.expert.is_none())
             .ok_or_else(SkillCommandError::not_found)?;
         let host = self.host(chat).await?;
         let before = host
@@ -188,7 +198,7 @@ impl SkillRuntime {
             .catalog()?
             .entries
             .iter()
-            .any(|entry| entry.id == skill_id)
+            .any(|entry| entry.id == skill_id && entry.expert.is_none())
         {
             Ok(())
         } else {
@@ -244,6 +254,18 @@ pub struct SkillCommandError {
 }
 
 impl SkillCommandError {
+    pub(super) fn expert_error(&self) -> crate::chat::experts::generated::ErrorCode {
+        use crate::chat::experts::generated::ErrorCode as Error;
+        match self.code {
+            "invalid_request" => Error::InvalidRequest,
+            "skill_not_found" => Error::NotFound,
+            "unauthorized" | "capability_denied" => Error::PermissionDenied,
+            "skill_marketplace_disabled" => Error::QualificationRequired,
+            "skill_busy" => Error::Busy,
+            _ => Error::ResourceUnavailable,
+        }
+    }
+
     const fn new(code: &'static str, retryable: bool, recovery: &'static str) -> Self {
         Self {
             code,
@@ -350,7 +372,7 @@ impl SkillCommandError {
     }
 }
 
-fn merge_snapshot(
+pub(super) fn merge_snapshot(
     catalog: &SkillCatalog,
     snapshot: HostSkillSnapshot,
 ) -> Result<SkillSnapshotDto, SkillCommandError> {
@@ -361,7 +383,11 @@ fn merge_snapshot(
         .map(|skill| (skill.id.clone(), skill))
         .collect::<HashMap<_, _>>();
     let mut skills = Vec::with_capacity(catalog.entries.len());
-    for entry in &catalog.entries {
+    for entry in catalog
+        .entries
+        .iter()
+        .filter(|entry| entry.expert.is_none())
+    {
         let state = state_by_id.get(&entry.id).ok_or_else(contract_mismatch)?;
         skills.push(merge_skill(entry, state));
     }
@@ -379,7 +405,7 @@ fn merge_snapshot(
     })
 }
 
-fn validate_host_snapshot(
+pub(super) fn validate_host_snapshot(
     catalog: &SkillCatalog,
     snapshot: &HostSkillSnapshot,
 ) -> Result<(), SkillCommandError> {
@@ -406,6 +432,7 @@ fn validate_host_snapshot(
             || state.catalog_status != entry.catalog_status
             || state.catalog_blocked_reason != entry.catalog_blocked_reason
             || state.maintenance_status != entry.maintenance_status
+            || (entry.expert.is_some() && state.runtime_visible)
         {
             return Err(contract_mismatch());
         }
@@ -458,7 +485,10 @@ async fn upgrade_outdated_installations(
         let Some(entry) = entries.get(state.id.as_str()) else {
             return Err(contract_mismatch());
         };
-        if state.installation_status != "installed" || entry.catalog_status != "installable" {
+        if entry.expert.is_some()
+            || state.installation_status != "installed"
+            || entry.catalog_status != "installable"
+        {
             continue;
         }
         if !catalog_version_is_newer(&entry.version, &state.version)? {
@@ -564,6 +594,7 @@ mod tests {
         let catalog = SkillCatalog {
             revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
             entries: vec![SkillCatalogEntry {
+                expert: None,
                 id: id.clone(),
                 runtime_name: "copywriting".to_owned(),
                 category: "content-marketing".to_owned(),

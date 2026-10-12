@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature": "FEAT-158",
+  "release": false,
+  "bundle_version": "0.4.3",
+  "manifest_sha256": "4fec45edbe0995d0fa809c11c1fb37189176c6e9fc7fa7e8cce6a31cf1eea201",
+  "source": {
+    "repository": "https://github.com/36Dge/yijie-skills.git",
+    "revision_kind": "git-commit",
+    "revision": "d7a850c9d5c5f8e52b8ab8f631800f671acc60dc",
+    "tree_sha256": "e7521eabbef58a18cfeddaa04caba3acd1d3068b52f2d06beec804f3b05e8b6f"
+  },
+  "authority_sha256": "122486fe96f51a35a47c747d7d89ab70375b057fa39a87bcb22a25dfcb0a7860",
+  "contracts_source_lock_sha256": "a5056217e4d54310d451ba53c64504ef010e2c616108cf75b606b0de0e4d9033"
+}

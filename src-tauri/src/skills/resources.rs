@@ -76,13 +76,30 @@ pub fn resolve_skill_roots(
     resource_dir: &Path,
     app_data_dir: &Path,
 ) -> Result<SkillRoots, SkillRootsError> {
+    resolve_roots(resource_dir, app_data_dir, BUNDLE_DIRECTORY)
+}
+
+/// Explicit local candidate resource slot; the managed install root and installer
+/// remain the same. The caller must apply the native expert gate first.
+pub(crate) fn resolve_expert_skill_roots(
+    resource_dir: &Path,
+    app_data_dir: &Path,
+) -> Result<SkillRoots, SkillRootsError> {
+    resolve_roots(resource_dir, app_data_dir, "skill-packages-experts")
+}
+
+fn resolve_roots(
+    resource_dir: &Path,
+    app_data_dir: &Path,
+    bundle_directory: &str,
+) -> Result<SkillRoots, SkillRootsError> {
     require_absolute(resource_dir)?;
     require_absolute(app_data_dir)?;
 
     let resource_dir =
         canonical_existing_directory(resource_dir, SkillRootsError::ResourceDirectoryMissing)?;
     let bundle_root = canonical_existing_directory(
-        &resource_dir.join(BUNDLE_DIRECTORY),
+        &resource_dir.join(bundle_directory),
         SkillRootsError::ResourceDirectoryMissing,
     )?;
     validate_bundle_authority(&bundle_root)?;
@@ -421,6 +438,22 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn feat158_expert_bundle_slot_reuses_the_existing_managed_install_root() {
+        let (_root, resource, app_data) = fixture("feat158-expert-slot");
+        let candidate = resource.join("skill-packages-experts");
+        fs::create_dir(&candidate).unwrap();
+        fs::write(candidate.join(BUNDLE_MANIFEST), b"{}\n").unwrap();
+        let ordinary = resolve_skill_roots(&resource, &app_data).unwrap();
+        let experts = resolve_expert_skill_roots(&resource, &app_data).unwrap();
+        assert_eq!(ordinary.install_root, experts.install_root);
+        assert_ne!(ordinary.bundle_root, experts.bundle_root);
+        assert_eq!(
+            experts.bundle_root.file_name().unwrap(),
+            "skill-packages-experts"
+        );
     }
 
     fn fixture(label: &str) -> (TestRoot, PathBuf, PathBuf) {

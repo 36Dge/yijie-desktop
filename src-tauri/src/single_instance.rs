@@ -18,8 +18,31 @@ pub(crate) struct Guard {
     _file: File,
 }
 
-pub(crate) fn acquire() -> Result<Guard, AcquireError> {
-    acquire_at(user_cache_directory()?.join(LOCK_FILE_NAME))
+pub(crate) fn acquire(app_identifier: &str, expert_candidate: bool) -> Result<Guard, AcquireError> {
+    acquire_at(user_cache_directory()?.join(lock_file_name(app_identifier, expert_candidate)))
+}
+
+fn lock_file_name(app_identifier: &str, expert_candidate: bool) -> String {
+    // Enabling experts in the daily App must share its existing lock with the
+    // feature-off reader, so two versions can never open the same daily store.
+    if expert_candidate && app_identifier != "com.yijie.ai" {
+        // This table is compiled into the App; runtime environment values cannot
+        // introduce another identity or choose an arbitrary lock path.
+        if let Ok(table) = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../experts-local-profiles.json"
+        )) {
+            if table["schema_version"] == 1
+                && table["profiles"].as_array().is_some_and(|profiles| {
+                    profiles
+                        .iter()
+                        .any(|profile| profile["identifier"].as_str() == Some(app_identifier))
+                })
+            {
+                return format!("{app_identifier}.instance.lock");
+            }
+        }
+    }
+    LOCK_FILE_NAME.to_owned()
 }
 
 fn user_cache_directory() -> Result<PathBuf, AcquireError> {
@@ -146,6 +169,73 @@ mod tests {
         let replacement = acquire_at(path.clone()).expect("replacement instance lock");
         drop(replacement);
         remove(&path);
+    }
+
+    #[test]
+    fn feat158_isolated_lock_requires_both_local_gate_and_compiled_identity() {
+        assert_ne!(
+            lock_file_name("com.yijie.ai.feat158-local", true),
+            LOCK_FILE_NAME
+        );
+        assert_eq!(
+            lock_file_name("com.yijie.ai.feat158-local", false),
+            LOCK_FILE_NAME
+        );
+        assert_eq!(lock_file_name("com.yijie.ai", true), LOCK_FILE_NAME);
+        let content_lock = lock_file_name("com.yijie.ai.feat158-content-v011", true);
+        assert_ne!(content_lock, LOCK_FILE_NAME);
+        assert_ne!(
+            content_lock,
+            lock_file_name("com.yijie.ai.feat158-local", true)
+        );
+        assert_eq!(
+            lock_file_name("com.yijie.ai.feat158-content-v011", false),
+            LOCK_FILE_NAME
+        );
+        assert_ne!(
+            lock_file_name("com.yijie.ai.feat158-content-v012", true),
+            content_lock
+        );
+        assert_eq!(
+            lock_file_name("com.yijie.ai.feat158-content-v012", false),
+            LOCK_FILE_NAME
+        );
+        assert_ne!(
+            lock_file_name("com.yijie.ai.feat158-content-v013", true),
+            LOCK_FILE_NAME
+        );
+        assert_eq!(
+            lock_file_name("com.yijie.ai.feat158-content-v013", false),
+            LOCK_FILE_NAME
+        );
+        assert_eq!(
+            lock_file_name("com.yijie.ai.feat158-content-v014", true),
+            LOCK_FILE_NAME
+        );
+        let daily_path = test_path("daily");
+        let candidate_path = test_path("expert");
+        let content_path = test_path("expert-content-v011");
+        let daily = acquire_at(daily_path.clone()).unwrap();
+        let candidate = acquire_at(candidate_path.clone()).unwrap();
+        let content = acquire_at(content_path.clone()).unwrap();
+        assert!(matches!(
+            acquire_at(candidate_path.clone()),
+            Err(AcquireError::AlreadyRunning)
+        ));
+        drop(content);
+        assert!(matches!(
+            acquire_at(candidate_path.clone()),
+            Err(AcquireError::AlreadyRunning)
+        ));
+        drop(candidate);
+        assert!(matches!(
+            acquire_at(daily_path.clone()),
+            Err(AcquireError::AlreadyRunning)
+        ));
+        drop(daily);
+        remove(&daily_path);
+        remove(&candidate_path);
+        remove(&content_path);
     }
 
     #[test]

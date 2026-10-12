@@ -10,6 +10,7 @@ pub(crate) mod connectors;
 mod database;
 mod error;
 pub(crate) mod exit_owner;
+pub(crate) mod experts;
 mod feat134;
 mod feat136;
 mod feat137;

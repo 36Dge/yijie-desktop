@@ -1,0 +1,1271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.yijie.ai/experts/v1/native",
+  "$defs": {
+    "SnapshotRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/EmptyPayload"
+        }
+      }
+    },
+    "SnapshotResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/CatalogSnapshot"
+        }
+      }
+    },
+    "PrepareRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/ResourcePayload"
+        }
+      }
+    },
+    "PrepareResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/ResourceOperation"
+        }
+      }
+    },
+    "RemoveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/ResourcePayload"
+        }
+      }
+    },
+    "RemoveResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/ResourceOperation"
+        }
+      }
+    },
+    "ResourceOperationReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/OperationReadPayload"
+        }
+      }
+    },
+    "ResourceOperationReadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/ResourceOperation"
+        }
+      }
+    },
+    "BindingReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/BindingReadPayload"
+        }
+      }
+    },
+    "BindingReadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/BindingView"
+        }
+      }
+    },
+    "BindingSetRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/BindingSetPayload"
+        }
+      }
+    },
+    "BindingSetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/BindingResult"
+        }
+      }
+    },
+    "BindingOperationReadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/BindingOperationReadPayload"
+        }
+      }
+    },
+    "BindingOperationReadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/BindingResult"
+        }
+      }
+    },
+    "NativeSubmitRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/NativeSubmitPayload"
+        }
+      }
+    },
+    "NativeSubmitResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/NativeSubmissionResult"
+        }
+      }
+    },
+    "BindingRecoverRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/BindingOperationReadPayload"
+        }
+      }
+    },
+    "BindingRecoverResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/BindingResult"
+        }
+      }
+    },
+    "ResourceOperationRecoverRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contextId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "payload": {
+          "$ref": "#/$defs/OperationReadPayload"
+        }
+      }
+    },
+    "ResourceOperationRecoverResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "data": {
+          "$ref": "#/$defs/ResourceOperation"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "code",
+        "retryable"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "requestId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "description": "Only temporarily_unavailable may be retryable, after reading original operation. Outcome unknown never grants automatic retry or replacement identity.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "retryable": {
+                "const": true
+              }
+            },
+            "required": [
+              "retryable"
+            ]
+          },
+          "then": {
+            "properties": {
+              "code": {
+                "const": "temporarily_unavailable"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CanonicalId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "not": {
+        "const": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "EmptyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {}
+    },
+    "CatalogSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "experts",
+        "canManage",
+        "executionAvailable"
+      ],
+      "properties": {
+        "experts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/CatalogEntry"
+          }
+        },
+        "canManage": {
+          "type": "boolean"
+        },
+        "executionAvailable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CatalogEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display",
+        "description",
+        "platform",
+        "tags",
+        "quickPrompts",
+        "knowledgeSummary",
+        "state"
+      ],
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/ExpertDisplay"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "quickPrompts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "knowledgeSummary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "state": {
+          "$ref": "#/$defs/ResourceState"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "operation": {
+          "$ref": "#/$defs/ResourceOperation"
+        }
+      }
+    },
+    "ExpertDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expertId",
+        "version",
+        "displayName",
+        "subtitle",
+        "iconKey"
+      ],
+      "properties": {
+        "expertId": {
+          "$ref": "#/$defs/ExpertId"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "subtitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "iconKey": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$",
+          "maxLength": 64
+        }
+      },
+      "description": "Historical safe identity. No raw resource path, digest, role/knowledge text or credential."
+    },
+    "ExpertId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "ResourceState": {
+      "type": "string",
+      "enum": [
+        "available",
+        "preparing",
+        "ready",
+        "unavailable",
+        "incompatible"
+      ]
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "context_invalid",
+        "permission_denied",
+        "unsupported_capability",
+        "not_found",
+        "resource_unavailable",
+        "resource_in_use",
+        "version_unavailable",
+        "revision_conflict",
+        "request_conflict",
+        "busy",
+        "approval_pending",
+        "operation_pending",
+        "outcome_unknown",
+        "binding_unavailable",
+        "thread_unavailable",
+        "qualification_required",
+        "model_unavailable",
+        "permission_mode_unavailable",
+        "selection_stale",
+        "capacity_exceeded",
+        "temporarily_unavailable"
+      ]
+    },
+    "ResourceOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "expert",
+        "action",
+        "state"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "expert": {
+          "$ref": "#/$defs/ExpertSelection"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "prepare",
+            "remove"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/OperationState"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/ErrorCode"
+        }
+      },
+      "description": "Closing or abandoning a selection does not undo completed installation. Query the original operation after unknown outcomes. No implicit retry with a new operation."
+    },
+    "ExpertSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expertId",
+        "version"
+      ],
+      "properties": {
+        "expertId": {
+          "$ref": "#/$defs/ExpertId"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "description": "Safe catalog reference only. Native resolves current verified receipt; the renderer cannot choose paths, hashes, role text or trust."
+    },
+    "OperationState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "succeeded",
+        "rejected",
+        "unknown"
+      ]
+    },
+    "ResourcePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "expert"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "expert": {
+          "$ref": "#/$defs/ExpertSelection"
+        }
+      }
+    },
+    "OperationReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "BindingReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "BindingView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "bindingRevision",
+        "expert",
+        "state",
+        "managed"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "bindingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "expert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/BindingState"
+        },
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "managed": {
+          "type": "boolean",
+          "description": "True once this conversation enters the expert submission family, including explicit ordinary snapshots or a rejected initial binding attempt. Native owns this routing marker; none/revision0 cannot imply a legacy conversation."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "managed": {
+                "const": false
+              }
+            },
+            "required": [
+              "managed"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindingRevision": {
+                "const": 0
+              },
+              "expert": {
+                "type": "null"
+              },
+              "state": {
+                "const": "none"
+              },
+              "operationId": false
+            }
+          }
+        }
+      ]
+    },
+    "Revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "BindingState": {
+      "type": "string",
+      "enum": [
+        "none",
+        "ready",
+        "applying",
+        "unknown",
+        "unavailable"
+      ]
+    },
+    "BindingSetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "sessionId",
+        "expectedBindingRevision",
+        "expert"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "expectedBindingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "expert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Existing local conversation only. Native owns scope and maps Host/thread IDs. Null explicitly selects ordinary mode. Active/pending approval/unknown outbox rejects before changing any binding. Draft with no native rollout saves intent only and never invokes SwitchThread."
+    },
+    "BindingResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding",
+        "operation"
+      ],
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/BindingView"
+        },
+        "operation": {
+          "$ref": "#/$defs/BindingOperation"
+        }
+      }
+    },
+    "BindingOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "sessionId",
+        "state",
+        "expectedBindingRevision",
+        "bindingRevision",
+        "requestedExpert"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "state": {
+          "$ref": "#/$defs/OperationState"
+        },
+        "expectedBindingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "bindingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "requestedExpert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorCode": {
+          "$ref": "#/$defs/ErrorCode"
+        }
+      },
+      "description": "Same scope/operation/full intent replays original receipt. Succeeded means the binding application protocol completed under qualified native lifecycle, not a model quality assertion. Unknown blocks sends and further changes. bindingRevision is the effective confirmed revision: succeeded expected+1; pending/unknown/rejected expected. requestedExpert preserves the original request and is not the effective current binding."
+    },
+    "BindingOperationReadPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "operationId"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "NativeSubmitPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "submission",
+        "expectedBindingRevision",
+        "expert"
+      ],
+      "properties": {
+        "submission": {
+          "$ref": "#/$defs/MarketSubmitPayload"
+        },
+        "expectedBindingRevision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "expert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Versioned wrapper: never attach expert fields to the old closed submit. New chat explicit expert/null with revision zero. Existing chat must exactly match the current binding. Native resolves private hashes and freezes with messages/outbox. Full wrapper participates in idempotency."
+    },
+    "MarketSubmitPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "projectId",
+        "contentBlocks",
+        "intent",
+        "selection"
+      ],
+      "properties": {
+        "operationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CanonicalId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "contentBlocks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          }
+        },
+        "intent": {
+          "$ref": "#/$defs/ModelIntent"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "sessionId"
+            ],
+            "properties": {
+              "sessionId": {}
+            }
+          },
+          "then": {
+            "properties": {
+              "projectId": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Ordinary chat only. New chat omits sessionId and uses nullable projectId; an existing session requires projectId=null. Input attachment references use existing Native scoped attachment validation, never arbitrary paths. At most 10 attachment blocks and nonblank text require Native conformance. operationId is renderer submission identity, not necessarily the first actual turn operation. Nonempty selections must be rejected before any durable outbox or Runtime work when execution qualification is unavailable; no implicit fallback to empty. Before a versioned Host provider is qualified, all selections including empty must return execution_unavailable before persistence; do not dispatch via a legacy fallback. Idempotency compares full original content, target, model intent and connector references, not only selectionDigest."
+    },
+    "ContentBlock": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/textContentBlock"
+        },
+        {
+          "$ref": "#/$defs/FileInput"
+        },
+        {
+          "$ref": "#/$defs/ImageInput"
+        }
+      ]
+    },
+    "textContentBlock": {
+      "title": "ChatTextContentBlock",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "FileInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attachmentId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "file"
+        },
+        "attachmentId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "ImageInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attachmentId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "image"
+        },
+        "attachmentId": {
+          "$ref": "#/$defs/CanonicalId"
+        }
+      }
+    },
+    "ModelIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "expectedRevision"
+      ],
+      "properties": {
+        "profileId": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/ReferencedReferencedRevision"
+        }
+      }
+    },
+    "ProfileId": {
+      "type": "string",
+      "enum": [
+        "kimi-k3-max-v1",
+        "minimax-m3-high-v1"
+      ]
+    },
+    "ReferencedReferencedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "Selection": {
+      "type": "array",
+      "maxItems": 58,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/SelectionRef"
+      },
+      "description": "Unique installationId required even when revisions differ. Native freezes canonical ASCII installationId order; requests may use any order."
+    },
+    "SelectionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId",
+        "revision",
+        "generation"
+      ],
+      "properties": {
+        "installationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "revision": {
+          "$ref": "#/$defs/ReferencedRevision"
+        },
+        "generation": {
+          "$ref": "#/$defs/ReferencedRevision"
+        }
+      },
+      "description": "No service label or secret is accepted as authority. Native and Host revalidate exact scope, generation, ready state and connector.use before a versioned turn is admitted."
+    },
+    "ReferencedRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "NativeSubmissionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt",
+        "expert",
+        "bindingRevision"
+      ],
+      "properties": {
+        "receipt": {
+          "$ref": "#/$defs/NativeReceipt"
+        },
+        "expert": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExpertDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bindingRevision": {
+          "$ref": "#/$defs/Revision"
+        }
+      }
+    },
+    "NativeReceipt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "outcome",
+        "sessionId",
+        "localTurnId",
+        "submissionOperationId",
+        "turnOperationId",
+        "selectionDigest"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "local_durable_accepted"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "localTurnId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "submissionOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "turnOperationId": {
+          "$ref": "#/$defs/CanonicalId"
+        },
+        "selectionDigest": {
+          "$ref": "#/$defs/SelectionDigest"
+        }
+      },
+      "description": "Durable Native receipt only, not proof of Runtime acceptance. Coordinator wake-up failure after commit must not change this accepted result; original receipt remains queryable/replayable."
+    },
+    "SelectionDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

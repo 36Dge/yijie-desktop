@@ -18,6 +18,7 @@ export default tseslint.config(
       "src/api/generated/market-connectors-validator.gen.js",
       "src/api/generated/market-selection-validator.gen.js",
       "src/api/generated/market-host-native-validator.gen.js",
+      "src/api/generated/experts-validator.gen.js",
       "src/api/generated/chat-turn-timing-validator.gen.js",
       "src/api/generated/workflow-local-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-validator.gen.js",
@@ -34,6 +35,10 @@ export default tseslint.config(
       parserOptions: { parser: tseslint.parser },
     },
     rules: { "vue/multi-word-component-names": "off" },
+  },
+  {
+    files: ["src/domain/experts.generated.ts"],
+    rules: { "@typescript-eslint/no-empty-object-type": "off" },
   },
   eslintConfigPrettier,
 );

@@ -592,6 +592,61 @@ impl ChatAuthorizationManager {
         has_selection: bool,
         now: i64,
     ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
+        let mut required = ChatAction::SubmitTurn.required_capabilities().to_vec();
+        if create {
+            required.extend_from_slice(ChatAction::UseProject.required_capabilities());
+        }
+        if has_selection {
+            required.push("connector.use");
+        }
+        self.dispatch_authority(scope, expected_revision, &required, now)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn expert_dispatch_authority(
+        &self,
+        scope: &ChatScope,
+        expected_revision: u64,
+        create: bool,
+        has_selection: bool,
+        has_expert: bool,
+        now: i64,
+    ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
+        let mut required = ChatAction::SubmitTurn.required_capabilities().to_vec();
+        if create {
+            required.extend_from_slice(ChatAction::UseProject.required_capabilities());
+        }
+        if has_selection {
+            required.push("connector.use");
+        }
+        if has_expert {
+            required.push("plugin.read");
+        }
+        self.dispatch_authority(scope, expected_revision, &required, now)
+    }
+
+    /// Observation uses current read authority; it never renews a turn grant.
+    pub(crate) fn expert_observation_authority(
+        &self,
+        scope: &ChatScope,
+        now: i64,
+    ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
+        let revision = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| AuthorizationFailure::ContextInvalid)?
+            .highest_revision;
+        self.dispatch_authority(scope, revision, &["task.read"], now)
+    }
+
+    fn dispatch_authority(
+        &self,
+        scope: &ChatScope,
+        expected_revision: u64,
+        required: &[&str],
+        now: i64,
+    ) -> Result<super::connectors::broker_generated::ScopeBinding, AuthorizationFailure> {
         if self.inner.owner_user_id != scope.owner_user_id
             || scope.tenant_uuid().ok() != Some(self.inner.tenant_id)
             || expected_revision == 0
@@ -606,13 +661,6 @@ impl ChatAuthorizationManager {
             .map_err(|_| AuthorizationFailure::ContextInvalid)?;
         if state.highest_revision != expected_revision {
             return Err(AuthorizationFailure::ContextInvalid);
-        }
-        let mut required = ChatAction::SubmitTurn.required_capabilities().to_vec();
-        if create {
-            required.extend_from_slice(ChatAction::UseProject.required_capabilities());
-        }
-        if has_selection {
-            required.push("connector.use");
         }
         let expiry = state
             .contexts

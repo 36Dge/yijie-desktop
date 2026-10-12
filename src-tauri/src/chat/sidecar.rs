@@ -313,6 +313,20 @@ impl SidecarConfig {
                     roots.install_root.to_string_lossy().into_owned(),
                 ),
             ]);
+            // The Native runtime selected and validated this dedicated bundle
+            // slot. Host independently checks its fixed source manifest pin;
+            // no ambient path or caller-supplied hash becomes authority.
+            if demo_fast
+                && super::experts::enabled()
+                && roots
+                    .bundle_root
+                    .file_name()
+                    .is_some_and(|name| name == "skill-packages-experts")
+                && !test_enabled
+                && !self.feat128_s10_profile
+            {
+                values.push(("YIJIE_EXPERTS_ENABLED", "true".to_owned()));
+            }
         }
         if let Some(profile) = &self.test_profile {
             values.extend([

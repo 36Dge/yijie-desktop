@@ -1,3 +1,7 @@
+import { expertNativeClient, ExpertClientError } from "../api/expert-native-client";
+import { useChatExpertsStore } from "./chat-experts.store";
+import { expertDisplay } from "../test/expert-fixture";
+import type { NativeSubmissionResult } from "../domain/experts.generated";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
 import type {NativeConversationViewEvent} from "../api/generated/native-conversation-private.gen";
 import { createPinia,setActivePinia } from "pinia";
@@ -776,6 +780,99 @@ describe("chat view-model store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("FEAT158 expert creation freezes the wrapper and never calls legacy submit", async () => {
+    const { client } = fakeClient(); const legacy = vi.spyOn(client, "createSession");
+    const expert = useChatExpertsStore(); expert.bind(CONTEXT, "scope-one");
+    const send = vi.spyOn(expertNativeClient, "submit").mockImplementation(async (_context, payload) => ({
+      bindingRevision: payload.expectedBindingRevision, expert: expertDisplay,
+      receipt: { outcome: "local_durable_accepted", sessionId: SESSION_A, localTurnId: TURN_A, submissionOperationId: payload.submission.operationId, turnOperationId: TURN_A, selectionDigest: "a".repeat(64) },
+    }));
+    const store = createStore(client); await store.bind(TENANT);
+    try {
+      const intent = { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } };
+      const result = await store.createSessionWithResult(null, "普通专家问题", { profileId: "kimi-k3-max-v1", expectedRevision: 0 }, [], intent);
+      expect(result.status).toBe("local_durable_accepted");
+      expect(send).toHaveBeenCalledWith(CONTEXT, expect.objectContaining({ ...intent, submission: expect.objectContaining({ contentBlocks: [{ type: "text", text: "普通专家问题" }], selection: [] }) }));
+      expect(legacy).not.toHaveBeenCalled(); expect(store.liveTurnStatus).toBe("queued");
+    } finally { send.mockRestore(); legacy.mockRestore(); await store.dispose(); }
+  });
+
+  it("FEAT158 ordinary subscription resync updates an uncertain submission without sending again", async () => {
+    let status: "queued" | "uncertain" = "queued";
+    const read = vi.fn(async () => ({
+      views: [], remainingTurnIds: [], historyAvailability: "unavailable" as const,
+      submissions: [{ turnId: TURN_A, operationId: "019c1a00-0000-7000-8000-00000000000c", status }],
+    }));
+    const { client, emit } = fakeClient({
+      resyncSession: async () => ({ session: session(SESSION_A), history: artifactHistory(), cleanup: null }),
+      loadNativeHistory: read,
+    });
+    const store = createChatStoreDefinition(client, `chat-feat158-resync-${storeSequence++}`, undefined, false, false, false)();
+    const submit = vi.spyOn(client, "submitTurn"), expertSubmit = vi.spyOn(expertNativeClient, "submit");
+    await store.bind(TENANT); await store.selectSession(SESSION_A);
+    try {
+      expect(Object.values(store.conversationState.turns)[0]).toMatchObject({ source: "local_submission", submissionStatus: "queued" });
+      status = "uncertain";
+      emit(event("1", "019c1a00-0000-7000-8000-000000000099", "resync_required", { reason: "protocol_error" }));
+      await store.resyncSelected();
+      expect(Object.values(store.conversationState.turns)[0]).toMatchObject({ source: "local_submission", submissionStatus: "uncertain" });
+      expect(read.mock.calls.length).toBeGreaterThan(1);
+      expect(store.canSend).toBe(false);
+      expect(submit).not.toHaveBeenCalled(); expect(expertSubmit).not.toHaveBeenCalled();
+    } finally { submit.mockRestore(); expertSubmit.mockRestore(); await store.dispose(); }
+  });
+
+  it("FEAT158 removal keeps explicit null on the expert family and unknown preserves original operation", async () => {
+    const { client } = fakeClient(); const legacy = vi.spyOn(client, "submitTurn");
+    const store = createStore(client); await store.bind(TENANT); await store.selectSession(SESSION_A);
+    const expert = useChatExpertsStore(); expert.bind(CONTEXT, "scope-one");
+    expert.bindings = { [SESSION_A]: { sessionId: SESSION_A, managed: true, bindingRevision: 2, expert: null, state: "none" } };
+    const send = vi.spyOn(expertNativeClient, "submit").mockRejectedValue(new ExpertClientError("outcome_unknown"));
+    try {
+      const intent = { expectedBindingRevision: 2, expert: null };
+      await expect(store.submitTurnWithResult("普通后续问题", { profileId: "kimi-k3-max-v1", expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
+      const original = send.mock.calls[0]![1];
+      await expect(store.submitTurnWithResult("普通后续问题", { profileId: "kimi-k3-max-v1", expectedRevision: 1 }, [], intent)).rejects.toMatchObject({ code: "outcome_unknown" });
+      expect(send.mock.calls[1]![1]).toEqual(original);
+      await expect(store.submitTurnWithResult("普通后续问题")).rejects.toMatchObject({ code: "binding_unavailable" });
+      expect(legacy).not.toHaveBeenCalled(); expect(expert.submissions[SESSION_A]).toEqual(original);
+    } finally { send.mockRestore(); legacy.mockRestore(); await store.dispose(); }
+  });
+
+  it.each(["create", "reply"] as const)("FEAT158 late %s acceptance survives navigation and consumes its original receipt without resending", async (kind) => {
+    const { client } = fakeClient();
+    const store = createStore(client); await store.bind(TENANT);
+    if (kind === "reply") await store.selectSession(SESSION_A);
+    store.draftAttachments = Object.freeze([attachment()]);
+    const expert = useChatExpertsStore(); expert.bind(CONTEXT, "scope-one");
+    const waiting = new Deferred<NativeSubmissionResult>();
+    const send = vi.spyOn(expertNativeClient, "submit").mockImplementation(() => waiting.promise);
+    const intent = { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } };
+    const model = { profileId: "kimi-k3-max-v1" as const, expectedRevision: kind === "create" ? 0 : 1 };
+    const target = kind === "create" ? "new" : SESSION_A;
+    const submit = () => kind === "create"
+      ? store.createSessionWithResult(null, "保留原专家问题", model, [], intent)
+      : store.submitTurnWithResult("保留原专家问题", model, [], intent);
+    try {
+      const attempt = submit();
+      expect(send).toHaveBeenCalledOnce();
+      const original = send.mock.calls[0]![1];
+      await store.selectSession(SESSION_B);
+      waiting.resolve({ bindingRevision: 0, expert: expertDisplay, receipt: { outcome: "local_durable_accepted", sessionId: SESSION_A, localTurnId: TURN_A, submissionOperationId: original.submission.operationId, turnOperationId: TURN_A, selectionDigest: "a".repeat(64) } });
+      expect(await attempt).toEqual({ status: "not_accepted" });
+      expect(expert.submissions[target]).toEqual(original);
+      expect(original.submission.contentBlocks).toContainEqual({ type: "file", attachmentId: attachment().attachmentId });
+      if (kind === "create") await store.clearSelectedSession();
+      else await store.selectSession(SESSION_A);
+      expect(store.draftAttachments).toEqual([]);
+      const accepted = await submit();
+      expect(accepted).toMatchObject({ status: "local_durable_accepted", operationId: original.submission.operationId });
+      expect(send).toHaveBeenCalledOnce();
+      expert.acknowledgeSubmission(original.submission.operationId);
+      expect(expert.submissions[target]).toBeUndefined();
+    } finally { send.mockRestore(); await store.dispose(); }
   });
 
   it("market selection uses Native submission and keeps only local durable acceptance", async () => {

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { NPopover, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 
 type Resource = "skills" | "connectors";
-const props = defineProps<{ disabled: boolean; attachmentDisabled: boolean; skillsAvailable: boolean; connectorsAvailable: boolean }>();
-const emit = defineEmits<{ "pick-attachments": [] }>();
+const props = defineProps<{ disabled: boolean; attachmentDisabled: boolean; skillsAvailable: boolean; connectorsAvailable: boolean; expertsAvailable?: boolean }>();
+const emit = defineEmits<{ "pick-attachments": []; "browse-experts": [] }>();
+const addLabel = computed(() => props.expertsAvailable ? "可添加文件、技能、连接器，或选择专家" : "可添加文件、技能、连接器");
 defineSlots<{ skills(props: { close: () => void }): unknown; connectors(props: { close: () => void }): unknown }>();
 const open = ref(false), view = ref<Resource | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
@@ -155,9 +156,9 @@ onBeforeUnmount(() => {
     <template #trigger>
       <NTooltip :disabled="open || disabled" :to="overlay ?? false" placement="top" :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
         <template #trigger>
-          <button ref="trigger" class="chat-composer__add" type="button" :disabled="disabled" aria-label="可添加文件、技能、连接器" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? panelId : undefined" @keydown.down.prevent="setOpen(true)" @keydown.esc.stop.prevent="close"><YjIcon name="plus" size="lg" /></button>
+          <button ref="trigger" class="chat-composer__add" type="button" :disabled="disabled" :aria-label="addLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? panelId : undefined" @keydown.down.prevent="setOpen(true)" @keydown.esc.stop.prevent="close"><YjIcon name="plus" size="lg" /></button>
         </template>
-        可添加文件、技能、连接器
+        {{ addLabel }}
       </NTooltip>
     </template>
     <div :id="panelId" ref="panel" class="composer-add-menu" :style="{ '--add-menu-height': `${height}px`, '--add-menu-shift-x': `${shiftX}px` }" role="dialog" aria-label="添加到对话" @mouseenter="cancelClose" @mouseleave="leave" @keydown="navigate">
@@ -166,6 +167,7 @@ onBeforeUnmount(() => {
         <div class="composer-add-menu__separator" role="separator" />
         <button class="chat-control-option" role="menuitem" type="button" data-resource-menu="skills" :disabled="!skillsAvailable" aria-haspopup="dialog" :aria-expanded="view === 'skills'" :aria-controls="view === 'skills' ? submenuId : undefined" @mouseenter="showView('skills')" @click="showView('skills', true)" @keydown.right.prevent="showView('skills', true)"><YjIcon name="skillOperations" size="sm" /><span>技能</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
         <button class="chat-control-option" role="menuitem" type="button" data-resource-menu="connectors" :disabled="!connectorsAvailable" aria-haspopup="dialog" :aria-expanded="view === 'connectors'" :aria-controls="view === 'connectors' ? submenuId : undefined" @mouseenter="showView('connectors')" @click="showView('connectors', true)" @keydown.right.prevent="showView('connectors', true)"><YjIcon name="connector" size="sm" /><span>连接器</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
+        <button v-if="expertsAvailable" class="chat-control-option" role="menuitem" type="button" @mouseenter="view = null" @click="close(); emit('browse-experts')"><YjIcon name="skillOperations" size="sm" /><span>选择专家</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
       </div>
       <div v-if="view" :id="submenuId" ref="submenu" class="composer-add-menu__submenu chat-control-menu" :data-side="submenuSide" :style="{ left: `${submenuX}px`, top: `${submenuY}px`, maxHeight: `${submenuHeight}px` }" role="dialog" tabindex="-1" :aria-label="view === 'skills' ? '技能' : '连接器'" @mouseenter="cancelClose">
         <slot v-if="view === 'skills'" name="skills" :close="close" />

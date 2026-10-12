@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 33] = [
+const CATALOG: [CatalogEntry; 35] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -197,6 +197,16 @@ const CATALOG: [CatalogEntry; 33] = [
         name: "0033_market_provider_operations",
         sql: include_str!("../../migrations/chat/0033_market_provider_operations.sql"),
     },
+    CatalogEntry {
+        version: 34,
+        name: "0034_conversation_experts",
+        sql: include_str!("../../migrations/chat/0034_conversation_experts.sql"),
+    },
+    CatalogEntry {
+        version: 35,
+        name: "0035_expert_resource_operations",
+        sql: include_str!("../../migrations/chat/0035_expert_resource_operations.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -220,6 +230,8 @@ pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
 pub const MARKET_DISPATCH_SCHEMA_VERSION: i64 = 32;
 pub const MARKET_PROVIDER_SCHEMA_VERSION: i64 = 33;
+pub const CONVERSATION_EXPERTS_SCHEMA_VERSION: i64 = 34;
+pub const EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION: i64 = 35;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -260,6 +272,8 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         MARKET_SELECTION_SCHEMA_VERSION,
         MARKET_DISPATCH_SCHEMA_VERSION,
         MARKET_PROVIDER_SCHEMA_VERSION,
+        CONVERSATION_EXPERTS_SCHEMA_VERSION,
+        EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION,
     ]
     .contains(&target)
     {
@@ -414,6 +428,72 @@ mod tests {
     use rusqlite::OpenFlags;
     use std::fs;
     use uuid::Uuid;
+
+    #[test]
+    fn feat158_expert_expand_preserves_history_and_default_writer() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        migrate_to_target(&mut connection, MARKET_PROVIDER_SCHEMA_VERSION).unwrap();
+        connection.execute_batch("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at)
+            VALUES('expert-project','owner','tenant','ordinary',printf('%064d',0),X'0102',1);
+            INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at)
+            VALUES('expert-chat','owner','tenant','expert-project','ordinary','fallback','not_started',1,1);
+            INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES('expert-turn','expert-chat','expert-operation','queued');
+            INSERT INTO chat_messages(id,session_id,turn_id,role,content,status,ordinal,created_at)
+            VALUES('expert-message','expert-chat','expert-turn','user','ordinary history','committed',0,1);").unwrap();
+        let ledger = |db: &Connection| -> Vec<(i64, String)> {
+            db.prepare("SELECT version,sha256 FROM chat_schema_migrations WHERE version<=33 ORDER BY version")
+                .unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+                .collect::<Result<_, _>>().unwrap()
+        };
+        let before = ledger(&connection);
+        migrate_to_target(&mut connection, EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION).unwrap();
+        assert_eq!(ledger(&connection), before);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT content FROM chat_messages WHERE id='expert-message'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "ordinary history"
+        );
+        for table in [
+            "chat_expert_bindings",
+            "chat_expert_binding_operations",
+            "chat_expert_submissions",
+            "chat_expert_resource_operations",
+        ] {
+            assert_eq!(
+                connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+        // Re-entering a normal older target retains a compatible forward reader;
+        // it neither backfills an expert nor downgrades a migrated database.
+        migrate(&mut connection).unwrap();
+        assert_eq!(
+            user_version(&connection).unwrap(),
+            EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION
+        );
+        assert_eq!(LATEST_SCHEMA_VERSION, 15);
+        validate_reader(&connection).unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn feat155_preparation_migration_preserves_parent_and_old_chat() {

@@ -325,6 +325,10 @@ impl ChatRepository {
         if !replay && (revision != intent.expected_revision || state != "ready") {
             return Err(ChatError::ConversationConflict);
         }
+        if !replay {
+            super::experts::store::require_settled(&tx, &session.to_string())
+                .map_err(|_| ChatError::ConversationConflict)?;
+        }
         tx.execute("UPDATE chat_model_selections SET state='switching',operation_id=?2,requested_profile_id=?3,expected_revision=?4 WHERE session_id=?1",params![session.to_string(),op.to_string(),profile_id(intent.profile_id),intent.expected_revision]).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(host)

@@ -1,4 +1,9 @@
 // @vitest-environment happy-dom
+import { createExpertNativeClient, expertNativeClient } from "../../api/expert-native-client";
+import { expertDisplay, expertEntry, expertSnapshot } from "../../test/expert-fixture";
+import { usePermissionStore } from "../../stores/permission.store";
+import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
+import { useChatExpertsStore } from "../../stores/chat-experts.store";
 import { defineComponent, h } from "vue";
 import { RouterView } from "vue-router";
 
@@ -37,6 +42,7 @@ type ChatSession,
 import { hydrateConversationApprovalState } from "../../domain/conversation-approval";
 import { selectConversationTimeline } from "../../domain/conversation-timeline";
 import {
+composeConversationView,
 emptyConversationView,
 viewFromLegacySnapshot
 } from "../../domain/conversation-view";
@@ -46,6 +52,9 @@ useChatStore,
 type ChatSubmissionResult,
 } from "../../stores/chat.store";
 import ChatPage from "./ChatPage.vue";
+
+const expertFlag = vi.hoisted(() => ({ enabled: false }));
+vi.mock("../../authorization/experts-ui-config", () => ({ get expertsUiEnabled() { return expertFlag.enabled; } }));
 
 type MockDragDropPayload =
   | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
@@ -211,6 +220,13 @@ async function mountPage(
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   const pinia = createPinia();
   setActivePinia(pinia);
+  if (expertFlag.enabled) {
+    const permission = usePermissionStore(pinia);
+    vi.spyOn(permission, "hasCapability").mockImplementation(capability => permission.capabilities.includes(capability));
+    permission.selectedTenantId = PROJECT_ID; permission.capabilities = ["task.read", "task.create", "plugin.read", "plugin.manage"]; permission.phase = "ready";
+    vi.spyOn(expertNativeClient, "snapshot").mockResolvedValue({ ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true });
+    vi.spyOn(expertNativeClient, "binding").mockResolvedValue({ sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "ready" });
+  }
   const store = useChatStore(pinia);
   store.phase = active ? "ready" : "ready";
   store.context = {
@@ -261,6 +277,7 @@ async function mountPage(
 }
 
 afterEach(() => {
+  expertFlag.enabled = false;
   vi.useRealTimers();
   dragDropMock.handler = null;
   dragDropMock.unlisten.mockClear();
@@ -1686,4 +1703,99 @@ it("FEAT-155 confirms leaving an unsent chat draft and defaults to staying", asy
   expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("未发送的导航验证");
   const second=router.push("/scheduled-tasks");await flushPromises();button("放弃文字并离开").click();await second;
   expect(router.currentRoute.value.path).toBe("/scheduled-tasks");wrapper.unmount();
+});
+
+it("FEAT158 composer keeps the expert after the shop and requires explicit user content", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage("/chat?focus=composer");
+  expect(document.activeElement).toBe(wrapper.get("textarea").element);
+  useChatComposerDraftStore().setExpert("new", expertDisplay); await flushPromises();
+  const leading = wrapper.get(".chat-composer__leading-actions");
+  expect(leading.text()).toContain(expertDisplay.displayName);
+  expect(leading.find(".chat-expert-chip").exists()).toBe(true);
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+  await wrapper.get("textarea").setValue("普通待发送问题");
+  const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue({ status: "not_accepted" });
+  await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+  expect(create).toHaveBeenCalledWith(null, "普通待发送问题", undefined, undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+  expect(useChatComposerDraftStore().expert("new")).toEqual(expertDisplay);
+  wrapper.unmount();
+});
+
+it("FEAT158 chip details carry the exact selected expert version", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, router } = await mountPage("/chat");
+  router.addRoute({ path: "/plugins", component: { template: "<div>扩展</div>" } });
+  useChatComposerDraftStore().setExpert("new", expertDisplay); await flushPromises();
+  await wrapper.get('[aria-label^="查看已选专家"]').trigger("click"); await flushPromises();
+  expect(router.currentRoute.value.query).toEqual({ tab: "experts", from: "/chat", expert: expertDisplay.expertId, expertVersion: expertDisplay.version });
+  expect(useChatComposerDraftStore().expert("new")).toEqual(expertDisplay);
+  wrapper.unmount();
+});
+
+it("FEAT158 removes a session expert only on the Native receipt and uses explicit null afterwards", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  await wrapper.get("textarea").setValue("保留当前文字");
+  const binding = vi.spyOn(expertNativeClient, "setBinding").mockImplementation(async (_ctx, payload) => ({
+    binding: { sessionId: SESSION_ID, managed: true, bindingRevision: 2, expert: null, state: "none" },
+    operation: { operationId: payload.operationId, sessionId: SESSION_ID, expectedBindingRevision: 1, bindingRevision: 2, requestedExpert: null, state: "succeeded" },
+  }));
+  await wrapper.get('[aria-label="移除专家"]').trigger("click"); await flushPromises();
+  expect(binding).toHaveBeenCalledTimes(1); expect(wrapper.find(".chat-expert-chip").exists()).toBe(false);
+  expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("保留当前文字");
+  const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
+  await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+  expect(submit).toHaveBeenCalledWith("保留当前文字", undefined, undefined, { expectedBindingRevision: 2, expert: null });
+  const acknowledged = vi.spyOn(useChatExpertsStore(), "acknowledgeSubmission");
+  submit.mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
+  await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
+  expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+  expect(acknowledged).toHaveBeenCalledWith("019c1a00-0000-7000-8000-000000000020");
+  expect(useChatExpertsStore().bindings[SESSION_ID]?.bindingRevision).toBe(2); wrapper.unmount();
+});
+
+it("FEAT158 binding recovery is an explicit original-operation command without sending content", async () => {
+  expertFlag.enabled = true;
+  const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const store = useChatExpertsStore(), operation = "019c1a00-0000-7000-8000-000000000088";
+  store.bindings = { [SESSION_ID]: { sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "unknown", operationId: operation } };
+  store.pending = { [SESSION_ID]: { operationId: operation, sessionId: SESSION_ID, expectedBindingRevision: 1, expert: null } };
+  await wrapper.get("textarea").setValue("恢复前保留的草稿");
+  const transport = vi.fn(async (_command, { request }) => ({ schemaVersion: 1, requestId: request.requestId, data: {
+    binding: { sessionId: SESSION_ID, managed: true, bindingRevision: 2, expert: null, state: "none" },
+    operation: { operationId: operation, sessionId: SESSION_ID, expectedBindingRevision: 1, bindingRevision: 2, requestedExpert: null, state: "succeeded" },
+  } }));
+  const client = createExpertNativeClient(transport);
+  const recover = vi.spyOn(expertNativeClient, "recoverBinding").mockImplementation(client.recoverBinding);
+  const select = vi.spyOn(expertNativeClient, "setBinding"), submit = vi.spyOn(expertNativeClient, "submit");
+  try {
+    await flushPromises();
+    expect(wrapper.text()).toContain("恢复会重新应用原选择，不发送消息");
+    await wrapper.findAll("button").find(button => button.text() === "恢复原操作")!.trigger("click"); await flushPromises();
+    expect(transport.mock.calls.map(call => call[0])).toEqual(["chat_expert_binding_recover_v1"]);
+    expect(transport.mock.calls[0]![1].request.payload).toEqual({ sessionId: SESSION_ID, operationId: operation });
+    expect(store.pending[SESSION_ID]).toBeUndefined();
+    expect(store.bindings[SESSION_ID]).toMatchObject({ bindingRevision: 2, expert: null, state: "none" });
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("恢复前保留的草稿");
+    expect(select).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled();
+  } finally { recover.mockRestore(); select.mockRestore(); submit.mockRestore(); wrapper.unmount(); }
+});
+
+it("FEAT158 uncertain accepted submission offers only an original-status read", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  store.conversationState = composeConversationView({
+    threads: [{ threadId: SESSION_ID, status: "active" }],
+    turns: [{ threadId: SESSION_ID, turnId: TURN_ID, ordinal: 0, status: "queued", terminalStatus: null }],
+    items: [],
+  }, [], [{ turnId: TURN_ID, operationId: "019c1a00-0000-7000-8000-000000000088", status: "uncertain" }]);
+  const read = vi.spyOn(store, "resyncSelected").mockResolvedValue();
+  const submit = vi.spyOn(store, "submitTurnWithResult");
+  await flushPromises();
+  expect(wrapper.text()).toContain("原提交结果尚未确认，请勿重复发送");
+  await wrapper.findAll("button").find(button => button.text() === "重新读取原提交")!.trigger("click");
+  expect(read).toHaveBeenCalledOnce();
+  expect(submit).not.toHaveBeenCalled();
+  wrapper.unmount();
 });

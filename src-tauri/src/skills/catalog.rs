@@ -1,4 +1,5 @@
 use super::SkillRoots;
+use crate::chat::experts::generated::ExpertMetadata;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -25,6 +26,7 @@ pub(super) struct SkillCatalog {
 
 #[derive(Clone, Debug)]
 pub(super) struct SkillCatalogEntry {
+    pub expert: Option<ExpertMetadata>,
     pub id: String,
     pub runtime_name: String,
     pub category: String,
@@ -76,6 +78,10 @@ struct BundleSource {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ManifestSkill {
+    #[serde(default)]
+    asset_kind: Option<String>,
+    #[serde(default)]
+    expert: Option<ExpertMetadata>,
     id: String,
     runtime_name: String,
     category: String,
@@ -163,6 +169,12 @@ struct ManifestRelease {
 }
 
 pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogError> {
+    load_catalog_mode(roots, false)
+}
+pub(super) fn load_expert_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogError> {
+    load_catalog_mode(roots, true)
+}
+fn load_catalog_mode(roots: &SkillRoots, experts: bool) -> Result<SkillCatalog, CatalogError> {
     let manifest_path = roots.bundle_root.join("bundle-manifest.json");
     let metadata = fs::symlink_metadata(&manifest_path).map_err(|_| CatalogError::Unavailable)?;
     if metadata.file_type().is_symlink()
@@ -179,12 +191,17 @@ pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogEr
     let revision = format!("{:x}", Sha256::digest(&bytes));
     let manifest: BundleManifest =
         serde_json::from_slice(&bytes).map_err(|_| CatalogError::Invalid)?;
-    validate_manifest(&manifest, &roots.bundle_root, &revision)?;
+    if experts {
+        validate_expert_manifest(&manifest, &roots.bundle_root, &revision)?;
+    } else {
+        validate_manifest(&manifest, &roots.bundle_root, &revision)?;
+    }
 
     let entries = manifest
         .skills
         .into_iter()
         .map(|skill| SkillCatalogEntry {
+            expert: skill.expert,
             id: skill.id,
             runtime_name: skill.runtime_name,
             category: skill.category,
@@ -208,6 +225,98 @@ pub(super) fn load_catalog(roots: &SkillRoots) -> Result<SkillCatalog, CatalogEr
         })
         .collect();
     Ok(SkillCatalog { revision, entries })
+}
+
+// Local deployment authority generated from the canonical Skills candidate.
+// It is compiled into Native, never accepted from renderer requests or env hashes.
+#[derive(Deserialize)]
+struct ExpertAssetsPin {
+    schema_version: u8,
+    feature: String,
+    release: bool,
+    manifest_sha256: String,
+    authority_sha256: String,
+    bundle_version: String,
+    source: BundleSource,
+}
+fn validate_expert_manifest(
+    manifest: &BundleManifest,
+    root: &Path,
+    revision: &str,
+) -> Result<(), CatalogError> {
+    let pin: ExpertAssetsPin = serde_json::from_str(include_str!(
+        "../../../contracts/experts-assets.candidate.json"
+    ))
+    .map_err(|_| CatalogError::Invalid)?;
+    let authority_path = root.join("authority.json");
+    let info = fs::symlink_metadata(&authority_path).map_err(|_| CatalogError::Unavailable)?;
+    if info.file_type().is_symlink()
+        || !info.is_file()
+        || info.len() == 0
+        || info.len() > MAX_MANIFEST_BYTES
+    {
+        return Err(CatalogError::Invalid);
+    }
+    let authority = fs::read(authority_path).map_err(|_| CatalogError::Unavailable)?;
+    if pin.schema_version != 1
+        || pin.feature != "FEAT-158"
+        || pin.release
+        || pin.manifest_sha256 != revision
+        || format!("{:x}", Sha256::digest(&authority)) != pin.authority_sha256
+        || manifest.schema_version != 3
+        || manifest.bundle_id != "yijie.desktop.skill-packages"
+        || manifest.bundle_version != pin.bundle_version
+        || manifest.distribution_channel != "local-development"
+        || manifest.source.repository != SKILLS_REPOSITORY
+        || manifest.source.repository != pin.source.repository
+        || manifest.source.revision_kind != "working-tree"
+        || manifest.source.revision_kind != pin.source.revision_kind
+        || manifest.source.revision != pin.source.revision
+        || manifest.source.tree_sha256 != pin.source.tree_sha256
+    {
+        return Err(CatalogError::Invalid);
+    }
+    let mut ids = HashSet::new();
+    let mut runtime_names = HashSet::new();
+    let mut archives = HashSet::new();
+    let mut expert_ids = HashSet::new();
+    let mut categories = [0usize; 5];
+    for skill in &manifest.skills {
+        if !ids.insert(skill.id.as_str()) || !runtime_names.insert(skill.runtime_name.as_str()) {
+            return Err(CatalogError::Invalid);
+        }
+        if skill.asset_kind.as_deref() == Some("expert_resources") {
+            let metadata = skill.expert.as_ref().ok_or(CatalogError::Invalid)?;
+            if metadata.validate().is_err()
+                || !expert_ids.insert(metadata.expert_id.as_str())
+                || !validate_skill_common(skill, &manifest.distribution_channel, true)
+                || skill.license.redistribution_status != "unverified"
+                || skill.license.authorization_scope != "local-development"
+                || skill.release.catalog_status != "installable"
+            {
+                return Err(CatalogError::Invalid);
+            }
+        } else {
+            if !validate_skill(skill, &manifest.distribution_channel) {
+                return Err(CatalogError::Invalid);
+            }
+            categories[category_index(&skill.category).ok_or(CatalogError::Invalid)?] += 1;
+        }
+        if let Some(archive) = &skill.archive {
+            if !archives.insert(archive.path.as_str()) {
+                return Err(CatalogError::Invalid);
+            };
+            validate_archive(root, archive)?;
+        }
+    }
+    if categories != [5, 9, 7, 9, 8]
+        || expert_ids.is_empty()
+        || expert_ids.len() > 64
+        || manifest.skills.len() != EXPECTED_SKILL_COUNT + expert_ids.len()
+    {
+        return Err(CatalogError::Invalid);
+    }
+    Ok(())
 }
 
 fn validate_manifest(
@@ -262,6 +371,13 @@ fn validate_manifest(
 }
 
 fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
+    if skill.asset_kind.is_some() || skill.expert.is_some() {
+        return false;
+    }
+    validate_skill_common(skill, distribution_channel, false)
+}
+
+fn validate_skill_common(skill: &ManifestSkill, distribution_channel: &str, expert: bool) -> bool {
     let mode = skill.catalog_entry_mode.as_deref().unwrap_or("bundled");
     let archive_valid = skill.archive.as_ref().is_some_and(|archive| {
         valid_archive_path(&archive.path)
@@ -361,7 +477,11 @@ fn validate_skill(skill: &ManifestSkill, distribution_channel: &str) -> bool {
             skill.entrypoint.as_deref() == Some("SKILL.md")
                 && archive_valid
                 && skill.provenance.review_status == "verified"
-                && skill.license.redistribution_status == "verified"
+                && (skill.license.redistribution_status == "verified"
+                    || (expert
+                        && distribution_channel == "local-development"
+                        && skill.license.redistribution_status == "unverified"
+                        && skill.license.authorization_scope == "local-development"))
                 && matches!(
                     skill.license.authorization_scope.as_str(),
                     "local-development" | "desktop-distribution"

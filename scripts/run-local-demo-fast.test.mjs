@@ -32,6 +32,9 @@ describe("local demo launcher profiles", () => {
       scheduled_daily="$1"
       chat_models_enabled="$2"
       image_generation_enabled="true"
+      workflow_requested="false"
+      experts_requested=""
+      reopen_app="false"
       unset YIJIE_MARKET_CONNECTORS_ENABLED
       export VITE_YIJIE_MARKET_CONNECTORS_ENABLED=stale
       if [[ "$3" != "unset" ]]; then export YIJIE_MARKET_CONNECTORS_ENABLED="$3"; fi
@@ -39,6 +42,30 @@ describe("local demo launcher profiles", () => {
       printf '%s:%s:%s' "$YIJIE_MARKET_CONNECTORS_ENABLED" "$VITE_YIJIE_MARKET_CONNECTORS_ENABLED" "$image_generation_enabled"
     `, "connector-profile", daily, models, override]);
     expect(stdout).toBe(`${expected}:${expected}:${expected === "true" ? "false" : "true"}`);
+  });
+
+  it.each([
+    ["daily", "true", "true", "true", "false", "", "true"],
+    ["explicit off", "true", "true", "true", "false", "false", "false"],
+    ["market off", "true", "true", "false", "false", "", "false"],
+    ["models off", "true", "false", "false", "false", "", "false"],
+    ["stable or isolated scheduled", "false", "false", "false", "false", "", "false"],
+    ["workflow retained", "true", "true", "true", "true", "", "false"],
+    ["explicit isolated experts", "false", "true", "true", "false", "true", "true"],
+  ])("selects experts only for the supported deployment combination: %s", async (_label, daily, models, market, workflow, override, expected) => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('experts_default="false"');
+    const end = runner.indexOf("# Host market admission", start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const { stdout } = await exec("/bin/bash", ["-c", `
+      set -euo pipefail
+      fail() { exit 1; }
+      scheduled_daily="$1"; chat_models_enabled="$2"; market_connectors_enabled="$3"
+      workflow_requested="$4"; experts_requested="$5"; reopen_app="false"
+      ${runner.slice(start, end)}
+      printf '%s' "$experts_requested"
+    `, "expert-default", daily, models, market, workflow, override]);
+    expect(stdout).toBe(expected);
   });
 
   it("keeps the default commands and adds one explicit stable API entry", async () => {
@@ -206,7 +233,7 @@ describe("local demo launcher profiles", () => {
     expect(runner).toContain('if [[ "$stable_api_only" == "true" ]]; then');
     expect(runner).toContain("pnpm tauri:build:demo-fast:stable");
     expect(runner).toContain("src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop");
-    expect(runner).toContain("launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)");
+    expect(runner).toContain('launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}")');
     expect(runner).toContain('"${launch_command[@]}"');
   });
 
@@ -219,6 +246,110 @@ describe("local demo launcher profiles", () => {
 
     expect(runner).toContain('"${feat134_environment[@]+"${feat134_environment[@]}"}"');
     expect(stdout).toBe("0");
+  });
+
+  it("keeps the expert candidate app, Host and Runtime state outside daily roots", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const config = JSON.parse(await readFile(path.join(repositoryRoot, "src-tauri/tauri.experts-local.conf.json"), "utf8"));
+    const daily = JSON.parse(await readFile(path.join(repositoryRoot, "src-tauri/tauri.conf.json"), "utf8"));
+    expect(config.identifier).not.toBe(daily.identifier);
+    expect(config.productName).toBe("易界 AI FEAT-158");
+    expect(runner).toContain('runtime_root="$desktop_root/.local/$expert_runtime_directory"');
+    expect(runner).toContain('host_binary="$expert_host_binary"');
+    expect(runner).toContain('host_port="$expert_host_port"');
+    expect(runner).toContain("bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop");
+    expect(runner).toContain('experts_requested="${YIJIE_EXPERTS_ENABLED:-}"');
+  });
+
+  it.each([
+    ["default", "false", [], "false:daily:false:false"],
+    ["expert daily packaged", "true", ["--packaged"], "true:daily:false:false"],
+    ["isolated original candidate", "true", ["--packaged", "--experts-local"], "true:default:false:false"],
+    ["content development", "true", ["--experts-content-v011"], "false:content-v011:false:false"],
+    ["content packaged", "true", ["--packaged", "--experts-content-v011"], "true:content-v011:false:false"],
+    ["new content packaged", "true", ["--packaged", "--experts-content-v012"], "true:content-v012:false:false"],
+    ["repaired content packaged", "true", ["--packaged", "--experts-content-v013"], "true:content-v013:false:false"],
+    ["repaired content reopen", "true", ["--packaged", "--experts-content-v013", "--reopen"], "true:content-v013:true:false"],
+    ["same build reopen", "true", ["--packaged", "--experts-content-v012", "--reopen"], "true:content-v012:true:false"],
+    ["daily expert reopen", "true", ["--packaged", "--reopen"], "true:daily:true:false"],
+    ["daily default reopen", "", ["--packaged", "--reopen"], "true:daily:true:false"],
+  ])("selects only explicit content isolation for %s", async (_label, experts, args, expected) => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('image_generation_enabled="true"');
+    const end = runner.indexOf("# The normal local entry", start);
+    const { stdout } = await exec("/bin/bash", ["-c", `
+      set -euo pipefail
+      fail() { exit 1; }
+      experts_requested="$1"; shift
+      ${runner.slice(start, end)}
+      printf '%s:%s:%s:%s' "$packaged_app" "$expert_profile" "$reopen_app" "$stable_api_only"
+    `, "expert-arguments", experts, ...args]);
+    expect(stdout).toBe(expected);
+  });
+
+  it("rejects content isolation without expert opt-in before any preflight", async () => {
+    await expect(exec(runnerPath, ["--packaged", "--experts-content-v011"], {
+      cwd: repositoryRoot,
+      env: { ...process.env, YIJIE_EXPERTS_ENABLED: "false" },
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("content isolation requires explicit YIJIE_EXPERTS_ENABLED=true") });
+  });
+
+  it.each([
+    ["true", ["--reopen"]],
+    ["false", ["--packaged", "--reopen"]],
+  ])("requires both explicit expert and packaged selection for reopen (%s)", async (enabled, args) => {
+    await expect(exec(runnerPath, args, {
+      cwd: repositoryRoot,
+      env: { ...process.env, YIJIE_EXPERTS_ENABLED: enabled },
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("--reopen requires an enabled packaged expert profile") });
+  });
+
+  it.each([
+    ["daily", "demo-fast", "18081", "tauri.experts-daily.conf.json"],
+    ["default", "feat158-candidate", "18158", "tauri.experts-local.conf.json"],
+    ["content-v011", "feat158-content-v011-candidate", "18159", "tauri.experts-content-v011.conf.json"],
+    ["content-v012", "feat158-content-v012-candidate", "18160", "tauri.experts-content-v012.conf.json"],
+    ["content-v013", "feat158-content-v013-candidate", "18161", "tauri.experts-content-v013.conf.json"],
+  ])("uses reviewed roots with profile=%s and keeps current resource authority", async (content, directory, port, overlay) => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('  expert_profile_data=');
+    const end = runner.indexOf('\nfi\n\n# Detached', start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const { stdout } = await exec("/bin/bash", ["-c", `
+      set -euo pipefail
+      desktop_root="$1"
+      expert_profile="$2"
+      fail() { exit 1; }
+      unset YIJIE_DEMO_FAST_HOST_PORT
+      ${runner.slice(start, end)}
+      printf '%s\n' "$runtime_root" "$host_home" "$codex_home" "$host_binary" "$host_port" "\${experts_tauri_config[*]}"
+    `, "expert-roots", repositoryRoot, content]);
+    const base = `${repositoryRoot}/.local/${directory}`;
+    const host = content === "daily" ? path.resolve(repositoryRoot, "../yijie-agent-host/.local/bin/yijie-agent-host") : `${base}/bin/yijie-agent-host`;
+    expect(stdout.trim().split("\n")).toEqual([base, `${base}/host-home`, `${base}/codex-home`, host, port, `--config src-tauri/${overlay}`]);
+    const config = JSON.parse(await readFile(path.join(repositoryRoot, "src-tauri", overlay), "utf8"));
+    const previous = JSON.parse(await readFile(path.join(repositoryRoot, "src-tauri/tauri.experts-local.conf.json"), "utf8"));
+    expect(config.bundle.resources).toEqual(previous.bundle.resources);
+    if (content === "daily") {
+      const daily = JSON.parse(await readFile(path.join(repositoryRoot, "src-tauri/tauri.conf.json"), "utf8"));
+      expect(config.identifier).toBe(daily.identifier);
+      expect(config.productName).toBe(daily.productName);
+    } else if (content !== "default") {
+      expect(config.identifier).toBe(`com.yijie.ai.feat158-${content}`);
+      expect(config.identifier).not.toBe(previous.identifier);
+      expect(config.productName).not.toBe(previous.productName);
+    }
+    expect(runner).toContain("bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop");
+  });
+
+  it("copies the current v013 producer through the same checked resource installer", async () => {
+    const source = await readFile(path.join(repositoryRoot, "scripts/sync-desktop-expert-resources.mjs"), "utf8");
+    expect(source).toContain('const producerOutput = "dist/skills-experts-candidate-v013"');
+    expect(source).toContain('"contracts/experts-assets.candidate.json"');
+    expect(source).toContain('"--output", producerOutput');
+    expect(source).toContain('path.join(skillsRoot, producerOutput, "authority.json")');
+    expect(source).toContain('else await installOutput(outputRoot, files)');
+    expect(source).not.toContain('experts-assets-content-v011');
   });
 
   it("isolates stable app identity and durable local state from the default demo", async () => {

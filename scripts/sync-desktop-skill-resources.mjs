@@ -123,7 +123,7 @@ async function verifyRepository(root, repository, commit, { requireHead = false 
   if (status && (requireHead || !isLocalPermissionCandidate())) throw new Error(`${root} immutable checkout is not clean`);
 }
 
-async function readRegularFile(filePath, maximum = Number.MAX_SAFE_INTEGER) {
+export async function readRegularFile(filePath, maximum = Number.MAX_SAFE_INTEGER) {
   const info = await lstat(filePath);
   if (!info.isFile() || info.isSymbolicLink() || info.size > maximum) throw new Error(`${filePath} is not an allowed regular file`);
   return readFile(filePath);
@@ -228,7 +228,7 @@ export function validateBundleManifest(manifest, rawManifest, lock, channel) {
   return manifest;
 }
 
-async function verifyBundleFiles(skillsRoot, manifest, channelLock, lock) {
+export async function verifyBundleFiles(skillsRoot, manifest, channelLock, lock) {
   const bundleRoot = path.dirname(path.join(skillsRoot, safeRelativePath(channelLock.manifest_path)));
   const files = [];
   const inventoryLines = [];
@@ -312,7 +312,7 @@ async function listFiles(root, prefix = "") {
   return files.sort();
 }
 
-async function verifyOutput(outputRoot, expectedFiles) {
+export async function verifyOutput(outputRoot, expectedFiles) {
   if (!sameJSON(await listFiles(outputRoot), expectedFiles.map(({ relativePath }) => relativePath).sort())) {
     throw new Error("generated Desktop Skill resource file set differs from its lock");
   }
@@ -323,7 +323,7 @@ async function verifyOutput(outputRoot, expectedFiles) {
   }
 }
 
-async function installOutput(outputRoot, expectedFiles) {
+export async function installOutput(outputRoot, expectedFiles) {
   const parent = path.dirname(outputRoot);
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const staging = await mkdtemp(path.join(parent, ".skill-packages-staging-"));

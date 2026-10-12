@@ -7,6 +7,8 @@ unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEA
 # This launcher never reads or places K_NA itself in an environment variable.
 workflow_requested="${YIJIE_WORKFLOW_ENABLED:-false}"
 workflow_credential_file="${YIJIE_WORKFLOW_CREDENTIAL_FILE:-}"
+experts_requested="${YIJIE_EXPERTS_ENABLED:-}"
+unset YIJIE_EXPERTS_ENABLED VITE_YIJIE_EXPERTS_ENABLED
 unset YIJIE_WORKFLOW_ENABLED YIJIE_WORKFLOW_CREDENTIAL_FILE YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE
 unset VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE
 
@@ -37,10 +39,28 @@ sha256_file() {
 image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
+expert_profile="daily"
+reopen_app="false"
 feat134_environment=()
 # The ordinary packaged entry keeps the existing stable-only branch intact.
-if [[ "$#" == "1" && "$1" == "--packaged" ]]; then
+if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   packaged_app="true"
+  shift
+fi
+# A fixed acceptance profile isolates new content from retained conversations.
+# It changes deployment identity/roots only; all source and install gates remain.
+if [[ "$#" -ge 1 && "$1" == "--experts-local" ]]; then
+  [[ "$experts_requested" == "true" ]] || fail "expert isolation requires explicit YIJIE_EXPERTS_ENABLED=true"
+  expert_profile="default"
+  shift
+elif [[ "$#" -ge 1 && ( "$1" == "--experts-content-v011" || "$1" == "--experts-content-v012" || "$1" == "--experts-content-v013" ) ]]; then
+  [[ "$experts_requested" == "true" ]] || fail "content isolation requires explicit YIJIE_EXPERTS_ENABLED=true"
+  expert_profile="${1#--experts-}"
+  shift
+fi
+if [[ "$#" == "1" && "$1" == "--reopen" ]]; then
+  [[ "$packaged_app" == "true" && "$experts_requested" != "false" ]] || fail "--reopen requires an enabled packaged expert profile"
+  reopen_app="true"
   shift
 fi
 case "$#" in
@@ -162,6 +182,17 @@ market_connectors_enabled="${YIJIE_MARKET_CONNECTORS_ENABLED:-$market_connectors
 [[ "$market_connectors_enabled" == "true" || "$market_connectors_enabled" == "false" ]] || fail "invalid market connector selection"
 export YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
 export VITE_YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
+# FEAT-158 daily activation preserves the existing identity and all data roots.
+# Explicit isolated profiles and false rollback retain their previous boundaries.
+experts_default="false"
+if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" && "$market_connectors_enabled" == "true" && "$workflow_requested" == "false" ]]; then
+  experts_default="true"
+fi
+experts_requested="${experts_requested:-$experts_default}"
+[[ "$experts_requested" == "true" || "$experts_requested" == "false" ]] || fail "invalid expert selection"
+if [[ "$reopen_app" == "true" && "$experts_requested" != "true" ]]; then
+  fail "--reopen requires an enabled packaged expert profile"
+fi
 # Host market admission excludes the legacy FEAT-128 dynamic-tool profile.
 # Keep that profile available through the explicit connector rollback above.
 if [[ "$market_connectors_enabled" == "true" ]]; then
@@ -175,7 +206,14 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/sync-market-selection.mjs" --consumer=desktop --check
   node "$workspace_root/yijie-contracts/scripts/sync-market-host.mjs" --consumer=desktop --check
   node "$workspace_root/yijie-contracts/scripts/sync-market-provider.mjs" --consumer=desktop --check
-  bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+  if [[ "$reopen_app" == "true" ]]; then
+    python3 "$workspace_root/yijie-connectors/scripts/check-worker-source.py"
+  else
+    if [[ "$experts_requested" == "true" && "$packaged_app" == "true" ]]; then
+      expert_worker_inputs="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
+    fi
+    bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+  fi
   export YIJIE_MARKET_WORKER_MANIFEST="$workspace_root/yijie-connectors/bin/market-worker/current.json"
 fi
 market_provider_only="false"
@@ -186,6 +224,35 @@ if [[ "$market_connectors_enabled" == "true" && ! -e "$provider_key_file" ]]; th
   provider_environment=()
 fi
 export YIJIE_MARKET_PROVIDER_ONLY="$market_provider_only"
+
+# FEAT-158 uses a separately pinned local resource slot in the selected profile;
+# selecting it does not start a conversation or issue an execution grant.
+[[ "$experts_requested" == "true" || "$experts_requested" == "false" ]] || fail "invalid expert opt-in"
+experts_tauri_config=()
+export YIJIE_EXPERTS_ENABLED="$experts_requested"
+export VITE_YIJIE_EXPERTS_ENABLED="$experts_requested"
+if [[ "$experts_requested" == "true" ]]; then
+  [[ "$market_connectors_enabled" == "true" && "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "experts require the current local market/model runtime"
+  [[ "$workflow_requested" == "false" && -z "${TAURI_CONFIG:-}" ]] || fail "expert candidate requires its reviewed local resource overlay without workflow or ambient config overrides"
+  if [[ "$expert_profile" == "daily" ]]; then
+    [[ "$scheduled_daily" == "true" ]] || fail "daily experts require the existing daily data profile"
+  fi
+  node "$workspace_root/yijie-contracts/scripts/sync-experts.mjs" --consumer=desktop --check
+  if [[ "$reopen_app" == "true" ]]; then
+    node "$desktop_root/scripts/sync-desktop-expert-resources.mjs" --check
+  else
+    node "$desktop_root/scripts/sync-desktop-expert-resources.mjs"
+  fi
+  expert_profile_data="$(node "$desktop_root/scripts/expert-local-profile.mjs" "$expert_profile")" || fail "expert profile is invalid"
+  IFS=$'\t' read -r expert_overlay expert_runtime_directory expert_host_port expert_product_name expert_identifier expert_host_binary <<< "$expert_profile_data"
+  [[ -z "${YIJIE_DEMO_FAST_HOST_PORT:-}" || "$YIJIE_DEMO_FAST_HOST_PORT" == "$expert_host_port" ]] || fail "expert candidates require their fixed profile port"
+  experts_tauri_config=(--config "$expert_overlay")
+  runtime_root="$desktop_root/.local/$expert_runtime_directory"
+  host_port="$expert_host_port"
+  host_home="$runtime_root/host-home"
+  codex_home="$runtime_root/codex-home"
+  host_binary="$expert_host_binary"
+fi
 
 # Detached source verification may reuse the same existing audited Runtime and
 # provider key by absolute path. All original hash/type/protection checks remain.
@@ -210,21 +277,31 @@ YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
   node scripts/check-approval-retirement.mjs
-YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
-YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
-  pnpm skills:sync:local
-
-mkdir -p "$host_root/.local/bin" "$host_home" "$codex_home"
-chmod 0700 "$runtime_root" "$host_home" "$codex_home"
+if [[ "$reopen_app" == "true" ]]; then
+  YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
+  YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
+    node scripts/sync-desktop-skill-resources.mjs --channel local-development --check --skip-package
+else
+  YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
+  YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
+    pnpm skills:sync:local
+  mkdir -p "$(dirname "$host_binary")" "$host_home" "$codex_home"
+  chmod 0700 "$runtime_root" "$host_home" "$codex_home"
+fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port is already in use; close the existing local Demo first"
 fi
 
-(
-  cd "$host_root"
-  go build -trimpath -o "$host_binary" ./cmd/desktop-host
-)
+if [[ "$experts_requested" == "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
+  expert_build_inputs="$(node scripts/expert-packaged-receipt.mjs --inputs-digest)"
+fi
+if [[ "$reopen_app" == "false" ]]; then
+  (
+    cd "$host_root"
+    go build -trimpath -o "$host_binary" ./cmd/desktop-host
+  )
+fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port became busy while preparing the local Demo"
@@ -239,15 +316,20 @@ if [[ "$stable_api_only" == "true" ]]; then
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "stable Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 elif [[ "$packaged_app" == "true" ]]; then
-  pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}"
+  if [[ "$reopen_app" == "false" ]]; then
+    pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
+  fi
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
+  if [[ "$experts_requested" == "true" ]]; then
+    bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
+  fi
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 else
   if [[ "$workflow_requested" == "true" ]]; then
     launch_command=(node scripts/run-workflow-dev.mjs)
   else
-    launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json)
+    launch_command=(pnpm exec tauri dev --config src-tauri/tauri.demo-fast.conf.json "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}")
   fi
 fi
 
@@ -256,6 +338,14 @@ if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
+fi
+
+if [[ "$experts_requested" == "true" && "$packaged_app" == "true" ]]; then
+  if [[ "$reopen_app" == "true" ]]; then
+    node scripts/expert-packaged-receipt.mjs --check "$expert_profile" "$codex_binary" "$codex_manifest" "$YIJIE_MARKET_WORKER_MANIFEST"
+  else
+    node scripts/expert-packaged-receipt.mjs --record "$expert_profile" "$codex_binary" "$codex_manifest" "$YIJIE_MARKET_WORKER_MANIFEST" "$expert_build_inputs" "$expert_worker_inputs"
+  fi
 fi
 
 exec env \

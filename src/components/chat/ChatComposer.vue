@@ -37,6 +37,8 @@ const props = withDefaults(defineProps<{
   attachmentErrorCode?: string | null;
   dragActive?: boolean;
   connectors?: readonly ConnectorChipView[];
+  expertsAvailable?: boolean;
+  textLocked?: boolean;
 }>(), {
   activeProjectName: null,
   attachments: () => Object.freeze([]),
@@ -60,10 +62,12 @@ const emit = defineEmits<{
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
   "remove-connector": [id: string];
+  "browse-experts": [];
 }>();
 
 defineSlots<{
   "shop-control"(): unknown;
+  "expert-control"(): unknown;
   "connector-control"(props: { close: () => void }): unknown;
   "skill-control"(props: { close: () => void }): unknown;
   "workspace-control"(): unknown;
@@ -238,7 +242,15 @@ function restoreInputFocus(snapshot: ChatComposerFocusSnapshot): boolean {
   return true;
 }
 
-defineExpose({ captureInputFocus, restoreInputFocus });
+// Explicit navigation from a user selection may move focus from the route heading.
+function focusInput(): boolean {
+  const textarea = textareaElement.value;
+  if (!textarea || submissionBusy.value) return false;
+  textarea.focus({ preventScroll: true });
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  return true;
+}
+defineExpose({ captureInputFocus, restoreInputFocus, focusInput });
 
 async function removeConnector(id: string): Promise<void> {
   const snapshot = captureInputFocus();
@@ -316,7 +328,7 @@ function handlePaste(event: ClipboardEvent): void {
   <section
     ref="composerElement"
     class="chat-composer"
-    :class="`chat-composer--${mode}`"
+    :class="[`chat-composer--${mode}`, { 'chat-composer--expert': !!$slots['expert-control'] }]"
     aria-label="任务输入区"
     :aria-busy="submissionBusy ? 'true' : undefined"
   >
@@ -417,7 +429,7 @@ function handlePaste(event: ClipboardEvent): void {
           id="chat-task-input"
           class="chat-composer__textarea"
           :value="modelValue"
-          :readonly="submissionBusy"
+          :readonly="submissionBusy || textLocked"
           :placeholder="!textOnly && connectors.length ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
           :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
           :aria-invalid="visibleValidationMessage ? 'true' : undefined"
@@ -435,11 +447,13 @@ function handlePaste(event: ClipboardEvent): void {
           <div class="chat-composer__leading-actions">
             <ChatAddControl
               v-if="!textOnly"
-              :disabled="submissionBusy || streaming || (attachmentButtonDisabled && !$slots['skill-control'] && !$slots['connector-control'])"
+              :disabled="submissionBusy || streaming || (attachmentButtonDisabled && !$slots['skill-control'] && !$slots['connector-control'] && !expertsAvailable)"
               :attachment-disabled="attachmentButtonDisabled"
               :skills-available="Boolean($slots['skill-control'])"
               :connectors-available="Boolean($slots['connector-control'])"
+              :experts-available="expertsAvailable"
               @pick-attachments="emit('pick-attachments')"
+              @browse-experts="emit('browse-experts')"
             >
               <template #skills="{ close }"><slot name="skill-control" :close="close" /></template>
               <template #connectors="{ close }"><slot name="connector-control" :close="close" /></template>
@@ -460,6 +474,7 @@ function handlePaste(event: ClipboardEvent): void {
               </button>
             </slot>
             <slot v-if="!textOnly" name="shop-control" />
+            <slot v-if="!textOnly" name="expert-control" />
           </div>
           <div class="chat-composer__trailing-actions">
           <slot name="model-control" />
@@ -891,18 +906,21 @@ function handlePaste(event: ClipboardEvent): void {
   overflow: hidden;
 }
 
-.chat-composer--reply .chat-composer__leading-actions {
+.chat-composer--reply .chat-composer__leading-actions,
+.chat-composer--expert .chat-composer__leading-actions {
   flex-wrap: wrap;
   overflow: visible;
 }
 
 @container chat-composer (max-width: 680px) {
-  .chat-composer--reply .chat-composer__actions {
+  .chat-composer--reply .chat-composer__actions,
+  .chat-composer--expert .chat-composer__actions {
     grid-template-columns: minmax(0, 1fr);
     row-gap: var(--yj-space-2);
   }
 
-  .chat-composer--reply .chat-composer__trailing-actions { justify-self: end; }
+  .chat-composer--reply .chat-composer__trailing-actions,
+  .chat-composer--expert .chat-composer__trailing-actions { justify-self: end; }
 }
 
 .chat-composer__permission {

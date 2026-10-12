@@ -73,6 +73,56 @@ Desktop 使用 macOS 每用户缓存目录中的进程级本机锁保持单实�
 后启动的实例会在创建窗口前退出；它不会产生第二个客户端，也不会以缺少 `demo_fast` 环境的设置页
 遮挡当前 Chat 客户端。
 
+## FEAT-158 日常专家与同构建重开
+
+2026-10-13 Owner授权接入日常客户端。普通canonical入口在既有daily模型/连接器组合且未选择workflow专用配置时默认开启专家，保持 `com.yijie.ai`、原 `demo-fast-v1`、Host/Runtime Home、18081端口、Host binary和单实例锁。复用既有SQL33→35及Host8→10迁移，不重写历史、旧outbox或普通Skill安装。专家资源仍通过独立受审槽加载，须用户召唤后才用于会话。
+
+```bash
+./scripts/run-local-demo-fast.sh --packaged
+# 正常Quit后，不重建地重开同一日常制品：
+./scripts/run-local-demo-fast.sh --packaged --reopen
+```
+
+显式 `YIJIE_EXPERTS_ENABLED=false` 保留新版兼容reader并关闭专家入口；回退需要按canonical正常构建，不能把新旧Renderer与Native开关混用。已升级SQL35/Host10禁止降级或重置，旧专家会话不冒充普通执行；新普通会话仍可使用。stable、旧模型、隔离定时验证及workflow专用入口维持其原边界。
+
+固定 `--experts-content-v013` 使用 `com.yijie.ai.feat158-content-v013`、`feat158-content-v013-candidate` 与18161端口。原隔离部署和历史保留，不替换旧资源绕过引用保护；这些隔离入口仍需显式 `YIJIE_EXPERTS_ENABLED=true`。
+
+`contract-impact=semantic`：固定本地部署身份与正常重开选择，复用既有专家契约、单一当前资产 pin、构建和安装服务；不增加业务 wire、数据库 schema、权限或进程管理器。
+
+新内容验收使用固定的独立 profile：
+
+```bash
+YIJIE_EXPERTS_ENABLED=true ./scripts/run-local-demo-fast.sh --packaged --experts-content-v012
+```
+
+原 `default` 专家隔离身份改用显式 `--experts-local` 选择；`--experts-content-v011/v012/v013` 保留。daily和四个隔离profile由 `src-tauri/experts-local-profiles.json` 统一定义，Tauri overlay是经启动前核对的投影。Native日常版无论专家开关真假均使用原日常锁，隔离版使用已登记身份的独立锁。参数不选择历史内容版本，也不接受任意AppData、安装路径或hash。
+
+| 状态 | `--experts-local` | `content-v011` | `content-v012` |
+|---|---|---|---|
+| App 身份 | `com.yijie.ai.feat158-local` | `com.yijie.ai.feat158-content-v011` | `com.yijie.ai.feat158-content-v012` |
+| App 名称 | 易界 AI FEAT-158 | 易界 AI FEAT-158 内容 0.1.1 | 易界 AI FEAT-158 内容 0.1.2 |
+| Host/Runtime 根 | `.local/feat158-candidate` | `.local/feat158-content-v011-candidate` | `.local/feat158-content-v012-candidate` |
+| 固定 Host 端口 | 18158 | 18159 | 18160 |
+| Native AppData | 对应 App 身份目录 | 对应 App 身份目录 | 对应 App 身份目录 |
+
+上述隔离profile的Host binary、HostHome、CodexHome、Native SQLCipher/secret、Skills安装和单实例锁相互隔离；daily项精确复用原日常路径，不能用来另开同库实例。开启专家时 `YIJIE_DEMO_FAST_HOST_PORT` 必须等于所选profile固定值，daily为18081。端口占用直接拒绝，须通过应用正常退出释放，启动器不终止既有进程。
+
+所有 profile 仍用同一份当前 `contracts/experts-assets.candidate.json`，通过原资源同步器校验后复制到共享构建资源槽 `.local/skill-packages-experts`，再装入各自 App 包。这是生成缓存，不是安装目录。新增 profile 不复制或清空旧数据库，不覆盖旧安装，不删除历史；旧资源引用依旧阻止移除和覆盖。用新隔离环境验证新内容，不代表真实旧版本升级已通过。0.1.0/0.1.1 历史及原失败证据保留，跨版本的旧绑定只能继续明确受支持的版本或如实显示不可用，不能静默转换。
+
+首次 canonical packaged 构建成功并且构建前后 Desktop 源码、配置、资产 pin 和构建参数一致后，在对应部署根写 `packaged-launch-receipt.json`。该本地 QA 出处记录包含源码摘要、完整 App bundle 文件清单及摘要、Host、固定 Runtime/manifest、原市场 worker/manifest 摘要和部署身份；不保存密钥，不代表发布签名或安全认证。
+
+worker 的实际构建输入也进入同一个回执：包括 `worker/` 的 Cargo 配置、锁文件、手写/生成源码和内联资产，以及编译包含的 `catalog/` JSON、canonical 构建脚本和依赖检查器。它在 worker 构建前单独采样，直至 App 构建完成仍必须一致。既有 Codex 依赖来源检查继续执行；仅旧 worker binary 没变不能掩盖手写源码已漂移。
+
+完成正常 Quit 后，可用同一构建重新打开：
+
+```bash
+YIJIE_EXPERTS_ENABLED=true ./scripts/run-local-demo-fast.sh --packaged --experts-content-v012 --reopen
+```
+
+`--reopen` 支持已启用专家的daily及隔离packaged入口。该路径仍执行原契约、源码、权限、普通38技能、专家资源及固定 Runtime 门禁，但全部为 check-only；不调用 Go/Tauri/worker 构建，不同步或重打包资源，不改写回执。只有当前源码/配置、当前单一资产权威和原 App/Host/Runtime/worker 全部与回执一致，才复用原来的受管环境 `exec` 同一个 App binary。缺少回执、来源或产物变化一律停止，需重新执行正常 canonical 构建；不为旧产物补登记回执，不把双击裸 App 当作等价启动。
+
+回执中的编译参数仅存摘要。源码或内容更新后重建会产生新的本地回执，因此本轮同构建 Quit/reopen 应在修改源码或 pin 之前完成。该机制不读写会话数据库或安装回执，不发消息、不授执行资格；真实构建、启动、生命周期和模型验收另行记录，外观按用户指令跳过。
+
 ## 基础前端开发
 
 ```bash
