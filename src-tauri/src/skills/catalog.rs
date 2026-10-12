@@ -269,7 +269,10 @@ fn validate_expert_manifest(
         || manifest.distribution_channel != "local-development"
         || manifest.source.repository != SKILLS_REPOSITORY
         || manifest.source.repository != pin.source.repository
-        || manifest.source.revision_kind != "working-tree"
+        || !matches!(
+            manifest.source.revision_kind.as_str(),
+            "working-tree" | "git-commit"
+        )
         || manifest.source.revision_kind != pin.source.revision_kind
         || manifest.source.revision != pin.source.revision
         || manifest.source.tree_sha256 != pin.source.tree_sha256
@@ -712,6 +715,33 @@ fn valid_identifiers(value: &str, reject_numeric_leading_zero: bool) -> bool {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn exact_reviewed_expert_bundle_loads_when_the_integration_root_is_supplied() {
+        let Some(bundle_root) = std::env::var_os("YIJIE_DESKTOP_EXPERT_BUNDLE_TEST_ROOT") else {
+            return;
+        };
+        let roots = SkillRoots {
+            bundle_root: PathBuf::from(bundle_root),
+            install_root: PathBuf::new(),
+        };
+        // Read the actual canonical package with its compiled source pin. This
+        // also covers the normal transition from a worktree to a Git commit.
+        let catalog = load_expert_catalog(&roots).expect("load exact reviewed expert bundle");
+        assert_eq!(catalog.entries.len(), EXPECTED_SKILL_COUNT + 1);
+        let experts: Vec<_> = catalog
+            .entries
+            .iter()
+            .filter(|entry| entry.expert.is_some())
+            .collect();
+        assert_eq!(experts.len(), 1);
+        assert_eq!(experts[0].version, "0.1.3");
+        assert_eq!(
+            experts[0].expert.as_ref().unwrap().expert_id,
+            "jd-ops-expert"
+        );
+        assert_eq!(experts[0].catalog_status, "installable");
+    }
 
     #[test]
     fn semantic_version_and_identifiers_are_closed() {

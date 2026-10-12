@@ -170,3 +170,5 @@ pnpm build
 Contracts `experts/1@0.1.0`：`e35ae9a0711014e4774a1347413e9a343ce7ab2c`；Skills 0.1.3 / bundle 0.4.3：`d7a850c9d5c5f8e52b8ab8f631800f671acc60dc`；Host：`9acae49ee2bf1fb33ae1da8ef02fd0bd07538d63`；Shopify worker 源：`23c31e8f3cd467916956e1bbdef428a334de0ca3`。相关源均在各自提交中，Runtime 仓无改动。Skills 原 canonical 打包器从干净提交重建后，39 项归档、专家 metadata 与已验收 phase12 一致，manifest SHA-256 更新为 `4fec45edbe0995d0fa809c11c1fb37189176c6e9fc7fa7e8cce6a31cf1eea201`，authority SHA-256 `122486fe96f51a35a47c747d7d89ab70375b057fa39a87bcb22a25dfcb0a7860`。旧安装 ExpertRef、普通 Skill 和历史会话无需迁移或替换。
 
 Host/资源固定摘要依原校验与显式 freeze 同步，兼容专家开启及关闭入口；不得只提交旧工作树 HEAD 造成启动 drift。产品仍是 local/demo_fast 候选，不新增 tag、桌面签名发行或生产部署。公开 Git 范围已获用户确认，见 Skills `docs/provenance/FEAT-158-git-publication.md`。本轮只补来源变化的必要构建/正常启动验证，无模型调用，外观跳过；完整测试与历史验收沿用元仓 phase11/phase12，最新交付收口见元仓 `16-final-audit-and-git-delivery.md`。
+
+本轮提交后定点启动发现并修复 `validate_expert_manifest` 只接受 `working-tree` 的遗漏：canonical 打包已支持 `git-commit`，Native 必须接受这两种受支持类型并继续与编译 pin 完全相等。实际已提交包的单测试先复现 `Invalid`，修复后原路径复测；不改安装收据、内容版本或历史。此修复 `contract-impact=semantic`，只是恢复既有包 schema 已支持来源的消费者兼容，不更改公共 wire/schema。完整前后证据见元仓 phase13。
