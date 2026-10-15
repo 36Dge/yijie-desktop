@@ -303,6 +303,18 @@ it("locates the exact requested local turn without sending or substituting the l
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("shows the decorative mascot only on the new-task homepage and keeps it out of a conversation", async () => {
+    const { wrapper, router } = await mountPage("/chat");
+    expect(wrapper.find(".home-mascot[aria-hidden=true]").exists()).toBe(true);
+    expect(wrapper.get(".home-mascot").attributes("data-phase")).toBe("static"); // reduced-motion preference
+    expect(wrapper.get(".home-mascot").attributes("data-frame")).toBe("-1");
+    await wrapper.get("textarea").setValue("本地输入检查");
+    expect(wrapper.get(".home-mascot").attributes("data-frame")).toBe("-1");
+    await router.push(`/chat/${SESSION_ID}`);
+    await flushPromises();
+    expect(wrapper.find(".home-mascot").exists()).toBe(false);
+    wrapper.unmount();
+  });
   it("replays the opening after leaving a session but not on duplicate new-task navigation", async () => {
     const { wrapper, router } = await mountPage("/chat");
     let now = 0;

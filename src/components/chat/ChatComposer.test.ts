@@ -73,6 +73,15 @@ afterEach(() => {
 });
 
 describe("ChatComposer", () => {
+  it("anchors the homepage decoration to the input surface and excludes it from reply and text-only composers", async () => {
+    const wrapper = mountComposer({}, { "home-decoration": () => h("div", { "data-mascot": "" }) });
+    expect(wrapper.find(".chat-composer__surface--decorated > [data-mascot]").exists()).toBe(true);
+    await wrapper.setProps({ mode: "reply" });
+    expect(wrapper.find("[data-mascot]").exists()).toBe(false);
+    expect(wrapper.find(".chat-composer__surface--decorated").exists()).toBe(false);
+    await wrapper.setProps({ mode: "new", textOnly: true });
+    expect(wrapper.find("[data-mascot]").exists()).toBe(false);
+  });
   it("moves connectors into the add menu and keeps unavailable chips out of legacy submission", async () => {
     const wrapper = mountComposer({ connectors: [{ id: "sample", name: "普通合成服务", iconAssetId: "cue", unavailableReason: "需要重新连接" }] }, {
       "shop-control": () => h("button", { "data-shop": "" }, "关联店铺"),

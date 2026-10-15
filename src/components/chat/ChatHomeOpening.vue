@@ -7,6 +7,7 @@ import {
 } from "./home-opening-geometry";
 
 const props=withDefaults(defineProps<{ skipAnimation?: boolean }>(), { skipAnimation:false });
+const emit=defineEmits<{ started: []; settled: [] }>();
 const root=ref<HTMLElement|null>(null);
 const logo=ref<HTMLElement|null>(null);
 const stage=ref<SVGSVGElement|null>(null);
@@ -36,7 +37,7 @@ function cancelFrame(): void {
   if(frame!==null) cancelAnimationFrame(frame);
   frame=null;
 }
-function rest(): void { cancelFrame(); active.value=false; pose.value=HOME_OPENING_END; }
+function rest(): void { cancelFrame(); active.value=false; pose.value=HOME_OPENING_END; emit("settled"); }
 function measure(): void {
   if(!root.value || !stage.value || !logo.value) return;
   const style=getComputedStyle(root.value);
@@ -82,10 +83,11 @@ function reduced(): void { if(preference?.matches) rest(); }
 watch(()=>props.skipAnimation, value=>{if(value) finish();});
 
 onMounted(()=>{
+  emit("started");
   preference=window.matchMedia("(prefers-reduced-motion: reduce)");
   // The homepage mounts on entry; selecting its already active menu does not remount it.
-  if(props.skipAnimation || preference.matches || document.hidden) return;
-  try {planes=readOpeningPlanes();} catch {return;}
+  if(props.skipAnimation || preference.matches || document.hidden) {rest();return;}
+  try {planes=readOpeningPlanes();} catch {rest();return;}
   measure();
   observer=new ResizeObserver(measure);
   observer.observe(root.value!);

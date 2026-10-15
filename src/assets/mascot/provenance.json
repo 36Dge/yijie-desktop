@@ -1,0 +1,179 @@
+{
+  "contract-impact": "none",
+  "reason": "Homepage decoration only. Desktop/API/Agent Host cross-process, cross-repository and cross-version boundaries, permission behavior, and persisted/replayed state are unchanged.",
+  "source": "otter-final-repaired-master.mkv",
+  "sourceSha256": "16d8f88af439cfd9ee826b34cf2d751442a1de5e0b8e1be15f6e6ece8486e975",
+  "sourceResolution": [
+    1764,
+    1176
+  ],
+  "sourceFrames": [
+    348,
+    432
+  ],
+  "timeRangeSeconds": [
+    14.5,
+    18
+  ],
+  "frameCount": 84,
+  "fps": 24,
+  "canvasCrop": [
+    414,
+    400,
+    1484,
+    994
+  ],
+  "deliveryResolution": [
+    1070,
+    594
+  ],
+  "downscaled": false,
+  "repainted": false,
+  "paidGeneration": false,
+  "processing": [
+    "native-resolution foreground masks",
+    "protect white parcel",
+    "unmix light background only on translucent boundary pixels",
+    "integer vertical translation to stabilize contact plane",
+    "fixed union crop",
+    "lossless WebP, one cycle"
+  ],
+  "validation": {
+    "size": [
+      1070,
+      594
+    ],
+    "frames": 84,
+    "loop": 1,
+    "fileBytes": 23757916,
+    "alphaEqual": true,
+    "visibleRGBEqual": true,
+    "durationMs": 3500,
+    "sourceOpaqueRGBEqual": true,
+    "sha256": "324028d0758a02ae51588ffcdd10e430c13800dad8b39443fcbc63486104953d",
+    "whiteParcelCoreOpaqueAll84Frames": true
+  },
+  "files": {
+    "otter-rest-once.webp": {
+      "bytes": 23757916,
+      "sha256": "324028d0758a02ae51588ffcdd10e430c13800dad8b39443fcbc63486104953d"
+    },
+    "otter-asleep.webp": {
+      "bytes": 325390,
+      "sha256": "a53b535d6b502a63aac8fa8ea897645160eb524580fde26922448e69df2cfa82"
+    },
+    "otter-awake.webp": {
+      "bytes": 337206,
+      "sha256": "66d06301b8fc6062a7e20c5e978278b94364d6a57551c57b362b6885ac43fce5"
+    }
+  },
+  "playback": {
+    "renderer": "canvas-static-lossless-sheets",
+    "columns": 2,
+    "framesPerSheet": 6,
+    "maxResidentSheets": 3,
+    "sheets": [
+      {
+        "file": "frames/otter-00.webp",
+        "firstFrame": 0,
+        "frameCount": 6,
+        "bytes": 1479982,
+        "sha256": "0285c5f26303f8c1f1f4ab902f0350fe1ba4c69a2cb51c00102db4fa623c94f7"
+      },
+      {
+        "file": "frames/otter-01.webp",
+        "firstFrame": 6,
+        "frameCount": 6,
+        "bytes": 1342816,
+        "sha256": "53ce50975d52a0b4768f9ae7b1ed9c3fbccf4ca59f5daec45523789dda20d19b"
+      },
+      {
+        "file": "frames/otter-02.webp",
+        "firstFrame": 12,
+        "frameCount": 6,
+        "bytes": 1630252,
+        "sha256": "bf7f6a93426dbad1c6a5bd4dacb7b5de4fd5e5cfe3a11a7180907816eb8763e1"
+      },
+      {
+        "file": "frames/otter-03.webp",
+        "firstFrame": 18,
+        "frameCount": 6,
+        "bytes": 1568706,
+        "sha256": "4d38ba2fdf67f321421cf6574a06b33809c3c0d2f956f352b87127d2567e6f23"
+      },
+      {
+        "file": "frames/otter-04.webp",
+        "firstFrame": 24,
+        "frameCount": 6,
+        "bytes": 1727036,
+        "sha256": "0872180471c8a12c7dd5a7d6bd55f3fc7f752771d7e26e0b595442d5dfc6b94f"
+      },
+      {
+        "file": "frames/otter-05.webp",
+        "firstFrame": 30,
+        "frameCount": 6,
+        "bytes": 1734012,
+        "sha256": "8f553a97fa0e819c2b8612546ad44f688f58f3ee11d7a2b4a7b1238f43dd8947"
+      },
+      {
+        "file": "frames/otter-06.webp",
+        "firstFrame": 36,
+        "frameCount": 6,
+        "bytes": 1764734,
+        "sha256": "995e25ac26b91a431d025121763165a0aa24b611d725734171c2bfcf16559af9"
+      },
+      {
+        "file": "frames/otter-07.webp",
+        "firstFrame": 42,
+        "frameCount": 6,
+        "bytes": 1767000,
+        "sha256": "e58a3dfb0c8c303a366029d9d5039c8b9aa5f05758cbb2c8e3c597da53f04a5f"
+      },
+      {
+        "file": "frames/otter-08.webp",
+        "firstFrame": 48,
+        "frameCount": 6,
+        "bytes": 1703456,
+        "sha256": "6f477913ef4a90114d62102f84e8e32c7798cae55c95b8d682d801b7eed02d9b"
+      },
+      {
+        "file": "frames/otter-09.webp",
+        "firstFrame": 54,
+        "frameCount": 6,
+        "bytes": 1621354,
+        "sha256": "4f5909148a8f0e7d7a2d50f17f05cd5d72128479a975e3c52d9ba05fe3dfc256"
+      },
+      {
+        "file": "frames/otter-10.webp",
+        "firstFrame": 60,
+        "frameCount": 6,
+        "bytes": 1585680,
+        "sha256": "431955eea101308415a85b203345490c6acf059333b08a8ac4f0db621a52d161"
+      },
+      {
+        "file": "frames/otter-11.webp",
+        "firstFrame": 66,
+        "frameCount": 6,
+        "bytes": 1689984,
+        "sha256": "01b77efe2008ee5631ef8d0d94aa8aec38a474c80b5949cd28e145d652a3a678"
+      },
+      {
+        "file": "frames/otter-12.webp",
+        "firstFrame": 72,
+        "frameCount": 6,
+        "bytes": 1711338,
+        "sha256": "7d80095391a6c0ae4d93536245477a2d057f97bf013e188af417c187bdbb5b44"
+      },
+      {
+        "file": "frames/otter-13.webp",
+        "firstFrame": 78,
+        "frameCount": 6,
+        "bytes": 1461940,
+        "sha256": "a97b8bf4ed70edbf2c3d387c5b2f457989f0c08933f3d61993b987d333e23238"
+      }
+    ],
+    "pixelEqualityToApprovedAnimation": true,
+    "sourceAnimationSha256": "324028d0758a02ae51588ffcdd10e430c13800dad8b39443fcbc63486104953d",
+    "note": "Native pixels and all 84 frames preserved. No animation timer or browser-managed animated image delay. Canvas keeps its final drawn pixels; hidden pages pause without changing pose."
+  }
+}

@@ -208,12 +208,23 @@
   --yj-home-opening-light: #ffffff;
   --yj-home-opening-shadow: rgba(37, 40, 43, .20);
 
+  /* Native-resolution mascot, one 3.5s performance on an empty homepage. */
+  --yj-home-mascot-width: 160px;
+  --yj-home-mascot-width-compact: 128px;
+  --yj-home-mascot-clearance: 96px;
+  --yj-home-mascot-right: var(--yj-space-6);
+  --yj-home-mascot-overlap: 3px;
+  --yj-home-mascot-contact-height: 4px;
+  --yj-home-mascot-contact-blur: 2px;
+  --yj-home-mascot-contact-shadow: rgba(37, 40, 43, .14);
+
   --yj-logo-mark-sm: 24px;
   --yj-logo-mark-md: 32px;
   --yj-logo-mark-lg: 40px;
 }
 
 [data-theme="dark"] {
+  --yj-home-mascot-contact-shadow: rgba(0, 0, 0, .30);
   --yj-home-opening-face: #ffffff;
   --yj-home-opening-edge: #a5adb5;
   --yj-home-opening-shadow: rgba(0, 0, 0, .48);

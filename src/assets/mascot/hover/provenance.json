@@ -1,0 +1,368 @@
+{
+  "contract-impact": "none",
+  "reason": "Decorative in-process media update only; no API/Agent Host/native/permission/persistence/replay boundary changes.",
+  "acceptance": {
+    "status": "accepted",
+    "basis": "User-approved supported-head choreography. Independent native and160/128px review passed after gift-alpha repair. Original raw4s generation was not accepted; final media is a disclosed postprocessed composite."
+  },
+  "deliveryResolution": [
+    1070,
+    594
+  ],
+  "sourceResolution": [
+    1764,
+    1176
+  ],
+  "frameCount": 166,
+  "fps": 24,
+  "durationMs": 6916.666666666667,
+  "downscaled": false,
+  "registration": {
+    "translationY": 38,
+    "crop": [
+      414,
+      400,
+      1484,
+      994
+    ]
+  },
+  "sourceRuns": [
+    {
+      "id": "4dc8fc9b-a283-4fe5-a0aa-b19735c961fa",
+      "url": "https://media.weavy.ai/video/upload/v1792006879/uploads/2ZxleU5gXcfvJA43MJLUAPsLyDV2/iqrqtfea03zoshveom8y.mp4",
+      "used": "Supported resting reference plus selected sleepy eye opening76–83, actual gaze84–97; rejected alert gaze and extra blink excluded."
+    },
+    {
+      "id": "841f1461-21b0-4877-b51c-44fcbbdb5d46",
+      "url": "https://media.weavy.ai/video/upload/v1792001646/uploads/2ZxleU5gXcfvJA43MJLUAPsLyDV2/csjjsscuuwooe2tjmjcc.mp4",
+      "used": "Closing performance1–73 with original-rest tail replacement and gift matte repair."
+    }
+  ],
+  "motion": {
+    "majorEyeOpeningSecondsApprox": 2.04,
+    "actualGazeFrames": 24,
+    "actualGazeSeconds": 1,
+    "tailMaxDisplacementAt160CssPx": 8.22429906542056,
+    "headSupported": true
+  },
+  "processing": [
+    "Integer eye-region registration; preserve actual homepage rest pixels outside the eye region during the first93frames",
+    "Local optical-flow eye-opening retiming; retain actual gaze frames; no held open still added",
+    "Bounded low-frequency closing colour match, no clipped channels; ten-frame premultiplied material transition",
+    "Original-rest tail texture with fixed root and one2.5D gentle arc; no high dark generated tail",
+    "Gift matte holes in closing43/44 restored from corresponding original video RGB; soft bottom contour recovered from valid adjacent alpha",
+    "First/last use actual Canvas rest; six-frame final material settle",
+    "Native-resolution RGBA PNGs packed into lossless static WebP sheets",
+    "Copy exact straight-alpha pixels of actual entry frame83 into hover first/last sheets; same runtime decoding path"
+  ],
+  "limitations": [
+    "Short material transition mildly softens mixed fine hairs at native enlargement; not obvious at160/128CSSpx",
+    "2.5D tail preserves original texture but does not synthesize new volumetric fur; mild strip texture remains at native enlargement",
+    "Derived foreground alpha is not native3D alpha"
+  ],
+  "restSha256": "a53b535d6b502a63aac8fa8ea897645160eb524580fde26922448e69df2cfa82",
+  "totalSheetBytes": 40816772,
+  "validation": {
+    "sheetRgbaPixelEquality": true,
+    "firstLastRgbaEqualToActualCanvasRest": true,
+    "canvasRestSha256": "a8be60325272d387bff8854b4cf0f5d19f351e32b0f815e81792dc7c3a6b27d0",
+    "opaqueFixedRegionsMatchRestFirst93Frames": true,
+    "giftAlphaRepairVerifiedFrames": [
+      136,
+      137
+    ],
+    "nativeAndProductSizeVisualReview": "passed",
+    "runtimePlayback": "passed: actual component observed all166frames in order twice; leave completes; pointer hold does not replay; input/blank do not trigger; white160px and dark128px; exact entry/hover resting Canvas RGBA equality",
+    "restAnchorSource": "entry frames/otter-13.webp, cell5",
+    "restAnchorStraightRgbaSha256": "c4b073b9e648df6a289a0537cb22f2c479378dbf60661c9108fae8f696bea13a",
+    "runtimeAudit": ".local/home-mascot-hover-20261015-slow-wake/audit/final-validation/browser-runtime.json"
+  },
+  "playback": {
+    "renderer": "canvas-static-lossless-sheets",
+    "columns": 2,
+    "framesPerSheet": 6,
+    "maxResidentSheets": 3,
+    "sheets": [
+      {
+        "file": "frames/hover-000.webp",
+        "firstFrame": 0,
+        "frameCount": 6,
+        "bytes": 1221186,
+        "sha256": "4f6cdfcd08a0569a752f32984d01fffa8aa4614cb9f4516adbb1f864e507d6f3",
+        "rgbaSha256": "98c9f7edfd2f7fb5822cf6f86344981a2ddad486c9c9fdb7d408ecbb715caace",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-001.webp",
+        "firstFrame": 6,
+        "frameCount": 6,
+        "bytes": 1194536,
+        "sha256": "690dcf95012274c911112195748908450fc0559e05b3525bf79f1ee67a6340cc",
+        "rgbaSha256": "ce39b0c3d05814c2a2ec3573f5c8b432d8d41fc6ec05a15ecdb112c02f66c7dc",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-002.webp",
+        "firstFrame": 12,
+        "frameCount": 6,
+        "bytes": 1205876,
+        "sha256": "8be2d2ecb6477decfb06b278e3dd4ebf0308d0ea3ff0cbd70b1d0ff6d6932042",
+        "rgbaSha256": "ff65e117f26f095797963d1752d7483ab4f86917c92e22142ad9f34b15ecb8e7",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-003.webp",
+        "firstFrame": 18,
+        "frameCount": 6,
+        "bytes": 1201288,
+        "sha256": "d710eaa0abeb45caca7bb637def415022eef297b129225767b29e81d24998de9",
+        "rgbaSha256": "d449998648438c32979ff733ab18ed446998752836a80f6a013e49bacc111c66",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-004.webp",
+        "firstFrame": 24,
+        "frameCount": 6,
+        "bytes": 1207000,
+        "sha256": "557523dbcd5d9e045e027ac4e40382d5e56940c7209282fbc441dee8c870a297",
+        "rgbaSha256": "352dbdfbc4261ee282086302c0fffe4e827623baed755da832483ad4dc82987b",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-005.webp",
+        "firstFrame": 30,
+        "frameCount": 6,
+        "bytes": 1200446,
+        "sha256": "289acad8b5f4846bae02f8ab2d22dd8521c65f4610fd5a5b4a9f9525df2af0d2",
+        "rgbaSha256": "328d8b06fae7a7a2cf2c983f719866f60135c3ff352f8a82b94b3fe64f9e834f",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-006.webp",
+        "firstFrame": 36,
+        "frameCount": 6,
+        "bytes": 1201950,
+        "sha256": "1e73d3844c5da93bbe4db10760aeca254b18c7eeb4a18780323729fb321821cb",
+        "rgbaSha256": "25e50a81cf54bcfa50a46793e42e9852d4de259634974f827441ec1651399265",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-007.webp",
+        "firstFrame": 42,
+        "frameCount": 6,
+        "bytes": 1208582,
+        "sha256": "13531b7ffb2a519f8c38bab6a355084c1577000d23e7bb5169f2788698aceaae",
+        "rgbaSha256": "1bfd1ce83ad46538326c4e26b16ab9bd5d39de39102fa344b94ae7089d78c483",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-008.webp",
+        "firstFrame": 48,
+        "frameCount": 6,
+        "bytes": 1197506,
+        "sha256": "1fdbf360f95162ed9723c1494a377ebb9d658ac2dfb2c73625267fe3a3c56715",
+        "rgbaSha256": "3e722446a08f4d99038520d829851ede090caf2f9c1af6ee0c943014f7dd3833",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-009.webp",
+        "firstFrame": 54,
+        "frameCount": 6,
+        "bytes": 1198290,
+        "sha256": "64bd88dee80add7d10bc2d044af10c9be305ab2cbd26a67811deded43dfe7edc",
+        "rgbaSha256": "f8025dced34eda23aaf4350b2459b87943a37993f602f69e88daba8e2cd78015",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-010.webp",
+        "firstFrame": 60,
+        "frameCount": 6,
+        "bytes": 1214614,
+        "sha256": "67ff5c99e72660472f9ae04dfbf8b06099261a6c82eee426209dda1683fc630c",
+        "rgbaSha256": "9c1034d3295cde5c3b4f1ddb645a1b863fce4fb2f007a496709be7d1aea287e6",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-011.webp",
+        "firstFrame": 66,
+        "frameCount": 6,
+        "bytes": 1206412,
+        "sha256": "3e44a389922a37d66829e7dc58a563da5b9785f89b4504cb870f20c618221175",
+        "rgbaSha256": "ce5d1c8ab19bcabf3f4f6486f28861c61bd2e3eca3458edb6d56fb02c78ade43",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-012.webp",
+        "firstFrame": 72,
+        "frameCount": 6,
+        "bytes": 1198794,
+        "sha256": "90923868d62e4a876dd753f05a01e83cc17ff5f07b70f24d7db4b9c898bfe62e",
+        "rgbaSha256": "6c3408c551cd8f3139d80bf3742ce71527d5b15d29da8c920c4dca3cee537d1e",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-013.webp",
+        "firstFrame": 78,
+        "frameCount": 6,
+        "bytes": 1232950,
+        "sha256": "9b9a32339326f89e852e79cbb67a7b3cc11f98e37074e6f513e41eb64b6c316b",
+        "rgbaSha256": "1b8fe737f20299ea1dc52c803348e7c5519204f97972fc2a07b9701135724826",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-014.webp",
+        "firstFrame": 84,
+        "frameCount": 6,
+        "bytes": 1209768,
+        "sha256": "5b5d187500663f33408440b20a4095d0de869da2d4dc2d4e7e3886444ae2a1d0",
+        "rgbaSha256": "cdf34a0c51a8c7c95c838eeec8c86bcd742ee185612315a7a3ff888cc760c4ab",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-015.webp",
+        "firstFrame": 90,
+        "frameCount": 6,
+        "bytes": 1418636,
+        "sha256": "c21efb7e88841f75c1f2bc1ee1d334118eb78224fccb4afbcb8bba4a0538cc27",
+        "rgbaSha256": "62829582ebd27039c0ad5ddfacad241e129a80fe7ff458ecb6b50dabb459186c",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-016.webp",
+        "firstFrame": 96,
+        "frameCount": 6,
+        "bytes": 1812702,
+        "sha256": "827d7f04e9cc0cadfcb125372e5422330f0c40d6c024f843111a2b093238872c",
+        "rgbaSha256": "30133d96c4693b36a33a806b474f83eb91175818ef1c9007ceb5430f6159f1ef",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-017.webp",
+        "firstFrame": 102,
+        "frameCount": 6,
+        "bytes": 1827946,
+        "sha256": "41150370f377d3b28430420c9feb8dca93286c3e841acb40292901599e23e220",
+        "rgbaSha256": "ab4f5c79e17a60883807a438e2e4f64a612d741f8f2a4a0c6118729d87a0e079",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-018.webp",
+        "firstFrame": 108,
+        "frameCount": 6,
+        "bytes": 1890034,
+        "sha256": "884a3858b80b8b0d5ed8041d1922280792040f8c5313bc42dc648c0db8d6e7b1",
+        "rgbaSha256": "1d993f5a9f08bf4e8b377b700d027955cc67f4321e6df34928fbc63f2bb93c36",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-019.webp",
+        "firstFrame": 114,
+        "frameCount": 6,
+        "bytes": 1905612,
+        "sha256": "ad678bf15b092f7450dd539f6ce2fc529e45b2acc1bf6b6b7792522c64869ff6",
+        "rgbaSha256": "552fb6089cbf7f802b6a476996be02861115c14a7efa534d15ba3741e49ba61d",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-020.webp",
+        "firstFrame": 120,
+        "frameCount": 6,
+        "bytes": 1875488,
+        "sha256": "ff2ae706dbdd62ba2dfe3988bfd011fb00f4c233e7879d7a834c69db728b57c6",
+        "rgbaSha256": "599f54682c64f003d50bcab7ee1947dc4c05e3d9f430d9ac03754e166e4a5898",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-021.webp",
+        "firstFrame": 126,
+        "frameCount": 6,
+        "bytes": 1899536,
+        "sha256": "2a2e587feb11aeb7a00a5227bffe24a3905270dbfbe03fd48368dc48d3c4870b",
+        "rgbaSha256": "852a267bcca67e45d31a4a1014cca7dc4ed1e2c63706adea02f111a64fd8a0c9",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-022.webp",
+        "firstFrame": 132,
+        "frameCount": 6,
+        "bytes": 1861110,
+        "sha256": "a65d13f9f03a4569269bc1aa5944a7e62d5754e16cbea2b58d85aa6babfcb444",
+        "rgbaSha256": "6fe9a5c029259c9475252c79ddad51d3b2e679f162ce613b103d487a003187f5",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-023.webp",
+        "firstFrame": 138,
+        "frameCount": 6,
+        "bytes": 1839690,
+        "sha256": "b922e343e572913888f39d7136e6ca5399d483816938776afe5cdd895107471f",
+        "rgbaSha256": "29ee2f204ce8983961df39c3ba11a1e6da910295a7f236589893385fea29b2cb",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-024.webp",
+        "firstFrame": 144,
+        "frameCount": 6,
+        "bytes": 1790012,
+        "sha256": "234da6fa72a03d8ee4a44b9aa4a2dfdbb82d3d2430a268617ef0064121d4138b",
+        "rgbaSha256": "6ad6bb665db8dab39e3c5d0780149278464887911d4c883fa50a881caa239dbf",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-025.webp",
+        "firstFrame": 150,
+        "frameCount": 6,
+        "bytes": 1752648,
+        "sha256": "263b6baab11ef1b11609a69b40536f9c56c7dc8de277ae9c11ccf91a7c90454a",
+        "rgbaSha256": "f0e589f0b11cef52d2825182b8c05cb5dd191f6518301216948a526133909042",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-026.webp",
+        "firstFrame": 156,
+        "frameCount": 6,
+        "bytes": 1816360,
+        "sha256": "cee7cc2c42c5f027834cab7306f929c2682b37789ccd19ce46f8121201b93425",
+        "rgbaSha256": "a3ad7616f109e02eed1a1439ef49002d99fdbebb0b4538d8d0464f4cb8c454db",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      },
+      {
+        "file": "frames/hover-027.webp",
+        "firstFrame": 162,
+        "frameCount": 4,
+        "bytes": 1027800,
+        "sha256": "2dd67ce44fd99f3bc1c122bab66b69c9e846d6849d7e993dcf75855a90136821",
+        "rgbaSha256": "bd1e55fc17fbabd9fb5461dbe1552cbf073e03196b79507482139a36d6d67fe9",
+        "decodedRgbaPixelEquality": true,
+        "unusedCellsTransparent": true
+      }
+    ]
+  }
+}

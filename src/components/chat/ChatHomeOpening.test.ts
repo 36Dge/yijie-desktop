@@ -35,10 +35,13 @@ describe("home opening playback",()=>{
   it("finishes at 2.2 seconds with no idle animation frames",async()=>{
     const wrapper=await setup();
     expect(wrapper.attributes("data-animating")).toBe("true");
+    expect(wrapper.emitted("started")).toHaveLength(1);
+    expect(wrapper.emitted("settled")).toBeUndefined();
     await advance(1200);
     expect(wrapper.findAll(".home-opening__plane")).toHaveLength(3);
     await advance(1000);
     expect(wrapper.attributes("data-animating")).toBe("false");
+    expect(wrapper.emitted("settled")).toHaveLength(1);
     expect(wrapper.get("h1").text()).toBe("易界AI");
     expect(wrapper.text()).toContain("让跨境经营更高效，让全球生意更进一步。");
     expect(frames.size).toBe(0);

@@ -41,6 +41,7 @@ import { useChatShopPreview } from "../../composables/useChatShopPreview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
 import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
+import ChatHomeMascot from "../../components/chat/ChatHomeMascot.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
@@ -248,6 +249,7 @@ const workspacePicker = useChatWorkspaces({
 });
 const composer = ref<ChatComposerHandle | null>(null);
 const homeOpening = ref<InstanceType<typeof ChatHomeOpening> | null>(null);
+const homeOpeningDone = ref(false);
 watch([() => route.query.focus, () => composer.value], async ([focus]) => {
   if (focus !== "composer" || !composer.value) return;
   await nextTick();
@@ -934,7 +936,7 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="!isSessionRoute" class="chat-entry" aria-labelledby="new-task-title" @focusin="handleEntryFocus" @pointerdown="homeOpening?.finish()">
     <div class="chat-entry__content">
-      <ChatHomeOpening ref="homeOpening" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" />
+      <ChatHomeOpening ref="homeOpening" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" @started="homeOpeningDone = false" @settled="homeOpeningDone = true" />
 
       <div v-if="stableError" class="chat-notice" :class="`chat-notice--${stableError.tone}`" role="alert">
         <YjIcon :name="stableError.tone === 'error' ? 'warning' : 'pending'" size="lg" :tone="stableError.tone === 'error' ? 'error' : 'warning'" />
@@ -986,6 +988,9 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
+        <template v-if="!isDraftMode" #home-decoration>
+          <ChatHomeMascot :ready="homeOpeningDone" :skip-animation="prompt.length > 0 || chatStore.draftAttachments.length > 0 || submitting || dragActive || Boolean(stableError)" />
+        </template>
         <template v-if="!isDraftMode" #workspace-control>
           <ChatWorkspaceControl
             :entries="workspacePicker.entries.value" :selected-project-id="availableProjectId"

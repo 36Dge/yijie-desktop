@@ -66,6 +66,7 @@ const emit = defineEmits<{
 }>();
 
 defineSlots<{
+  "home-decoration"(): unknown;
   "shop-control"(): unknown;
   "expert-control"(): unknown;
   "connector-control"(props: { close: () => void }): unknown;
@@ -355,7 +356,8 @@ function handlePaste(event: ClipboardEvent): void {
       </button>
     </div>
 
-    <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly && mode === 'new' }">
+    <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly && mode === 'new', 'chat-composer__surface--decorated': !textOnly && mode === 'new' && !!$slots['home-decoration'] }">
+      <slot v-if="!textOnly && mode === 'new'" name="home-decoration" />
       <div
         class="chat-composer__field"
         :class="{ 'chat-composer__field--drag-active': dragActive && !attachmentButtonDisabled }"
@@ -776,6 +778,12 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__readiness + .chat-composer__surface { margin-top: var(--yj-space-2); }
+
+.chat-composer .chat-composer__surface--decorated {
+  position: relative;
+  container: home-composer / inline-size;
+  margin-top: var(--yj-home-mascot-clearance);
+}
 
 .chat-composer__field--drag-active {
   border-color: var(--yj-color-text-primary);
