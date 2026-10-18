@@ -174,6 +174,8 @@ fi
 # FEAT-157 belongs to the normal daily client. Keep stable, legacy-model and
 # isolated qualification profiles opt-in, and preserve an explicit false rollback.
 # It selects the Native-owned market Host/worker path; it is not an execution grant.
+export YIJIE_ARTIFACT_MEDIA_ENABLED="${YIJIE_ARTIFACT_MEDIA_ENABLED:-$chat_models_enabled}"
+[[ "$YIJIE_ARTIFACT_MEDIA_ENABLED" == "true" || "$YIJIE_ARTIFACT_MEDIA_ENABLED" == "false" ]] || fail "invalid artifact media profile"
 market_connectors_default="false"
 if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" ]]; then
   market_connectors_default="true"
@@ -301,6 +303,10 @@ if [[ "$reopen_app" == "false" ]]; then
     cd "$host_root"
     go build -trimpath -o "$host_binary" ./cmd/desktop-host
   )
+fi
+
+if [[ "${YIJIE_ARTIFACT_MEDIA_ENABLED:-false}" == "true" ]]; then
+  bash "$host_root/scripts/build-artifact-adapter.sh" "$(dirname "$host_binary")"
 fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then

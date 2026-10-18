@@ -181,6 +181,15 @@ pub fn run() {
         .manage(ArtifactNativeRuntime::new())
         .manage(ArtifactReportNativeRuntime::new())
         .manage(ArtifactVideoNativeRuntime::new());
+    #[cfg(all(target_os = "macos", not(feature = "feat126-s10-driver")))]
+    let builder = builder
+        .menu(chat::exit_owner::menu)
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == chat::exit_owner::QUIT_MENU_ID {
+                app.state::<chat::exit_owner::ExitOwner>()
+                    .request(app.clone());
+            }
+        });
     #[cfg(not(feature = "feat126-s10-driver"))]
     let builder = builder.manage(workflows::WorkflowRuntime::new(
         local_profile,
@@ -463,6 +472,8 @@ pub fn run() {
         chat::artifact_video_native::chat_save_artifact_video_v1,
         chat::artifact_file_native::chat_read_artifact_file_preview_v1,
         chat::artifact_file_native::chat_save_artifact_file_v1,
+        chat::artifact_media::chat_open_artifact_html_preview_v1,
+        chat::artifact_media::chat_close_artifact_html_preview_v1,
         chat::artifact_report_native::chat_read_artifact_report_preview_v1,
         chat::artifact_report_native::chat_save_artifact_report_v1,
         chat::ipc::chat_load_reasoning_v1,

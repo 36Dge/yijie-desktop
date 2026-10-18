@@ -911,7 +911,7 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=8) {
+        if !matches!(schema_version, 2..=9) {
             return Err(protocol_error());
         }
         let path = format!("/v{schema_version}/agent-sessions/{session_id}/events");
@@ -968,7 +968,16 @@ impl HostBridge {
         session_id: Uuid,
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
-        self.open_event_stream(session_id, cursor, 3).await
+        self.open_event_stream(
+            session_id,
+            cursor,
+            if super::artifact_media::enabled() {
+                9
+            } else {
+                3
+            },
+        )
+        .await
     }
 
     pub async fn open_event_stream_v4(

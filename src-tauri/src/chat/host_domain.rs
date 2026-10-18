@@ -1172,11 +1172,11 @@ fn parse_event_json(
         }
         return Ok(HostStreamEvent::Native(Box::new(event)));
     }
-    if schema_version >= 5 {
+    if (5..=6).contains(&schema_version) {
         validate_v5_explicit_nulls(&raw)?;
     }
     let wire: WireEvent = serde_json::from_value(raw).map_err(|_| protocol_error())?;
-    if !matches!(schema_version, 2..=6)
+    if !matches!(schema_version, 2..=6 | 9)
         || wire.schema_version != schema_version
         || wire.sequence == 0
         || wire.occurred_at.len() > 64
@@ -1259,7 +1259,7 @@ fn parse_event_json(
             payload: wire.payload,
         }));
     }
-    if schema_version == 3 && !is_v3_ordinary_event_type(&event_type) {
+    if matches!(schema_version, 3 | 9) && !is_v3_ordinary_event_type(&event_type) {
         return Err(protocol_error());
     }
     if schema_version == 4 && !is_v4_ordinary_event_type(&event_type) {
@@ -1281,7 +1281,11 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let kind = parse_event_kind(
-        schema_version,
+        if schema_version == 9 {
+            3
+        } else {
+            schema_version
+        },
         &event_type,
         wire.terminal,
         turn_id,

@@ -11,6 +11,7 @@ import type {
   ArtifactFilePreviewResult,
 } from "../../domain/chat-artifact-file-native";
 import type { ArtifactProjection } from "../../domain/chat-artifact";
+import { openArtifactHTML, closeArtifactHTML } from "../../api/chat-artifact-html-native-client";
 import YjIcon from "../yijie/YjIcon.vue";
 
 type PreviewPhase = "idle" | "loading" | "previewed" | "error";
@@ -31,6 +32,7 @@ const props = defineProps<{
 
 const INLINE_MEDIA_TYPES = new Set(["text/plain", "text/csv", "application/json"]);
 const SAVE_MEDIA_TYPES = new Set([
+  "text/html",
   "text/plain",
   "text/csv",
   "application/json",
@@ -60,6 +62,7 @@ const canPreview = computed(() => eligible.value && props.artifact.mediaType !==
   INLINE_MEDIA_TYPES.has(props.artifact.mediaType));
 const canSave = computed(() => eligible.value && props.artifact.mediaType !== null &&
   SAVE_MEDIA_TYPES.has(props.artifact.mediaType));
+const htmlPreview = computed(() => eligible.value && props.artifact.mediaType === "text/html");
 const saveOnly = computed(() => eligible.value && canSave.value && !canPreview.value);
 const previewTitleId = computed(() => `artifact-file-${props.artifact.artifactId}-preview-title`);
 
@@ -76,6 +79,7 @@ let identityEpoch = 0;
 let previewRequest = 0;
 let saveRequest = 0;
 let disposed = false;
+let htmlIdentity: { contextId: string; identity: ArtifactFileNativeIdentity } | null = null;
 
 const busy = computed(() => phase.value === "loading");
 const textProjection = computed(() => projection.value?.mediaType === "text/plain" ||
@@ -165,6 +169,34 @@ function csvCellSegments(rowIndex: number, cellIndex: number, value: string): re
     : [{ text: value, hit: false }];
 }
 
+async function openHTML(): Promise<void> {
+  if (busy.value || !htmlPreview.value) return;
+  const contextId = props.contextId;
+  const id = identity.value;
+  const epoch = identityEpoch;
+  phase.value = "loading";
+  previewError.value = null;
+  try {
+    await openArtifactHTML(contextId, id);
+    if (disposed || epoch !== identityEpoch) {
+      await closeArtifactHTML(contextId, id);
+      return;
+    }
+    htmlIdentity = { contextId, identity: id };
+    phase.value = "idle";
+  } catch {
+    if (disposed || epoch !== identityEpoch) return;
+    phase.value = "error";
+    previewError.value = { message: "HTML 预览暂时不可用，请重试。", retryable: true };
+  }
+}
+
+function releaseHTML(): void {
+  const previous = htmlIdentity;
+  htmlIdentity = null;
+  if (previous) void closeArtifactHTML(previous.contextId, previous.identity).catch(() => {});
+}
+
 function clearAuthorizedContent(): void {
   projection.value = null;
   searchQuery.value = "";
@@ -196,6 +228,7 @@ async function openPreview(): Promise<void> {
 }
 
 async function retryPreview(): Promise<void> {
+  if (htmlPreview.value) { await openHTML(); return; }
   if (!previewError.value?.retryable || busy.value) return;
   phase.value = "idle";
   await openPreview();
@@ -251,6 +284,7 @@ async function saveFile(): Promise<void> {
 }
 
 function replaceIdentity(): void {
+  releaseHTML();
   ++identityEpoch;
   ++previewRequest;
   ++saveRequest;
@@ -265,6 +299,7 @@ function replaceIdentity(): void {
 watch(identityKey, replaceIdentity);
 
 onBeforeUnmount(() => {
+  releaseHTML();
   disposed = true;
   ++identityEpoch;
   ++previewRequest;
@@ -281,7 +316,9 @@ onBeforeUnmount(() => {
     aria-label="文件预览与保存"
     :aria-busy="busy ? 'true' : 'false'"
   >
+    <p v-if="htmlPreview" class="artifact-file__fallback">支持自包含 HTML；外链资源不会加载。</p>
     <div class="artifact-file__actions">
+      <button v-if="htmlPreview" class="yj-control" type="button" :disabled="busy" @click="openHTML">{{busy ? "正在打开…" : "预览 HTML"}}</button>
       <button class="yj-control"
         v-if="canPreview"
         ref="previewTrigger"
@@ -294,10 +331,10 @@ onBeforeUnmount(() => {
         <YjIcon name="file" size="sm" />
         {{ busy ? "预览中" : "预览文件" }}
       </button>
-      <span v-else-if="saveOnly" class="artifact-file__fallback" role="note">
+      <span v-else-if="saveOnly && !htmlPreview" class="artifact-file__fallback" role="note">
         当前格式不支持应用内预览，可使用原生保存。
       </span>
-      <span v-else class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
+      <span v-else-if="!htmlPreview" class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
 
       <button class="yj-control"
         v-if="canSave"

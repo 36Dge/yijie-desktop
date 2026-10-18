@@ -1863,3 +1863,7 @@ pub(crate) mod turn_timing_generated;
 
 pub(crate) mod models;
 pub(crate) mod models_generated;
+
+pub mod artifact_media;
+#[allow(dead_code)] // Shared generated tool DTOs are consumed by the Host adapter.
+mod artifact_media_generated;

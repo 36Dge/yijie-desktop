@@ -805,6 +805,7 @@ fn canonical_extension(media_type: &str) -> Option<&'static str> {
         "image/png" => Some("png"),
         "image/jpeg" => Some("jpg"),
         "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
         _ => None,
     }
 }
@@ -1137,6 +1138,10 @@ fn protocol_success(content: ReadyImageContent) -> http::Response<Vec<u8>> {
     http::Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content.media_type)
+        .header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        )
         .header(header::CONTENT_LENGTH, content.size_bytes.to_string())
         .header(header::CACHE_CONTROL, "no-store")
         .header("X-Content-Type-Options", "nosniff")

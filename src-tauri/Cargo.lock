@@ -5820,6 +5820,7 @@ dependencies = [
  "url",
  "uuid",
  "webbrowser",
+ "wry",
  "zeroize",
  "zip",
 ]

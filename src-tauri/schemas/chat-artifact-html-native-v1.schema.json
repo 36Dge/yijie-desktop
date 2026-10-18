@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-artifact-html-native-v1.schema.json",
+  "title": "Identity-only isolated HTML preview",
+  "x-command-names": [
+    "chat_open_artifact_html_preview_v1",
+    "chat_close_artifact_html_preview_v1"
+  ],
+  "x-request-source": "chat-artifact-file-native-v1.schema.json identityRequest (unchanged, same native decoder)",
+  "x-resource-authority": "existing context/session/turn/artifact and verified SQLCipher content; no paths or bytes in IPC",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "requestId",
+    "data"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "opened"
+        }
+      }
+    }
+  }
+}

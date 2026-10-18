@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 35] = [
+const CATALOG: [CatalogEntry; 36] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -207,6 +207,11 @@ const CATALOG: [CatalogEntry; 35] = [
         name: "0035_expert_resource_operations",
         sql: include_str!("../../migrations/chat/0035_expert_resource_operations.sql"),
     },
+    CatalogEntry {
+        version: 36,
+        name: "0036_artifact_media",
+        sql: include_str!("../../migrations/chat/0036_artifact_media.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -232,6 +237,7 @@ pub const MARKET_DISPATCH_SCHEMA_VERSION: i64 = 32;
 pub const MARKET_PROVIDER_SCHEMA_VERSION: i64 = 33;
 pub const CONVERSATION_EXPERTS_SCHEMA_VERSION: i64 = 34;
 pub const EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION: i64 = 35;
+pub const ARTIFACT_MEDIA_SCHEMA_VERSION: i64 = 36;
 
 pub fn validate_embedded_migrations() -> Result<(), ChatError> {
     migrations()
@@ -274,6 +280,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         MARKET_PROVIDER_SCHEMA_VERSION,
         CONVERSATION_EXPERTS_SCHEMA_VERSION,
         EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION,
+        ARTIFACT_MEDIA_SCHEMA_VERSION,
     ]
     .contains(&target)
     {

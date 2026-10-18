@@ -5,6 +5,14 @@ import { validateNativeHistory, validateNativeViewEvent } from "../api/generated
 const legacy: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"failed",terminalStatus:"failed"}],items:[{threadId:"local-session",turnId:"local-turn",itemId:"old-display",ordinal:0,kind:"assistant_message",status:"completed",contentBlocks:[{type:"text",blockIndex:0,text:"old archive"}]}]};
 const native: NativeConversationView = {sessionId:"local-session",turnId:"local-turn",runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"2",availability:"partial",status:"failed",terminalObserved:true,items:[{item:{id:"native-a",type:"agentMessage",phase:"final_answer",text:"original final",availability:"available"},ordinal:0,lastMethod:"item/completed"},{item:{id:"native-r",type:"reasoning",content:["unfinished"],availability:"available"},ordinal:1,lastMethod:"item/started"}]};
 describe("FEAT-132 readonly native view",()=>{
+ it("shows independent Artifact references before the history turn arrives",()=>{
+  const ref={threadId:"local-session",turnId:"local-turn",itemId:"artifact-record",ordinal:1000,kind:"artifact" as const,status:"completed" as const,contentBlocks:[{type:"artifact_reference" as const,blockIndex:0,artifactId:"artifact-1",label:"preview.html"}]};
+  const empty={...legacy,turns:[],items:[]};
+  const view=composeConversationView(empty,[native],[],[],[ref]);
+  expect(Object.values(view.items).map(item=>item.itemId)).toEqual(["native-a","native-r","artifact-record"]);
+  expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({status:"failed",terminalStatus:"failed"});
+ });
+
  it("shows an unsupported saved format without inventing a native view or changing execution facts",()=>{
    const view=composeConversationView(legacy,[native],[],[{sessionId:"local-session",turnId:"local-turn",formatVersion:3,code:"format_unsupported"}]);
    expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({source:"native_observed",status:"failed",terminalStatus:"failed",availability:"unavailable",diagnostic:"native_format_unsupported"});

@@ -17,12 +17,12 @@ export function chatModelBuildCandidateSelection(environment=process.env){
  assert([undefined,'','false','true'].includes(environment.YIJIE_EXPERTS_ENABLED),'Invalid expert candidate selection');
  if(environment.YIJIE_EXPERTS_ENABLED==='true'){
   assert(environment.YIJIE_MARKET_CONNECTORS_ENABLED==='true'&&environment.YIJIE_RUNTIME_PERMISSIONS_ENABLED==='true','Expert candidate requires the existing model, permission and market families');
-  return {feature:'FEAT-158',file:'experts-host-build.candidate.json'};
+  return environment.YIJIE_ARTIFACT_MEDIA_ENABLED==='true' ? {feature:'FEAT-159',file:'artifact-media-host-build.candidate.json'} : {feature:'FEAT-158',file:'experts-host-build.candidate.json'};
  }
- return {feature:'FEAT-156',file:'chat-model-host-build.candidate.json'};
+ return environment.YIJIE_ARTIFACT_MEDIA_ENABLED==='true' ? {feature:'FEAT-159',file:'artifact-media-host-build.candidate.json'} : {feature:'FEAT-156',file:'chat-model-host-build.candidate.json'};
 }
-function snapshot(root){
- const files=[...new Set(git(root,'ls-files','-co','--exclude-standard','--',...inputs).split('\n'))].sort();
+function snapshot(root,media=false){
+ const files=[...new Set(git(root,'ls-files','-co','--exclude-standard','--',...inputs,...(media?['artifact-mcp/Cargo.toml','artifact-mcp/Cargo.lock','artifact-mcp/src','scripts/build-artifact-adapter.sh']:[])).split('\n'))].sort();
  return {base_commit:git(root,'rev-parse','HEAD'),repository:git(root,'remote','get-url','origin'),sources:Object.fromEntries(files.map(f=>{assert(!path.isAbsolute(f)&&!f.split('/').includes('..'));assert(lstatSync(path.join(root,f)).isFile());return [f,digest(readFileSync(path.join(root,f)))];}))};
 }
 function candidateContracts(desktopRoot,expert){
@@ -56,22 +56,31 @@ function verifyConsumers(desktopRoot,contractsRoot,expert){
  execFileSync(process.execPath,['scripts/sync-market-catalog.mjs','--check'],{cwd:desktopRoot,stdio:'pipe'});
  execFileSync(process.execPath,['scripts/sync-desktop-expert-resources.mjs','--check'],{cwd:desktopRoot,stdio:'pipe',env:{...process.env,YIJIE_ENV:'local',YIJIE_LOCAL_PROFILE:'demo_fast',YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot}});
 }
+
+function verifyArtifactMedia(desktopRoot,contractsRoot,record){
+ assert.equal(record.artifact_media,digest(readFileSync(path.join(desktopRoot,'contracts/artifact-media.candidate.json'))),'Artifact media pin drift');
+ for(const consumer of ['host','desktop'])execFileSync(process.execPath,['scripts/generate-artifact-media.mjs','--check',`--consumer=${consumer}`],{cwd:contractsRoot,stdio:'pipe'});
+}
+
 export function verifyChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot,environment=process.env){
- const selected=chatModelBuildCandidateSelection(environment),expert=selected.feature==='FEAT-158';
+ const selected=chatModelBuildCandidateSelection(environment),expert=environment.YIJIE_EXPERTS_ENABLED==='true',media=selected.feature==='FEAT-159';
  const actual=JSON.parse(readFileSync(path.join(desktopRoot,'contracts',selected.file)));
  assert.equal(actual.schema_version,1);assert.equal(actual.feature,selected.feature);assert.equal(actual.mode,'local_worktree_candidate');assert.equal(actual.release,false);
- if(JSON.stringify(actual.host)!==JSON.stringify(snapshot(hostRoot)))throw Error('Model Host source candidate drift; freeze a newly reviewed local snapshot before building.');
+ if(JSON.stringify(actual.host)!==JSON.stringify(snapshot(hostRoot,media)))throw Error('Model Host source candidate drift; freeze a newly reviewed local snapshot before building.');
  assert.deepEqual(actual.contracts,candidateContracts(desktopRoot,expert),'Candidate contract pin drift');
  if(expert)assert.deepEqual(actual.contracts_source_locks,expertAuthority(contractsRoot),'Expert source authority drift');
  verifyConsumers(desktopRoot,contractsRoot,expert);
+ if(media)verifyArtifactMedia(desktopRoot,contractsRoot,actual);
  return actual.host.sources;
 }
 export function freezeChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot,environment=process.env){
- const selected=chatModelBuildCandidateSelection(environment),expert=selected.feature==='FEAT-158';
+ const selected=chatModelBuildCandidateSelection(environment),expert=environment.YIJIE_EXPERTS_ENABLED==='true',media=selected.feature==='FEAT-159';
  // An explicit freeze records reviewed implementation bytes only after all
  // generated projections and resource evidence pass their existing checks.
  verifyConsumers(desktopRoot,contractsRoot,expert);
- const record={schema_version:1,feature:selected.feature,mode:'local_worktree_candidate',release:false,host:snapshot(hostRoot),contracts:candidateContracts(desktopRoot,expert)};
+ const record={schema_version:1,feature:selected.feature,mode:'local_worktree_candidate',release:false,host:snapshot(hostRoot,media),contracts:candidateContracts(desktopRoot,expert)};
+ if(media)record.artifact_media=digest(readFileSync(path.join(desktopRoot,'contracts/artifact-media.candidate.json')));
+ if(media)verifyArtifactMedia(desktopRoot,contractsRoot,record);
  if(expert)record.contracts_source_locks=expertAuthority(contractsRoot);
  writeFileSync(path.join(desktopRoot,'contracts',selected.file),JSON.stringify(record,null,2)+'\n');
  return selected;

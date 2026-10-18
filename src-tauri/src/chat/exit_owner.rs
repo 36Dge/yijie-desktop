@@ -5,6 +5,41 @@ use std::sync::{
     Mutex,
 };
 use tauri::Manager;
+
+pub(crate) const QUIT_MENU_ID: &str = "yijie-normal-quit";
+
+#[cfg(target_os = "macos")]
+pub(crate) fn menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    let menu = Menu::default(app)?;
+    let quit_text = PredefinedMenuItem::quit(app, None)?.text()?;
+    // The macOS predefined Quit calls NSApplication terminate: directly. Keep
+    // the standard menu, replacing only that action with our existing owner.
+    for item in menu.items()? {
+        if let MenuItemKind::Submenu(submenu) = item {
+            for (position, item) in submenu.items()?.into_iter().enumerate() {
+                if let MenuItemKind::Predefined(item) = item {
+                    if item.text()? == quit_text {
+                        submenu.remove(&item)?;
+                        submenu.insert(
+                            &MenuItem::with_id(
+                                app,
+                                QUIT_MENU_ID,
+                                &quit_text,
+                                true,
+                                Some("CmdOrCtrl+Q"),
+                            )?,
+                            position,
+                        )?;
+                        return Ok(menu);
+                    }
+                }
+            }
+        }
+    }
+    Err(std::io::Error::other("normal quit menu unavailable").into())
+}
+
 #[derive(Default)]
 pub(crate) struct ExitOwner {
     started: AtomicBool,

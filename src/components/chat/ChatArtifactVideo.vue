@@ -63,7 +63,7 @@ const busy = computed(() => phase.value === "opening" || phase.value === "loadin
 const stateMessage = computed(() => {
   if (phase.value === "opening") return "正在准备安全视频预览…";
   if (phase.value === "loading") return "正在读取视频信息…";
-  if (phase.value === "ready") return "视频可以播放。";
+  if (phase.value === "ready") return "使用播放器控件播放视频。";
   return "";
 });
 
@@ -185,7 +185,7 @@ async function retryVideo(): Promise<void> {
 }
 
 async function saveVideo(): Promise<void> {
-  if (!eligible.value || phase.value !== "ready" || saving.value) return;
+  if (!eligible.value || saving.value) return;
   const request = ++saveRequest;
   const epoch = identityEpoch;
   const issuingClient = client.value;
@@ -300,7 +300,7 @@ onBeforeUnmount(() => {
       <button class="yj-control"
         data-testid="artifact-video-save"
         type="button"
-        :disabled="saving || phase !== 'ready'"
+        :disabled="saving || !eligible"
         aria-label="保存视频"
         title="保存视频"
         @click="saveVideo"

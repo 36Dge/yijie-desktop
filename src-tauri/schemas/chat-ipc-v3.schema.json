@@ -61,9 +61,10 @@
         "payload": { "$ref": "#/$defs/sessionReadPayload" }
       }
     },
-    "imageMediaType": { "enum": ["image/png", "image/jpeg", "image/webp"] },
+    "imageMediaType": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] },
     "fileMediaType": {
       "enum": [
+        "text/html",
         "text/plain",
         "text/csv",
         "application/json",

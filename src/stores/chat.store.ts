@@ -7,7 +7,7 @@ import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
 import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
 import {conversationMessageItemId} from "../api/chat-conversation-adapter";
-import {selectConversationItem} from "../domain/conversation-view";
+import {selectConversationItem, type ConversationItemSnapshot} from "../domain/conversation-view";
 import type {LocalSubmissionView} from "../api/generated/native-conversation-history.gen";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
@@ -387,6 +387,7 @@ export function createChatStoreDefinition(
     const selectedSessionPurpose = shallowRef<SessionPurpose | null>(null);
     const selectedAccessMode = ref<ChatSelectedAccessMode | null>(null);
     const history = shallowRef<ChatHistoryAuthority | null>(null);
+    const artifactReferenceItems = shallowRef<readonly ConversationItemSnapshot[]>([]);
     const localSubmissions = shallowRef<Readonly<Record<string, LocalSubmissionView>>>({});
     // Transport observation only; history loading never marks a Turn live.
     const nativeLiveTurnId = ref<string | null>(null);
@@ -708,6 +709,7 @@ export function createChatStoreDefinition(
       history.value = null;
       conversationState.value = emptyConversationView();
       nativeViews.value = {};
+      artifactReferenceItems.value = [];
       nativeRecordDiagnostics.value = {};
       nativeLiveTurnId.value = null;
       localSubmissions.value = {};
@@ -1750,7 +1752,7 @@ export function createChatStoreDefinition(
     function displayNativeViews(): void {
       const sessionId = selectedSessionId.value;
       if (!sessionId || !history.value) return;
-      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
+      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value);
       const latest = Object.values(nativeViews.value).sort((a,b) => (b.ordinal ?? 0) - (a.ordinal ?? 0))[0];
       if (!latest) return;
       syncLiveProjection(liveProjection(conversationState.value, sessionId, latest.turnId));
@@ -1901,7 +1903,12 @@ export function createChatStoreDefinition(
             selectedSessionId.value !== sessionId ||
             subscriptionId !== activeSubscription
           ) return;
-          if (!artifactIntegration.store.ingestHistoryV3(token, page)) requestResync();
+          if (!artifactIntegration.store.ingestHistoryV3(token, page)) { requestResync(); return; }
+          // Product references can arrive before the native turn is in the history page.
+          // Merge only these IDs; never merge text or infer a native execution result.
+          const references = conversationSnapshotFromHistory(sessionId, page).items.filter(item => item.kind === "artifact");
+          artifactReferenceItems.value = [...new Map([...artifactReferenceItems.value, ...references].map(item => [item.itemId, item])).values()];
+          displayNativeViews();
         } catch {
           if (
             context.value?.contextId === bound.contextId &&
@@ -2291,7 +2298,7 @@ export function createChatStoreDefinition(
 
       await loadNativeViews(bound.contextId,sessionId,epoch,controller,page.turns.map(t => t.turnId));
       if (!isCurrent(epoch,controller,sessionId)) return "superseded";
-      const nextConversation = composeConversationView(historyPageV6ToConversationSnapshot(sessionId,page),Object.values(nativeViews.value),Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
+      const nextConversation = composeConversationView(historyPageV6ToConversationSnapshot(sessionId,page),Object.values(nativeViews.value),Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value);
       if (nextConversation.syncStatus === "recovery_required") {
         throw approvalProtocolError();
       }
@@ -2747,7 +2754,7 @@ export function createChatStoreDefinition(
         projection.session.sessionId,
         authoritativeHistory,
       );
-      const nextConversation = composeConversationView(snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value));
+      const nextConversation = composeConversationView(snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value);
       let nextApproval = streamingV6Enabled
         ? createConversationApprovalState()
         : conversationApprovalState.value;

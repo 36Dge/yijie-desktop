@@ -120,7 +120,7 @@ describe("ChatArtifactVideo", () => {
 
     await video.trigger("loadedmetadata");
     expect(wrapper.get(".artifact-video").attributes("aria-busy")).toBe("false");
-    expect(wrapper.get("[data-testid='artifact-video-state']").text()).toContain("可以播放");
+    expect(wrapper.get("[data-testid='artifact-video-state']").text()).toContain("使用播放器控件播放视频");
     expect(wrapper.html()).not.toMatch(/(?:base64|sha256|digest|hostHref|file:\/\/|\/Users\/|bearer|token)/i);
     wrapper.unmount();
   });

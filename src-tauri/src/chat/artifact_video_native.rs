@@ -27,6 +27,7 @@ const ABSOLUTE_TTL_SECONDS: i64 = 30 * 60;
 const IDLE_TTL_SECONDS: i64 = 5 * 60;
 const MAX_HANDLES_PER_WEBVIEW: usize = 2;
 const MAX_CONCURRENT_REQUESTS: usize = 2;
+const MAX_PENDING_REQUESTS: usize = 16;
 const MAX_INFLIGHT_BYTES: usize = 64 * 1024 * 1024;
 const NATIVE_IO_TIMEOUT_SECONDS: u64 = 10;
 
@@ -302,6 +303,9 @@ pub struct ArtifactVideoNativeRuntime {
     process_epoch: Uuid,
     registry: Mutex<VideoPreviewRegistry>,
     reads: Mutex<VideoReadLimits>,
+    pending_reads: tokio::sync::Semaphore,
+    read_slots: tokio::sync::Semaphore,
+    read_bytes: tokio::sync::Semaphore,
     active_saves: Mutex<HashSet<ReadyVideoIdentity>>,
     #[cfg(feature = "feat128-s7b-runtime")]
     diagnostics: Mutex<VideoProtocolDiagnostics>,
@@ -366,6 +370,9 @@ impl ArtifactVideoNativeRuntime {
             process_epoch,
             registry: Mutex::new(VideoPreviewRegistry::new(process_epoch)),
             reads: Mutex::new(VideoReadLimits::default()),
+            pending_reads: tokio::sync::Semaphore::new(MAX_PENDING_REQUESTS),
+            read_slots: tokio::sync::Semaphore::new(MAX_CONCURRENT_REQUESTS),
+            read_bytes: tokio::sync::Semaphore::new(MAX_INFLIGHT_BYTES),
             active_saves: Mutex::new(HashSet::new()),
             #[cfg(feature = "feat128-s7b-runtime")]
             diagnostics: Mutex::new(VideoProtocolDiagnostics::default()),
@@ -1258,6 +1265,22 @@ pub fn handle_video_protocol(
     };
     tauri::async_runtime::spawn(async move {
         let runtime = app.state::<ArtifactVideoNativeRuntime>();
+        // WebKit may request audio, video and metadata concurrently. Queue normal
+        // bursts before reserving memory instead of revoking a valid preview.
+        // The queue, active reads, memory and wait duration all remain bounded.
+        let Ok(_pending) = runtime.pending_reads.try_acquire() else {
+            responder.respond(protocol_not_found());
+            return;
+        };
+        let Ok(Ok(_slot)) = tokio::time::timeout(
+            std::time::Duration::from_secs(NATIVE_IO_TIMEOUT_SECONDS),
+            runtime.read_slots.acquire(),
+        )
+        .await
+        else {
+            responder.respond(protocol_not_found());
+            return;
+        };
         let now = match unix_seconds() {
             Ok(now) => now,
             Err(_) => {
@@ -1314,6 +1337,16 @@ pub fn handle_video_protocol(
             binding.expectation.size
         } else {
             body_length
+        };
+        let Ok(Ok(_bytes)) = tokio::time::timeout(
+            std::time::Duration::from_secs(NATIVE_IO_TIMEOUT_SECONDS),
+            runtime.read_bytes.acquire_many(reservation_bytes as u32),
+        )
+        .await
+        else {
+            runtime.revoke(&protocol.handle);
+            responder.respond(protocol_not_found());
+            return;
         };
         let reservation = match runtime.reserve(reservation_bytes) {
             Ok(reservation) => reservation,
@@ -1513,7 +1546,6 @@ fn schedule_idle_expiry(app: &tauri::AppHandle) {
 #[derive(Clone, Copy, Debug)]
 struct Mp4BoxView {
     kind: [u8; 4],
-    start: usize,
     content_start: usize,
     end: usize,
 }
@@ -1563,7 +1595,6 @@ fn parse_boxes(bytes: &[u8], start: usize, end: usize) -> Result<Vec<Mp4BoxView>
         }
         boxes.push(Mp4BoxView {
             kind,
-            start: cursor,
             content_start: cursor + header,
             end: cursor + size,
         });
@@ -1581,203 +1612,54 @@ fn child<'a>(boxes: &'a [Mp4BoxView], kind: &[u8; 4]) -> Result<&'a Mp4BoxView, 
     Ok(value)
 }
 
+/// Bounded ISO container admission. WebKit owns codec/track decoding; the old
+/// fixture-specific single-track/sample-table parser is deliberately not a decoder.
 pub(crate) fn validate_mp4(bytes: &[u8]) -> Result<(), ()> {
     if !(32..=MAX_ARTIFACT_BYTES).contains(&bytes.len()) {
         return Err(());
     }
     let top = parse_boxes(bytes, 0, bytes.len())?;
-    if top.first().map(|item| item.kind) != Some(*b"ftyp") {
+    let ftyp = child(&top, b"ftyp")?;
+    if top.first().map(|b| b.kind) != Some(*b"ftyp") || ftyp.end - ftyp.content_start < 8 {
         return Err(());
     }
-    let ftyp = child(&top, b"ftyp")?;
-    if ftyp.end - ftyp.content_start < 8
-        || !bytes[ftyp.content_start..ftyp.end]
-            .chunks_exact(4)
-            .any(|brand| brand == b"avc1")
-    {
+    let brands = &bytes[ftyp.content_start..ftyp.end];
+    if !brands.chunks_exact(4).any(|b| {
+        matches!(
+            b,
+            b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"iso6"
+        )
+    }) {
         return Err(());
     }
     let moov = child(&top, b"moov")?;
-    let mdat = child(&top, b"mdat")?;
-    if moov.start >= mdat.start || mdat.content_start >= mdat.end {
-        return Err(());
-    }
-    let moov_children = parse_boxes(bytes, moov.content_start, moov.end)?;
-    let mvhd = child(&moov_children, b"mvhd")?;
-    validate_duration_box(bytes, mvhd)?;
-    let tracks = moov_children
+    if !top
         .iter()
-        .filter(|item| item.kind == *b"trak")
-        .collect::<Vec<_>>();
-    if tracks.len() != 1 {
+        .any(|b| b.kind == *b"mdat" && b.end > b.content_start)
+    {
         return Err(());
     }
-    validate_video_track(bytes, tracks[0], mdat)
-}
-
-fn validate_duration_box(bytes: &[u8], value: &Mp4BoxView) -> Result<(), ()> {
-    let payload = &bytes[value.content_start..value.end];
-    let version = *payload.first().ok_or(())?;
-    let (timescale_offset, duration_offset, wide) = if version == 0 {
-        (12, 16, false)
-    } else if version == 1 {
-        (20, 24, true)
-    } else {
-        return Err(());
-    };
-    let timescale = u64::from(read_u32(payload, timescale_offset)?);
-    let duration = if wide {
-        read_u64(payload, duration_offset)?
-    } else {
-        u64::from(read_u32(payload, duration_offset)?)
-    };
-    if timescale == 0 || duration == 0 || duration > timescale.saturating_mul(24 * 60 * 60) {
-        return Err(());
-    }
-    Ok(())
-}
-
-fn validate_video_track(bytes: &[u8], trak: &Mp4BoxView, mdat: &Mp4BoxView) -> Result<(), ()> {
-    let trak_children = parse_boxes(bytes, trak.content_start, trak.end)?;
-    let tkhd = child(&trak_children, b"tkhd")?;
-    let tkhd_payload = &bytes[tkhd.content_start..tkhd.end];
-    if tkhd_payload.len() < 8 {
-        return Err(());
-    }
-    let width = read_u32(tkhd_payload, tkhd_payload.len() - 8)? >> 16;
-    let height = read_u32(tkhd_payload, tkhd_payload.len() - 4)? >> 16;
-    if width == 0 || height == 0 || width > 8192 || height > 8192 {
-        return Err(());
-    }
-    let mdia = child(&trak_children, b"mdia")?;
-    let mdia_children = parse_boxes(bytes, mdia.content_start, mdia.end)?;
-    let hdlr = child(&mdia_children, b"hdlr")?;
-    if bytes.get(hdlr.content_start + 8..hdlr.content_start + 12) != Some(b"vide") {
-        return Err(());
-    }
-    let minf = child(&mdia_children, b"minf")?;
-    let minf_children = parse_boxes(bytes, minf.content_start, minf.end)?;
-    let stbl = child(&minf_children, b"stbl")?;
-    validate_sample_table(bytes, stbl, mdat, width, height)
-}
-
-fn validate_sample_table(
-    bytes: &[u8],
-    stbl: &Mp4BoxView,
-    mdat: &Mp4BoxView,
-    width: u32,
-    height: u32,
-) -> Result<(), ()> {
-    let boxes = parse_boxes(bytes, stbl.content_start, stbl.end)?;
-    let stsd = child(&boxes, b"stsd")?;
-    let stts = child(&boxes, b"stts")?;
-    let stsc = child(&boxes, b"stsc")?;
-    let stsz = child(&boxes, b"stsz")?;
-    let stss = child(&boxes, b"stss")?;
-    let offsets = boxes
-        .iter()
-        .find(|item| matches!(&item.kind, b"stco" | b"co64"))
-        .ok_or(())?;
-    validate_stsd(bytes, stsd, width, height)?;
-    validate_table_count(bytes, stts, 8)?;
-    validate_table_count(bytes, stsc, 12)?;
-    let stsz_payload = &bytes[stsz.content_start..stsz.end];
-    if stsz_payload.len() < 12 {
-        return Err(());
-    }
-    let sample_size = usize::try_from(read_u32(stsz_payload, 4)?).map_err(|_| ())?;
-    let sample_count = usize::try_from(read_u32(stsz_payload, 8)?).map_err(|_| ())?;
-    if sample_count == 0 || sample_count > 100_000 {
-        return Err(());
-    }
-    let total_samples = if sample_size == 0 {
-        if stsz_payload.len() != 12 + sample_count.checked_mul(4).ok_or(())? {
+    let children = parse_boxes(bytes, moov.content_start, moov.end)?;
+    let mut video = false;
+    let mut tracks = 0;
+    for track in children.iter().filter(|b| b.kind == *b"trak") {
+        tracks += 1;
+        if tracks > 32 {
             return Err(());
         }
-        (0..sample_count).try_fold(0_usize, |total, index| {
-            let size = usize::try_from(read_u32(stsz_payload, 12 + index * 4)?).map_err(|_| ())?;
-            if size == 0 {
-                return Err(());
-            }
-            total.checked_add(size).ok_or(())
-        })?
-    } else {
-        sample_size.checked_mul(sample_count).ok_or(())?
-    };
-    if total_samples == 0 || total_samples > mdat.end - mdat.content_start {
-        return Err(());
-    }
-    let stss_payload = &bytes[stss.content_start..stss.end];
-    if stss_payload.len() < 12 || read_u32(stss_payload, 4)? == 0 || read_u32(stss_payload, 8)? != 1
-    {
-        return Err(());
-    }
-    validate_chunk_offsets(bytes, offsets, mdat)
-}
-
-fn validate_table_count(bytes: &[u8], value: &Mp4BoxView, entry_bytes: usize) -> Result<(), ()> {
-    let payload = &bytes[value.content_start..value.end];
-    if payload.len() < 8 {
-        return Err(());
-    }
-    let count = usize::try_from(read_u32(payload, 4)?).map_err(|_| ())?;
-    if count == 0
-        || count > 100_000
-        || payload.len() < 8 + count.checked_mul(entry_bytes).ok_or(())?
-    {
-        return Err(());
-    }
-    Ok(())
-}
-
-fn validate_stsd(bytes: &[u8], stsd: &Mp4BoxView, width: u32, height: u32) -> Result<(), ()> {
-    let payload = &bytes[stsd.content_start..stsd.end];
-    if payload.len() < 16 || read_u32(payload, 4)? != 1 {
-        return Err(());
-    }
-    let entries = parse_boxes(payload, 8, payload.len())?;
-    let avc1 = child(&entries, b"avc1")?;
-    let sample = &payload[avc1.content_start..avc1.end];
-    if sample.len() < 78
-        || u32::from(u16::from_be_bytes(
-            sample[24..26].try_into().map_err(|_| ())?,
-        )) != width
-        || u32::from(u16::from_be_bytes(
-            sample[26..28].try_into().map_err(|_| ())?,
-        )) != height
-    {
-        return Err(());
-    }
-    let children = parse_boxes(payload, avc1.content_start + 78, avc1.end)?;
-    let avcc = child(&children, b"avcC")?;
-    if avcc.end - avcc.content_start < 7 || payload[avcc.content_start] != 1 {
-        return Err(());
-    }
-    Ok(())
-}
-
-fn validate_chunk_offsets(bytes: &[u8], value: &Mp4BoxView, mdat: &Mp4BoxView) -> Result<(), ()> {
-    let payload = &bytes[value.content_start..value.end];
-    if payload.len() < 8 {
-        return Err(());
-    }
-    let count = usize::try_from(read_u32(payload, 4)?).map_err(|_| ())?;
-    let width = if value.kind == *b"stco" { 4 } else { 8 };
-    if count == 0 || count > 100_000 || payload.len() != 8 + count.checked_mul(width).ok_or(())? {
-        return Err(());
-    }
-    for index in 0..count {
-        let offset = if width == 4 {
-            u64::from(read_u32(payload, 8 + index * width)?)
-        } else {
-            read_u64(payload, 8 + index * width)?
-        };
-        let offset = usize::try_from(offset).map_err(|_| ())?;
-        if offset < mdat.content_start || offset >= mdat.end {
-            return Err(());
+        let track_children = parse_boxes(bytes, track.content_start, track.end)?;
+        let mdia = child(&track_children, b"mdia")?;
+        let media_children = parse_boxes(bytes, mdia.content_start, mdia.end)?;
+        let handler = child(&media_children, b"hdlr")?;
+        if bytes.get(handler.content_start + 8..handler.content_start + 12) == Some(b"vide") {
+            video = true
         }
     }
-    Ok(())
+    if video {
+        Ok(())
+    } else {
+        Err(())
+    }
 }
 
 #[cfg(test)]

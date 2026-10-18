@@ -1,4 +1,4 @@
-use super::attachment::validate_image_content;
+use super::artifact_media::validate_artifact_image as validate_image_content;
 use super::database::ChatRepository;
 use super::error::{map_sqlite_error, ChatError};
 use super::host_bridge::HostBridge;
@@ -169,6 +169,7 @@ pub(crate) struct ReadyFileContent {
     pub size_bytes: usize,
     pub sha256: [u8; 32],
     pub revision: i64,
+    pub expires_at: Option<i64>,
     pub bytes: Vec<u8>,
 }
 
@@ -790,7 +791,7 @@ pub fn decode_artifact_event_envelope_v3(
     local_session_id: Uuid,
     local_turn_id: Uuid,
 ) -> Result<ArtifactEventV3, ChatError> {
-    if !matches!(wire.schema_version, 3..=6)
+    if !matches!(wire.schema_version, 3..=6 | 9)
         || wire.event_id.is_nil()
         || wire.cursor.stream_id.is_nil()
         || wire.cursor.sequence == 0
@@ -895,7 +896,14 @@ pub fn decode_artifact_event_envelope_v3(
                 provenance: parse_wire_provenance(&payload.provenance)?,
                 ordinal: payload.ordinal,
                 display_name: payload.display_name,
-                media_type: payload.media_type,
+                media_type: {
+                    if wire.schema_version != 9
+                        && matches!(payload.media_type.as_str(), "text/html" | "image/svg+xml")
+                    {
+                        return Err(ChatError::InvalidInput);
+                    }
+                    payload.media_type
+                },
                 size_bytes: payload.size_bytes,
                 sha256: payload.sha256,
                 content_href: payload.content_href,
@@ -1818,6 +1826,7 @@ impl ChatRepository {
             Some("image/png") => "image/png",
             Some("image/jpeg") => "image/jpeg",
             Some("image/webp") => "image/webp",
+            Some("image/svg+xml") => "image/svg+xml",
             _ => return Ok(Err(ReadyImageReadError::Unsupported)),
         };
         let Some(size_bytes) = size_bytes.and_then(|value| usize::try_from(value).ok()) else {
@@ -2110,6 +2119,7 @@ impl ChatRepository {
             return Ok(Err(ReadyFileReadError::Unsupported));
         }
         let media_type = match media_type.as_deref() {
+            Some("text/html") => "text/html",
             Some("text/plain") => "text/plain",
             Some("text/csv") => "text/csv",
             Some("application/json") => "application/json",
@@ -2178,6 +2188,7 @@ impl ChatRepository {
             size_bytes,
             sha256: expected_sha256,
             revision,
+            expires_at,
             bytes,
         }))
     }
@@ -2615,7 +2626,7 @@ fn validate_kind_content(
                 && bytes[8..12].iter().all(u8::is_ascii)
         }
         ArtifactKind::File => match media_type {
-            "text/plain" | "text/csv" => std::str::from_utf8(bytes)
+            "text/html" | "text/plain" | "text/csv" => std::str::from_utf8(bytes)
                 .map(|text| !text.contains('\0'))
                 .unwrap_or(false),
             "application/json" => serde_json::from_slice::<Value>(bytes).is_ok(),
@@ -2974,19 +2985,7 @@ fn max_bytes(kind: ArtifactKind) -> usize {
 }
 
 fn media_type_matches(kind: ArtifactKind, value: &str) -> bool {
-    match kind {
-        ArtifactKind::Image => matches!(value, "image/png" | "image/jpeg" | "image/webp"),
-        ArtifactKind::Video => value == "video/mp4",
-        ArtifactKind::File => matches!(
-            value,
-            "text/plain"
-                | "text/csv"
-                | "application/json"
-                | "application/pdf"
-                | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        ArtifactKind::Report => value == "application/vnd.yijie.report+json;version=1",
-    }
+    super::artifact_media_generated::media_type_allowed(kind.as_str(), value)
 }
 
 fn valid_safe_name(value: &str) -> bool {
@@ -3134,6 +3133,144 @@ mod tests {
     use crate::chat::{ChatScope, DatabaseKey, ReceiptKey};
     use rusqlite::params;
     use std::fs;
+
+    #[test]
+    fn media_normal_commit_save_and_reopen() {
+        let root = std::env::temp_dir().join(format!("yijie-media-normal-{}", Uuid::now_v7()));
+        let owner = Uuid::now_v7();
+        let tenant = Uuid::now_v7();
+        let scope = ChatScope::new(owner.to_string(), tenant.to_string()).unwrap();
+        let key = DatabaseKey::from_bytes([0x61; 32]);
+        let receipt_key = ReceiptKey::from_bytes([0x62; 32]);
+        let project = Uuid::now_v7();
+        let session = Uuid::now_v7();
+        let turn = Uuid::now_v7();
+        let agent = Uuid::now_v7();
+        let mut repository =
+            ChatRepository::open(&root, &key, receipt_key.clone(), scope.clone()).unwrap();
+        repository.connection.execute("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES (?1,?2,?3,'normal',?4,?5,1)",params![project.to_string(),owner.to_string(),tenant.to_string(),"a".repeat(64),vec![1_u8]]).unwrap();
+        repository.connection.execute("INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at) VALUES (?1,?2,?3,?4,'normal','fallback','not_started',1,1)",params![session.to_string(),owner.to_string(),tenant.to_string(),project.to_string()]).unwrap();
+        repository.connection.execute("INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES (?1,?2,?3,'completed')",params![turn.to_string(),session.to_string(),Uuid::now_v7().to_string()]).unwrap();
+        let mut cases=vec![(ArtifactKind::File,"text/html","normal.html",b"<!doctype html><h1>Offline report</h1>".to_vec()),(ArtifactKind::Image,"image/svg+xml","normal.svg",br#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="60"><rect width="80" height="60" fill="teal"/></svg>"#.to_vec())];
+        cases.push((ArtifactKind::Image, "image/svg+xml", "prefixed.svg",
+            br#"<s:svg xmlns:s="http://www.w3.org/2000/svg" width="80" height="60"><s:rect width="80" height="60" fill="teal"/></s:svg>"#.to_vec()));
+        if let Ok(sample) = std::env::var("YIJIE_TEST_MEDIA_FILE") {
+            cases.push((
+                ArtifactKind::Video,
+                "video/mp4",
+                "normal.mp4",
+                fs::read(sample).unwrap(),
+            ));
+        }
+        let committed_at = unix_seconds().unwrap();
+        let mut records = Vec::new();
+        for (ordinal, (kind, mime, name, bytes)) in cases.into_iter().enumerate() {
+            let id = Uuid::now_v7();
+            let digest = format!("{:x}", Sha256::digest(&bytes));
+            let identity = ArtifactIdentity {
+                artifact_id: id,
+                local_session_id: session,
+                local_turn_id: turn,
+                kind,
+                provenance: ArtifactProvenance::Tool,
+                ordinal,
+                display_name: Some(name.into()),
+            };
+            let manifest = ArtifactManifest {
+                artifact_id: id,
+                agent_session_id: agent,
+                local_session_id: session,
+                local_turn_id: turn,
+                kind,
+                provenance: ArtifactProvenance::Tool,
+                ordinal,
+                display_name: Some(name.into()),
+                media_type: mime.into(),
+                size_bytes: bytes.len(),
+                sha256: digest.clone(),
+                content_href: format!("/v3/agent-sessions/{agent}/artifacts/{id}/content"),
+                poster_href: None,
+            };
+            repository.record_artifact_started(&identity).unwrap();
+            repository.begin_artifact_transfer(&manifest).unwrap();
+            repository
+                .commit_artifact(
+                    &manifest,
+                    &DownloadedArtifact {
+                        content: DownloadedResource {
+                            media_type: mime.into(),
+                            size_bytes: bytes.len(),
+                            sha256: digest,
+                            bytes: bytes.clone(),
+                        },
+                        poster: None,
+                    },
+                    committed_at,
+                    Uuid::now_v7(),
+                )
+                .unwrap();
+            let target = root.join(name);
+            super::super::artifact_native::atomic_save_content(
+                &target,
+                &bytes,
+                bytes.len(),
+                Sha256::digest(&bytes).into(),
+                Uuid::now_v7(),
+            )
+            .unwrap();
+            assert_eq!(fs::read(target).unwrap(), bytes);
+            records.push((id, kind, bytes));
+        }
+        drop(repository);
+        let repository = ChatRepository::open(&root, &key, receipt_key, scope).unwrap();
+        for (id, kind, bytes) in records {
+            let restored = match kind {
+                ArtifactKind::Image => {
+                    repository
+                        .read_ready_image(session, turn, id, committed_at + 1)
+                        .unwrap()
+                        .unwrap()
+                        .bytes
+                }
+                ArtifactKind::Video => {
+                    // Verify real MP4 sample data across SQLCipher page boundaries,
+                    // including the tail moov, using the same playback range reader.
+                    for start in (0..bytes.len()).step_by(32_749) {
+                        let length = (bytes.len() - start).min(32_749);
+                        let part = repository
+                            .read_ready_video_range(ReadyVideoRangeRequest {
+                                session_id: session,
+                                turn_id: turn,
+                                artifact_id: id,
+                                now: committed_at + 1,
+                                expected_size: bytes.len(),
+                                expected_sha256: Sha256::digest(&bytes).into(),
+                                start,
+                                length,
+                            })
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(part.bytes, bytes[start..start + length]);
+                    }
+                    repository
+                        .read_ready_video(session, turn, id, committed_at + 1)
+                        .unwrap()
+                        .unwrap()
+                        .bytes
+                }
+                _ => {
+                    repository
+                        .read_ready_file(session, turn, id, committed_at + 1, MAX_ARTIFACT_BYTES)
+                        .unwrap()
+                        .unwrap()
+                        .bytes
+                }
+            };
+            assert_eq!(restored, bytes);
+        }
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn report_adapter_accepts_unknown_optional_and_rejects_required_or_markup() {

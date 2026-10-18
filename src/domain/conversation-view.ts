@@ -385,20 +385,25 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
   return null;
 }
 /** Select whole Item sets by documented source. Never match cold and live IDs or compare content. */
-export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = []): ConversationView {
+export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = [], artifactReferences: readonly ConversationItemSnapshot[] = []): ConversationView {
   const legacy = viewFromLegacySnapshot(snapshot);
+  const productReferences = viewFromLegacySnapshot({...snapshot, turns: [], items: artifactReferences.filter(item => item.kind === "artifact")}).items;
   const turns = {...legacy.turns}; const items = {...legacy.items}; const threads = {...legacy.threads};
   for (const view of nativeViews) {
     if (!threads[view.sessionId]) continue;
     const key = turnKey(view.sessionId, view.turnId);
     const old = turns[key];
     // Local attachments and Artifact references are separate product records, not native Items.
-    const localReferences = old?.itemKeys.flatMap(k => {
+    const priorReferences = old?.itemKeys.flatMap(k => {
       const item = items[k];
       if (!item) return [];
       const blocks = item.contentBlocks.filter(b => b.type === "attachment_reference" || b.type === "artifact_reference");
       return blocks.length ? [{...item, contentBlocks: blocks}] : [];
     }) ?? [];
+    const localReferences = [...new Map([
+      ...priorReferences,
+      ...Object.values(productReferences).filter(item => item.threadId === view.sessionId && item.turnId === view.turnId),
+    ].map(item => [item.itemId, item])).values()];
     for (const k of old?.itemKeys ?? []) delete items[k];
     const nativeItems: ConversationItem[] = view.items.map(entry => {
       const item = entry.item;

@@ -40,19 +40,19 @@ const FILE_TEMP_PREFIX: &str = ".yijie-artifact-file-save-v1-";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct IdentityRequest {
-    schema_version: u8,
-    request_id: Uuid,
-    context_id: Uuid,
-    payload: ArtifactLocator,
+pub(super) struct IdentityRequest {
+    pub(super) schema_version: u8,
+    pub(super) request_id: Uuid,
+    pub(super) context_id: Uuid,
+    pub(super) payload: ArtifactLocator,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ArtifactLocator {
-    session_id: Uuid,
-    turn_id: Uuid,
-    artifact_id: Uuid,
+pub(super) struct ArtifactLocator {
+    pub(super) session_id: Uuid,
+    pub(super) turn_id: Uuid,
+    pub(super) artifact_id: Uuid,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -342,7 +342,7 @@ fn extract_request_id(value: &Value) -> Option<Uuid> {
         .filter(|value| !value.is_nil())
 }
 
-fn decode_request(value: Value) -> Result<IdentityRequest, ArtifactNativeError> {
+pub(super) fn decode_request(value: Value) -> Result<IdentityRequest, ArtifactNativeError> {
     let request_id = extract_request_id(&value);
     if serde_json::to_vec(&value).map_or(true, |encoded| encoded.len() > 4_096) {
         return Err(ArtifactNativeError::new(
@@ -414,7 +414,7 @@ fn map_read_error(error: ReadyFileReadError) -> ArtifactNativeCode {
     }
 }
 
-async fn authorized_file(
+pub(super) async fn authorized_file(
     chat_runtime: &ChatRuntime,
     context_id: Uuid,
     locator: ArtifactLocator,
@@ -948,6 +948,7 @@ fn project_file_preview(
 
 fn canonical_file_extension(media_type: &str) -> Option<&'static str> {
     match media_type {
+        "text/html" => Some("html"),
         "text/plain" => Some("txt"),
         "text/csv" => Some("csv"),
         "application/json" => Some("json"),
@@ -962,7 +963,7 @@ fn validate_file_for_save(media_type: &str, bytes: &[u8]) -> Result<(), Artifact
         return Err(ArtifactNativeCode::LimitExceeded);
     }
     match media_type {
-        "text/plain" | "text/csv" => {
+        "text/html" | "text/plain" | "text/csv" => {
             std::str::from_utf8(bytes).map_err(|_| ArtifactNativeCode::IntegrityFailed)?;
             if bytes.contains(&0) {
                 return Err(ArtifactNativeCode::IntegrityFailed);
@@ -1073,6 +1074,7 @@ fn media_marker(media_type: &str) -> Option<&'static str> {
 fn marker_media_type(marker: &str) -> Option<&'static str> {
     match marker {
         "txt" => Some("text/plain"),
+        "html" | "htm" => Some("text/html"),
         "csv" => Some("text/csv"),
         "json" => Some("application/json"),
         "pdf" => Some("application/pdf"),
@@ -1468,6 +1470,7 @@ mod tests {
             size_bytes: bytes.len(),
             sha256: Sha256::digest(&bytes).into(),
             revision: 1,
+            expires_at: None,
             bytes,
         }
     }

@@ -938,6 +938,12 @@ impl ChatRepository {
                 migrations::EXPERT_RESOURCE_OPERATIONS_SCHEMA_VERSION,
             )?;
         }
+        if super::artifact_media::enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::ARTIFACT_MEDIA_SCHEMA_VERSION,
+            )?;
+        }
         protect_database_files(&database_path)?;
         let mut repository = Self {
             schedule_background_only: false,

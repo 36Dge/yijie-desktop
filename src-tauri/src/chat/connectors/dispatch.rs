@@ -276,6 +276,43 @@ impl ChatRepository {
         tx.commit().map_err(db_error)
     }
 
+    fn settle_expert_busy_rejection(
+        &mut self,
+        pending: &Pending,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        // The worker serializes this recheck and the existing terminal write.
+        // Only the correlated expert-submit busy diagnostic is qualifying;
+        // a missing receipt or an unknown transport result alone never is.
+        let confirmed: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chat_market_dispatch d
+             JOIN chat_market_submissions m USING(submission_operation_id)
+             JOIN chat_expert_submissions e USING(submission_operation_id)
+             JOIN chat_turns t ON t.id=m.local_turn_id AND t.session_id=m.session_id
+             JOIN chat_sessions s ON s.id=m.session_id
+             WHERE d.submission_operation_id=?1 AND m.session_id=?2 AND m.local_turn_id=?3
+               AND m.turn_operation_id=?4 AND d.state='uncertain' AND d.issue_code='busy'
+               AND d.host_instance_id IS NOT NULL AND t.runtime_turn_id IS NULL
+               AND t.submission_status='uncertain' AND s.owner_user_id=?5 AND s.tenant_id=?6)",
+                params![
+                    pending.operation.to_string(),
+                    pending.session.to_string(),
+                    pending.turn.to_string(),
+                    pending.turn_operation.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id
+                ],
+                |row| row.get(0),
+            )
+            .map_err(db_error)?;
+        if confirmed {
+            self.market_mark(pending.operation, "blocked", None, Some("busy"), now)?;
+        }
+        Ok(confirmed)
+    }
+
     fn market_accept(
         &mut self,
         pending: &Pending,
@@ -418,6 +455,11 @@ fn dispatch_authority(
     }
 }
 
+enum ExpertReceiptRead {
+    Found(Box<expert_wire::PrivateReceipt>),
+    Missing,
+}
+
 async fn read_expert_receipt(
     host: &HostBridge,
     authority: &ChatAuthorizationManager,
@@ -425,7 +467,7 @@ async fn read_expert_receipt(
     lifecycle: &Lifecycle,
     epoch: u64,
     now: i64,
-) -> Result<expert_wire::PrivateReceipt, ChatError> {
+) -> Result<ExpertReceiptRead, ChatError> {
     let scope = authority
         .expert_observation_authority(&pending.scope, now)
         .map_err(|_| ChatError::ScopeDenied)?;
@@ -447,10 +489,9 @@ async fn read_expert_receipt(
     };
     request.validate().map_err(|_| ChatError::InvalidInput)?;
     lifecycle.validate(epoch)?;
-    let response: expert_wire::SubmissionReadResponse = control
+    let response: Result<expert_wire::SubmissionReadResponse, _> = control
         .expert_request(&request.request_id, &request, &request.method)
-        .await
-        .map_err(|_| ChatError::OrchestrationUnavailable)?;
+        .await;
     lifecycle.validate(epoch)?;
     authority
         .expert_observation_authority(
@@ -458,7 +499,15 @@ async fn read_expert_receipt(
             super::now().map_err(|_| ChatError::DatabaseUnavailable)?,
         )
         .map_err(|_| ChatError::ScopeDenied)?;
-    Ok(response.data)
+    match response {
+        Ok(response) => Ok(ExpertReceiptRead::Found(Box::new(response.data))),
+        Err(super::control::ExpertControlError::Rejected(error))
+            if error.code == expert_wire::ErrorCode::NotFound =>
+        {
+            Ok(ExpertReceiptRead::Missing)
+        }
+        _ => Err(ChatError::OrchestrationUnavailable),
+    }
 }
 
 pub(crate) fn bindings(
@@ -521,10 +570,10 @@ pub(crate) async fn next(
             .await?;
         if let Some(task) = pending.task {
             if pending.expert_snapshot.is_some() {
-                if let Ok(receipt) =
-                    read_expert_receipt(host, authority, &pending, lifecycle, epoch, now).await
-                {
-                    if receipt.receipt.state == wire::SubmissionState::Accepted {
+                match read_expert_receipt(host, authority, &pending, lifecycle, epoch, now).await {
+                    Ok(ExpertReceiptRead::Found(receipt))
+                        if receipt.receipt.state == wire::SubmissionState::Accepted =>
+                    {
                         let saved = pending.clone();
                         database
                             .call(move |r| r.expert_accept(&saved, &receipt))
@@ -533,6 +582,18 @@ pub(crate) async fn next(
                             session_id: pending.session,
                         }));
                     }
+                    Ok(ExpertReceiptRead::Missing) => {
+                        let saved = pending.clone();
+                        if database
+                            .call(move |r| r.settle_expert_busy_rejection(&saved, now))
+                            .await?
+                        {
+                            return Ok(Some(DispatchOutcome::FailedSafely {
+                                operation_id: operation,
+                            }));
+                        }
+                    }
+                    _ => {}
                 }
             } else if let Ok(receipt) = host.market_operation(task, pending.turn_operation).await {
                 if receipt.state == wire::SubmissionState::Accepted {
@@ -1189,6 +1250,115 @@ mod tests {
             .claim_next_conversation_outbox(now + 10, 30)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn feat160_confirmed_busy_rejection_uses_existing_terminal_path_and_survives_reopen() {
+        let mut f = Fixture::new();
+        let pending = f.create_expert();
+        let now = super::super::now().unwrap();
+        let host = Uuid::now_v7().to_string();
+        let issue = expert_submission_issue(super::super::control::ExpertControlError::Rejected(
+            expert_wire::Error {
+                schema_version: 1,
+                request_id: None,
+                code: expert_wire::ErrorCode::Busy,
+                retryable: true,
+            },
+        ));
+        f.repo()
+            .market_mark(
+                pending.operation,
+                "uncertain",
+                Some(&host),
+                Some(&issue),
+                now,
+            )
+            .unwrap();
+        // Normal observation preserves the original correlated diagnostic.
+        f.repo()
+            .market_mark(pending.operation, "uncertain", None, None, now + 1)
+            .unwrap();
+        assert!(f
+            .repo()
+            .settle_expert_busy_rejection(&pending, now + 2)
+            .unwrap());
+        let scope = f.repo().scope.clone();
+        drop(f.repo.take());
+        f.repo = Some(
+            ChatRepository::open(
+                &f.root.join("chat"),
+                &DatabaseKey::from_bytes([57; 32]),
+                ReceiptKey::from_bytes([58; 32]),
+                scope,
+            )
+            .unwrap(),
+        );
+        assert!(f.repo().pending_market(now + 5).unwrap().is_none());
+        let submissions = f
+            .repo()
+            .local_submissions(pending.session, &[pending.turn])
+            .unwrap();
+        assert_eq!(submissions[0].status, "failed");
+        assert_eq!(
+            submissions[0].operation_id,
+            pending.turn_operation.to_string()
+        );
+        assert!(!f
+            .repo()
+            .settle_expert_busy_rejection(&pending, now + 5)
+            .unwrap());
+        assert!(f
+            .repo()
+            .claim_next_conversation_outbox(now + 10, 30)
+            .unwrap()
+            .is_none());
+        let repo = f.repo();
+        assert_eq!(
+            expert_store::submission(
+                &repo.connection,
+                &repo.scope,
+                &pending.operation.to_string()
+            )
+            .unwrap()
+            .unwrap()
+            .0,
+            pending.expert_snapshot.unwrap()
+        );
+    }
+
+    #[test]
+    fn feat160_missing_receipt_alone_keeps_unknown_and_never_resends() {
+        for issue in [
+            None,
+            Some("submission_unknown"),
+            Some("temporarily_unavailable"),
+        ] {
+            let mut f = Fixture::new();
+            let pending = f.create_expert();
+            let now = super::super::now().unwrap();
+            f.repo()
+                .market_mark(
+                    pending.operation,
+                    "uncertain",
+                    Some(&Uuid::now_v7().to_string()),
+                    issue,
+                    now,
+                )
+                .unwrap();
+            assert!(!f
+                .repo()
+                .settle_expert_busy_rejection(&pending, now + 1)
+                .unwrap());
+            let retained = f.repo().pending_market(now + 5).unwrap().unwrap();
+            assert_eq!(retained.state, "uncertain");
+            assert_eq!(retained.turn_operation, pending.turn_operation);
+            assert!(f
+                .repo()
+                .claim_next_conversation_outbox(now + 10, 30)
+                .unwrap()
+                .is_none());
+        }
     }
 
     #[test]

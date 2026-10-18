@@ -65,6 +65,25 @@ it("FEAT158 uncertain local submission keeps its status without implying a queue
   expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
 });
 
+it("FEAT160 terminal local submissions preserve the message without queued execution text", () => {
+  for (const status of ["failed", "cancelled"] as const) {
+    const state = composeConversationView({
+      threads: [{ threadId: THREAD_ID, status: "active" }],
+      turns: [{ threadId: THREAD_ID, turnId: TURN_ID, ordinal: 0, status: "queued", terminalStatus: null }],
+      items: [message("original-message", 0, "user_message", "普通历史恢复验收")],
+    }, [], [{ turnId: TURN_ID, operationId: "original-operation", status }]);
+    const turn = selectConversationTimeline(state, THREAD_ID)!.turns[0]!;
+    const wrapper = mount(ChatTurnGroup, { props: { turn, position: 0 } });
+    expect(wrapper.text()).toContain(status === "failed" ? "提交失败" : "提交已取消");
+    expect(wrapper.text()).toContain("普通历史恢复验收");
+    expect(wrapper.text()).toContain("原消息已保留");
+    expect(wrapper.text()).not.toContain("本轮正在等待处理");
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    wrapper.unmount();
+  }
+});
+
 function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);

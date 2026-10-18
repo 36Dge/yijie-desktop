@@ -43,7 +43,13 @@ fn permission_child_environment(
     if !enabled {
         return Vec::new();
     }
-    let mut values = vec![("YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true".to_owned())];
+    let mut values = vec![
+        (
+            "YIJIE_ARTIFACT_MEDIA_ENABLED",
+            super::artifact_media::enabled().to_string(),
+        ),
+        ("YIJIE_RUNTIME_PERMISSIONS_ENABLED", "true".to_owned()),
+    ];
     if meter_url == Some("http://127.0.0.1:18083/v1") {
         values.push((
             "YIJIE_PERMISSION_VERIFICATION_BASE_URL",

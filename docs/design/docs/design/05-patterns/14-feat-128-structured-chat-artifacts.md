@@ -906,3 +906,10 @@ TEST-ONLY AUTHORITY BOOTSTRAP, ZERO CANARY, CONTENT-FREE VERDICT, TRANSIENT SCRE
 - `docs/design/docs/design/04-components/05-feedback-components.md`
 - `docs/design/docs/design/04-components/06-data-display-components.md`
 - `yijie/docs/features/FEAT-128-structured-chat-artifacts/`
+
+
+## 2026-10-18 FEAT-159 已批准扩展（local candidate）
+
+Owner已批准HTML/SVG/有声MP4的独立媒体版本。旧ReportDocumentV1、旧公共v3 MIME闭集和主WebView权限不扩张。HTML使用独立无IPC的Wry/WebKit容器、非持久网站存储和响应CSP，允许离线内联脚本交互，禁外链资源、表单提交、新窗口和浏览器下载；这取代此前仅针对未来HTML的禁脚本建议，适用范围仅新预览容器。SVG复用图片上下文、缩放与保存；视频复用原生controls，H264/AAC和普通moov布局由WebKit解码，原件不转码。所有保存仍走Native身份校验和原子写入。新schema9伴随流和DB reader36先于新writer启用，回滚不能降级写入新库。
+
+产品状态：已批准实施，真实验收尚未完成。完整证据归元仓FEAT-159，不把单元测试写为D4。

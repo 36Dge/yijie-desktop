@@ -1,3 +1,4 @@
+import { ARTIFACT_MEDIA_TYPES } from "../api/generated/artifact-media-policy.gen";
 import { isSessionPurposeView, type SessionPurposeView } from "./chat-session-purpose.generated";
 import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
 
@@ -1623,14 +1624,8 @@ export function parseHistoryPageResponseV2(value: unknown): ChatHistoryPage {
   return responseDataV2(value, parseHistoryPageV2);
 }
 
-const CHAT_ARTIFACT_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
-const CHAT_ARTIFACT_FILE_MEDIA_TYPES = [
-  "text/plain",
-  "text/csv",
-  "application/json",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-] as const;
+const CHAT_ARTIFACT_IMAGE_MEDIA_TYPES = ARTIFACT_MEDIA_TYPES.image;
+const CHAT_ARTIFACT_FILE_MEDIA_TYPES = ARTIFACT_MEDIA_TYPES.file;
 
 function parseArtifact(value: unknown): ChatArtifact {
   return parseArtifactWithLengths(value, false);

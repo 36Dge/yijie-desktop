@@ -67,7 +67,9 @@ const thinking = computed(() => {
   }
   return !answerStarted.value || latest?.presentation === "reasoning" && latest.busy === true;
 });
-const showProgress = computed(() => props.turn.progress && (!nativeLiveProgress.value ||
+const localSubmissionTerminal = computed(() => props.turn.source === "local_submission" &&
+  ["failed", "cancelled"].includes(props.turn.submissionStatus ?? ""));
+const showProgress = computed(() => !localSubmissionTerminal.value && props.turn.progress && (!nativeLiveProgress.value ||
   props.turn.domainStatus !== "in_progress" || thinking.value));
 const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
 const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId)].join(" "));
@@ -226,6 +228,7 @@ function turnStatusLabel(turn: ConversationTimelineTurnViewModel): string {
 }
 
 function turnStatusIcon(turn: ConversationTimelineTurnViewModel): YjIconName {
+  if (turn.source === "local_submission" && turn.submissionStatus === "failed") return "warning";
   switch (turn.phase) {
     case "complete":
       return "check";
@@ -254,6 +257,10 @@ function progressLabel(progress: ConversationTimelineProgressViewModel): string 
 }
 
 function turnStateMessage(turn: ConversationTimelineTurnViewModel): string | null {
+  if (turn.source === "local_submission") {
+    if (turn.submissionStatus === "failed") return "本次提交未成功，原消息已保留。";
+    if (turn.submissionStatus === "cancelled") return "本次提交已取消，原消息已保留。";
+  }
   switch (turn.domainStatus) {
     case "interrupted":
       return "本轮已中断，已确认的内容仍可阅读。";
