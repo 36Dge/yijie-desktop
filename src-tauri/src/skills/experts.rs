@@ -9,6 +9,27 @@ use crate::chat::{ChatRuntime, HostManagedSkill, HostSkillSnapshot};
 type Error = wire::ErrorCode;
 
 impl SkillRuntime {
+    /// Only reviewed versions in distinct managed installation directories may
+    /// coexist. Unknown retained references remain protected by the store.
+    pub(crate) fn expert_coexisting_refs(
+        &self,
+        selection: &wire::ExpertSelection,
+    ) -> Result<Vec<wire::ExpertRef>, Error> {
+        let catalog = self.catalog().map_err(|error| error.expert_error())?;
+        let selected = find_expert(catalog, selection)?;
+        catalog
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.id != selected.id
+                    && entry
+                        .expert
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.expert_id == selection.expert_id)
+            })
+            .map(|entry| resolve_entry(entry).map(|resolved| resolved.reference))
+            .collect()
+    }
     pub(crate) fn expert_catalog_revision(&self) -> Result<&str, Error> {
         let catalog = self.catalog().map_err(|error| error.expert_error())?;
         if !catalog.entries.iter().any(|entry| entry.expert.is_some()) {
@@ -83,11 +104,20 @@ fn find_expert<'a>(
                 .expert
                 .as_ref()
                 .is_some_and(|metadata| metadata.expert_id == selection.expert_id)
+                && entry.version == selection.version
         })
-        .ok_or(Error::NotFound)?;
-    if entry.version != selection.version {
-        return Err(Error::VersionUnavailable);
-    }
+        .ok_or_else(|| {
+            if catalog.entries.iter().any(|entry| {
+                entry
+                    .expert
+                    .as_ref()
+                    .is_some_and(|value| value.expert_id == selection.expert_id)
+            }) {
+                Error::VersionUnavailable
+            } else {
+                Error::NotFound
+            }
+        })?;
     Ok(entry)
 }
 fn resolve_entry(entry: &SkillCatalogEntry) -> Result<ResolvedExpert, Error> {
@@ -153,6 +183,19 @@ fn project_expert_catalog(
         .filter(|entry| entry.expert.is_some())
     {
         let metadata = entry.expert.as_ref().ok_or(Error::ResourceUnavailable)?;
+        // Keep old versions resolvable for retained bindings while presenting
+        // one current card. Use SemVer precedence, not string ordering.
+        let version =
+            semver::Version::parse(&entry.version).map_err(|_| Error::ResourceUnavailable)?;
+        if catalog.entries.iter().any(|other| {
+            other
+                .expert
+                .as_ref()
+                .is_some_and(|value| value.expert_id == metadata.expert_id)
+                && semver::Version::parse(&other.version).is_ok_and(|other| other > version)
+        }) {
+            continue;
+        }
         let state = snapshot
             .skills
             .iter()
@@ -171,6 +214,20 @@ fn project_expert_catalog(
             operation: None,
         });
     }
+    experts.sort_by_key(|entry| {
+        catalog
+            .entries
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .expert
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.expert_id == entry.display.expert_id)
+                    && candidate.version == entry.display.version
+            })
+            .map(|candidate| candidate.order)
+            .unwrap_or(u16::MAX)
+    });
     let result = wire::CatalogSnapshot {
         experts,
         can_manage,
@@ -198,14 +255,14 @@ mod tests {
             install_root: PathBuf::new(),
         };
         let catalog = load_expert_catalog(&roots).expect("reviewed local v3 candidate");
-        assert_eq!(catalog.entries.len(), 39);
+        assert_eq!(catalog.entries.len(), 75);
         assert!(
             load_catalog(&roots).is_err(),
             "ordinary v2 loader must retain its original authority"
         );
         let snapshot = HostSkillSnapshot {
             catalog_revision: catalog.revision.clone(),
-            scanned_at: "2026-10-11T00:00:00Z".into(),
+            scanned_at: "2026-10-16T00:00:00Z".into(),
             skills: catalog
                 .entries
                 .iter()
@@ -233,8 +290,62 @@ mod tests {
             38
         );
         let safe = project_expert_catalog(&catalog, &snapshot, true, true).unwrap();
-        assert_eq!(safe.experts.len(), 1);
-        assert_eq!(safe.experts[0].state, wire::ResourceState::Ready);
+        let expected = [
+            ("chuhaijiang-tiktok-shop-operations-expert", "0.1.0"),
+            ("linkfox-expert-aigc-imagegen-mannequin-to-model", "0.1.0"),
+            ("linkfox-expert-aigc-videogen-viral-replicate", "0.1.0"),
+            ("linkfox-expert-aigc-videogen-sale", "0.1.0"),
+            ("moss-industry-research", "0.1.1"),
+            ("equity-research", "0.1.2"),
+            ("strategy-backtest-expert", "0.1.1"),
+            ("linkfox-expert-1688-sourcing-expert", "0.1.0"),
+            ("market-researcher", "0.1.0"),
+            ("product-management", "0.1.0"),
+            ("novel-creator", "0.1.0"),
+            ("data-analyst-pro", "0.1.2"),
+            ("ui-designer", "0.1.1"),
+            ("tb-tm-ops-expert", "0.1.3"),
+            ("pdd-ops-expert", "0.1.3"),
+            ("tradebuddy-baojia", "0.1.0"),
+            ("report-viz-expert", "0.1.1"),
+            ("jd-ops-expert", "0.1.3"),
+            ("xiaohongshu-copywriter", "0.1.1"),
+            ("agentgrid-comic-storyboard-director", "0.1.0"),
+            ("cross-border-ecommerce-operations-expert", "0.1.1"),
+        ];
+        assert_eq!(safe.experts.len(), expected.len());
+        assert_eq!(
+            safe.experts
+                .iter()
+                .map(|entry| (
+                    entry.display.expert_id.as_str(),
+                    entry.display.version.as_str()
+                ))
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected.into_iter().collect()
+        );
+        assert!(safe.can_manage && safe.execution_available);
+        for (expert_id, version) in expected {
+            let entry = find_expert(
+                &catalog,
+                &wire::ExpertSelection {
+                    expert_id: expert_id.into(),
+                    version: version.into(),
+                },
+            )
+            .unwrap();
+            let resolved = resolve_entry(entry).unwrap();
+            let projected = safe
+                .experts
+                .iter()
+                .find(|item| item.display.expert_id == expert_id)
+                .unwrap();
+            assert_eq!(projected.state, wire::ResourceState::Ready);
+            assert!(projected.error_code.is_none());
+            assert_eq!(resolved.reference.expert_id, expert_id);
+            assert_eq!(resolved.reference.version, version);
+            assert_eq!(resolved.display, projected.display);
+        }
         let raw = serde_json::to_string(&safe).unwrap();
         for private_field in [
             "archiveSha256",
@@ -242,6 +353,9 @@ mod tests {
             "knowledgeManifestSha256",
             "ROLE.md",
             "references/",
+            "scripts/",
+            "source_dir",
+            "install_root",
         ] {
             assert!(!raw.contains(private_field));
         }
@@ -249,18 +363,24 @@ mod tests {
             &catalog,
             &wire::ExpertSelection {
                 expert_id: "jd-ops-expert".into(),
-                version: "0.1.0".into(),
+                version: "0.1.3".into(),
             },
         )
         .unwrap();
         let resolved = resolve_entry(entry).unwrap();
+        // These are the retained jd@0.1.3 identities from the previous daily
+        // bundle; adding experts must not invalidate existing history bindings.
+        assert_eq!(
+            resolved.reference.archive_sha256,
+            "baa8c8550b8b82b5f1be7bcfc59693c8920ff438fa854e84450936685e3d3b80"
+        );
         assert_eq!(
             resolved.reference.role_sha256,
-            "7173636f07506ce525c15af7b6fc29b564536c3be41798ac614714a26b4c70f0"
+            "a644bf12c4573895d3e6edc7b7a619cc95cc429c910260a5ef16b5f2bce7b6f5"
         );
         assert_eq!(
             resolved.reference.knowledge_manifest_sha256,
-            "a9a8b3fd47188e66e0d5489ccbdebd2e60c643f34fde92502eaa3a76958cb483"
+            "b0718d43a248bdf4dbcebec5623932266a87e7e4f78aad3dbe01e250b6545d08"
         );
     }
 }

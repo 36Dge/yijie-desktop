@@ -399,7 +399,7 @@ fn expert_resources_completed_history_blocks_new_version_prepare_before_journal(
         role_sha256: "b".repeat(64),
         knowledge_manifest_sha256: "c".repeat(64),
     };
-    let snapshot = wire::freeze_snapshot(operation.clone(), 1, Some(old)).unwrap();
+    let snapshot = wire::freeze_snapshot(operation.clone(), 1, Some(old.clone())).unwrap();
     db.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at) VALUES(?1,?2,?3,?4,1,?5,?6,'[]',?7,1)",params![submission,session_id,turn,operation,"a".repeat(64),serde_json::to_string(&market).unwrap(),serde_json::to_string(&receipt).unwrap()]).unwrap();
     db.execute("INSERT INTO chat_expert_submissions(submission_operation_id,session_id,snapshot_json,display_json) VALUES(?1,?2,?3,?4)",params![submission,session_id,serde_json::to_string(&snapshot).unwrap(),serde_json::to_string(&catalog().experts[0].display).unwrap()]).unwrap();
     let mut next = private(&owner, 10, false);
@@ -408,7 +408,14 @@ fn expert_resources_completed_history_blocks_new_version_prepare_before_journal(
     }
     let tx = db.transaction().unwrap();
     assert!(matches!(
-        resources::begin(&tx, &owner, next, &"a".repeat(64), &"b".repeat(64), 10),
+        resources::begin(
+            &tx,
+            &owner,
+            next.clone(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            10
+        ),
         Err(wire::ErrorCode::ResourceInUse)
     ));
     tx.commit().unwrap();
@@ -422,6 +429,36 @@ fn expert_resources_completed_history_blocks_new_version_prepare_before_journal(
         .unwrap(),
         0
     );
+    // Trusted exact older identity in a distinct installation slot permits
+    // additive preparation, while the retained snapshot stays byte-for-byte.
+    let before: String = db
+        .query_row(
+            "SELECT snapshot_json FROM chat_expert_submissions",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let tx = db.transaction().unwrap();
+    let allowed = resources::begin_with_coexisting(
+        &tx,
+        &owner,
+        next,
+        &"a".repeat(64),
+        &"b".repeat(64),
+        10,
+        &[old],
+    )
+    .unwrap();
+    assert!(allowed.1);
+    tx.rollback().unwrap();
+    let after: String = db
+        .query_row(
+            "SELECT snapshot_json FROM chat_expert_submissions",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(before, after);
     // Same exact version may still prepare as the existing core's normal no-op.
     let retained = begin(&mut db, &owner, 11, false);
     assert_eq!(retained.receipt.expert.version, "0.1.0");

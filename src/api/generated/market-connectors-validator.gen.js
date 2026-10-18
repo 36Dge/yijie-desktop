@@ -1560,7 +1560,7 @@ return errors === 0;
 validate88.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateSnapshot = validate100;
-const schema41 = {"type":"object","additionalProperties":true,"required":["catalogRevision","catalog","installations","capabilities","executionAvailable"],"properties":{"catalogRevision":{"$ref":"#/$defs/Revision"},"catalog":{"type":"array","items":{"$ref":"#/$defs/CatalogEntry"},"maxItems":58},"installations":{"type":"array","items":{"$ref":"#/$defs/Installation"},"maxItems":58},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Permission"},"maxItems":4,"uniqueItems":true},"executionAvailable":{"type":"boolean"}},"description":"executionAvailable=false makes every connector unselectable even if cached states are ready. Exact catalog membership/count is verified against the Connectors product source, not inferred from a request."};
+const schema41 = {"type":"object","additionalProperties":true,"required":["catalogRevision","catalog","installations","capabilities","executionAvailable"],"properties":{"catalogRevision":{"$ref":"#/$defs/Revision"},"catalog":{"type":"array","items":{"$ref":"#/$defs/CatalogEntry"},"maxItems":60},"installations":{"type":"array","items":{"$ref":"#/$defs/Installation"},"maxItems":60},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Permission"},"maxItems":4,"uniqueItems":true},"executionAvailable":{"type":"boolean"}},"description":"executionAvailable=false makes every connector unselectable even if cached states are ready. Exact catalog membership/count is verified against the Connectors product source, not inferred from a request."};
 const func0 = (function equal(a, b) {
   if (a === b) return true;
 
@@ -1672,8 +1672,8 @@ errors = vErrors.length;
 if(data.catalog !== undefined){
 let data1 = data.catalog;
 if(Array.isArray(data1)){
-if(data1.length > 58){
-const err5 = {instancePath:instancePath+"/catalog",schemaPath:"#/properties/catalog/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
+if(data1.length > 60){
+const err5 = {instancePath:instancePath+"/catalog",schemaPath:"#/properties/catalog/maxItems",keyword:"maxItems",params:{limit: 60},message:"must NOT have more than 60 items"};
 if(vErrors === null){
 vErrors = [err5];
 }
@@ -1704,8 +1704,8 @@ errors++;
 if(data.installations !== undefined){
 let data3 = data.installations;
 if(Array.isArray(data3)){
-if(data3.length > 58){
-const err7 = {instancePath:instancePath+"/installations",schemaPath:"#/properties/installations/maxItems",keyword:"maxItems",params:{limit: 58},message:"must NOT have more than 58 items"};
+if(data3.length > 60){
+const err7 = {instancePath:instancePath+"/installations",schemaPath:"#/properties/installations/maxItems",keyword:"maxItems",params:{limit: 60},message:"must NOT have more than 60 items"};
 if(vErrors === null){
 vErrors = [err7];
 }

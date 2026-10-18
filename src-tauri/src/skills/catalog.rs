@@ -291,7 +291,7 @@ fn validate_expert_manifest(
         if skill.asset_kind.as_deref() == Some("expert_resources") {
             let metadata = skill.expert.as_ref().ok_or(CatalogError::Invalid)?;
             if metadata.validate().is_err()
-                || !expert_ids.insert(metadata.expert_id.as_str())
+                || !expert_ids.insert((metadata.expert_id.as_str(), skill.version.as_str()))
                 || !validate_skill_common(skill, &manifest.distribution_channel, true)
                 || skill.license.redistribution_status != "unverified"
                 || skill.license.authorization_scope != "local-development"
@@ -728,19 +728,71 @@ mod tests {
         // Read the actual canonical package with its compiled source pin. This
         // also covers the normal transition from a worktree to a Git commit.
         let catalog = load_expert_catalog(&roots).expect("load exact reviewed expert bundle");
-        assert_eq!(catalog.entries.len(), EXPECTED_SKILL_COUNT + 1);
+        assert_eq!(catalog.entries.len(), EXPECTED_SKILL_COUNT + 37);
         let experts: Vec<_> = catalog
             .entries
             .iter()
             .filter(|entry| entry.expert.is_some())
             .collect();
-        assert_eq!(experts.len(), 1);
-        assert_eq!(experts[0].version, "0.1.3");
+        assert_eq!(experts.len(), 37);
         assert_eq!(
-            experts[0].expert.as_ref().unwrap().expert_id,
-            "jd-ops-expert"
+            experts
+                .iter()
+                .map(|entry| (
+                    entry.expert.as_ref().unwrap().expert_id.as_str(),
+                    entry.version.as_str()
+                ))
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                ("chuhaijiang-tiktok-shop-operations-expert", "0.1.0"),
+                ("linkfox-expert-aigc-imagegen-mannequin-to-model", "0.1.0"),
+                ("linkfox-expert-aigc-videogen-viral-replicate", "0.1.0"),
+                ("linkfox-expert-aigc-videogen-sale", "0.1.0"),
+                ("moss-industry-research", "0.1.0"),
+                ("moss-industry-research", "0.1.1"),
+                ("equity-research", "0.1.0"),
+                ("equity-research", "0.1.1"),
+                ("equity-research", "0.1.2"),
+                ("strategy-backtest-expert", "0.1.0"),
+                ("strategy-backtest-expert", "0.1.1"),
+                ("linkfox-expert-1688-sourcing-expert", "0.1.0"),
+                ("market-researcher", "0.1.0"),
+                ("product-management", "0.1.0"),
+                ("novel-creator", "0.1.0"),
+                ("data-analyst-pro", "0.1.0"),
+                ("data-analyst-pro", "0.1.1"),
+                ("data-analyst-pro", "0.1.2"),
+                ("ui-designer", "0.1.0"),
+                ("ui-designer", "0.1.1"),
+                ("tb-tm-ops-expert", "0.1.0"),
+                ("tb-tm-ops-expert", "0.1.1"),
+                ("tb-tm-ops-expert", "0.1.2"),
+                ("tb-tm-ops-expert", "0.1.3"),
+                ("pdd-ops-expert", "0.1.0"),
+                ("pdd-ops-expert", "0.1.1"),
+                ("pdd-ops-expert", "0.1.2"),
+                ("pdd-ops-expert", "0.1.3"),
+                ("tradebuddy-baojia", "0.1.0"),
+                ("report-viz-expert", "0.1.0"),
+                ("report-viz-expert", "0.1.1"),
+                ("jd-ops-expert", "0.1.3"),
+                ("xiaohongshu-copywriter", "0.1.0"),
+                ("agentgrid-comic-storyboard-director", "0.1.0"),
+                ("cross-border-ecommerce-operations-expert", "0.1.0"),
+                ("xiaohongshu-copywriter", "0.1.1"),
+                ("cross-border-ecommerce-operations-expert", "0.1.1"),
+            ]
+            .into_iter()
+            .collect()
         );
-        assert_eq!(experts[0].catalog_status, "installable");
+        for expert in experts {
+            assert_eq!(expert.catalog_status, "installable");
+            assert!(expert.catalog_blocked_reason.is_none());
+            assert_eq!(
+                expert.expert.as_ref().unwrap().runtime_projection,
+                "expert_only"
+            );
+        }
     }
 
     #[test]

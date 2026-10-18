@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import { isLocalPermissionCandidate, verifyLocalPermissionCandidate } from "./local-permission-candidate.mjs";
 import { resolveSkillsCheckout } from "./resolve-skills-checkout.mjs";
+import { resolveAgentHostCheckout } from "./resolve-pinned-checkout.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -363,17 +364,21 @@ export async function syncDesktopSkillResources({
   channel = "local-development", allChannels = false,
   skillsRoot = process.env.YIJIE_DESKTOP_SKILLS_DIR,
   contractsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
-  agentHostRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
+  agentHostRoot = process.env.YIJIE_DESKTOP_AGENT_HOST_DIR,
   outputRoot, check = false, packageProducer = false, producerExecutor = exec,
 } = {}) {
   if (!SKILL_CHANNELS.includes(channel)) throw new Error(`Unsupported Skill channel: ${channel}`);
-  if (isLocalPermissionCandidate()) {
-    if (channel !== "local-development" || allChannels) {
-      throw new Error("Permission candidates are restricted to local development consumption");
-    }
-    await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
+  const localCandidate = isLocalPermissionCandidate();
+  if (localCandidate && (channel !== "local-development" || allChannels)) {
+    throw new Error("Permission candidates are restricted to local development consumption");
   }
   const lock = validateResourceLock(JSON.parse(await readFile(lockPath, "utf8")));
+  agentHostRoot = localCandidate
+    ? path.resolve(repositoryRoot, agentHostRoot === undefined ? "../yijie-agent-host" : agentHostRoot)
+    : await resolveAgentHostCheckout({
+      repositoryRoot, fullCommit: lock.agent_host.full_commit, explicitRoot: agentHostRoot,
+    });
+  if (localCandidate) await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
   skillsRoot = await resolveSkillsCheckout({ repositoryRoot, fullCommit: lock.producer.full_commit, explicitRoot: skillsRoot });
   if (packageProducer) {
     await verifySourceChain(skillsRoot, contractsRoot, agentHostRoot, lock);
@@ -408,7 +413,7 @@ if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
   syncDesktopSkillResources({ channel, allChannels,
     skillsRoot: explicitSkillsRoot,
     contractsRoot: path.resolve(repositoryRoot, argument("--contracts-root") ?? process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
-    agentHostRoot: path.resolve(repositoryRoot, argument("--agent-host-root") ?? process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
+    agentHostRoot: argument("--agent-host-root") ?? process.env.YIJIE_DESKTOP_AGENT_HOST_DIR,
     outputRoot, check, packageProducer: !process.argv.includes("--skip-package") && !check,
   }).then(({ bundles }) => process.stdout.write(
     `${check ? "Verified" : "Synchronized"} ${allChannels ? "both reviewed channels" : channel}: ` +

@@ -15,7 +15,7 @@
     },
     {
       "path": "scripts/generate-scheduled-ipc.mjs",
-      "sha256": "4f937120b42bbdb2c8a3be9b54d21590cd23eb7f20d722fbf306a125ca780e93"
+      "sha256": "a3d2fe3103b378c4b1d5c92a8166b5c1e90982822c09356203046b8b5b3301b5"
     },
     {
       "path": "contracts/scheduled-plan.schema.json",

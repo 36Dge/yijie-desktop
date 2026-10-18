@@ -552,13 +552,24 @@ pub(crate) fn resource_in_use(
 pub(crate) fn resource_replacement_in_use(
     db: &Connection,
     selected: &wire::ExpertSelection,
+    coexisting: &[wire::ExpertRef],
 ) -> Result<bool, Error> {
     selected.validate().map_err(|_| Error::InvalidRequest)?;
-    db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM (SELECT expert_ref_json AS reference FROM chat_expert_bindings UNION ALL SELECT json_extract(snapshot_json,'$.expert') AS reference FROM chat_expert_submissions UNION ALL SELECT requested_ref_json AS reference FROM chat_expert_binding_operations WHERE state IN ('pending','unknown')) WHERE json_extract(reference,'$.expertId')=?1 AND json_extract(reference,'$.version')!=?2)",
-        params![selected.expert_id, selected.version],
-        |row| row.get(0),
-    ).map_err(db_error)
+    let mut statement = db.prepare(
+        "SELECT DISTINCT reference FROM (SELECT expert_ref_json AS reference FROM chat_expert_bindings UNION ALL SELECT json_extract(snapshot_json,'$.expert') AS reference FROM chat_expert_submissions UNION ALL SELECT requested_ref_json AS reference FROM chat_expert_binding_operations WHERE state IN ('pending','unknown')) WHERE json_extract(reference,'$.expertId')=?1 AND json_extract(reference,'$.version')!=?2"
+    ).map_err(db_error)?;
+    let rows = statement
+        .query_map(params![selected.expert_id, selected.version], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(db_error)?;
+    for row in rows {
+        let reference: wire::ExpertRef = decode(&row.map_err(db_error)?)?;
+        if !coexisting.contains(&reference) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Read the exact original adapter attempt for read-only receipt recovery.

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   items: readonly {
     key: string;
     label: string;
+    count?: number;
   }[];
   modelValue: string;
   ariaLabel?: string;
   "aria-label"?: string;
   panelId?: string;
-}>();
+  variant?: "pill" | "line";
+}>(), { variant: "pill" });
 
 const emit = defineEmits<{
   "update:modelValue": [key: string];
@@ -60,23 +62,24 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
 </script>
 
 <template>
-  <div class="yj-tabs" role="tablist" :aria-label="accessibleLabel">
+  <div class="yj-tabs" :class="`yj-tabs--${variant}`" role="tablist" :aria-label="accessibleLabel">
     <button
       v-for="(item, index) in items"
       :key="item.key"
       ref="tabElements"
-      class="yj-tabs__tab yj-control yj-control--pill"
-      :class="{ 'yj-tabs__tab--selected': item.key === modelValue }"
+      class="yj-tabs__tab yj-control"
+      :class="{ 'yj-control--pill': variant === 'pill', 'yj-tabs__tab--selected': item.key === modelValue }"
       type="button"
       role="tab"
       :id="tabId(item.key)"
       :aria-controls="panelId"
       :aria-selected="item.key === modelValue"
+      :aria-label="item.count === undefined ? undefined : `${item.label} ${item.count}`"
       :tabindex="item.key === modelValue ? 0 : -1"
       @click="select(item.key)"
       @keydown="handleKeydown($event, index)"
     >
-      {{ item.label }}
+      {{ item.label }}<span v-if="item.count !== undefined" class="yj-tabs__count"> {{ item.count }}</span>
     </button>
   </div>
 </template>
@@ -132,5 +135,51 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
   color: var(--yj-color-on-brand);
   border-color: var(--yj-color-on-brand);
   background: var(--yj-color-brand-active);
+}
+
+.yj-tabs__count {
+  color: var(--yj-color-text-secondary);
+  font-size: var(--yj-font-size-caption);
+  font-weight: var(--yj-font-weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.yj-tabs--line {
+  gap: var(--yj-space-6);
+  align-self: stretch;
+}
+
+.yj-tabs--line .yj-tabs__tab {
+  --yj-control-height: var(--yj-space-12);
+  position: relative;
+  padding: 0 var(--yj-space-1);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--yj-color-text-tertiary);
+  font-size: var(--yj-font-size-body);
+  font-weight: var(--yj-font-weight-regular);
+  line-height: var(--yj-line-height-body);
+}
+
+.yj-tabs--line .yj-tabs__tab:hover,
+.yj-tabs--line .yj-tabs__tab:active,
+.yj-tabs--line .yj-tabs__tab--selected {
+  color: var(--yj-color-text-primary);
+  background: transparent;
+}
+
+.yj-tabs--line .yj-tabs__tab--selected {
+  font-weight: var(--yj-font-weight-semibold);
+}
+
+.yj-tabs--line .yj-tabs__tab--selected::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--yj-space-1);
+  bottom: calc(var(--yj-border-width) * -1);
+  height: var(--yj-space-1);
+  border-radius: var(--yj-radius-full);
+  background: var(--yj-color-brand-primary);
 }
 </style>

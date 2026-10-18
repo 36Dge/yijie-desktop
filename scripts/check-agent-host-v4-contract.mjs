@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import { loadPinnedOpenApiParser } from "./check-agent-host-contract.mjs";
 import { isLocalPermissionCandidate, verifyLocalPermissionCandidate } from "./local-permission-candidate.mjs";
+import { resolveAgentHostCheckout } from "./resolve-pinned-checkout.mjs";
 
 const exec = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -501,10 +502,19 @@ export function validateStableActivation(packageJson, runnerSource, activation) 
 
 export async function checkAgentHostV4Contract({
   contractsRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_CONTRACTS_DIR ?? "../yijie-contracts"),
-  agentHostRoot = path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host"),
+  agentHostRoot,
 } = {}) {
   const lock = validateLock(JSON.parse(await readFile(lockPath, "utf8")));
   const localCandidate = isLocalPermissionCandidate();
+  // Executable candidates must still validate the actual Host build checkout.
+  // Only the immutable historical contract check selects a pinned source copy.
+  if (agentHostRoot === undefined) {
+    agentHostRoot = localCandidate
+      ? path.resolve(repositoryRoot, process.env.YIJIE_DESKTOP_AGENT_HOST_DIR ?? "../yijie-agent-host")
+      : await resolveAgentHostCheckout({
+        repositoryRoot, fullCommit: lock.agent_host.full_commit, explicitRoot: process.env.YIJIE_DESKTOP_AGENT_HOST_DIR,
+      });
+  }
   if (localCandidate) await verifyLocalPermissionCandidate(repositoryRoot, contractsRoot, agentHostRoot);
   await Promise.all([
     verifyImmutableGitObject(

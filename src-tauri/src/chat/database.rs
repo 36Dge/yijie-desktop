@@ -8574,7 +8574,7 @@ fn prepare_chat_directory(path: &Path) -> Result<(), ChatError> {
             .map_err(|_| ChatError::DatabaseUnsafe)?;
         validate_owner_only_directory(path)?;
     }
-    exclude_from_backup(path)?;
+    exclude_directory_from_backup(path)?;
     Ok(())
 }
 
@@ -8688,16 +8688,21 @@ fn protect_database_files(database_path: &Path) -> Result<(), ChatError> {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
                 .map_err(|_| ChatError::DatabaseUnsafe)?;
             validate_owner_only_file(&path)?;
-            exclude_from_backup(&path)?;
+            // prepare_chat_directory excludes the entire private directory before
+            // SQLite opens it. Never ask Foundation for resource values of live
+            // db/WAL/SHM files: its open/close drops this process's POSIX locks,
+            // including SQLite's SHM dead-man switch, invalidating mapped pages
+            // when another normal connection initializes the WAL index.
         }
     }
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn exclude_from_backup(path: &Path) -> Result<(), ChatError> {
+fn exclude_directory_from_backup(path: &Path) -> Result<(), ChatError> {
     use objc2_foundation::{NSNumber, NSString, NSURLIsExcludedFromBackupKey, NSURL};
 
+    validate_owner_only_directory(path)?;
     let path = path.to_str().ok_or(ChatError::DatabaseUnsafe)?;
     let string = NSString::from_str(path);
     let url = NSURL::fileURLWithPath(&string);
@@ -8718,7 +8723,7 @@ fn exclude_from_backup(path: &Path) -> Result<(), ChatError> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn exclude_from_backup(_path: &Path) -> Result<(), ChatError> {
+fn exclude_directory_from_backup(_path: &Path) -> Result<(), ChatError> {
     Ok(())
 }
 
@@ -8784,6 +8789,62 @@ mod tests {
     use super::*;
 
     use std::os::unix::fs::symlink;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn live_database_file_protection_preserves_posix_locks() {
+        use std::os::fd::AsRawFd;
+        // Empty ordinary files only: no SQLite connection, mapping, truncation,
+        // broken permissions or fault injection. A separate process observes
+        // the record lock; F_GETLK in the owning process cannot observe itself.
+        let root = std::env::temp_dir().join(format!("database-locks-{}", Uuid::now_v7()));
+        prepare_chat_directory(&root).unwrap();
+        let database = root.join(DATABASE_FILE_NAME);
+        let paths = [
+            database.clone(),
+            root.join(format!("{DATABASE_FILE_NAME}-wal")),
+            root.join(format!("{DATABASE_FILE_NAME}-shm")),
+        ];
+        let files: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                let file = OpenOptions::new()
+                    .create_new(true)
+                    .read(true)
+                    .write(true)
+                    .mode(0o600)
+                    .open(path)
+                    .unwrap();
+                let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+                lock.l_type = libc::F_RDLCK;
+                lock.l_whence = libc::SEEK_SET as i16;
+                lock.l_start = 128;
+                lock.l_len = 1;
+                assert_eq!(
+                    unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &lock) },
+                    0
+                );
+                file
+            })
+            .collect();
+        let held = |path: &Path| {
+            let result = std::process::Command::new("/usr/bin/python3").args(["-c", "import os,sys,fcntl,struct; f=os.open(sys.argv[1],os.O_RDONLY); r=fcntl.fcntl(f,fcntl.F_GETLK,struct.pack('qqihh',128,1,0,fcntl.F_WRLCK,os.SEEK_SET)); os.close(f); sys.exit(0 if struct.unpack('qqihh',r)[3]!=fcntl.F_UNLCK else 1)"]).arg(path).status().unwrap();
+            assert!(
+                result.success(),
+                "POSIX lock lost for {}",
+                path.file_name().unwrap().to_string_lossy()
+            );
+        };
+        for path in &paths {
+            held(path);
+        }
+        protect_database_files(&database).unwrap();
+        for path in &paths {
+            held(path);
+        }
+        drop(files);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn scope() -> ChatScope {
         ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap()

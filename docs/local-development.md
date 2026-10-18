@@ -61,6 +61,30 @@ all-targets Clippy）；`pnpm skills:check` 与 `pnpm skills:release-boundary` �
 因此以上结果不代表全库测试通过。此次未重新打包、签名或启动发布 App。
 App 包仍通过本地启动器提供 Native 的 local/demo_fast 环境，直接双击裸开发包不等于完整本地启动。
 
+2026-10-16，旧 Host Skills v1/v4及普通Skills双渠道资源来源检查也复用上述固定提交选择机制，公共实现为
+`scripts/resolve-pinned-checkout.mjs`。未指定 Host 路径时，历史契约检查使用精确 HEAD 的 sibling，
+或 `.local/agent-host-pinned-<固定提交前7位>`；Skills v1 固定
+`1b7bfd1ce4323e52035b2ba1e62842c2d332d9ed`，v4 固定
+`96b1fa19783694aef583b614c492fd2b6b5c15cc`，各自原锁和内容摘要不变。
+显式 `YIJIE_DESKTOP_AGENT_HOST_DIR`、`--agent-host-root` 或函数参数始终优先，脏目录、错误远端或缺少固定对象
+仍由原检查器拒绝，不回退。选择器不会自动拉取、建立检出、切换分支、提交或刷新摘要。
+
+历史参考副本只供读取锁定 Git 对象。本机通过两个独立 detached sparse worktree 准备，
+工作区只展开 `api/contracts.lock`、`api/skills.lock`，其余固定对象由原 `git show` /
+`git cat-file` 校验；不展开或执行历史攻击归档/进程故障 fixture。新建副本须在 sparse 模式下
+初始化索引并确认 `git status --porcelain` 为空，不能忽略未完成检出留下的删除状态。
+目录前缀不是信任依据，实际 HEAD、canonical origin、干净状态、完整 commit、provider 锁与
+每份摘要仍必须通过。缺副本时按错误中的完整提交准备，不改变现有开发工作区。
+
+实际运行候选继续使用当前 Host build checkout，并验证完整 source snapshot、原权限消费锁
+及生成物；v4检查与普通Skills资源入口在原 local candidate 条件成立时不选择历史副本。
+因此历史契约基线检查通过不授予旧 Host 运行新专家的资格，也不替代当前专家来源门禁。
+`contract-impact = none`：仅修正开发工具的来源选择，原固定字节、启动权限、专家资产、
+协议、数据库及历史均不变。修复与全量检查证据见元仓 FEAT-158/20。
+本次默认 `make lint`、23项相关回归、双渠道 `skills:check`、`skills:release-boundary`、
+当前专家Host候选及资源来源检查均通过；显式脏Host来源仍拒绝，历史副本也不能冒充当前执行来源。
+此处是本地工程检查结果，不表示远端CI、全量故障测试或发布通过。
+
 Agent Host 的 owner-only loopback token 由 Desktop 自动管理；MiniMax API Key 由 owner-only
 本地文件提供。这两者是进程/外部服务凭据，不是用户登录。`demo_fast` 仅允许 `local` 环境；
 公网或生产构建继续使用正式 OIDC 与服务端权限链。
@@ -74,6 +98,8 @@ Desktop 使用 macOS 每用户缓存目录中的进程级本机锁保持单实�
 遮挡当前 Chat 客户端。
 
 ## FEAT-158 日常专家与同构建重开
+
+2026-10-16 第一组接入：当前受审资产为 bundle 0.5.0，来源 `yijie-skills/dist/skills-experts-first-three-v010`，包含38个原普通Skill和4位真实专家。原京东0.1.3身份与归档不变；新增小红书、漫剧、跨境运营均为易界适配版0.1.0。仍使用下方同一个daily入口、安装器与会话绑定，不新增profile或数据迁移。三位不再是展示卡，其余7位保留展示状态；它们不因资源已准备而获得平台连接或额外权限。来源更新必须先规范打包、核对原资源不变、固定Desktop/Host资产pin，再执行既有Host源码freeze和canonical构建；不得改旧receipt或清理历史以通过检查。
 
 2026-10-13 Owner授权接入日常客户端。普通canonical入口在既有daily模型/连接器组合且未选择workflow专用配置时默认开启专家，保持 `com.yijie.ai`、原 `demo-fast-v1`、Host/Runtime Home、18081端口、Host binary和单实例锁。复用既有SQL33→35及Host8→10迁移，不重写历史、旧outbox或普通Skill安装。专家资源仍通过独立受审槽加载，须用户召唤后才用于会话。
 
@@ -185,3 +211,14 @@ Owner已授权将定时任务接到普通客户端。`pnpm tauri:dev`、`pnpm ta
 日常历史兼容：旧v1投递明确failed但projection仍queued时，只有turn payload精确匹配、无Runtime turn绑定、没有同轮非failed操作，且submission不是submitted/uncertain，才不占用全局调度通道。已有聊天自身的原索引/删除保护继续有效；不会把旧历史改成成功或重新投递。清理重试耗尽且lease已释放的记录仍留存，但不再冒充当前清理工作；pending或仍持有lease的清理照常阻挡。
 
 专属聊天的首次create若从未尝试、已按原生恢复流程取消退款且仍无Host/Runtime绑定，则它只是已撤销运行的本地占位。后续显式确认可沿同一受管目录创建新会话/新操作，组合事务重验后更新当前专属关联；旧run、旧聊天和旧outbox继续留存且不得出站。已有真实绑定、已尝试、未释放或未知记录不适用此重建规则。
+
+### 第一组专家事实保真修复候选（2026-10-16）
+
+当前 canonical expert producer 为 `dist/skills-experts-first-three-v011`，bundle `0.5.1`。
+44 个资产包含原 38 普通 Skill、原 jd 0.1.3、新三位原 0.1.0 以及小红书/跨境的 0.1.1。
+新修订使用不同受管 installation id，旧包、receipt 和精确会话引用保留；目录每位只显示最新版本，仍共 4 位真实专家。
+历史版本解析继续校验完整 ExpertRef；只有权威目录确认安装目录互异且摘要相符的旧版本可与新版本共存。
+
+数据库目录在连接打开前统一设置备份排除；不要对打开的 db、WAL、SHM 文件调用 Foundation
+`getResourceValue` 或绕过 SQLite 另开/关闭同 inode 描述符，后者会释放进程的 POSIX 锁。
+验收保留对照仅在正常退出后运行。修复证据与真实模型复验见元仓 FEAT-158/19。

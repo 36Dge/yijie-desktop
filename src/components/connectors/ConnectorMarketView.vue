@@ -24,7 +24,7 @@ const detailsId = ref<string | null>(null), uninstallId = ref<string | null>(nul
 const panelId = useId();
 let detailsTrigger: HTMLElement | null = null, uninstallTrigger: HTMLElement | null = null;
 const installed = computed(() => props.model.entries.filter(entry => entry.installed));
-const tabs = computed(() => [{ key: "market", label: "市场" }, { key: "installed", label: `已安装 ${installed.value.length}` }]);
+const tabs = computed(() => [{ key: "market", label: "市场" }, { key: "installed", label: "已安装", count: installed.value.length }]);
 const filtered = computed(() => filterConnectors(tab.value === "installed" ? installed.value : props.model.entries, query.value));
 const categories = computed(() => {
   const groups = new Map<string, { id: string; label: string; entries: typeof filtered.value[number][] }>();
@@ -57,7 +57,7 @@ watch(() => props.model.phase, phase => { if (phase === "permission-denied") { d
     <template v-else>
       <NAlert v-if="model.error" type="warning" :bordered="false" role="alert">{{ model.error }} 当前显示上次读取的状态，请刷新后再操作。</NAlert>
       <NAlert v-if="!model.canManage" type="info" :bordered="false">安装、启停和卸载需要管理权限；账户授权按对应权限单独开放。</NAlert>
-      <div class="connector-market__toolbar"><YjTabs v-model="tab" :items="tabs" aria-label="连接器视图" :panel-id="panelId" /><NInput v-model:value="query" class="connector-market__search" clearable placeholder="搜索连接器" :input-props="{ 'aria-label': '搜索连接器' }"><template #prefix><YjIcon name="search" size="sm" tone="muted" /></template></NInput></div>
+      <div class="connector-market__toolbar"><YjTabs v-model="tab" variant="line" :items="tabs" aria-label="连接器视图" :panel-id="panelId" /><NInput v-model:value="query" class="connector-market__search" clearable placeholder="搜索连接器" :input-props="{ 'aria-label': '搜索连接器' }"><template #prefix><YjIcon name="search" size="sm" tone="muted" /></template></NInput></div>
       <section :id="panelId" role="tabpanel" :aria-labelledby="`${panelId}-tab-${tab}`">
         <YjEmpty v-if="!filtered.length" :title="query.trim() ? '没有找到匹配的连接器' : tab === 'installed' ? '还没有安装连接器' : '当前没有可展示的连接器'" :description="query.trim() ? '试试其他名称或清空搜索。' : tab === 'installed' ? '前往市场安装应用，再完成配置或授权。' : '请刷新状态，或更新客户端后重试。'" :icon="query.trim() ? 'search' : 'connector'"><template #actions><NButton v-if="query.trim()" @click="query = ''">清空搜索</NButton><NButton v-else-if="tab === 'installed'" type="primary" @click="tab = 'market'">前往市场</NButton><NButton v-else @click="$emit('refresh')">刷新</NButton></template></YjEmpty>
         <ConnectorInstalledList v-else-if="tab === 'installed'" :entries="filtered" :can-manage="model.canManage" @open="openDetails" @enabled-change="enabledChange" @uninstall="requestUninstall" />
@@ -84,7 +84,7 @@ watch(() => props.model.phase, phase => { if (phase === "permission-denied") { d
 
 <style scoped>
 .connector-market { container: connector-market / inline-size; }
-.connector-market__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--yj-space-4); margin-block: var(--yj-space-5); }
+.connector-market__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--yj-space-4); margin-block: var(--yj-space-6); border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle); }
 .connector-market__search { width: min(100%, var(--yj-layout-connector-search-width)); }
 .connector-market__categories { display: flex; flex-direction: column; gap: var(--yj-space-6); }
 .connector-market__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--yj-space-3); padding: 0; margin: 0; list-style: none; }

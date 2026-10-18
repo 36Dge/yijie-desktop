@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { resolveAgentHostCheckout } from "./resolve-pinned-checkout.mjs";
 import {
   checkAgentHostV4Contract,
   safeRelativePath,
@@ -50,7 +52,12 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
     })).toThrow();
   });
 
-  it("verifies immutable v4 objects while current clean siblings provide v6 execution", async () => {
+  it("verifies immutable v4 objects without moving the current development checkouts", async () => {
+    const head = root => execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const originalHeads = [head(contractsRoot), head(agentHostRoot)];
+    const pinnedHostRoot = await resolveAgentHostCheckout({
+      repositoryRoot, fullCommit: lock.agent_host.full_commit, explicitRoot: process.env.YIJIE_DESKTOP_AGENT_HOST_DIR,
+    });
     await expect(checkAgentHostV4Contract()).resolves.toBeUndefined();
     await expect(verifyImmutableGitObject(
       contractsRoot,
@@ -59,26 +66,16 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
       "Contracts",
     )).rejects.toThrow("immutable commit");
     await expect(verifyImmutableGitObject(
-      agentHostRoot,
+      pinnedHostRoot,
       "https://example.invalid/wrong-host.git",
       lock.agent_host.full_commit,
       "Agent Host",
     )).rejects.toThrow("origin");
 
-    await expect(
-      import("node:child_process").then(({ execFileSync }) =>
-        execFileSync("git", ["-C", contractsRoot, "rev-parse", "HEAD"], {
-          encoding: "utf8",
-        }).trim(),
-      ),
-    ).resolves.toBe("aeccf5d561bd4259389cdb325bae84ce3e0dea86");
-    await expect(
-      import("node:child_process").then(({ execFileSync }) =>
-        execFileSync("git", ["-C", agentHostRoot, "rev-parse", "HEAD"], {
-          encoding: "utf8",
-        }).trim(),
-      ),
-    ).resolves.toBe("078769a22d035c2921e315e5776185bed6f7feeb");
+    expect(execFileSync("git", ["-C", pinnedHostRoot, "rev-parse", "--verify", `${lock.agent_host.full_commit}^{commit}`], {
+      encoding: "utf8",
+    }).trim()).toBe(lock.agent_host.full_commit);
+    expect([head(contractsRoot), head(agentHostRoot)]).toEqual(originalHeads);
   });
 
   it("pins the Host consumption lock bytes and rejects any drift", async () => {
@@ -98,6 +95,10 @@ describe("FEAT-134 Agent Host v4 exact pin", () => {
     });
     expect(() => validateHostContractsLock(Buffer.concat([bytes, Buffer.from("# drift\n")])))
       .toThrow("digest");
+  });
+
+  it("rejects an explicitly invalid source instead of selecting a different checkout", async () => {
+    await expect(checkAgentHostV4Contract({ agentHostRoot: null })).rejects.toThrow();
   });
 
   it("keeps the v4 schema, proto, five fixtures and Runtime policy invariant at v0.7", () => {

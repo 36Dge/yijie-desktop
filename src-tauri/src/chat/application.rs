@@ -2739,7 +2739,7 @@ impl ConversationApplication {
         }
         let recovery = self.database.recovery_snapshot().await?;
         if let Some(session_id) = recovery.active_session_ids.first().copied() {
-            self.stream_active_turn_with_projection_sink(session_id, sink)
+            self.stream_active_sessions_with_projection_sink(recovery.active_session_ids, sink)
                 .await?;
             return Ok(CoordinatorOutcome::StreamRecovered { session_id });
         }
@@ -2932,10 +2932,98 @@ impl ConversationApplication {
         sink.publish_native(buffer.view.clone())
     }
 
+    /// Observe every already-running session while retaining one outbox dispatcher.
+    /// Waiting for one whole turn before opening the next SSE lets Host's bounded
+    /// replay discard the other session's early facts during ordinary overlap.
+    async fn stream_active_sessions_with_projection_sink(
+        &self,
+        mut pending_sessions: Vec<Uuid>,
+        sink: &dyn TurnProjectionSink,
+    ) -> Result<(), ChatError> {
+        type Observation<'a> =
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ChatError>> + Send + 'a>>;
+        let mut observations: Vec<(Uuid, Observation<'_>)> = Vec::new();
+        let mut dispatch = Box::pin(self.dispatch_while_observing(sink));
+        loop {
+            for session_id in pending_sessions.drain(..) {
+                if !observations.iter().any(|(id, _)| *id == session_id) {
+                    observations.push((
+                        session_id,
+                        Box::pin(self.stream_native_conversation(session_id, sink, false)),
+                    ));
+                }
+            }
+            if observations.is_empty() {
+                // Finish any in-flight submission before returning. A completed
+                // observer must never cancel an unrelated outbox operation.
+                pending_sessions = dispatch.await?;
+                if pending_sessions.is_empty() {
+                    return Ok(());
+                }
+                dispatch = Box::pin(self.dispatch_while_observing(sink));
+                continue;
+            }
+            let completed = std::future::poll_fn(|cx| {
+                for (index, (_, observation)) in observations.iter_mut().enumerate() {
+                    if let std::task::Poll::Ready(result) = observation.as_mut().poll(cx) {
+                        return std::task::Poll::Ready((index, result));
+                    }
+                }
+                std::task::Poll::Pending
+            });
+            tokio::select! {
+                (index, result) = completed => {
+                    // Dropping a completed read future never interrupts a Runtime turn.
+                    drop(observations.swap_remove(index));
+                    if let Err(error) = result {
+                        // A recovery snapshot can outlive a just-completed turn.
+                        // Its missing active context is benign; other readers stay live.
+                        if error != ChatError::NotFound {
+                            let _ = dispatch.await;
+                            return Err(error);
+                        }
+                    }
+                }
+                sessions = &mut dispatch => {
+                    pending_sessions = sessions?;
+                    dispatch = Box::pin(self.dispatch_while_observing(sink));
+                }
+            }
+        }
+    }
+
+    async fn dispatch_while_observing(
+        &self,
+        sink: &dyn TurnProjectionSink,
+    ) -> Result<Vec<Uuid>, ChatError> {
+        tokio::time::sleep(PROGRESS_FLUSH_INTERVAL).await;
+        if self.stopping()
+            || matches!(
+                self.lifecycle.phase(),
+                super::lifecycle::Phase::Suspended
+                    | super::lifecycle::Phase::Stopping
+                    | super::lifecycle::Phase::StopPending
+                    | super::lifecycle::Phase::Stopped
+            )
+        {
+            return Ok(vec![]);
+        }
+        // This future is polled alongside every SSE. A slow normal Host request
+        // cannot stop the other sessions' notification readers.
+        let _ = self.native_schedule_tick().await;
+        if let Ok(outcome) = self.dispatch_next().await {
+            if outcome != DispatchOutcome::Idle {
+                sink.publish_coordinator(&CoordinatorOutcome::Dispatched(outcome))?;
+            }
+        }
+        Ok(self.database.recovery_snapshot().await?.active_session_ids)
+    }
+
     async fn stream_native_conversation(
         &self,
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
+        dispatch_background: bool,
     ) -> Result<(), ChatError> {
         use super::native_conversation::NativeDisplayBuffer;
         let context = self.database.active_turn_context(session_id).await?;
@@ -3125,14 +3213,14 @@ impl ConversationApplication {
             }
             tokio::select! {
                 _=dispatch.tick()=>{
-                    let _=self.native_schedule_tick().await;
-                    // SSE can stay open for the whole Turn. Keep the existing
-                    // outbox dispatcher responsive to native interrupt requests
-                    // and ordinary submissions while receiving notifications.
-                    // Dispatch errors do not change the observed execution state.
-                    if let Ok(outcome)=self.dispatch_next().await {
-                        if outcome!=DispatchOutcome::Idle {
-                            sink.publish_coordinator(&CoordinatorOutcome::Dispatched(outcome))?;
+                    if dispatch_background {
+                        let _=self.native_schedule_tick().await;
+                        // Direct single-session observation retains its dispatcher;
+                        // the multi-session coordinator dispatches once for all streams.
+                        if let Ok(outcome)=self.dispatch_next().await {
+                            if outcome!=DispatchOutcome::Idle {
+                                sink.publish_coordinator(&CoordinatorOutcome::Dispatched(outcome))?;
+                            }
                         }
                     }
                 }
@@ -3201,7 +3289,8 @@ impl ConversationApplication {
         session_id: Uuid,
         sink: &dyn TurnProjectionSink,
     ) -> Result<(), ChatError> {
-        self.stream_native_conversation(session_id, sink).await
+        self.stream_native_conversation(session_id, sink, true)
+            .await
     }
 }
 
@@ -4671,6 +4760,204 @@ mod tests {
         drop(application);
         drop(database);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn feat158_native_observers_capture_overlapping_sessions() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa6";
+        for initially_discovered in [1, 2] {
+            let (root, database, first, _, first_host) =
+                prepare_v2_turn_outbox("feat158-normal-overlap").await;
+            let first_runtime = Uuid::now_v7();
+            database
+                .accept_native_turn(first.turn_operation_id, first_runtime, NONCE.into())
+                .await
+                .unwrap();
+            let first_session = first.session_id;
+            let project = database
+                .call(move |r| Ok(r.session_summary(first_session)?.project_id.unwrap()))
+                .await
+                .unwrap();
+            let second = database
+                .create_session_and_enqueue_multimodal(
+                    project,
+                    vec![DraftContentBlock::Text("second ordinary report".into())],
+                    Uuid::now_v7(),
+                    1,
+                )
+                .await
+                .unwrap();
+            let now = unix_seconds().unwrap();
+            let create = database
+                .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+                .await
+                .unwrap()
+                .unwrap();
+            let task = Uuid::now_v7();
+            database
+                .bind_public_task(create.operation_id, task, now)
+                .await
+                .unwrap();
+            database
+                .reschedule_outbox(create.operation_id, now)
+                .await
+                .unwrap();
+            let create = database
+                .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+                .await
+                .unwrap()
+                .unwrap();
+            let second_host = Uuid::now_v7();
+            database
+                .bind_host_session_and_enqueue_turn(
+                    create.operation_id,
+                    task,
+                    second_host,
+                    Uuid::now_v7(),
+                )
+                .await
+                .unwrap();
+            let turn = database
+                .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(turn.operation_id, second.turn_operation_id);
+            database
+                .accept_native_turn(turn.operation_id, Uuid::now_v7(), NONCE.into())
+                .await
+                .unwrap();
+            let mut responses = std::collections::BTreeMap::new();
+            for (pending, host_id) in [(&first, first_host), (&second, second_host)] {
+                let context = database
+                    .active_turn_context(pending.session_id)
+                    .await
+                    .unwrap();
+                let stream = Uuid::now_v7();
+                let native_turn = context.runtime_turn_id;
+                let item = |kind: &str, text: &str| serde_json::json!({"id":format!("{host_id}-{kind}"),"type":kind,"text":text,"availability":"available"});
+                let mut start = String::new();
+                let mut end = String::new();
+                for (index, (method, payload)) in [
+                    ("turn/started",serde_json::json!({"turn":{"id":native_turn,"status":"inProgress","items":[],"itemsComplete":false}})),
+                    ("item/started",serde_json::json!({"item":item("userMessage","ordinary input")})),
+                    ("item/completed",serde_json::json!({"item":item("userMessage","ordinary input")})),
+                    ("item/started",serde_json::json!({"item":item("agentMessage","")})),
+                    ("item/completed",serde_json::json!({"item":item("agentMessage","ordinary final")})),
+                    ("turn/completed",serde_json::json!({"turn":{"id":native_turn,"status":"completed","items":[],"itemsComplete":false}})),
+                ].into_iter().enumerate() {
+                    let sequence=index+1;
+                    let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":native_turn,"availability":"available"});
+                    for (k,v) in payload.as_object().unwrap() {n[k]=v.clone();}
+                    let event=serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":sequence,"occurred_at":"2026-10-17T00:00:00Z","task_id":context.task_id,"agent_session_id":host_id,"codex_thread_id":context.codex_thread_id,"turn_id":native_turn,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+                    let message=format!("id: {stream}:{sequence}\nevent: native.notification\ndata: {event}\n\n");
+                    if method=="turn/completed" {end.push_str(&message);} else {start.push_str(&message);}
+                }
+                let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 8\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",start.len()+end.len());
+                responses.insert(host_id.to_string(), (headers + &start, end));
+            }
+            let token_directory = root.join("host");
+            fs::create_dir(&token_directory).unwrap();
+            fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+            let token_path = token_directory.join("api-token");
+            fs::write(&token_path, "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap();
+            fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = tokio::spawn(async move {
+                let mut held: Vec<(tokio::net::TcpStream, String)> = Vec::new();
+                let mut timely = true;
+                let mut opened = 0;
+                while opened < 2 {
+                    let accepted =
+                        tokio::time::timeout(Duration::from_secs(2), listener.accept()).await;
+                    if accepted.is_err() && !held.is_empty() {
+                        // On a regression, still finish the first ordinary HTTP
+                        // response so the test exits without aborting any process.
+                        timely = false;
+                        for (mut stream, end) in held.drain(..) {
+                            stream.write_all(end.as_bytes()).await.unwrap();
+                            stream.shutdown().await.unwrap();
+                        }
+                        continue;
+                    }
+                    let (mut connection, _) = accepted.unwrap().unwrap();
+                    let request = read_request(&mut connection).await;
+                    if request.starts_with("GET /readyz ") {
+                        connection
+                            .write_all(ready_response(NONCE).as_bytes())
+                            .await
+                            .unwrap();
+                        connection.shutdown().await.unwrap();
+                        continue;
+                    }
+                    let id = responses
+                        .keys()
+                        .find(|id| request.starts_with(&format!("GET /v8/agent-sessions/{id}/")))
+                        .unwrap()
+                        .clone();
+                    let (start, end) = responses.remove(&id).unwrap();
+                    connection.write_all(start.as_bytes()).await.unwrap();
+                    held.push((connection, end));
+                    opened += 1;
+                }
+                for (mut stream, end) in held {
+                    stream.write_all(end.as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                }
+                timely
+            });
+            let application = ConversationApplication::new(
+                database.clone(),
+                Arc::new(
+                    HostBridge::from_connection(HostConnection {
+                        port,
+                        token_path,
+                        instance_nonce: NONCE.into(),
+                    })
+                    .unwrap(),
+                ),
+                Arc::new(FixedPublicTaskControlPlane::new([])),
+            );
+            let sessions = [first.session_id, second.session_id];
+            application
+                .stream_active_sessions_with_projection_sink(
+                    sessions[..initially_discovered].to_vec(),
+                    &NoopProjectionSink,
+                )
+                .await
+                .unwrap();
+            assert!(server.await.unwrap(),"second SSE must be observed before the first turn ends, including sessions discovered after observation began");
+            for pending in [&first, &second] {
+                let views = database
+                    .native_views(pending.session_id, vec![pending.turn_id])
+                    .await
+                    .unwrap();
+                assert_eq!(views[0].items.len(), 2);
+                assert!(views[0].terminal_observed);
+                assert_eq!(views[0].status.as_deref(), Some("completed"));
+                assert_eq!(views[0].diagnostic, None);
+                assert_eq!(
+                    views[0].items[0].item.text.as_deref(),
+                    Some("ordinary input")
+                );
+                assert_eq!(
+                    views[0].items[1].item.text.as_deref(),
+                    Some("ordinary final")
+                );
+            }
+            application
+                .stream_active_sessions_with_projection_sink(
+                    vec![first.session_id],
+                    &NoopProjectionSink,
+                )
+                .await
+                .unwrap();
+            drop(application);
+            drop(database);
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[cfg(target_os = "macos")]

@@ -1,6 +1,6 @@
 # 按钮、筛选项与说明标签尺寸规范
 
-状态：Accepted · 2026-09-08 · 适用：全部活跃 Desktop 页面。
+状态：Accepted · 2026-10-16 · 适用：全部活跃 Desktop 页面。
 
 依据用户本轮截图反馈，统一同类组件的高度、字号、内边距、图标与圆角。颜色体系、颜色角色、交互语义和权限边界不变。
 
@@ -8,6 +8,7 @@
 
 | 角色 | 高度 | 文字 | 水平内边距 | 图标 | 圆角 | 实现入口 |
 |---|---:|---|---:|---:|---:|---|
+| 页面内容标签页 | 48px | 14px / 22px 行高 | 4px；标签间距 24px | 可选 | 无；选中项 4px 青柠色圆角下划线 | `YjTabs variant="line"`，原店铺页基准 |
 | 筛选胶囊、分类、紧凑工具栏操作 | 32px | 14px / 20px 行高 | 12px | 16px，图文间距 8px | 胶囊；普通工具按钮 8px | `yj-control`，胶囊加 `yj-control--pill` |
 | 常规按钮、确认弹窗操作 | 36px | 14px / 20px 行高 | 16px | 16px | 8px | `yj-control yj-control--regular`；NButton medium |
 | 明确的大操作，如 Chat 发送与附件主入口 | 40px | 14px / 20px 行高 | 16px | 20px | 沿用相应操作的形状 | `yj-control--large`；NButton large |
@@ -23,7 +24,7 @@
 - `src/styles/variables.css`：32/36/40px 控件高度、24px 标签高度、20/16px 行高。
 - `src/styles/component-metrics.css`：只定义几何与排版，不定义任何颜色。
 - `src/design/theme/naive-theme.ts`：Naive UI Button/Tag 映射到同一组 tokens；颜色字段完全沿用。
-- `YjTabs`：保留键盘、tablist、tab、aria-selected、panel 关联，复用紧凑胶囊。
+- `YjTabs`：保留键盘、tablist、tab、aria-selected、panel 关联；上述三组内容标签页使用 `line`，既有紧凑切换保留默认 `pill`。线形样式与数量文字由组件统一提供，详见[导航组件](./02-navigation-components.md)。
 - 页内颜色和 disabled/hover/selected 仍由现有组件负责；禁止借统一尺寸改变主题或状态色。
 
 ## 当前覆盖

@@ -11,9 +11,20 @@ import { installOutput, readRegularFile, safeRelativePath, sha256, verifyBundleF
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exec = promisify(execFile);
 const outputRoot = path.join(root, ".local/skill-packages-experts");
-const producerOutput = "dist/skills-experts-candidate-v013";
+const producerOutput = "dist/skills-experts-thirteen-overall-v013";
 const manifestPath = `${producerOutput}/bundle-manifest.json`;
 const inventory = items => `${items.map(item => `${safeRelativePath(item.archive.path)} ${item.archive.sha256}`).sort().join("\n")}\n`;
+
+export function verifyRetainedExpertResources(manifest, baselineBytes) {
+  assert.equal(sha256(baselineBytes), "9d41fa9835616a0bb9b4e72b2656a8fdff0fa631faca32ca0c7a97de94a29970", "Retained 73-resource baseline changed");
+  const baseline = JSON.parse(baselineBytes);
+  assert.equal(baseline.skills.length, 73);
+  for (const previous of baseline.skills) {
+    const matches = manifest.skills.filter(item => item.id === previous.id && item.version === previous.version);
+    assert.equal(matches.length, 1, "Every prior resource version must be retained exactly once");
+    assert.deepEqual(matches[0], previous, `Existing resource metadata/archive changed: ${previous.id}@${previous.version}`);
+  }
+}
 
 export async function syncDesktopExpertResources({ check = false, packageProducer = false, environment = process.env } = {}) {
   assert.ok(environment.YIJIE_ENV === "local" && environment.YIJIE_LOCAL_PROFILE === "demo_fast", "Expert assets are restricted to explicit local/demo_fast candidates");
@@ -43,6 +54,7 @@ export async function syncDesktopExpertResources({ check = false, packageProduce
   assert.equal(sha256(bytes), pin.manifest_sha256, "Expert manifest differs from Native pin");
   assert.equal(sha256(authorityBytes), pin.authority_sha256, "Expert authority differs from Native pin");
   const manifest = JSON.parse(bytes), authority = JSON.parse(authorityBytes);
+  verifyRetainedExpertResources(manifest, await readRegularFile(path.join(skillsRoot, "docs/provenance/FEAT-158-retained-resources-v0.24.0.json"), 256 * 1024));
   assert.equal(manifest.schema_version, 3); assert.equal(manifest.distribution_channel, "local-development");
   assert.equal(manifest.bundle_version, pin.bundle_version); assert.deepEqual(manifest.source, pin.source);
   assert.equal(authority.release, false); assert.equal(authority.manifest_sha256, pin.manifest_sha256);
@@ -64,9 +76,13 @@ export async function syncDesktopExpertResources({ check = false, packageProduce
   const ordinary = manifest.skills.filter(item => item.asset_kind !== "expert_resources");
   const experts = manifest.skills.filter(item => item.asset_kind === "expert_resources");
   const oldLock = validateResourceLock(JSON.parse(await readRegularFile(path.join(root, "contracts/desktop-skill-bundle-local.lock.json"), 256 * 1024)));
-  assert.equal(ordinary.length, 38); assert.equal(experts.length, 1); assert.equal(manifest.skills.length, 39);
+  assert.equal(ordinary.length, 38);
+  assert.ok(experts.length >= 1 && experts.length <= 64, "Expert catalog must stay within the Native catalog bound");
+  assert.equal(manifest.skills.length, ordinary.length + experts.length);
   assert.equal(sha256(inventory(ordinary)), oldLock.catalog.archive_inventory_sha256, "Ordinary Skill archive inventory must remain unchanged");
-  assert.equal(experts[0].expert.expert_id, "jd-ops-expert");
+  assert.deepEqual(experts.map(item => item.expert.expert_id).sort(), authority.experts.map(item => item.expert_id).sort(), "Every expert must have matching reviewed source authority");
+  const retainedExpert = experts.find(item => item.expert.expert_id === "jd-ops-expert");
+  assert.equal(retainedExpert?.version, "0.1.3", "Retain the original expert version for existing conversations");
   const bundle = await verifyBundleFiles(skillsRoot, manifest, { manifest_path: manifestPath }, { catalog: { archive_inventory_sha256: sha256(inventory(manifest.skills)) } });
   const files = [{ relativePath: "bundle-manifest.json", bytes }, { relativePath: "authority.json", bytes: authorityBytes }, ...bundle.files];
   if (check) await verifyOutput(outputRoot, files); else await installOutput(outputRoot, files);

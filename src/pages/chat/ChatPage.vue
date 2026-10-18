@@ -180,7 +180,14 @@ const expertContextBlocked = computed(() => expertsUiEnabled && !isDraftMode.val
   !expertBinding.value || chatExperts.busy.has(routeSessionId.value) || !!chatExperts.errors[routeSessionId.value] || !["none", "ready"].includes(expertBinding.value.state)
 ));
 const expertBusy = computed(() => expertContextBlocked.value || !!expertSubmission.value);
-const expertSendReady = computed(() => !expertBusy.value && (!selectedExpert.value || (expertResources.snapshot?.executionAvailable === true && expertResources.entries.some(entry => entry.display.expertId === selectedExpert.value?.expertId && entry.display.version === selectedExpert.value?.version && entry.state === "ready"))));
+const expertSendReady = computed(() => !expertBusy.value && (!selectedExpert.value || (
+  expertResources.snapshot?.executionAvailable === true && (
+    // Native refresh checks the exact retained version for an existing binding.
+    // The market directory contains only the latest version of each expert.
+    routeSessionId.value ? expertBinding.value?.state === "ready" :
+      expertResources.entries.some(entry => entry.display.expertId === selectedExpert.value?.expertId && entry.display.version === selectedExpert.value?.version && entry.state === "ready")
+  )
+)));
 const expertIntent = computed<ExpertTurnIntent | undefined>(() => {
   if (!expertsUiEnabled || isDraftMode.value) return undefined;
   if (routeSessionId.value) return bindingTurnIntent(expertBinding.value);

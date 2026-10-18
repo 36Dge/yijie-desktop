@@ -684,6 +684,39 @@ async fn recover_binding(
     encode(&settled)
 }
 
+// The market catalog intentionally shows only the latest card. Historical
+// conversations must instead check their exact retained resource through the
+// existing resolver. This is a read projection, never a binding migration.
+async fn current_binding_view(
+    chat: &ChatRuntime,
+    skills: &SkillRuntime,
+    access: &Access,
+    mut binding: wire::BindingView,
+) -> wire::BindingView {
+    if binding.state != wire::BindingState::Ready {
+        return binding;
+    }
+    let Some(expert) = &binding.expert else {
+        return binding;
+    };
+    let selection = wire::ExpertSelection {
+        expert_id: expert.expert_id.clone(),
+        version: expert.version.clone(),
+    };
+    let available = async {
+        access.authority(&["task.read", "plugin.read"])?;
+        skills.expert_resolve(chat, &selection).await?;
+        access.authority(&["task.read", "plugin.read"])?;
+        Ok::<(), Error>(())
+    }
+    .await;
+    if let Err(error) = available {
+        binding.state = wire::BindingState::Unavailable;
+        binding.error_code = Some(error);
+    }
+    binding
+}
+
 async fn command(
     raw: Value,
     chat: &ChatRuntime,
@@ -707,9 +740,13 @@ async fn command(
         let data = match action {
             Action::Set(payload) => set_binding(chat, skills, &access, payload).await?,
             Action::Recover(payload) => recover_binding(chat, skills, &access, payload).await?,
-            Action::Operation(payload) => encode(
-                &binding_operation(chat, &access, payload.session_id, payload.operation_id).await?,
-            )?,
+            Action::Operation(payload) => {
+                let mut result =
+                    binding_operation(chat, &access, payload.session_id, payload.operation_id)
+                        .await?;
+                result.binding = current_binding_view(chat, skills, &access, result.binding).await;
+                encode(&result)?
+            }
             Action::Read(payload) => {
                 access.authority(&["task.read"])?;
                 let worker = chat.database().await.map_err(db_error)?;
@@ -727,16 +764,16 @@ async fn command(
                     wire::BindingState::Applying | wire::BindingState::Unknown
                 ) {
                     if let Some(operation) = binding.operation_id.clone() {
-                        encode(
-                            &binding_operation(chat, &access, binding.session_id, operation)
+                        let current =
+                            binding_operation(chat, &access, binding.session_id, operation)
                                 .await?
-                                .binding,
-                        )?
+                                .binding;
+                        encode(&current_binding_view(chat, skills, &access, current).await)?
                     } else {
                         encode(&binding)?
                     }
                 } else {
-                    encode(&binding)?
+                    encode(&current_binding_view(chat, skills, &access, binding).await)?
                 }
             }
         };

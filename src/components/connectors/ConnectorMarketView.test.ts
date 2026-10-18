@@ -156,17 +156,17 @@ describe("independent OAuth authorization entry", () => {
 
 
 describe("cross-border catalog", () => {
-  it("renders ten cross-border icons with category search and the existing detail entry", async () => {
+  it("renders twelve cross-border icons with category search and the existing detail entry", async () => {
     const data: Snapshot = { ...snapshot([]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
     const entries = connectorViews(data);
     const cross = entries.filter(entry => entry.categoryId === "cross_border_ecommerce");
-    expect(entries).toHaveLength(58);
-    expect(cross.map(entry => entry.id)).toEqual(["lingxing", "sif", "keepa", "pangolinfo", "datahawk", "seller-labs", "shopify", "sellersprite", "sorftime", "FastMoss"]);
+    expect(entries).toHaveLength(60);
+    expect(cross.map(entry => entry.id)).toEqual(["lingxing", "sif", "keepa", "pangolinfo", "datahawk", "seller-labs", "shopify", "sellersprite", "sorftime", "FastMoss", "chuhaijiang", "linkfox"]);
     const wrapper = mount(ConnectorMarketView, { props: { model: { phase: "ready", entries, canManage: true, refreshing: false, error: null } }, attachTo: document.body });
     wrappers.push(wrapper);
-    expect(wrapper.findAll(".connector-card")).toHaveLength(58);
+    expect(wrapper.findAll(".connector-card")).toHaveLength(60);
     await wrapper.get("input").setValue("跨境电商");
-    expect(wrapper.findAll(".connector-card")).toHaveLength(10);
+    expect(wrapper.findAll(".connector-card")).toHaveLength(12);
     for (const entry of cross) {
       expect(connectorIconUrl(entry.iconAssetId)).toBeTruthy();
       expect(wrapper.findAll(".connector-card img").some(img => img.attributes("src") === connectorIconUrl(entry.iconAssetId))).toBe(true);

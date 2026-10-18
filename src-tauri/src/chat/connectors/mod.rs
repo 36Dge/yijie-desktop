@@ -46,7 +46,7 @@ fn catalog() -> &'static Catalog {
         let value: Catalog =
             serde_json::from_str(include_str!("../../../../contracts/market-catalog.json"))
                 .expect("validated Connectors catalog");
-        assert_eq!(value.catalog.len(), 58);
+        assert_eq!(value.catalog.len(), 60);
         value
     })
 }

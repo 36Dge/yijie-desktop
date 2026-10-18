@@ -4,6 +4,7 @@ import { expertDisplay, expertEntry, expertSnapshot } from "../../test/expert-fi
 import { usePermissionStore } from "../../stores/permission.store";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import { useChatExpertsStore } from "../../stores/chat-experts.store";
+import { useExpertsStore } from "../../stores/experts.store";
 import { defineComponent, h } from "vue";
 import { RouterView } from "vue-router";
 
@@ -782,7 +783,7 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(wrapper.getComponent(ChatTimeline).element).toBe(timelineElement);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
-    expect(wrapper.text()).toContain("过程记录");
+    expect(wrapper.text()).toContain("处理过程");
     expect(wrapper.text()).toContain("此过程仅包含状态元数据；详情未进入当前对话投影。");
     expect(wrapper.text()).toContain("标题检查完成");
     expect(loadReasoning).not.toHaveBeenCalled();
@@ -810,31 +811,23 @@ describe("FEAT-126 ChatPage", () => {
       true,
       HISTORY_WITHOUT_REASONING,
     );
-    store.conversationState = viewFromLegacySnapshot({
-      threads: [{ threadId: SESSION_ID, status: "active" }],
-      turns: [{
-        threadId: SESSION_ID,
-        turnId: TURN_ID,
-        ordinal: 0,
-        status: "in_progress",
-        terminalStatus: null,
-      }],
-      items: [{
-        threadId: SESSION_ID,
-        turnId: TURN_ID,
-        itemId: `${TURN_ID}:reasoning:0`,
-        ordinal: 100,
-        kind: "reasoning",
-        status: "streaming",
-        contentBlocks: [],
-      }],
-    });
+    // A live state needs an observed Native notification, not a legacy archive.
+    store.conversationState = composeConversationView(
+      { threads: [{ threadId: SESSION_ID, status: "active" }], turns: [], items: [] },
+      [{ sessionId: SESSION_ID, turnId: TURN_ID, runtimeThreadId: SESSION_ID, runtimeTurnId: TURN_ID,
+        source: "native_observed", revision: "1", availability: "available", status: "inProgress",
+        statusSource: "runtime_notification", terminalObserved: false,
+        items: [{ item: { id: `${TURN_ID}:reasoning:0`, type: "reasoning", summary: [], content: [], availability: "available" }, lastMethod: "item/started", ordinal: 0 }] }],
+    );
+    store.phase = "streaming";
+    store.nativeLiveTurnId = TURN_ID;
     await flushPromises();
 
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
-    expect(wrapper.text()).toContain("过程记录");
-    expect(wrapper.text()).toContain("本轮正在处理中");
+    expect(wrapper.text()).toContain("处理过程");
+    expect(wrapper.text()).toContain("正在思考");
+    expect(wrapper.text()).not.toContain("当前进度待确认");
     expect(wrapper.text()).not.toContain("仅包含状态元数据");
   });
 
@@ -1214,7 +1207,8 @@ describe("FEAT-126 ChatPage", () => {
     await wrapper.get('[aria-label="发送任务"]').trigger("click");
     await flushPromises();
 
-    expect(createSession).toHaveBeenCalledWith(PROJECT_ID, "");
+    // Selecting an attachment does not implicitly select a workspace.
+    expect(createSession).toHaveBeenCalledWith(null, "");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
   });
 
@@ -1440,6 +1434,10 @@ describe("FEAT-126 ChatPage", () => {
       vi.spyOn(store, "submitTurnWithResult").mockImplementation(async () => {
         store.draftAttachments = Object.freeze([]);
         setHistoryProjection(store, historyWithAcceptedTurn(acceptedTurnId, "queued", input));
+        store.conversationState = composeConversationView(
+          historyPageToConversationSnapshot(SESSION_ID, store.history!), [],
+          [{ turnId: acceptedTurnId, operationId: "019c1a00-0000-7000-8000-000000000020", status: "queued" }],
+        );
         return acceptedSubmission(
           SESSION_ID,
           chatSessionDraftTarget(SESSION_ID),
@@ -1742,6 +1740,46 @@ it("FEAT158 chip details carry the exact selected expert version", async () => {
   await wrapper.get('[aria-label^="查看已选专家"]').trigger("click"); await flushPromises();
   expect(router.currentRoute.value.query).toEqual({ tab: "experts", from: "/chat", expert: expertDisplay.expertId, expertVersion: expertDisplay.version });
   expect(useChatComposerDraftStore().expert("new")).toEqual(expertDisplay);
+  wrapper.unmount();
+});
+
+it("FEAT158 retained binding uses its Native checked version when the market only lists a newer card", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
+  await wrapper.get("textarea").setValue("继续使用历史专家");
+  const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
+  await flushPromises();
+  expect(wrapper.text()).not.toContain("所选专家资源或执行环境暂不可用");
+  await wrapper.get('[aria-label="发送任务"]').trigger("click");
+  expect(submit).toHaveBeenCalledWith("继续使用历史专家", undefined, undefined, { expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
+  expect(useChatExpertsStore().bindings[SESSION_ID]?.expert).toEqual(expertDisplay);
+  wrapper.unmount();
+});
+
+it.each(["resource", "execution"])("FEAT158 retained binding still blocks when Native reports unavailable %s", async (unavailable) => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: unavailable !== "execution" };
+  if (unavailable === "resource") useChatExpertsStore().bindings = { [SESSION_ID]: { sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "unavailable", errorCode: "resource_unavailable" } };
+  await wrapper.get("textarea").setValue("不能借用新版资源");
+  const submit = vi.spyOn(store, "submitTurnWithResult");
+  await flushPromises();
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+  expect(submit).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it("FEAT158 an unbound draft cannot borrow readiness from another expert version", async () => {
+  expertFlag.enabled = true;
+  const { wrapper, store } = await mountPage("/chat");
+  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
+  useChatComposerDraftStore().setExpert("new", expertDisplay);
+  await wrapper.get("textarea").setValue("旧版草稿尚未确认绑定");
+  const create = vi.spyOn(store, "createSessionWithResult");
+  await flushPromises();
+  expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+  expect(create).not.toHaveBeenCalled();
   wrapper.unmount();
 });
 

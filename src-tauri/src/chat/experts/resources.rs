@@ -190,6 +190,7 @@ pub(super) fn replay(
 }
 
 /// Caller commits before any Host mutation; false means ordinary replay is query-only.
+#[cfg(test)]
 pub(super) fn begin(
     tx: &Transaction<'_>,
     scope: &ChatScope,
@@ -197,6 +198,18 @@ pub(super) fn begin(
     fingerprint: &str,
     catalog: &str,
     timestamp: i64,
+) -> Result<(Journal, bool), Error> {
+    begin_with_coexisting(tx, scope, request, fingerprint, catalog, timestamp, &[])
+}
+
+pub(super) fn begin_with_coexisting(
+    tx: &Transaction<'_>,
+    scope: &ChatScope,
+    request: PrivateRequest,
+    fingerprint: &str,
+    catalog: &str,
+    timestamp: i64,
+    coexisting: &[wire::ExpertRef],
 ) -> Result<(Journal, bool), Error> {
     request.validate()?;
     let payload = request.payload();
@@ -222,7 +235,9 @@ pub(super) fn begin(
     if request.action() == "remove" && store::resource_in_use(tx, &payload.expert)? {
         return Err(Error::ResourceInUse);
     }
-    if request.action() == "prepare" && store::resource_replacement_in_use(tx, &payload.expert)? {
+    if request.action() == "prepare"
+        && store::resource_replacement_in_use(tx, &payload.expert, coexisting)?
+    {
         return Err(Error::ResourceInUse);
     }
     let receipt = wire::ResourceOperation {
@@ -609,19 +624,21 @@ async fn change(
     let ui = payload.clone();
     let instance = host.instance_nonce().to_owned();
     let revision = status.catalog_revision;
+    let coexisting = skills.expert_coexisting_refs(&payload.expert)?;
     let (original, fresh) = worker
         .call(move |repo| {
             Ok(prepare.run(&["plugin.manage"], |authority| {
                 let fingerprint = intent(repo, &prepare.scope, action, &ui)?;
                 let request = make_request(instance, authority, &ui, remove);
                 let tx = repo.connection.transaction().map_err(db_error)?;
-                let result = begin(
+                let result = begin_with_coexisting(
                     &tx,
                     &prepare.scope,
                     request,
                     &fingerprint,
                     &revision,
                     now()?,
+                    &coexisting,
                 )?;
                 tx.commit().map_err(db_error)?;
                 Ok(result)

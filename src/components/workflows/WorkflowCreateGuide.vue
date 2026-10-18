@@ -113,7 +113,6 @@ onBeforeUnmount(stop);
             <button type="button" class="workflow-create-guide__close yj-control yj-control--icon" aria-label="关闭新手引导" @click="dismiss(true)"><YjIcon name="dismiss" size="sm" /></button>
           </header>
           <p id="workflow-guide-description" class="workflow-create-guide__description">点击高亮的“创建工作流”，填写名称和描述，开始编排你的流程。</p>
-          <p class="workflow-create-guide__hint">可按 Esc 关闭，本次启动内不再提示；重启客户端后再次显示。</p>
       </NCard>
     </div>
   </Teleport>
@@ -128,12 +127,10 @@ onBeforeUnmount(stop);
 .workflow-create-guide__panel::before { content: ""; position: absolute; width: var(--yj-space-2); height: var(--yj-space-2); left: var(--guide-arrow-left); top: calc(var(--yj-space-1) * -1 - var(--yj-border-width)); transform: translateX(-50%) rotate(45deg); background: var(--yj-color-bg-elevated); border-top: var(--yj-border-width) solid var(--yj-color-border-default); border-left: var(--yj-border-width) solid var(--yj-color-border-default); }
 .workflow-create-guide__panel--above::before { top: auto; bottom: calc(var(--yj-space-1) * -1 - var(--yj-border-width)); transform: translateX(-50%) rotate(225deg); }
 .workflow-create-guide__header { display: flex; align-items: center; justify-content: space-between; gap: var(--yj-space-3); margin-bottom: var(--yj-space-2); }
-.workflow-create-guide__hint { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
 .workflow-create-guide__close { border: 0; background: transparent; color: var(--yj-color-text-secondary); cursor: pointer; }
 .workflow-create-guide__close:hover { background: var(--yj-color-control-hover); }
 .workflow-create-guide__close:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); }
 .workflow-create-guide__panel h2 { margin: 0; font-size: var(--yj-font-size-card-title); line-height: var(--yj-line-height-card-title); }
 .workflow-create-guide__panel p { margin: 0; }
 .workflow-create-guide__description { color: var(--yj-color-text-body); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
-.workflow-create-guide__panel .workflow-create-guide__hint { margin-top: var(--yj-space-4); }
 </style>

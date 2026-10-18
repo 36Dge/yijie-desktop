@@ -125,6 +125,7 @@ function changeState(event: Event) {
     <div class="sd-toolbar">
       <YjTabs
         class="sd-main-tabs"
+        variant="line"
         :items="dashboardTabs"
         :model-value="tab"
         aria-label="店铺分析视图"

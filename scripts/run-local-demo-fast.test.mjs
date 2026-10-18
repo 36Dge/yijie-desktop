@@ -342,9 +342,10 @@ describe("local demo launcher profiles", () => {
     expect(runner).toContain("bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop");
   });
 
-  it("copies the current v013 producer through the same checked resource installer", async () => {
+  it("copies the current expert producer through the same checked resource installer", async () => {
     const source = await readFile(path.join(repositoryRoot, "scripts/sync-desktop-expert-resources.mjs"), "utf8");
-    expect(source).toContain('const producerOutput = "dist/skills-experts-candidate-v013"');
+    expect(source).toContain('const producerOutput = "dist/skills-experts-thirteen-overall-v013"');
+    expect(source).toContain('verifyRetainedExpertResources(manifest,');
     expect(source).toContain('"contracts/experts-assets.candidate.json"');
     expect(source).toContain('"--output", producerOutput');
     expect(source).toContain('path.join(skillsRoot, producerOutput, "authority.json")');

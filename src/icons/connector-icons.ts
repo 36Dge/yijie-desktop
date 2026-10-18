@@ -1,3 +1,4 @@
+import linkfoxIcon from "../assets/connectors/linkfox.png?url";
 // Bundled user-provided artwork; keys preserve the catalogue serverName.
 import icon0 from "../assets/connectors/cue.png?url";
 import icon1 from "../assets/connectors/baixiao-mcp.png?url";
@@ -59,7 +60,11 @@ import crossBorder6 from "../assets/connectors/shopify.svg?url";
 import crossBorder7 from "../assets/connectors/sellersprite.svg?url";
 import crossBorder8 from "../assets/connectors/sorftime.svg?url";
 
+import chuhaijiangIcon from "../assets/connectors/chuhaijiang.svg?url";
+
 const connectorIcons: Readonly<Record<string, string>> = Object.freeze({
+  "linkfox": linkfoxIcon,
+  "chuhaijiang": chuhaijiangIcon,
   "lingxing": crossBorder0,
   "sif": crossBorder1,
   "keepa": crossBorder2,

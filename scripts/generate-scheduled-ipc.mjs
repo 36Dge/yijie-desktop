@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, openSync, closeSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -72,7 +73,23 @@ let validator=standalone(ajv,exports).replaceAll('require("ajv/dist/runtime/ucs2
 if(validator.includes('require('))throw Error('Unmapped standalone validator runtime dependency');
 validator='// Generated strict validators. DO NOT EDIT.\nimport ucs2lengthModule from "ajv/dist/runtime/ucs2length.js";\nimport equalModule from "ajv/dist/runtime/equal.js";\nconst equal=typeof equalModule==="function"?equalModule:equalModule.default;\nimport { fullFormats as formats } from "./scheduled-task-ipc-formats.gen.js";\nconst ucs2length=typeof ucs2lengthModule==="function"?ucs2lengthModule:ucs2lengthModule.default;\n'+validator;
 const declarations='// Generated. DO NOT EDIT.\nimport type * as Types from "./scheduled-task-ipc.gen";\n'+names.map(n=>`export declare function validate${n}(value:unknown):value is Types.${n};`).join('\n')+'\n';
-function format(code){const r=spawnSync('rustfmt',['--edition','2021'],{input:code,encoding:'utf8'});if(r.status!==0)throw Error(r.stderr);return r.stdout;}
+function format(code){
+ // A regular-file stdin has a definite EOF. Keep rustfmt's stdin mode and cwd
+ // unchanged; synchronous pipe input can otherwise wait indefinitely on macOS.
+ const directory=mkdtempSync(path.join(tmpdir(),'yijie-scheduled-format-'));
+ let input;
+ try{
+  const file=path.join(directory,'input.rs');writeFileSync(file,code);
+  input=openSync(file,'r');
+  const result=spawnSync('rustfmt',['--edition','2021'],{stdio:[input,'pipe','pipe'],encoding:'utf8'});
+  if(result.error)throw result.error;
+  if(result.status!==0)throw Error(result.stderr||'rustfmt did not complete');
+  return result.stdout;
+ }finally{
+  if(input!==undefined)closeSync(input);
+  rmSync(directory,{recursive:true,force:true});
+ }
+}
 const formatsPath=require.resolve('ajv-formats/dist/formats.js');
 const formatsSource=readFileSync(formatsPath,'utf8');
 if(formatsSource.includes('require('))throw Error('Unexpected format runtime dependency');

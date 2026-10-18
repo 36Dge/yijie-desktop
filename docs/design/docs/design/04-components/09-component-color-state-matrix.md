@@ -121,10 +121,10 @@ hover/pressed/focus 不改变输入框外壳的背景、边框或阴影。此例
 
 | 状态 | 侧栏主导航项（YjNavItem） | 小型筛选 / 可选芯片 | 内容标签页（线形 Tabs） |
 |---|---|---|---|
-| default | `P / N / 无` | `P / C / B` | `S / C / 无` |
-| hover | `P / H / 无`，仅该项局部 | `P / H / BH` | `P / C / 无`，可用中性下划线 |
+| default | `P / N / 无` | `P / C / B` | tertiary 文字 / 透明底 / 无边框 |
+| hover | `P / H / 无`，仅该项局部 | `P / H / BH` | `P / 透明底 / 无` |
 | pressed | `P / A / 无`，仅该项局部 | `P / A / BH` | `P / C / 无` |
-| selected | `P / H / 无`，浅灰底且无青柠标记 | `ON / L / ON` | `P / C / 无` + 中性可见下划线 |
+| selected | `P / H / 无`，浅灰底且无青柠标记 | `ON / L / ON` | `P / 透明底 / 无` + 4px 青柠色圆角下划线，文字字重 600 |
 | selected + hover/pressed | hover 用 H、pressed 用 A，均限当前小项 | hover=`ON/LH/ON`；pressed=`ON/LA/ON` | 维持选中下划线与可读 P |
 | focus | 当前状态 `＋F`；保留选中语义 | 当前状态 `＋F` | 当前状态 `＋F` |
 | readonly | N/A：导航行为不以 readonly 表达 | 展示当前值时使用非交互文本/标签，保留正常 P；不伪造可切换项 | 不可切换但需展示当前分类时按静态标题，不称 disabled 内容 |
