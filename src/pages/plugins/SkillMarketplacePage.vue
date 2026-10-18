@@ -9,9 +9,8 @@ import {
   NSkeleton,
   useMessage,
 } from "naive-ui";
-import type { SkillCategory } from "../../domain/skill-marketplace";
 import { skillNativeClient } from "../../api/skill-native-client";
-import type { YjIconName } from "../../icons/registry";
+import { skillCategoryArtwork } from "../../icons/skill-artwork";
 import { usePermissionStore } from "../../stores/permission.store";
 import {
   skillNativeFailureMessage,
@@ -25,14 +24,6 @@ import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
 
 const props = withDefaults(defineProps<{ title?: string; embedded?: boolean; active?: boolean }>(), { title: "Skill 广场", embedded: false, active: true });
-
-const CATEGORY_ICONS = {
-  "sourcing-selection": "skillCategorySourcing",
-  "market-research": "skillCategoryResearch",
-  "content-marketing": "skillCategoryContent",
-  "traffic-advertising": "skillCategoryTraffic",
-  "store-operations": "skillCategoryOperations",
-} as const satisfies Readonly<Record<SkillCategory, YjIconName>>;
 
 const permissionStore = usePermissionStore();
 const skillStore = useSkillStore();
@@ -263,8 +254,10 @@ onBeforeUnmount(() => {
         :key="category.key"
         :title="category.label"
         :count="category.skills.length"
-        :icon="CATEGORY_ICONS[category.key]"
       >
+        <template #icon>
+          <img class="skill-marketplace__category-icon" :src="skillCategoryArtwork(category.key)" alt="" aria-hidden="true" draggable="false" />
+        </template>
         <ul v-if="category.skills.length > 0" class="skill-marketplace__grid">
           <li v-for="skill in category.skills" :key="skill.id">
             <SkillCard
@@ -322,6 +315,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.skill-marketplace__category-icon {
+  display: block;
+  width: var(--yj-space-6);
+  height: var(--yj-space-6);
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--yj-radius-sm);
+}
+
 .skill-marketplace {
   display: grid;
   align-content: start;

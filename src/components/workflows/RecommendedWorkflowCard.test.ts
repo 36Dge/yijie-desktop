@@ -30,7 +30,7 @@ describe("recommended workflow actions", () => {
 
   it("shows the same example notice as entering a workflow, without opening a dialog", async () => {
     wrapper = mount(RecommendedWorkflowCard, { attachTo: document.body, props: { workflow: RECOMMENDED_WORKFLOWS[1]! } });
-    const use = wrapper.get(".workflow-card-action--primary");
+    const use = wrapper.get('button[aria-label^="使用工作流："]');
     await use.trigger("click");
     await flushPromises();
     expect(use.attributes("aria-expanded")).toBe("true");

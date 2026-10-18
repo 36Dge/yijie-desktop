@@ -11,6 +11,29 @@ const runnerPath = path.join(repositoryRoot, "scripts/run-local-demo-fast.sh");
 
 describe("local demo launcher profiles", () => {
   it.each([
+    ["ordinary daily", "false", "false", "daily", "", "true"],
+    ["explicit daily enable", "false", "false", "daily", "true", "true"],
+    ["explicit daily rollback", "false", "false", "daily", "false", "false"],
+    ["stable", "true", "false", "daily", "", "false"],
+    ["scheduled isolation", "false", "true", "daily", "", "false"],
+    ["expert isolation", "false", "false", "default", "", "false"],
+    ["expert content isolation", "false", "false", "content-v013", "", "false"],
+  ])("selects the real workflow entry without manual flags: %s", async (_label, stable, scheduled, expertProfile, override, expected) => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('workflow_default="false"');
+    const end = runner.indexOf('scheduled_daily_default="true"', start);
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
+    const { stdout } = await exec("/bin/bash", ["-c", `
+      set -euo pipefail
+      fail() { exit 1; }
+      stable_api_only="$1"; scheduled_candidate="$2"; expert_profile="$3"; workflow_requested="$4"
+      ${runner.slice(start, end)}
+      printf '%s' "$workflow_requested"
+    `, "workflow-default", stable, scheduled, expertProfile, override]);
+    expect(stdout).toBe(expected);
+  });
+
+  it.each([
     ["daily default", "true", "true", "unset", "true"],
     ["daily explicit rollback", "true", "true", "false", "false"],
     ["legacy model rollback", "true", "false", "unset", "false"],
@@ -50,7 +73,7 @@ describe("local demo launcher profiles", () => {
     ["market off", "true", "true", "false", "false", "", "false"],
     ["models off", "true", "false", "false", "false", "", "false"],
     ["stable or isolated scheduled", "false", "false", "false", "false", "", "false"],
-    ["workflow retained", "true", "true", "true", "true", "", "false"],
+    ["daily workflow and experts", "true", "true", "true", "true", "", "true"],
     ["explicit isolated experts", "false", "true", "true", "false", "true", "true"],
   ])("selects experts only for the supported deployment combination: %s", async (_label, daily, models, market, workflow, override, expected) => {
     const runner = await readFile(runnerPath, "utf8");

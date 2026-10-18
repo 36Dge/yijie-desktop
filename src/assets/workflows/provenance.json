@@ -1,0 +1,132 @@
+{
+  "generator": "Codex built-in image_gen",
+  "date": "2026-10-18",
+  "assets": [
+    {
+      "id": "douyin-acquisition",
+      "name": "抖音电商获客工作流",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-e4072e5c-2656-4e16-b73e-3defcdeefed4.png",
+      "output": "src/assets/workflows/generated/douyin-acquisition.png",
+      "sourceSha256": "89abe843886d34c39ca6e6fdfd849696b44efa127c80e3c4acd90b6ac42bc9d7",
+      "sha256": "4df253fa0b4b5471ba42e9983660a27436272f40b7c4fbaf4b2080dd5bc71b21",
+      "width": 192,
+      "height": 192,
+      "bytes": 33347,
+      "previousVersions": [
+        {
+          "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-b93e248a-d16e-491f-9427-5e9c7dda2e08.png",
+          "sourceSha256": "fc2b9731997be9b166145e1a864bcf5727c42a99b784c3c53db3ea6fb62a5baf",
+          "sha256": "ce54733b051b3b0d7fbbd213d560fccdeb91cabea6a585bd6150e56c9559fe23",
+          "bytes": 28922
+        }
+      ],
+      "edit": "Color-only palette change; see recolor-prompts.json"
+    },
+    {
+      "id": "product-batch-image",
+      "name": "商品批量出图工作流",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-fbf3585f-c2f7-48b5-829f-53e290773a68.png",
+      "output": "src/assets/workflows/generated/product-batch-image.png",
+      "sourceSha256": "5d7305c21f6feedda44664b09ab500232e201aaa0883b58ed645cc46d70b7183",
+      "sha256": "b0dc77fbf2ed49497266cd9b97d6e393db10ab92e4a1b46ca0b0188c71fadd84",
+      "width": 192,
+      "height": 192,
+      "bytes": 32372
+    },
+    {
+      "id": "network-price-monitor",
+      "name": "全网比价监控工作流",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-be224f70-50e4-472a-9abf-4daaa34e6f5d.png",
+      "output": "src/assets/workflows/generated/network-price-monitor.png",
+      "sourceSha256": "aac1a9aa732c938ace0431d1dde26e8ba82e5c6a18ca0f20aa08534e023ca6bd",
+      "sha256": "3ee92739d310cdea24ec06056eb736554f3ec3dca8b182897c0ae3030d0b5c8d",
+      "width": 192,
+      "height": 192,
+      "bytes": 34300
+    },
+    {
+      "id": "xiaohongshu-content",
+      "name": "小红书内容创作工作流",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-83e3e4b5-6d1d-4f4f-ae04-4bdd91a32572.png",
+      "output": "src/assets/workflows/generated/xiaohongshu-content.png",
+      "sourceSha256": "22899c304df3e8a0af557ef6ce7c820e3012cf486f24a7a1962aaa03f2592cc6",
+      "sha256": "6286e14620e5fe03fa97ab38a3c6e58af29eed05993db22b24cc0dfc4f3a4e4a",
+      "width": 192,
+      "height": 192,
+      "bytes": 35476
+    },
+    {
+      "id": "listing-localization",
+      "name": "Listing 多语种本地化",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-03bdf9e1-46a6-4472-a74c-842e0349cb58.png",
+      "output": "src/assets/workflows/generated/listing-localization.png",
+      "sourceSha256": "9304f31931ec2fcfb41c5a5e3829f0b52a040666a76000662b08b651849c5499",
+      "sha256": "edb230fb902d86760a697b20e422db4c05383be1e1fa730f1a74630a3509a62e",
+      "width": 192,
+      "height": 192,
+      "bytes": 36246,
+      "previousVersions": [
+        {
+          "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-01b00566-3cb4-4501-88f8-d406d9c3e97a.png",
+          "sourceSha256": "0a3eecad28fc2f9ee89804e37331bc7987722ecb5f0d3d4fa3ca9ec09e6a50e2",
+          "sha256": "a4c1a6259e5832b634becf881b6f8a295699c25dc184d5889f68bc16aa827757",
+          "bytes": 35218
+        }
+      ],
+      "edit": "Color-only palette change; see recolor-prompts.json"
+    },
+    {
+      "id": "ad-search-term-optimization",
+      "name": "广告搜索词优化",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-0333bf91-4f4d-4d68-99ad-a1477ebee981.png",
+      "output": "src/assets/workflows/generated/ad-search-term-optimization.png",
+      "sourceSha256": "ce8a51059b83bdd228da5edf85acf96023a8c92580739967073f3769737f8e7a",
+      "sha256": "65d89eaccc04b945bf71e7f289c148ccc06edc531912709f4863effb532bdf5a",
+      "width": 192,
+      "height": 192,
+      "bytes": 32155,
+      "previousVersions": [
+        {
+          "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-03bca4ef-04dc-4da0-976a-52b513c7c1fb.png",
+          "sourceSha256": "611f9b3961b849c61030f381495040ced1a636a532fb7f175c50a3e80ad893ba",
+          "sha256": "fcb6873cae1de1ade04da6469e1c7bf6847d9e88c3e3121918a8a2c13ac93741",
+          "bytes": 29644
+        }
+      ],
+      "edit": "Color-only palette change; see recolor-prompts.json"
+    },
+    {
+      "id": "fba-replenishment-planning",
+      "name": "FBA 智能补货规划",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-955229a4-25ed-4d29-8b3b-62539b7218d4.png",
+      "output": "src/assets/workflows/generated/fba-replenishment-planning.png",
+      "sourceSha256": "92c34e1c56a97c38a38e73eedb43bf62443b638d87f34df912fc3753b8bd7a78",
+      "sha256": "7fc3a399001afde93ec2bae3399c7aabc70598d42f2219da0901c7f59ccd74e7",
+      "width": 192,
+      "height": 192,
+      "bytes": 35512
+    },
+    {
+      "id": "overseas-review-insights",
+      "name": "海外买家评价洞察",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-b4262c84-03be-4a01-96f4-711af2634a51.png",
+      "output": "src/assets/workflows/generated/overseas-review-insights.png",
+      "sourceSha256": "bf025f3afae84b60378d0f51df63ddf36f1366814afa64554bc5d5e46e3be060",
+      "sha256": "afcc58a93ae8bee5c8088d7441da6a2207c4024faa726887f2244d4c93a9d815",
+      "width": 192,
+      "height": 192,
+      "bytes": 34364
+    },
+    {
+      "id": "custom-workflow",
+      "name": "自建文本工作流",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-5db26a60-31c5-4906-90ee-93287b00b912.png",
+      "output": "src/assets/workflows/generated/custom-workflow.png",
+      "sourceSha256": "cbdf0204c1e1f3810714abaf5f0aac7ca126a3db3cbc35e5c33912320e7632a4",
+      "sha256": "dcdc08653140c39ac033a5833005190b11c44e99e045e2ee26981bc232050bcb",
+      "width": 192,
+      "height": 192,
+      "bytes": 31224
+    }
+  ]
+}

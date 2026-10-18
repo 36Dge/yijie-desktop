@@ -47,8 +47,8 @@ async function render() {
 it("FEAT158 keeps the active tab focused through the real router for Arrow, Home and End keys", async () => {
   const { page, router } = await render();
   const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
-  tabs[0]!.element.focus();
-  for (const [from, key, to, tab] of [[0, "ArrowRight", 1, "experts"], [1, "ArrowLeft", 0, "skills"], [0, "End", 1, "experts"], [1, "Home", 0, "skills"]] as const) {
+  tabs[1]!.element.focus();
+  for (const [from, key, to, tab] of [[1, "ArrowLeft", 0, "experts"], [0, "ArrowRight", 1, "skills"], [1, "Home", 0, "experts"], [0, "End", 1, "skills"]] as const) {
     await tabs[from]!.trigger("keydown", { key }); await flushPromises();
     expect(router.currentRoute.value.query.tab).toBe(tab);
     expect(page.findAll('[role="tab"]')[to]!.element).toBe(tabs[to]!.element);
@@ -64,12 +64,12 @@ it("FEAT158 still focuses headings for entry, changed context and other pages' q
   await router.push("/plugins?tab=experts"); await flushPromises();
   expect(document.activeElement).toBe(page.get("h1").element);
   const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
-  tabs[1]!.element.focus();
+  tabs[0]!.element.focus();
   await router.replace("/plugins?tab=skills&from=/chat"); await flushPromises();
   expect(document.activeElement).toBe(page.get("h1").element);
-  tabs[0]!.element.focus();
+  tabs[1]!.element.focus();
   await router.replace("/plugins?tab=experts&from=/chat"); await flushPromises();
-  expect(document.activeElement).toBe(tabs[0]!.element);
+  expect(document.activeElement).toBe(tabs[1]!.element);
   await router.push("/settings"); await flushPromises();
   const heading = page.get<HTMLElement>("h1"); heading.element.blur();
   await router.replace("/settings?tab=experts"); await flushPromises();

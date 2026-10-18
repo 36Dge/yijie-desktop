@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { NPopover } from "naive-ui";
 import type { RecommendedWorkflow } from "../../domain/workflow-showcase";
 import YjIcon from "../yijie/YjIcon.vue";
+import { workflowCardArtwork } from "../../icons/workflow-artwork";
 import RecommendedWorkflowPreview from "./RecommendedWorkflowPreview.vue";
 defineProps<{ workflow: RecommendedWorkflow }>();
 const preview = ref(false);
@@ -18,7 +19,7 @@ function openPreview() {
 <template>
   <article class="recommended-workflow-card workflow-showcase-card">
     <header class="recommended-workflow-card__header workflow-showcase-card__header">
-      <span class="recommended-workflow-card__icon workflow-showcase-card__icon" aria-hidden="true"><YjIcon :name="workflow.icon" size="xl" /></span>
+      <img class="recommended-workflow-card__icon workflow-showcase-card__icon" :src="workflowCardArtwork(workflow.id)" alt="" aria-hidden="true" draggable="false" />
       <span class="recommended-workflow-card__badge workflow-showcase-card__badge yj-badge">{{ workflow.badge }}</span>
     </header>
     <div class="recommended-workflow-card__body workflow-showcase-card__body">
@@ -34,7 +35,7 @@ function openPreview() {
         :aria-label="`预览：${workflow.title}`" aria-haspopup="dialog" :aria-expanded="preview" @click="openPreview">{{ workflow.actions[0] }}</button>
       <NPopover trigger="click" placement="bottom-end" :show="exampleNoticeVisible" @update:show="exampleNoticeVisible = $event">
         <template #trigger>
-          <button type="button" class="recommended-workflow-card__action workflow-card-action workflow-card-action--primary workflow-showcase-control yj-control"
+          <button type="button" class="recommended-workflow-card__action workflow-card-action workflow-showcase-control yj-control"
             :aria-label="`使用工作流：${workflow.title}`" :aria-expanded="exampleNoticeVisible" @keyup.esc="exampleNoticeVisible = false">{{ workflow.actions[1] }}<YjIcon name="arrowRight" size="sm" /></button>
         </template>
         <p class="recommended-workflow-card__notice" role="status">此工作流为示例方案，暂未开放。可通过「创建工作流」编排自己的流程。</p>

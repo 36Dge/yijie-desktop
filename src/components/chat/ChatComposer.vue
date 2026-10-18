@@ -15,6 +15,7 @@ import {
 } from "../../domain/chat-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatConnectorChips from "./ChatConnectorChips.vue";
+import ChatReadinessNotice from "./ChatReadinessNotice.vue";
 import ChatAddControl from "./ChatAddControl.vue";
 import type { ConnectorChipView } from "../../domain/connector-ui";
 
@@ -99,7 +100,6 @@ const validationMessage = computed(() => {
   return message === "请输入任务需求" && props.attachments.length > 0 ? null : message;
 });
 const visibleValidationMessage = computed(() => props.modelValue.length > 0 ? validationMessage.value : null);
-const showReadiness = computed(() => props.readiness.tone !== "success" || props.readiness.actionLabel !== null);
 const attachmentConstraintMessage = computed(() => {
   if (props.attachments.length > 10) return "每条消息最多添加 10 个附件。";
   const imageBytes = props.attachments
@@ -333,28 +333,13 @@ function handlePaste(event: ClipboardEvent): void {
     aria-label="任务输入区"
     :aria-busy="submissionBusy ? 'true' : undefined"
   >
-    <div
-      v-if="showReadiness"
-      class="chat-composer__readiness"
-      :class="`chat-composer__readiness--${readiness.tone}`"
-      role="status"
-    >
-      <span class="chat-composer__readiness-dot" aria-hidden="true" />
-      <span class="chat-composer__readiness-copy">
-        <strong>{{ readiness.title }}</strong>
-        <span>{{ readiness.detail }}</span>
-      </span>
-      <button
-        v-if="recoveryAvailable && readiness.actionLabel"
-        class="chat-composer__recovery yj-control"
-        type="button"
-        :disabled="submissionBusy"
-        @click="emit('recover')"
-      >
-        <YjIcon name="refresh" size="xs" />
-        {{ readiness.actionLabel }}
-      </button>
-    </div>
+    <ChatReadinessNotice
+      v-if="mode === 'reply'"
+      :notice="readiness"
+      :recovery-available="recoveryAvailable"
+      :busy="submissionBusy"
+      @recover="emit('recover')"
+    />
 
     <div class="chat-composer__surface" :class="{ 'chat-composer__surface--with-settings': !textOnly && mode === 'new', 'chat-composer__surface--decorated': !textOnly && mode === 'new' && !!$slots['home-decoration'] }">
       <slot v-if="!textOnly && mode === 'new'" name="home-decoration" />
@@ -549,6 +534,13 @@ function handlePaste(event: ClipboardEvent): void {
         </slot>
       </div>
     </div>
+    <ChatReadinessNotice
+      v-if="mode === 'new'"
+      :notice="readiness"
+      :recovery-available="recoveryAvailable"
+      :busy="submissionBusy"
+      @recover="emit('recover')"
+    />
     <p
       class="chat-composer__submission-status"
       role="status"
@@ -669,8 +661,7 @@ function handlePaste(event: ClipboardEvent): void {
   white-space: nowrap;
 }
 
-.chat-composer__permission,
-.chat-composer__recovery {
+.chat-composer__permission {
   flex: none;
   border: var(--yj-border-width) solid transparent;
   color: var(--yj-color-text-primary);
@@ -694,17 +685,12 @@ function handlePaste(event: ClipboardEvent): void {
   background: var(--yj-color-bg-subtle);
 }
 
-.chat-composer__recovery:hover {
-  border-color: var(--yj-color-border-default);
-  background: var(--yj-color-bg-subtle);
-}
 .chat-composer__permission:hover { background: var(--yj-color-control-hover); }
 .chat-composer__permission:active { background: var(--yj-color-control-pressed); }
 
 .chat-composer__project--button:focus-visible,
 .chat-composer__attachment-action:focus-visible,
 .chat-composer__permission:focus-visible,
-.chat-composer__recovery:focus-visible,
 .chat-composer__send:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
@@ -718,50 +704,6 @@ function handlePaste(event: ClipboardEvent): void {
   color: var(--yj-color-text-primary);
   font-weight: var(--yj-font-weight-semibold);
   text-overflow: ellipsis;
-}
-
-.chat-composer__readiness {
-  display: flex;
-  align-items: center;
-  gap: var(--yj-space-2);
-  margin-top: var(--yj-space-2);
-  padding: var(--yj-space-2) var(--yj-space-3);
-  border-radius: var(--yj-radius-md);
-  color: var(--yj-color-text-secondary);
-  background: var(--yj-color-bg-subtle);
-  font-size: var(--yj-font-size-caption);
-}
-
-.chat-composer__readiness--success { background: var(--yj-color-success-soft); }
-.chat-composer__readiness--warning { background: var(--yj-color-warning-soft); }
-.chat-composer__readiness--error { background: var(--yj-color-error-soft); }
-
-.chat-composer__readiness-dot {
-  width: var(--yj-space-2);
-  height: var(--yj-space-2);
-  flex: 0 0 var(--yj-space-2);
-  border-radius: var(--yj-radius-full);
-  background: var(--yj-color-icon-muted);
-}
-
-.chat-composer__readiness--success .chat-composer__readiness-dot { background: var(--yj-color-success); }
-.chat-composer__readiness--warning .chat-composer__readiness-dot { background: var(--yj-color-warning); }
-.chat-composer__readiness--error .chat-composer__readiness-dot { background: var(--yj-color-error); }
-
-.chat-composer__readiness-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 0 var(--yj-space-2);
-}
-
-.chat-composer__readiness-copy strong { color: var(--yj-color-text-primary); }
-
-.chat-composer__recovery {
-  flex: none;
-  border-color: var(--yj-color-border-default);
-  background: var(--yj-color-bg-card);
 }
 
 .chat-composer__field {

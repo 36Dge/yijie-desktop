@@ -7,7 +7,7 @@ import {
   skillFailureMessage,
   type ManagedSkillProjection,
 } from "../../domain/skill-marketplace";
-import { skillCardIcon } from "../../icons/skill-icons";
+import { skillCardArtwork } from "../../icons/skill-artwork";
 import { skillInstallButtonTheme } from "../../design/theme/skill-card-theme";
 import type { SkillOperationKind } from "../../stores/skill.store";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -32,7 +32,7 @@ const installTooltipFocused = ref(false);
 const installTooltipVisible = computed(
   () => installTooltipHovered.value || installTooltipFocused.value,
 );
-const iconName = computed(() => skillCardIcon(props.skill));
+const artworkSrc = computed(() => skillCardArtwork(props.skill));
 const installed = computed(() => props.skill.installationStatus === "installed");
 const installable = computed(() => props.canManage && skillCanInstall(props.skill));
 const blockedReason = computed(() =>
@@ -109,9 +109,7 @@ function requestUninstall(event: MouseEvent): void {
     :aria-busy="pending"
   >
     <div class="skill-card__main">
-      <span class="skill-card__icon" aria-hidden="true">
-        <YjIcon :name="iconName" size="xl" tone="primary" />
-      </span>
+      <img class="skill-card__icon" :src="artworkSrc" alt="" aria-hidden="true" draggable="false" />
 
       <div class="skill-card__content">
         <div class="skill-card__title-row">
@@ -218,17 +216,12 @@ function requestUninstall(event: MouseEvent): void {
 }
 
 .skill-card__icon {
-  display: inline-flex;
+  display: block;
   width: var(--yj-space-12);
   height: var(--yj-space-12);
-  align-items: center;
-  justify-content: center;
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
+  object-fit: cover;
   border-radius: var(--yj-radius-lg);
-  background: var(--yj-color-bg-card);
 }
-
-.skill-card__icon :deep(.yj-icon) { color: var(--yj-color-text-primary); }
 
 .skill-card__content {
   display: grid;

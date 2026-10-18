@@ -4,8 +4,9 @@ import { NDropdown, NPopover } from "naive-ui";
 import type { MyWorkflow } from "../../domain/workflow-showcase";
 import { RouterLink } from "vue-router";
 import YjIcon from "../yijie/YjIcon.vue";
+import { workflowCardArtwork } from "../../icons/workflow-artwork";
 const props = defineProps<{ workflow: MyWorkflow; to?: string; example?: boolean }>();
-const emit = defineEmits<{ edit: []; delete: [trigger: HTMLButtonElement | null] }>();
+const emit = defineEmits<{ edit: []; delete: [trigger: HTMLButtonElement | null]; exampleAction: [] }>();
 const published = computed(() => props.workflow.status === "published");
 const actionLabel = computed(() => published.value ? "进入工作流" : "进入编辑");
 const exampleNoticeVisible = ref(false);
@@ -13,7 +14,10 @@ const menuVisible = ref(false);
 const moreButton = ref<HTMLButtonElement | null>(null);
 const menuOptions = [{ label: "编辑", key: "edit", props: { role: "menuitem", tabindex: -1 } }, { label: "删除", key: "delete", props: { role: "menuitem", tabindex: -1 } }];
 function select(key: string) {
+  menuVisible.value = false;
   moreButton.value?.focus();
+  if (key !== "edit" && key !== "delete") return;
+  if (props.example) { emit("exampleAction"); return; }
   if (key === "edit") emit("edit");
   if (key === "delete") emit("delete", moreButton.value);
 }
@@ -22,9 +26,11 @@ function select(key: string) {
 <template>
   <article class="workflow-summary-card workflow-showcase-card">
     <header class="workflow-summary-card__header workflow-showcase-card__header">
-      <span class="workflow-summary-card__icon workflow-showcase-card__icon" aria-hidden="true"><YjIcon :name="workflow.icon" size="xl" /></span>
+      <img class="workflow-summary-card__icon workflow-showcase-card__icon" :src="workflowCardArtwork(workflow.id)" alt="" aria-hidden="true" draggable="false" />
       <span v-if="example" class="workflow-summary-card__example yj-badge">示例</span>
-      <NDropdown v-if="to" role="menu" aria-label="工作流操作" :options="menuOptions" trigger="click" placement="bottom-end" :show="menuVisible" @update:show="menuVisible = $event" @select="select">
+      <NDropdown v-if="to || example" role="menu" aria-label="工作流操作" :options="menuOptions" trigger="click" placement="bottom-end"
+        :style="{ width: 'min(var(--yj-layout-workflow-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
+        :show="menuVisible" @update:show="menuVisible = $event" @select="select">
         <button ref="moreButton" type="button" class="workflow-summary-card__more workflow-showcase-control yj-control yj-control--icon"
           :aria-label="`${workflow.title}，更多`" aria-haspopup="menu" :aria-expanded="menuVisible" @click.stop="moreButton?.focus()"><YjIcon name="more" size="sm" /></button>
       </NDropdown>

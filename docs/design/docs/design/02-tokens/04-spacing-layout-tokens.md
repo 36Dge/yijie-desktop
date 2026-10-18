@@ -86,3 +86,4 @@
 - 定时任务记录卡片：双栏、16px 间距、20px 内边距，容器不足 720px 时单栏。标题预留两行 24px 行高，普通卡片及加载骨架约 176px 高（`--yj-layout-schedule-record-skeleton-height`），特殊说明允许自然增高；底部允许换行，不能压缩图标操作。
 
 - 任务和项目的右键操作菜单统一宽 175px（`--yj-layout-chat-context-menu-width`，按用户要求从 200px 缩小 25px），受可用视口约束，不再按短文案收窄。
+- 工作流卡片「编辑／删除」操作菜单统一宽 160px（`--yj-layout-workflow-menu-width`），受可用视口约束，不随两字文案收窄；右侧对齐「更多」入口。

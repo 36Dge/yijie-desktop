@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useMessage } from "naive-ui";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import type { WorkflowSchemas } from "../../api/workflow-native-client";
 import WorkflowCreateDialog from "../../components/workflows/WorkflowCreateDialog.vue";
@@ -26,6 +27,8 @@ const selectedView = ref("grid");
 const selectedSort = ref("modified");
 const viewAllSelected = ref(false);
 const state = useWorkflowWorkspace();
+const message = useMessage();
+function showExampleNotice() { message.info("示例工作流，暂不支持操作"); }
 const removedIds = ref(new Set<string>());
 const deletion = useWorkflowDeletion(id => {
   removedIds.value = new Set([...removedIds.value, id]);
@@ -141,7 +144,7 @@ const sortOptions = [
         </div>
         <p v-if="deletion.notice.value" role="status" class="workflow-page__notice">{{ deletion.notice.value }}</p>
         <WorkflowCardRail :count="cards.length">
-          <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="card.example" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
+          <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="card.example" @example-action="showExampleNotice" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
         </WorkflowCardRail>
         <button v-if="workflowLocalUiEnabled && nextCursor" type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh(true)">加载更多工作流</button>
       </YjSection>

@@ -55,6 +55,9 @@ export async function runWorkflowDev() {
     server = await createServer({ root, configFile: path.join(root, "vite.config.ts"), server: { host: "localhost", port: 1420, strictPort: true } });
     await server.listen();
     const arguments_ = ["exec", "tauri", "dev", "--config", "src-tauri/tauri.demo-fast.conf.json", "--config", "src-tauri/tauri.workflow-local.conf.json", "--no-watch"];
+    // The ordinary daily App can host both reviewed resources and the workflow
+    // iframe. Isolated expert identities are rejected by the parent launcher.
+    if (nativeEnvironment.YIJIE_EXPERTS_ENABLED === "true") arguments_.push("--config", "src-tauri/tauri.experts-daily.conf.json");
     child = spawn("pnpm", arguments_, { cwd: root, env: nativeEnvironment, stdio: "inherit", detached: true, shell: false });
     const finished = new Promise((resolve, reject) => {
       child.once("error", error => { childFinished = true; reject(error); });

@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
+import { h } from "vue";
+import { NMessageProvider } from "naive-ui";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { afterEach, expect, it, vi } from "vitest";
 import axe from "axe-core";
 import WorkflowPage from "./WorkflowPage.vue";
+import { MY_WORKFLOWS } from "../../domain/workflow-showcase";
 import { workflowNativeClient as native, WorkflowNativeError, type WorkflowSchemas } from "../../api/workflow-native-client";
 vi.mock("../../authorization/workflow-local-ui-config", () => ({ workflowLocalUiEnabled: true }));
 const row: WorkflowSchemas["WorkflowSummary"] = { workflow_id:"15301",revision:"15302",name:"菜单合成流程",description:"正常文本整理",runnable:false,updated_at_ms:1 };
@@ -14,7 +17,7 @@ async function setup() {
  vi.spyOn(native,"list").mockResolvedValue({items:[row]});
  const remove=vi.spyOn(native,"delete").mockResolvedValue({workflow_id:row.workflow_id,deleted:true});
  const router=createRouter({history:createMemoryHistory(),routes:[{path:"/workflows",component:WorkflowPage},{path:"/workflows/:workflowId",name:"workflow-editor",component:{template:"<h1>编辑页面</h1>"}},{path:"/chat",component:{template:"<h1>Chat</h1>"}}]});
- await router.push("/workflows");wrapper=mount(RouterView,{attachTo:document.body,global:{plugins:[router]}});await flushPromises();
+ await router.push("/workflows");wrapper=mount(NMessageProvider,{slots:{default:()=>h(RouterView)},attachTo:document.body,global:{plugins:[router]}});await flushPromises();
  return {router,remove};
 }
 async function menu(label:string) {
@@ -27,6 +30,22 @@ const dialog=()=>document.querySelector('[role="alertdialog"]')!;
 const button=(label:string)=>Array.from(dialog().querySelectorAll<HTMLButtonElement>('button')).find(n=>n.textContent?.trim()===label)!;
 it("More opens two actions; Edit routes to the selected real workflow",async()=>{
  const {router,remove}=await setup();await menu("编辑");expect(router.currentRoute.value.path).toBe('/workflows/15301');expect(remove).not.toHaveBeenCalled();
+});
+it.each(MY_WORKFLOWS.flatMap(example => ["编辑", "删除"].map(action => ({ example, action }))))("example $example.title $action only shows a toast and preserves every workflow", async ({ example, action }) => {
+ const {router,remove}=await setup();
+ const originalCards=wrapper.findAll(".workflow-summary-card__title").map(card=>card.text());
+  const trigger=wrapper.get(`button[aria-label="${example.title}，更多"]`);
+  await trigger.trigger("click");await flushPromises();
+  const options=Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+  expect(options.map(option=>option.textContent?.trim())).toEqual(["编辑","删除"]);
+  options.find(option=>option.textContent?.trim()===action)!.click();await flushPromises();
+  expect(document.querySelector(".n-message")?.textContent).toContain("示例工作流，暂不支持操作");
+  expect(trigger.attributes("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(trigger.element);
+  expect(router.currentRoute.value.path).toBe("/workflows");
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(remove).not.toHaveBeenCalled();
+  expect(wrapper.findAll(".workflow-summary-card__title").map(card=>card.text())).toEqual(originalCards);
 });
 it("Delete first confirms the named resource; cancelling keeps the card and makes no write",async()=>{
  const {remove}=await setup();await menu("删除");expect(dialog().textContent).toContain('确定删除“菜单合成流程”吗');expect(remove).not.toHaveBeenCalled();

@@ -64,6 +64,15 @@ describe("workflow Desktop normal foundation boundaries", () => {
     expect(launcher).toContain('pnpm tauri:build:demo-fast "${workflow_tauri_config');
   });
 
+  it("retains daily experts alongside the same workflow window and Infra lifecycle", () => {
+    expect(launcher).toContain('"$workflow_requested" == "false" || "$expert_profile" == "daily"');
+    expect(launcher).toContain('workflow_credential_file="${workflow_credential_file:-$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json}"');
+    expect(launcher).toContain('make -C "$workspace_root/yijie-infra" workflow-up');
+    expect(launcher).not.toContain('workflow-init');
+    expect(helper).toContain('nativeEnvironment.YIJIE_EXPERTS_ENABLED === "true"');
+    expect(helper).toContain('arguments_.push("--config", "src-tauri/tauri.experts-daily.conf.json")');
+  });
+
   it("preserves normal non-forceful Host cleanup with workflow and daily schedules", () => {
     const cleanup = sidecar.slice(sidecar.indexOf("    fn forceful_child_cleanup_enabled("), sidecar.indexOf("fn feat136_exact_local_enabled("));
     expect(cleanup).toMatch(/fn forceful_child_cleanup_enabled\(&self\) -> bool \{[\s\S]*?\n {8}false\n {4}\}/);

@@ -2,9 +2,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NSwitch } from "naive-ui";
 import { skillFailureMessage, type ManagedSkillProjection } from "../../domain/skill-marketplace";
-import { skillCardIcon } from "../../icons/skill-icons";
+import { skillCardArtwork } from "../../icons/skill-artwork";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
-import YjIcon from "../yijie/YjIcon.vue";
 
 const props = defineProps<{
   entries: readonly ManagedSkillProjection[];
@@ -43,7 +42,7 @@ onMounted(() => emit("refresh"));
     <p v-if="!canManage" class="skill-menu__notice">当前账号没有管理技能的权限。</p>
     <ul v-if="filtered.length" class="skill-menu__list" aria-label="已安装的技能">
       <li v-for="entry in filtered" :key="entry.id" :aria-busy="Boolean(operations[entry.id])">
-        <YjIcon :name="skillCardIcon(entry)" size="md" />
+        <img class="skill-menu__icon" :src="skillCardArtwork(entry)" alt="" aria-hidden="true" draggable="false" />
         <span class="skill-menu__copy"><span :title="entry.displayName">{{ entry.displayName }}</span><span v-if="status(entry)" class="skill-menu__status" :class="{ 'skill-menu__status--error': operationErrors[entry.id] || skillFailureMessage(entry.failureCode) }" :role="operationErrors[entry.id] ? 'alert' : undefined">{{ status(entry) }}</span></span>
         <NSwitch size="small" :value="entry.enabled" :loading="Boolean(operations[entry.id])" :disabled="disabled || !canManage || Boolean(operations[entry.id])" :aria-disabled="disabled || !canManage || Boolean(operations[entry.id])" :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.displayName}`" @update:value="setEnabled(entry, $event)" />
       </li>
@@ -53,6 +52,7 @@ onMounted(() => emit("refresh"));
 </template>
 
 <style scoped>
+.skill-menu__icon { display: block; width: var(--yj-space-6); height: var(--yj-space-6); flex: none; object-fit: cover; border-radius: var(--yj-radius-sm); }
 .skill-menu__notice { margin: 0; padding: var(--yj-space-2) var(--yj-space-4); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .skill-menu__notice p { margin: 0 0 var(--yj-space-2); }
 .skill-menu__list { list-style: none; padding: var(--yj-space-1) var(--yj-space-3); margin: 0; }

@@ -71,15 +71,6 @@ export const APP_NAVIGATION = [
   },
   {
     kind: "item",
-    key: "scheduledTask",
-    label: "定时任务",
-    icon: "scheduledTask",
-    placement: "main",
-    disabled: false,
-    to: "/scheduled-tasks",
-  },
-  {
-    kind: "item",
     key: "plugin",
     label: expertsUiEnabled ? "扩展" : "技能",
     icon: "skillOperations",
@@ -95,6 +86,15 @@ export const APP_NAVIGATION = [
     placement: "main",
     disabled: false,
     to: "/connectors",
+  },
+  {
+    kind: "item",
+    key: "scheduledTask",
+    label: "定时任务",
+    icon: "scheduledTask",
+    placement: "main",
+    disabled: false,
+    to: "/scheduled-tasks",
   },
   {
     kind: "section",

@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { h } from "vue";
+import { NMessageProvider } from "naive-ui";
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -13,7 +15,7 @@ function mountPage() {
     { path: "/", component: { template: "<div />" } },
     { path: "/workflows/new", component: { template: "<div />" } },
   ] });
-  return mount(WorkflowPage, { attachTo: document.body, global: { plugins: [router] } });
+  return mount(NMessageProvider, { slots: { default: () => h(WorkflowPage) }, attachTo: document.body, global: { plugins: [router] } });
 }
 
 afterEach(() => {
@@ -108,7 +110,7 @@ describe("WorkflowPage", () => {
       await button.trigger("click");
       expect(button.attributes("aria-pressed")).toBe("false");
     }
-    expect(wrapper.findAll(".workflow-summary-card__more")).toHaveLength(0);
+    expect(wrapper.findAll(".workflow-summary-card__more")).toHaveLength(4);
     expect(wrapper.findAll('.recommended-workflow-card [aria-pressed]')).toHaveLength(0);
     wrapper.unmount();
     const remounted = mountPage();

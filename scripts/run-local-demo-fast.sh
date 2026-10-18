@@ -5,7 +5,7 @@ set +x
 unset YIJIE_FEAT144_SORFTIME_ACCOUNT_SK YIJIE_FEAT144_SORFTIME_ENABLED YIJIE_FEAT144_HTTPS_PROXY YIJIE_DEMO_FAST_SORFTIME_ENABLED
 # Keep the workflow machine credential path out of the preparation processes.
 # This launcher never reads or places K_NA itself in an environment variable.
-workflow_requested="${YIJIE_WORKFLOW_ENABLED:-false}"
+workflow_requested="${YIJIE_WORKFLOW_ENABLED:-}"
 workflow_credential_file="${YIJIE_WORKFLOW_CREDENTIAL_FILE:-}"
 experts_requested="${YIJIE_EXPERTS_ENABLED:-}"
 unset YIJIE_EXPERTS_ENABLED VITE_YIJIE_EXPERTS_ENABLED
@@ -87,6 +87,15 @@ esac
 # Neither selection is a plan grant or an execution permission.
 scheduled_candidate="${YIJIE_FEAT155_SCHEDULED_CANDIDATE:-false}"
 [[ "$scheduled_candidate" == "true" || "$scheduled_candidate" == "false" ]] || fail "invalid scheduled candidate selection"
+# Workflow creation belongs to the ordinary daily App. Keep isolated profiles
+# opt-in and preserve an explicit false rollback, rather than compiling a
+# silently disabled creation form whenever the caller omits an environment flag.
+workflow_default="false"
+if [[ "$stable_api_only" == "false" && "$scheduled_candidate" == "false" && "$expert_profile" == "daily" ]]; then
+  workflow_default="true"
+fi
+workflow_requested="${workflow_requested:-$workflow_default}"
+[[ "$workflow_requested" == "true" || "$workflow_requested" == "false" ]] || fail "invalid workflow opt-in"
 scheduled_daily_default="true"
 if [[ "$scheduled_candidate" == "true" || "$stable_api_only" == "true" ]]; then
   scheduled_daily_default="false"
@@ -124,6 +133,7 @@ workflow_tauri_config=()
 # The renderer receives only this public opt-in, including packaged Vite builds.
 export VITE_YIJIE_WORKFLOW_ENABLED="$workflow_requested"
 if [[ "$workflow_requested" == "true" ]]; then
+  workflow_credential_file="${workflow_credential_file:-$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json}"
   [[ -z "${TAURI_CONFIG:-}" ]] || fail "workflow entry does not accept an ambient Tauri config override"
   [[ "$stable_api_only" != "true" ]] || fail "workflow uses the ordinary main App, not the separate stable entry"
   [[ "$workflow_credential_file" == /* && -f "$workflow_credential_file" && ! -L "$workflow_credential_file" ]] || fail "workflow credential path must be an existing absolute regular file"
@@ -187,7 +197,7 @@ export VITE_YIJIE_MARKET_CONNECTORS_ENABLED="$market_connectors_enabled"
 # FEAT-158 daily activation preserves the existing identity and all data roots.
 # Explicit isolated profiles and false rollback retain their previous boundaries.
 experts_default="false"
-if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" && "$market_connectors_enabled" == "true" && "$workflow_requested" == "false" ]]; then
+if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" && "$market_connectors_enabled" == "true" ]]; then
   experts_default="true"
 fi
 experts_requested="${experts_requested:-$experts_default}"
@@ -235,7 +245,8 @@ export YIJIE_EXPERTS_ENABLED="$experts_requested"
 export VITE_YIJIE_EXPERTS_ENABLED="$experts_requested"
 if [[ "$experts_requested" == "true" ]]; then
   [[ "$market_connectors_enabled" == "true" && "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "experts require the current local market/model runtime"
-  [[ "$workflow_requested" == "false" && -z "${TAURI_CONFIG:-}" ]] || fail "expert candidate requires its reviewed local resource overlay without workflow or ambient config overrides"
+  [[ -z "${TAURI_CONFIG:-}" ]] || fail "expert candidate requires its reviewed local resource overlay without ambient config overrides"
+  [[ "$workflow_requested" == "false" || "$expert_profile" == "daily" ]] || fail "isolated expert candidates do not share the daily workflow service"
   if [[ "$expert_profile" == "daily" ]]; then
     [[ "$scheduled_daily" == "true" ]] || fail "daily experts require the existing daily data profile"
   fi
@@ -314,6 +325,12 @@ if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
+fi
+
+# Reuse Infra's existing lifecycle and authenticated readiness checks. Never
+# initialize a new dataset, rebuild services, or bypass recovery gates here.
+if [[ "$workflow_requested" == "true" ]]; then
+  make -C "$workspace_root/yijie-infra" workflow-up
 fi
 
 if [[ "$stable_api_only" == "true" ]]; then

@@ -82,13 +82,13 @@ Luma Living `shopLighting`（Lamp）。全部来自既有 Lucide 依赖，经 re
 `contract-impact = none`：本次仅改变图标尺寸、导航显示名称及图标。Desktop 跨进程接口、
 API / Agent Host、路由与权限语义、本地持久状态均无变化。
 
-## Skill 广场分类图标（2026-09-07 用户确认）
+## Skill 广场图标（2026-10-18 用户更新）
 
-五个分类标题使用 `skillCategory*` registry 条目：在原有 Lucide 轮廓上，以品牌青柠 token 绘制局部笔画，与中性主体共同构成图标；背景透明，不添加青柠底板。包裹封口、趋势线、扩音器分隔线、点击射线、扳手柄分别作为强调细节。沿用 `lg` 20px、2 单位线宽、圆端点。
+用户明确要求将所有技能卡片与分类的线性图标替换为 Codex 生图图标；此授权覆盖旧的单色卡片和双色分类规范。38 个技能各有独立彩图，5 个分类各有简化彩图，风格为浅彩色底、饱和色实心意象、清晰大块几何，适合小尺寸阅读。与功能相符的原创意象不冒充官方平台 Logo。
 
-主体继承 `YjIcon` 的中性前景，暗色主题自动使用高对比浅色；青柠固定使用 `--yj-color-brand-primary`。分类文字同时提供完整含义，青柠细节不单独承担识别、操作或状态信息。所有 Skill 卡片继续使用各自独立的单色 Lucide 图标；不将分类双色外观用于卡片或其他普通图标。
+资产置于 `src/assets/skills/generated/`，通过 `src/icons/skill-artwork.ts` 的稳定 ID/category 映射消费。卡片 48px、分类 24px，圆角采用既有 token。使用本地图片而非远程资源；亮暗主题共用图像，不添加 CSS 色相过滤。完整提示词和来源校验值随资产保留。未知技能显示本分类彩图，不回退到旧线性图标。
 
-来源为项目已固定的 `@lucide/vue` 1.27.0（ISC），局部描线在 `src/icons/skill-category-icons.ts`，保留许可声明，不增加图标依赖。
+此组图像是用户授权的业务图标例外；导航、加号、刷新、删除、启停及状态图标仍走 `YjIcon`。图片不承担唯一语义，不改变安装、启停、权限或协议行为。`contract-impact = none`。
 
 ## 品牌图标
 
@@ -128,6 +128,12 @@ Iconify / Simple Icons 只能作为经过审核的备用来源，不是默认来
 ## 关联文件
 
 `exports/src/icons/registry.ts`、`exports/src/components/yijie/YjIcon.vue`、`docs/design/docs/design/09-implementation/03-yj-icon-code-scaffold.md`
+
+## 工作流卡片图标（2026-10-18 用户指定例外）
+
+工作流卡片与技能卡片采用相同的浅色圆角底、彩色实心图形。八张内置工作流使用逐个生成的专属图标，用户自建文本工作流使用统一的节点自动化图标。素材来自 Codex 内置生图工具，保存在 `src/assets/workflows/generated/`，并记录完整提示词和来源校验值；映射统一在 `src/icons/workflow-artwork.ts`。
+
+卡片图片使用 48px（`--yj-space-12`）、`--yj-radius-lg`，亮暗主题沿用同一素材，空 alt 且 `aria-hidden`。这是用户明确要求的业务卡片视觉例外；按钮、状态、导航与流程节点图标仍使用原有 `YjIcon`。不新增依赖或远程资源。
 
 ## 定时任务记录操作（2026-09-25）
 

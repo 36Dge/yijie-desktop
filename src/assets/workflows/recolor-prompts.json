@@ -1,0 +1,30 @@
+{
+  "generator": "Codex built-in image_gen",
+  "date": "2026-10-18",
+  "edits": [
+    {
+      "id": "douyin-acquisition",
+      "operation": "color-only edit",
+      "prompt": "Use case: precise-object-edit. Color-only edit of Image 1, which is the edit target. Image 2 is ONLY a color palette reference, never a shape reference. Keep Image 1's exact artwork: identical silhouettes, outline boundaries, geometry, positions, relative sizes, spacing, white negative spaces, details, overlaps, canvas aspect ratio and framing. Do not redesign, recompose, simplify, rotate, add or remove any element. Do not borrow Image 2's badge/receipt shapes. Recolor existing regions only, as if doing a precise palette replacement. Preserve full-bleed square background; UI applies corner rounding. No border, no shadows, no new shapes, no text, no watermark. Replace the lilac background with very pale mint green (#D1FAE8), the deep purple customer silhouette with saturated emerald green (#00AA72), and the lavender speech bubble with fresh medium mint green (#53D6A4). Keep the four-point sparkle white. Match Image 2's fresh mint and emerald family.",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/skills/generated/aliexpress-supplier-evaluator.png",
+      "previousSource": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-b93e248a-d16e-491f-9427-5e9c7dda2e08.png",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-e4072e5c-2656-4e16-b73e-3defcdeefed4.png"
+    },
+    {
+      "id": "listing-localization",
+      "operation": "color-only edit",
+      "prompt": "Use case: precise-object-edit. Color-only edit of Image 1, which is the edit target. Image 2 is ONLY a color palette reference, never a shape reference. Keep Image 1's exact artwork: identical silhouettes, outline boundaries, geometry, positions, relative sizes, spacing, white negative spaces, details, overlaps, canvas aspect ratio and framing. Do not redesign, recompose, simplify, rotate, add or remove any element. Do not borrow Image 2's badge/receipt shapes. Recolor existing regions only, as if doing a precise palette replacement. Preserve full-bleed square background; UI applies corner rounding. No border, no shadows, no new shapes, no text, no watermark. Replace the sky-blue background with very pale mint green (#D1FAE8), the royal-blue foreground speech bubble and globe bars with saturated emerald green (#00AA72), and the turquoise rear speech bubble with medium mint green (#53D6A4). Keep the globe's white areas pure white. Match Image 2's fresh mint and emerald family.",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/skills/generated/aliexpress-supplier-evaluator.png",
+      "previousSource": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-01b00566-3cb4-4501-88f8-d406d9c3e97a.png",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-03bdf9e1-46a6-4472-a74c-842e0349cb58.png"
+    },
+    {
+      "id": "ad-search-term-optimization",
+      "operation": "color-only edit",
+      "prompt": "Use case: precise-object-edit. Color-only edit of Image 1, which is the edit target. Image 2 is ONLY a color palette reference, never a shape reference. Keep Image 1's exact artwork: identical silhouettes, outline boundaries, geometry, positions, relative sizes, spacing, white negative spaces, details, overlaps, canvas aspect ratio and framing. Do not redesign, recompose, simplify, rotate, add or remove any element. Do not borrow Image 2's badge/receipt shapes. Recolor existing regions only, as if doing a precise palette replacement. Preserve full-bleed square background; UI applies corner rounding. No border, no shadows, no new shapes, no text, no watermark. Replace the periwinkle background with pale warm yellow (#FFF8AA), the indigo funnel with rich golden orange (#F4A000), and the lavender circular accent with a lighter golden yellow (#FFD54B). Keep its circular center white. Match Image 2's pale yellow, golden-orange, and yellow family.",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/skills/generated/invoice-generator.png",
+      "previousSource": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-03bca4ef-04dc-4da0-976a-52b513c7c1fb.png",
+      "source": "/Users/jack/.codex/generated_images/01a14e7a-330d-7712-8f4f-b006f15bb9db/exec-0333bf91-4f4d-4d68-99ad-a1477ebee981.png"
+    }
+  ]
+}

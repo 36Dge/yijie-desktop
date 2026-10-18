@@ -19,7 +19,9 @@ const titleId = useId();
   <section class="yj-section" :class="{ 'yj-section--actions-below': actionsPlacement === 'below' }" :aria-labelledby="titleId">
     <header class="yj-section__header">
       <div class="yj-section__heading">
-        <YjIcon v-if="icon" :name="icon" size="lg" tone="default" />
+        <slot name="icon">
+          <YjIcon v-if="icon" :name="icon" size="lg" tone="default" />
+        </slot>
         <h2 :id="titleId" class="yj-section__title">{{ title }}</h2>
         <span v-if="count !== undefined" class="yj-section__count yj-badge yj-badge--count" :aria-label="countLabel ?? `${count} 个 Skill`">
           {{ count }}

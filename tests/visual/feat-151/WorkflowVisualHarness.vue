@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { darkTheme, NConfigProvider } from "naive-ui";
+import { darkTheme, NConfigProvider, NMessageProvider } from "naive-ui";
 import { useRoute } from "vue-router";
 import YjWindowTitlebar from "../../../src/components/yijie/YjWindowTitlebar.vue";
 import YjSidebar from "../../../src/components/yijie/YjSidebar.vue";
@@ -18,6 +18,7 @@ const themeOverrides = createNaiveThemeOverrides(name => rootStyles.getPropertyV
 
 <template>
   <n-config-provider :theme="dark ? darkTheme : null" :theme-overrides="themeOverrides">
+    <n-message-provider>
     <div class="workflow-visual-shell">
       <YjWindowTitlebar :collapsed="collapsed" @toggle="collapsed = !collapsed" />
       <div class="workflow-visual-shell__body">
@@ -30,6 +31,7 @@ const themeOverrides = createNaiveThemeOverrides(name => rootStyles.getPropertyV
         <main class="workflow-visual-shell__content" tabindex="0"><RouterView /></main>
       </div>
     </div>
+    </n-message-provider>
   </n-config-provider>
 </template>
 

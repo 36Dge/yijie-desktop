@@ -42,6 +42,8 @@ async function mountSidebar(capabilities: readonly KnownCapability[]) {
       { path: "/store", component: defineComponent({ template: "<div />" }) },
       { path: "/workflows", component: defineComponent({ template: "<div />" }) },
       { path: "/plugins", component: defineComponent({ template: "<div />" }) },
+      { path: "/connectors", component: defineComponent({ template: "<div />" }) },
+      { path: "/scheduled-tasks", component: defineComponent({ template: "<div />" }) },
       { path: "/settings", component: defineComponent({ template: "<div />" }) },
     ],
   });
@@ -139,7 +141,7 @@ describe("YjSidebar permission rendering", () => {
       "workspace.use",
       "schedule.read",
       "plugin.read",
-      "knowledge.read",
+      "connector.read",
     ]);
     await wrapper.setProps({ currentPath: "/chat", showChatTree: true });
 
@@ -150,9 +152,9 @@ describe("YjSidebar permission rendering", () => {
       "新建任务",
       "我的店铺",
       "工作流",
-      "定时任务",
       "技能",
-      "资料库",
+      "连接器",
+      "定时任务",
       "任务",
     ]);
     const history = wrapper.get(".yj-sidebar__history-entry");

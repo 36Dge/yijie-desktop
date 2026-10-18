@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { h } from "vue";
+import { NMessageProvider } from "naive-ui";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -15,7 +17,7 @@ async function setup(openForm = true) {
  vi.spyOn(native,"status").mockResolvedValue(status); vi.spyOn(native,"list").mockResolvedValue({ items: [] });
  const open = vi.spyOn(native,"open"); const create = vi.spyOn(native,"create").mockResolvedValue(workflow);
  const router=createRouter({history:createMemoryHistory(),routes:[{path:"/workflows",component:WorkflowPage},{path:"/workflows/:workflowId",name:"workflow-editor",component:{template:"<h1>工作流编辑页面</h1>"}},{path:"/chat",component:{template:"<div>Chat</div>"}}]});
- await router.push("/workflows"); wrapper=mount(RouterView,{attachTo:document.body,global:{plugins:[router]}});await flushPromises();
+ await router.push("/workflows"); wrapper=mount(NMessageProvider,{slots:{default:()=>h(RouterView)},attachTo:document.body,global:{plugins:[router]}});await flushPromises();
  if (openForm) await wrapper.get(".workflow-page__create-card").trigger("click");await flushPromises();
  return {router,create,open};
 }

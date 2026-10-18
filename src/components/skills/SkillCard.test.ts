@@ -8,7 +8,7 @@ import {
   parseSkillCatalogSnapshot,
   type ManagedSkillProjection,
 } from "../../domain/skill-marketplace";
-import YjIcon from "../yijie/YjIcon.vue";
+import { skillCardArtwork, skillCategoryArtwork } from "../../icons/skill-artwork";
 import SkillCard from "./SkillCard.vue";
 
 const SKILL_ID = "yijie.content-marketing.copywriting";
@@ -94,7 +94,7 @@ describe("SkillCard", () => {
     expect(wrapper.text()).not.toContain("适用：");
     expect(wrapper.text()).not.toContain("许可：");
     expect(wrapper.text()).not.toContain("模型内执行，不访问网络或本地文件");
-    expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe("skillCopywriting");
+    expect(wrapper.get("img.skill-card__icon").attributes("src")).toBe(skillCardArtwork(skill()));
     await wrapper.setProps({ operation: "install" });
     expect(wrapper.classes()).not.toContain("skill-card--actionable");
     expect(install.attributes("disabled")).toBeDefined();
@@ -137,10 +137,10 @@ describe("SkillCard", () => {
     expect(installed.classes()).not.toContain("skill-card--actionable");
   });
 
-  it("falls back to the semantic plugin icon for an unknown iconKey", () => {
+  it("uses category artwork for a future skill without dedicated artwork", () => {
     const wrapper = mountCard(skill({ id: "partner.future-skill", iconKey: "futureIcon" }));
 
-    expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe("plugin");
+    expect(wrapper.get("img.skill-card__icon").attributes("src")).toBe(skillCategoryArtwork("content-marketing"));
   });
 
   it("keeps an installable degraded Skill actionable before and after Runtime confirmation", async () => {
@@ -205,9 +205,9 @@ describe("SkillCard", () => {
     "skillResearch",
     "skillSourcing",
     "skillTraffic",
-  ])("renders the reviewed iconKey %s without fallback", (iconKey) => {
+  ])("uses category artwork independently of the legacy iconKey %s", (iconKey) => {
     const wrapper = mountCard(skill({ id: "partner.future-skill", iconKey }));
-    expect(wrapper.findAllComponents(YjIcon)[0]?.props("name")).toBe(iconKey);
+    expect(wrapper.get("img.skill-card__icon").attributes("src")).toBe(skillCategoryArtwork("content-marketing"));
   });
 
   it("has no serious or critical accessibility violations", async () => {

@@ -157,7 +157,7 @@ function handleKeydown(event: KeyboardEvent, currentIndex: number): void {
   border-radius: 0;
   background: transparent;
   color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-body);
+  font-size: var(--yj-font-size-card-title);
   font-weight: var(--yj-font-weight-regular);
   line-height: var(--yj-line-height-body);
 }

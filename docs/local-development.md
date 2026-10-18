@@ -17,6 +17,12 @@ pnpm tauri:demo-fast:app
 该命令复用同一个本地启动器，先核验固定来源并构建 `易界 AI.app`，再携带 Native 所需环境启动；
 无需验收代理或手工填写 Skills 路径。`tauri:demo-fast:stable` 仍保留为独立验收应用入口。
 
+2026-10-18 起，普通日常入口默认同时启用已有工作流能力和日常专家。正常启动 Docker Desktop 后，
+上述命令复用 Infra `workflow-up` 检查并启动已准备的数据集，自动使用已有 owner-only 凭据文件路径；
+不再需要手工追加工作流环境变量。首次准备、源码构建及异常恢复仍由 Infra 原有流程负责，启动器不会
+初始化新数据集或绕过门禁。显式 `YIJIE_WORKFLOW_ENABLED=false` 保留展示模式；stable 和隔离候选
+不自动启用。详细边界见 `verification/workflow-daily-packaged-20261018.md`。
+
 2026-10-08 起，以上普通日常入口在当前 chat-models Runtime 下默认启用连接器，
 同时显示聊天输入框与侧栏入口。Native 与 Vite 的开关由启动器统一赋值，
 无需每次手动追加环境变量。显式设置 `YIJIE_MARKET_CONNECTORS_ENABLED=false` 可关闭；

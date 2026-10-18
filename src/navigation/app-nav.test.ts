@@ -9,9 +9,9 @@ describe("app navigation", () => {
       "newTask",
       "store",
       "workspace",
-      "scheduledTask",
       "plugin",
       "connectors",
+      "scheduledTask",
       "taskHistory",
       "settings",
     ]);
@@ -19,9 +19,9 @@ describe("app navigation", () => {
       "新建任务",
       "我的店铺",
       "工作流",
-      "定时任务",
       "技能",
       "连接器",
+      "定时任务",
       "任务",
       "设置",
     ]);
@@ -40,9 +40,9 @@ describe("app navigation", () => {
       { key: "newTask", to: "/chat" },
       { key: "store", to: "/store" },
       { key: "workspace", to: "/workflows" },
-      { key: "scheduledTask", to: "/scheduled-tasks" },
       { key: "plugin", to: "/plugins" },
       { key: "connectors", to: "/connectors" },
+      { key: "scheduledTask", to: "/scheduled-tasks" },
       { key: "settings", to: "/settings" },
     ]);
     expect(resolvedItems.filter((item) => item.disabled).every((item) => !("to" in item))).toBe(

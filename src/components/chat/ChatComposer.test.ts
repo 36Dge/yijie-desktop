@@ -10,6 +10,7 @@ import type {
   ChatProject,
 } from "../../domain/chat-ipc";
 import ChatComposer from "./ChatComposer.vue";
+import { readinessNotice } from "../../domain/chat-ui";
 
 enableAutoUnmount(afterEach);
 
@@ -563,8 +564,40 @@ describe("ChatComposer", () => {
       recoveryAvailable: true,
     });
     expect(wrapper.get(".chat-composer__readiness").text()).toContain("本地服务暂不可用");
+    expect(wrapper.get(".chat-composer__surface").element.nextElementSibling)
+      .toBe(wrapper.get(".chat-composer__readiness").element);
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
     await wrapper.get(".chat-composer__recovery").trigger("click");
     expect(wrapper.emitted("recover")).toHaveLength(1);
+    await wrapper.setProps({ submissionState: "submitting" });
+    expect(wrapper.get(".chat-composer__recovery").attributes("disabled")).toBeDefined();
+    await wrapper.setProps({ mode: "reply", submissionState: "idle" });
+    expect(wrapper.get(".chat-composer__readiness").element.nextElementSibling)
+      .toBe(wrapper.get(".chat-composer__surface").element);
+    await wrapper.get(".chat-composer__recovery").trigger("click");
+    expect(wrapper.emitted("recover")).toHaveLength(2);
+  });
+
+  it("places startup status after the homepage input and preserves the active draft when ready", async () => {
+    const wrapper = mountComposer({ readiness: readinessNotice(null), canSend: false });
+    const surface = wrapper.get(".chat-composer__surface").element;
+    const input = wrapper.get("textarea").element;
+    input.focus();
+    input.setSelectionRange(2, 4);
+    expect(surface.nextElementSibling).toBe(wrapper.get('[role="status"]').element);
+    expect(wrapper.get('[role="status"]').text()).toContain("正在检查本地运行环境");
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+
+    await wrapper.setProps({
+      readiness: { title: "本地运行环境已就绪", detail: "", actionLabel: null, tone: "success" },
+      canSend: true,
+    });
+    expect(wrapper.find(".chat-composer__readiness").exists()).toBe(false);
+    expect(wrapper.get(".chat-composer__surface").element).toBe(surface);
+    expect(wrapper.get("textarea").element).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd, input.value]).toEqual([2, 4, "检查商品标题"]);
+    expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeUndefined();
   });
 
   it("shows specific native attachment rejection guidance", () => {

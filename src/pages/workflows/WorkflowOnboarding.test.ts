@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent } from "vue";
+import { NMessageProvider } from "naive-ui";
 import { createMemoryHistory, RouterView } from "vue-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAppRouter } from "../../router";
@@ -27,7 +28,7 @@ it("shows onboarding in showcase mode with real route focus, dismisses for this 
     plugins: otherPage, settings: otherPage, accessDenied: otherPage,
   }, true, true, true, true);
   await router.push("/chat");
-  wrapper = mount(defineComponent({ components: { RouterView }, template: "<main><RouterView /></main>" }), {
+  wrapper = mount(defineComponent({ components: { RouterView, NMessageProvider }, template: "<NMessageProvider><main><RouterView /></main></NMessageProvider>" }), {
     attachTo: document.body, global: { plugins: [router] },
   });
   await router.push("/workflows");
