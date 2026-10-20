@@ -11,8 +11,21 @@ import type {
 } from "../../domain/chat-ipc";
 import ChatComposer from "./ChatComposer.vue";
 import { readinessNotice } from "../../domain/chat-ui";
+import { installedSkill } from "../../test/skill-fixture";
 
 enableAutoUnmount(afterEach);
+
+it("replaces the placeholder with removable skill selections and blocks unavailable skills", async () => {
+  const view = mountComposer({ skills: [{ ...installedSkill, unavailableReason: null }] });
+  expect(view.get('[aria-label="本轮使用的技能"]').text()).toContain("跨境营销文案");
+  await view.get('[aria-label="移除技能 跨境营销文案"]').trigger("click");
+  expect(view.emitted("remove-skill")).toEqual([[installedSkill.id]]);
+  expect(view.get('textarea').attributes('placeholder')).toBe('');
+  await view.setProps({ skills: [] });
+  expect(view.get('textarea').attributes('placeholder')).toBe('描述你想完成的事，或添加相关文件…');
+  await view.setProps({ skills: [{ ...installedSkill, unavailableReason: "技能已停用" }] });
+  expect(view.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
+});
 
 const PROJECT: ChatProject = {
   projectId: "019c1a00-0000-7000-8000-000000000001",

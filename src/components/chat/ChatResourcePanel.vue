@@ -18,7 +18,7 @@ defineEmits<{ manage: []; "update:query": [value: string] }>();
 <style scoped>
 .chat-resource-panel { display: flex; flex-direction: column; min-height: 0; border-radius: inherit; overflow: hidden; }
 .chat-resource-panel__search { padding: var(--yj-space-3) var(--yj-space-3) var(--yj-space-2); flex: none; }
-.chat-resource-panel__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; max-height: var(--yj-layout-connector-list-max); }
+.chat-resource-panel__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; max-height: var(--yj-resource-list-max, var(--yj-layout-connector-list-max)); }
 footer { flex: none; padding: var(--yj-space-2); border-top: var(--yj-border-width) solid var(--yj-color-border-default); }
 .chat-resource-panel__manage:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-border-width); }
 </style>

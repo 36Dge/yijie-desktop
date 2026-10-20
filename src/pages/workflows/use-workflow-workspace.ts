@@ -155,7 +155,8 @@ export function useWorkflowWorkspace(native: WorkflowNativeClient = workflowNati
       editor.value = null;
       dirty.value = false;
       error.value = null;
-      await refresh();
+      // The overview refreshes on activation. Do not unmount the canvas and
+      // hold navigation on an unrelated list request in the departing route.
     } catch (failure) {
       if (!disposed) error.value = workflowFailure(failure);
     } finally {

@@ -7,7 +7,9 @@
   --yj-shadow-control-focus: 0 0 0 var(--yj-focus-ring-width) var(--yj-color-focus-ring);
 
   --yj-color-brand-primary: #c3f35b;
+  --yj-color-workflow-notice-icon: #b7f03d;
   --yj-color-connector-mention: #5f7f0f;
+  --yj-color-connector-composer-mention: #668000;
   --yj-color-workflow-create-ink: #4b651d;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;
@@ -41,6 +43,10 @@
   --yj-color-bg-subtle: #ffffff;
   --yj-color-bg-composer-tray: #f4f5f6;
   --yj-color-chat-user-bg: #f2f2f2;
+  --yj-color-skill-pill-bg: var(--yj-color-chat-user-bg);
+  --yj-color-skill-pill-message-bg: color-mix(in srgb, var(--yj-color-text-primary) 10%, var(--yj-color-chat-user-bg));
+  --yj-color-skill-pill-border: transparent;
+  --yj-color-skill-pill-hover: var(--yj-color-control-pressed);
 
   --yj-color-border-subtle: #eceef0;
   --yj-color-border-default: #e2e5e8;
@@ -95,6 +101,7 @@
   --yj-line-height-page-title: 32px;
   --yj-line-height-display: 40px;
   --yj-font-weight-regular: 400;
+  --yj-font-weight-medium: 500;
   --yj-font-weight-semibold: 600;
 
   /* Shared component geometry; independent of the theme's color roles. */
@@ -147,6 +154,7 @@
   --yj-layout-titlebar-controls-inset: calc(var(--yj-space-16) + var(--yj-space-8));
   --yj-layout-form-max: 960px;
   --yj-layout-workflow-create-width: 440px;
+  --yj-layout-workflow-leave-width: 400px;
   --yj-layout-schedule-form-width: 520px;
   --yj-layout-schedule-record-width: 520px;
   --yj-layout-schedule-record-skeleton-height: 176px;
@@ -176,6 +184,8 @@
   --yj-layout-composer-add-menu-width: 200px;
   --yj-layout-connector-menu-width: 260px;
   --yj-layout-connector-list-max: 320px;
+  --yj-chat-skill-chip-height: 26px;
+  --yj-layout-skill-list-max: calc(var(--yj-control-height-lg) * 4 + var(--yj-space-6));
   --yj-layout-connector-search-width: 280px;
   --yj-layout-connector-chip-max: 248px;
   --yj-layout-connector-chip-list-max: 128px;
@@ -237,6 +247,7 @@
 
   --yj-color-brand-primary: #c3f35b;
   --yj-color-connector-mention: #c3f35b;
+  --yj-color-connector-composer-mention: #d0f780;
   --yj-color-workflow-create-ink: #c3f35b;
   --yj-color-brand-hover: #d0f780;
   --yj-color-brand-active: #b1e343;
@@ -268,6 +279,10 @@
   --yj-color-bg-subtle: #22262a;
   --yj-color-bg-composer-tray: #22262a;
   --yj-color-chat-user-bg: var(--yj-color-control-hover);
+  --yj-color-skill-pill-bg: var(--yj-color-chat-user-bg);
+  --yj-color-skill-pill-message-bg: color-mix(in srgb, var(--yj-color-text-primary) 10%, var(--yj-color-chat-user-bg));
+  --yj-color-skill-pill-border: transparent;
+  --yj-color-skill-pill-hover: var(--yj-color-control-pressed);
 
   --yj-color-border-subtle: #30363d;
   --yj-color-border-default: #414850;

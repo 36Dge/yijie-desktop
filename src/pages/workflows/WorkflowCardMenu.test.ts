@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { h } from "vue";
+import { h, KeepAlive } from "vue";
 import { NMessageProvider } from "naive-ui";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
@@ -17,7 +17,7 @@ async function setup() {
  vi.spyOn(native,"list").mockResolvedValue({items:[row]});
  const remove=vi.spyOn(native,"delete").mockResolvedValue({workflow_id:row.workflow_id,deleted:true});
  const router=createRouter({history:createMemoryHistory(),routes:[{path:"/workflows",component:WorkflowPage},{path:"/workflows/:workflowId",name:"workflow-editor",component:{template:"<h1>编辑页面</h1>"}},{path:"/chat",component:{template:"<h1>Chat</h1>"}}]});
- await router.push("/workflows");wrapper=mount(NMessageProvider,{slots:{default:()=>h(RouterView)},attachTo:document.body,global:{plugins:[router]}});await flushPromises();
+ await router.push("/workflows");wrapper=mount(NMessageProvider,{slots:{default:()=>h(RouterView,{}, {default: ({Component}: {Component: ReturnType<typeof h>}) => h(KeepAlive,{include:['WorkflowPage'],max:1},()=>Component)})},attachTo:document.body,global:{plugins:[router]}});await flushPromises();
  return {router,remove};
 }
 async function menu(label:string) {
@@ -57,7 +57,28 @@ it("retains the card until confirmed; stale list responses cannot restore it",as
  await menu("删除");button("删除工作流").click();await flushPromises();
  expect(remove).toHaveBeenCalledExactlyOnceWith({workflow_id:'15301',expected_revision:'15302'});expect(wrapper.find('a[href="/workflows/15301"]').exists()).toBe(true);expect(button("取消").disabled).toBe(true);
  await router.push('/chat');expect(router.currentRoute.value.path).toBe('/workflows');
- finish({workflow_id:'15301',deleted:true});await flushPromises();expect(wrapper.find('a[href="/workflows/15301"]').exists()).toBe(false);expect(wrapper.text()).toContain('已删除“菜单合成流程”');
+ finish({workflow_id:'15301',deleted:true});await flushPromises();expect(wrapper.find('a[href="/workflows/15301"]').exists()).toBe(false);expect(wrapper.text()).not.toContain('已删除');
+ await router.push('/chat');await router.push('/workflows');await flushPromises();
+ expect(wrapper.find('a[href="/workflows/15301"]').exists()).toBe(false);expect(wrapper.text()).not.toContain('已删除');
+});
+
+it.each(['/chat', '/workflows/15301'])("returning from %s retains the rail while the list refreshes in place", async destination => {
+ const {router}=await setup();
+ expect(native.list).toHaveBeenCalledTimes(1);
+ const rail=wrapper.get<HTMLElement>('[aria-label="我的工作流列表"]').element;
+ rail.scrollLeft=123;
+ let finish!: (value: WorkflowSchemas['WorkflowList']) => void;
+ // A normal delayed response, with no service/process manipulation.
+ vi.mocked(native.list).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ await router.push(destination);await router.push('/workflows');await flushPromises();
+ expect(wrapper.get('[aria-label="我的工作流列表"]').element).toBe(rail);
+ expect(rail.scrollLeft).toBe(123);
+ expect(wrapper.find('a[href="/workflows/15301"]').exists()).toBe(true);
+ expect(wrapper.text()).not.toContain('正在读取');
+ expect(wrapper.get('.workflow-card-rail').attributes('aria-busy')).toBe('true');
+ finish({items:[{...row,name:'更新后的流程'}]});await flushPromises();
+ expect(wrapper.text()).toContain('更新后的流程');
+ expect(wrapper.get('.workflow-card-rail').attributes('aria-busy')).toBe('false');
 });
 it("ambiguous deletion retries exactly the original ID/revision",async()=>{
  const {remove}=await setup();remove.mockRejectedValueOnce(new WorkflowNativeError('operation_unknown'));

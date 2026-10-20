@@ -33,19 +33,19 @@ beforeEach(() => {
   experts.snapshot = { ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true };
 });
 afterEach(() => { view?.unmount(); view = undefined; document.body.innerHTML = ""; document.title = originalTitle; vi.clearAllMocks(); });
-async function render() {
+async function render(path = "/plugins") {
   const otherPage = async () => defineComponent({ template: "<h1>其他页面</h1>" });
   const router = createAppRouter(createMemoryHistory(), { enabled: true, ready: true, ensureInitialized: async () => undefined, hasCapability: () => true }, {
     chat: otherPage, store: otherPage, workflows: otherPage, settings: otherPage, accessDenied: otherPage, plugins: async () => ExtensionsPage,
   }, true, true, true, true);
-  await router.push("/plugins");
+  await router.push(path);
   view = mount(defineComponent({ components: { NDialogProvider, NMessageProvider, RouterView }, template: "<NMessageProvider><NDialogProvider><main><RouterView /></main></NDialogProvider></NMessageProvider>" }), { attachTo: document.body, global: { plugins: [router] } });
   await flushPromises();
   return { page: view, router };
 }
 
 it("FEAT158 keeps the active tab focused through the real router for Arrow, Home and End keys", async () => {
-  const { page, router } = await render();
+  const { page, router } = await render("/plugins?tab=skills");
   const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
   tabs[1]!.element.focus();
   for (const [from, key, to, tab] of [[1, "ArrowLeft", 0, "experts"], [0, "ArrowRight", 1, "skills"], [1, "Home", 0, "experts"], [0, "End", 1, "skills"]] as const) {

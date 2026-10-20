@@ -58,7 +58,7 @@ watch(() => props.expert.iconUrl, () => { imageFailed.value = false; });
   cursor: pointer;
   transition: border-color var(--yj-motion-fast) var(--yj-ease-standard);
 }
-.expert-showcase-card:hover { border-color: var(--yj-color-border-strong); }
+.expert-showcase-card:is(:hover, :focus-visible) { border-color: var(--yj-color-brand-primary); }
 .expert-showcase-card:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);

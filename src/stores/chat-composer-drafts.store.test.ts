@@ -4,12 +4,24 @@ import { reactive } from "vue";
 import { updateChatComposerDraft } from "../domain/chat-composer-draft";
 import { useChatComposerDraftStore } from "./chat-composer-drafts.store";
 import type { PermissionPhase } from "../domain/permissions";
+import { installedSkill } from "../test/skill-fixture";
 
 const permission = reactive({ selectedTenantId: "scope-a" as string | null, phase: "ready" as PermissionPhase, capabilities: ["task.create", "task.read", "connector.use"], hasCapability(capability: string) { return this.capabilities.includes(capability); } });
 vi.mock("./permission.store", () => ({ usePermissionStore: () => permission }));
 beforeEach(() => { setActivePinia(createPinia()); permission.selectedTenantId = "scope-a"; permission.phase = "ready"; permission.capabilities = ["task.create", "task.read", "connector.use"]; });
 
 describe("connector-aware in-memory composer drafts", () => {
+  it("isolates skill choices per draft, preserves navigation, and clears them on logout or accepted submission", () => {
+    const store = useChatComposerDraftStore();
+    store.setSkills("new", [installedSkill]);
+    expect(store.skillSelection("plan:new")).toEqual([]);
+    permission.phase = "loading"; permission.phase = "ready";
+    expect(store.skillSelection("new")).toHaveLength(1);
+    store.clearTarget("new"); expect(store.skillSelection("new")).toEqual([]);
+    store.setSkills("new", [installedSkill]);
+    permission.selectedTenantId = "scope-b";
+    expect(store.skillSelection("new")).toEqual([]);
+  });
   it("copies only ordinary text into a fresh plan draft and preserves an existing plan", () => {
     const store = useChatComposerDraftStore();
     store.texts = updateChatComposerDraft(store.texts, "new", "每天整理公开资料");

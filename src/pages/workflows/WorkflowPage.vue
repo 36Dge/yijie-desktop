@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, h, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from "vue";
 import { useMessage } from "naive-ui";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import type { WorkflowSchemas } from "../../api/workflow-native-client";
@@ -28,7 +28,9 @@ const selectedSort = ref("modified");
 const viewAllSelected = ref(false);
 const state = useWorkflowWorkspace();
 const message = useMessage();
-function showExampleNotice() { message.info("示例工作流，暂不支持操作"); }
+function showExampleNotice() {
+  message.info(() => h("span", { class: "workflow-example-notice" }, "示例工作流，暂不支持操作"), { duration: 4000, closable: false });
+}
 const removedIds = ref(new Set<string>());
 const deletion = useWorkflowDeletion(id => {
   removedIds.value = new Set([...removedIds.value, id]);
@@ -43,7 +45,7 @@ function requestDelete(id: string, trigger: HTMLButtonElement | null) {
   deletion.select(workflow);
 }
 function cancelDelete() { deletion.cancel(); if (!deletion.blocked.value) void state.refresh(); }
-async function restoreDeleteFocus() { await nextTick(); (deleteReturnTarget?.isConnected ? deleteReturnTarget : createTrigger.value)?.focus(); }
+async function restoreDeleteFocus() { await nextTick(); (deleteReturnTarget?.isConnected ? deleteReturnTarget : createTrigger.value)?.focus({ preventScroll: true }); }
 function editWorkflow(id: string) { void router.push({ name: "workflow-editor", params: { workflowId: id } }); }
 const { loading, error, nextCursor, creating, createUncertain, pendingCreate, createdWorkflowId } = state;
 const router = useRouter();
@@ -83,6 +85,13 @@ onBeforeRouteLeave(() => {
   return true;
 });
 const cards = computed(() => workflowCards(workflowLocalUiEnabled ? state.workflows.value.filter(row => !removedIds.value.has(row.workflow_id)) : [], MY_WORKFLOWS));
+// Keep the list and rail position in this route instance; refresh in place on return.
+let activated = false;
+onActivated(() => {
+  if (activated && workflowLocalUiEnabled) void state.refresh();
+  activated = true;
+});
+onDeactivated(() => { dismissCreateGuide(); showCreate.value = false; });
 onMounted(async () => {
   if (workflowLocalUiEnabled) void state.refresh();
   if (route.query.create === "1") { openCreate(); return; }
@@ -137,13 +146,11 @@ const sortOptions = [
             </button>
           </div>
         </div>
-        <p v-if="workflowLocalUiEnabled && loading" class="workflow-page__notice" role="status">正在读取工作流…</p>
         <div v-if="workflowLocalUiEnabled && error" class="workflow-page__notice" role="alert">
           <span>{{ error.message }}</span>
           <button type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh()">重新连接</button>
         </div>
-        <p v-if="deletion.notice.value" role="status" class="workflow-page__notice">{{ deletion.notice.value }}</p>
-        <WorkflowCardRail :count="cards.length">
+        <WorkflowCardRail :count="cards.length" :loading="workflowLocalUiEnabled && loading">
           <li v-for="card in cards" :key="card.workflow.id"><WorkflowSummaryCard :workflow="card.workflow" :to="card.to" :example="card.example" @example-action="showExampleNotice" @edit="editWorkflow(card.workflow.id)" @delete="requestDelete(card.workflow.id, $event)" /></li>
         </WorkflowCardRail>
         <button v-if="workflowLocalUiEnabled && nextCursor" type="button" class="workflow-showcase-control yj-control" :disabled="loading" @click="state.refresh(true)">加载更多工作流</button>
@@ -259,4 +266,6 @@ const sortOptions = [
 }
 
 .workflow-page__notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--yj-space-3); color: var(--yj-color-text-secondary); }
+:global(.n-message:has(.workflow-example-notice) .n-message__icon > *) { color: var(--yj-color-workflow-notice-icon); }
+:global(.workflow-example-notice) { font-size: var(--yj-font-size-body); font-weight: var(--yj-font-weight-regular); color: var(--yj-color-text-secondary); }
 </style>

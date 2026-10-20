@@ -3,10 +3,8 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from "vue-router";
 import { NModal } from "naive-ui";
 import { useWorkflowWorkspace } from "../../pages/workflows/use-workflow-workspace";
-import { useWorkflowRuns } from "../../pages/workflows/use-workflow-runs";
-import type { WorkflowSchemas } from "../../api/workflow-native-client";
 import WorkflowEditorPane from "./WorkflowEditorPane.vue";
-import WorkflowRunPanel from "./WorkflowRunPanel.vue";
+import WorkflowOpeningPlaceholder from "./WorkflowOpeningPlaceholder.vue";
 import YjEmpty from "../yijie/YjEmpty.vue";
 import YjPageHeader from "../yijie/YjPageHeader.vue";
 
@@ -15,9 +13,6 @@ const router = useRouter();
 const state = useWorkflowWorkspace();
 const { error, loading, creating, opening, openPending, reconnecting, closing,
   editor, dirty, pendingWrites } = state;
-const runs = useWorkflowRuns(editor);
-const { submitting: running, pending: uncertainRun } = runs;
-const showHistory = ref(false);
 const confirmClose = ref(false);
 const leaveMessage = ref("");
 let finishLeave: ((allowed: boolean) => void) | undefined;
@@ -32,17 +27,13 @@ onMounted(() => { void start(props.workflowId); });
 watch(() => props.workflowId, id => { void start(id); });
 onBeforeUnmount(() => { finishLeave?.(false); });
 
-function acceptResult(result: WorkflowSchemas["EditorExchangeResult"]) {
-  state.acceptEditorResult(result);
-  if (result.run) runs.accept(result.run);
-}
 function askToClose(): Promise<boolean> {
   leaveMessage.value = "";
-  if (pendingWrites.value || creating.value || reconnecting.value || closing.value || running.value) {
+  if (pendingWrites.value || creating.value || reconnecting.value || closing.value) {
     leaveMessage.value = "操作正在进行，请等待真实结果后再返回。";
     return Promise.resolve(false);
   }
-  if (!dirty.value && !uncertainRun.value) return Promise.resolve(true);
+  if (!dirty.value) return Promise.resolve(true);
   if (finishLeave) return Promise.resolve(false);
   confirmClose.value = true;
   return new Promise(resolve => { finishLeave = resolve; });
@@ -59,7 +50,6 @@ async function leaveEditor() {
     await state.closeEditor();
     if (editor.value) return false;
   }
-  showHistory.value = false;
   return true;
 }
 onBeforeRouteLeave(leaveEditor);
@@ -72,36 +62,29 @@ function requestClose() { void router.push({ name: "workflows" }); }
     <p v-if="leaveMessage" class="workflow-local-workspace__notice" role="status">{{ leaveMessage }}</p>
     <WorkflowEditorPane v-if="editor" :key="editor.workflow.workflow_id" :view="editor" full-page
       :reconnecting="reconnecting" :closing="closing" :dirty="dirty" :pending-writes="pendingWrites" :parent-failure="error"
-      @close="requestClose" @history="showHistory = true" @reconnect="state.openWorkflow(editor.workflow.workflow_id, true)"
+      @close="requestClose" @reconnect="state.openWorkflow(editor.workflow.workflow_id, true)"
       @dirty="dirty = $event" @busy="pendingWrites = $event"
       @renewed="state.acceptEditorRenewal"
-      @result="acceptResult" @failure="state.acceptEditorFailure" />
+      @result="state.acceptEditorResult" @failure="state.acceptEditorFailure" />
+    <WorkflowOpeningPlaceholder v-else-if="!error || creating || loading || opening" @cancel="requestClose" />
     <div v-else class="workflow-local-workspace__landing">
       <YjPageHeader :title="workflowId === 'new' ? '创建工作流' : '打开工作流'">
         <template #actions><button type="button" class="workflow-showcase-control yj-control" @click="requestClose">返回工作流</button></template>
       </YjPageHeader>
       <p v-if="error" class="workflow-local-workspace__notice" role="alert">{{ error.message }}</p>
-      <p v-if="creating || loading || opening" role="status">{{ creating ? '正在创建工作流…' : opening ? '正在读取工作流并建立编辑会话…' : '正在连接工作流服务…' }}</p>
-      <button v-if="opening" type="button" class="workflow-showcase-control yj-control" @click="requestClose">取消打开</button>
-      <YjEmpty v-if="!creating && !loading && !openPending" title="暂时无法打开工作流"
+      <YjEmpty title="暂时无法打开工作流"
         description="确认本地工作流服务已启动后重试。已创建的流程会保留，重试打开不会重复创建。" icon="workflow">
         <template #actions><button type="button" class="workflow-showcase-control yj-control" @click="start(workflowId)">重新连接</button></template>
       </YjEmpty>
     </div>
 
-    <NModal v-model:show="showHistory" preset="card" title="版本与运行记录" class="workflow-local-history" :bordered="false" :closable="false" role="dialog" aria-label="版本与运行记录"
-      :style="{ width: 'min(var(--yj-layout-form-max), calc(100vw - var(--yj-space-8)))', maxHeight: 'calc(100vh - var(--yj-space-8))', overflow: 'auto' }">
-      <template #header-extra><button type="button" class="workflow-showcase-control yj-control" aria-label="关闭运行记录" @click="showHistory = false">关闭</button></template>
-      <WorkflowRunPanel v-if="editor" :state="runs" :latest-version="editor.workflow.published_version"
-        :busy="pendingWrites > 0 || reconnecting || closing" />
-    </NModal>
-    <NModal :show="confirmClose" preset="dialog" title="有未保存或待确认的内容" :show-icon="false"
+    <NModal :show="confirmClose" preset="dialog" title="确认离开？" :show-icon="false"
+      style="width: min(var(--yj-layout-workflow-leave-width), calc(100vw - var(--yj-space-8)))"
       :mask-closable="false" :closable="false" @esc="decideClose(false)">
-      <p>继续编辑会保留当前画布、节点配置和原操作查询入口。离开将关闭编辑会话，放弃本页内存中的电商节点设计、原草稿未保存的修改及待确认操作的查询入口。电商节点设计尚不支持持久保存。</p>
-      <p>已经提交的操作不会因此撤销，运行历史仍保留在服务端。关闭窗口、退出应用或刷新不保证保留本页配置。</p>
+      <p class="workflow-local-workspace__leave-description">离开将丢失未保存的修改和本页节点配置。已提交的操作及运行记录不受影响。</p>
       <template #action>
         <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(false)">继续编辑</button>
-        <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(true)">放弃本页未保存内容并离开</button>
+        <button type="button" class="workflow-showcase-control yj-control" @click="decideClose(true)">离开</button>
       </template>
     </NModal>
   </div>
@@ -111,4 +94,5 @@ function requestClose() { void router.push({ name: "workflows" }); }
 .workflow-local-workspace { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .workflow-local-workspace__landing { padding: var(--yj-space-6); display: grid; align-content: start; gap: var(--yj-space-5); }
 .workflow-local-workspace__notice { flex: none; margin: 0; padding: var(--yj-space-3); border-bottom: var(--yj-border-width) solid var(--yj-color-border-default); color: var(--yj-color-text-body); }
+.workflow-local-workspace__leave-description { margin: 0; }
 </style>

@@ -263,7 +263,9 @@ onBeforeUnmount(() => {
           <ChatDeletionUpdates v-if="localChatUiEnabled" />
           <YjAppShell>
             <RouterView v-slot="{ Component }">
-              <component :is="Component" v-if="canRenderCurrentRoute" />
+              <KeepAlive v-if="canRenderCurrentRoute" :include="workflowShowcaseUiEnabled ? ['WorkflowPage'] : []" :max="1">
+                <component :is="Component" />
+              </KeepAlive>
             </RouterView>
           </YjAppShell>
         </n-notification-provider>

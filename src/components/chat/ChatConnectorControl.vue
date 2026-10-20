@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton, NSwitch } from "naive-ui";
+import { NButton } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
-import { connectorSwitchDisabled, filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
+import { filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
 import ConnectorIcon from "../connectors/ConnectorIcon.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -12,7 +12,6 @@ const props = withDefaults(defineProps<{
   disabled?: boolean;
   disabledReason?: string;
   selectionAvailable: boolean;
-  canManage: boolean;
   loading?: boolean;
   error?: string | null;
 }>(), { disabled: false, disabledReason: "任务进行中，暂时不能选择连接器", loading: false, error: null });
@@ -20,7 +19,6 @@ const emit = defineEmits<{
   close: [];
   select: [id: string];
   configure: [id: string];
-  "enabled-change": [id: string, enabled: boolean];
   manage: [];
   refresh: [];
 }>();
@@ -47,17 +45,20 @@ const compactStatusLabels: Readonly<Record<string, string>> = {
   "待配置": "待配置",
   "待授权": "待授权",
   "已启用": "不可用",
+  "未启用": "未启用",
 };
 function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
-  if (!entry.busy && (entry.selectable || entry.status.label === "未启用")) return null;
+  if (!entry.busy && entry.selectable && props.selectionAvailable) return null;
   const label = compactStatusLabels[entry.status.label] ?? (entry.busy ? "处理中" : "待确认");
   return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
 }
 const filtered = computed(() => filterConnectors(installed.value, query.value).map(entry => ({ entry, status: compactStatus(entry) })));
+function canChoose(entry: ConnectorView): boolean { return props.selectedIds.includes(entry.id) || (props.selectionAvailable && entry.selectable); }
 function choose(entry: ConnectorView): void {
   if (props.disabled || entry.busy) return;
-  if (props.selectedIds.includes(entry.id) || (props.selectionAvailable && entry.selectable)) emit("select", entry.id);
+  if (canChoose(entry)) emit("select", entry.id);
   else emit("configure", entry.id);
+  emit("close");
 }
 function navigate(event: KeyboardEvent): void {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -82,13 +83,12 @@ onMounted(() => { emit("refresh"); });
       <p v-if="!selectionAvailable && !loading && installed.some(entry => entry.enabled)" class="connector-menu__notice">当前无法选用，请前往管理页检查。</p>
       <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择本轮连接器">
         <li v-for="{ entry, status } in filtered" :key="entry.id" :aria-busy="entry.busy" :class="{ 'connector-menu__row--selected': selectedIds.includes(entry.id), 'connector-menu__row--blocked': disabled || entry.busy }">
-          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :aria-pressed="selectedIds.includes(entry.id)" :aria-label="`${entry.selectable && selectionAvailable ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
+          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :role="canChoose(entry) ? 'checkbox' : undefined" :aria-checked="canChoose(entry) ? selectedIds.includes(entry.id) : undefined" :aria-label="`${selectedIds.includes(entry.id) ? '取消选择' : canChoose(entry) ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
             <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
             <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
-            <YjIcon v-if="selectedIds.includes(entry.id)" name="permissionCheck" size="sm" />
             <span v-if="status" class="connector-menu__status" :class="`connector-menu__status--${status.tone}`" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
+            <span class="connector-menu__check" aria-hidden="true"><YjIcon v-if="selectedIds.includes(entry.id)" name="checkmark" size="sm" /></span>
           </button>
-          <NSwitch size="small" :value="entry.enabled" :loading="entry.busy" :disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-disabled="(disabled || connectorSwitchDisabled(entry, canManage))" :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`" @update:value="$emit('enabled-change', entry.id, $event)" />
         </li>
       </ul>
       <div v-else-if="!loading && !error" class="connector-menu__empty"><span>{{ installed.length ? '没有找到匹配的连接器' : '还没有安装连接器' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>
@@ -104,6 +104,7 @@ onMounted(() => { emit("refresh"); });
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
 .connector-menu__option:disabled { cursor: default; }
 .connector-menu__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--yj-font-size-body); }
+.connector-menu__check { display: grid; width: var(--yj-space-4); height: var(--yj-space-4); flex: none; place-items: center; color: var(--yj-color-text-primary); }
 .connector-menu__status { flex: none; padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-xs); color: var(--yj-color-text-secondary); background: var(--yj-color-control-hover); font-size: var(--yj-font-size-caption); line-height: var(--yj-badge-line-height); white-space: nowrap; }
 .connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); background: var(--yj-color-warning-soft); }
 .connector-menu__status--error { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }

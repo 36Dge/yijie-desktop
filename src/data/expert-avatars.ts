@@ -14,6 +14,7 @@ import tiktokShop from "../assets/expert-showcase/chuhaijiang-tiktok-shop-operat
 import crossBorder from "../assets/expert-showcase/cross-border-ecommerce-operations-expert.png";
 import xiaohongshu from "../assets/expert-showcase/xiaohongshu-copywriter.png";
 import comic from "../assets/expert-showcase/agentgrid-comic-storyboard-director.jpg";
+import jdOps from "../assets/expert-showcase/jd-ops-expert.png";
 
 import quotation from "../assets/expert-showcase/tradebuddy-baojia.png";
 import report from "../assets/expert-showcase/report-viz-expert.png";
@@ -22,6 +23,7 @@ import novelCreator from "../assets/expert-showcase/novel-creator.png";
 
 /** Local presentation only. These paths never become an ExpertRef or a Native request. */
 const expertAvatars: ReadonlyMap<string, string> = new Map([
+  ["jd-ops-expert", jdOps],
   ["moss-industry-research", mossResearch],
   ["equity-research", equityResearch],
   ["strategy-backtest-expert", strategyBacktest],

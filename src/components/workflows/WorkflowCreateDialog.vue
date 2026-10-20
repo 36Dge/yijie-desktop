@@ -61,7 +61,6 @@ function submit() {
         </div>
       </div>
       <p v-if="error" class="workflow-create-dialog__error" role="alert">{{ error }}</p>
-      <p v-if="busy" role="status">正在确认创建结果…</p>
       <p v-if="uncertain" role="status">{{ queryable ? '创建结果尚未确认，请查询原操作后继续，避免重复创建。' : '创建结果尚未确认，尚未取得可查询的操作标识，请保留此页面。' }}</p>
       <div class="workflow-create-dialog__actions">
         <NButton :disabled="busy || uncertain" @click="cancel">取消</NButton>

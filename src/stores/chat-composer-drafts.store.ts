@@ -4,6 +4,7 @@ import type { ProfileId } from "../api/chat-model-client";
 import { createChatComposerDrafts, clearChatComposerDraft, updateChatComposerDraft, type ChatComposerDraftKey } from "../domain/chat-composer-draft";
 import type { ExpertDisplay } from "../domain/experts.generated";
 import type { SelectionDisplay } from "../domain/market-connectors.generated";
+import type { SelectedChatSkill } from "../domain/chat-skills";
 import { usePermissionStore } from "./permission.store";
 
 /** In-memory drafts survive page navigation, never account logout or scope changes. */
@@ -12,6 +13,12 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   const texts = shallowRef(createChatComposerDrafts());
   const selections = shallowRef<Readonly<Partial<Record<ChatComposerDraftKey, readonly SelectionDisplay[]>>>>({});
   const experts = shallowRef<Readonly<Partial<Record<ChatComposerDraftKey, ExpertDisplay>>>>({});
+  const skills = shallowRef<Readonly<Partial<Record<ChatComposerDraftKey, readonly SelectedChatSkill[]>>>>({});
+  function skillSelection(target: ChatComposerDraftKey): readonly SelectedChatSkill[] { return skills.value[target] ?? []; }
+  function setSkills(target: ChatComposerDraftKey, values: readonly SelectedChatSkill[]): void {
+    skills.value = { ...skills.value, [target]: Object.freeze(values.map(value => Object.freeze({ ...value }))) };
+  }
+  function clearSkills(target: ChatComposerDraftKey): void { const next = { ...skills.value }; delete next[target]; skills.value = next; }
   function expert(target: ChatComposerDraftKey): ExpertDisplay | null { return experts.value[target] ?? null; }
   function setExpert(target: ChatComposerDraftKey, value: ExpertDisplay | null): void { const next = { ...experts.value }; if (value) next[target] = Object.freeze({ ...value }); else delete next[target]; experts.value = next; }
   const workspaceId = ref<string | null>(null);
@@ -20,7 +27,7 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   let tenant: string | null = null;
 
   function clear(): void {
-    texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; workspaceId.value = null;
+    texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null;
     newProfile.value = "kimi-k3-max-v1"; planProfile.value = "kimi-k3-max-v1";
   }
   function selection(target: ChatComposerDraftKey): readonly SelectionDisplay[] { return selections.value[target] ?? []; }
@@ -28,7 +35,7 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
     selections.value = { ...selections.value, [target]: Object.freeze(values.map(value => Object.freeze({ ...value, reference: Object.freeze({ ...value.reference }) }))) };
   }
   function clearSelection(target: ChatComposerDraftKey): void { const next = { ...selections.value }; delete next[target]; selections.value = next; }
-  function clearTarget(target: ChatComposerDraftKey): void { texts.value = clearChatComposerDraft(texts.value, target); clearSelection(target); setExpert(target, null); }
+  function clearTarget(target: ChatComposerDraftKey): void { texts.value = clearChatComposerDraft(texts.value, target); clearSelection(target); clearSkills(target); setExpert(target, null); }
   function preparePlanDraft(): void {
     const source = texts.value.new ?? "";
     if (!(texts.value["plan:new"] ?? "").length && source.length) texts.value = updateChatComposerDraft(texts.value, "plan:new", source);
@@ -45,5 +52,5 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
     else if (phase === "ready" && !permission.hasCapability("connector.use")) selections.value = {};
   }, { immediate: true, flush: "sync" });
 
-  return { texts, experts, expert, setExpert, selections, workspaceId, newProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
+  return { texts, experts, expert, setExpert, selections, skills, skillSelection, setSkills, clearSkills, workspaceId, newProfile, planProfile, selection, setSelection, clearSelection, clearTarget, preparePlanDraft, clear };
 });

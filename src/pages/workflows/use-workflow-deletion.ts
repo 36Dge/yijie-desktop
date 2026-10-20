@@ -6,7 +6,6 @@ export function useWorkflowDeletion(onDeleted: (id: string) => void, native: Wor
   const busy = ref(false);
   const uncertain = ref(false);
   const error = shallowRef<WorkflowNativeError | null>(null);
-  const notice = ref("");
   const blocked = computed(() => busy.value || uncertain.value);
   let disposed = false;
   function select(workflow: WorkflowSummary) {
@@ -24,7 +23,6 @@ export function useWorkflowDeletion(onDeleted: (id: string) => void, native: Wor
       if (!result.deleted || result.workflow_id !== selected.workflow_id) throw new WorkflowNativeError("operation_unknown");
       if (disposed) return;
       onDeleted(selected.workflow_id);
-      notice.value = `已删除“${selected.name}”`;
       uncertain.value = false; target.value = null;
     } catch (failure) {
       if (!disposed) {
@@ -35,5 +33,5 @@ export function useWorkflowDeletion(onDeleted: (id: string) => void, native: Wor
     } finally { busy.value = false; }
   }
   onBeforeUnmount(() => { disposed = true; });
-  return { target, busy, uncertain, error, notice, blocked, select, cancel, confirm };
+  return { target, busy, uncertain, error, blocked, select, cancel, confirm };
 }

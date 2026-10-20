@@ -23,6 +23,9 @@ import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-rec
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
+import { skillNativeClient } from "../../api/skill-native-client";
+import { useSkillStore } from "../../stores/skill.store";
+import { installedSkill } from "../../test/skill-fixture";
 import { PREVIEW_SHOPS, SHOP_PREVIEW_TIMING } from "../../domain/chat-shop-preview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
@@ -56,6 +59,11 @@ import ChatPage from "./ChatPage.vue";
 
 const expertFlag = vi.hoisted(() => ({ enabled: false }));
 vi.mock("../../authorization/experts-ui-config", () => ({ get expertsUiEnabled() { return expertFlag.enabled; } }));
+const skillFlag = vi.hoisted(() => ({ enabled: false }));
+vi.mock("../../authorization/skill-marketplace-ui-config", async (original) => {
+  const actual = await original<typeof import("../../authorization/skill-marketplace-ui-config")>();
+  return { ...actual, get skillMarketplaceUiEnabled() { return skillFlag.enabled || actual.skillMarketplaceUiEnabled; } };
+});
 
 type MockDragDropPayload =
   | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
@@ -258,6 +266,7 @@ async function mountPage(
       { path: "/chat", component: ChatPage },
       { path: "/chat/:sessionId", component: ChatPage },
       { path: "/settings", component: { template: "<div />" } },
+      { path: "/plugins", component: { template: "<div>扩展</div>" } },
       { path: "/scheduled-tasks", component: { template: "<div>管理页</div>" } },
     ],
   });
@@ -279,6 +288,7 @@ async function mountPage(
 
 afterEach(() => {
   expertFlag.enabled = false;
+  skillFlag.enabled = false;
   vi.useRealTimers();
   dragDropMock.handler = null;
   dragDropMock.unlisten.mockClear();
@@ -1210,6 +1220,86 @@ describe("FEAT-126 ChatPage", () => {
     // Selecting an attachment does not implicitly select a workspace.
     expect(createSession).toHaveBeenCalledWith(null, "");
     expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+  });
+
+  it("loads history skill labels through the read-only catalog without a scan", async () => {
+    skillFlag.enabled = true;
+    const list = vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
+    const scan = vi.spyOn(skillNativeClient, "scan").mockRejectedValue(new Error("not used"));
+    const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
+    await flushPromises();
+    expect(list).toHaveBeenCalledOnce();
+    expect(scan).not.toHaveBeenCalled();
+    expect(wrapper.getComponent(ChatTimeline).props("skillCatalog")).toEqual([installedSkill]);
+    wrapper.unmount();
+  });
+
+  it.each([false, true])("opens the skills tab from Manage Skills in the composer (reply=%s)", async (reply) => {
+    expertFlag.enabled = true;
+    skillFlag.enabled = true;
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
+    const { wrapper, router } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    vi.spyOn(useSkillStore(), "open").mockResolvedValue();
+    await wrapper.get('[aria-label="可添加文件、技能、连接器，或选择专家"]').trigger("click");
+    await flushPromises();
+    const skillsItem = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find(item => item.textContent?.trim() === "技能");
+    expect(skillsItem).toBeDefined();
+    await new DOMWrapper(skillsItem!).trigger("click");
+    await flushPromises();
+    const manage = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(button => button.textContent?.trim() === "管理技能");
+    expect(manage).toBeDefined();
+    await new DOMWrapper(manage!).trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/plugins");
+    expect(router.currentRoute.value.query.tab).toBe("skills");
+    expect(document.querySelector('[aria-label="已安装的技能"]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it.each([false, true])("submits selected skills as explicit Runtime mentions (reply=%s)", async (reply) => {
+    skillFlag.enabled = true;
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
+    const { wrapper, store } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    const skillStore = useSkillStore();
+    skillStore.skills = [installedSkill]; skillStore.phase = "ready";
+    const refresh = vi.spyOn(skillStore, "open").mockResolvedValue();
+    const target = reply ? `session:${SESSION_ID}` as const : "new";
+    const drafts = useChatComposerDraftStore();
+    drafts.setSkills(target, [installedSkill]);
+    const submit = reply
+      ? vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)))
+      : vi.spyOn(store, "createSessionWithResult").mockResolvedValue(acceptedSubmission());
+    await wrapper.get("textarea").setValue("根据合成资料撰写一段文案");
+    await wrapper.getComponent(ChatComposer).vm.$emit("submit");
+    await flushPromises();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0]?.[reply ? 0 : 1]).toBe("$copywriting\n\n根据合成资料撰写一段文案");
+    expect(drafts.skillSelection(target)).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it("preserves selected skills on failed sends and blocks stale selections after revalidation", async () => {
+    skillFlag.enabled = true;
+    vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
+    const { wrapper, store } = await mountPage("/chat");
+    const skillStore = useSkillStore(); skillStore.skills = [installedSkill]; skillStore.phase = "ready";
+    const refresh = vi.spyOn(skillStore, "open").mockResolvedValue();
+    const drafts = useChatComposerDraftStore(); drafts.setSkills("new", [installedSkill]);
+    const submit = vi.spyOn(store, "createSessionWithResult").mockResolvedValue({ status: "not_accepted" });
+    await wrapper.get("textarea").setValue("保留原文");
+    await wrapper.getComponent(ChatComposer).vm.$emit("submit"); await flushPromises();
+    expect(drafts.skillSelection("new")).toHaveLength(1);
+    expect(wrapper.get("textarea").element.value).toBe("保留原文");
+    submit.mockClear();
+    refresh.mockImplementation(async () => { skillStore.skills = [{ ...installedSkill, enabled: false, runtimeVisible: false }]; });
+    await wrapper.getComponent(ChatComposer).vm.$emit("submit"); await flushPromises();
+    expect(submit).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("技能已停用");
+    expect(drafts.skillSelection("new")).toHaveLength(1);
+    wrapper.unmount();
   });
 
   it("projects native attachment progress into the real composer", async () => {

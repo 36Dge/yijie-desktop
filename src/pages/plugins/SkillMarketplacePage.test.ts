@@ -203,7 +203,8 @@ describe("SkillMarketplacePage", () => {
     expect(nativeMock.install).toHaveBeenCalledWith(SKILL_ID);
     expect(wrapper.find(`button[aria-label="安装 跨境营销文案"]`).exists()).toBe(false);
     expect(wrapper.get('[aria-label="停用 跨境营销文案"]')).toBeDefined();
-    expect(wrapper.text()).toContain("模型可用");
+    expect(wrapper.get('[role="switch"]').attributes("aria-checked")).toBe("true");
+    expect(wrapper.find(".skill-card .n-tag").exists()).toBe(false);
   });
 
   it("requires the exact uninstall confirmation and leaves cancel side-effect free", async () => {

@@ -45,7 +45,8 @@ describe("extensions page tab continuity", () => {
     const page = render(); await flushPromises();
     const tabs = page.findAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs.map(item => item.text())).toEqual(["专家", "技能"]);
-    expect(tabs[1]!.attributes("aria-selected")).toBe("true");
+    expect(tabs[0]!.attributes("aria-selected")).toBe("true");
+    await tabs[1]!.trigger("click"); await flushPromises();
     const skillsPanel = page.get<HTMLElement>('[aria-label="技能目录"]');
     skillsPanel.element.scrollTop = 160;
     tabs[1]!.element.focus(); await tabs[1]!.trigger("keydown", { key: "ArrowLeft" }); await flushPromises();
@@ -64,7 +65,7 @@ describe("extensions page tab continuity", () => {
     expect(expertPanel.element.scrollTop).toBe(80);
   });
 
-  it("closes details when switching away and returns to the default skill tab on a fresh visit", async () => {
+  it("closes details when switching away and returns to the default expert tab on a fresh visit", async () => {
     const page = render(); await flushPromises();
     await page.findAll('[role="tab"]')[0]!.trigger("click"); await flushPromises();
     const panel = page.findComponent(ExpertMarketPanel);
@@ -76,6 +77,15 @@ describe("extensions page tab continuity", () => {
     page.unmount(); view = undefined;
     navigation.route.query = {}; navigation.route.fullPath = "/plugins";
     const revisited = render(); await flushPromises();
-    expect(revisited.findAll('[role="tab"]')[1]!.attributes("aria-selected")).toBe("true");
+    expect(revisited.findAll('[role="tab"]')[0]!.attributes("aria-selected")).toBe("true");
+  });
+
+  it("preserves an explicit skill link from the chat menu", async () => {
+    navigation.route.query = { tab: "skills" };
+    navigation.route.fullPath = "/plugins?tab=skills";
+    const page = render(); await flushPromises();
+    expect(page.findAll('[role="tab"]')[1]!.attributes("aria-selected")).toBe("true");
+    expect(page.get('[aria-label="技能目录"]').isVisible()).toBe(true);
+    expect(page.get('[aria-label="专家列表"]').isVisible()).toBe(false);
   });
 });

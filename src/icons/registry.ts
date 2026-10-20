@@ -125,6 +125,7 @@ export const iconRegistry = {
   arrowRight: ArrowRight,
   arrowUpRight: ArrowUpRight,
   check: CheckCircle2,
+  checkmark: PermissionCheck,
   chevronDown: ChevronDown,
   chevronRight: ChevronRight,
   collapseSidebar: PanelLeftClose,

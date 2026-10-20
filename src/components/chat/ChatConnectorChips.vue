@@ -23,7 +23,7 @@ defineEmits<{ remove: [id: string] }>();
 .chat-connector-chip__copy { display: flex; min-width: 0; flex: 1; flex-direction: column; font-size: var(--yj-font-size-body); }
 .chat-connector-chip__copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-connector-chip__reason { font-size: var(--yj-font-size-caption); color: var(--yj-color-semantic-warning-ink); }
-.chat-connector-chip button { display: inline-flex; min-width: 0; align-items: flex-start; gap: var(--yj-space-1); padding: 0; border: 0; border-radius: var(--yj-radius-sm); color: var(--yj-color-connector-mention); background: transparent; font: inherit; line-height: var(--yj-line-height-body); cursor: pointer; }
+.chat-connector-chip button { display: inline-flex; min-width: 0; align-items: flex-start; gap: var(--yj-space-1); padding: 0; border: 0; border-radius: var(--yj-radius-sm); color: var(--yj-color-connector-composer-mention); background: transparent; font: inherit; line-height: var(--yj-line-height-body); cursor: pointer; }
 .chat-connector-chip__icon { display: inline-grid; flex: none; align-items: center; height: var(--yj-line-height-body); }
 .chat-connector-chip__icon > * { grid-area: 1 / 1; }
 .chat-connector-chip__icon > :last-child { visibility: hidden; }

@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-18",
+  "expertId": "jd-ops-expert",
+  "generator": "Codex built-in image_gen",
+  "asset": "jd-ops-expert.png",
+  "source": "/Users/jack/.codex/generated_images/01a14059-4c9e-7971-bc39-fdd08b8269f8/exec-58b5f4fc-666b-4228-88af-231d6372ce0c.png",
+  "derivation": "Unmodified original copied into the project; CSS displays it at existing 48px card and 64px detail sizes.",
+  "prompt": "Use case: stylized-concept. Asset type: a single finished square avatar icon for the first expert card in a Chinese ecommerce desktop app, shown at 48px and 64px. Subject: an experienced, friendly ecommerce operations consultant, a warm cartoon adult with neat short dark hair, small round glasses, a calm confident smile, a lime-accent shirt, holding one small parcel in one arm and a simple clipboard with a rising chart in the other. Style: match the adjacent expert avatar's cute flat 2D editorial cartoon, thick clean near-black outlines, rounded compact forms, dot eyes, peach face with soft rosy cheeks, very restrained soft shading, polished and approachable. Background: full-bleed pale sage/lime square with a large soft lime-green circular disc behind the bust, matching the visual composition of a pastel pink portrait avatar with a large coral circle. Centered head and upper body, head is prominent, 8 percent safe inset, few bold shapes that stay legible at 48px. No text, no letters, no numbers, no official platform logo, no watermark, no UI border or extra frame, no 3D rendering or photorealism. Output exactly one full square image, opaque background.",
+  "sha256": "54e03bf4ecdadd753e02c171c9b52c9a8bce54294be83ea08ef05f6f2a962ce1",
+  "dimensions": [
+    1254,
+    1254
+  ]
+}

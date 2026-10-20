@@ -23,7 +23,7 @@ if (expertsUiEnabled) useChatExpertsBinding(computed(() => chat.context?.context
 const retryAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const expertQuery = ref("");
 const tabs = [{ key: "experts", label: "专家" }, { key: "skills", label: "技能" }];
-const tab = computed(() => route.query.tab === "experts" ? "experts" : "skills");
+const tab = computed(() => route.query.tab === "skills" ? "skills" : "experts");
 const skillsPage = ref<InstanceType<typeof SkillMarketplacePage> | null>(null);
 const returnTo = computed(() => typeof route.query.from === "string" && /^\/chat(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/.test(route.query.from) ? route.query.from : null);
 if (expertsUiEnabled) useExpertsBinding(computed(() => chat.context?.contextId ?? null));

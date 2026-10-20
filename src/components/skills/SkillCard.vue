@@ -53,7 +53,7 @@ const enabledLabel = computed(() =>
 );
 const status = computed<{
   label: string;
-  type: "default" | "success" | "warning" | "error";
+  type: "default" | "warning" | "error";
 } | null>(() => {
   switch (props.operation) {
     case "install":
@@ -76,23 +76,23 @@ const status = computed<{
   if (props.skill.installationStatus === "uninstalling") {
     return { label: "正在卸载", type: "default" };
   }
-  if (props.skill.catalogStatus === "unknown") {
+  if (
+    props.skill.catalogStatus === "unknown" ||
+    props.skill.installationStatus === "unknown" ||
+    props.skill.capabilityReadiness === "unknown" ||
+    props.skill.executionMode === "unknown" ||
+    props.skill.networkAccess === "unknown" ||
+    props.skill.filesystemAccess === "unknown"
+  ) {
     return { label: "状态不兼容", type: "error" };
   }
   if (props.skill.capabilityReadiness === "blocked") {
     return { label: "能力未就绪", type: "warning" };
   }
-  if (props.skill.installationStatus === "unknown") {
-    return { label: "状态不兼容", type: "error" };
+  if (installed.value && props.skill.enabled && !props.skill.runtimeVisible) {
+    return { label: "正在同步", type: "warning" };
   }
-  if (!installed.value) {
-    return props.skill.capabilityReadiness === "degraded"
-      ? null
-      : { label: "未安装", type: "default" };
-  }
-  if (!props.skill.enabled) return { label: "已停用", type: "default" };
-  if (!props.skill.runtimeVisible) return { label: "正在同步", type: "warning" };
-  return { label: "模型可用", type: "success" };
+  return null;
 });
 
 function requestUninstall(event: MouseEvent): void {
@@ -112,19 +112,21 @@ function requestUninstall(event: MouseEvent): void {
       <img class="skill-card__icon" :src="artworkSrc" alt="" aria-hidden="true" draggable="false" />
 
       <div class="skill-card__content">
-        <div class="skill-card__title-row">
-          <h3 :id="titleId" class="skill-card__title" :title="skill.displayName">
-            {{ skill.displayName }}
-          </h3>
-          <n-tag v-if="status" size="small" :type="status.type" :bordered="false">
-            {{ status.label }}
-          </n-tag>
-        </div>
-        <p :id="descriptionId" class="skill-card__description">{{ skill.description }}</p>
+        <h3 :id="titleId" class="skill-card__title" :title="skill.displayName">
+          {{ skill.displayName }}
+        </h3>
+        <p :id="descriptionId" class="skill-card__description" :title="skill.description">{{ skill.description }}</p>
       </div>
 
       <div class="skill-card__actions" aria-label="Skill 操作">
         <template v-if="installed">
+          <n-switch
+            :value="skill.enabled"
+            :loading="operation === 'enable' || operation === 'disable'"
+            :disabled="!canManage || pending"
+            :aria-label="enabledLabel"
+            @update:value="emit('enabled-change', skill.id, $event)"
+          />
           <button
             v-if="canManage"
             class="skill-card__delete"
@@ -136,13 +138,6 @@ function requestUninstall(event: MouseEvent): void {
           >
             <YjIcon name="trash" size="lg" />
           </button>
-          <n-switch
-            :value="skill.enabled"
-            :loading="operation === 'enable' || operation === 'disable'"
-            :disabled="!canManage || pending"
-            :aria-label="enabledLabel"
-            @update:value="emit('enabled-change', skill.id, $event)"
-          />
         </template>
         <n-tooltip
           v-else-if="installable"
@@ -172,6 +167,10 @@ function requestUninstall(event: MouseEvent): void {
       </div>
     </div>
 
+    <div v-if="status" class="skill-card__status" role="status">
+      <n-tag size="small" :type="status.type" :bordered="false">{{ status.label }}</n-tag>
+    </div>
+
     <p v-if="blockedReason" class="skill-card__blocked-reason" role="status">
       {{ blockedReason }}
     </p>
@@ -186,6 +185,8 @@ function requestUninstall(event: MouseEvent): void {
 .skill-card {
   display: grid;
   min-width: 0;
+  height: 100%;
+  align-content: start;
   padding: var(--yj-space-5);
   border: var(--yj-border-width) solid var(--yj-color-border-subtle);
   border-radius: var(--yj-radius-lg);
@@ -210,7 +211,7 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) var(--yj-space-10);
   align-items: start;
   gap: var(--yj-space-3);
 }
@@ -227,15 +228,6 @@ function requestUninstall(event: MouseEvent): void {
   display: grid;
   min-width: 0;
   gap: var(--yj-space-1);
-}
-
-.skill-card__title-row {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--yj-space-2);
 }
 
 .skill-card__title,
@@ -259,6 +251,7 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__description {
   display: -webkit-box;
+  min-height: calc(var(--yj-line-height-body) * 2);
   overflow: hidden;
   color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-body);
@@ -268,18 +261,17 @@ function requestUninstall(event: MouseEvent): void {
 }
 
 .skill-card__actions {
-  display: flex;
-  min-width: var(--yj-space-10);
-  min-height: var(--yj-space-10);
+  display: grid;
+  grid-template-rows: var(--yj-space-10) var(--yj-space-8);
+  width: var(--yj-space-10);
   align-items: center;
-  justify-content: flex-end;
-  gap: var(--yj-space-2);
+  justify-items: center;
 }
 
 .skill-card__delete {
   display: inline-flex;
-  width: var(--yj-space-10);
-  height: var(--yj-space-10);
+  width: var(--yj-space-8);
+  height: var(--yj-space-8);
   align-items: center;
   justify-content: center;
   padding: var(--yj-space-0);
@@ -322,6 +314,7 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__blocked-reason,
 .skill-card__error {
+  overflow-wrap: anywhere;
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }

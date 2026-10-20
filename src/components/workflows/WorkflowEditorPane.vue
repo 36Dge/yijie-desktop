@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import WorkflowOpeningPlaceholder from "./WorkflowOpeningPlaceholder.vue";
 import {
   WORKFLOW_EDITOR_URL,
   WorkflowEditorChannel,
@@ -23,7 +24,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  history: [];
   reconnect: [];
   dirty: [value: boolean];
   result: [value: WorkflowSchemas["EditorExchangeResult"]];
@@ -44,6 +44,7 @@ const bootstrapFailed = computed(() => !ready.value && visibleFailure.value !== 
 const recoveryRequired = computed(() => interrupted.value || bootstrapFailed.value);
 const blocked = computed(() => !ready.value || recoveryRequired.value || props.reconnecting || props.closing);
 const canReconnect = computed(() => recoveryRequired.value && !props.closing && !props.reconnecting && props.pendingWrites === 0);
+const initiallyOpening = computed(() => !ready.value && !visibleFailure.value && !props.reconnecting && !props.closing);
 
 watch(canReconnect, async (allowed) => {
   if (allowed) {
@@ -67,7 +68,7 @@ function bind() {
       ready: () => { /* The real bootstrap result marks the editor usable. */ },
       dirty: (value) => { if (current()) emit("dirty", value); },
       requestClose: () => { if (current()) emit("close"); },
-      requestHistory: () => { if (current()) emit("history"); },
+      requestHistory: () => { /* Retired UI event: retained only for older editor envelope compatibility. */ },
       result: (value) => {
         if (!current()) return;
         if (value.bootstrap) ready.value = true;
@@ -127,9 +128,10 @@ onBeforeUnmount(() => {
       <iframe ref="frame" :src="WORKFLOW_EDITOR_URL" title="Coze 工作流画布"
         sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"
         allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
-        :tabindex="blocked ? -1 : 0" :inert="blocked" :class="{ 'workflow-editor-pane__frame--blocked': blocked }"
+        :tabindex="blocked ? -1 : 0" :inert="blocked" :class="{ 'workflow-editor-pane__frame--blocked': blocked, 'workflow-editor-pane__frame--opening': initiallyOpening }"
         @load="frameLoaded" />
-      <div v-if="blocked" class="workflow-editor-pane__overlay">
+      <WorkflowOpeningPlaceholder v-if="initiallyOpening" class="workflow-editor-pane__opening" :can-cancel="!!fullPage" @cancel="emit('close')" />
+      <div v-else-if="blocked" class="workflow-editor-pane__overlay" :class="{ 'workflow-editor-pane__overlay--closing': closing }">
         <div class="workflow-editor-pane__notice" role="status">
           <strong>{{ closing ? '正在关闭编辑会话…' : reconnecting ? '正在重新连接…' : recoveryRequired ? '编辑器连接暂不可用' : '正在连接编辑器…' }}</strong>
           <p v-if="recoveryRequired">当前画布和未保存内容仍保留在此页面，重新连接后可继续编辑。</p>
@@ -155,7 +157,11 @@ onBeforeUnmount(() => {
 .workflow-editor-pane__canvas { position: relative; height: max(calc(var(--yj-space-16) * 8), calc(100vh - var(--yj-space-16) * 3)); min-width: 0; }
 .workflow-editor-pane iframe { display: block; width: 100%; height: 100%; border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-lg); background: var(--yj-color-bg-card); }
 .workflow-editor-pane__frame--blocked { pointer-events: none; }
+.workflow-editor-pane__frame--opening { visibility: hidden; }
+.workflow-editor-pane__opening { position: absolute; inset: 0; }
 .workflow-editor-pane__overlay { position: absolute; inset: 0; display: grid; align-content: start; justify-items: center; padding: var(--yj-space-5); }
+.workflow-editor-pane__overlay--closing { animation: workflow-close-hint 1ms step-end 180ms both; }
+@keyframes workflow-close-hint { from { visibility: hidden; } to { visibility: visible; } }
 .workflow-editor-pane__notice { padding: var(--yj-space-4); border: var(--yj-border-width) solid var(--yj-color-border-default); border-radius: var(--yj-radius-md); background: var(--yj-color-bg-card); color: var(--yj-color-text-body); }
 .workflow-editor-pane__notice p { margin: var(--yj-space-2) 0 var(--yj-space-3); }
 .workflow-editor-pane__primary { background: var(--yj-color-brand-primary); color: var(--yj-color-on-brand); }

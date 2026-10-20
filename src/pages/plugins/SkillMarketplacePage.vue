@@ -360,6 +360,7 @@ onBeforeUnmount(() => {
 }
 
 .skill-marketplace__grid > li {
+  display: grid;
   min-width: 0;
 }
 

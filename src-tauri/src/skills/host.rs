@@ -1,6 +1,7 @@
 use super::catalog::{
     load_catalog, load_expert_catalog, CatalogError, SkillCatalog, SkillCatalogEntry,
 };
+use super::defaults::{StarterProgress, STARTER_SKILLS};
 use super::SkillRoots;
 use crate::chat::{
     ChatError, ChatRuntime, HostBridge, HostBridgeError, HostBridgeErrorKind, HostErrorCode,
@@ -27,18 +28,21 @@ enum SkillRuntimeMode {
 
 pub struct SkillRuntime {
     mode: SkillRuntimeMode,
+    starter_lock: tokio::sync::Mutex<()>,
 }
 
 impl SkillRuntime {
     pub(crate) const fn disabled() -> Self {
         Self {
             mode: SkillRuntimeMode::Disabled,
+            starter_lock: tokio::sync::Mutex::const_new(()),
         }
     }
 
     pub(crate) const fn unavailable() -> Self {
         Self {
             mode: SkillRuntimeMode::Unavailable,
+            starter_lock: tokio::sync::Mutex::const_new(()),
         }
     }
 
@@ -47,7 +51,10 @@ impl SkillRuntime {
             Ok(catalog) => SkillRuntimeMode::Ready { roots, catalog },
             Err(CatalogError::Unavailable | CatalogError::Invalid) => SkillRuntimeMode::Unavailable,
         };
-        Self { mode }
+        Self {
+            mode,
+            starter_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
     pub(crate) fn from_expert_roots(roots: SkillRoots) -> Self {
@@ -55,7 +62,10 @@ impl SkillRuntime {
             Ok(catalog) => SkillRuntimeMode::Ready { roots, catalog },
             Err(_) => SkillRuntimeMode::Unavailable,
         };
-        Self { mode }
+        Self {
+            mode,
+            starter_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
     pub(crate) fn roots(&self) -> Option<SkillRoots> {
@@ -112,6 +122,7 @@ impl SkillRuntime {
         ) {
             return Err(SkillCommandError::invalid_request());
         }
+        let _guard = self.starter_lock.lock().await;
         let catalog = self.catalog()?;
         let host = self.host(chat).await?;
         // GET already reconciles the managed directory and Runtime. Automatic
@@ -131,6 +142,14 @@ impl SkillRuntime {
         } else {
             snapshot
         };
+        let snapshot = if matches!(
+            reason,
+            "startup" | "app_upgrade" | "page_open" | "user_retry"
+        ) {
+            self.ensure_starter_skills(&host, snapshot).await?
+        } else {
+            snapshot
+        };
         merge_snapshot(catalog, snapshot)
     }
 
@@ -139,6 +158,7 @@ impl SkillRuntime {
         chat: &ChatRuntime,
         skill_id: &str,
     ) -> Result<SkillSnapshotDto, SkillCommandError> {
+        let _guard = self.starter_lock.lock().await;
         let catalog = self.catalog()?;
         let entry = catalog
             .entries
@@ -163,6 +183,7 @@ impl SkillRuntime {
         )
         .await
         .map_err(SkillCommandError::from_host)?;
+        self.remember_starter_choice(skill_id)?;
         self.list(chat).await
     }
 
@@ -172,6 +193,7 @@ impl SkillRuntime {
         skill_id: &str,
         enabled: bool,
     ) -> Result<SkillSnapshotDto, SkillCommandError> {
+        let _guard = self.starter_lock.lock().await;
         self.require_catalog_entry(skill_id)?;
         let host = self.host(chat).await?;
         host.set_managed_skill_enabled(skill_id, Uuid::now_v7(), enabled)
@@ -185,7 +207,11 @@ impl SkillRuntime {
         chat: &ChatRuntime,
         skill_id: &str,
     ) -> Result<SkillSnapshotDto, SkillCommandError> {
+        let _guard = self.starter_lock.lock().await;
         self.require_catalog_entry(skill_id)?;
+        // An explicit removal takes precedence over first-use installation,
+        // including a removal during partially completed initialization.
+        self.remember_starter_choice(skill_id)?;
         let host = self.host(chat).await?;
         host.uninstall_managed_skill(skill_id, Uuid::now_v7())
             .await
@@ -205,6 +231,97 @@ impl SkillRuntime {
             Err(SkillCommandError::not_found())
         }
     }
+
+    fn remember_starter_choice(&self, id: &str) -> Result<(), SkillCommandError> {
+        if !STARTER_SKILLS.contains(&id) {
+            return Ok(());
+        }
+        let roots = self
+            .roots()
+            .ok_or_else(SkillCommandError::resource_unavailable)?;
+        let mut progress =
+            StarterProgress::load(&roots.install_root).map_err(|_| starter_progress_error())?;
+        progress
+            .complete(&roots.install_root, id)
+            .map_err(|_| starter_progress_error())
+    }
+
+    async fn ensure_starter_skills(
+        &self,
+        host: &HostBridge,
+        mut snapshot: HostSkillSnapshot,
+    ) -> Result<HostSkillSnapshot, SkillCommandError> {
+        let roots = self
+            .roots()
+            .ok_or_else(SkillCommandError::resource_unavailable)?;
+        let catalog = self.catalog()?;
+        let mut progress =
+            StarterProgress::load(&roots.install_root).map_err(|_| starter_progress_error())?;
+        validate_host_snapshot(catalog, &snapshot)?;
+        for id in STARTER_SKILLS {
+            if progress.contains(id) {
+                continue;
+            }
+            let entry = catalog
+                .entries
+                .iter()
+                .find(|entry| entry.id == id && entry.expert.is_none())
+                .ok_or_else(contract_mismatch)?;
+            let state = snapshot
+                .skills
+                .iter()
+                .find(|state| state.id == id)
+                .ok_or_else(contract_mismatch)?;
+            // An existing installation (including a disabled one) is a user
+            // choice. Do not enable it or alter its configuration.
+            if state.installation_status != "installed" {
+                if entry.catalog_status != "installable" || entry.execution_mode != "model-only" {
+                    return Err(contract_mismatch());
+                }
+                if !matches!(
+                    state.installation_status.as_str(),
+                    "not_installed" | "error"
+                ) {
+                    return Err(SkillCommandError::new("skill_busy", true, "retry"));
+                }
+                let installed = host
+                    .install_managed_skill(
+                        id,
+                        Uuid::now_v7(),
+                        &entry.version,
+                        entry
+                            .archive_sha256
+                            .as_deref()
+                            .ok_or_else(contract_mismatch)?,
+                        &snapshot.catalog_revision,
+                    )
+                    .await
+                    .map_err(SkillCommandError::from_host)?;
+                if installed.installation_status != "installed" || !installed.enabled {
+                    return Err(contract_mismatch());
+                }
+                // Record the acknowledged installation before another read or
+                // user mutation can fail. Partial progress survives restarts.
+                progress
+                    .complete(&roots.install_root, id)
+                    .map_err(|_| starter_progress_error())?;
+                snapshot = host
+                    .list_managed_skills()
+                    .await
+                    .map_err(SkillCommandError::from_host)?;
+                validate_host_snapshot(catalog, &snapshot)?;
+            } else {
+                progress
+                    .complete(&roots.install_root, id)
+                    .map_err(|_| starter_progress_error())?;
+            }
+        }
+        Ok(snapshot)
+    }
+}
+
+fn starter_progress_error() -> SkillCommandError {
+    SkillCommandError::new("scan_failed", true, "retry")
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]

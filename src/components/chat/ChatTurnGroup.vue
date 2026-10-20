@@ -15,6 +15,8 @@ import ChatCommandItem, {
   type ChatApprovalDecisionChange,
   type ChatApprovalTransientState,
 } from "./ChatCommandItem.vue";
+import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-skills";
+import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
 import ChatToolItem from "./ChatToolItem.vue";
@@ -28,12 +30,14 @@ const props = withDefaults(defineProps<{
   turn: ConversationTimelineTurnViewModel;
   position: number;
   timingLabel?: string | null;
+  skillCatalog?: readonly SelectedChatSkill[];
   connectorNames?: readonly string[];
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
   timingLabel: null,
+  skillCatalog: () => Object.freeze([]),
   connectorNames: () => Object.freeze([]),
   canDecideApprovals: false,
   approvalAuthorityRevision: 0,
@@ -42,6 +46,9 @@ const props = withDefaults(defineProps<{
 
 const processId = `${useId()}-process`;
 const firstUserMessage = computed(() => props.turn.items.find(item => item.presentation === "user_message")?.identity);
+const skillMessages = computed(() => new Map(props.turn.items
+  .filter(item => item.role === "user" && item.presentation === "user_message")
+  .map(item => [item.identity, presentSkillMessage(item.contentBlocks, props.skillCatalog)])));
 const expansionChoice = ref<boolean | null>(null);
 const processItems = computed(() => props.turn.items.filter(item =>
   isCollapsibleProcessItem(item) && (!item.approval ||
@@ -467,11 +474,14 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
             <ChatSafeContent
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
-              :blocks="item.contentBlocks"
+              :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
               :streaming="item.kind === 'assistant_message' && item.busy === true && (!processKeys.has(item.identity) || processExpanded)"
             >
-              <template v-if="item.identity === firstUserMessage && connectorNames.length" #text-prefix><span aria-label="本轮连接器"><span v-for="(name, index) in connectorNames" :key="index" class="chat-turn-group__connector-mention">/ {{ name }}</span></span></template>
+              <template v-if="(item.identity === firstUserMessage && connectorNames.length) || skillMessages.get(item.identity)?.skills.length" #text-prefix>
+                <span v-if="item.identity === firstUserMessage && connectorNames.length" aria-label="本轮连接器"><span v-for="(name, index) in connectorNames" :key="index" class="chat-turn-group__connector-mention">/ {{ name }}</span></span>
+                <span v-if="skillMessages.get(item.identity)?.skills.length" aria-label="本轮技能"><ChatSkillPill v-for="skill in skillMessages.get(item.identity)!.skills" :key="skill.id" :entry="skill" class="chat-turn-group__skill-mention" /></span>
+              </template>
               <template
                 v-if="slots['artifact-reference']"
                 #artifact-reference="{ block }"
@@ -536,6 +546,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 </template>
 
 <style scoped>
+.chat-turn-group__skill-mention { margin-inline-end: var(--yj-space-2); }
 .chat-turn-group__connector-mention { color: var(--yj-color-connector-mention); margin-inline-end: var(--yj-space-2); overflow-wrap: anywhere; }
 .chat-turn-group__process-toggle {
   display: inline-flex;

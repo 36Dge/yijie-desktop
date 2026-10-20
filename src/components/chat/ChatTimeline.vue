@@ -7,6 +7,7 @@ import type {
   ConversationTimelineNoticeViewModel,
   ConversationTimelineViewModel,
 } from "../../domain/conversation-timeline";
+import type { SelectedChatSkill } from "../../domain/chat-skills";
 import YjEmpty from "../yijie/YjEmpty.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 import type {
@@ -19,12 +20,14 @@ import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 withDefaults(defineProps<{
   timeline: ConversationTimelineViewModel;
   turnTimingLabels?: Readonly<Record<string, string | null>>;
+  skillCatalog?: readonly SelectedChatSkill[];
   connectorNamesByTurn?: Readonly<Record<string, readonly string[]>>;
   canDecideApprovals?: boolean;
   approvalAuthorityRevision?: number;
   approvalTransients?: Readonly<Record<string, ChatApprovalTransientState | undefined>>;
 }>(), {
   turnTimingLabels: () => ({}),
+  skillCatalog: () => Object.freeze([]),
   connectorNamesByTurn: () => Object.freeze({}),
   canDecideApprovals: false,
   approvalAuthorityRevision: 0,
@@ -159,6 +162,7 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
       >
         <ChatTurnGroup
           :turn="turn"
+          :skill-catalog="skillCatalog"
           :position="index + 1"
           :timing-label="turnTimingLabels[turn.turnId] ?? null"
           :connector-names="turn.source === 'native_observed' || turn.source === 'native_rebuilt' ? connectorNamesByTurn[turn.turnId] ?? [] : []"

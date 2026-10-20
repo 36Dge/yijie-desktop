@@ -85,7 +85,8 @@ describe("ten adapted experts use the existing Native catalog and summon flow", 
       expect(card.find("img").exists()).toBe(true);
       expect(view.find(`button[aria-label='查看 ${name} 展示详情']`).exists()).toBe(false);
     }
-    expect(view.get("button[aria-label='查看 资深电商运营操盘手 详情']").find("img").exists()).toBe(false);
+    expect(view.get("button[aria-label='查看 资深电商运营操盘手 详情']").get("img").attributes("src"))
+      .toContain("jd-ops-expert.png");
   });
 
   it.each(["older catalog", "initial loading", "read failure"] as const)("does not invent integrated cards during %s", (condition) => {

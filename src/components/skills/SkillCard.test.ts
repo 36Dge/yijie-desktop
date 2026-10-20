@@ -166,8 +166,47 @@ describe("SkillCard", () => {
         runtimeVisible: true,
       }),
     });
-    expect(wrapper.text()).toContain("模型可用");
+    expect(wrapper.find(".n-tag").exists()).toBe(false);
     expect(wrapper.getComponent(NSwitch).props("value")).toBe(true);
+  });
+
+  it.each(["ready", "degraded"])("uses controls for every normal %s installation state", async (capabilityReadiness) => {
+    const wrapper = mountCard(skill({ capabilityReadiness }));
+    expect(wrapper.find(".skill-card__install").exists()).toBe(true);
+    expect(wrapper.find(".n-tag").exists()).toBe(false);
+
+    for (const enabled of [true, false]) {
+      await wrapper.setProps({ skill: skill({ capabilityReadiness, installationStatus: "installed", enabled, runtimeVisible: enabled }) });
+      expect(wrapper.find(".skill-card__install").exists()).toBe(false);
+      expect(wrapper.getComponent(NSwitch).props("value")).toBe(enabled);
+      expect(wrapper.find(".n-tag").exists()).toBe(false);
+    }
+    wrapper.unmount();
+  });
+
+  it("keeps a real pending Runtime confirmation visible until the next projection", async () => {
+    const wrapper = mountCard(skill({ installationStatus: "installed", enabled: true }));
+    expect(wrapper.get('[role="status"]').text()).toBe("正在同步");
+    expect(wrapper.getComponent(NSwitch).props("value")).toBe(true);
+    await wrapper.setProps({ skill: skill({ installationStatus: "installed", enabled: true, runtimeVisible: true }) });
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["installationStatus", "installing", "正在安装"],
+    ["installationStatus", "uninstalling", "正在卸载"],
+    ["installationStatus", "unknown", "状态不兼容"],
+    ["capabilityReadiness", "blocked", "能力未就绪"],
+    ["capabilityReadiness", "unknown", "状态不兼容"],
+    ["executionMode", "unknown", "状态不兼容"],
+    ["networkAccess", "unknown", "状态不兼容"],
+    ["filesystemAccess", "unknown", "状态不兼容"],
+  ])("preserves feedback for %s=%s", (field, value, label) => {
+    const wrapper = mountCard(skill({ [field!]: value }));
+    expect(wrapper.get('[role="status"]').text()).toBe(label);
+    expect(wrapper.find(".skill-card__install").exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("shows the stable blocked reason and exposes no install control", () => {

@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { DOMWrapper, enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
-import { h } from "vue";
+import { h, ref } from "vue";
+import ChatSkillControl from "./ChatSkillControl.vue";
+import { installedSkill } from "../../test/skill-fixture";
 import { afterEach, describe, expect, it } from "vitest";
 import ChatAddControl from "./ChatAddControl.vue";
 enableAutoUnmount(afterEach);
@@ -18,6 +20,31 @@ function setup(attachmentDisabled = false) {
 function menu() { return new DOMWrapper(document.querySelector<HTMLElement>('.composer-add-menu')!); }
 
 describe("composer add menu", () => {
+  it("closes the entire menu after a skill selection and retains the checkmark when reopened", async () => {
+    const selected = ref<string[]>([]);
+    const wrapper = mount(ChatAddControl, {
+      attachTo: document.body,
+      props: { disabled: false, attachmentDisabled: false, skillsAvailable: true, connectorsAvailable: false },
+      slots: { skills: ({ close }: { close: () => void }) => h(ChatSkillControl, {
+        entries: [installedSkill], selectedIds: selected.value, disabled: false, loading: false, error: null,
+        operations: {}, operationErrors: {}, onClose: close,
+        onSelect: (id: string) => { selected.value = selected.value.includes(id) ? [] : [id]; },
+      }) },
+    });
+    const openSkills = async () => {
+      await wrapper.get('button').trigger('click'); await flushPromises();
+      await menu().get('[data-resource-menu="skills"]').trigger('click'); await flushPromises();
+    };
+    await openSkills();
+    await menu().get('[role="checkbox"]').trigger('click'); await flushPromises();
+    expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
+    expect(selected.value).toEqual([installedSkill.id]);
+    await openSkills();
+    expect(menu().get('[role="checkbox"]').attributes('aria-checked')).toBe('true');
+    await menu().get('[role="checkbox"]').trigger('click'); await flushPromises();
+    expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
+    expect(selected.value).toEqual([]);
+  });
   it("only exposes expert browsing when enabled and never sends a message", async () => {
     const wrapper = setup();
     await wrapper.setProps({ expertsAvailable: true });
@@ -100,5 +127,21 @@ describe("composer add menu", () => {
     await wrapper.setProps({ disabled: true }); await flushPromises();
     expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
     expect(wrapper.emitted('pick-attachments')).toBeUndefined();
+  });
+  it("only reveals and focuses the latest resource when switching during initial layout", async () => {
+    const wrapper = setup();
+    await wrapper.get('button').trigger('click'); await flushPromises();
+    const skills = menu().get('[data-resource-menu="skills"]');
+    const connectors = menu().get('[data-resource-menu="connectors"]');
+    skills.element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    connectors.element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushPromises();
+    const panel = menu().get<HTMLElement>('.composer-add-menu__submenu');
+    expect(panel.attributes('aria-label')).toBe('连接器');
+    expect(panel.element.style.visibility).toBe('visible');
+    expect(document.activeElement).toBe(panel.element);
+    skills.element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await wrapper.setProps({ disabled: true }); await flushPromises();
+    expect(document.querySelector('.composer-add-menu__submenu')).toBeNull();
   });
 });

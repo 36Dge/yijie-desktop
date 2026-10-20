@@ -15,6 +15,8 @@ import {
 } from "../../domain/chat-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatConnectorChips from "./ChatConnectorChips.vue";
+import ChatSkillChips from "./ChatSkillChips.vue";
+import type { ChatSkillChip } from "../../domain/chat-skills";
 import ChatReadinessNotice from "./ChatReadinessNotice.vue";
 import ChatAddControl from "./ChatAddControl.vue";
 import type { ConnectorChipView } from "../../domain/connector-ui";
@@ -38,6 +40,7 @@ const props = withDefaults(defineProps<{
   attachmentErrorCode?: string | null;
   dragActive?: boolean;
   connectors?: readonly ConnectorChipView[];
+  skills?: readonly ChatSkillChip[];
   expertsAvailable?: boolean;
   textLocked?: boolean;
 }>(), {
@@ -49,6 +52,7 @@ const props = withDefaults(defineProps<{
   dragActive: false,
   textOnly: false,
   connectors: () => Object.freeze([]),
+  skills: () => Object.freeze([]),
 });
 
 const emit = defineEmits<{
@@ -63,6 +67,7 @@ const emit = defineEmits<{
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
   "remove-connector": [id: string];
+  "remove-skill": [id: string];
   "browse-experts": [];
 }>();
 
@@ -87,6 +92,7 @@ const textareaElement = ref<HTMLTextAreaElement | null>(null);
 const connectorPrefixElement = ref<HTMLElement | null>(null);
 const connectorPrefixWidth = ref(0);
 const inputScrollTop = ref(0);
+const hasSkillPrefix = computed(() => !props.textOnly && props.skills.length > 0);
 let resizeObserver: ResizeObserver | null = null;
 let observedComposerWidth: number | null = null;
 const selectedProject = computed(() => props.projects.find((project) =>
@@ -113,6 +119,7 @@ const sendDisabled = computed(() =>
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
   props.attachments.some((attachment) => attachment.status !== "ready") ||
   (!props.textOnly && props.connectors.some((connector) => Boolean(connector.unavailableReason))) ||
+  (!props.textOnly && props.skills.some((skill) => Boolean(skill.unavailableReason))) ||
   attachmentConstraintMessage.value !== null,
 );
 const sendLabel = computed(() => {
@@ -187,11 +194,16 @@ function updateInput(event: Event): void {
 
 function syncTextareaHeight(textarea = textareaElement.value): void {
   if (textarea === null) return;
+  // Size from the user's text, not the selection prefix. Selecting skills must
+  // not grow the composer; any extra wrapped text scrolls inside its viewport.
+  const indent = textarea.style.textIndent;
+  if (hasSkillPrefix.value) textarea.style.textIndent = "0px";
   textarea.style.height = "auto";
   const contentHeight = textarea.scrollHeight;
+  textarea.style.textIndent = indent;
   if (contentHeight > 0) textarea.style.height = `${contentHeight}px`;
   else textarea.style.removeProperty("height");
-  textarea.style.overflowY = contentHeight > textarea.clientHeight + 1 ? "auto" : "hidden";
+  textarea.style.overflowY = textarea.scrollHeight > textarea.clientHeight + 1 ? "auto" : "hidden";
   inputScrollTop.value = textarea.scrollTop;
 }
 
@@ -203,9 +215,13 @@ function syncInputLayout(): void {
     const line = Number.parseFloat(style.lineHeight) || 20;
     const gap = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--yj-space-2")) || 8;
     const available = textarea.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
-    // Keep the native textarea (IME, undo and selection). Only its first line
-    // is indented; long/multiple prefixes get a separate wrapped line.
-    if (prefix.offsetHeight <= line + 1 && prefix.offsetWidth + gap + line * 4 <= available) width = prefix.offsetWidth + gap;
+    // Preserve native IME/undo/selection. A compact skill row stays inside the
+    // existing input area, with room reserved for the caret and input text.
+    if (hasSkillPrefix.value) {
+      width = prefix.offsetWidth + gap;
+    } else if (prefix.offsetHeight <= line + 1 && prefix.offsetWidth + gap + line * 4 <= available) {
+      width = prefix.offsetWidth + gap;
+    }
   }
   const changed = connectorPrefixWidth.value !== width;
   connectorPrefixWidth.value = width;
@@ -267,6 +283,7 @@ watch(
     () => props.attachments.length,
     () => props.attachmentImportAttempt?.operationId ?? null,
     () => props.connectors,
+    () => props.skills,
     () => props.textOnly,
   ],
   syncInputLayout,
@@ -299,6 +316,12 @@ onBeforeUnmount(() => {
 
 function submit(): void {
   if (!sendDisabled.value && !composing.value) emit("submit");
+}
+
+function removeSkill(id: string): void {
+  if (submissionBusy.value || props.streaming || props.textLocked) return;
+  emit("remove-skill", id);
+  void nextTick(() => textareaElement.value?.focus({ preventScroll: true }));
 }
 
 function requestActiveTurnInterrupt(): void {
@@ -407,8 +430,9 @@ function handlePaste(event: ClipboardEvent): void {
             </span>
           </li>
         </ul>
-        <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0 }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
-          <div v-if="!textOnly && connectors.length" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
+        <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
+          <div v-if="!textOnly && (connectors.length || skills.length)" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
+            <ChatSkillChips :entries="skills" :disabled="submissionBusy || streaming || textLocked" @remove="removeSkill" />
             <ChatConnectorChips :entries="connectors" :disabled="submissionBusy || streaming || !canSend" @remove="removeConnector" />
           </div>
           <textarea
@@ -417,7 +441,7 @@ function handlePaste(event: ClipboardEvent): void {
           class="chat-composer__textarea"
           :value="modelValue"
           :readonly="submissionBusy || textLocked"
-          :placeholder="!textOnly && connectors.length ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
+          :placeholder="!textOnly && (connectors.length || skills.length) ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
           :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
           :aria-invalid="visibleValidationMessage ? 'true' : undefined"
           autocomplete="off"
@@ -833,6 +857,24 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__connector-prefix + .chat-composer__textarea { padding-top: var(--yj-space-2); }
 .chat-composer__input--inline-prefix .chat-composer__connector-prefix { position: absolute; top: var(--yj-space-4); left: var(--yj-space-4); margin: 0; }
 .chat-composer__input--inline-prefix .chat-composer__textarea { padding-top: var(--yj-space-4); text-indent: var(--connector-prefix-width); }
+/* Skill selections share the existing first line; never create a layout row. */
+.chat-composer__input--skills .chat-composer__connector-prefix {
+  position: absolute;
+  top: var(--yj-space-3);
+  left: var(--yj-space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--yj-space-2);
+  max-width: calc(100% - var(--yj-space-8) - var(--yj-line-height-body) * 4);
+  padding: var(--yj-space-1);
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: var(--yj-space-1);
+}
+.chat-composer__input--skills .chat-composer__connector-prefix::-webkit-scrollbar { display: none; }
+.chat-composer__input--skills :deep(.chat-connector-chips) { flex: none; flex-wrap: nowrap; overflow: visible; }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
 
 .chat-composer__actions {

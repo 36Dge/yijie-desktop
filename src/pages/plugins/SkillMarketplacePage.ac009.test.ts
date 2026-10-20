@@ -227,7 +227,8 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     }));
     await flushPromises();
     expect(card.attributes("aria-busy")).toBe("false");
-    expect(card.text()).toContain("模型可用");
+    expect(card.get('[role="switch"]').attributes("aria-checked")).toBe("true");
+    expect(card.find(".n-tag").exists()).toBe(false);
   });
 
   it("keeps an atomic failure visible and retries from the same card", async () => {
@@ -258,7 +259,8 @@ describe("FEAT-129 AC-009 automated acceptance", () => {
     await flushPromises();
     expect(nativeMock.install).toHaveBeenCalledTimes(2);
     expect(wrapper.find(".skill-card [role=alert]").exists()).toBe(false);
-    expect(wrapper.text()).toContain("模型可用");
+    expect(wrapper.get('[role="switch"]').attributes("aria-checked")).toBe("true");
+    expect(wrapper.find(".skill-card .n-tag").exists()).toBe(false);
   });
 
   it("supports uninstall cancel, Escape, and danger confirmation while restoring focus", async () => {

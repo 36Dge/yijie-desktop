@@ -187,9 +187,8 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
 .expert-market__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: var(--yj-space-4); }
 .expert-market__skeleton { min-height: calc(var(--yj-space-16) * 2 + var(--yj-space-12)); border-radius: var(--yj-radius-xl); }
 .expert-card { display: flex; min-width: 0; flex-direction: column; gap: var(--yj-space-4); padding: var(--yj-space-5); border: var(--yj-border-width) solid var(--yj-color-border-subtle); border-radius: var(--yj-radius-xl); background: var(--yj-color-bg-card); transition: border-color var(--yj-motion-fast) var(--yj-ease-standard); }
-.expert-card:hover { border-color: var(--yj-color-border-strong); }
 .expert-card--selected { border-color: var(--yj-color-border-strong); }
-.expert-card:focus-within { border-color: var(--yj-color-focus-ring); }
+.expert-card:is(:hover, :focus-within) { border-color: var(--yj-color-brand-primary); }
 .expert-card__details { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--yj-space-4); padding: 0; border: 0; background: transparent; color: var(--yj-color-text-primary); font: inherit; text-align: left; cursor: pointer; }
 .expert-card__details:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-2); border-radius: var(--yj-radius-md); }
 .expert-card__header { display: grid; grid-template-columns: var(--yj-space-12) minmax(0, 1fr); align-items: center; gap: var(--yj-space-3); width: 100%; }

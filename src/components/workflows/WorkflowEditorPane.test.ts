@@ -30,7 +30,8 @@ describe("native Coze page carrier", () => {
   it("gives the full page to Coze and only shows recovery for a real connection failure", async () => {
     wrapper = mount(WorkflowEditorPane, { props: { ...props, fullPage: true } });
     expect(wrapper.find("header").exists()).toBe(false);
-    expect(wrapper.text()).toContain("返回工作流");
+    expect(wrapper.text()).not.toContain("正在连接编辑器");
+    expect(wrapper.find(".workflow-editor-pane__opening").exists()).toBe(true);
     const frame = wrapper.get("iframe");
     await frame.trigger("load");
     const binding = channels.hooks[channels.hooks.length - 1]!;
@@ -44,12 +45,14 @@ describe("native Coze page carrier", () => {
     await wrapper.vm.$nextTick();
     await wrapper.setProps({ view: { ...view, expires_at_ms: Date.now() - 1 } });
     expect(wrapper.find(".workflow-editor-pane__overlay").exists()).toBe(false);
+    expect(wrapper.find(".workflow-editor-pane__opening").exists()).toBe(false);
+    expect(frame.classes()).not.toContain("workflow-editor-pane__frame--opening");
     expect(wrapper.text()).not.toContain("会话已到期");
     await wrapper.setProps({ view });
     expect(wrapper.find(".workflow-editor-pane__overlay").exists()).toBe(false);
     expect(wrapper.find("header").exists()).toBe(false);
     binding.requestHistory();
-    expect(wrapper.emitted("history")).toHaveLength(1);
+    expect(wrapper.emitted("history")).toBeUndefined();
 
     const renewed = { ...view, bridge_id: "quietly-renewed", generation: 2, expires_at_ms: Date.now() + 300_000 };
     binding.renewed?.(renewed);
@@ -70,7 +73,7 @@ describe("native Coze page carrier", () => {
     await wrapper.setProps({ view: { ...view, bridge_id: "ordinary-reconnected", generation: 2 }, parentFailure: null, reconnecting: true });
     expect(wrapper.get("iframe").element).toBe(frame.element);
     binding.requestHistory();
-    expect(wrapper.emitted("history")).toHaveLength(1);
+    expect(wrapper.emitted("history")).toBeUndefined();
   });
 
   it("keeps the existing embedded header and actions slot for non-full-page consumers", () => {
@@ -78,5 +81,15 @@ describe("native Coze page carrier", () => {
     expect(wrapper.get("header").text()).toContain("返回工作流");
     expect(wrapper.get("h2").text()).toBe(view.workflow.name);
     expect(wrapper.get("header").text()).toContain("原有嵌入操作");
+  });
+
+  it("shows a genuine bootstrap failure immediately instead of delaying recovery feedback", async () => {
+    wrapper = mount(WorkflowEditorPane, { props: { ...props, fullPage: true } });
+    await wrapper.get("iframe").trigger("load");
+    channels.hooks[channels.hooks.length - 1]!.failure(new WorkflowNativeError("service_unavailable"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".workflow-editor-pane__opening").exists()).toBe(false);
+    expect(wrapper.text()).toContain("编辑器连接暂不可用");
+    expect(wrapper.findAll("button").some(button => button.text() === "重新连接")).toBe(true);
   });
 });

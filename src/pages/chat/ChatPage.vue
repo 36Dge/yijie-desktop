@@ -98,6 +98,7 @@ import { browserChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 
 import { CHAT_AUTHORITY_RETRY_KEY } from "../../authorization/chat-authority-recovery";
 import { locateChatTurn } from "../../domain/locate-chat-turn";
+import { compileSkillInput, selectedSkillIssue, skillSelectionIssue, type ChatSkillChip } from "../../domain/chat-skills";
 
 const route = useRoute();
 const router = useRouter();
@@ -110,16 +111,17 @@ const retryChatAuthority = inject(CHAT_AUTHORITY_RETRY_KEY, async () => false);
 const localComposerDrafts = shallowRef(createChatComposerDrafts());
 const sharedDrafts = useChatComposerDraftStore();
 const chatExperts = useChatExpertsStore(), expertResources = useExpertsStore();
-const sharedComposerDraftsEnabled = marketConnectorsEnabled || expertsUiEnabled;
+const sharedComposerDraftsEnabled = marketConnectorsEnabled || expertsUiEnabled || skillMarketplaceUiEnabled;
 const connectors = useMarketConnectorStore();
 const skills = useSkillStore();
+// History labels only need the catalog projection; do not scan/install on read.
+watch(() => chatStore.context?.contextId, contextId => {
+  if (contextId && skillMarketplaceUiEnabled && skills.phase === "idle") void skills.open(false);
+}, { immediate: true });
 const canManageSkills = computed(() => permissionScope.hasCapability("plugin.manage"));
 const skillError = computed(() => skills.lastFailure ? skillNativeFailureMessage(skills.lastFailure) : null);
 function refreshSkills(): void { void skills.open(canManageSkills.value); }
-function skillEnabledChange(id: string, enabled: boolean): void {
-  if (!canManageSkills.value || modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
-  void skills.setEnabled(id, enabled);
-}
+function manageSkills(): void { void router.push({ path: "/plugins", query: { tab: "skills" } }); }
 const composerDrafts = computed({
   get: () => sharedComposerDraftsEnabled ? sharedDrafts.texts : localComposerDrafts.value,
   set: value => { if (sharedComposerDraftsEnabled) sharedDrafts.texts = value; else localComposerDrafts.value = value; },
@@ -429,6 +431,20 @@ const connectorNamesByTurn = computed(() => Object.fromEntries(
   (marketChat.observation.value?.availableTurns ?? []).map(turn => [turn.nativeTurnId, turn.selectionDisplay.map(item => item.displayName)]),
 ));
 const connectorSelection = computed(() => marketConnectorsEnabled && !isDraftMode.value ? sharedDrafts.selection(composerDraftTargetKey.value) : []);
+const skillSelection = computed(() => skillMarketplaceUiEnabled && !isDraftMode.value ? sharedDrafts.skillSelection(composerDraftTargetKey.value) : []);
+const skillChips = computed<readonly ChatSkillChip[]>(() => skillSelection.value.map(selected => ({
+  ...selected,
+  unavailableReason: skills.operations[selected.id] ? "技能正在更新，请稍后重试" : skills.phase === "ready" || skills.phase === "empty" ? selectedSkillIssue(selected, skills.skills) : null,
+})));
+const skillNotice = computed(() => skillChips.value.find(skill => skill.unavailableReason)?.unavailableReason ?? null);
+function toggleSkill(id: string): void {
+  if (modelBusy.value || submitting.value || expertSubmission.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
+  const target = composerDraftTargetKey.value, current = sharedDrafts.skillSelection(target);
+  if (current.some(skill => skill.id === id)) { sharedDrafts.setSkills(target, current.filter(skill => skill.id !== id)); return; }
+  const entry = skills.skills.find(skill => skill.id === id);
+  if (!entry || skillSelectionIssue(entry) || skills.operations[id]) return;
+  sharedDrafts.setSkills(target, [...current, { id: entry.id, runtimeName: entry.runtimeName, displayName: entry.displayName, category: entry.category }]);
+}
 const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSelection.value.map(selected => {
   const entry = connectors.entries.find(item => item.id === selected.serviceId);
   const installation = connectors.installation(selected.serviceId);
@@ -452,7 +468,6 @@ function browseExperts(): void {
   if (!expertsUiEnabled || isDraftMode.value || modelBusy.value || !permissionScope.hasCapability("plugin.read")) return;
   void router.push({ path: "/plugins", query: { tab: "experts", from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat" } });
 }
-function connectorEnabledChange(id: string, enabled: boolean): void { if (enabled) manageConnectors(id); else void connectors.execute("disable", id); }
 function prepareConnectorSubmit(): boolean {
   if (!marketConnectorsEnabled) return true;
   if (routeSessionId.value && !marketChat.ready.value) {
@@ -693,12 +708,26 @@ async function submit(recoverExpert = false): Promise<void> {
   transientNotice.value = null;
   const draftTargetAtStart = composerDraftTargetKey.value;
   let focusRestoreTarget = draftTargetAtStart;
-  const input = prompt.value.trim();
+  const draftTextAtStart = prompt.value;
+  const selectedSkillsAtStart = [...skillSelection.value];
+  const contextAtStart = chatStore.context?.contextId;
+  let input = draftTextAtStart.trim();
   const frozenExpert = recoverExpert ? expertSubmission.value : undefined;
   const turnExpert = frozenExpert ? { expectedBindingRevision: frozenExpert.expectedBindingRevision, expert: frozenExpert.expert } : expertIntent.value;
   const marketSelection = frozenExpert?.submission.selection ?? (marketConnectorsEnabled && (connectorSelection.value.length > 0 || marketChat.managed.value)
     ? connectorSelection.value.map(item => ({ ...item.reference })) : undefined);
   try {
+    if (!recoverExpert && selectedSkillsAtStart.length) {
+      await skills.open(canManageSkills.value);
+      if (composerDraftTargetKey.value !== draftTargetAtStart || chatStore.context?.contextId !== contextAtStart || prompt.value !== draftTextAtStart || JSON.stringify(skillSelection.value) !== JSON.stringify(selectedSkillsAtStart)) return;
+      if (skills.lastFailure || (skills.phase !== "ready" && skills.phase !== "empty")) {
+        transientNotice.value = "暂时无法确认所选技能状态，请重试。";
+        return;
+      }
+      const issue = selectedSkillsAtStart.map(skill => skills.operations[skill.id] ? "技能正在更新，请稍后重试" : selectedSkillIssue(skill, skills.skills)).find(Boolean);
+      if (issue) { transientNotice.value = issue; return; }
+      input = compileSkillInput(input, selectedSkillsAtStart);
+    }
     if (isSessionRoute.value) {
       const result = await (turnExpert !== undefined
         ? chatStore.submitTurnWithResult(input, frozenExpert?.submission.intent ?? models.intent.value ?? undefined, marketSelection, turnExpert)
@@ -714,6 +743,7 @@ async function submit(recoverExpert = false): Promise<void> {
         composerDraftTargetKey.value !== draftTargetAtStart
       ) return;
       composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+      sharedDrafts.clearSkills(draftTargetAtStart);
       if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
       if (turnExpert) chatExperts.acknowledgeSubmission(result.operationId);
       await nextTick();
@@ -734,6 +764,7 @@ async function submit(recoverExpert = false): Promise<void> {
       composerDraftTargetKey.value !== draftTargetAtStart
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
+    sharedDrafts.clearSkills(draftTargetAtStart);
     if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
     if (turnExpert) { sharedDrafts.setExpert("new", null); chatExperts.acknowledgeSubmission(result.operationId); }
     models.resetNew();
@@ -961,6 +992,7 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="skillNotice" class="chat-workspace__composer-error" role="status">{{ skillNotice }}</p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
@@ -975,6 +1007,8 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :text-only="isDraftMode"
         :connectors="connectorChips"
+        :skills="skillChips"
+        @remove-skill="toggleSkill"
         @remove-connector="toggleConnector"
         :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
@@ -1013,10 +1047,10 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
-          <ChatSkillControl :entries="skills.skills" :can-manage="canManageSkills" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading' || skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @enabled-change="skillEnabledChange" @manage="router.push('/plugins')" @close="close" />
+          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
@@ -1081,6 +1115,7 @@ onBeforeUnmount(() => {
           <ChatTimeline
             v-if="conversationTimeline"
             :timeline="conversationTimeline"
+            :skill-catalog="skills.skills"
             :turn-timing-labels="turnTimingLabels"
             :connector-names-by-turn="connectorNamesByTurn"
             :can-decide-approvals="chatStore.canDecideApprovals"
@@ -1218,6 +1253,7 @@ onBeforeUnmount(() => {
       <p v-if="!isDraftMode && !workspaceSelectionValid" class="chat-workspace__composer-error" role="alert">所选工作空间已不可用，请重新选择或取消工作空间后发送。</p>
       <ScheduledDraftPanel v-if="isDraftMode" ref="draftPanel" :model="draft" @accepted="openDraftConversation" @view-plan="viewDraftPlan" @recover="recoverDraft" />
       <p v-if="chatModelsEnabled && models.error.value" class="chat-workspace__composer-error" role="alert">{{ models.error.value }}</p>
+      <p v-if="skillNotice" class="chat-workspace__composer-error" role="status">{{ skillNotice }}</p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
@@ -1233,6 +1269,8 @@ onBeforeUnmount(() => {
         :readiness="readiness"
         :text-only="isDraftMode"
         :connectors="connectorChips"
+        :skills="skillChips"
+        @remove-skill="toggleSkill"
         @remove-connector="toggleConnector"
         :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
@@ -1259,10 +1297,10 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
-          <ChatSkillControl :entries="skills.skills" :can-manage="canManageSkills" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading' || skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @enabled-change="skillEnabledChange" @manage="router.push('/plugins')" @close="close" />
+          <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
           <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />

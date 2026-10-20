@@ -17,6 +17,8 @@ const placement = ref<"top-start" | "bottom-start">("top-start");
 const height = ref(0), shiftX = ref(0);
 const submenuX = ref(0), submenuY = ref(0), submenuHeight = ref(0);
 const submenuSide = ref<"right" | "left" | "stacked">("right");
+const submenuReady = ref(false);
+let submenuRequest = 0;
 let closeTimer: ReturnType<typeof setTimeout> | undefined;
 let observer: ResizeObserver | undefined;
 let frame = 0;
@@ -104,9 +106,26 @@ async function closeSubmenu(): Promise<void> {
 }
 async function showView(value: Resource, focus = false): Promise<void> {
   if (!open.value || props.disabled || (value === "skills" ? !props.skillsAvailable : !props.connectorsAvailable)) return;
-  cancelClose(); view.value = value;
-  await nextTick(); measureSubmenu(); queueMeasureSubmenu();
-  if (focus && view.value === value) submenu.value?.focus({ preventScroll: true });
+  cancelClose();
+  if (view.value === value && submenuReady.value) {
+    if (focus) submenu.value?.focus({ preventScroll: true });
+    return;
+  }
+  const request = ++submenuRequest;
+  const current = () => open.value && view.value === value && request === submenuRequest;
+  submenuReady.value = false;
+  view.value = value;
+  await nextTick();
+  if (!current()) return;
+  // Apply the viewport constraint before reading the content's final height.
+  measureSubmenu();
+  await nextTick();
+  if (!current()) return;
+  measureSubmenu();
+  submenuReady.value = true;
+  await nextTick();
+  if (focus && current()) submenu.value?.focus({ preventScroll: true });
+  queueMeasureSubmenu();
 }
 function pickAttachments(): void {
   if (props.attachmentDisabled) return;
@@ -169,7 +188,7 @@ onBeforeUnmount(() => {
         <button class="chat-control-option" role="menuitem" type="button" data-resource-menu="connectors" :disabled="!connectorsAvailable" aria-haspopup="dialog" :aria-expanded="view === 'connectors'" :aria-controls="view === 'connectors' ? submenuId : undefined" @mouseenter="showView('connectors')" @click="showView('connectors', true)" @keydown.right.prevent="showView('connectors', true)"><YjIcon name="connector" size="sm" /><span>连接器</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
         <button v-if="expertsAvailable" class="chat-control-option" role="menuitem" type="button" @mouseenter="view = null" @click="close(); emit('browse-experts')"><YjIcon name="skillOperations" size="sm" /><span>选择专家</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
       </div>
-      <div v-if="view" :id="submenuId" ref="submenu" class="composer-add-menu__submenu chat-control-menu" :data-side="submenuSide" :style="{ left: `${submenuX}px`, top: `${submenuY}px`, maxHeight: `${submenuHeight}px` }" role="dialog" tabindex="-1" :aria-label="view === 'skills' ? '技能' : '连接器'" @mouseenter="cancelClose">
+      <div v-if="view" :id="submenuId" ref="submenu" class="composer-add-menu__submenu chat-control-menu" :data-side="submenuSide" :style="{ left: `${submenuX}px`, top: `${submenuY}px`, maxHeight: `${submenuHeight}px`, visibility: submenuReady ? 'visible' : 'hidden' }" role="dialog" tabindex="-1" :aria-label="view === 'skills' ? '技能' : '连接器'" @mouseenter="cancelClose">
         <slot v-if="view === 'skills'" name="skills" :close="close" />
         <slot v-else name="connectors" :close="close" />
       </div>

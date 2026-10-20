@@ -4,7 +4,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h, nextTick } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { workflowNativeClient, WorkflowNativeError, type EditorOpenedView, type WorkflowSchemas } from "../../api/workflow-native-client";
 import WorkflowLocalWorkspace from "./WorkflowLocalWorkspace.vue";
 
@@ -63,7 +63,22 @@ const Dialog = defineComponent({
   },
 });
 
-it("protects page-only design, preserves the editor through history and closes only after explicit consent", async () => {
+it("shows no unavailable page or loading heading while the first open is still pending", async () => {
+  let resolve!: (value: EditorOpenedView) => void;
+  vi.spyOn(workflowNativeClient, "open").mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  vi.spyOn(workflowNativeClient, "close").mockResolvedValue({ closed: true });
+  wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog } } });
+  await nextTick();
+  expect(wrapper.find(".workflow-opening-placeholder").exists()).toBe(true);
+  expect(wrapper.find("h1").exists()).toBe(false);
+  expect(wrapper.text()).not.toContain("暂时无法打开工作流");
+  resolve(view);
+  await flushPromises();
+  expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(true);
+  expect(wrapper.find(".workflow-opening-placeholder").exists()).toBe(false);
+});
+
+it("ignores retired history actions, protects page-only design and closes only after explicit consent", async () => {
   vi.spyOn(workflowNativeClient, "status").mockResolvedValue(status);
   vi.spyOn(workflowNativeClient, "list").mockResolvedValue({ items: [workflow] });
   vi.spyOn(workflowNativeClient, "open").mockResolvedValue(view);
@@ -72,10 +87,7 @@ it("protects page-only design, preserves the editor through history and closes o
   const close = vi.spyOn(workflowNativeClient, "close")
     .mockRejectedValueOnce(new WorkflowNativeError("service_unavailable"))
     .mockResolvedValue({ closed: true });
-  const run = vi.spyOn(workflowNativeClient, "run").mockResolvedValue({
-    workflow_id: workflowId, run_id: "7684526620584968193", operation_id: "10000000-0000-4000-8000-000000000001",
-    mode: "release", version: "v0.0.1", state: "succeeded", terminal: true, started_at_ms: 1_800_000_000_000,
-  });
+  const run = vi.spyOn(workflowNativeClient, "run");
   wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
   await flushPromises();
   const pane = wrapper.findComponent(EditorPane);
@@ -86,38 +98,36 @@ it("protects page-only design, preserves the editor through history and closes o
 
   await button("运行记录").trigger("click");
   await flushPromises();
-  expect(button("执行所选版本").attributes("disabled")).toBeUndefined();
-  await wrapper.get("#workflow-run-input").setValue("普通历史版本输入");
-  await wrapper.get("form.workflow-runs__form").trigger("submit");
-  await flushPromises();
-  expect(run).toHaveBeenCalledExactlyOnceWith({ workflow_id: workflowId, version: "v0.0.1", input: { input: "普通历史版本输入" } });
-  expect(exchange).not.toHaveBeenCalled();
-  await wrapper.get('[aria-label="关闭运行记录"]').trigger("click");
   expect(wrapper.find('[aria-label="版本与运行记录"]').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain("执行所选版本");
+  expect(run).not.toHaveBeenCalled();
+  expect(workflowNativeClient.query).not.toHaveBeenCalled();
+  expect(exchange).not.toHaveBeenCalled();
   expect(wrapper.findComponent(EditorPane).element).toBe(retainedElement);
 
   const leave = vi.mocked(onBeforeRouteLeave).mock.calls[0]![0] as () => Promise<boolean>;
   const stay = leave();
   await nextTick();
-  expect(wrapper.text()).toContain("本页内存中的电商节点设计");
-  expect(wrapper.text()).toContain("关闭窗口、退出应用或刷新不保证保留本页配置");
+  expect(wrapper.text()).toContain("本页节点配置");
+  expect(wrapper.text()).toContain("离开将丢失未保存的修改");
   await button("继续编辑").trigger("click");
   await expect(stay).resolves.toBe(false);
   expect(close).not.toHaveBeenCalled();
 
   const firstClose = leave();
   await nextTick();
-  await button("放弃本页未保存内容并离开").trigger("click");
+  await button("离开").trigger("click");
   await expect(firstClose).resolves.toBe(false);
   expect(wrapper.findComponent(EditorPane).element).toBe(retainedElement);
   const retry = leave();
   await nextTick();
-  expect(wrapper.find('[aria-label="有未保存或待确认的内容"]').exists()).toBe(true);
-  await button("放弃本页未保存内容并离开").trigger("click");
+  expect(wrapper.find('[aria-label="确认离开？"]').exists()).toBe(true);
+  await button("离开").trigger("click");
   await expect(retry).resolves.toBe(true);
   expect(close).toHaveBeenCalledTimes(2);
+  expect(workflowNativeClient.list).not.toHaveBeenCalled();
   expect(exchange).not.toHaveBeenCalled();
-  expect(run).toHaveBeenCalledTimes(1);
+  expect(run).not.toHaveBeenCalled();
   expect(invoke).not.toHaveBeenCalled();
 });
 let wrapper: VueWrapper | undefined;
@@ -125,58 +135,6 @@ afterEach(() => {
   wrapper?.unmount(); wrapper = undefined;
   vi.restoreAllMocks();
   vi.clearAllMocks();
-});
-
-describe("workflow unknown execution departure", () => {
-  it("retains the page on continue, then closes and permits leaving only after explicit confirmation", async () => {
-    vi.spyOn(workflowNativeClient, "status").mockResolvedValue(status);
-    vi.spyOn(workflowNativeClient, "list").mockResolvedValue({ items: [workflow] });
-    vi.spyOn(workflowNativeClient, "open").mockResolvedValue(view);
-    vi.spyOn(workflowNativeClient, "query").mockResolvedValue({ history: { items: [] } });
-    const close = vi.spyOn(workflowNativeClient, "close").mockResolvedValue({ closed: true });
-    const run = vi.spyOn(workflowNativeClient, "run").mockRejectedValueOnce(new WorkflowNativeError("operation_unknown"));
-    wrapper = mount(WorkflowLocalWorkspace, { props: { workflowId }, global: { stubs: { WorkflowEditorPane: EditorPane, NModal: Dialog, Modal: Dialog } } });
-    await flushPromises();
-    const button = (label: string) => {
-      const target = wrapper!.findAll("button").find(candidate => candidate.text() === label);
-      expect(target, `button: ${label}`).toBeDefined();
-      return target!;
-    };
-    await button("运行记录").trigger("click");
-    await flushPromises();
-    await wrapper.get("#workflow-run-input").setValue("普通输入");
-    await wrapper.get("form.workflow-runs__form").trigger("submit");
-    await flushPromises();
-    expect(run).toHaveBeenCalledExactlyOnceWith({ workflow_id: workflowId, version: "v0.0.1", input: { input: "普通输入" } });
-    expect(wrapper.text()).toContain("尚未取得可查询的操作标识");
-    expect(button("执行所选版本").attributes("disabled")).toBeDefined();
-
-    // Exercise the actual component's registered route guard, with its normal
-    // two choices. The dialog substitute preserves show/slots, not focus/layout.
-    const leave = vi.mocked(onBeforeRouteLeave).mock.calls[0]![0] as () => Promise<boolean>;
-    const stay = leave();
-    await nextTick();
-    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("待确认操作的查询入口");
-    await button("继续编辑").trigger("click");
-    await expect(stay).resolves.toBe(false);
-    expect(close).not.toHaveBeenCalled();
-    expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("尚未取得可查询的操作标识");
-    expect(wrapper.find('[aria-label="有未保存或待确认的内容"]').exists()).toBe(false);
-
-    const depart = leave();
-    await nextTick();
-    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("已经提交的操作不会因此撤销");
-    expect(wrapper.get('[aria-label="有未保存或待确认的内容"]').text()).toContain("运行历史仍保留在服务端");
-    await button("放弃本页未保存内容并离开").trigger("click");
-    await expect(depart).resolves.toBe(true);
-    await flushPromises();
-    expect(close).toHaveBeenCalledExactlyOnceWith({ bridge_id: view.bridge_id });
-    expect(wrapper.find('[data-testid="retained-editor"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain("打开工作流");
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(invoke).not.toHaveBeenCalled();
-  });
 });
 
 it("keeps a confirmed new workflow ID when opening fails and retries only that resource", async () => {

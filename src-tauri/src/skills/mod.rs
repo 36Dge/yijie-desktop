@@ -1,4 +1,5 @@
 mod catalog;
+mod defaults;
 mod experts;
 pub(crate) mod host;
 mod resources;
