@@ -3,11 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { NPopover, NTooltip } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 
-type Resource = "skills" | "connectors";
+type Resource = "skills" | "connectors" | "experts";
 const props = defineProps<{ disabled: boolean; attachmentDisabled: boolean; skillsAvailable: boolean; connectorsAvailable: boolean; expertsAvailable?: boolean }>();
-const emit = defineEmits<{ "pick-attachments": []; "browse-experts": [] }>();
+const emit = defineEmits<{ "pick-attachments": [] }>();
 const addLabel = computed(() => props.expertsAvailable ? "可添加文件、技能、连接器，或选择专家" : "可添加文件、技能、连接器");
-defineSlots<{ skills(props: { close: () => void }): unknown; connectors(props: { close: () => void }): unknown }>();
+defineSlots<{ skills(props: { close: () => Promise<void> }): unknown; connectors(props: { close: () => Promise<void> }): unknown; experts(props: { close: () => Promise<void> }): unknown }>();
+const resourceLabels: Record<Resource, string> = { skills: "技能", connectors: "连接器", experts: "专家" };
+function available(value: Resource): boolean { return value === "skills" ? props.skillsAvailable : value === "connectors" ? props.connectorsAvailable : !!props.expertsAvailable; }
 const open = ref(false), view = ref<Resource | null>(null);
 const trigger = ref<HTMLButtonElement | null>(null);
 const panel = ref<HTMLElement | null>(null), primary = ref<HTMLElement | null>(null), submenu = ref<HTMLElement | null>(null);
@@ -99,13 +101,13 @@ async function setOpen(value: boolean, restoreFocus = false): Promise<void> {
     if (open.value) primary.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
   } else if (restoreFocus) { await nextTick(); trigger.value?.focus({ preventScroll: true }); }
 }
-function close(): void { void setOpen(false, true); }
+function close(): Promise<void> { return setOpen(false, true); }
 async function closeSubmenu(): Promise<void> {
   const parent = resourceTrigger(); cancelClose(); view.value = null;
   await nextTick(); parent?.focus({ preventScroll: true });
 }
 async function showView(value: Resource, focus = false): Promise<void> {
-  if (!open.value || props.disabled || (value === "skills" ? !props.skillsAvailable : !props.connectorsAvailable)) return;
+  if (!open.value || props.disabled || !available(value)) return;
   cancelClose();
   if (view.value === value && submenuReady.value) {
     if (focus) submenu.value?.focus({ preventScroll: true });
@@ -156,8 +158,8 @@ watch(submenu, value => {
   }
 });
 watch(() => props.disabled, value => { if (value) void setOpen(false); });
-watch(() => [props.skillsAvailable, props.connectorsAvailable], () => {
-  if ((view.value === "skills" && !props.skillsAvailable) || (view.value === "connectors" && !props.connectorsAvailable)) close();
+watch(() => [props.skillsAvailable, props.connectorsAvailable, props.expertsAvailable], () => {
+  if (view.value && !available(view.value)) close();
 });
 onMounted(() => {
   window.addEventListener("resize", measure); window.addEventListener("scroll", measure, true);
@@ -186,11 +188,12 @@ onBeforeUnmount(() => {
         <div class="composer-add-menu__separator" role="separator" />
         <button class="chat-control-option" role="menuitem" type="button" data-resource-menu="skills" :disabled="!skillsAvailable" aria-haspopup="dialog" :aria-expanded="view === 'skills'" :aria-controls="view === 'skills' ? submenuId : undefined" @mouseenter="showView('skills')" @click="showView('skills', true)" @keydown.right.prevent="showView('skills', true)"><YjIcon name="skillOperations" size="sm" /><span>技能</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
         <button class="chat-control-option" role="menuitem" type="button" data-resource-menu="connectors" :disabled="!connectorsAvailable" aria-haspopup="dialog" :aria-expanded="view === 'connectors'" :aria-controls="view === 'connectors' ? submenuId : undefined" @mouseenter="showView('connectors')" @click="showView('connectors', true)" @keydown.right.prevent="showView('connectors', true)"><YjIcon name="connector" size="sm" /><span>连接器</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
-        <button v-if="expertsAvailable" class="chat-control-option" role="menuitem" type="button" @mouseenter="view = null" @click="close(); emit('browse-experts')"><YjIcon name="skillOperations" size="sm" /><span>选择专家</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
+        <button v-if="expertsAvailable" class="chat-control-option" role="menuitem" type="button" data-resource-menu="experts" aria-haspopup="dialog" :aria-expanded="view === 'experts'" :aria-controls="view === 'experts' ? submenuId : undefined" @mouseenter="showView('experts')" @click="showView('experts', true)" @keydown.right.prevent="showView('experts', true)"><YjIcon name="skillOperations" size="sm" /><span>选择专家</span><YjIcon name="chevronRight" size="sm" tone="muted" /></button>
       </div>
-      <div v-if="view" :id="submenuId" ref="submenu" class="composer-add-menu__submenu chat-control-menu" :data-side="submenuSide" :style="{ left: `${submenuX}px`, top: `${submenuY}px`, maxHeight: `${submenuHeight}px`, visibility: submenuReady ? 'visible' : 'hidden' }" role="dialog" tabindex="-1" :aria-label="view === 'skills' ? '技能' : '连接器'" @mouseenter="cancelClose">
+      <div v-if="view" :id="submenuId" ref="submenu" class="composer-add-menu__submenu chat-control-menu" :data-side="submenuSide" :style="{ left: `${submenuX}px`, top: `${submenuY}px`, maxHeight: `${submenuHeight}px`, visibility: submenuReady ? 'visible' : 'hidden' }" role="dialog" tabindex="-1" :aria-label="resourceLabels[view]" @mouseenter="cancelClose">
         <slot v-if="view === 'skills'" name="skills" :close="close" />
-        <slot v-else name="connectors" :close="close" />
+        <slot v-else-if="view === 'connectors'" name="connectors" :close="close" />
+        <slot v-else name="experts" :close="close" />
       </div>
     </div>
   </NPopover>

@@ -47,6 +47,8 @@
   --yj-color-skill-pill-message-bg: color-mix(in srgb, var(--yj-color-text-primary) 10%, var(--yj-color-chat-user-bg));
   --yj-color-skill-pill-border: transparent;
   --yj-color-skill-pill-hover: var(--yj-color-control-pressed);
+  --yj-color-chat-skill-hover-bg: color-mix(in srgb, var(--yj-color-brand-primary) 12%, var(--yj-color-bg-card));
+  --yj-color-chat-expert-chip-border: color-mix(in srgb, var(--yj-color-border-default) 35%, var(--yj-color-bg-card));
 
   --yj-color-border-subtle: #eceef0;
   --yj-color-border-default: #e2e5e8;
@@ -87,6 +89,7 @@
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --yj-font-size-caption: 12px;
   --yj-font-size-body: 14px;
+  --yj-font-size-chat-expert-chip: 13px;
   --yj-font-size-workflow-description: 13px;
   --yj-font-size-card-title: 16px;
   --yj-font-size-section-title: 18px;
@@ -185,6 +188,7 @@
   --yj-layout-connector-menu-width: 260px;
   --yj-layout-connector-list-max: 320px;
   --yj-chat-skill-chip-height: 26px;
+  --yj-chat-expert-chip-height: 28px;
   --yj-layout-skill-list-max: calc(var(--yj-control-height-lg) * 4 + var(--yj-space-6));
   --yj-layout-connector-search-width: 280px;
   --yj-layout-connector-chip-max: 248px;

@@ -4,7 +4,7 @@ import { expertAvatar } from "../../data/expert-avatars";
 import { isYjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
 
-const props = withDefaults(defineProps<{ expertId: string; iconKey: string; detail?: boolean }>(), { detail: false });
+const props = withDefaults(defineProps<{ expertId: string; iconKey: string; detail?: boolean; compact?: boolean }>(), { detail: false, compact: false });
 const imageFailed = ref(false);
 const image = computed(() => expertAvatar(props.expertId));
 const icon = computed(() => props.iconKey === "skillOperations" ? "skillShopSetup" : isYjIconName(props.iconKey) ? props.iconKey : "user");
@@ -12,7 +12,7 @@ watch(image, () => { imageFailed.value = false; });
 </script>
 
 <template>
-  <span class="expert-avatar" :class="{ 'expert-avatar--image': image && !imageFailed, 'expert-avatar--detail': detail }" aria-hidden="true">
+  <span class="expert-avatar" :class="{ 'expert-avatar--image': image && !imageFailed, 'expert-avatar--detail': detail, 'expert-avatar--compact': compact }" aria-hidden="true">
     <img v-if="image && !imageFailed" :src="image" alt="" decoding="async" @error="imageFailed = true" />
     <YjIcon v-else :name="icon" size="xl" :stroke-width="1.5" />
   </span>
@@ -24,4 +24,6 @@ watch(image, () => { imageFailed.value = false; });
 .expert-avatar--image { background: var(--yj-color-bg-connector-artwork); }
 .expert-avatar img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .expert-avatar :deep(.yj-icon) { color: var(--yj-color-brand-primary); width: var(--yj-space-8); height: var(--yj-space-8); }
+.expert-avatar--compact { width: var(--yj-space-6); height: var(--yj-space-6); border-radius: var(--yj-radius-sm); }
+.expert-avatar--compact :deep(.yj-icon) { width: var(--yj-space-4); height: var(--yj-space-4); }
 </style>

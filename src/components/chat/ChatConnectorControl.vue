@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton } from "naive-ui";
+import { NButton, NSwitch } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
-import { filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
+import { connectorSwitchDisabled, filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
 import ConnectorIcon from "../connectors/ConnectorIcon.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean;
   disabledReason?: string;
   selectionAvailable: boolean;
+  canManage: boolean;
   loading?: boolean;
   error?: string | null;
 }>(), { disabled: false, disabledReason: "任务进行中，暂时不能选择连接器", loading: false, error: null });
@@ -19,6 +20,7 @@ const emit = defineEmits<{
   close: [];
   select: [id: string];
   configure: [id: string];
+  "enabled-change": [id: string, enabled: boolean];
   manage: [];
   refresh: [];
 }>();
@@ -48,7 +50,7 @@ const compactStatusLabels: Readonly<Record<string, string>> = {
   "未启用": "未启用",
 };
 function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
-  if (!entry.busy && entry.selectable && props.selectionAvailable) return null;
+  if (!entry.busy && ((entry.selectable && props.selectionAvailable) || entry.status.label === "未启用")) return null;
   const label = compactStatusLabels[entry.status.label] ?? (entry.busy ? "处理中" : "待确认");
   return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
 }
@@ -59,6 +61,10 @@ function choose(entry: ConnectorView): void {
   if (canChoose(entry)) emit("select", entry.id);
   else emit("configure", entry.id);
   emit("close");
+}
+function changeEnabled(entry: ConnectorView, enabled: boolean): void {
+  if (props.disabled || connectorSwitchDisabled(entry, props.canManage)) return;
+  emit("enabled-change", entry.id, enabled);
 }
 function navigate(event: KeyboardEvent): void {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -86,9 +92,18 @@ onMounted(() => { emit("refresh"); });
           <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :role="canChoose(entry) ? 'checkbox' : undefined" :aria-checked="canChoose(entry) ? selectedIds.includes(entry.id) : undefined" :aria-label="`${selectedIds.includes(entry.id) ? '取消选择' : canChoose(entry) ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
             <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
             <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
-            <span v-if="status" class="connector-menu__status" :class="`connector-menu__status--${status.tone}`" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
-            <span class="connector-menu__check" aria-hidden="true"><YjIcon v-if="selectedIds.includes(entry.id)" name="checkmark" size="sm" /></span>
+            <YjIcon v-if="selectedIds.includes(entry.id)" class="connector-menu__check" name="checkmark" size="sm" />
+            <span v-if="status" class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
           </button>
+          <NSwitch
+            size="small"
+            :value="entry.enabled"
+            :loading="entry.busy"
+            :disabled="disabled || connectorSwitchDisabled(entry, canManage)"
+            :aria-disabled="disabled || connectorSwitchDisabled(entry, canManage)"
+            :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`"
+            @update:value="changeEnabled(entry, $event)"
+          />
         </li>
       </ul>
       <div v-else-if="!loading && !error" class="connector-menu__empty"><span>{{ installed.length ? '没有找到匹配的连接器' : '还没有安装连接器' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>
@@ -109,6 +124,7 @@ onMounted(() => { emit("refresh"); });
 .connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); background: var(--yj-color-warning-soft); }
 .connector-menu__status--error { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }
 .connector-menu__status--success { color: var(--yj-color-semantic-success-ink); background: var(--yj-color-success-soft); }
+.connector-menu__status--pending { background: transparent; }
 .connector-menu__notice { margin: 0; padding: var(--yj-space-2) var(--yj-space-4); color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); flex: none; }
 .connector-menu__notice p { margin: 0 0 var(--yj-space-2); }
 .connector-menu__empty { display: flex; flex-direction: column; align-items: center; gap: var(--yj-space-3); padding: var(--yj-space-5) var(--yj-space-3); text-align: center; min-height: 0; overflow-y: auto; }

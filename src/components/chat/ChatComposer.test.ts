@@ -10,10 +10,36 @@ import type {
   ChatProject,
 } from "../../domain/chat-ipc";
 import ChatComposer from "./ChatComposer.vue";
+import ChatSkillControl from "./ChatSkillControl.vue";
 import { readinessNotice } from "../../domain/chat-ui";
 import { installedSkill } from "../../test/skill-fixture";
 
 enableAutoUnmount(afterEach);
+
+it.each([
+  { mode: "new" as const, text: "" },
+  { mode: "reply" as const, text: "" },
+  { mode: "new" as const, text: "继续编辑已有正文" },
+  { mode: "reply" as const, text: "继续编辑已有正文" },
+])("focuses the input after selecting a skill in $mode with draft '$text'", async ({ mode, text }) => {
+  const view = mountComposer({ mode, modelValue: text }, {
+    "skill-control": ({ close }: { close: () => void }) => h(ChatSkillControl, {
+      entries: [installedSkill], selectedIds: [], disabled: false, loading: false, error: null,
+      operations: {}, operationErrors: {}, onClose: close,
+      onSelect: () => view.setProps({ skills: [{ ...installedSkill, unavailableReason: null }] }),
+    }),
+  });
+  await view.get('.chat-composer__add').trigger('click'); await flushPromises();
+  const menu = new DOMWrapper(document.querySelector('.composer-add-menu')!);
+  await menu.get('[data-resource-menu="skills"]').trigger('click'); await flushPromises();
+  await menu.get('[role="checkbox"]').trigger('click'); await flushPromises();
+  const textarea = view.get('textarea').element;
+  expect(view.get('.chat-composer__add').attributes('aria-expanded')).toBe('false');
+  expect(view.get('[aria-label="本轮使用的技能"]').text()).toContain(installedSkill.displayName);
+  expect(document.activeElement).toBe(textarea);
+  expect([textarea.value, textarea.selectionStart, textarea.selectionEnd]).toEqual([text, text.length, text.length]);
+  expect(view.emitted('submit')).toBeUndefined();
+});
 
 it("replaces the placeholder with removable skill selections and blocks unavailable skills", async () => {
   const view = mountComposer({ skills: [{ ...installedSkill, unavailableReason: null }] });
@@ -130,6 +156,71 @@ describe("ChatComposer", () => {
     await wrapper.setProps({ submissionState: "submitting" });
     await input.trigger("keydown", { key: "Backspace" });
     expect(wrapper.emitted("remove-connector")).toHaveLength(1);
+  });
+  it("removes mixed selections from right to left without deleting the draft text", async () => {
+    const skills = [
+      { ...installedSkill, unavailableReason: null },
+      { ...installedSkill, id: "second-skill", displayName: "第二个技能", unavailableReason: null },
+    ];
+    const wrapper = mountComposer({ skills, connectors: [{ id: "shopify", name: "Shopify MCP", iconAssetId: "shopify" }] });
+    const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
+    element.focus();
+    element.setSelectionRange(0, 0);
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-connector")).toEqual([["shopify"]]);
+    expect(wrapper.emitted("remove-skill")).toBeUndefined();
+    await wrapper.setProps({ connectors: [] });
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-skill")).toEqual([["second-skill"]]);
+    await wrapper.setProps({ skills: skills.slice(0, 1) });
+    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-skill")).toEqual([["second-skill"], [installedSkill.id]]);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(element.value).toBe("检查商品标题");
+    expect(element.selectionStart).toBe(0);
+  });
+  it("preserves the input selection after clicking either skill or connector removal", async () => {
+    const wrapper = mountComposer({
+      skills: [{ ...installedSkill, unavailableReason: null }],
+      connectors: [{ id: "shopify", name: "Shopify MCP", iconAssetId: "shopify" }],
+    });
+    const element = wrapper.get("textarea").element as HTMLTextAreaElement;
+    for (const label of ["移除技能 跨境营销文案", "移除 Shopify MCP"]) {
+      element.focus();
+      element.setSelectionRange(1, 4, "backward");
+      const button = wrapper.get<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      button.element.focus();
+      await button.trigger("click");
+      await flushPromises();
+      expect(document.activeElement).toBe(element);
+      expect([element.selectionStart, element.selectionEnd, element.selectionDirection]).toEqual([1, 4, "backward"]);
+    }
+    expect(wrapper.emitted("remove-skill")).toEqual([[installedSkill.id]]);
+    expect(wrapper.emitted("remove-connector")).toEqual([["shopify"]]);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+  it("protects skill removal during composition, text selection, and locked or busy input", async () => {
+    const wrapper = mountComposer({ skills: [{ ...installedSkill, unavailableReason: null }] });
+    const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
+    for (const range of [[0, 2], [2, 2]]) {
+      element.setSelectionRange(range[0]!, range[1]!);
+      await input.trigger("keydown", { key: "Backspace" });
+    }
+    element.setSelectionRange(0, 0);
+    await input.trigger("compositionstart");
+    await input.trigger("keydown", { key: "Backspace" });
+    await input.trigger("compositionend");
+    await input.trigger("keydown", { key: "Backspace", isComposing: true });
+    expect(wrapper.emitted("remove-skill")).toBeUndefined();
+    for (const restriction of [{ textLocked: true }, { streaming: true }, { submissionState: "submitting" }, { canSend: false }] as const) {
+      await wrapper.setProps({ textLocked: false, streaming: false, submissionState: "idle", canSend: true, ...restriction });
+      await input.trigger("keydown", { key: "Backspace" });
+      const remove = wrapper.get('[aria-label="移除技能 跨境营销文案"]');
+      expect(remove.attributes("disabled")).toBeDefined();
+      await remove.trigger("click");
+      expect(wrapper.emitted("remove-skill")).toBeUndefined();
+    }
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
   it("places workspace and permission settings below the panel while keeping attachment and send actions inside", async () => {
     const wrapper = mountComposer();

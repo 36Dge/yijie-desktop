@@ -14,6 +14,7 @@ function setup(attachmentDisabled = false) {
     slots: {
       skills: ({ close }: { close: () => void }) => h("section", [h("input", { "aria-label": "搜索技能" }), h("button", { onClick: close }, "关闭技能")]),
       connectors: ({ close }: { close: () => void }) => h("section", [h("input", { "aria-label": "搜索连接器" }), h("button", { onClick: close }, "关闭连接器")]),
+      experts: ({ close }: { close: () => void }) => h("section", [h("input", { "aria-label": "搜索专家" }), h("button", { onClick: close }, "关闭专家")]),
     },
   });
 }
@@ -45,14 +46,25 @@ describe("composer add menu", () => {
     expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
     expect(selected.value).toEqual([]);
   });
-  it("only exposes expert browsing when enabled and never sends a message", async () => {
+  it("opens experts on hover and keyboard entry without navigation or stealing hover focus", async () => {
     const wrapper = setup();
     await wrapper.setProps({ expertsAvailable: true });
     await wrapper.get('button').trigger('click'); await flushPromises();
     const experts = menu().findAll('[role="menuitem"]').find(item => item.text() === "选择专家")!;
+    const focused = document.activeElement;
+    await experts.trigger('mouseenter'); await flushPromises();
+    expect(menu().get('.composer-add-menu__submenu').attributes('aria-label')).toBe('专家');
+    expect(menu().find('[aria-label="搜索专家"]').exists()).toBe(true);
+    expect(document.activeElement).toBe(focused);
+    await experts.trigger('keydown', { key: 'ArrowRight' }); await flushPromises();
+    expect(document.activeElement).toBe(menu().get('.composer-add-menu__submenu').element);
+    await menu().trigger('keydown', { key: 'Escape' }); await flushPromises();
+    expect(document.activeElement).toBe(experts.element);
+    expect(menu().find('.composer-add-menu__submenu').exists()).toBe(false);
     await experts.trigger('click'); await flushPromises();
-    expect(wrapper.emitted('browse-experts')).toEqual([[]]);
+    expect(wrapper.emitted('browse-experts')).toBeUndefined();
     expect(wrapper.emitted('pick-attachments')).toBeUndefined();
+    await wrapper.setProps({ expertsAvailable: false }); await flushPromises();
     expect(wrapper.get('button').attributes('aria-expanded')).toBe('false');
   });
   it("opens without invoking the picker, then forwards the existing file action once", async () => {

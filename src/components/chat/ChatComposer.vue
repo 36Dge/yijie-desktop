@@ -68,15 +68,15 @@ const emit = defineEmits<{
   "unsupported-input": [message: string];
   "remove-connector": [id: string];
   "remove-skill": [id: string];
-  "browse-experts": [];
 }>();
 
 defineSlots<{
   "home-decoration"(): unknown;
   "shop-control"(): unknown;
   "expert-control"(): unknown;
+  "expert-picker"(props: { close: () => void }): unknown;
   "connector-control"(props: { close: () => void }): unknown;
-  "skill-control"(props: { close: () => void }): unknown;
+  "skill-control"(props: { close: (reason?: "selection") => Promise<void> }): unknown;
   "workspace-control"(): unknown;
   "permission-control"(): unknown;
   "model-control"(): unknown;
@@ -114,6 +114,9 @@ const attachmentConstraintMessage = computed(() => {
   return imageBytes > 10 * 1024 * 1024 ? "每条消息中的图片总大小不能超过 10 MB。" : null;
 });
 const submissionBusy = computed(() => props.submissionState !== "idle");
+const selectionRemovalDisabled = computed(() =>
+  submissionBusy.value || props.streaming || props.textLocked || !props.canSend,
+);
 const sendDisabled = computed(() =>
   submissionBusy.value || props.streaming || !props.canSend || validationMessage.value !== null ||
   props.attachmentImporting || props.attachmentImportAttempt !== null ||
@@ -269,7 +272,18 @@ function focusInput(): boolean {
 }
 defineExpose({ captureInputFocus, restoreInputFocus, focusInput });
 
+async function closeSkillPicker(close: () => Promise<void>, reason?: "selection"): Promise<void> {
+  // Let the menu finish restoring its trigger first, so it cannot steal the
+  // caret back after a successful skill selection. Cancellation keeps that focus.
+  await close();
+  if (reason === "selection") {
+    syncInputLayout();
+    focusInput();
+  }
+}
+
 async function removeConnector(id: string): Promise<void> {
+  if (selectionRemovalDisabled.value) return;
   const snapshot = captureInputFocus();
   emit("remove-connector", id);
   await nextTick();
@@ -318,10 +332,12 @@ function submit(): void {
   if (!sendDisabled.value && !composing.value) emit("submit");
 }
 
-function removeSkill(id: string): void {
-  if (submissionBusy.value || props.streaming || props.textLocked) return;
+async function removeSkill(id: string): Promise<void> {
+  if (selectionRemovalDisabled.value) return;
+  const snapshot = captureInputFocus();
   emit("remove-skill", id);
-  void nextTick(() => textareaElement.value?.focus({ preventScroll: true }));
+  await nextTick();
+  if (snapshot) restoreInputFocus(snapshot);
 }
 
 function requestActiveTurnInterrupt(): void {
@@ -330,8 +346,17 @@ function requestActiveTurnInterrupt(): void {
 
 function handleKeydown(event: KeyboardEvent): void {
   const textarea = textareaElement.value;
-  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly && !submissionBusy.value && !props.streaming && props.canSend && textarea?.selectionStart === 0 && textarea.selectionEnd === 0 && props.connectors.length) {
-    event.preventDefault(); emit("remove-connector", props.connectors[props.connectors.length - 1]!.id); return;
+  if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly &&
+    !selectionRemovalDisabled.value && textarea?.selectionStart === 0 && textarea.selectionEnd === 0) {
+    // Prefixes render skills first, then connectors: remove the nearest item.
+    const connector = props.connectors[props.connectors.length - 1];
+    const skill = props.skills[props.skills.length - 1];
+    if (connector || skill) {
+      event.preventDefault();
+      if (connector) void removeConnector(connector.id);
+      else if (skill) void removeSkill(skill.id);
+      return;
+    }
   }
   if (event.key !== "Enter" || event.shiftKey || composing.value || event.isComposing) return;
   event.preventDefault();
@@ -432,8 +457,8 @@ function handlePaste(event: ClipboardEvent): void {
         </ul>
         <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
           <div v-if="!textOnly && (connectors.length || skills.length)" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
-            <ChatSkillChips :entries="skills" :disabled="submissionBusy || streaming || textLocked" @remove="removeSkill" />
-            <ChatConnectorChips :entries="connectors" :disabled="submissionBusy || streaming || !canSend" @remove="removeConnector" />
+            <ChatSkillChips :entries="skills" :disabled="selectionRemovalDisabled" @remove="removeSkill" />
+            <ChatConnectorChips :entries="connectors" :disabled="selectionRemovalDisabled" @remove="removeConnector" />
           </div>
           <textarea
           ref="textareaElement"
@@ -464,10 +489,10 @@ function handlePaste(event: ClipboardEvent): void {
               :connectors-available="Boolean($slots['connector-control'])"
               :experts-available="expertsAvailable"
               @pick-attachments="emit('pick-attachments')"
-              @browse-experts="emit('browse-experts')"
             >
-              <template #skills="{ close }"><slot name="skill-control" :close="close" /></template>
+              <template #skills="{ close }"><slot name="skill-control" :close="(reason?: 'selection') => closeSkillPicker(close, reason)" /></template>
               <template #connectors="{ close }"><slot name="connector-control" :close="close" /></template>
+              <template #experts="{ close }"><slot name="expert-picker" :close="close" /></template>
             </ChatAddControl>
             <slot v-if="!textOnly && mode === 'reply'" name="permission-control">
               <button
@@ -864,7 +889,7 @@ function handlePaste(event: ClipboardEvent): void {
   left: var(--yj-space-3);
   display: flex;
   align-items: center;
-  gap: var(--yj-space-2);
+  gap: var(--yj-space-3);
   max-width: calc(100% - var(--yj-space-8) - var(--yj-line-height-body) * 4);
   padding: var(--yj-space-1);
   margin: 0;

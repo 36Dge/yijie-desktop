@@ -1833,6 +1833,47 @@ it("FEAT158 chip details carry the exact selected expert version", async () => {
   wrapper.unmount();
 });
 
+it.each(["new", "existing"] as const)("inline expert picker applies the %s selection without navigation or sending", async target => {
+  expertFlag.enabled = true;
+  const active = target === "existing", path = active ? `/chat/${SESSION_ID}` : "/chat";
+  const { wrapper, router } = await mountPage(path, active);
+  const chosen = { ...expertDisplay, expertId: "second-expert", displayName: "第二位专家" };
+  const entry = { ...expertEntry, display: chosen, state: "ready" as const };
+  const snapshot = { ...expertSnapshot(entry), executionAvailable: true };
+  useExpertsStore().snapshot = snapshot;
+  vi.spyOn(expertNativeClient, "snapshot").mockResolvedValue(snapshot);
+  const binding = vi.spyOn(expertNativeClient, "setBinding").mockImplementation(async (_ctx, payload) => ({
+    binding: { sessionId: SESSION_ID, managed: true, bindingRevision: 2, expert: chosen, state: "ready" },
+    operation: { ...payload, requestedExpert: chosen, bindingRevision: 2, state: "succeeded" },
+  }));
+  const submit = vi.spyOn(expertNativeClient, "submit");
+  await wrapper.get("textarea").setValue("保留当前正文");
+  const open = async () => {
+    await wrapper.get('[aria-label="可添加文件、技能、连接器，或选择专家"]').trigger("click");
+    await flushPromises();
+    await new DOMWrapper(document.querySelector<HTMLElement>('[data-resource-menu="experts"]')!).trigger("mouseenter");
+    await flushPromises();
+  };
+  await open();
+  await new DOMWrapper(document.querySelector<HTMLElement>('.expert-menu [role="radio"]')!).trigger("click");
+  await flushPromises();
+  expect(router.currentRoute.value.path).toBe(path);
+  expect(wrapper.get("textarea").element.value).toBe("保留当前正文");
+  expect(wrapper.get(".chat-expert-chip").text()).toContain("第二位专家");
+  expect(wrapper.get('[aria-label="可添加文件、技能、连接器，或选择专家"]').attributes("aria-expanded")).toBe("false");
+  if (active) {
+    expect(binding).toHaveBeenCalledTimes(1);
+    expect(useChatExpertsStore().bindings[SESSION_ID]?.expert).toEqual(chosen);
+  } else {
+    expect(binding).not.toHaveBeenCalled();
+    expect(useChatComposerDraftStore().expert("new")).toEqual(chosen);
+  }
+  expect(submit).not.toHaveBeenCalled();
+  await open();
+  expect(document.querySelector('.expert-menu [aria-checked="true"]')?.textContent).toContain("第二位专家");
+  wrapper.unmount();
+});
+
 it("FEAT158 retained binding uses its Native checked version when the market only lists a newer card", async () => {
   expertFlag.enabled = true;
   const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);

@@ -4,7 +4,7 @@ import { NButton } from "naive-ui";
 import { skillFailureMessage, type ManagedSkillProjection } from "../../domain/skill-marketplace";
 import { skillCardArtwork } from "../../icons/skill-artwork";
 import { skillSelectionIssue } from "../../domain/chat-skills";
-import YjIcon from "../yijie/YjIcon.vue";
+import ChatResourceCheck from "./ChatResourceCheck.vue";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
 
 const props = defineProps<{
@@ -17,7 +17,7 @@ const props = defineProps<{
   operations: Readonly<Record<string, string>>;
   operationErrors: Readonly<Record<string, string>>;
 }>();
-const emit = defineEmits<{ close: []; manage: []; refresh: []; select: [id: string] }>();
+const emit = defineEmits<{ close: [reason?: "selection"]; manage: []; refresh: []; select: [id: string] }>();
 const query = ref("");
 const installed = computed(() => props.entries.filter(entry => entry.installationStatus === "installed"));
 const filtered = computed(() => {
@@ -34,7 +34,7 @@ function unavailable(entry: ManagedSkillProjection): boolean { return props.disa
 function select(entry: ManagedSkillProjection): void {
   if (unavailable(entry)) return;
   emit("select", entry.id);
-  emit("close");
+  emit("close", "selection");
 }
 function navigate(event: KeyboardEvent): void {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -60,7 +60,7 @@ onMounted(() => emit("refresh"));
         <button type="button" class="skill-menu__option" role="checkbox" :aria-checked="selected(entry)" :disabled="unavailable(entry)" :title="skillSelectionIssue(entry) ?? entry.description" @click="select(entry)">
         <img class="skill-menu__icon" :src="skillCardArtwork(entry)" alt="" aria-hidden="true" draggable="false" />
         <span class="skill-menu__copy"><span :title="entry.displayName">{{ entry.displayName }}</span><span v-if="status(entry)" class="skill-menu__status" :class="{ 'skill-menu__status--error': operationErrors[entry.id] || skillFailureMessage(entry.failureCode) }" :role="operationErrors[entry.id] ? 'alert' : undefined">{{ status(entry) }}</span></span>
-        <span class="skill-menu__check" aria-hidden="true"><YjIcon v-if="selected(entry)" name="checkmark" size="sm" /></span>
+        <ChatResourceCheck class="skill-menu__check" :selected="selected(entry)" />
         </button>
       </li>
     </ul>
@@ -83,7 +83,6 @@ onMounted(() => emit("refresh"));
 .skill-menu__option:is(:hover, [aria-checked="true"]):not(:disabled) { background: var(--yj-color-control-hover); }
 .skill-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(var(--yj-border-width) * -1); }
 .skill-menu__option:disabled { color: var(--yj-color-text-disabled); cursor: default; }
-.skill-menu__check { display: grid; width: var(--yj-space-4); height: var(--yj-space-4); flex: none; place-items: center; color: var(--yj-color-text-primary); }
 .skill-menu__copy { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: var(--yj-space-1); font-size: var(--yj-font-size-body); }
 .skill-menu__copy > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-menu__status { color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); overflow-wrap: anywhere; }

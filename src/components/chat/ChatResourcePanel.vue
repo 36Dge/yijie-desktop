@@ -2,14 +2,14 @@
 import { NButton, NInput } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import { chatSearchTheme } from "../../design/theme/chat-search-theme";
-defineProps<{ title: string; query: string; loading?: boolean }>();
+defineProps<{ title: string; query: string; loading?: boolean; searchLabel?: string }>();
 defineEmits<{ manage: []; "update:query": [value: string] }>();
 
 </script>
 
 <template>
   <section class="chat-resource-panel" :aria-label="title" :aria-busy="loading">
-    <div class="chat-resource-panel__search"><NInput :value="query" size="small" clearable :placeholder="`搜索${title}`" :theme-overrides="chatSearchTheme" :input-props="{ 'aria-label': `搜索已安装的${title}` }" @update:value="$emit('update:query', $event)"><template #prefix><YjIcon name="search" size="sm" tone="muted" /></template></NInput></div>
+    <div class="chat-resource-panel__search"><NInput :value="query" size="small" clearable :placeholder="`搜索${title}`" :theme-overrides="chatSearchTheme" :input-props="{ 'aria-label': searchLabel ?? `搜索已安装的${title}` }" @update:value="$emit('update:query', $event)"><template #prefix><YjIcon name="search" size="sm" tone="muted" /></template></NInput></div>
     <div class="chat-resource-panel__body"><slot /></div>
     <footer><NButton class="chat-resource-panel__manage" type="primary" size="small" :bordered="false" block @click="$emit('manage')">管理{{ title }}</NButton></footer>
   </section>

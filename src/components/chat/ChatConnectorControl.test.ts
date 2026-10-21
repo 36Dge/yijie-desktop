@@ -7,15 +7,17 @@ import ChatConnectorControl from "./ChatConnectorControl.vue";
 const entry: ConnectorView = { id: "sample", name: "普通合成服务", description: "组件验证", iconAssetId: "cue", categoryId: "productivity", categoryLabel: "效率工具", installed: true, enabled: true, selectable: true, status: { label: "已启用", tone: "success" }, explanation: null, configurationLabel: "", busy: false, actions: ["disable", "uninstall"] };
 const wrappers: ReturnType<typeof mount>[] = [];
 function setup(entries: ConnectorView[] = [entry]) {
-  const wrapper = mount(ChatConnectorControl, { attachTo: document.body, props: { entries, selectedIds: [], selectionAvailable: true } }); wrappers.push(wrapper); return wrapper;
+  const wrapper = mount(ChatConnectorControl, { attachTo: document.body, props: { entries, selectedIds: [], selectionAvailable: true, canManage: true } }); wrappers.push(wrapper); return wrapper;
 }
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ""; });
 
 describe("chat connector menu intent separation", () => {
-  it("selects only for this turn, shows a trailing checkmark, and exposes no enable switch", async () => {
+  it("keeps the restored global switch separate from current-turn selection", async () => {
     const wrapper = setup();
     await flushPromises();
-    expect(wrapper.find('[role="switch"]').exists()).toBe(false);
+    const control = wrapper.get('[role="switch"]');
+    expect(control.attributes('aria-label')).toBe('停用 普通合成服务');
+    expect(control.attributes('aria-checked')).toBe('true');
     expect(wrapper.find('.connector-menu__status').exists()).toBe(false);
     const row = wrapper.get('[data-connector-option]');
     expect(row.attributes('role')).toBe('checkbox');
@@ -26,11 +28,49 @@ describe("chat connector menu intent separation", () => {
     expect(wrapper.emitted('enabled-change')).toBeUndefined();
     await wrapper.setProps({ selectedIds: ['sample'] });
     expect(row.attributes('aria-checked')).toBe('true');
-    expect(row.find('.connector-menu__check svg').exists()).toBe(true);
+    expect(row.find('.connector-menu__check').exists()).toBe(true);
     expect(row.element.lastElementChild?.classList.contains('connector-menu__check')).toBe(true);
     await row.trigger('click');
     expect(wrapper.emitted('select')).toHaveLength(2);
     expect(wrapper.emitted('enabled-change')).toBeUndefined();
+    await control.trigger('click');
+    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false]]);
+    expect(wrapper.emitted('select')).toHaveLength(2);
+    expect(wrapper.emitted('close')).toHaveLength(2);
+    // Controlled value follows the authoritative result, never an optimistic toggle.
+    expect(control.attributes('aria-checked')).toBe('true');
+    await wrapper.setProps({ entries: [{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' }, actions: ['enable'] }] });
+    expect(control.attributes('aria-checked')).toBe('false');
+    expect(control.attributes('aria-label')).toBe('启用 普通合成服务');
+    expect(wrapper.find('.connector-menu__status').exists()).toBe(false);
+    await control.trigger('click');
+    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false], ['sample', true]]);
+    expect(wrapper.emitted('select')).toHaveLength(2);
+  });
+  it.each([
+    { canManage: false, disabled: false, entry },
+    { canManage: true, disabled: true, entry },
+    { canManage: true, disabled: false, entry: { ...entry, busy: true } },
+    { canManage: true, disabled: false, entry: { ...entry, actions: [] } },
+    { canManage: true, disabled: false, entry: { ...entry, enabled: false, selectable: false, actions: [] } },
+  ])("disables the switch when management is unavailable: %j", async ({ canManage, disabled, entry: state }) => {
+    const wrapper = setup([state]);
+    await wrapper.setProps({ canManage, disabled });
+    const control = wrapper.get('[role="switch"]');
+    expect(control.attributes('aria-disabled')).toBe('true');
+    await control.trigger('click');
+    expect(wrapper.emitted('enabled-change')).toBeUndefined();
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
+  it("allows the off switch to request configuration without selecting an unready connector", async () => {
+    const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: '连接待恢复', tone: 'warning' }, actions: ['configure'] }]);
+    const control = wrapper.get('[role="switch"]');
+    expect(control.attributes('aria-checked')).toBe('false');
+    expect(control.attributes('aria-disabled')).toBe('false');
+    await control.trigger('click');
+    expect(wrapper.emitted('enabled-change')).toEqual([['sample', true]]);
+    expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.emitted('close')).toBeUndefined();
   });
   it("allows removing a selected connection that became unavailable without enabling it", async () => {
     const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' } }]);
@@ -38,7 +78,7 @@ describe("chat connector menu intent separation", () => {
     const row = wrapper.get('[data-connector-option]');
     expect(row.attributes('aria-label')).toContain('取消选择');
     expect(row.attributes('aria-checked')).toBe('true');
-    expect(row.get('.connector-menu__status').text()).toBe('未启用');
+    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false');
     await row.trigger('click');
     expect(wrapper.emitted('select')).toEqual([['sample']]);
     expect(wrapper.emitted('configure')).toBeUndefined();

@@ -19,6 +19,9 @@ import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
+import ChatExpertControl from "../../components/chat/ChatExpertControl.vue";
+import { useChatExpertPicker } from "../../composables/useChatExpertPicker";
+import type { CatalogEntry } from "../../domain/experts.generated";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { expertsUiEnabled } from "../../authorization/experts-ui-config";
 import ChatExpertChip from "../../components/experts/ChatExpertChip.vue";
@@ -36,7 +39,7 @@ import { marketConnectorsEnabled } from "../../api/market-connectors-client";
 import { useMarketConnectorStore } from "../../stores/market-connectors.store";
 import { useMarketConnectorBinding } from "../../composables/useMarketConnectorBinding";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
-import type { ConnectorChipView } from "../../domain/connector-ui";
+import { connectorSwitchDisabled, type ConnectorChipView } from "../../domain/connector-ui";
 import { useChatShopPreview } from "../../composables/useChatShopPreview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
@@ -178,10 +181,25 @@ if (expertsUiEnabled) {
 const expertBinding = computed(() => routeSessionId.value ? chatExperts.bindings[routeSessionId.value] : null);
 const expertSubmission = computed(() => expertsUiEnabled ? chatExperts.submissions[routeSessionId.value ?? "new"] : undefined);
 const selectedExpert = computed(() => !expertsUiEnabled || isDraftMode.value ? null : routeSessionId.value ? expertBinding.value?.expert ?? null : sharedDrafts.expert("new"));
+const expertPicker = useChatExpertPicker(() => routeSessionId.value, () =>
+  !expertsUiEnabled || isDraftMode.value || !normalPurposeReady.value || !permissionScope.hasCapability("plugin.read") ||
+  expertRemovalBlocked.value || expertContextBlocked.value,
+);
+const expertPendingKeys = computed(() => Object.entries(expertResources.operations).filter(([, operation]) => ["pending", "unknown"].includes(operation.state)).map(([key]) => key));
+async function refreshExpertPicker(): Promise<void> {
+  expertPicker.error.value = null;
+  await expertResources.refresh();
+}
+async function selectExpert(entry: CatalogEntry, close: () => void): Promise<void> {
+  if (!await expertPicker.select(entry)) return;
+  close();
+  await nextTick();
+  composer.value?.focusInput?.();
+}
 const expertContextBlocked = computed(() => expertsUiEnabled && !isDraftMode.value && !!routeSessionId.value && (
   !expertBinding.value || chatExperts.busy.has(routeSessionId.value) || !!chatExperts.errors[routeSessionId.value] || !["none", "ready"].includes(expertBinding.value.state)
 ));
-const expertBusy = computed(() => expertContextBlocked.value || !!expertSubmission.value);
+const expertBusy = computed(() => expertContextBlocked.value || !!expertSubmission.value || expertPicker.pending.value);
 const expertSendReady = computed(() => !expertBusy.value && (!selectedExpert.value || (
   expertResources.snapshot?.executionAvailable === true && (
     // Native refresh checks the exact retained version for an existing binding.
@@ -198,6 +216,8 @@ const expertIntent = computed<ExpertTurnIntent | undefined>(() => {
 const expertNotice = computed(() => {
   if (!expertsUiEnabled || isDraftMode.value) return null;
   if (expertSubmission.value) return "原提交结果待确认。已保留完整请求，请确认原提交后再编辑或切换。";
+  if (expertPicker.pending.value) return "正在选择专家…";
+  if (expertPicker.error.value) return expertPicker.error.value;
   if (routeSessionId.value && chatExperts.errors[routeSessionId.value]) return chatExperts.errors[routeSessionId.value];
   if (expertContextBlocked.value) return "正在确认会话专家状态，确认前不能发送或切换。";
   if (selectedExpert.value && !expertSendReady.value) return "所选专家资源或执行环境暂不可用，请重新读取或移除专家。";
@@ -227,7 +247,7 @@ async function refreshExpert(): Promise<void> {
   if (routeSessionId.value) await chatExperts.refresh(routeSessionId.value);
 }
 async function removeExpert(): Promise<void> {
-  if (expertRemovalBlocked.value) return;
+  if (expertRemovalBlocked.value || expertPicker.pending.value) return;
   if (routeSessionId.value) await chatExperts.select(routeSessionId.value, null);
   else sharedDrafts.setExpert("new", null);
 }
@@ -463,6 +483,13 @@ function toggleConnector(serviceId: string): void {
 }
 function manageConnectors(serviceId?: string): void {
   void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
+}
+function connectorEnabledChange(id: string, enabled: boolean): void {
+  const entry = connectors.entries.find(item => item.id === id);
+  if (modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only" ||
+    !entry || connectorSwitchDisabled(entry, connectors.canManage)) return;
+  if (enabled) manageConnectors(id);
+  else void connectors.execute("disable", id);
 }
 function browseExperts(): void {
   if (!expertsUiEnabled || isDraftMode.value || modelBusy.value || !permissionScope.hasCapability("plugin.read")) return;
@@ -1001,7 +1028,6 @@ onBeforeUnmount(() => {
         mode="new"
         :text-locked="!!expertSubmission"
         :experts-available="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')"
-        @browse-experts="browseExperts"
         :projects="chatStore.projects"
         :selected-project-id="availableProjectId"
         :readiness="readiness"
@@ -1042,12 +1068,15 @@ onBeforeUnmount(() => {
             @update:create-open="workspacePicker.setCreateOpen" @create="workspacePicker.create"
           />
         </template>
-        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
+          <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
+        </template>
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
@@ -1262,7 +1291,6 @@ onBeforeUnmount(() => {
         mode="reply"
         :text-locked="!!expertSubmission"
         :experts-available="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')"
-        @browse-experts="browseExperts"
         :projects="chatStore.projects"
         :selected-project-id="selectedSession?.projectId ?? null"
         :active-project-name="activeProject?.safeName"
@@ -1292,12 +1320,15 @@ onBeforeUnmount(() => {
         @recover="recoverReadiness"
         @unsupported-input="showUnsupportedInput"
       >
-        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="selectedExpert" #expert-control><ChatExpertChip :expert="selectedExpert" :disabled="expertRemovalBlocked || expertPicker.pending.value" :pending="!!routeSessionId && (chatExperts.busy.has(routeSessionId) || expertBinding?.state === 'applying')" @details="showExpertDetails" @remove="removeExpert" /></template>
+        <template v-if="expertsUiEnabled && !isDraftMode && permissionScope.hasCapability('plugin.read')" #expert-picker="{ close }">
+          <ChatExpertControl :entries="expertResources.entries" :selected="selectedExpert" :disabled="expertRemovalBlocked || expertContextBlocked || expertPicker.pending.value" :loading="!expertResources.snapshot && expertResources.refreshing" :refreshing="!!expertResources.snapshot && expertResources.refreshing" :error="expertPicker.error.value ?? expertResources.error" :execution-available="expertResources.snapshot?.executionAvailable === true" :can-manage="expertResources.canManage" :busy-keys="expertResources.busy" :operation-errors="expertResources.operationErrors" :pending-keys="expertPendingKeys" @refresh="refreshExpertPicker" @select="selectExpert($event, close)" @close="close" @manage="browseExperts" />
+        </template>
         <template v-if="!isDraftMode" #shop-control>
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
