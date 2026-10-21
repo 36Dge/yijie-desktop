@@ -4,7 +4,6 @@ import { NButton, NSwitch } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
 import { connectorSwitchDisabled, filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
 import ConnectorIcon from "../connectors/ConnectorIcon.vue";
-import YjIcon from "../yijie/YjIcon.vue";
 
 const props = withDefaults(defineProps<{
   entries: readonly ConnectorView[];
@@ -19,7 +18,6 @@ const props = withDefaults(defineProps<{
 }>(), { disabled: false, disabledReason: "任务进行中，暂时不能选择连接器", loading: false, error: null, operationErrors: () => ({}) });
 const emit = defineEmits<{
   close: [];
-  select: [id: string];
   configure: [id: string];
   "enabled-change": [id: string, enabled: boolean];
   manage: [];
@@ -57,12 +55,10 @@ function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
   return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
 }
 const filtered = computed(() => filterConnectors(installed.value, query.value).map(entry => ({ entry, status: compactStatus(entry) })));
-function canChoose(entry: ConnectorView): boolean { return props.selectedIds.includes(entry.id) || (props.selectionAvailable && entry.selectable); }
 function choose(entry: ConnectorView): void {
   if (props.disabled || entry.busy) return;
-  if (canChoose(entry)) emit("select", entry.id);
-  else emit("configure", entry.id);
-  emit("close");
+  if (!connectorSwitchDisabled(entry, props.canManage)) changeEnabled(entry, !entry.enabled);
+  else if (!entry.selectable) { emit("configure", entry.id); emit("close"); }
 }
 function changeEnabled(entry: ConnectorView, enabled: boolean): void {
   if (props.disabled || connectorSwitchDisabled(entry, props.canManage)) return;
@@ -86,15 +82,14 @@ onMounted(() => { emit("refresh"); });
 <template>
   <ChatResourcePanel title="连接器" v-model:query="query" :loading="loading" @manage="manage">
     <div ref="panel" @keydown="navigate">
-      <p v-if="loading" class="connector-menu__notice" role="status">正在读取连接器状态…</p>
+      <p v-if="loading && !installed.length" class="connector-menu__notice" role="status">正在读取连接器状态…</p>
       <div v-if="error" class="connector-menu__notice" role="alert"><p>{{ error }}</p><NButton size="small" :disabled="loading" @click="$emit('refresh')">重试</NButton></div>
       <p v-if="!selectionAvailable && !loading && installed.some(entry => entry.enabled)" class="connector-menu__notice">当前无法选用，请前往管理页检查。</p>
       <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择本轮连接器">
         <li v-for="{ entry, status } in filtered" :key="entry.id" :aria-busy="entry.busy" :class="{ 'connector-menu__row--selected': selectedIds.includes(entry.id), 'connector-menu__row--blocked': disabled || entry.busy }">
-          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :role="canChoose(entry) ? 'checkbox' : undefined" :aria-checked="canChoose(entry) ? selectedIds.includes(entry.id) : undefined" :aria-label="`${selectedIds.includes(entry.id) ? '取消选择' : canChoose(entry) ? '本轮使用' : '配置'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
+          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :aria-label="`${entry.enabled ? '停用' : connectorSwitchDisabled(entry, canManage) ? '配置' : '启用'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
             <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
             <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
-            <YjIcon v-if="selectedIds.includes(entry.id)" class="connector-menu__check" name="checkmark" size="sm" />
             <span v-if="status" class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
           </button>
           <NSwitch
@@ -127,7 +122,6 @@ onMounted(() => { emit("refresh"); });
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
 .connector-menu__option:disabled { cursor: default; }
 .connector-menu__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--yj-font-size-body); }
-.connector-menu__check { display: grid; width: var(--yj-space-4); height: var(--yj-space-4); flex: none; place-items: center; color: var(--yj-color-text-primary); }
 .connector-menu__status { flex: none; padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-xs); color: var(--yj-color-text-secondary); background: var(--yj-color-control-hover); font-size: var(--yj-font-size-caption); line-height: var(--yj-badge-line-height); white-space: nowrap; }
 .connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); background: var(--yj-color-warning-soft); }
 .connector-menu__status--error { color: var(--yj-color-semantic-error-ink); background: var(--yj-color-error-soft); }

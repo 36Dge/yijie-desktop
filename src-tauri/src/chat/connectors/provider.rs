@@ -744,7 +744,17 @@ mod tests {
         String,
         super::super::broker_generated::ScopeBinding,
     ) {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        setup_database(rusqlite::Connection::open_in_memory().unwrap())
+    }
+    fn setup_database(
+        mut db: rusqlite::Connection,
+    ) -> (
+        rusqlite::Connection,
+        ChatScope,
+        ui::Installation,
+        String,
+        super::super::broker_generated::ScopeBinding,
+    ) {
         db.pragma_update(None, "foreign_keys", true).unwrap();
         crate::chat::migrations::migrate_to_target(
             &mut db,
@@ -1211,6 +1221,95 @@ mod tests {
             .err(),
             Some(Error::ExecutionUnavailable)
         );
+    }
+
+    #[test]
+    fn startup_recheck_preserves_enabled_intent_across_normal_database_reopen() {
+        let root = std::env::temp_dir().join(format!("yijie-connector-reopen-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("ordinary.db");
+        let (mut db, scope, item, host, authority) =
+            setup_database(rusqlite::Connection::open(&path).unwrap());
+        let enabled = qualified_enable(&mut db, &scope, &item, &host, authority.clone());
+        let credential = enabled.payload.binding.credential_ref.clone();
+        db.close().unwrap();
+
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        let stored = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(stored.desired_enabled);
+        assert!(!stored.effective_enabled);
+        let mut renewed = authority;
+        renewed.native_process_epoch = Uuid::now_v7().to_string();
+        let new_host = Uuid::now_v7().to_string();
+        let recovery = begin(
+            &mut db,
+            &scope,
+            &stored,
+            &new_host,
+            renewed.clone(),
+            ui::OperationAction::Enable,
+        );
+        assert_eq!(recovery.payload.binding.credential_ref, credential);
+        assert_eq!(
+            recovery.payload.binding.reference.generation,
+            stored.generation
+        );
+        assert!(recovery.payload.binding.reference.revision > stored.revision);
+        assert!(recovery.result.installation.desired_enabled);
+        assert!(!recovery.result.installation.effective_enabled);
+        let mut unavailable = status(&recovery, p::OperationState::Failed);
+        unavailable.connection_status = p::ConnectionStatus::Error;
+        unavailable.error_code = Some(p::ErrorCode::MetadataUnavailable);
+        let failed = store::finish_provider(&mut db, &scope, &recovery, unavailable, 104).unwrap();
+        assert!(failed.result.installation.desired_enabled);
+        assert!(!failed.result.installation.effective_enabled);
+        db.close().unwrap();
+
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        let stored = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(stored.desired_enabled);
+        assert!(!stored.effective_enabled);
+        let retry = begin(
+            &mut db,
+            &scope,
+            &stored,
+            &new_host,
+            renewed.clone(),
+            ui::OperationAction::Enable,
+        );
+        let mut ready = status(&retry, p::OperationState::Succeeded);
+        ready.qualification = p::Qualification::Qualified;
+        ready.execution_available = true;
+        let completed = store::finish_provider(&mut db, &scope, &retry, ready, 105).unwrap();
+        assert!(completed.result.installation.desired_enabled);
+        // Even successful persisted metadata still needs fresh live evidence.
+        assert!(!completed.result.installation.effective_enabled);
+        let operations = store::enabled_provider_operations(
+            &db,
+            &scope,
+            std::slice::from_ref(&completed.payload.binding.reference),
+        )
+        .unwrap();
+        assert_eq!(
+            operations[0].payload.operation_id,
+            retry.payload.operation_id
+        );
+        let disable = begin(
+            &mut db,
+            &scope,
+            &completed.result.installation,
+            &new_host,
+            renewed,
+            ui::OperationAction::Disable,
+        );
+        assert!(!disable.result.installation.desired_enabled);
+        assert!(
+            !store::find(&db, &scope, &catalog().catalog, &item.installation_id)
+                .unwrap()
+                .desired_enabled
+        );
+        db.close().unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[tokio::test]

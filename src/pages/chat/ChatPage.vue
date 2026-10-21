@@ -473,14 +473,36 @@ const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSel
     unavailableReason: !sameConnection ? "连接已变化，请重新选择" : !entry?.selectable ? entry?.status.label === "已启用" ? "当前环境暂不支持" : entry?.status.label ?? "状态待确认" : null };
 }));
 if (marketConnectorsEnabled) useMarketConnectorBinding(computed(() => !isDraftMode.value ? chatStore.context?.contextId ?? null : null));
-function toggleConnector(serviceId: string): void {
-  if (modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
-  const target = composerDraftTargetKey.value, current = sharedDrafts.selection(target);
-  if (current.some(item => item.serviceId === serviceId)) { sharedDrafts.setSelection(target, current.filter(item => item.serviceId !== serviceId)); return; }
-  const entry = connectors.entries.find(item => item.id === serviceId), installation = connectors.installation(serviceId);
-  if (!entry?.selectable || !installation || current.length >= 58) return;
-  sharedDrafts.setSelection(target, [...current, { serviceId, displayName: entry.name, reference: { installationId: installation.installationId, revision: installation.revision, generation: installation.generation } }]);
-}
+// The switch is the single selection control. A stop request removes the next
+// turn's selection immediately; adding it still requires confirmed readiness.
+watch(
+  [() => connectors.entries, () => connectors.selectionAvailable, () => connectors.selectionExcluded, () => connectors.phase,
+    composerDraftTargetKey, modelBusy, () => chatStore.selectedAccessMode, connectorSelection],
+  () => {
+    if (!marketConnectorsEnabled || isDraftMode.value || modelBusy.value ||
+      chatStore.selectedAccessMode === "history-only") return;
+    const current = connectorSelection.value;
+    const next = current.filter(selected => {
+      if (connectors.selectionExcluded.has(selected.serviceId)) return false;
+      // A refresh failure must not undo an explicit deselection or silently
+      // drop other selected connectors whose availability is still unknown.
+      if (connectors.phase !== "ready" || connectors.error) return true;
+      const entry = connectors.entries.find(item => item.id === selected.serviceId);
+      return entry && (entry.enabled || entry.busy || connectors.installation(selected.serviceId)?.desiredEnabled);
+    });
+    if (connectors.selectionAvailable) for (const entry of connectors.entries) {
+      const installation = connectors.installation(entry.id);
+      if (!entry.selectable || !installation || connectors.selectionExcluded.has(entry.id)) continue;
+      const selected = { serviceId: entry.id, displayName: entry.name, reference: {
+        installationId: installation.installationId, revision: installation.revision, generation: installation.generation,
+      } };
+      const index = next.findIndex(item => item.serviceId === entry.id);
+      if (index >= 0) next[index] = selected;
+      else if (next.length < 58) next.push(selected);
+    }
+    if (JSON.stringify(current) !== JSON.stringify(next)) sharedDrafts.setSelection(composerDraftTargetKey.value, next);
+  }, { immediate: true },
+);
 function manageConnectors(serviceId?: string): void {
   void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
 }
@@ -1056,7 +1078,6 @@ onBeforeUnmount(() => {
         :connectors="connectorChips"
         :skills="skillChips"
         @remove-skill="toggleSkill"
-        @remove-connector="toggleConnector"
         :can-send="workspaceSelectionValid && !workspacePicker.creating.value && models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
@@ -1097,7 +1118,7 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
@@ -1320,7 +1341,6 @@ onBeforeUnmount(() => {
         :connectors="connectorChips"
         :skills="skillChips"
         @remove-skill="toggleSkill"
-        @remove-connector="toggleConnector"
         :can-send="models.ready.value && (isDraftMode ? draft.canSubmit.value : normalPurposeReady && chatStore.canSend && permissionCanSend && expertSendReady)"
         :can-attach="attachmentInteractionAllowed"
         :submission-state="composerSubmissionState"
@@ -1349,7 +1369,7 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @select="toggleConnector" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />

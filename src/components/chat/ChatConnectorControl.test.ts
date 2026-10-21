@@ -11,41 +11,27 @@ function setup(entries: ConnectorView[] = [entry]) {
 }
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ""; });
 
-describe("chat connector menu intent separation", () => {
-  it("keeps the restored global switch separate from current-turn selection", async () => {
+describe("chat connector switch selection", () => {
+  it("uses the switch as the sole toggle, without a checkbox or checkmark", async () => {
     const wrapper = setup();
-    await flushPromises();
+    await wrapper.setProps({ selectedIds: [entry.id] });
     const control = wrapper.get('[role="switch"]');
-    expect(control.attributes('aria-label')).toBe('停用 普通合成服务');
-    expect(control.attributes('aria-checked')).toBe('true');
-    expect(wrapper.find('.connector-menu__status').exists()).toBe(false);
     const row = wrapper.get('[data-connector-option]');
-    expect(row.attributes('role')).toBe('checkbox');
-    expect(row.attributes('aria-checked')).toBe('false');
-    await row.trigger('click');
-    expect(wrapper.emitted('select')).toEqual([["sample"]]);
-    expect(wrapper.emitted('close')).toHaveLength(1);
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    await wrapper.setProps({ selectedIds: ['sample'] });
-    expect(row.attributes('aria-checked')).toBe('true');
-    expect(row.find('.connector-menu__check').exists()).toBe(true);
-    expect(row.element.lastElementChild?.classList.contains('connector-menu__check')).toBe(true);
-    await row.trigger('click');
-    expect(wrapper.emitted('select')).toHaveLength(2);
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    await control.trigger('click');
-    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false]]);
-    expect(wrapper.emitted('select')).toHaveLength(2);
-    expect(wrapper.emitted('close')).toHaveLength(2);
-    // Controlled value follows the authoritative result, never an optimistic toggle.
     expect(control.attributes('aria-checked')).toBe('true');
-    await wrapper.setProps({ entries: [{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' }, actions: ['enable'] }] });
+    expect(row.attributes('role')).toBeUndefined();
+    expect(row.attributes('aria-checked')).toBeUndefined();
+    expect(wrapper.find('.connector-menu__check').exists()).toBe(false);
+    await row.trigger('click');
+    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false]]);
+    expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.emitted('close')).toBeUndefined();
+    // Wait for the authoritative result before changing the controlled switch.
+    expect(control.attributes('aria-checked')).toBe('true');
+    await wrapper.setProps({ entries: [{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' }, actions: ['enable'] }], selectedIds: [] });
     expect(control.attributes('aria-checked')).toBe('false');
-    expect(control.attributes('aria-label')).toBe('启用 普通合成服务');
-    expect(wrapper.find('.connector-menu__status').exists()).toBe(false);
     await control.trigger('click');
     expect(wrapper.emitted('enabled-change')).toEqual([['sample', false], ['sample', true]]);
-    expect(wrapper.emitted('select')).toHaveLength(2);
+    expect(wrapper.emitted('close')).toBeUndefined();
   });
   it.each([
     { canManage: false, disabled: false, entry },
@@ -72,36 +58,23 @@ describe("chat connector menu intent separation", () => {
     expect(wrapper.emitted('select')).toBeUndefined();
     expect(wrapper.emitted('close')).toBeUndefined();
   });
-  it("allows removing a selected connection that became unavailable without enabling it", async () => {
-    const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' } }]);
-    await wrapper.setProps({ selectedIds: ['sample'], selectionAvailable: false });
-    const row = wrapper.get('[data-connector-option]');
-    expect(row.attributes('aria-label')).toContain('取消选择');
-    expect(row.attributes('aria-checked')).toBe('true');
-    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false');
-    await row.trigger('click');
-    expect(wrapper.emitted('select')).toEqual([['sample']]);
-    expect(wrapper.emitted('configure')).toBeUndefined();
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-  });
-  it("preserves busy and unavailable execution restrictions", async () => {
+  it("preserves busy and unavailable management restrictions", async () => {
     const wrapper = setup([{ ...entry, busy: true }]);
     await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('select')).toBeUndefined();
-    expect(wrapper.emitted('configure')).toBeUndefined();
+    expect(wrapper.emitted('enabled-change')).toBeUndefined();
     await wrapper.setProps({ entries: [entry], disabled: true });
     await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('select')).toBeUndefined();
-    await wrapper.setProps({ disabled: false, selectionAvailable: false });
+    expect(wrapper.emitted('enabled-change')).toBeUndefined();
+    await wrapper.setProps({ disabled: false, canManage: false });
     await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('configure')).toEqual([['sample']]);
-    expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.emitted('enabled-change')).toBeUndefined();
   });
-  it("routes an unavailable entry to configuration without selecting it", async () => {
-    const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: "待配置", tone: "warning" }, actions: ["configure"] }]);
+  it("routes configuration-only entries to management when the switch cannot start them", async () => {
+    const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: "待授权", tone: "warning" }, actions: ["authorize"] }]);
     await flushPromises();
     await new DOMWrapper(document.querySelector<HTMLButtonElement>('[data-connector-option]')!).trigger('click');
-    expect(wrapper.emitted('configure')).toEqual([["sample"]]); expect(wrapper.emitted('select')).toBeUndefined();
+    expect(wrapper.emitted('configure')).toEqual([["sample"]]);
+    expect(wrapper.emitted('enabled-change')).toBeUndefined();
     await wrapper.get('footer button').trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(2);
   });

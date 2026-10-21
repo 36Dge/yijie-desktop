@@ -66,7 +66,6 @@ const emit = defineEmits<{
   "remove-attachment": [attachmentId: string];
   "dismiss-attachment-import": [operationId: string];
   "unsupported-input": [message: string];
-  "remove-connector": [id: string];
   "remove-skill": [id: string];
 }>();
 
@@ -282,21 +281,12 @@ async function closeSkillPicker(close: () => Promise<void>, reason?: "selection"
   }
 }
 
-async function removeConnector(id: string): Promise<void> {
-  if (selectionRemovalDisabled.value) return;
-  const snapshot = captureInputFocus();
-  emit("remove-connector", id);
-  await nextTick();
-  if (snapshot) restoreInputFocus(snapshot);
-}
-
 watch(
   [
     () => props.modelValue,
     () => props.mode,
     () => props.attachments.length,
     () => props.attachmentImportAttempt?.operationId ?? null,
-    () => props.connectors,
     () => props.skills,
     () => props.textOnly,
   ],
@@ -348,13 +338,10 @@ function handleKeydown(event: KeyboardEvent): void {
   const textarea = textareaElement.value;
   if (event.key === "Backspace" && !event.isComposing && !composing.value && !props.textOnly &&
     !selectionRemovalDisabled.value && textarea?.selectionStart === 0 && textarea.selectionEnd === 0) {
-    // Prefixes render skills first, then connectors: remove the nearest item.
-    const connector = props.connectors[props.connectors.length - 1];
     const skill = props.skills[props.skills.length - 1];
-    if (connector || skill) {
+    if (skill) {
       event.preventDefault();
-      if (connector) void removeConnector(connector.id);
-      else if (skill) void removeSkill(skill.id);
+      void removeSkill(skill.id);
       return;
     }
   }
@@ -456,9 +443,8 @@ function handlePaste(event: ClipboardEvent): void {
           </li>
         </ul>
         <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
-          <div v-if="!textOnly && (connectors.length || skills.length)" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
+          <div v-if="hasSkillPrefix" ref="connectorPrefixElement" class="chat-composer__connector-prefix" :style="connectorPrefixWidth && inputScrollTop > 0 ? { visibility: 'hidden' } : undefined">
             <ChatSkillChips :entries="skills" :disabled="selectionRemovalDisabled" @remove="removeSkill" />
-            <ChatConnectorChips :entries="connectors" :disabled="selectionRemovalDisabled" @remove="removeConnector" />
           </div>
           <textarea
           ref="textareaElement"
@@ -466,7 +452,7 @@ function handlePaste(event: ClipboardEvent): void {
           class="chat-composer__textarea"
           :value="modelValue"
           :readonly="submissionBusy || textLocked"
-          :placeholder="!textOnly && (connectors.length || skills.length) ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
+          :placeholder="hasSkillPrefix ? '' : textOnly ? '描述计划内容、时间、时区和运行方式…' : mode === 'new' ? '描述你想完成的事，或添加相关文件…' : '继续输入任务需求…'"
           :aria-describedby="visibleValidationMessage ? 'chat-composer-validation' : undefined"
           :aria-invalid="visibleValidationMessage ? 'true' : undefined"
           autocomplete="off"
@@ -509,6 +495,9 @@ function handlePaste(event: ClipboardEvent): void {
                 <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
               </button>
             </slot>
+            <ChatConnectorChips v-if="!textOnly && connectors.length" :entries="connectors" :disabled="selectionRemovalDisabled || !$slots['connector-control']">
+              <template #default="{ close }"><slot name="connector-control" :close="close" /></template>
+            </ChatConnectorChips>
             <slot v-if="!textOnly" name="shop-control" />
             <slot v-if="!textOnly" name="expert-control" />
           </div>
@@ -541,7 +530,7 @@ function handlePaste(event: ClipboardEvent): void {
             :title="sendLabel"
             @click="submit"
           >
-            <YjIcon class="chat-composer__send-icon" name="send" size="md" />
+            <YjIcon name="send" size="md" />
           </button>
           </div>
         </div>
@@ -623,7 +612,7 @@ function handlePaste(event: ClipboardEvent): void {
       {{ attachmentConstraintMessage }}
     </p>
     <p v-if="!textOnly && connectors.some(connector => connector.unavailableReason)" class="chat-composer__validation" role="alert">
-      部分连接器暂不可用，请移除或重新连接后发送。
+      部分连接器暂不可用，请关闭对应开关或重新连接后发送。
     </p>
   </section>
 </template>
@@ -899,7 +888,6 @@ function handlePaste(event: ClipboardEvent): void {
   scroll-padding-inline: var(--yj-space-1);
 }
 .chat-composer__input--skills .chat-composer__connector-prefix::-webkit-scrollbar { display: none; }
-.chat-composer__input--skills :deep(.chat-connector-chips) { flex: none; flex-wrap: nowrap; overflow: visible; }
 .chat-composer__textarea::placeholder { color: var(--yj-color-text-tertiary); opacity: 1; }
 
 .chat-composer__actions {
@@ -920,7 +908,7 @@ function handlePaste(event: ClipboardEvent): void {
   min-width: 0;
   align-items: center;
   gap: var(--yj-space-1);
-  overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .chat-composer--reply .chat-composer__leading-actions,
@@ -1006,7 +994,6 @@ function handlePaste(event: ClipboardEvent): void {
 }
 
 .chat-composer__send :deep(.yj-icon) { color: inherit; }
-.chat-composer__send-icon { transform: rotate(-90deg); }
 .chat-composer__send:hover:not(:disabled) { background: var(--yj-color-brand-hover); }
 .chat-composer__send:active:not(:disabled):not(.chat-composer__send--stop) { background: var(--yj-color-brand-active); }
 .chat-composer__send:disabled { color: var(--yj-color-text-disabled); background: var(--yj-color-control-disabled-bg); cursor: not-allowed; }

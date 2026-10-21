@@ -1238,8 +1238,8 @@ describe("FEAT-126 ChatPage", () => {
     expertFlag.enabled = true;
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
-    const { wrapper, router } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
-    vi.spyOn(useSkillStore(), "open").mockResolvedValue();
+    const { wrapper, router, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    vi.spyOn(useSkillStore(pinia), "open").mockResolvedValue();
     await wrapper.get('[aria-label="可添加文件、技能、连接器，或选择专家"]').trigger("click");
     await flushPromises();
     const skillsItem = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
@@ -1261,12 +1261,12 @@ describe("FEAT-126 ChatPage", () => {
   it.each([false, true])("submits selected skills as explicit Runtime mentions (reply=%s)", async (reply) => {
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
-    const { wrapper, store } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
-    const skillStore = useSkillStore();
+    const { wrapper, store, pinia } = await mountPage(reply ? `/chat/${SESSION_ID}` : "/chat", reply);
+    const skillStore = useSkillStore(pinia);
     skillStore.skills = [installedSkill]; skillStore.phase = "ready";
     const refresh = vi.spyOn(skillStore, "open").mockResolvedValue();
     const target = reply ? `session:${SESSION_ID}` as const : "new";
-    const drafts = useChatComposerDraftStore();
+    const drafts = useChatComposerDraftStore(pinia);
     drafts.setSkills(target, [installedSkill]);
     const submit = reply
       ? vi.spyOn(store, "submitTurnWithResult").mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)))
@@ -1284,10 +1284,10 @@ describe("FEAT-126 ChatPage", () => {
   it("preserves selected skills on failed sends and blocks stale selections after revalidation", async () => {
     skillFlag.enabled = true;
     vi.spyOn(skillNativeClient, "list").mockResolvedValue({ schemaVersion: 1, scannedAt: "2026-10-20T00:00:00Z", skills: [installedSkill] });
-    const { wrapper, store } = await mountPage("/chat");
-    const skillStore = useSkillStore(); skillStore.skills = [installedSkill]; skillStore.phase = "ready";
+    const { wrapper, store, pinia } = await mountPage("/chat");
+    const skillStore = useSkillStore(pinia); skillStore.skills = [installedSkill]; skillStore.phase = "ready";
     const refresh = vi.spyOn(skillStore, "open").mockResolvedValue();
-    const drafts = useChatComposerDraftStore(); drafts.setSkills("new", [installedSkill]);
+    const drafts = useChatComposerDraftStore(pinia); drafts.setSkills("new", [installedSkill]);
     const submit = vi.spyOn(store, "createSessionWithResult").mockResolvedValue({ status: "not_accepted" });
     await wrapper.get("textarea").setValue("保留原文");
     await wrapper.getComponent(ChatComposer).vm.$emit("submit"); await flushPromises();
@@ -1807,9 +1807,9 @@ it("FEAT-155 confirms leaving an unsent chat draft and defaults to staying", asy
 
 it("FEAT158 composer keeps the expert after the shop and requires explicit user content", async () => {
   expertFlag.enabled = true;
-  const { wrapper, store } = await mountPage("/chat?focus=composer");
+  const { wrapper, store, pinia } = await mountPage("/chat?focus=composer");
   expect(document.activeElement).toBe(wrapper.get("textarea").element);
-  useChatComposerDraftStore().setExpert("new", expertDisplay); await flushPromises();
+  useChatComposerDraftStore(pinia).setExpert("new", expertDisplay); await flushPromises();
   const leading = wrapper.get(".chat-composer__leading-actions");
   expect(leading.text()).toContain(expertDisplay.displayName);
   expect(leading.find(".chat-expert-chip").exists()).toBe(true);
@@ -1818,29 +1818,29 @@ it("FEAT158 composer keeps the expert after the shop and requires explicit user 
   const create = vi.spyOn(store, "createSessionWithResult").mockResolvedValue({ status: "not_accepted" });
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
   expect(create).toHaveBeenCalledWith(null, "普通待发送问题", undefined, undefined, { expectedBindingRevision: 0, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
-  expect(useChatComposerDraftStore().expert("new")).toEqual(expertDisplay);
+  expect(useChatComposerDraftStore(pinia).expert("new")).toEqual(expertDisplay);
   wrapper.unmount();
 });
 
 it("FEAT158 chip details carry the exact selected expert version", async () => {
   expertFlag.enabled = true;
-  const { wrapper, router } = await mountPage("/chat");
+  const { wrapper, router, pinia } = await mountPage("/chat");
   router.addRoute({ path: "/plugins", component: { template: "<div>扩展</div>" } });
-  useChatComposerDraftStore().setExpert("new", expertDisplay); await flushPromises();
+  useChatComposerDraftStore(pinia).setExpert("new", expertDisplay); await flushPromises();
   await wrapper.get('[aria-label^="查看已选专家"]').trigger("click"); await flushPromises();
   expect(router.currentRoute.value.query).toEqual({ tab: "experts", from: "/chat", expert: expertDisplay.expertId, expertVersion: expertDisplay.version });
-  expect(useChatComposerDraftStore().expert("new")).toEqual(expertDisplay);
+  expect(useChatComposerDraftStore(pinia).expert("new")).toEqual(expertDisplay);
   wrapper.unmount();
 });
 
 it.each(["new", "existing"] as const)("inline expert picker applies the %s selection without navigation or sending", async target => {
   expertFlag.enabled = true;
   const active = target === "existing", path = active ? `/chat/${SESSION_ID}` : "/chat";
-  const { wrapper, router } = await mountPage(path, active);
+  const { wrapper, router, pinia } = await mountPage(path, active);
   const chosen = { ...expertDisplay, expertId: "second-expert", displayName: "第二位专家" };
   const entry = { ...expertEntry, display: chosen, state: "ready" as const };
   const snapshot = { ...expertSnapshot(entry), executionAvailable: true };
-  useExpertsStore().snapshot = snapshot;
+  useExpertsStore(pinia).snapshot = snapshot;
   vi.spyOn(expertNativeClient, "snapshot").mockResolvedValue(snapshot);
   const binding = vi.spyOn(expertNativeClient, "setBinding").mockImplementation(async (_ctx, payload) => ({
     binding: { sessionId: SESSION_ID, managed: true, bindingRevision: 2, expert: chosen, state: "ready" },
@@ -1863,10 +1863,10 @@ it.each(["new", "existing"] as const)("inline expert picker applies the %s selec
   expect(wrapper.get('[aria-label="可添加文件、技能、连接器，或选择专家"]').attributes("aria-expanded")).toBe("false");
   if (active) {
     expect(binding).toHaveBeenCalledTimes(1);
-    expect(useChatExpertsStore().bindings[SESSION_ID]?.expert).toEqual(chosen);
+    expect(useChatExpertsStore(pinia).bindings[SESSION_ID]?.expert).toEqual(chosen);
   } else {
     expect(binding).not.toHaveBeenCalled();
-    expect(useChatComposerDraftStore().expert("new")).toEqual(chosen);
+    expect(useChatComposerDraftStore(pinia).expert("new")).toEqual(chosen);
   }
   expect(submit).not.toHaveBeenCalled();
   await open();
@@ -1876,26 +1876,36 @@ it.each(["new", "existing"] as const)("inline expert picker applies the %s selec
 
 it("FEAT158 retained binding uses its Native checked version when the market only lists a newer card", async () => {
   expertFlag.enabled = true;
-  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
-  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
+  const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+  useExpertsStore(pinia).snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
   await wrapper.get("textarea").setValue("继续使用历史专家");
   const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
   await flushPromises();
   expect(wrapper.text()).not.toContain("所选专家资源或执行环境暂不可用");
   await wrapper.get('[aria-label="发送任务"]').trigger("click");
   expect(submit).toHaveBeenCalledWith("继续使用历史专家", undefined, undefined, { expectedBindingRevision: 1, expert: { expertId: expertDisplay.expertId, version: expertDisplay.version } });
-  expect(useChatExpertsStore().bindings[SESSION_ID]?.expert).toEqual(expertDisplay);
+  expect(useChatExpertsStore(pinia).bindings[SESSION_ID]?.expert).toEqual(expertDisplay);
   wrapper.unmount();
 });
 
 it.each(["resource", "execution"])("FEAT158 retained binding still blocks when Native reports unavailable %s", async (unavailable) => {
   expertFlag.enabled = true;
-  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
-  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: unavailable !== "execution" };
-  if (unavailable === "resource") useChatExpertsStore().bindings = { [SESSION_ID]: { sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "unavailable", errorCode: "resource_unavailable" } };
+  const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const experts = useExpertsStore(pinia), bindings = useChatExpertsStore(pinia);
+  await vi.waitFor(() => {
+    expect(bindings.bindings[SESSION_ID]?.state).toBe("ready");
+    expect(bindings.busy.has(SESSION_ID)).toBe(false);
+  });
+  // Drive the authoritative read instead of racing initialization with a
+  // direct store assignment while the Native fixture still reports ready.
+  vi.mocked(expertNativeClient.snapshot).mockResolvedValue({ ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: unavailable !== "execution" });
+  if (unavailable === "resource") vi.mocked(expertNativeClient.binding).mockResolvedValue({ sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "unavailable", errorCode: "resource_unavailable" });
+  await experts.refresh();
+  await bindings.refresh(SESSION_ID);
   await wrapper.get("textarea").setValue("不能借用新版资源");
   const submit = vi.spyOn(store, "submitTurnWithResult");
   await flushPromises();
+  expect(bindings.bindings[SESSION_ID]?.state).toBe(unavailable === "resource" ? "unavailable" : "ready");
   expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
   expect(submit).not.toHaveBeenCalled();
   wrapper.unmount();
@@ -1903,9 +1913,9 @@ it.each(["resource", "execution"])("FEAT158 retained binding still blocks when N
 
 it("FEAT158 an unbound draft cannot borrow readiness from another expert version", async () => {
   expertFlag.enabled = true;
-  const { wrapper, store } = await mountPage("/chat");
-  useExpertsStore().snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
-  useChatComposerDraftStore().setExpert("new", expertDisplay);
+  const { wrapper, store, pinia } = await mountPage("/chat");
+  useExpertsStore(pinia).snapshot = { ...expertSnapshot({ ...expertEntry, display: { ...expertDisplay, version: "9.0.0" }, state: "ready" }), executionAvailable: true };
+  useChatComposerDraftStore(pinia).setExpert("new", expertDisplay);
   await wrapper.get("textarea").setValue("旧版草稿尚未确认绑定");
   const create = vi.spyOn(store, "createSessionWithResult");
   await flushPromises();
@@ -1916,7 +1926,7 @@ it("FEAT158 an unbound draft cannot borrow readiness from another expert version
 
 it("FEAT158 removes a session expert only on the Native receipt and uses explicit null afterwards", async () => {
   expertFlag.enabled = true;
-  const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
   await wrapper.get("textarea").setValue("保留当前文字");
   const binding = vi.spyOn(expertNativeClient, "setBinding").mockImplementation(async (_ctx, payload) => ({
     binding: { sessionId: SESSION_ID, managed: true, bindingRevision: 2, expert: null, state: "none" },
@@ -1928,18 +1938,18 @@ it("FEAT158 removes a session expert only on the Native receipt and uses explici
   const submit = vi.spyOn(store, "submitTurnWithResult").mockResolvedValue({ status: "not_accepted" });
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
   expect(submit).toHaveBeenCalledWith("保留当前文字", undefined, undefined, { expectedBindingRevision: 2, expert: null });
-  const acknowledged = vi.spyOn(useChatExpertsStore(), "acknowledgeSubmission");
+  const acknowledged = vi.spyOn(useChatExpertsStore(pinia), "acknowledgeSubmission");
   submit.mockResolvedValue(acceptedSubmission(SESSION_ID, chatSessionDraftTarget(SESSION_ID)));
   await wrapper.get('[aria-label="发送任务"]').trigger("click"); await flushPromises();
   expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
   expect(acknowledged).toHaveBeenCalledWith("019c1a00-0000-7000-8000-000000000020");
-  expect(useChatExpertsStore().bindings[SESSION_ID]?.bindingRevision).toBe(2); wrapper.unmount();
+  expect(useChatExpertsStore(pinia).bindings[SESSION_ID]?.bindingRevision).toBe(2); wrapper.unmount();
 });
 
 it("FEAT158 binding recovery is an explicit original-operation command without sending content", async () => {
   expertFlag.enabled = true;
-  const { wrapper } = await mountPage(`/chat/${SESSION_ID}`, true);
-  const store = useChatExpertsStore(), operation = "019c1a00-0000-7000-8000-000000000088";
+  const { wrapper, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+  const store = useChatExpertsStore(pinia), operation = "019c1a00-0000-7000-8000-000000000088";
   store.bindings = { [SESSION_ID]: { sessionId: SESSION_ID, managed: true, bindingRevision: 1, expert: expertDisplay, state: "unknown", operationId: operation } };
   store.pending = { [SESSION_ID]: { operationId: operation, sessionId: SESSION_ID, expectedBindingRevision: 1, expert: null } };
   await wrapper.get("textarea").setValue("恢复前保留的草稿");

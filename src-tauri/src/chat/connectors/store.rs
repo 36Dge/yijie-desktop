@@ -439,7 +439,10 @@ pub(super) fn prepare_provider(
         _ => return Err(Error::UnsupportedCapability),
     };
     item.revision = next(item.revision)?;
-    item.desired_enabled = false;
+    // Rechecking an already-enabled installation must not erase the user's
+    // saved intent. Readiness remains false until this owner's probe succeeds.
+    // Initial enable still starts false; disable/reconfigure continue to fence.
+    item.desired_enabled = item.desired_enabled && intent.action == wire::OperationAction::Enable;
     let credential_ref = item
         .credential_ref
         .clone()
@@ -460,7 +463,7 @@ pub(super) fn prepare_provider(
         },
     };
     payload.validate().map_err(|_| Error::InvalidRequest)?;
-    sql(tx.execute("UPDATE chat_connector_installations SET revision=?1,desired_enabled=0,credential_ref=?2,updated_at=?3 WHERE installation_id=?4 AND owner_user_id=?5 AND tenant_id=?6",params![item.revision,item.credential_ref,intent.now,item.installation_id,scope.owner_user_id,scope.tenant_id]))?;
+    sql(tx.execute("UPDATE chat_connector_installations SET revision=?1,desired_enabled=?7,credential_ref=?2,updated_at=?3 WHERE installation_id=?4 AND owner_user_id=?5 AND tenant_id=?6",params![item.revision,item.credential_ref,intent.now,item.installation_id,scope.owner_user_id,scope.tenant_id,item.desired_enabled]))?;
     let mut result = receipt(item, &intent.key.operation_id, intent.action, None);
     result.operation.status = wire::OperationStatus::Pending;
     result.operation.cancellable = kind != "forget";

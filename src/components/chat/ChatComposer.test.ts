@@ -128,19 +128,22 @@ describe("ChatComposer", () => {
       "connector-control": () => h("button", { "data-connectors": "" }, "连接器"),
     });
     expect(wrapper.find('[data-connectors]').exists()).toBe(false);
-    expect(wrapper.get('[aria-label="本轮使用的连接器"]').text()).toContain("需要重新连接");
+    expect(wrapper.get('.chat-connector-chip__button').attributes("aria-label")).toContain("需要重新连接");
+    expect(wrapper.get('[data-shop]').element.previousElementSibling?.classList.contains("chat-connector-chips")).toBe(true);
     expect(wrapper.get('[aria-label="发送任务"]').attributes("disabled")).toBeDefined();
-    await wrapper.get('[aria-label="移除 普通合成服务"]').trigger("click");
-    expect(wrapper.emitted("remove-connector")).toEqual([["sample"]]);
+    await wrapper.get('.chat-connector-chip__button').trigger("click");
+    await flushPromises();
+    expect(document.querySelector('[role="dialog"][aria-label="连接器"] [data-connectors]')).not.toBeNull();
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
     await wrapper.setProps({ textOnly: true });
     expect(wrapper.find('[data-connectors]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="本轮使用的连接器"]').exists()).toBe(false);
     wrapper.unmount();
   });
-  it("removes a connector at the start without changing text, selection, or IME input", async () => {
+  it("keeps toolbar connectors independent from text and Backspace", async () => {
     const wrapper = mountComposer({ modelValue: "今天数据如何", connectors: [{ id: "sorftime", name: "Sorftime", iconAssetId: "sorftime" }] });
     const input = wrapper.get("textarea"), element = input.element as HTMLTextAreaElement;
-    expect(input.attributes("placeholder")).toBe("");
+    expect(input.attributes("placeholder")).toBe("描述你想完成的事，或添加相关文件…");
     element.setSelectionRange(0, 2);
     await input.trigger("keydown", { key: "Backspace" });
     expect(wrapper.emitted("remove-connector")).toBeUndefined();
@@ -150,14 +153,14 @@ describe("ChatComposer", () => {
     expect(wrapper.emitted("remove-connector")).toBeUndefined();
     await input.trigger("compositionend");
     await input.trigger("keydown", { key: "Backspace" });
-    expect(wrapper.emitted("remove-connector")).toEqual([["sorftime"]]);
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
     expect(element.value).toBe("今天数据如何");
     await wrapper.setProps({ submissionState: "submitting" });
     await input.trigger("keydown", { key: "Backspace" });
-    expect(wrapper.emitted("remove-connector")).toHaveLength(1);
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
   });
-  it("removes mixed selections from right to left without deleting the draft text", async () => {
+  it("removes inline skills from right to left while retaining toolbar connectors", async () => {
     const skills = [
       { ...installedSkill, unavailableReason: null },
       { ...installedSkill, id: "second-skill", displayName: "第二个技能", unavailableReason: null },
@@ -167,10 +170,7 @@ describe("ChatComposer", () => {
     element.focus();
     element.setSelectionRange(0, 0);
     await input.trigger("keydown", { key: "Backspace" });
-    expect(wrapper.emitted("remove-connector")).toEqual([["shopify"]]);
-    expect(wrapper.emitted("remove-skill")).toBeUndefined();
-    await wrapper.setProps({ connectors: [] });
-    await input.trigger("keydown", { key: "Backspace" });
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
     expect(wrapper.emitted("remove-skill")).toEqual([["second-skill"]]);
     await wrapper.setProps({ skills: skills.slice(0, 1) });
     await input.trigger("keydown", { key: "Backspace" });
@@ -179,13 +179,13 @@ describe("ChatComposer", () => {
     expect(element.value).toBe("检查商品标题");
     expect(element.selectionStart).toBe(0);
   });
-  it("preserves the input selection after clicking either skill or connector removal", async () => {
+  it("preserves the input selection after clicking skill removal", async () => {
     const wrapper = mountComposer({
       skills: [{ ...installedSkill, unavailableReason: null }],
       connectors: [{ id: "shopify", name: "Shopify MCP", iconAssetId: "shopify" }],
     });
     const element = wrapper.get("textarea").element as HTMLTextAreaElement;
-    for (const label of ["移除技能 跨境营销文案", "移除 Shopify MCP"]) {
+    for (const label of ["移除技能 跨境营销文案"]) {
       element.focus();
       element.setSelectionRange(1, 4, "backward");
       const button = wrapper.get<HTMLButtonElement>(`button[aria-label="${label}"]`);
@@ -196,7 +196,7 @@ describe("ChatComposer", () => {
       expect([element.selectionStart, element.selectionEnd, element.selectionDirection]).toEqual([1, 4, "backward"]);
     }
     expect(wrapper.emitted("remove-skill")).toEqual([[installedSkill.id]]);
-    expect(wrapper.emitted("remove-connector")).toEqual([["shopify"]]);
+    expect(wrapper.emitted("remove-connector")).toBeUndefined();
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
   it("protects skill removal during composition, text selection, and locked or busy input", async () => {
@@ -333,7 +333,7 @@ describe("ChatComposer", () => {
     expect(source).toMatch(
       /\.chat-composer__actions\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/s,
     );
-    expect(source).toMatch(/\.chat-composer__leading-actions\s*\{[^}]*overflow: hidden;/s);
+    expect(source).toMatch(/\.chat-composer__leading-actions\s*\{[^}]*flex-wrap: wrap;/s);
     expect(source).toMatch(/\.chat-composer__send\s*\{[^}]*justify-self: end;/s);
   });
 

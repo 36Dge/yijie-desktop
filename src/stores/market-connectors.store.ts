@@ -27,9 +27,30 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
     let scopeEpoch = 0, readEpoch = 0, mutationEpoch = 0;
     let operationObservation = false, operationPollBusy = false;
     let operationTimer: ReturnType<typeof setTimeout> | null = null;
+    // Session-local only: refresh/navigation/context renewal must not turn a
+    // failed connection check into another external attempt.
+    const restorationChecked = new Set<string>();
+    let restorationBusy = false;
+    function restorationKey(item: Installation): string { return `${item.installationId}:${item.generation}`; }
     const operationBudgets = new Map<string, { startedAt: number; attempts: number; failures: number; lastRead: number }>();
     const canManage = computed(() => snapshot.value?.capabilities.includes("connector.manage") === true);
     const selectionAvailable = computed(() => contextId.value !== null && snapshot.value?.executionAvailable === true && snapshot.value.capabilities.includes("connector.use") && !error.value && phase.value === "ready");
+    // Removing a connector from the next turn is immediate user intent, not an
+    // acknowledgement that Native has finished retiring its connection. Keep
+    // pending/unknown cleanup observable in the menu, including after renewal
+    // or reload when only the authoritative active operation remains.
+    const selectionExcluded = computed<ReadonlySet<string>>(() => {
+      const ids = new Set<string>();
+      for (const [id, attempt] of Object.entries(unconfirmed.value)) {
+        if (attempt.action === "disable" || attempt.action === "uninstall") ids.add(id);
+      }
+      for (const item of snapshot.value?.installations ?? []) {
+        const operation = item.activeOperation;
+        if (item.status === "removing" || (operation && ["pending", "unknown"].includes(operation.status) &&
+          ["disable", "uninstall"].includes(operation.action))) ids.add(item.serviceId);
+      }
+      return ids;
+    });
     const entries = computed(() => {
       if (!snapshot.value) return [];
       return connectorViews(snapshot.value, pending.value).map(entry => {
@@ -61,7 +82,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
     function forgetAttempt(id: string): void { const next = { ...unconfirmed.value }; delete next[id]; unconfirmed.value = next; }
     function installation(id: string): Installation | undefined { return snapshot.value?.installations.find(item => item.serviceId === id && item.status !== "removed"); }
     function clear(): void {
-      stopOperationTimer(); operationBudgets.clear(); mutationEpoch++;
+      stopOperationTimer(); operationBudgets.clear(); restorationChecked.clear(); mutationEpoch++;
       scopeEpoch++; readEpoch++; contextId.value = null; authorityScope.value = null; snapshot.value = null; phase.value = "loading";
       refreshing.value = false; error.value = null; pending.value = new Set(); unconfirmed.value = {}; operationErrors.value = {};
     }
@@ -99,7 +120,35 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
         }
         else if (code === "unsupported_capability") { snapshot.value = null; phase.value = "incompatible"; }
         else phase.value = snapshot.value ? "ready" : "unavailable";
-      } finally { if (scope === scopeEpoch && read === readEpoch) refreshing.value = false; scheduleOperationPoll(); }
+      } finally {
+        if (scope === scopeEpoch && read === readEpoch) {
+          refreshing.value = false;
+          void restoreEnabled();
+        }
+        scheduleOperationPoll();
+      }
+    }
+    async function restoreEnabled(): Promise<void> {
+      if (restorationBusy || !contextId.value || phase.value !== "ready" || error.value || !canManage.value) return;
+      restorationBusy = true;
+      const scope = scopeEpoch;
+      try {
+        while (scope === scopeEpoch && contextId.value && phase.value === "ready" && !error.value && canManage.value) {
+          const item = snapshot.value?.installations.find(item => item.status === "installed" && item.desiredEnabled && !restorationChecked.has(restorationKey(item)));
+          if (!item) break;
+          restorationChecked.add(restorationKey(item));
+          // Reuse only the noninteractive enable path. Existing operations keep
+          // their original identity; authorization/configuration require a user.
+          const entry = entries.value.find(entry => entry.id === item.serviceId);
+          if (item.effectiveEnabled || item.activeOperation || unconfirmed.value[item.serviceId] || !entry?.actions.includes("enable")) continue;
+          await execute("enable", item.serviceId);
+        }
+      } finally {
+        restorationBusy = false;
+        // A renewed context may have completed its read while the old attempt
+        // was still returning. Re-evaluate the new scope, never its old receipt.
+        if (scope !== scopeEpoch) void restoreEnabled();
+      }
     }
     function acceptMutation(result: MutationResult): void {
       const current = snapshot.value;
@@ -130,6 +179,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       const context = contextId.value, entry = entries.value.find(item => item.id === serviceId);
       if (!context || !entry || pending.value.has(serviceId) || !entry.actions.includes(action)) return false;
       const scope = scopeEpoch, item = installation(serviceId);
+      if (item) restorationChecked.add(restorationKey(item));
       setPending(serviceId, true); setError(serviceId, null); readEpoch++; mutationEpoch++; refreshing.value = false;
       const stillCurrent = () => scope === scopeEpoch && context === contextId.value;
       try {
@@ -179,7 +229,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       } catch (failure) {
         if (!stillCurrent()) return false;
         const code = failure instanceof ConnectorClientError ? failure.code : "temporarily_unavailable";
-        if (!["temporarily_unavailable", "outcome_unknown", "operation_pending", "context_invalid"].includes(code)) forgetAttempt(serviceId);
+        if (!["temporarily_unavailable", "outcome_unknown", "operation_pending", "cleanup_pending", "context_invalid"].includes(code)) forgetAttempt(serviceId);
         setError(serviceId, connectorErrorMessage(code));
         if (code === "revision_conflict" || code === "permission_denied" || code === "context_invalid") await refresh();
         return false;
@@ -251,7 +301,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       operationObservation = active;
       if (active) scheduleOperationPoll(); else stopOperationTimer();
     }
-    return { contextId, authorityScope, snapshot, model, entries, phase, refreshing, error, pending, operationErrors, canManage, selectionAvailable, bind, refresh, execute, clear, installation, setOperationObservation };
+    return { contextId, authorityScope, snapshot, model, entries, phase, refreshing, error, pending, operationErrors, canManage, selectionAvailable, selectionExcluded, bind, refresh, execute, clear, installation, setOperationObservation };
   });
 }
 
