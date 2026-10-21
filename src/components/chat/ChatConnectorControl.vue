@@ -15,7 +15,8 @@ const props = withDefaults(defineProps<{
   canManage: boolean;
   loading?: boolean;
   error?: string | null;
-}>(), { disabled: false, disabledReason: "任务进行中，暂时不能选择连接器", loading: false, error: null });
+  operationErrors?: Readonly<Record<string, string>>;
+}>(), { disabled: false, disabledReason: "任务进行中，暂时不能选择连接器", loading: false, error: null, operationErrors: () => ({}) });
 const emit = defineEmits<{
   close: [];
   select: [id: string];
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   "enabled-change": [id: string, enabled: boolean];
   manage: [];
   refresh: [];
+  retry: [id: string];
 }>();
 const query = ref("");
 const panel = ref<HTMLElement | null>(null);
@@ -104,6 +106,10 @@ onMounted(() => { emit("refresh"); });
             :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`"
             @update:value="changeEnabled(entry, $event)"
           />
+          <div v-if="operationErrors[entry.id]" class="connector-menu__operation-error" role="alert">
+            <p>{{ operationErrors[entry.id] }}</p>
+            <NButton v-if="entry.actions.includes('retry')" size="tiny" :disabled="disabled" @click="$emit('retry', entry.id)">重新确认状态</NButton>
+          </div>
         </li>
       </ul>
       <div v-else-if="!loading && !error" class="connector-menu__empty"><span>{{ installed.length ? '没有找到匹配的连接器' : '还没有安装连接器' }}</span><NButton v-if="query" quaternary @click="query = ''">清空搜索</NButton></div>
@@ -113,7 +119,9 @@ onMounted(() => { emit("refresh"); });
 
 <style scoped>
 .connector-menu__list { list-style: none; padding: var(--yj-space-1) var(--yj-space-3); margin: 0; overflow-y: auto; overscroll-behavior: contain; min-height: 0; max-height: var(--yj-layout-connector-list-max); }
-.connector-menu__list li { display: flex; align-items: center; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-md); }
+.connector-menu__list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-md); }
+.connector-menu__operation-error { grid-column: 1 / -1; padding-bottom: var(--yj-space-2); color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); overflow-wrap: anywhere; }
+.connector-menu__operation-error p { margin: 0 0 var(--yj-space-1); }
 .connector-menu__list li:not(.connector-menu__row--blocked):is(:hover, :focus-within), .connector-menu__row--selected { background: var(--yj-color-control-hover); }
 .connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding: var(--yj-space-1) 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }

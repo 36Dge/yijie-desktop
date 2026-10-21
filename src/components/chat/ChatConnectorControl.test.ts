@@ -131,3 +131,17 @@ describe("chat connector menu intent separation", () => {
     expect(wrapper.emitted('enabled-change')).toBeUndefined();
   });
 });
+
+
+it("shows operation errors beside the affected connector and queries its original operation", async () => {
+  const wrapper = setup([{ ...entry, enabled: false, selectable: false, actions: ["retry"], status: { label: "操作结果待确认", tone: "warning" } }]);
+  await wrapper.setProps({ operationErrors: { sample: "操作结果尚未确认，请重新确认状态。" } });
+  const alert = wrapper.get('[role="alert"]');
+  expect(alert.text()).toContain("操作结果尚未确认");
+  await alert.get("button").trigger("click");
+  expect(wrapper.emitted("retry")).toEqual([["sample"]]);
+  expect(wrapper.emitted("configure")).toBeUndefined();
+  expect(wrapper.emitted("close")).toBeUndefined();
+  await wrapper.setProps({ disabled: true });
+  expect(alert.get("button").attributes("disabled")).toBeDefined();
+});
