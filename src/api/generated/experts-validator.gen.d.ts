@@ -21,4 +21,6 @@ export declare const validateBindingRecoverRequest:Validator<T.BindingRecoverReq
 export declare const validateBindingRecoverResponse:Validator<T.BindingRecoverResponse>;
 export declare const validateResourceOperationRecoverRequest:Validator<T.ResourceOperationRecoverRequest>;
 export declare const validateResourceOperationRecoverResponse:Validator<T.ResourceOperationRecoverResponse>;
+export declare const validateDeveloperReadRequest:Validator<T.DeveloperReadRequest>;
+export declare const validateDeveloperReadResponse:Validator<T.DeveloperReadResponse>;
 export declare const validateError:Validator<T.Error>;

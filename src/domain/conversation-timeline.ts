@@ -44,6 +44,7 @@ export type ConversationTimelineItemKind =
   | "reasoning"
   | "command"
   | "tool"
+  | "web_search"
   | "artifact"
   | "unknown";
 export type ConversationTimelineItemPresentation =
@@ -54,6 +55,7 @@ export type ConversationTimelineItemPresentation =
   | "reasoning"
   | "command"
   | "tool"
+  | "web_search"
   | "artifact"
   | "unknown";
 export type ConversationTimelineContentMode = "rich" | "plain";
@@ -152,6 +154,7 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineItemViewModel = Readonly<{
+  webSearch?: ConversationItem["webSearch"];
   identity: string;
   threadId: string;
   turnId: string;
@@ -248,6 +251,7 @@ const ITEM_KINDS: Readonly<Record<ConversationItemKind, ConversationTimelineItem
     reasoning: "reasoning",
     command: "command",
     tool: "tool",
+    web_search: "web_search",
     approval: "unknown",
     artifact: "artifact",
     unknown: "unknown",
@@ -417,6 +421,8 @@ function itemPresentation(item: ConversationItem): ConversationTimelineItemPrese
       return "command";
     case "tool":
       return "tool";
+    case "web_search":
+      return "web_search";
     case "artifact":
       return "artifact";
     default:
@@ -438,6 +444,7 @@ function presentationRole(
     case "reasoning":
     case "command":
     case "tool":
+    case "web_search":
       return "process";
     case "unknown":
     default:
@@ -489,6 +496,7 @@ function projectItem(
   return Object.freeze({
     identity,
     busy, activityLabel, availability: item.availability,
+    ...(item.webSearch ? {webSearch: item.webSearch} : {}),
     threadId: item.threadId,
     turnId: item.turnId,
     itemId: item.itemId,

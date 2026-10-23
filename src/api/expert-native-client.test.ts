@@ -3,6 +3,18 @@ import { createExpertNativeClient } from "./expert-native-client";
 import { expertDisplay, expertSnapshot, expertTestId as id } from "../test/expert-fixture";
 
 describe("expert source-defined Native client", () => {
+  it("reads developer metadata for the exact expert through the generated read-only interface", async () => {
+    const transport = vi.fn(async (_command, { request }) => ({ schemaVersion: 1, requestId: request.requestId, data: { expert: request.payload, name: "易界 AI" } }));
+    const result = await createExpertNativeClient(transport).developer(id(1), expertDisplay);
+    expect(result.name).toBe("易界 AI");
+    expect(transport.mock.calls[0]?.[0]).toBe("experts_developer_read_v1");
+    expect(transport.mock.calls[0]?.[1].request.payload).toEqual({ expertId: expertDisplay.expertId, version: expertDisplay.version });
+    expect(transport).toHaveBeenCalledOnce();
+  });
+  it("does not apply metadata returned for another version", async () => {
+    const transport = vi.fn(async (_command, { request }) => ({ schemaVersion: 1, requestId: request.requestId, data: { expert: { ...request.payload, version: "0.2.0" }, name: "示例开发者" } }));
+    await expect(createExpertNativeClient(transport).developer(id(1), expertDisplay)).rejects.toMatchObject({ code: "unsupported_capability" });
+  });
   it("reads a normal source-validated catalog without promoting resource readiness to execution", async () => {
     const transport = vi.fn(async (_command, { request }) => ({ schemaVersion: 1, requestId: request.requestId, data: expertSnapshot() }));
     const result = await createExpertNativeClient(transport).snapshot(id(1));

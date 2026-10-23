@@ -58,6 +58,8 @@ pub struct NativeItem {
     pub tool_label: Option<String>,
     #[serde(rename = "mcp", default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<NativeMcpDisplay>,
+    #[serde(rename = "webSearch", default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<NativeWebSearchDisplay>,
 }
 impl std::fmt::Debug for NativeItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -282,6 +284,40 @@ pub struct NativeThreadStatusSnapshot {
 impl std::fmt::Debug for NativeThreadStatusSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeThreadStatusSnapshot([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeWebSearchDisplay {
+    #[serde(rename = "action")]
+    pub action: String,
+    #[serde(rename = "queries")]
+    pub queries: Vec<String>,
+    #[serde(rename = "pageLabel", default, skip_serializing_if = "Option::is_none")]
+    pub page_label: Option<String>,
+    #[serde(rename = "pattern", default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(rename = "sources", default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<NativeWebSearchSourceDisplay>>,
+}
+impl std::fmt::Debug for NativeWebSearchDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeWebSearchDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeWebSearchSourceDisplay {
+    #[serde(rename = "url")]
+    pub url: String,
+    #[serde(rename = "title", default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+impl std::fmt::Debug for NativeWebSearchSourceDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeWebSearchSourceDisplay([REDACTED])")
     }
 }
 

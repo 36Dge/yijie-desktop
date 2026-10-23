@@ -8,6 +8,8 @@ import {
 import { createPermissionLifecycle, type PermissionLifecycle } from "./authorization/permission-lifecycle";
 import { authoritativePermissionUiEnabled } from "./authorization/permission-ui-config";
 import { marketConnectorsEnabled } from "./api/market-connectors-client";
+import { useMarketConnectorBinding } from "./composables/useMarketConnectorBinding";
+import { useMarketConnectorStore } from "./stores/market-connectors.store";
 import { localChatUiEnabled } from "./authorization/chat-ui-config";
 import { skillMarketplaceUiEnabled } from "./authorization/skill-marketplace-ui-config";
 import { storeShowcaseUiEnabled } from "./authorization/store-showcase-ui-config";
@@ -42,6 +44,8 @@ const route = useRoute();
 const router = useRouter();
 const permissionStore = usePermissionStore();
 const chatStore = useChatStore();
+const connectors = useMarketConnectorStore();
+if (marketConnectorsEnabled) useMarketConnectorBinding(computed(() => chatStore.context?.contextId ?? null));
 const isDark = ref(false);
 const uiZoomPercent = ref(UI_ZOOM_DEFAULT_PERCENT);
 const themeOverrides = ref<GlobalThemeOverrides>();
@@ -217,6 +221,9 @@ watch(
 );
 
 onMounted(() => {
+  // Startup recovery must finish even when the app initially opens behind
+  // another window. The store only polls existing operations with a bounded budget.
+  if (marketConnectorsEnabled) connectors.setOperationObservation(true, "app");
   colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
   applyColorScheme(colorSchemeQuery.matches);
   colorSchemeQuery.addEventListener("change", handleColorSchemeChange);
@@ -234,6 +241,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (marketConnectorsEnabled) connectors.setOperationObservation(false, "app");
   colorSchemeQuery?.removeEventListener("change", handleColorSchemeChange);
   window.removeEventListener("keydown", handleUiZoomShortcut);
   document.documentElement.style.removeProperty("zoom");

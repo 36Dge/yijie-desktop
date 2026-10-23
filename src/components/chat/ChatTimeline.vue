@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { conversationDiagnosticMessage } from "../../domain/conversation-diagnostics";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
@@ -17,7 +18,7 @@ import type {
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   timeline: ConversationTimelineViewModel;
   turnTimingLabels?: Readonly<Record<string, string | null>>;
   skillCatalog?: readonly SelectedChatSkill[];
@@ -33,6 +34,14 @@ withDefaults(defineProps<{
   approvalAuthorityRevision: 0,
   approvalTransients: () => Object.freeze({}),
 });
+
+// A normal output notification describes the existing final-output safety
+// policy, not an execution failure. Keep the diagnostic inspectable without
+// promoting it to a conversation warning. Errors and unknown notices stay out.
+const isOutputPolicyNotice = (notice: ConversationTimelineNoticeViewModel) =>
+  notice.severity === "warning" && notice.diagnostic === "command_output_pending_final";
+const outputPolicyNotices = computed(() => props.timeline.notices.filter(isOutputPolicyNotice));
+const visibleNotices = computed(() => props.timeline.notices.filter(notice => !isOutputPolicyNotice(notice)));
 
 const emit = defineEmits<{
   "disclosure-change": [change: ChatTimelineDisclosureChange];
@@ -90,9 +99,9 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
       对话状态需要核对，现有内容仍可阅读。
     </p>
 
-    <ul v-if="timeline.notices.length > 0" class="chat-timeline__notices" aria-label="对话通知">
+    <ul v-if="visibleNotices.length > 0" class="chat-timeline__notices" aria-label="对话通知">
       <li
-        v-for="notice in timeline.notices"
+        v-for="notice in visibleNotices"
         :key="notice.identity"
         class="chat-timeline__notice"
         :class="`chat-timeline__notice--${notice.severity}`"
@@ -108,6 +117,11 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
         </div>
       </li>
     </ul>
+
+    <details v-if="outputPolicyNotices.length" class="chat-timeline__output-policy" aria-label="命令输出说明">
+      <summary>命令输出说明</summary>
+      <p v-for="notice in outputPolicyNotices" :key="notice.identity" role="note">{{ threadNoticeMessage(notice) }}</p>
+    </details>
 
     <p
       v-if="timeline.phase === 'loading'"
@@ -245,6 +259,19 @@ function threadNoticeMessage(notice: ConversationTimelineNoticeViewModel): strin
   gap: var(--yj-space-2);
   list-style: none;
 }
+
+.chat-timeline__output-policy {
+  color: var(--yj-color-text-tertiary);
+  font-size: var(--yj-font-size-caption);
+  line-height: var(--yj-line-height-caption);
+  overflow-wrap: anywhere;
+}
+.chat-timeline__output-policy summary { cursor: pointer; }
+.chat-timeline__output-policy summary:focus-visible {
+  outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
+  outline-offset: var(--yj-space-1);
+}
+.chat-timeline__output-policy p { margin-block: var(--yj-space-2) var(--yj-space-0); }
 
 .chat-timeline__notice-body {
   display: grid;

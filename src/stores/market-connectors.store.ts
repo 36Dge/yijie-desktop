@@ -25,6 +25,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
     const unconfirmed = shallowRef<Readonly<Record<string, UnconfirmedOperation>>>({});
     const operationErrors = shallowRef<Readonly<Record<string, string>>>({});
     let scopeEpoch = 0, readEpoch = 0, mutationEpoch = 0;
+    const operationObservers = new Set<string>();
     let operationObservation = false, operationPollBusy = false;
     let operationTimer: ReturnType<typeof setTimeout> | null = null;
     // Session-local only: refresh/navigation/context renewal must not turn a
@@ -297,9 +298,10 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
         }
       } finally { operationPollBusy = false; scheduleOperationPoll(delay); }
     }
-    function setOperationObservation(active: boolean): void {
-      operationObservation = active;
-      if (active) scheduleOperationPoll(); else stopOperationTimer();
+    function setOperationObservation(active: boolean, owner = "page"): void {
+      if (active) operationObservers.add(owner); else operationObservers.delete(owner);
+      operationObservation = operationObservers.size > 0;
+      if (operationObservation) scheduleOperationPoll(); else stopOperationTimer();
     }
     return { contextId, authorityScope, snapshot, model, entries, phase, refreshing, error, pending, operationErrors, canManage, selectionAvailable, selectionExcluded, bind, refresh, execute, clear, installation, setOperationObservation };
   });

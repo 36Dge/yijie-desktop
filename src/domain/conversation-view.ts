@@ -9,6 +9,7 @@ export const CONVERSATION_ITEM_KINDS = Object.freeze([
   // FEAT-136 projects command/tool directly; remaining unsupported kinds still fail soft.
   "command",
   "tool",
+  "web_search",
   "approval",
   "artifact",
   "unknown",
@@ -244,6 +245,7 @@ export interface ConversationTurn {
 }
 
 export interface ConversationItem {
+  readonly webSearch?: NativeConversationView["items"][number]["item"]["webSearch"];
   readonly availability?: NativeConversationView["availability"];
   readonly threadId: string;
   readonly turnId: string;
@@ -407,13 +409,14 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
     for (const k of old?.itemKeys ?? []) delete items[k];
     const nativeItems: ConversationItem[] = view.items.map(entry => {
       const item = entry.item;
-      const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : "unknown";
+      const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
       const contentBlocks: TextContentBlock[] = item.type === "reasoning"
         ? (["summary", "content"] as const).flatMap(reasoningSource =>
           (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
         : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
       return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
         availability: item.availability,
+        ...(item.webSearch ? {webSearch: item.webSearch} : {}),
         status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
         agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,
         reasoning: item.type === "reasoning" ? {status: entry.lastMethod === "item/completed" ? "complete" : entry.lastMethod === "thread/read" ? "unknown" : "in_progress", reasonCode: null} : null,

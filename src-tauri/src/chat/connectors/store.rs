@@ -92,13 +92,17 @@ pub(super) fn lookup(
         params![scope.owner_user_id, scope.tenant_id, entry.service_id], |r| row(r, entry)).optional())?;
     if let Some(item) = item.as_mut() {
         if provider_storage(db)? {
-            let record: Option<(Option<String>,String)> = sql(db.query_row("SELECT p.observation_json,o.response_json FROM chat_connector_provider_operations p JOIN chat_connector_operations o USING(owner_user_id,tenant_id,operation_id) WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND p.installation_id=?3 ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1",params![scope.owner_user_id,scope.tenant_id,item.installation_id],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
-            if let Some((observed, receipt)) = record {
+            let record: Option<(Option<String>,String,String)> = sql(db.query_row("SELECT p.observation_json,o.response_json,p.kind FROM chat_connector_provider_operations p JOIN chat_connector_operations o USING(owner_user_id,tenant_id,operation_id) WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND p.installation_id=?3 ORDER BY p.created_at DESC,p.rowid DESC LIMIT 1",params![scope.owner_user_id,scope.tenant_id,item.installation_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional())?;
+            if let Some((observed, receipt, kind)) = record {
                 let result: wire::MutationResult = decode(&receipt)?;
                 if result.installation.revision == item.revision
                     && result.installation.generation == item.generation
                 {
-                    if let Some(observed) = observed {
+                    if kind == "suspend" {
+                        // Suspension does not inspect or alter saved authorization.
+                        item.configuration_status = result.installation.configuration_status;
+                        item.authorization_status = result.installation.authorization_status;
+                    } else if let Some(observed) = observed {
                         let observed: super::provider_generated::ProviderStatus =
                             decode(&observed)?;
                         if item.credential_ref.as_ref() == Some(&observed.binding.credential_ref) {
@@ -435,7 +439,8 @@ pub(super) fn prepare_provider(
     let kind = match intent.action {
         wire::OperationAction::Authorize | wire::OperationAction::Configure => "auth",
         wire::OperationAction::Enable => "probe",
-        wire::OperationAction::Disable | wire::OperationAction::Uninstall => "forget",
+        wire::OperationAction::Disable => "suspend",
+        wire::OperationAction::Uninstall => "forget",
         _ => return Err(Error::UnsupportedCapability),
     };
     item.revision = next(item.revision)?;
@@ -466,7 +471,7 @@ pub(super) fn prepare_provider(
     sql(tx.execute("UPDATE chat_connector_installations SET revision=?1,desired_enabled=?7,credential_ref=?2,updated_at=?3 WHERE installation_id=?4 AND owner_user_id=?5 AND tenant_id=?6",params![item.revision,item.credential_ref,intent.now,item.installation_id,scope.owner_user_id,scope.tenant_id,item.desired_enabled]))?;
     let mut result = receipt(item, &intent.key.operation_id, intent.action, None);
     result.operation.status = wire::OperationStatus::Pending;
-    result.operation.cancellable = kind != "forget";
+    result.operation.cancellable = !matches!(kind, "forget" | "suspend");
     result.installation.active_operation = Some(result.operation.clone());
     save(&tx, scope, &result, &hash, intent.now)?;
     sql(tx.execute("INSERT INTO chat_connector_provider_operations(operation_id,owner_user_id,tenant_id,installation_id,kind,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",params![intent.key.operation_id,scope.owner_user_id,scope.tenant_id,result.installation.installation_id,kind,encode(&payload)?,intent.now]))?;
@@ -567,7 +572,15 @@ pub(super) fn finish_provider(
     {
         return Err(Error::SelectionStale);
     }
-    project_provider(&mut item, &status);
+    if current.kind == "suspend" {
+        item.configuration_status = current.result.installation.configuration_status;
+        item.authorization_status = current.result.installation.authorization_status;
+        item.connection_status = wire::ConnectionStatus::Disconnected;
+        item.effective_enabled = false;
+        item.error_code = status.error_code.map(provider_error);
+    } else {
+        project_provider(&mut item, &status);
+    }
     current.result.operation.status = match status.operation_state {
         p::OperationState::Starting | p::OperationState::AwaitingUser => {
             wire::OperationStatus::Pending
@@ -595,8 +608,10 @@ pub(super) fn finish_provider(
             item.error_code = Some(Error::ProviderOnboardingRequired);
         }
     }
-    if current.kind == "forget" && status.operation_state == p::OperationState::Succeeded {
-        // Once the owned vault deletion is confirmed, earlier superseded
+    if matches!(current.kind.as_str(), "forget" | "suspend")
+        && status.operation_state == p::OperationState::Succeeded
+    {
+        // Once normal cleanup is confirmed, earlier superseded
         // authorization/probe intents cannot remain pending or resume later.
         let prior: Vec<(String, String)> = {
             let mut q=sql(tx.prepare("SELECT operation_id,response_json FROM chat_connector_operations WHERE owner_user_id=?1 AND tenant_id=?2 AND installation_id=?3 AND operation_id<>?4 AND json_extract(response_json,'$.operation.status') IN ('pending','unknown')"))?;
@@ -620,6 +635,8 @@ pub(super) fn finish_provider(
             old.installation.active_operation = None;
             sql(tx.execute("UPDATE chat_connector_operations SET response_json=?1 WHERE owner_user_id=?2 AND tenant_id=?3 AND operation_id=?4",params![encode(&old)?,scope.owner_user_id,scope.tenant_id,operation_id]))?;
         }
+    }
+    if current.kind == "forget" && status.operation_state == p::OperationState::Succeeded {
         item.generation = next(item.generation)?;
         item.revision = next(item.revision)?;
         item.credential_ref = None;
@@ -635,7 +652,7 @@ pub(super) fn finish_provider(
         item.connection_status = wire::ConnectionStatus::Disconnected;
         sql(tx.execute("UPDATE chat_connector_installations SET revision=?1,generation=?2,credential_ref=NULL,desired_enabled=0,installed=?3,updated_at=?4 WHERE installation_id=?5 AND owner_user_id=?6 AND tenant_id=?7",params![item.revision,item.generation,installed,now,item.installation_id,scope.owner_user_id,scope.tenant_id]))?;
     }
-    current.result.operation.cancellable = current.kind != "forget"
+    current.result.operation.cancellable = !matches!(current.kind.as_str(), "forget" | "suspend")
         && current.result.operation.status == wire::OperationStatus::Pending;
     if current.result.operation != expected.result.operation {
         current.result.operation.revision = next(current.result.operation.revision)?;

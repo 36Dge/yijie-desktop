@@ -51,6 +51,7 @@
 - Chat 会话列表：280px。
 - 右侧上下文面板：320–380px。
 - 表单最大宽度：720–960px。
+- 专家详情弹窗最大宽度：600px（`--yj-layout-expert-detail-width`），最小高度700px（`--yj-layout-expert-detail-min-height`）；最小高度也受视口限制，上下至少留32px，居中显示，超高时固定头部、正文内部滚动。内部标准边距24px，窄窗口减为20px。
 - 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。
 - 定时任务页签与筛选工具栏同排：搜索、状态、排序的标准宽度为 240 / 112 / 112px（`--yj-layout-schedule-search-width` / `--yj-layout-schedule-state-width` / `--yj-layout-schedule-sort-width`）；状态与排序组件等宽，排序显示“最新优先”或“最早优先”。执行记录页的任务筛选与状态筛选同为 112px（`--yj-layout-schedule-plan-filter-width` 引用状态宽度 token），占位文字为“全部任务”，下拉仅显示任务标题；下拉菜单可随标题内容展开，宽度不超过可用视口。可用宽度不足时换行。列表空状态最小高度为 360px（`--yj-layout-schedule-empty-min-height`）。
 - 新建任务内容列最大宽度：760px（`--yj-layout-chat-entry-max`）；活跃会话正文与输入区同为 760px，在 `.chat-workspace` 内复用该 token 覆盖内容列和输入框宽度，保持居中与等宽。

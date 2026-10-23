@@ -1,7 +1,7 @@
 /* Generated from native conversation source contracts. Do not edit. */
 
 export interface NativeConversationViewEvent {
-  schemaVersion: 2;
+  schemaVersion: 4;
   contextId: string;
   subscriptionId: string;
   sessionId: string;
@@ -36,7 +36,7 @@ export interface NativeDisplayItem {
 }
 export interface NativeItem {
   id: string;
-  type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "unknown";
+  type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "unknown";
   clientId?: string | null;
   text?: string;
   phase?: ("commentary" | "final_answer") | null;
@@ -80,6 +80,7 @@ export interface NativeItem {
    */
   toolLabel?: string;
   mcp?: NativeMcpDisplay;
+  webSearch?: NativeWebSearchDisplay;
 }
 /**
  * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
@@ -481,6 +482,38 @@ export interface NativeMcpText {
    * Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert.
    */
   text: string;
+}
+/**
+ * Safe display of the native WebSearchAction only. No execution or lifecycle inference. Queries/pattern are bounded and redacted; pageLabel is a hostname only, never an actionable URL. Optional sources are actual search hits, never inferred citations. Absence means no source metadata observed.
+ */
+export interface NativeWebSearchDisplay {
+  action: "search" | "openPage" | "findInPage" | "other";
+  /**
+   * @maxItems 8
+   */
+  queries:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
+  pageLabel?: string;
+  pattern?: string;
+  /**
+   * @maxItems 32
+   */
+  sources?: NativeWebSearchSourceDisplay[];
+}
+/**
+ * Actual provider search hit. Inert text only; not a verified citation or executable link. URL must be safe HTTP(S), no credentials, bounded and redacted; unsafe entries are omitted with partial availability.
+ */
+export interface NativeWebSearchSourceDisplay {
+  url: string;
+  title?: string;
 }
 export interface NativePlanStep {
   step: string;

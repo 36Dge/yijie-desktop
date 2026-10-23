@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { EXPERT_COMMANDS, type BindingReadResponse, type BindingSetResponse, type BindingSetPayload, type CatalogSnapshot, type ErrorCode, type ExpertSelection, type NativeSubmitPayload, type NativeSubmitResponse, type ResourceOperation, type SnapshotResponse, type PrepareResponse } from "../domain/experts.generated";
+import { EXPERT_COMMANDS, type BindingReadResponse, type BindingSetResponse, type BindingSetPayload, type CatalogSnapshot, type DeveloperInfo, type ErrorCode, type ExpertSelection, type NativeSubmitPayload, type NativeSubmitResponse, type ResourceOperation, type SnapshotResponse, type PrepareResponse } from "../domain/experts.generated";
 import * as validators from "./generated/experts-validator.gen";
 import { expertSelection } from "../domain/expert-ui";
 
@@ -46,6 +46,11 @@ export function createExpertNativeClient(transport: (command: string, args: { re
     return result;
   }
   return {
+    async developer(contextId: string, expert: ExpertSelection): Promise<DeveloperInfo> {
+      const result = await call<DeveloperInfo>("experts_developer_read_v1", contextId, expertSelection(expert));
+      if (!sameExpert(result.expert, expert)) throw new ExpertClientError("unsupported_capability");
+      return result;
+    },
     async snapshot(contextId: string): Promise<CatalogSnapshot> {
       const result = await call<SnapshotResponse["data"]>("experts_snapshot_v1", contextId, {});
       if (new Set(result.experts.map(item => `${item.display.expertId}@${item.display.version}`)).size !== result.experts.length || result.experts.some(item => item.operation && !sameExpert(item.operation.expert, item.display))) throw new ExpertClientError("unsupported_capability");

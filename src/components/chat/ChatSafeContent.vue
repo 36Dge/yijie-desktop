@@ -807,10 +807,13 @@ h3.chat-safe-content__heading {
 
 .chat-safe-content th,
 .chat-safe-content td {
+  min-width: 8em;
   padding: var(--yj-space-2) var(--yj-space-3);
   border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
   text-align: left;
-  white-space: nowrap;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .chat-safe-content th {

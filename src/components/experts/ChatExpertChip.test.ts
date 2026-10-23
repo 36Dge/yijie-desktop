@@ -3,7 +3,17 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { expertDisplay } from "../../test/expert-fixture";
 import ChatExpertChip from "./ChatExpertChip.vue";
+import ExpertAvatar from "./ExpertAvatar.vue";
 describe("single expert chip", () => {
+  it.each(["jd-ops-expert", "xiaohongshu-copywriter"])("uses the list avatar for %s, including while binding is pending", async expertId => {
+    const expert = { ...expertDisplay, expertId };
+    const listAvatar = mount(ExpertAvatar, { props: { expertId, iconKey: expert.iconKey, compact: true } });
+    const view = mount(ChatExpertChip, { props: { expert } });
+    expect(view.get("img").attributes("src")).toBe(listAvatar.get("img").attributes("src"));
+    await view.setProps({ pending: true });
+    expect(view.get("img").attributes("src")).toBe(listAvatar.get("img").attributes("src"));
+    view.unmount(); listAvatar.unmount();
+  });
   it("has separate accessible detail and remove controls", async () => {
     const view = mount(ChatExpertChip, { props: { expert: expertDisplay } });
     expect(view.text()).toBe(expertDisplay.displayName);

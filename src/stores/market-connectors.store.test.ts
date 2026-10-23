@@ -364,3 +364,23 @@ describe("saved enabled connector startup recovery", () => {
     expect(client.setEnabled).toHaveBeenCalledTimes(1);
   });
 });
+
+
+it("keeps bounded application recovery observation when the page becomes hidden", async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = { ...installed, desiredEnabled: true, activeOperation: operation("normal-pending-enable", "pending") };
+    const { client, store } = setup(snapshot([pending]));
+    client.operation.mockResolvedValue(operation("normal-pending-enable", "succeeded"));
+    await store.bind("boot", "local:scope-a");
+    store.setOperationObservation(true, "app");
+    store.setOperationObservation(true);
+    store.setOperationObservation(false);
+    client.snapshot.mockResolvedValue(snapshot([{ ...installed, desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" }]));
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(client.operation).toHaveBeenCalledExactlyOnceWith("boot", "normal-pending-enable");
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    expect(store.installation("sample")?.effectiveEnabled).toBe(true);
+    store.setOperationObservation(false, "app"); store.clear();
+  } finally { vi.useRealTimers(); }
+});

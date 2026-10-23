@@ -1,6 +1,7 @@
 import { onScopeDispose, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import type { CatalogEntry } from "../domain/experts.generated";
+import { chatComposerDraftKey } from "../domain/chat-composer-draft";
 import { useExpertsStore } from "../stores/experts.store";
 import { useChatExpertsStore } from "../stores/chat-experts.store";
 import { useChatComposerDraftStore } from "../stores/chat-composer-drafts.store";
@@ -26,7 +27,10 @@ export function useChatExpertPicker(sessionId: () => string | null, disabled: ()
     const current = () => !disposed && original === generation;
     const selected = session ? bindings.bindings[session]?.expert : drafts.expert("new");
     error.value = null;
-    if (entry.state === "ready" && selected?.expertId === entry.display.expertId && selected.version === entry.display.version) return true;
+    if (entry.state === "ready" && selected?.expertId === entry.display.expertId && selected.version === entry.display.version) {
+      drafts.prefillExpertPrompt(chatComposerDraftKey(session), entry);
+      return true;
+    }
     pending.value = true;
     try {
       if (entry.state !== "ready") {
@@ -44,6 +48,7 @@ export function useChatExpertPicker(sessionId: () => string | null, disabled: ()
         if (!current()) return false;
         if (!applied) { error.value = bindings.errors[session] ?? "专家切换尚未完成，请重新读取会话状态。"; return false; }
       } else drafts.setExpert("new", ready.display);
+      if (current()) drafts.prefillExpertPrompt(chatComposerDraftKey(session), ready);
       return current();
     } finally { pending.value = false; }
   }

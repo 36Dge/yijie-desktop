@@ -11,72 +11,47 @@ function setup(entries: ConnectorView[] = [entry]) {
 }
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = ""; });
 
-describe("chat connector switch selection", () => {
-  it("uses the switch as the sole toggle, without a checkbox or checkmark", async () => {
+describe("chat connector conversation selection", () => {
+  it("controls conversation selection independently of the globally enabled connection", async () => {
     const wrapper = setup();
+    const control = wrapper.get('[role="switch"]');
+    expect(control.attributes("aria-checked")).toBe("false");
+    await wrapper.get('[data-connector-option]').trigger("click");
+    expect(wrapper.emitted("selection-change")).toEqual([["sample", true]]);
+    expect(wrapper.emitted("enabled-change")).toBeUndefined();
     await wrapper.setProps({ selectedIds: [entry.id] });
-    const control = wrapper.get('[role="switch"]');
-    const row = wrapper.get('[data-connector-option]');
-    expect(control.attributes('aria-checked')).toBe('true');
-    expect(row.attributes('role')).toBeUndefined();
-    expect(row.attributes('aria-checked')).toBeUndefined();
-    expect(wrapper.find('.connector-menu__check').exists()).toBe(false);
-    await row.trigger('click');
-    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false]]);
-    expect(wrapper.emitted('select')).toBeUndefined();
-    expect(wrapper.emitted('close')).toBeUndefined();
-    // Wait for the authoritative result before changing the controlled switch.
-    expect(control.attributes('aria-checked')).toBe('true');
-    await wrapper.setProps({ entries: [{ ...entry, enabled: false, selectable: false, status: { label: '未启用', tone: 'neutral' }, actions: ['enable'] }], selectedIds: [] });
-    expect(control.attributes('aria-checked')).toBe('false');
-    await control.trigger('click');
-    expect(wrapper.emitted('enabled-change')).toEqual([['sample', false], ['sample', true]]);
-    expect(wrapper.emitted('close')).toBeUndefined();
+    expect(control.attributes("aria-checked")).toBe("true");
+    await control.trigger("click");
+    expect(wrapper.emitted("selection-change")).toEqual([["sample", true], ["sample", false]]);
+    expect(wrapper.emitted("configure")).toBeUndefined();
+    expect(wrapper.emitted("close")).toBeUndefined();
   });
-  it.each([
-    { canManage: false, disabled: false, entry },
-    { canManage: true, disabled: true, entry },
-    { canManage: true, disabled: false, entry: { ...entry, busy: true } },
-    { canManage: true, disabled: false, entry: { ...entry, actions: [] } },
-    { canManage: true, disabled: false, entry: { ...entry, enabled: false, selectable: false, actions: [] } },
-  ])("disables the switch when management is unavailable: %j", async ({ canManage, disabled, entry: state }) => {
-    const wrapper = setup([state]);
-    await wrapper.setProps({ canManage, disabled });
-    const control = wrapper.get('[role="switch"]');
-    expect(control.attributes('aria-disabled')).toBe('true');
-    await control.trigger('click');
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    expect(wrapper.emitted('select')).toBeUndefined();
+  it("allows selection without connector management permission", async () => {
+    const wrapper = setup();
+    await wrapper.setProps({ canManage: false });
+    expect(wrapper.get('[role="switch"]').attributes("aria-disabled")).toBe("false");
+    await wrapper.get('[role="switch"]').trigger("click");
+    expect(wrapper.emitted("selection-change")).toEqual([["sample", true]]);
   });
-  it("allows the off switch to request configuration without selecting an unready connector", async () => {
-    const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: '连接待恢复', tone: 'warning' }, actions: ['configure'] }]);
-    const control = wrapper.get('[role="switch"]');
-    expect(control.attributes('aria-checked')).toBe('false');
-    expect(control.attributes('aria-disabled')).toBe('false');
-    await control.trigger('click');
-    expect(wrapper.emitted('enabled-change')).toEqual([['sample', true]]);
-    expect(wrapper.emitted('select')).toBeUndefined();
-    expect(wrapper.emitted('close')).toBeUndefined();
+  it.each([false, true])("allows removal of an unavailable selection, including busy=%s", async busy => {
+    const wrapper = setup([{ ...entry, busy, selectable: false, enabled: false }]);
+    await wrapper.setProps({ selectedIds: [entry.id], canManage: false, selectionAvailable: false });
+    await wrapper.get('[role="switch"]').trigger("click");
+    expect(wrapper.emitted("selection-change")).toEqual([["sample", false]]);
+    expect(wrapper.emitted("enabled-change")).toBeUndefined();
   });
-  it("preserves busy and unavailable management restrictions", async () => {
-    const wrapper = setup([{ ...entry, busy: true }]);
-    await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    await wrapper.setProps({ entries: [entry], disabled: true });
-    await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    await wrapper.setProps({ disabled: false, canManage: false });
-    await wrapper.get('[data-connector-option]').trigger('click');
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
+  it("blocks selection changes while a conversation is running", async () => {
+    const wrapper = setup(); await wrapper.setProps({ disabled: true });
+    await wrapper.get('[role="switch"]').trigger("click");
+    expect(wrapper.emitted("selection-change")).toBeUndefined();
   });
-  it("routes configuration-only entries to management when the switch cannot start them", async () => {
+  it("routes an unready row to management without enabling or authorizing", async () => {
     const wrapper = setup([{ ...entry, enabled: false, selectable: false, status: { label: "待授权", tone: "warning" }, actions: ["authorize"] }]);
-    await flushPromises();
-    await new DOMWrapper(document.querySelector<HTMLButtonElement>('[data-connector-option]')!).trigger('click');
-    expect(wrapper.emitted('configure')).toEqual([["sample"]]);
-    expect(wrapper.emitted('enabled-change')).toBeUndefined();
-    await wrapper.get('footer button').trigger("click");
-    expect(wrapper.emitted("close")).toHaveLength(2);
+    expect(wrapper.get('[role="switch"]').attributes("aria-disabled")).toBe("true");
+    await wrapper.get('[data-connector-option]').trigger("click");
+    expect(wrapper.emitted("configure")).toEqual([["sample"]]);
+    expect(wrapper.emitted("selection-change")).toBeUndefined();
+    expect(wrapper.emitted("enabled-change")).toBeUndefined();
   });
   it("offers management from the empty state without fabricating an installed app", async () => {
     const wrapper = setup([]);

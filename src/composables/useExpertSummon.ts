@@ -39,10 +39,11 @@ export function useExpertSummon() {
     binding.busy.has(session.value) || !!binding.errors[session.value] || !binding.bindings[session.value] || ["applying", "unknown", "unavailable"].includes(binding.bindings[session.value]!.state) ||
     ["queued", "pending", "running", "in_progress", "awaiting_approval", "unknown", "uncertain"].includes(chat.sessions.find(item => item.sessionId === session.value)?.latestTurnStatus ?? "")
   )));
-  async function summon(entry: CatalogEntry, prompt?: string, replaceText = false): Promise<void> {
+  async function summon(entry: CatalogEntry, prompt?: string, replaceText = false, preserveText = false): Promise<void> {
     if (disposed || busy.value || !resources.snapshot?.executionAvailable || !["available", "ready"].includes(entry.state)) return;
     error.value = null;
     const destination = returnTo.value, localSession = session.value, draftTarget = target.value, scope = resources.scope;
+    const originalText = drafts.texts[draftTarget] ?? "";
     const generation = navigationGeneration, context = resources.contextId, bindingContext = binding.contextId;
     const isCurrentDestination = () => !disposed && generation === navigationGeneration && scope === resources.scope && context === resources.contextId && bindingContext === binding.contextId && destination === returnTo.value;
     const confirm = (action: () => Promise<void>) => async () => {
@@ -52,7 +53,7 @@ export function useExpertSummon() {
     };
     if (prompt && !replaceText && ((drafts.texts[draftTarget] ?? "").length > 0 || chat.draftAttachments.length > 0)) {
       closeConfirmation();
-      const keepDraft = confirm(() => summon(entry)), replaceDraft = confirm(() => summon(entry, prompt, true));
+      const keepDraft = confirm(() => summon(entry, undefined, false, true)), replaceDraft = confirm(() => summon(entry, prompt, true));
       openConfirmation({
         title: "保留当前草稿", content: "召唤专家后，可保留当前草稿，或用参考问题替换文字。附件会保留。",
         positiveText: "保留当前草稿", negativeText: "替换文字", onPositiveClick: keepDraft, onNegativeClick: replaceDraft,
@@ -67,7 +68,7 @@ export function useExpertSummon() {
     }
     if (selected.value && (selected.value.expertId !== entry.display.expertId || selected.value.version !== entry.display.version) && !replaceText) {
       closeConfirmation();
-      openConfirmation({ title: "更换专家", content: "将从下一条消息使用新专家，已有聊天保留。", positiveText: "更换", negativeText: "取消", onPositiveClick: confirm(() => summon(entry, prompt, true)) });
+      openConfirmation({ title: "更换专家", content: "将从下一条消息使用新专家，已有聊天保留。", positiveText: "更换", negativeText: "取消", onPositiveClick: confirm(() => summon(entry, prompt, true, preserveText)) });
       return;
     }
     pending.value = true; error.value = null;
@@ -86,7 +87,10 @@ export function useExpertSummon() {
         if (!applied) { error.value = binding.errors[localSession] ?? "会话暂不能切换专家，请返回对话查看状态。"; return; }
       } else drafts.setExpert("new", ready.display);
       if (!isCurrentDestination()) return;
-      if (prompt) drafts.texts = updateChatComposerDraft(drafts.texts, draftTarget, prompt);
+      if (prompt) {
+        // Resource preparation and binding may finish after the user edits.
+        if ((drafts.texts[draftTarget] ?? "") === originalText) drafts.texts = updateChatComposerDraft(drafts.texts, draftTarget, prompt);
+      } else if (!preserveText) drafts.prefillExpertPrompt(draftTarget, ready);
       await router.push({ path: destination, query: { focus: "composer" } });
     } finally { pending.value = false; }
   }

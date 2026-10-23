@@ -18,6 +18,23 @@ beforeEach(() => {
   useChatExpertsStore().bind(id(1), "scope-one");
 });
 describe("expert summon navigation and prefill", () => {
+  it("summoning without a question prefills the catalog default and never submits", async () => {
+    const drafts = useChatComposerDraftStore(), submit = vi.spyOn(expertNativeClient, "submit");
+    try {
+      await useExpertSummon().summon({ ...expertEntry, state: "ready" });
+      expect(drafts.texts.new).toBe(expertEntry.quickPrompts[0]);
+      expect(drafts.expert("new")).toEqual(expertDisplay);
+      expect(mocks.info).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled();
+    } finally { submit.mockRestore(); }
+  });
+  it("keeping a draft also preserves a previous untouched automatic prompt", async () => {
+    const drafts = useChatComposerDraftStore();
+    drafts.prefillExpertPrompt("new", { ...expertEntry, quickPrompts: ["保留自动文案"] });
+    const flow = useExpertSummon();
+    await flow.summon(expertEntry, "指定参考问题");
+    await mocks.info.mock.calls[0]![0].onPositiveClick();
+    expect(drafts.texts.new).toBe("保留自动文案");
+  });
   it.each(["new", "existing"] as const)("prepares an available display and summons %s through the real generated validators", async (target) => {
     const selection = { expertId: expertDisplay.expertId, version: expertDisplay.version };
     const resources = useExpertsStore();
@@ -94,7 +111,22 @@ describe("expert summon navigation and prefill", () => {
       expect(select).toHaveBeenCalledWith(id(2), expertDisplay);
       expect(mocks.push).toHaveBeenCalledWith({ path: `/chat/${id(2)}`, query: { focus: "composer" } });
       expect(useChatComposerDraftStore().expert("new")).toBeNull();
+      expect(useChatComposerDraftStore().texts[`session:${id(2)}`]).toBe(expertEntry.quickPrompts[0]);
     } finally { select.mockRestore(); }
+  });
+  it.each([undefined, "指定参考问题"])("preserves later user edits while preparing prompt %s", async prompt => {
+    const resources = useExpertsStore(), drafts = useChatComposerDraftStore();
+    resources.snapshot = { ...expertSnapshot(), executionAvailable: true };
+    let done!: (ready: boolean) => void;
+    const prepare = vi.spyOn(resources, "execute").mockImplementation(() => new Promise(resolve => { done = resolve; }));
+    try {
+      const request = useExpertSummon().summon(expertEntry, prompt);
+      drafts.texts = { new: "等待期间写的任务" } as typeof drafts.texts;
+      resources.snapshot = { ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true };
+      done(true); await request;
+      expect(drafts.texts.new).toBe("等待期间写的任务");
+      expect(drafts.expert("new")).toEqual(expertDisplay);
+    } finally { prepare.mockRestore(); }
   });
   it("a pending Native binding prevents another selection or navigation", async () => {
     mocks.route.query.from = `/chat/${id(2)}`;

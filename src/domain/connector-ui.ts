@@ -16,6 +16,8 @@ export interface ConnectorView {
   readonly categoryLabel: string;
   readonly installed: boolean;
   readonly enabled: boolean;
+  /** Saved global intent, separate from current connection readiness. */
+  readonly desiredEnabled?: boolean;
   readonly selectable: boolean;
   readonly status: ConnectorStatusView;
   readonly explanation: string | null;
@@ -44,7 +46,7 @@ export function connectorCan(view: ConnectorView, action: ConnectorAction): bool
 }
 
 export function connectorSwitchDisabled(view: ConnectorView, canManage: boolean): boolean {
-  return !canManage || view.busy || (view.enabled
+  return !canManage || view.busy || ((view.desiredEnabled ?? view.enabled)
     ? !view.actions.includes("disable")
     : !view.actions.some(action => action === "enable" || action === "configure"));
 }

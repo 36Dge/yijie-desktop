@@ -5,12 +5,48 @@ import { updateChatComposerDraft } from "../domain/chat-composer-draft";
 import { useChatComposerDraftStore } from "./chat-composer-drafts.store";
 import type { PermissionPhase } from "../domain/permissions";
 import { installedSkill } from "../test/skill-fixture";
+import { expertEntry } from "../test/expert-fixture";
 
 const permission = reactive({ selectedTenantId: "scope-a" as string | null, phase: "ready" as PermissionPhase, capabilities: ["task.create", "task.read", "connector.use"], hasCapability(capability: string) { return this.capabilities.includes(capability); } });
 vi.mock("./permission.store", () => ({ usePermissionStore: () => permission }));
 beforeEach(() => { setActivePinia(createPinia()); permission.selectedTenantId = "scope-a"; permission.phase = "ready"; permission.capabilities = ["task.create", "task.read", "connector.use"]; });
 
 describe("connector-aware in-memory composer drafts", () => {
+  it("replaces untouched expert prompts but preserves user edits, even after reverting their text", () => {
+    const store = useChatComposerDraftStore();
+    const second = { ...expertEntry, quickPrompts: ["规划新品推广"] };
+    store.prefillExpertPrompt("new", expertEntry);
+    expect(store.texts.new).toBe("整理当前任务");
+    store.prefillExpertPrompt("new", second);
+    expect(store.texts.new).toBe("规划新品推广");
+    store.texts = updateChatComposerDraft(store.texts, "new", "规划我的新品推广");
+    store.texts = updateChatComposerDraft(store.texts, "new", "规划新品推广");
+    store.prefillExpertPrompt("new", expertEntry);
+    expect(store.texts.new).toBe("规划新品推广");
+    store.clearExpertPrompt("new");
+    expect(store.texts.new).toBe("规划新品推广");
+  });
+  it("isolates defaults by conversation, removes only automatic copy and clears provenance on logout", () => {
+    const store = useChatComposerDraftStore();
+    store.prefillExpertPrompt("new", expertEntry);
+    store.prefillExpertPrompt("session:one", { ...expertEntry, quickPrompts: ["会话问题"] });
+    store.setExpert("new", null);
+    expect(store.texts.new).toBeUndefined(); expect(store.texts["session:one"]).toBe("会话问题");
+    store.clearTarget("session:one"); expect(store.texts).toEqual({});
+    store.prefillExpertPrompt("new", expertEntry);
+    permission.phase = "unauthorized";
+    expect(store.texts).toEqual({});
+    store.texts = updateChatComposerDraft(store.texts, "new", "整理当前任务");
+    store.prefillExpertPrompt("new", { ...expertEntry, quickPrompts: ["另一问题"] });
+    expect(store.texts.new).toBe("整理当前任务");
+  });
+  it("uses original catalog copy and supplies a task-oriented fallback for catalogs without questions", () => {
+    const store = useChatComposerDraftStore();
+    store.prefillExpertPrompt("new", { ...expertEntry, quickPrompts: [" ", " 请整理任务。 "] });
+    expect(store.texts.new).toBe(" 请整理任务。 ");
+    store.prefillExpertPrompt("new", { ...expertEntry, quickPrompts: [] });
+    expect(store.texts.new).toBe("请以普通合成专家的专业视角，先确认我的任务目标和所需资料，再给出具体方案。");
+  });
   it("isolates skill choices per draft, preserves navigation, and clears them on logout or accepted submission", () => {
     const store = useChatComposerDraftStore();
     store.setSkills("new", [installedSkill]);

@@ -123,7 +123,7 @@ describe("ten adapted experts use the existing Native catalog and summon flow", 
     expect(dialog.querySelector("img")).not.toBeNull();
     expect(dialog.textContent).toContain(entry.description);
     expect(transport).not.toHaveBeenCalled();
-    [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === entry.quickPrompts[0])!.click();
+    [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(button => button.getAttribute("aria-label") === `去试试：${entry.quickPrompts[0]}`)!.click();
     await flushPromises();
     expect(transport.mock.calls.map(call => call[0])).toEqual(["experts_prepare_v1", "experts_snapshot_v1"]);
     expect(transport.mock.calls[0]![1].request.payload.expert).toEqual({ expertId, version: entry.display.version });

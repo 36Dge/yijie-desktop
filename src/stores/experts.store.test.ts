@@ -6,7 +6,7 @@ import { expertDisplay, expertEntry, expertSnapshot, expertTestId as id } from "
 import { createExpertsStoreDefinition } from "./experts.store";
 
 function setup() {
-  const client = { snapshot: vi.fn().mockResolvedValue(expertSnapshot()), prepare: vi.fn(), remove: vi.fn(), operation: vi.fn(), recoverOperation: vi.fn(), binding: vi.fn(), setBinding: vi.fn(), bindingOperation: vi.fn(), recoverBinding: vi.fn(), submit: vi.fn() } satisfies ExpertNativeClient;
+  const client = { developer: vi.fn(), snapshot: vi.fn().mockResolvedValue(expertSnapshot()), prepare: vi.fn(), remove: vi.fn(), operation: vi.fn(), recoverOperation: vi.fn(), binding: vi.fn(), setBinding: vi.fn(), bindingOperation: vi.fn(), recoverBinding: vi.fn(), submit: vi.fn() } satisfies ExpertNativeClient;
   const store = createExpertsStoreDefinition(client, `expert-test-${crypto.randomUUID()}`)();
   return { client, store };
 }

@@ -957,7 +957,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 })
                 .map(|(id, record)| {
                     super::native_conversation_generated::NativeConversationViewEvent {
-                        schema_version: 2,
+                        schema_version: 4,
                         context_id: record.context_id.to_string(),
                         subscription_id: id.to_string(),
                         session_id: session_id.to_string(),
@@ -971,8 +971,15 @@ impl TurnProjectionSink for ChatEventBridge {
             .get_webview_window("main")
             .ok_or(ChatError::OrchestrationUnavailable)?;
         for event in events {
-            let mut legacy =
+            let mut previous =
                 serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
+            previous["schemaVersion"] = serde_json::json!(2);
+            strip_native_process_extension(&mut previous["view"]);
+            let previous: super::native_conversation_v2_generated::NativeConversationViewEvent =
+                serde_json::from_value(previous)
+                    .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let mut legacy =
+                serde_json::to_value(&previous).map_err(|_| ChatError::OrchestrationUnavailable)?;
             legacy["schemaVersion"] = serde_json::json!(1);
             strip_native_mcp_extension(&mut legacy["view"]);
             let legacy: super::native_conversation_legacy_generated::NativeConversationViewEvent =
@@ -981,7 +988,19 @@ impl TurnProjectionSink for ChatEventBridge {
                 .emit("chat:native-view:v1", legacy)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
             window
-                .emit("chat:native-view:v2", event)
+                .emit("chat:native-view:v2", previous)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let mut third =
+                serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
+            third["schemaVersion"] = serde_json::json!(3);
+            strip_native_source_extension(&mut third["view"]);
+            let third: super::native_conversation_v3_generated::NativeConversationViewEvent =
+                serde_json::from_value(third).map_err(|_| ChatError::OrchestrationUnavailable)?;
+            window
+                .emit("chat:native-view:v3", third)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            window
+                .emit("chat:native-view:v4", event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
         Ok(())
@@ -8484,6 +8503,72 @@ fn strip_native_mcp_extension(view: &mut Value) {
 
 #[tauri::command]
 pub async fn chat_load_native_history_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let mut response = chat_load_native_history_v3(request, chat_runtime, ipc_runtime).await?;
+    if let Some(views) = response
+        .get_mut("data")
+        .and_then(|v| v.get_mut("views"))
+        .and_then(Value::as_array_mut)
+    {
+        for view in views {
+            strip_native_process_extension(view);
+        }
+    }
+    Ok(response)
+}
+
+fn strip_native_process_extension(view: &mut Value) {
+    if let Some(items) = view.get_mut("items").and_then(Value::as_array_mut) {
+        for entry in items {
+            if let Some(item) = entry.get_mut("item") {
+                if item.get("type").and_then(Value::as_str) == Some("webSearch") {
+                    *item = serde_json::json!({
+                        "id": item["id"], "type": "unknown", "availability": "unavailable"
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn strip_native_source_extension(view: &mut Value) {
+    if let Some(items) = view.get_mut("items").and_then(Value::as_array_mut) {
+        for entry in items {
+            if let Some(search) = entry
+                .get_mut("item")
+                .and_then(|v| v.get_mut("webSearch"))
+                .and_then(Value::as_object_mut)
+            {
+                search.remove("sources");
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v3(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let mut response = chat_load_native_history_v4(request, chat_runtime, ipc_runtime).await?;
+    if let Some(views) = response
+        .get_mut("data")
+        .and_then(|v| v.get_mut("views"))
+        .and_then(Value::as_array_mut)
+    {
+        for view in views {
+            strip_native_source_extension(view);
+        }
+    }
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v4(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,

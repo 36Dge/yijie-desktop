@@ -24,8 +24,8 @@ describe("FEAT-132 readonly native view",()=>{
  it("keeps legacy IDs and archive provenance when no native facts exist",()=>{const view=composeConversationView(legacy,[]);expect(Object.values(view.items)[0]?.itemId).toBe("old-display");expect(Object.values(view.turns)[0]?.source).toBe("legacy_archive");});
  it("marks queued submission failure separately from native execution",()=>{const view=composeConversationView(legacy,[],[{turnId:"local-turn",operationId:"operation",status:"failed"}]);expect(Object.values(view.turns)[0]).toMatchObject({source:"local_submission",submissionStatus:"failed",status:"queued",terminalStatus:null});});
  it("validates the generated private boundary and rejects unknown status/version",()=>{
-   const event={schemaVersion:2,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native};expect(validateNativeViewEvent(event)).toBe(true);
-   expect(validateNativeViewEvent({...event,schemaVersion:3})).toBe(false);expect(validateNativeViewEvent({...event,view:{...native,status:"guess-failed"}})).toBe(false);
+   const event={schemaVersion:3,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native};expect(validateNativeViewEvent(event)).toBe(true);
+   expect(validateNativeViewEvent({...event,schemaVersion:4})).toBe(false);expect(validateNativeViewEvent({...event,view:{...native,status:"guess-failed"}})).toBe(false);
    expect(validateNativeHistory({views:[native],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
  });
 });

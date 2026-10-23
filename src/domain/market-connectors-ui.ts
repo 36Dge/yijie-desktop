@@ -127,7 +127,7 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
     return {
       id: entry.serviceId, name: entry.displayName, description: entry.description || `连接${entry.displayName}，在对话中使用其服务能力。`,
       iconAssetId: entry.iconAssetId, categoryId: entry.categoryId, categoryLabel: entry.categoryLabel,
-      installed, enabled,
+      installed, enabled, desiredEnabled: installation?.desiredEnabled ?? false,
       selectable: enabled && installation?.connectionStatus === "ready" && canUse && snapshot.executionAvailable && !busy,
       status: statusFor(entry, installation, pending),
       explanation,

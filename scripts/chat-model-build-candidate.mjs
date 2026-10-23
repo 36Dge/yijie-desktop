@@ -27,6 +27,7 @@ function snapshot(root,media=false){
 }
 function candidateContracts(desktopRoot,expert){
  const files=modelFamilies.map(f=>[f,`${f}.candidate.json`]);
+ files.push(['native-process','native-process.candidate.json']);
  if(expert){
   files.push(...expertFamilies.map(f=>[f,`${f}.candidate.json`]));
   files.push(['experts-assets','experts-assets.candidate.json'],['runtime-permissions','runtime-permissions.lock.json'],['desktop-skill-bundle-local','desktop-skill-bundle-local.lock.json']);
@@ -37,6 +38,8 @@ function expertAuthority(contractsRoot){
  return Object.fromEntries(expertSourceLocks.map(f=>[f,digest(readFileSync(path.join(contractsRoot,`compatibility/${f}/source.lock.json`)))]));
 }
 function verifyConsumers(desktopRoot,contractsRoot,expert){
+ execFileSync(process.execPath,['scripts/generate-native-process.mjs','--check'],{cwd:contractsRoot,stdio:'pipe'});
+ execFileSync(process.execPath,['scripts/sync-native-process.mjs','--candidate','--check'],{cwd:contractsRoot,stdio:'pipe'});
  for(const family of modelFamilies){
   execFileSync(process.execPath,[`scripts/sync-${family}.mjs`,'--check'],{cwd:contractsRoot,stdio:'pipe'});
  }

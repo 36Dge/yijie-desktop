@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-21",
+  "generator": "Codex built-in image_gen",
+  "derivation": "Unmodified generated PNG originals copied into the project. Existing CSS renders the assets at 24px, 48px and 64px.",
+  "assets": [
+    {
+      "expertId": "novel-creator",
+      "name": "小说故事创作专家",
+      "asset": "novel-creator.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-5e7577df-52db-42ce-bc4c-67e333c9ef22.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/novel-creator.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original adult woman novelist, warm brown half-up hair, thoughtful friendly expression, blue knit cardigan over cream blouse, holding an open cream book and one elegant quill. Preserve the reference's polished 2D editorial cartoon illustration, subtle cel shading, coral/rose outer background and a deep navy circular storytelling backdrop. Simplify the backdrop to two airy paper shapes; large readable face and book, refined anatomy, no tiny decorations.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "cd86b32e376c460bc940b2f26987aa25ca09f5118700692b23bd06147ce22ef5",
+      "referenceSha256": "472b72e154a6c895b0ec5b990e20a6e0fbea7776201bfab2a2899b6c72399297"
+    },
+    {
+      "expertId": "data-analyst-pro",
+      "name": "数据分析专家",
+      "asset": "data-analyst-pro.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-11cbe0cf-ada4-468c-97a3-b64e1dc5dcfe.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/data-analyst-pro.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original adult male data analyst, neatly swept dark charcoal hair, warm confident face, teal shirt and dark jacket, chest-up portrait. Preserve the reference's polished 2D comic/editorial portrait, clean expressive linework and soft cel shading. Background is pale cool blue with a large cyan circular disc and a restrained three-bar chart silhouette. Improve calm approachable facial expression and clean composition.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "6bff2d5c2d3abf27e250baceefcdf6b0ef5855b4f05ae5c4ad22e176b3e40228",
+      "referenceSha256": "867cce417a2b0232dce32086f5209e7926b4e1fdc0bf330cc36796ed4498f677"
+    },
+    {
+      "expertId": "linkfox-expert-aigc-videogen-sale",
+      "name": "跨境电商带货口播专家",
+      "asset": "linkfox-expert-aigc-videogen-sale.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-3bac7545-6a09-449d-9f8d-70b0a6c3a33c.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/linkfox-expert-aigc-videogen-sale.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original adult female ecommerce video presenter, dark high ponytail, friendly smile, teal blazer over a warm orange top, holding one handheld microphone naturally. A small dark smartphone filming rig beside her shoulder, and a single simplified orange parcel/play motif behind. Preserve polished 2D flat editorial cartoon style of reference, crisp clean shapes and subtle cel shading, pale blue background, teal/orange palette. Clear face and microphone, anatomically correct visible hand.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "7244a283c4674f5770a35a2b04545ce2763a9aba34bffaab9b3e89194e189a92",
+      "referenceSha256": "06fd3e8bcbabdea9693ee6261dfdd052b7238177fcf528ac79129b1bd0c1fc91"
+    },
+    {
+      "expertId": "equity-research",
+      "name": "股票研究专家",
+      "asset": "equity-research.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-29956e28-fae4-470c-873e-6ae9ee6c503d.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/equity-research.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original adult male equity research analyst, neat dark side-part hair, tasteful rectangular glasses, composed friendly expression, forest green suit, white shirt and navy tie, small muted gold pocket square. Preserve reference's clean 2D editorial cartoon portrait style, dark outlines, restrained cel shading, flat deep forest-green background. Head and upper shoulders fill the frame, professional original face, refined symmetry and natural anatomy.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "95b3591fd7ab79674c2e764cde414603d88dcd1183364eb13a3c9846b73f8864",
+      "referenceSha256": "2290e12d80376429a890b04d9bb4de21741a984602938e364b5fafcb38b74067"
+    },
+    {
+      "expertId": "strategy-backtest-expert",
+      "name": "量化策略回测师",
+      "asset": "strategy-backtest-expert.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-72ba2c2a-cfa1-47eb-95b9-71651046c1ba.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/strategy-backtest-expert.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original adult female quantitative analyst, sleek dark chin-length bob, intelligent approachable expression, navy blazer and pale blue blouse, holding the edge of a simple tablet with two clear chart lines in the lower corner. Preserve reference's polished 2D editorial cartoon portrait, crisp dark contours, restrained cel shading, deep navy square background. Prominent face, no clothing badge, no letters, simplify tablet details for small-size clarity.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "34823a992a5becca2272d03f078ee0a5bd0f60119fcab3580867e3662a306cbe",
+      "referenceSha256": "1587d04fcf04e73a221b9b7f41a8ea35e83f396edb19b4b2789189f8325f1030"
+    },
+    {
+      "expertId": "moss-industry-research",
+      "name": "行业研究专家-MOSS",
+      "asset": "moss-industry-research.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-21e6bdaa-cdc1-4cac-82f8-9b4f3780c20f.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/moss-industry-research.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A newly designed premium compact scientific telescope on a solid rotating desk pedestal, elegant short cylindrical dark graphite and teal body, large luminous cyan objective lens, aimed diagonally upward. Preserve reference's sophisticated stylized 3D icon rendering, metallic teal materials, subtle brushed texture and soft cinematic highlights, deep petrol-blue background with restrained cyan halo. Bold simple recognizable silhouette, fully visible telescope and base, no intricate screws, no blown-out lens, beautifully engineered form.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "6a885a74cec94c9fba644dbe5d28c9661088ac3be8bde4f6902aae640721fb34",
+      "referenceSha256": "33b38d5bbe8584945fad02d6400b084de71511f24f3ad016bdf08a780f5cdf64"
+    },
+    {
+      "expertId": "cross-border-ecommerce-operations-expert",
+      "name": "跨境电商运营专家",
+      "asset": "cross-border-ecommerce-operations-expert.png",
+      "source": "/Users/jack/.codex/generated_images/01a15dcc-e960-7eb0-8bb1-5e6b929b2a76/exec-9d91eb8b-b993-4d6d-8ef1-c53956051779.png",
+      "reference": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src/assets/expert-showcase/cross-border-ecommerce-operations-expert.png",
+      "prompt": "Use case: stylized-concept. Asset type: one finished square expert avatar/app icon for the YiJie desktop expert marketplace, displayed at 24px, 48px and 64px. Primary request: generate a high-quality replacement icon, retaining the existing icon's visual style and profession, while creating a genuinely new illustration. Input image 1 is a STYLE AND ROLE REFERENCE, not a UI screenshot to reproduce. A fresh original global ecommerce app emblem: a bold globe with simple meridian arcs, elegantly integrated with a small shipping parcel and one flowing orbital arrow. Preserve the reference's clean graphic app-icon visual language, rich indigo-violet background, luminous cyan-to-lavender emblem with one warm golden-orange accent. Filled graphic shapes, restrained smooth gradients, sophisticated polished brand-style mark, centered powerful silhouette readable at 48px. Replace the old letter logo and all text with this distinct non-letter pictorial ecommerce emblem; no portrait and no realistic scene.\nComposition: one centered subject, head/primary object clearly prominent, balanced optical weight, about 8% safe inset. Full-bleed opaque square background all the way to every edge; the app applies rounded corners. Deliver exactly one square icon, no contact sheet. High quality, clean edges, controlled detail, readable at tiny sizes. No white frame or bottom strip, no pre-rounded outer corners, no text, letters, numbers, signature, watermarks, official company logos or AI label. Do not merely upscale or reuse reference pixels.",
+      "dimensions": [
+        1254,
+        1254
+      ],
+      "sha256": "1cb29bf10a1eedd612f2907e9f48ea06fe2514bbbb16b836de36c7fb75c9ca1e",
+      "referenceSha256": "4ea48cfa7caac462a0097270372db4dcf4d832ddf9ea6a5ca454def0614ab8c8"
+    }
+  ]
+}

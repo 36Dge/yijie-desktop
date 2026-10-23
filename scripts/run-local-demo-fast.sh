@@ -163,7 +163,7 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
   candidate_lock="$desktop_root/contracts/runtime-chat-models.candidate.json"
-  codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/chat-models-stream-args/aarch64-apple-darwin}"
+  codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/chat-models-web-sources/aarch64-apple-darwin}"
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
   runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
@@ -285,6 +285,7 @@ fi
 cd "$desktop_root"
 node scripts/check-native-conversation.mjs --require-committed
 node scripts/check-native-mcp.mjs --require-committed
+node scripts/check-native-process.mjs --candidate
 YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
 YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
   node scripts/check-agent-host-v4-contract.mjs

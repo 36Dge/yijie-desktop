@@ -406,6 +406,7 @@ pub(super) async fn handle(
             "auth" => "provider_auth_begin",
             "probe" => "provider_probe",
             "forget" => "provider_forget",
+            "suspend" => "provider_suspend",
             _ => return Err(Error::OutcomeUnknown),
         }
     };
@@ -429,6 +430,7 @@ pub(super) async fn handle(
         "provider_auth_poll" => exchange!(AuthPollRequest, AuthPollResponse),
         "provider_auth_cancel" => exchange!(AuthCancelRequest, AuthCancelResponse),
         "provider_forget" => exchange!(ForgetRequest, ForgetResponse),
+        "provider_suspend" => exchange!(SuspendRequest, SuspendResponse),
         "provider_probe" => exchange!(ProbeRequest, ProbeResponse),
         _ => unreachable!(),
     };
@@ -747,7 +749,22 @@ mod tests {
         setup_database(rusqlite::Connection::open_in_memory().unwrap())
     }
     fn setup_database(
+        db: rusqlite::Connection,
+    ) -> (
+        rusqlite::Connection,
+        ChatScope,
+        ui::Installation,
+        String,
+        super::super::broker_generated::ScopeBinding,
+    ) {
+        setup_database_version(
+            db,
+            crate::chat::migrations::CONNECTOR_SUSPEND_SCHEMA_VERSION,
+        )
+    }
+    fn setup_database_version(
         mut db: rusqlite::Connection,
+        version: i64,
     ) -> (
         rusqlite::Connection,
         ChatScope,
@@ -756,11 +773,7 @@ mod tests {
         super::super::broker_generated::ScopeBinding,
     ) {
         db.pragma_update(None, "foreign_keys", true).unwrap();
-        crate::chat::migrations::migrate_to_target(
-            &mut db,
-            crate::chat::migrations::MARKET_PROVIDER_SCHEMA_VERSION,
-        )
-        .unwrap();
+        crate::chat::migrations::migrate_to_target(&mut db, version).unwrap();
         let scope = ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap();
         let entry = catalog()
             .catalog
@@ -1048,7 +1061,7 @@ mod tests {
         assert!(!completed.result.installation.desired_enabled);
     }
     #[test]
-    fn disable_fences_pending_auth_before_forget_receipt_and_late_auth_stays_stale() {
+    fn uninstall_fences_pending_auth_before_forget_receipt_and_late_auth_stays_stale() {
         let (mut db, scope, item, host, authority) = setup();
         let auth = begin(
             &mut db,
@@ -1065,7 +1078,7 @@ mod tests {
             &item,
             &host,
             authority,
-            ui::OperationAction::Disable,
+            ui::OperationAction::Uninstall,
         );
         assert!(
             forget.payload.binding.reference.revision > auth.payload.binding.reference.revision
@@ -1221,6 +1234,162 @@ mod tests {
             .err(),
             Some(Error::ExecutionUnavailable)
         );
+    }
+
+    #[test]
+    fn suspend_migration_preserves_preexisting_enablement_and_operation_receipts() {
+        let (mut db, scope, item, host, authority) =
+            setup_database_version(rusqlite::Connection::open_in_memory().unwrap(), 36);
+        let enabled = qualified_enable(&mut db, &scope, &item, &host, authority.clone());
+        let before = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        let receipt = store::provider_operation(&db, &scope, &enabled.payload.operation_id)
+            .unwrap()
+            .unwrap();
+        crate::chat::migrations::migrate_to_target(
+            &mut db,
+            crate::chat::migrations::CONNECTOR_SUSPEND_SCHEMA_VERSION,
+        )
+        .unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            37
+        );
+        let after = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            store::provider_operation(&db, &scope, &enabled.payload.operation_id)
+                .unwrap()
+                .unwrap()
+                .result,
+            receipt.result
+        );
+        let suspended = begin(
+            &mut db,
+            &scope,
+            &after,
+            &host,
+            authority,
+            ui::OperationAction::Disable,
+        );
+        assert_eq!(suspended.kind, "suspend");
+        assert_eq!(
+            suspended.result.installation.credential_ref,
+            after.credential_ref
+        );
+        assert_eq!(suspended.result.installation.generation, after.generation);
+    }
+
+    #[test]
+    fn suspend_preserves_credentials_authorization_and_reenable_after_normal_reopen() {
+        let root = std::env::temp_dir().join(format!("yijie-suspend-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("ordinary.db");
+        let (mut db, scope, item, host, authority) =
+            setup_database(rusqlite::Connection::open(&path).unwrap());
+        let enabled = qualified_enable(&mut db, &scope, &item, &host, authority.clone());
+        let item = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        let suspended = begin(
+            &mut db,
+            &scope,
+            &item,
+            &host,
+            authority.clone(),
+            ui::OperationAction::Disable,
+        );
+        assert_eq!(suspended.kind, "suspend");
+        assert_eq!(
+            suspended.payload.binding.credential_ref,
+            enabled.payload.binding.credential_ref
+        );
+        assert!(!suspended.result.operation.cancellable);
+        let mut stopped = status(&suspended, p::OperationState::Succeeded);
+        stopped.authorization_status = p::AuthorizationStatus::Unknown;
+        stopped.connection_status = p::ConnectionStatus::Disconnected;
+        let finished =
+            store::finish_provider(&mut db, &scope, &suspended, stopped.clone(), 104).unwrap();
+        assert_eq!(
+            finished.result.installation.credential_ref,
+            item.credential_ref
+        );
+        assert_eq!(finished.result.installation.generation, item.generation);
+        assert!(!finished.result.installation.desired_enabled);
+        assert_eq!(
+            finished.result.installation.status,
+            ui::InstallationStatus::Installed
+        );
+        assert_eq!(
+            finished.result.installation.configuration_status,
+            ui::ConfigurationStatus::Configured
+        );
+        assert_eq!(
+            finished.result.installation.authorization_status,
+            ui::AuthorizationStatus::Authorized
+        );
+        assert_eq!(
+            store::finish_provider(&mut db, &scope, &suspended, stopped, 105)
+                .unwrap()
+                .result,
+            finished.result
+        );
+        db.close().unwrap();
+        let mut db = rusqlite::Connection::open(&path).unwrap();
+        let stored = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert_eq!(stored.credential_ref, item.credential_ref);
+        assert_eq!(stored.generation, item.generation);
+        assert_eq!(
+            stored.configuration_status,
+            ui::ConfigurationStatus::Configured
+        );
+        assert_eq!(
+            stored.authorization_status,
+            ui::AuthorizationStatus::Authorized
+        );
+        assert!(!stored.effective_enabled);
+        let retry = begin(
+            &mut db,
+            &scope,
+            &stored,
+            &host,
+            authority.clone(),
+            ui::OperationAction::Enable,
+        );
+        assert_eq!(retry.kind, "probe");
+        assert_eq!(
+            retry.payload.binding.credential_ref,
+            enabled.payload.binding.credential_ref
+        );
+        let mut live = status(&retry, p::OperationState::Succeeded);
+        live.qualification = p::Qualification::Qualified;
+        live.execution_available = true;
+        let completed = store::finish_provider(&mut db, &scope, &retry, live, 106).unwrap();
+        assert!(completed.result.installation.desired_enabled);
+        // Explicit uninstall still clears the binding and changes credential generation.
+        let uninstall = begin(
+            &mut db,
+            &scope,
+            &completed.result.installation,
+            &host,
+            authority,
+            ui::OperationAction::Uninstall,
+        );
+        assert_eq!(uninstall.kind, "forget");
+        let removed = store::finish_provider(
+            &mut db,
+            &scope,
+            &uninstall,
+            status(&uninstall, p::OperationState::Succeeded),
+            107,
+        )
+        .unwrap();
+        assert!(removed.result.installation.credential_ref.is_none());
+        assert_eq!(
+            removed.result.installation.status,
+            ui::InstallationStatus::Removed
+        );
+        assert!(removed.result.installation.generation > item.generation);
+        db.close().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -34,3 +34,5 @@ export function expertResourceOperationMessage(operation: ResourceOperation): st
 export const expertResourceLabels: Readonly<Record<ResourceState, string>> = {
   available: "待准备", preparing: "正在准备", ready: "资源已准备", unavailable: "暂不可用", incompatible: "版本不兼容",
 };
+
+export const defaultExpertDeveloper = "易界 AI";

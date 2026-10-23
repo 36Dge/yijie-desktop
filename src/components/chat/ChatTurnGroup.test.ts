@@ -317,6 +317,8 @@ describe("ChatTurnGroup", () => {
 
     await disclosure.trigger("click");
     expect(disclosure.attributes("aria-expanded")).toBe("true");
+    expect(reasoningItems.every(item => !item.isVisible())).toBe(true);
+    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
     expect(reasoningItems.every(item => item.isVisible())).toBe(true);
     expect(reasoningItems[0]?.get(".chat-timeline-item-shell__body").text())
       .toContain("**短过程保持字面量**");

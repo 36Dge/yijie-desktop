@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "NativeConversationViewV2",
+  "title": "NativeConversationViewV3",
   "$ref": "#/definitions/NativeConversationViewEvent",
   "definitions": {
     "NativeItem": {
@@ -24,6 +24,7 @@
             "reasoning",
             "commandExecution",
             "mcpToolCall",
+            "webSearch",
             "unknown"
           ]
         },
@@ -152,6 +153,9 @@
         },
         "mcp": {
           "$ref": "#/definitions/NativeMcpDisplay"
+        },
+        "webSearch": {
+          "$ref": "#/definitions/NativeWebSearchDisplay"
         }
       }
     },
@@ -321,7 +325,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            2
+            4
           ]
         },
         "source": {
@@ -371,7 +375,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            8
+            11
           ]
         },
         "event_id": {
@@ -607,6 +611,68 @@
         }
       }
     },
+    "NativeWebSearchDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "queries"
+      ],
+      "description": "Safe display of the native WebSearchAction only. No execution or lifecycle inference. Queries/pattern are bounded and redacted; pageLabel is a hostname only, never an actionable URL. Optional sources are actual search hits, never inferred citations. Absence means no source metadata observed.",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "search",
+            "openPage",
+            "findInPage",
+            "other"
+          ]
+        },
+        "queries": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "pageLabel": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/NativeWebSearchSourceDisplay"
+          }
+        }
+      }
+    },
+    "NativeWebSearchSourceDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "description": "Actual provider search hit. Inert text only; not a verified citation or executable link. URL must be safe HTTP(S), no credentials, bounded and redacted; unsafe entries are omitted with partial availability.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
     "NativeDisplayItem": {
       "type": "object",
       "additionalProperties": false,
@@ -800,7 +866,7 @@
         "schemaVersion": {
           "type": "integer",
           "enum": [
-            2
+            4
           ]
         },
         "contextId": {

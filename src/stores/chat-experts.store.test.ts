@@ -7,7 +7,7 @@ import { bindingTurnIntent, createChatExpertsStoreDefinition } from "./chat-expe
 
 const view = (): BindingView => ({ sessionId: id(2), managed: true, bindingRevision: 1, expert: expertDisplay, state: "ready" });
 function setup() {
-  const client = { snapshot: vi.fn(), prepare: vi.fn(), remove: vi.fn(), operation: vi.fn(), recoverOperation: vi.fn(), binding: vi.fn().mockResolvedValue(view()), setBinding: vi.fn(), bindingOperation: vi.fn(), recoverBinding: vi.fn(), submit: vi.fn() } satisfies ExpertNativeClient;
+  const client = { developer: vi.fn(), snapshot: vi.fn(), prepare: vi.fn(), remove: vi.fn(), operation: vi.fn(), recoverOperation: vi.fn(), binding: vi.fn().mockResolvedValue(view()), setBinding: vi.fn(), bindingOperation: vi.fn(), recoverBinding: vi.fn(), submit: vi.fn() } satisfies ExpertNativeClient;
   const store = createChatExpertsStoreDefinition(client, `chat-expert-${crypto.randomUUID()}`)();
   store.bind(id(1), "scope-one");
   return { client, store };

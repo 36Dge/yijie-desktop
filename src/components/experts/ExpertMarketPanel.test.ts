@@ -28,7 +28,7 @@ describe("expert candidate panel", () => {
     expect(document.activeElement).not.toBe(trigger.element);
     await trigger.trigger("click"); await flushPromises();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-    if (action === "close") document.querySelector<HTMLButtonElement>(".expert-detail .n-card-header__close")!.click();
+    if (action === "close") document.querySelector<HTMLButtonElement>(".expert-detail__close")!.click();
     else document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
     await flushPromises();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -41,7 +41,7 @@ describe("expert candidate panel", () => {
     const trigger = view.get<HTMLButtonElement>(".expert-card__details");
     await trigger.trigger("click"); await flushPromises();
     const focus = vi.spyOn(trigger.element, "focus");
-    document.querySelector<HTMLButtonElement>(".expert-detail .n-card-header__close")!.click();
+    document.querySelector<HTMLButtonElement>(".expert-detail__close")!.click();
     if (change === "navigate") navigation.route.fullPath = "/chat";
     else if (change === "context") store.contextId = id(2);
     else if (change === "inactive") active.value = false;
@@ -58,7 +58,7 @@ describe("expert candidate panel", () => {
     const store = useExpertsStore();
     store.contextId = id(1); store.snapshot = expertSnapshot({ ...expertEntry, state: "ready" });
     const view = render();
-    expect(view.text()).toContain("资源已准备");
+    expect(view.text()).not.toContain("资源已准备");
     expect(view.text()).toContain("当前执行环境暂不支持专家会话");
     const summon = view.findAll("button").find(button => button.text() === "召唤专家");
     expect(summon?.attributes("disabled")).toBeDefined();
@@ -76,7 +76,7 @@ describe("expert candidate panel", () => {
     const store = useExpertsStore(); store.contextId = id(1);
     store.snapshot = { ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true };
     render(ref(true), ref(true), ref(expertEntry.display.version)); await flushPromises();
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(`${expertEntry.display.subtitle} · ${expertEntry.display.version}`);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(`v${expertEntry.display.version}`);
     expect(document.body.textContent).not.toContain("所选专家版本详情不可用");
   });
   it("does not replace unavailable selected-version details with a newer catalog version", async () => {
@@ -91,31 +91,36 @@ describe("expert candidate panel", () => {
     expect(view.findComponent(ExpertMarketPanel).emitted("summon")).toBeUndefined();
     [...dialog.querySelectorAll('button')].find(button => button.textContent?.trim() === "返回专家目录")!.click(); await flushPromises();
     await view.get(".expert-card__details").trigger("click"); await flushPromises();
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(`${expertEntry.display.subtitle} · 0.2.0`);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("v0.2.0");
   });
-  it.each(["navigate", "context", "scope", "inactive", "unmount"] as const)("closes the original removal dialog on %s without removing resources", async (change) => {
-    const store = useExpertsStore(); store.contextId = id(1); store.scope = "scope-one";
-    store.snapshot = { ...expertSnapshot({ ...expertEntry, state: "ready" }), executionAvailable: true };
-    const remove = vi.spyOn(store, "execute").mockResolvedValue(true), show = ref(true), active = ref(true);
-    try {
-      const view = render(show, active);
-      await view.find(".expert-card__details").trigger("click"); await flushPromises();
-      [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "移除资源")!.click();
-      await flushPromises();
-      const confirm = [...document.querySelectorAll<HTMLButtonElement>('.n-dialog button')].find(button => button.textContent?.trim() === "移除")!;
-      expect(confirm).toBeDefined();
-      if (change === "navigate") navigation.route.fullPath = "/plugins?tab=skills";
-      else if (change === "context") store.contextId = id(2);
-      else if (change === "scope") store.scope = "scope-two";
-      else if (change === "inactive") active.value = false;
-      else show.value = false;
-      await flushPromises();
-      // Naive retains the hidden node until its normal leave transition finishes.
-      const dismissed = document.querySelector<HTMLElement>('.n-dialog');
-      expect(!dismissed || getComputedStyle(dismissed).display === "none").toBe(true);
-      confirm.click(); await flushPromises();
-      expect(remove).not.toHaveBeenCalled();
-    } finally { remove.mockRestore(); }
+  it.each(["available", "ready"] as const)("presents %s details without resource removal or informational banners", async (state) => {
+    const store = useExpertsStore(); store.contextId = id(1);
+    store.snapshot = { ...expertSnapshot({ ...expertEntry, state }), executionAvailable: true };
+    const view = render();
+    await view.get(".expert-card__details").trigger("click"); await flushPromises();
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("易界 AI");
+    expect(dialog.textContent).toContain("开发者信息");
+    expect(dialog.textContent).toContain("暂无统计");
+    expect(dialog.textContent).toContain("专家帮你做");
+    expect(dialog.textContent).toContain(expertEntry.display.expertId);
+    expect(dialog.textContent).not.toContain("移除资源");
+    expect(dialog.textContent).not.toContain("参考问题只填入输入框");
+    expect(dialog.textContent).not.toContain("当前版本仅获本地开发");
+    expect(dialog.querySelector('.n-alert')).toBeNull();
+    dialog.querySelector<HTMLButtonElement>('.expert-detail__prompt')!.click();
+    await flushPromises();
+    expect(view.findComponent(ExpertMarketPanel).emitted("summon")).toEqual([[{ ...expertEntry, state }, expertEntry.quickPrompts[0]]]);
+  });
+  it.each(["unavailable", "preparing", "incompatible"] as const)("keeps %s example questions disabled", async (state) => {
+    const store = useExpertsStore(); store.contextId = id(1);
+    store.snapshot = { ...expertSnapshot({ ...expertEntry, state }), executionAvailable: true };
+    const view = render();
+    await view.get(".expert-card__details").trigger("click"); await flushPromises();
+    const prompt = document.querySelector<HTMLButtonElement>('.expert-detail__prompt')!;
+    expect(prompt.disabled).toBe(true);
+    prompt.click(); await flushPromises();
+    expect(view.findComponent(ExpertMarketPanel).emitted("summon")).toBeUndefined();
   });
   it("explicit recovery confirms once and invokes only the original recovery command plus catalog read", async () => {
     const store = useExpertsStore(); store.contextId = id(1); store.scope = "scope-one";

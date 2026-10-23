@@ -6,10 +6,14 @@ import { fileURLToPath } from "node:url";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const require=createRequire(path.join(root,"../yijie-contracts/package.json"));
 const {compile}=require("json-schema-to-typescript");
-const publicSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v2.json"),"utf8"));
-const privateSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v2.schema.json"),"utf8"));
+const publicSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v4.json"),"utf8"));
+const privateSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v4.schema.json"),"utf8"));
+const previousPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v2.json"),"utf8"));
+const previousPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v2.schema.json"),"utf8"));
 const legacyPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation.json"),"utf8"));
 const legacyPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v1.schema.json"),"utf8"));
+const thirdPublic=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/native-conversation-v3.json"),"utf8"));
+const thirdPrivate=JSON.parse(await fs.readFile(path.join(root,"src-tauri/schemas/chat-native-conversation-v3.schema.json"),"utf8"));
 const permissionSpec=JSON.parse(await fs.readFile(path.join(root,"src-tauri/contracts/runtime-permissions-v2.json"),"utf8"));
 const schemas={...publicSpec.components.schemas,...privateSpec.definitions,McpApprovalScope:permissionSpec.components.schemas.McpApprovalScope,McpPermissionScopeResult:permissionSpec.components.schemas.McpPermissionScopeResult};
 const snake=name=>name.replace(/([a-z0-9])([A-Z])/g,"$1_$2").toLowerCase();
@@ -61,7 +65,17 @@ definitions.length=0;
 for(const[name,schema]of Object.entries({...legacyPublic.components.schemas,...legacyPrivate.definitions}))emit(schema,name);
 const legacyFormatted=spawnSync("rustfmt",["--edition","2021"],{input:`// Generated legacy v1 reader. Do not edit.\n${definitions.join("\n\n")}\n`,encoding:"utf8"});
 if(legacyFormatted.status!==0)throw new Error(legacyFormatted.stderr||"legacy rustfmt failed");
+definitions.length=0;
+for(const[name,schema]of Object.entries({...previousPublic.components.schemas,...previousPrivate.definitions}))emit(schema,name);
+const previousFormatted=spawnSync("rustfmt",["--edition","2021"],{input:`// Generated legacy v2 reader. Do not edit.\n${definitions.join("\n\n")}\n`,encoding:"utf8"});
+if(previousFormatted.status!==0)throw new Error(previousFormatted.stderr||"v2 rustfmt failed");
+definitions.length=0;
+for(const[name,schema]of Object.entries({...thirdPublic.components.schemas,...thirdPrivate.definitions}))emit(schema,name);
+const thirdFormatted=spawnSync("rustfmt",["--edition","2021"],{input:`// Generated legacy v3 reader. Do not edit.\n${definitions.join("\n\n")}\n`,encoding:"utf8"});
+if(thirdFormatted.status!==0)throw new Error(thirdFormatted.stderr||"v3 rustfmt failed");
 const outputs=[
+ ["src-tauri/src/chat/native_conversation_v3_generated.rs",thirdFormatted.stdout],
+ ["src-tauri/src/chat/native_conversation_v2_generated.rs",previousFormatted.stdout],
  ["src-tauri/src/chat/native_conversation_legacy_generated.rs",legacyFormatted.stdout],
  ["src/api/generated/native-conversation-history.gen.ts",historyTs],
  ["src/api/generated/native-conversation-validator.gen.js",validationCode],

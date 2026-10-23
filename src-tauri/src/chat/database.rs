@@ -929,7 +929,7 @@ impl ChatRepository {
         if super::connectors::enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::MARKET_PROVIDER_SCHEMA_VERSION,
+                migrations::CONNECTOR_SUSPEND_SCHEMA_VERSION,
             )?;
         }
         if super::experts::enabled() {
@@ -11134,7 +11134,7 @@ mod tests {
         // An ordinary future-format record is retained, not interpreted as a
         // missing snapshot or an invitation to reconstruct it from native history.
         repo.connection
-            .execute("UPDATE chat_native_views SET format_version=3", [])
+            .execute("UPDATE chat_native_views SET format_version=5", [])
             .unwrap();
         let records = repo
             .native_recovery_records(pending.session_id, &[pending.turn_id], None, true)
@@ -11145,7 +11145,7 @@ mod tests {
             records.record_diagnostics[0].turn_id,
             pending.turn_id.to_string()
         );
-        assert_eq!(records.record_diagnostics[0].format_version, 3);
+        assert_eq!(records.record_diagnostics[0].format_version, 5);
         assert!(repo
             .native_views(pending.session_id, &[pending.turn_id])
             .is_err());
@@ -11482,7 +11482,11 @@ mod tests {
             .unwrap();
         let context = repo.active_turn_context(pending.session_id).unwrap();
         let mut buffer = NativeDisplayBuffer::new(context.clone(), None).unwrap();
-        let mut decoder = SseDecoder::new(Uuid::parse_str(&first.stream_id).unwrap(), 0, 7);
+        let mut decoder = SseDecoder::new(
+            Uuid::parse_str(&first.stream_id).unwrap(),
+            0,
+            first.schema_version.try_into().unwrap(),
+        );
         for raw in exchange.events {
             let frame = format!(
                 "id: {}:{}\nevent: native.notification\ndata: {}\n\n",
@@ -11525,6 +11529,29 @@ mod tests {
             .unwrap();
         assert_eq!(reason.last_method, "item/started");
         assert_eq!(reason.item.summary.as_ref().unwrap()[1], "公开摘要");
+        let web = buffer
+            .view
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-web")
+            .unwrap();
+        assert_eq!(web.last_method, "item/completed");
+        assert_eq!(web.item.kind, "webSearch");
+        assert_eq!(
+            web.item.web_search.as_ref().unwrap().queries,
+            vec!["城市产业", "生活成本"]
+        );
+        assert_eq!(
+            web.item
+                .web_search
+                .as_ref()
+                .unwrap()
+                .sources
+                .as_ref()
+                .unwrap()[0]
+                .url,
+            "https://example.org/statistics/2025"
+        );
         assert_eq!(buffer.view.status.as_deref(), Some("failed"));
         assert_eq!(
             buffer.view.terminal_error_code.as_deref(),
@@ -11541,6 +11568,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(views[0].status.as_deref(), Some("failed"));
+        assert!(views[0]
+            .items
+            .iter()
+            .any(|i| i.item.id == "host-web" && i.item.web_search.is_some()));
+        let retained_source = views[0]
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-web")
+            .unwrap();
+        assert_eq!(
+            retained_source
+                .item
+                .web_search
+                .as_ref()
+                .unwrap()
+                .sources
+                .as_ref()
+                .unwrap()[0]
+                .url,
+            "https://example.org/statistics/2025"
+        );
         assert!(!views[0].items.iter().any(|i| i.item.id == "item-0"));
         assert_eq!(
             views[0].diagnostic.as_deref(),

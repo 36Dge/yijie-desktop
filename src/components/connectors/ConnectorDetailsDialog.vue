@@ -30,7 +30,7 @@ const title = computed(() => {
         <div class="connector-details__principles">
           <div><YjIcon name="skillOperations" size="md" /><span><strong>扩展对话能力</strong><span>启用后，可在对话中选择此连接器。</span></span></div>
           <div><YjIcon name="shield" size="md" /><span><strong>遵循当前权限设置</strong><span>授权连接不会替代任务中的操作审批。</span></span></div>
-          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>可以停用或卸载本机安装，已发送的任务记录会保留。</span></span></div>
+          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>停用会保留配置和授权；卸载才会清除本机配置和凭据。</span></span></div>
         </div>
         <p v-if="connector.configurationLabel" class="connector-details__configuration">{{ connector.configurationLabel }}</p>
         <NAlert v-if="connector.explanation && connector.explanation !== error" :type="connector.status.tone === 'error' ? 'error' : connector.status.tone === 'warning' ? 'warning' : 'info'" :bordered="false">{{ connector.explanation }}</NAlert>
@@ -43,8 +43,8 @@ const title = computed(() => {
           <NButton v-if="connector.actions.includes('reopen')" @click="$emit('action', 'reopen', connector.id)">重新打开连接页面</NButton>
           <NButton v-if="connector.actions.includes('cancel')" @click="$emit('action', 'cancel', connector.id)">取消操作</NButton>
           <NButton v-if="primary" type="primary" block :loading="connector.busy && primary.action !== 'retry'" :disabled="connector.busy && primary.action !== 'retry'" @click="$emit('action', primary.action, connector.id)">{{ primary.label }}</NButton>
-          <NButton v-else-if="connector.enabled && connector.actions.includes('disable')" block :disabled="!canManage || connector.busy" @click="$emit('action', 'disable', connector.id)">停用连接器</NButton>
-          <NButton v-else-if="!connector.busy" block @click="$emit('update:show', false)">知道了</NButton>
+          <NButton v-if="connector.actions.includes('disable')" block :disabled="!canManage || connector.busy" @click="$emit('action', 'disable', connector.id)">停用连接器</NButton>
+          <NButton v-if="!primary && !connector.actions.includes('disable') && !connector.busy" block @click="$emit('update:show', false)">知道了</NButton>
         </div>
       </template>
     </NCard>

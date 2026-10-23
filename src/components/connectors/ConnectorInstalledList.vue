@@ -25,7 +25,7 @@ defineEmits<{
       </button>
       <div class="connector-installed__actions">
         <button v-if="canManage" class="connector-installed__remove" type="button" :aria-label="`卸载 ${connector.name}`" title="卸载" :disabled="!connectorCan(connector, 'uninstall')" @click="$emit('uninstall', connector.id)"><YjIcon name="trash" size="sm" /></button>
-        <NSwitch :value="connector.enabled" :loading="connector.busy" :disabled="connectorSwitchDisabled(connector, canManage)" :aria-disabled="connectorSwitchDisabled(connector, canManage)" :aria-label="`${connector.enabled ? '停用' : '启用'} ${connector.name}`" @update:value="$emit('enabled-change', connector.id, $event)" />
+        <NSwitch :value="connector.desiredEnabled ?? connector.enabled" :loading="connector.busy" :disabled="connectorSwitchDisabled(connector, canManage)" :aria-disabled="connectorSwitchDisabled(connector, canManage)" :aria-label="`${(connector.desiredEnabled ?? connector.enabled) ? '停用' : '启用'} ${connector.name}`" @update:value="$emit('enabled-change', connector.id, $event)" />
       </div>
     </li>
   </ul>

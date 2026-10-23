@@ -3,13 +3,13 @@
   "feature": "FEAT-158",
   "release": false,
   "bundle_version": "0.25.0",
-  "manifest_sha256": "8965847c8eed66ae70a35a8d215728e6dc003c8f119dcd8814050c0723e6c58c",
+  "manifest_sha256": "033689b005c2659fa625a7a8e93081ec04b2ffe7cfde67f0c293f69684874741",
   "source": {
     "repository": "https://github.com/36Dge/yijie-skills.git",
     "revision_kind": "working-tree",
-    "revision": "25df87ea261a922881e6b74c640909fcfab0b6a3",
+    "revision": "4247a4f2967ecf60fcf92ed0e86b9dd62496ea6e",
     "tree_sha256": "1306280eb61b66771cb3d539972053dca30000626c71149524aa861405930b70"
   },
-  "authority_sha256": "b4a210eb403ea3b3087e66f76b8ff41d46767687a1f7f021997ff76cc11ee60a",
-  "contracts_source_lock_sha256": "49a29bd355e9e0bd5286b12962ccb22f1207fe3a8ace04b6dce735ca8d9b987d"
+  "authority_sha256": "5783cf61e01873a23e0e5982115791b4363a19ff64357d95419e16641b358be1",
+  "contracts_source_lock_sha256": "d9f467254f9afe41e14aa68deaafdba6ea1aa7ad7e601378fb2dbf04f6dbdca3"
 }

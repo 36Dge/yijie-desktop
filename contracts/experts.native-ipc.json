@@ -64,6 +64,12 @@
       "request": "ResourceOperationRecoverRequest",
       "response": "ResourceOperationRecoverResponse",
       "requiredPermission": "plugin.manage"
+    },
+    {
+      "command": "experts_developer_read_v1",
+      "request": "DeveloperReadRequest",
+      "response": "DeveloperReadResponse",
+      "requiredPermission": "plugin.read"
     }
   ],
   "error": "Error"

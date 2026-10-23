@@ -435,7 +435,7 @@ impl HostBridge {
         let response = self
             .authorized_request(
                 Method::GET,
-                &format!("/v2/agent-sessions/{session_id}/native-thread"),
+                &format!("/v4/agent-sessions/{session_id}/native-thread"),
             )
             .await?
             .timeout(REQUEST_TIMEOUT)
@@ -449,7 +449,7 @@ impl HostBridge {
         let bytes = read_limited(response, 8 * 1024 * 1024).await?;
         let value: super::native_conversation_generated::NativeThreadSnapshot =
             serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
-        if value.schema_version != 2 || value.source != "runtime_read" {
+        if value.schema_version != 4 || value.source != "runtime_read" {
             return Err(protocol_error());
         }
         Ok(value)
@@ -488,7 +488,7 @@ impl HostBridge {
         session_id: Uuid,
         cursor: Option<HostEventCursor>,
     ) -> Result<HostEventStream, HostBridgeError> {
-        self.open_event_stream(session_id, cursor, 8).await
+        self.open_event_stream(session_id, cursor, 11).await
     }
     pub(super) fn from_connection(connection: HostConnection) -> Result<Self, HostBridgeError> {
         if connection.port == 0
@@ -911,11 +911,11 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=9) {
+        if !matches!(schema_version, 2..=11) {
             return Err(protocol_error());
         }
         let path = format!("/v{schema_version}/agent-sessions/{session_id}/events");
-        let path = if matches!(schema_version, 7 | 8) {
+        let path = if matches!(schema_version, 7 | 8 | 10 | 11) {
             path
         } else {
             format!("{path}?event_schema_version={schema_version}")

@@ -9,6 +9,17 @@ use crate::chat::{ChatRuntime, HostManagedSkill, HostSkillSnapshot};
 type Error = wire::ErrorCode;
 
 impl SkillRuntime {
+    /// Presentation metadata only; reading it never installs resources or starts Host.
+    pub(crate) fn expert_developer(
+        &self,
+        selection: &wire::ExpertSelection,
+    ) -> Result<wire::DeveloperInfo, Error> {
+        selection.validate().map_err(|_| Error::InvalidRequest)?;
+        self.expert_catalog_revision()?;
+        let catalog = self.catalog().map_err(|error| error.expert_error())?;
+        project_expert_developer(catalog, selection)
+    }
+
     /// Only reviewed versions in distinct managed installation directories may
     /// coexist. Unknown retained references remain protected by the store.
     pub(crate) fn expert_coexisting_refs(
@@ -90,6 +101,17 @@ impl SkillRuntime {
         }
         resolve_entry(entry)
     }
+}
+
+fn project_expert_developer(
+    catalog: &SkillCatalog,
+    selection: &wire::ExpertSelection,
+) -> Result<wire::DeveloperInfo, Error> {
+    find_expert(catalog, selection)?;
+    Ok(wire::DeveloperInfo {
+        expert: selection.clone(),
+        name: "易界 AI".into(),
+    })
 }
 
 fn find_expert<'a>(
@@ -334,6 +356,14 @@ mod tests {
                 },
             )
             .unwrap();
+            let selection = wire::ExpertSelection {
+                expert_id: expert_id.into(),
+                version: version.into(),
+            };
+            let developer = project_expert_developer(&catalog, &selection).unwrap();
+            developer.validate().unwrap();
+            assert_eq!(developer.expert, selection);
+            assert_eq!(developer.name, "易界 AI");
             let resolved = resolve_entry(entry).unwrap();
             let projected = safe
                 .experts

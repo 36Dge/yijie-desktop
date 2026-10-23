@@ -391,6 +391,7 @@ export function createChatStoreDefinition(
     const localSubmissions = shallowRef<Readonly<Record<string, LocalSubmissionView>>>({});
     // Transport observation only; history loading never marks a Turn live.
     const nativeLiveTurnId = ref<string | null>(null);
+    let nativeLiveRevocationEpoch = 0;
     watch(phase, value => { if (value !== "streaming") nativeLiveTurnId.value = null; }, {flush: "sync"});
     const nativeViews = shallowRef<Readonly<Record<string, NativeConversationView>>>({});
     const nativeRecordDiagnostics = shallowRef<Readonly<Record<string, NativeRecordDiagnostic>>>({});
@@ -711,6 +712,7 @@ export function createChatStoreDefinition(
       nativeViews.value = {};
       artifactReferenceItems.value = [];
       nativeRecordDiagnostics.value = {};
+      nativeLiveRevocationEpoch += 1;
       nativeLiveTurnId.value = null;
       localSubmissions.value = {};
       conversationApprovalState.value = createConversationApprovalState();
@@ -1470,6 +1472,8 @@ export function createChatStoreDefinition(
     }
 
     function requestControlPlaneResync(observedSequence: bigint | null = null): void {
+      nativeLiveRevocationEpoch += 1;
+      nativeLiveTurnId.value = null;
       if (streamingV6Enabled) {
         controlPlaneGapEpoch += 1;
         controlPlaneSequence = observedSequence;
@@ -1720,6 +1724,8 @@ export function createChatStoreDefinition(
       )) {
         return;
       }
+      nativeLiveRevocationEpoch += 1;
+      nativeLiveTurnId.value = null;
       requestResync();
     }
 
@@ -1978,7 +1984,9 @@ export function createChatStoreDefinition(
       liveAssistantText.value = "";
       liveReasoning.value = Object.freeze([]);
       liveTurnStatus.value = null;
-      phase.value = "resync-required";
+      // A normal readonly refresh does not revoke a native observation. Let
+      // resyncSelected retain it across the read; authority gaps clear it above.
+      if (!subscriptionId || selectedAccessMode.value === "history-only") phase.value = "resync-required";
       void resyncSelected();
     }
 
@@ -2929,6 +2937,8 @@ export function createChatStoreDefinition(
           conversationApprovalState.value,
         );
       }
+      const observedLiveTurnId = nativeLiveTurnId.value;
+      const observedRevocationEpoch = nativeLiveRevocationEpoch;
       const { epoch, controller } = startRead();
       phase.value = "resyncing";
       resetProjectionBuffer();
@@ -3025,7 +3035,17 @@ export function createChatStoreDefinition(
           bufferingEvents = false;
           bufferingArtifactEvents = false;
           activeRead = null;
-          if (phase.value === "resyncing") phase.value = "ready";
+          if (phase.value === "resyncing") {
+            const observed = observedLiveTurnId === null ? undefined : nativeViews.value[observedLiveTurnId];
+            const stillLive = observedRevocationEpoch === nativeLiveRevocationEpoch &&
+              observed?.sessionId === sessionId && observed.source === "native_observed" &&
+              observed.statusSource === "runtime_notification" && observed.status === "inProgress" &&
+              !observed.terminalObserved && !observed.diagnostic && observed.availability !== "unavailable";
+            // Only restore an observation received before this successful read.
+            // A cold history snapshot alone can never promote a Turn to live.
+            phase.value = stillLive ? "streaming" : "ready";
+            if (stillLive) nativeLiveTurnId.value = observedLiveTurnId;
+          }
           applyBufferedEvents(pending, authoritativeHistory);
           if (needsTrailingArtifactRefresh && !resyncTrailingRequested) requestArtifactRefresh();
         } catch (error: unknown) {

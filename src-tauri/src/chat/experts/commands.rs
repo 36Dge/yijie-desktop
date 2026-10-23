@@ -801,6 +801,7 @@ macro_rules! command {
     };
 }
 command!(experts_snapshot_v1);
+command!(experts_developer_read_v1);
 command!(experts_prepare_v1);
 command!(experts_remove_v1);
 command!(experts_operation_read_v1);

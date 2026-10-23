@@ -21,6 +21,8 @@ export type HttpsSchemasYijieAiExpertsV1Native =
   | BindingRecoverResponse
   | ResourceOperationRecoverRequest
   | ResourceOperationRecoverResponse
+  | DeveloperReadRequest
+  | DeveloperReadResponse
   | Error;
 export type CanonicalId = string;
 export type ExpertId = string;
@@ -345,6 +347,27 @@ export interface ResourceOperationRecoverResponse {
   requestId: CanonicalId;
   data: ResourceOperation;
 }
+export interface DeveloperReadRequest {
+  schemaVersion: 1;
+  requestId: CanonicalId;
+  contextId: CanonicalId;
+  payload: ExpertSelection;
+}
+export interface DeveloperReadResponse {
+  schemaVersion: 1;
+  requestId: CanonicalId;
+  data: DeveloperInfo;
+}
+/**
+ * Read-only developer metadata for an exact catalog identity. No usage metrics, external URL, installation, binding, or persistence side effects.
+ */
+export interface DeveloperInfo {
+  expert: ExpertSelection;
+  /**
+   * Developer display name. Defaults to 易界 AI for the current native catalog; not a verification badge or third-party source attribution.
+   */
+  name: string;
+}
 /**
  * Only temporarily_unavailable may be retryable, after reading original operation. Outcome unknown never grants automatic retry or replacement identity.
  */
@@ -355,4 +378,4 @@ export interface Error {
   retryable: boolean;
 }
 
-export const EXPERT_COMMANDS=[{"command":"experts_snapshot_v1","request":"SnapshotRequest","response":"SnapshotResponse","requiredPermission":"plugin.read"},{"command":"experts_prepare_v1","request":"PrepareRequest","response":"PrepareResponse","requiredPermission":"plugin.manage"},{"command":"experts_remove_v1","request":"RemoveRequest","response":"RemoveResponse","requiredPermission":"plugin.manage"},{"command":"experts_operation_read_v1","request":"ResourceOperationReadRequest","response":"ResourceOperationReadResponse","requiredPermission":"plugin.read"},{"command":"chat_expert_binding_read_v1","request":"BindingReadRequest","response":"BindingReadResponse","requiredPermission":"task.read"},{"command":"chat_expert_binding_set_v1","request":"BindingSetRequest","response":"BindingSetResponse","requiredPermission":"task.read and task.create; plugin.read for nonnull expert"},{"command":"chat_expert_binding_operation_read_v1","request":"BindingOperationReadRequest","response":"BindingOperationReadResponse","requiredPermission":"task.read"},{"command":"chat_expert_submit_v1","request":"NativeSubmitRequest","response":"NativeSubmitResponse","requiredPermission":"existing chat permissions and connector.use for nonempty market selection; plugin.read for nonnull expert"},{"command":"chat_expert_binding_recover_v1","request":"BindingRecoverRequest","response":"BindingRecoverResponse","requiredPermission":"task.read and task.create; plugin.read for nonnull original expert"},{"command":"experts_operation_recover_v1","request":"ResourceOperationRecoverRequest","response":"ResourceOperationRecoverResponse","requiredPermission":"plugin.manage"}] as const;
+export const EXPERT_COMMANDS=[{"command":"experts_snapshot_v1","request":"SnapshotRequest","response":"SnapshotResponse","requiredPermission":"plugin.read"},{"command":"experts_prepare_v1","request":"PrepareRequest","response":"PrepareResponse","requiredPermission":"plugin.manage"},{"command":"experts_remove_v1","request":"RemoveRequest","response":"RemoveResponse","requiredPermission":"plugin.manage"},{"command":"experts_operation_read_v1","request":"ResourceOperationReadRequest","response":"ResourceOperationReadResponse","requiredPermission":"plugin.read"},{"command":"chat_expert_binding_read_v1","request":"BindingReadRequest","response":"BindingReadResponse","requiredPermission":"task.read"},{"command":"chat_expert_binding_set_v1","request":"BindingSetRequest","response":"BindingSetResponse","requiredPermission":"task.read and task.create; plugin.read for nonnull expert"},{"command":"chat_expert_binding_operation_read_v1","request":"BindingOperationReadRequest","response":"BindingOperationReadResponse","requiredPermission":"task.read"},{"command":"chat_expert_submit_v1","request":"NativeSubmitRequest","response":"NativeSubmitResponse","requiredPermission":"existing chat permissions and connector.use for nonempty market selection; plugin.read for nonnull expert"},{"command":"chat_expert_binding_recover_v1","request":"BindingRecoverRequest","response":"BindingRecoverResponse","requiredPermission":"task.read and task.create; plugin.read for nonnull original expert"},{"command":"experts_operation_recover_v1","request":"ResourceOperationRecoverRequest","response":"ResourceOperationRecoverResponse","requiredPermission":"plugin.manage"},{"command":"experts_developer_read_v1","request":"DeveloperReadRequest","response":"DeveloperReadResponse","requiredPermission":"plugin.read"}] as const;

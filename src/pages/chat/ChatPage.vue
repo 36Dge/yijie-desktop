@@ -39,7 +39,7 @@ import { marketConnectorsEnabled } from "../../api/market-connectors-client";
 import { useMarketConnectorStore } from "../../stores/market-connectors.store";
 import { useMarketConnectorBinding } from "../../composables/useMarketConnectorBinding";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
-import { connectorSwitchDisabled, type ConnectorChipView } from "../../domain/connector-ui";
+import { type ConnectorChipView } from "../../domain/connector-ui";
 import { useChatShopPreview } from "../../composables/useChatShopPreview";
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
@@ -174,7 +174,7 @@ watch(isNewDraftMode, (active, previous) => {
   if (previous && !active) composerDrafts.value = clearChatComposerDraft(composerDrafts.value, sharedComposerDraftsEnabled ? "plan:new" : chatComposerDraftKey(null));
 }, { flush: "post" });
 if (expertsUiEnabled) {
-  const context = computed(() => !isDraftMode.value ? chatStore.context?.contextId ?? null : null);
+  const context = computed(() => chatStore.context?.contextId ?? null);
   useChatExpertsBinding(context, routeSessionId);
   useExpertsBinding(context);
 }
@@ -248,7 +248,10 @@ async function refreshExpert(): Promise<void> {
 }
 async function removeExpert(): Promise<void> {
   if (expertRemovalBlocked.value || expertPicker.pending.value) return;
-  if (routeSessionId.value) await chatExperts.select(routeSessionId.value, null);
+  if (routeSessionId.value) {
+    const target = chatComposerDraftKey(routeSessionId.value);
+    if (await chatExperts.select(routeSessionId.value, null)) sharedDrafts.clearExpertPrompt(target);
+  }
   else sharedDrafts.setExpert("new", null);
 }
 function showExpertDetails(): void {
@@ -472,46 +475,43 @@ const connectorChips = computed<readonly ConnectorChipView[]>(() => connectorSel
   return { id: selected.serviceId, name: selected.displayName, iconAssetId: entry?.iconAssetId ?? selected.serviceId,
     unavailableReason: !sameConnection ? "连接已变化，请重新选择" : !entry?.selectable ? entry?.status.label === "已启用" ? "当前环境暂不支持" : entry?.status.label ?? "状态待确认" : null };
 }));
-if (marketConnectorsEnabled) useMarketConnectorBinding(computed(() => !isDraftMode.value ? chatStore.context?.contextId ?? null : null));
-// The switch is the single selection control. A stop request removes the next
-// turn's selection immediately; adding it still requires confirmed readiness.
+if (marketConnectorsEnabled) useMarketConnectorBinding(computed(() => chatStore.context?.contextId ?? null));
+// Refresh only choices this conversation already made. A global enable or
+// startup reconnect never silently opts another conversation into a connector.
 watch(
   [() => connectors.entries, () => connectors.selectionAvailable, () => connectors.selectionExcluded, () => connectors.phase,
     composerDraftTargetKey, modelBusy, () => chatStore.selectedAccessMode, connectorSelection],
   () => {
-    if (!marketConnectorsEnabled || isDraftMode.value || modelBusy.value ||
-      chatStore.selectedAccessMode === "history-only") return;
+    if (!marketConnectorsEnabled || isDraftMode.value || modelBusy.value || chatStore.selectedAccessMode === "history-only") return;
     const current = connectorSelection.value;
-    const next = current.filter(selected => {
-      if (connectors.selectionExcluded.has(selected.serviceId)) return false;
-      // A refresh failure must not undo an explicit deselection or silently
-      // drop other selected connectors whose availability is still unknown.
-      if (connectors.phase !== "ready" || connectors.error) return true;
+    const next = current.flatMap(selected => {
+      if (connectors.selectionExcluded.has(selected.serviceId)) return [];
+      if (connectors.phase !== "ready" || connectors.error) return [selected];
       const entry = connectors.entries.find(item => item.id === selected.serviceId);
-      return entry && (entry.enabled || entry.busy || connectors.installation(selected.serviceId)?.desiredEnabled);
+      const item = connectors.installation(selected.serviceId);
+      if (!entry || !item || (!item.desiredEnabled && !entry.busy) ||
+        item.installationId !== selected.reference.installationId || item.generation !== selected.reference.generation) return [];
+      if (!connectors.selectionAvailable || !entry.selectable) return [selected];
+      return [{ ...selected, displayName: entry.name, reference: {
+        installationId: item.installationId, revision: item.revision, generation: item.generation,
+      } }];
     });
-    if (connectors.selectionAvailable) for (const entry of connectors.entries) {
-      const installation = connectors.installation(entry.id);
-      if (!entry.selectable || !installation || connectors.selectionExcluded.has(entry.id)) continue;
-      const selected = { serviceId: entry.id, displayName: entry.name, reference: {
-        installationId: installation.installationId, revision: installation.revision, generation: installation.generation,
-      } };
-      const index = next.findIndex(item => item.serviceId === entry.id);
-      if (index >= 0) next[index] = selected;
-      else if (next.length < 58) next.push(selected);
-    }
     if (JSON.stringify(current) !== JSON.stringify(next)) sharedDrafts.setSelection(composerDraftTargetKey.value, next);
-  }, { immediate: true },
+  }, { immediate: true, deep: true },
 );
 function manageConnectors(serviceId?: string): void {
   void router.push({ path: "/connectors", query: { from: routeSessionId.value ? `/chat/${routeSessionId.value}` : "/chat", ...(serviceId ? { service: serviceId } : {}) } });
 }
-function connectorEnabledChange(id: string, enabled: boolean): void {
+function connectorSelectionChange(id: string, selected: boolean): void {
+  if (modelBusy.value || submitting.value || expertSubmission.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
+  const current = connectorSelection.value;
+  if (!selected) { sharedDrafts.setSelection(composerDraftTargetKey.value, current.filter(item => item.serviceId !== id)); return; }
   const entry = connectors.entries.find(item => item.id === id);
-  if (modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only" ||
-    !entry || connectorSwitchDisabled(entry, connectors.canManage)) return;
-  const action = enabled ? (entry.actions.includes("enable") ? "enable" : "configure") : "disable";
-  void connectors.execute(action, id);
+  const item = connectors.installation(id);
+  if (!connectors.selectionAvailable || !entry?.selectable || !item || current.some(value => value.serviceId === id) || current.length >= 58) return;
+  sharedDrafts.setSelection(composerDraftTargetKey.value, [...current, { serviceId: id, displayName: entry.name, reference: {
+    installationId: item.installationId, revision: item.revision, generation: item.generation,
+  } }]);
 }
 function retryConnectorOperation(id: string): void {
   if (modelBusy.value || isDraftMode.value || chatStore.selectedAccessMode === "history-only") return;
@@ -804,7 +804,7 @@ async function submit(recoverExpert = false): Promise<void> {
       ) return;
       composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
       sharedDrafts.clearSkills(draftTargetAtStart);
-      if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
+
       if (turnExpert) chatExperts.acknowledgeSubmission(result.operationId);
       await nextTick();
       scrollToBottom();
@@ -825,7 +825,10 @@ async function submit(recoverExpert = false): Promise<void> {
     ) return;
     composerDrafts.value = clearChatComposerDraft(composerDrafts.value, draftTargetAtStart);
     sharedDrafts.clearSkills(draftTargetAtStart);
-    if (marketConnectorsEnabled) sharedDrafts.clearSelection(draftTargetAtStart);
+    if (marketConnectorsEnabled) {
+      sharedDrafts.setSelection(chatComposerDraftKey(result.sessionId), sharedDrafts.selection(draftTargetAtStart));
+      sharedDrafts.clearSelection(draftTargetAtStart);
+    }
     if (turnExpert) { sharedDrafts.setExpert("new", null); chatExperts.acknowledgeSubmission(result.operationId); }
     models.resetNew();
     shopPreview.adoptNewChat(result.sessionId);
@@ -1118,7 +1121,7 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
@@ -1369,7 +1372,7 @@ onBeforeUnmount(() => {
           <ChatShopControl :model="shopPreview" :disabled="composerSubmissionState !== 'idle' || isStreaming || chatStore.selectedAccessMode === 'history-only'" />
         </template>
         <template v-if="!isDraftMode && marketConnectorsEnabled" #connector-control="{ close }">
-          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @enabled-change="connectorEnabledChange" @manage="manageConnectors()" />
+          <ChatConnectorControl @close="close" :entries="connectors.entries" :selected-ids="connectorSelection.map(item => item.serviceId)" :disabled="modelBusy || chatStore.selectedAccessMode === 'history-only'" :selection-available="connectors.selectionAvailable" :can-manage="connectors.canManage" :loading="connectors.refreshing" :error="connectors.error" :operation-errors="connectors.operationErrors" @retry="retryConnectorOperation" @refresh="connectors.refresh" @configure="manageConnectors" @selection-change="connectorSelectionChange" @manage="manageConnectors()" />
         </template>
         <template v-if="!isDraftMode && skillMarketplaceUiEnabled" #skill-control="{ close }">
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />

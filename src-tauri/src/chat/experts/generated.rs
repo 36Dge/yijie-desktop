@@ -5175,6 +5175,165 @@ impl std::fmt::Debug for PrivateResourceRecoverResponse {
         f.write_str("PrivateResourceRecoverResponse([redacted])")
     }
 }
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "DeveloperInfoWire")]
+pub struct DeveloperInfo {
+    pub expert: ExpertSelection,
+    pub name: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeveloperInfoWire {
+    pub expert: ExpertSelection,
+    pub name: String,
+}
+impl TryFrom<DeveloperInfoWire> for DeveloperInfo {
+    type Error = &'static str;
+    fn try_from(w: DeveloperInfoWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            expert: w.expert,
+            name: w.name,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl DeveloperInfo {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_expert = &self.expert;
+            value_expert.validate()?;
+        }
+        {
+            let value_name = &self.name;
+            if value_name.chars().count() < 1 {
+                return Err("invalid broker text");
+            }
+            if value_name.chars().count() > 128 {
+                return Err("invalid broker text");
+            }
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for DeveloperInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeveloperInfo([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "DeveloperReadRequestWire")]
+pub struct DeveloperReadRequest {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub context_id: CanonicalId,
+    pub payload: ExpertSelection,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeveloperReadRequestWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub context_id: CanonicalId,
+    pub payload: ExpertSelection,
+}
+impl TryFrom<DeveloperReadRequestWire> for DeveloperReadRequest {
+    type Error = &'static str;
+    fn try_from(w: DeveloperReadRequestWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            context_id: w.context_id,
+            payload: w.payload,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl DeveloperReadRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid expert identity");
+            }
+        }
+        {
+            let value_context_id = &self.context_id;
+            if !canonical_id(value_context_id) {
+                return Err("invalid expert identity");
+            }
+        }
+        {
+            let value_payload = &self.payload;
+            value_payload.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for DeveloperReadRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeveloperReadRequest([redacted])")
+    }
+}
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "DeveloperReadResponseWire")]
+pub struct DeveloperReadResponse {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: DeveloperInfo,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeveloperReadResponseWire {
+    pub schema_version: i64,
+    pub request_id: CanonicalId,
+    pub data: DeveloperInfo,
+}
+impl TryFrom<DeveloperReadResponseWire> for DeveloperReadResponse {
+    type Error = &'static str;
+    fn try_from(w: DeveloperReadResponseWire) -> Result<Self, Self::Error> {
+        let v = Self {
+            schema_version: w.schema_version,
+            request_id: w.request_id,
+            data: w.data,
+        };
+        v.validate()?;
+        Ok(v)
+    }
+}
+impl DeveloperReadResponse {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        {
+            let value_schema_version = &self.schema_version;
+            if *value_schema_version != 1 {
+                return Err("invalid broker constant");
+            }
+        }
+        {
+            let value_request_id = &self.request_id;
+            if !canonical_id(value_request_id) {
+                return Err("invalid expert identity");
+            }
+        }
+        {
+            let value_data = &self.data;
+            value_data.validate()?;
+        }
+        Ok(())
+    }
+}
+impl std::fmt::Debug for DeveloperReadResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeveloperReadResponse([redacted])")
+    }
+}
 
 fn canonical_id(s: &str) -> bool {
     let b = s.as_bytes();

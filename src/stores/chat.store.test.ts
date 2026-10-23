@@ -2581,7 +2581,7 @@ describe("chat view-model store", () => {
     }
     expect(submitTurnV2).toHaveBeenCalledOnce();
 
-    emitNative({schemaVersion:2,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
+    emitNative({schemaVersion:4,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
     expect(store.phase).toBe("streaming");
     expect(store.canSend).toBe(false);
     delayedSubmit.resolve({
@@ -2601,7 +2601,7 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     expect(store.nativeLiveTurnId).toBeNull();
-    const event: NativeConversationViewEvent = {schemaVersion:2, contextId:CONTEXT, sessionId:SESSION_A,
+    const event: NativeConversationViewEvent = {schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A,
       subscriptionId:"019c1a00-0000-7000-8000-00000000000a", view:{sessionId:SESSION_A, turnId:TURN_A,
         runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
         availability:"partial", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};
@@ -2613,6 +2613,94 @@ describe("chat view-model store", () => {
     expect(store.nativeLiveTurnId).toBeNull();
     emitNative({...event, view:{...event.view, revision:"2"}});
     expect(store.nativeLiveTurnId).toBeNull();
+  });
+
+  it.each(["manual", "notification"])("retains an observed live turn through a successful %s resync with no new model event", async trigger => {
+    const {client, emitNative, emit} = fakeClient();
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const nativeEvent: NativeConversationViewEvent = {schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A,
+      subscriptionId:LOCAL_SUBSCRIPTION_A, view:{sessionId:SESSION_A, turnId:TURN_A,
+        runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
+        availability:"available", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};
+    emitNative(nativeEvent);
+    expect(store.nativeLiveTurnId).toBe(TURN_A);
+    if(trigger === "manual") await store.resyncSelected();
+    else {
+      emit(event("1","019c1a00-0000-7000-8000-000000000099","resync_required",{reason:"protocol_error"}));
+      await vi.waitFor(()=>expect(store.phase).toBe("streaming"));
+    }
+    expect(store.nativeLiveTurnId).toBe(TURN_A);
+    expect(store.phase).toBe("streaming");
+    expect(store.canSend).toBe(false);
+    expect(store.liveTurnStatus).toBe("streaming");
+    emitNative({...nativeEvent, view:{...nativeEvent.view, revision:"2",status:"completed",terminalObserved:true}});
+    await vi.waitFor(()=>expect(store.phase).toBe("ready"));
+    expect(store.nativeLiveTurnId).toBeNull();
+    expect(store.phase).toBe("ready");
+  });
+
+  it("revokes live display when a readonly resync fails", async () => {
+    let failRead=false;
+    const {client,emitNative}=fakeClient({resyncSession:async (_context,id)=>{
+      if(failRead)throw new ChatClientError({schemaVersion:1,code:"chat_temporarily_unavailable",retryable:true,recovery:"resync"});
+      return projection(id);
+    }});
+    const store=createStore(client);
+    await store.bind(TENANT);await store.selectSession(SESSION_A);
+    emitNative({schemaVersion:4,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:LOCAL_SUBSCRIPTION_A,
+      view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",
+        revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
+    failRead=true;
+    await store.resyncSelected();
+    expect(store.nativeLiveTurnId).toBeNull();
+    expect(store.phase).not.toBe("streaming");
+    expect(store.canSend).toBe(false);
+  });
+
+  it("does not restore an observation invalidated while a readonly resync is pending", async () => {
+    const pending = new Deferred<Awaited<ReturnType<ChatClient["resyncSession"]>>>();
+    let holdRead = false;
+    const resyncSession = vi.fn<ChatClient["resyncSession"]>(async (_context, id) =>
+      holdRead ? pending.promise : projection(id));
+    const {client, emitNative, invalidate} = fakeClient({resyncSession});
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    emitNative({schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A, subscriptionId:LOCAL_SUBSCRIPTION_A,
+      view:{sessionId:SESSION_A, turnId:TURN_A, runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn",
+        source:"native_observed", revision:"1", availability:"available", status:"inProgress",
+        statusSource:"runtime_notification", terminalObserved:false, items:[]}});
+    expect(store.nativeLiveTurnId).toBe(TURN_A);
+    const readsBefore = resyncSession.mock.calls.length;
+    holdRead = true;
+    const refreshing = store.resyncSelected();
+    await vi.waitFor(() => expect(resyncSession.mock.calls.length).toBeGreaterThan(readsBefore));
+    invalidate();
+    holdRead = false;
+    pending.resolve(projection(SESSION_A));
+    await refreshing;
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.nativeLiveTurnId).toBeNull();
+    expect(store.canSend).toBe(false);
+  });
+
+  it("does not turn saved native history into a live observation during resync", async () => {
+    const saved: NativeConversationViewEvent["view"]={sessionId:SESSION_A,turnId:TURN_A,
+      runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",
+      availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]};
+    const {client}=fakeClient({
+      resyncSession:async()=>({...projection(SESSION_A),history:artifactHistory()}),
+      loadNativeHistory:async()=>({views:[saved],submissions:[],remainingTurnIds:[],historyAvailability:"partial"}),
+    });
+    const store=createStore(client);
+    await store.bind(TENANT);await store.selectSession(SESSION_A);
+    expect(store.nativeLiveTurnId).toBeNull();
+    await store.resyncSelected();
+    expect(store.nativeLiveTurnId).toBeNull();
+    expect(store.phase).toBe("ready");
+    expect(store.canSend).toBe(false);
   });
 
   it("ignores an accepted submit response after selecting B without clearing B's draft", async () => {

@@ -156,6 +156,8 @@
   --yj-layout-titlebar-height: var(--yj-space-8);
   --yj-layout-titlebar-controls-inset: calc(var(--yj-space-16) + var(--yj-space-8));
   --yj-layout-form-max: 960px;
+  --yj-layout-expert-detail-width: 600px;
+  --yj-layout-expert-detail-min-height: 700px;
   --yj-layout-workflow-create-width: 440px;
   --yj-layout-workflow-leave-width: 400px;
   --yj-layout-schedule-form-width: 520px;

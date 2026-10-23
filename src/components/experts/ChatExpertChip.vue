@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ExpertDisplay } from "../../domain/experts.generated";
-import { isYjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
+import ExpertAvatar from "./ExpertAvatar.vue";
 defineProps<{ expert: ExpertDisplay; disabled?: boolean; pending?: boolean }>();
 const emit = defineEmits<{ details: []; remove: [] }>();
 </script>
@@ -9,7 +9,7 @@ const emit = defineEmits<{ details: []; remove: [] }>();
   <div class="chat-expert-chip" :class="{ 'chat-expert-chip--removable': !disabled && !pending }" :aria-busy="pending">
     <button type="button" class="yj-control yj-control--pill chat-expert-chip__remove" :disabled="disabled || pending" aria-label="移除专家" title="移除专家，已有聊天保留" @click="!disabled && !pending && emit('remove')">
       <span class="chat-expert-chip__icon" aria-hidden="true">
-        <YjIcon :name="pending ? 'loading' : isYjIconName(expert.iconKey) ? expert.iconKey : 'skillOperations'" size="sm" class="chat-expert-chip__symbol" :class="{ 'chat-expert-chip__symbol--pending': pending }" />
+        <ExpertAvatar :expert-id="expert.expertId" :icon-key="expert.iconKey" compact class="chat-expert-chip__symbol" />
         <YjIcon name="dismiss" size="sm" class="chat-expert-chip__dismiss" />
       </span>
     </button>
@@ -44,14 +44,11 @@ const emit = defineEmits<{ details: []; remove: [] }>();
 .chat-expert-chip > .chat-expert-chip__details { min-width: 0; padding-right: var(--yj-space-2); }
 .chat-expert-chip__details span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: calc(var(--yj-space-16) * 3); }
 .chat-expert-chip > .chat-expert-chip__remove { flex: none; width: var(--yj-chat-expert-chip-height); }
-.chat-expert-chip__icon { display: inline-grid; width: var(--yj-space-4); height: var(--yj-space-4); }
+.chat-expert-chip__icon { display: inline-grid; place-items: center; width: var(--yj-space-6); height: var(--yj-space-6); }
 .chat-expert-chip__icon > * { grid-area: 1 / 1; }
 .chat-expert-chip__dismiss { visibility: hidden; }
 .chat-expert-chip--removable:is(:hover, :focus-within) .chat-expert-chip__symbol { visibility: hidden; }
 .chat-expert-chip--removable:is(:hover, :focus-within) .chat-expert-chip__dismiss { visibility: visible; }
-.chat-expert-chip__symbol--pending { animation: expert-chip-pending 800ms linear infinite; }
 .chat-expert-chip__status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-@keyframes expert-chip-pending { to { transform: rotate(360deg); } }
 @media (hover: none) { .chat-expert-chip--removable .chat-expert-chip__symbol { visibility: hidden; } .chat-expert-chip--removable .chat-expert-chip__dismiss { visibility: visible; } }
-@media (prefers-reduced-motion: reduce) { .chat-expert-chip__symbol--pending { animation: none; } }
 </style>

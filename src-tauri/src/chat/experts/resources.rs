@@ -774,6 +774,15 @@ pub(crate) async fn command(
     let result=async {
         if !super::enabled(){return Err(Error::UnsupportedCapability)}
         let (request_id,context,payload,remove)=match name {
+            "experts_developer_read_v1"=>{
+                let value:wire::DeveloperReadRequest=serde_json::from_value(raw).map_err(|_|Error::InvalidRequest)?;
+                value.validate().map_err(|_|Error::InvalidRequest)?;
+                let access=Access::new(chat,&value.context_id)?;
+                let developer=access.run(&["plugin.read"],|_|skills.expert_developer(&value.payload))?;
+                developer.validate().map_err(|_|Error::ResourceUnavailable)?;
+                access.authority(&["plugin.read"])?;
+                return Ok(serde_json::json!({"schemaVersion":1,"requestId":value.request_id,"data":developer}));
+            },
             "experts_snapshot_v1"=>{let value:wire::SnapshotRequest=serde_json::from_value(raw).map_err(|_|Error::InvalidRequest)?;(value.request_id,value.context_id,None,false)},
             "experts_prepare_v1"=>{let value:wire::PrepareRequest=serde_json::from_value(raw).map_err(|_|Error::InvalidRequest)?;(value.request_id,value.context_id,Some(value.payload),false)},
             "experts_remove_v1"=>{let value:wire::RemoveRequest=serde_json::from_value(raw).map_err(|_|Error::InvalidRequest)?;(value.request_id,value.context_id,Some(value.payload),true)},

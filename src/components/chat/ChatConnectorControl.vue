@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NSwitch } from "naive-ui";
 import ChatResourcePanel from "./ChatResourcePanel.vue";
-import { connectorSwitchDisabled, filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
+import { filterConnectors, type ConnectorStatusView, type ConnectorView } from "../../domain/connector-ui";
 import ConnectorIcon from "../connectors/ConnectorIcon.vue";
 
 const props = withDefaults(defineProps<{
@@ -19,7 +19,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   close: [];
   configure: [id: string];
-  "enabled-change": [id: string, enabled: boolean];
+  "selection-change": [id: string, selected: boolean];
   manage: [];
   refresh: [];
   retry: [id: string];
@@ -55,14 +55,18 @@ function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
   return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
 }
 const filtered = computed(() => filterConnectors(installed.value, query.value).map(entry => ({ entry, status: compactStatus(entry) })));
-function choose(entry: ConnectorView): void {
-  if (props.disabled || entry.busy) return;
-  if (!connectorSwitchDisabled(entry, props.canManage)) changeEnabled(entry, !entry.enabled);
-  else if (!entry.selectable) { emit("configure", entry.id); emit("close"); }
+function selected(entry: ConnectorView): boolean { return props.selectedIds.includes(entry.id); }
+function selectionDisabled(entry: ConnectorView): boolean {
+  return props.disabled || (!selected(entry) && (!props.selectionAvailable || !entry.selectable));
 }
-function changeEnabled(entry: ConnectorView, enabled: boolean): void {
-  if (props.disabled || connectorSwitchDisabled(entry, props.canManage)) return;
-  emit("enabled-change", entry.id, enabled);
+function choose(entry: ConnectorView): void {
+  if (props.disabled) return;
+  if (!selectionDisabled(entry)) changeSelection(entry, !selected(entry));
+  else if (!entry.busy) { emit("configure", entry.id); emit("close"); }
+}
+function changeSelection(entry: ConnectorView, value: boolean): void {
+  if (selectionDisabled(entry)) return;
+  emit("selection-change", entry.id, value);
 }
 function navigate(event: KeyboardEvent): void {
   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -82,24 +86,25 @@ onMounted(() => { emit("refresh"); });
 <template>
   <ChatResourcePanel title="连接器" v-model:query="query" :loading="loading" @manage="manage">
     <div ref="panel" @keydown="navigate">
+      <p class="connector-menu__notice">开关仅控制当前对话选用</p>
       <p v-if="loading && !installed.length" class="connector-menu__notice" role="status">正在读取连接器状态…</p>
       <div v-if="error" class="connector-menu__notice" role="alert"><p>{{ error }}</p><NButton size="small" :disabled="loading" @click="$emit('refresh')">重试</NButton></div>
       <p v-if="!selectionAvailable && !loading && installed.some(entry => entry.enabled)" class="connector-menu__notice">当前无法选用，请前往管理页检查。</p>
-      <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择本轮连接器">
+      <ul v-if="filtered.length" class="connector-menu__list" aria-label="选择当前对话使用的连接器">
         <li v-for="{ entry, status } in filtered" :key="entry.id" :aria-busy="entry.busy" :class="{ 'connector-menu__row--selected': selectedIds.includes(entry.id), 'connector-menu__row--blocked': disabled || entry.busy }">
-          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled || entry.busy" :aria-label="`${entry.enabled ? '停用' : connectorSwitchDisabled(entry, canManage) ? '配置' : '启用'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
+          <button type="button" data-connector-option class="connector-menu__option" :disabled="disabled" :aria-label="`${selected(entry) ? '取消选用' : selectionDisabled(entry) ? '管理' : '选用'} ${entry.name}，${entry.status.label}`" @click="choose(entry)">
             <ConnectorIcon :asset-id="entry.iconAssetId" size="xs" />
             <span class="connector-menu__name" :title="entry.name">{{ entry.name }}</span>
             <span v-if="status" class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
           </button>
           <NSwitch
             size="small"
-            :value="entry.enabled"
-            :loading="entry.busy"
-            :disabled="disabled || connectorSwitchDisabled(entry, canManage)"
-            :aria-disabled="disabled || connectorSwitchDisabled(entry, canManage)"
-            :aria-label="`${entry.enabled ? '停用' : '启用'} ${entry.name}`"
-            @update:value="changeEnabled(entry, $event)"
+            :value="selected(entry)"
+            :loading="false"
+            :disabled="selectionDisabled(entry)"
+            :aria-disabled="selectionDisabled(entry)"
+            :aria-label="`${selected(entry) ? '取消选用' : '选用'} ${entry.name}，仅当前对话`"
+            @update:value="changeSelection(entry, $event)"
           />
           <div v-if="operationErrors[entry.id]" class="connector-menu__operation-error" role="alert">
             <p>{{ operationErrors[entry.id] }}</p>

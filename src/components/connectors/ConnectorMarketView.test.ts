@@ -177,3 +177,13 @@ describe("cross-border catalog", () => {
     expect(document.body.textContent).toContain("安装 领星 ERP");
   });
 });
+
+
+it("shows saved enable intent while disconnected and allows global disable", async () => {
+  const model = { phase: "ready" as const, entries: connectorViews(snapshot([{ ...installed, desiredEnabled: true, effectiveEnabled: false, connectionStatus: "disconnected" }])), refreshing: false, canManage: true, error: null };
+  const wrapper = mount(ConnectorInstalledList, { props: { entries: model.entries, canManage: true } }); wrappers.push(wrapper);
+  const control = wrapper.get('[role="switch"]');
+  expect(control.attributes("aria-checked")).toBe("true");
+  await control.trigger("click");
+  expect(wrapper.emitted("enabled-change")).toEqual([["sample", false]]);
+});

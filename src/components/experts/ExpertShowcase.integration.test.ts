@@ -143,7 +143,7 @@ describe("display-only expert catalog integration", () => {
     await flushPromises();
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
     for (const prompt of analyst.quickPrompts) {
-      const item = [...dialog.querySelectorAll<HTMLElement>(".expert-showcase-detail__prompts p")].find(element => element.textContent?.trim() === prompt);
+      const item = [...dialog.querySelectorAll<HTMLElement>(".expert-detail__prompts p")].find(element => element.textContent?.trim() === prompt);
       expect(item, `Expected a readable example question: ${prompt}`).toBeDefined();
       item!.click();
     }

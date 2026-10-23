@@ -35,6 +35,7 @@ fn omit_display_content(item: &mut NativeItem) {
     item.result_summary = None;
     item.command_label = None;
     item.cwd_label = None;
+    item.web_search = None;
     item.availability = "partial".into();
     if let Some(mcp) = &mut item.mcp {
         if !mcp.texts.is_empty() {
@@ -130,7 +131,7 @@ impl NativeDisplayBuffer {
     /// Transport ordering is checked exactly once here. It never changes the
     /// native execution status and never requests or retries a model operation.
     pub fn observe(&mut self, event: &NativeEvent) -> Result<bool, ChatError> {
-        if !matches!(event.schema_version, 7 | 8)
+        if !matches!(event.schema_version, 7 | 8 | 10 | 11)
             || event.event_type != "native.notification"
             || event.task_id != self.context.task_id.to_string()
             || event.agent_session_id != self.context.agent_session_id.to_string()

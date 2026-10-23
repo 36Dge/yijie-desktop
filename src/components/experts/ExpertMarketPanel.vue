@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onScopeDispose, ref, useId, watch } from "vue";
-import { NAlert, NButton, NCard, NModal, NSkeleton, NTag, useDialog, type DialogReactive } from "naive-ui";
+import { NAlert, NButton, NCard, NModal, NSkeleton, useDialog, type DialogReactive } from "naive-ui";
 import { useRoute } from "vue-router";
 import type { CatalogEntry, ExpertDisplay, ResourceOperation } from "../../domain/experts.generated";
 import type { ExpertShowcase } from "../../domain/expert-showcase";
@@ -11,6 +11,8 @@ import YjIcon from "../yijie/YjIcon.vue";
 import ExpertShowcaseCard from "./ExpertShowcaseCard.vue";
 import ExpertShowcaseDetail from "./ExpertShowcaseDetail.vue";
 import ExpertAvatar from "./ExpertAvatar.vue";
+import ExpertDetailCard from "./ExpertDetailCard.vue";
+import { useExpertDeveloper } from "../../composables/useExpertDeveloper";
 
 const props = withDefaults(defineProps<{ active?: boolean; selectedExpert?: ExpertDisplay | null; summonBusy?: boolean; summonError?: string | null; openExpertId?: string; openExpertVersion?: string; showcaseEntries?: readonly ExpertShowcase[] }>(), { active: true, showcaseEntries: () => [] });
 const emit = defineEmits<{ summon: [entry: CatalogEntry, prompt?: string] }>();
@@ -26,7 +28,9 @@ const query = defineModel<string>("query", { default: "" });
 const selectedKey = ref<string | null>(null), titleId = useId();
 let detailTrigger: HTMLElement | null = null;
 const key = (entry: CatalogEntry) => `${entry.display.expertId}@${entry.display.version}`;
+watch(() => [route.fullPath, experts.scope, experts.contextId], () => { selectedKey.value = null; detailTrigger = null; }, { flush: "sync" });
 const selected = computed(() => experts.entries.find(entry => key(entry) === selectedKey.value) ?? null);
+const developer = useExpertDeveloper(computed(() => selected.value?.display ?? null), computed(() => experts.contextId), computed(() => props.active));
 const missingRequestedDetails = computed(() => props.active && !!experts.snapshot && !!props.openExpertId && !!props.openExpertVersion && selectedKey.value === `${props.openExpertId}@${props.openExpertVersion}` && selected.value === null);
 const filtered = computed(() => {
   const search = query.value.trim().toLocaleLowerCase();
@@ -77,10 +81,6 @@ function confirmResourceAction(title: string, content: string, positiveText: str
     await action();
   } });
 }
-function remove(entry: CatalogEntry): void {
-  const display = entry.display;
-  confirmResourceAction("移除专家资源", `移除 ${display.displayName} ${display.version} 的本地资源？已有会话历史会保留；被会话或待发送任务引用的版本不能移除。`, "移除", () => experts.execute(display, "remove"));
-}
 function recover(operation: ResourceOperation): void {
   confirmResourceAction("处理未完成操作", "仅核对这次操作；如果确认尚未开始，会结束原请求。不会重复安装或移除资源。", "处理未完成操作", () => experts.recover(operation.expert, operation.operationId));
 }
@@ -98,7 +98,7 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
       <span v-if="showcaseEntries.length || experts.snapshot && !experts.error" class="expert-market__count">{{ resultCount }} 位专家</span>
       <p class="expert-market__hint">{{ showcaseEntries.length ? '点击卡片查看详情，标注「展示」的专家仅供浏览。' : '选择专家后进入对话，发送消息才会开始任务。' }}</p>
     </div>
-    <NAlert v-if="!experts.canManage && experts.snapshot" type="info" :bordered="false">当前仅可查看，准备和移除资源需要插件管理权限。</NAlert>
+    <NAlert v-if="!experts.canManage && experts.snapshot" type="info" :bordered="false">当前仅可查看，准备资源需要插件管理权限。</NAlert>
     <NAlert v-if="experts.snapshot && !experts.snapshot.executionAvailable" type="info" :bordered="false">当前执行环境暂不支持专家会话，可先查看资料范围。</NAlert>
     <NAlert v-if="summonError" type="warning" :bordered="false">{{ summonError }}</NAlert>
     <div v-if="experts.refreshing && !experts.snapshot" class="expert-market__grid" role="status" aria-label="正在读取专家目录">
@@ -120,12 +120,11 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
           <span class="expert-card__tags"><span v-for="tag in entry.tags" :key="tag" class="expert-card__tag">{{ tag }}</span></span>
         </button>
         <div class="expert-card__footer">
-          <span class="expert-card__status" :title="`${entry.display.subtitle} · ${expertResourceLabels[entry.state]}`">
+          <span class="expert-card__status">
             <span class="expert-card__platform">{{ entry.display.subtitle }}</span>
-            <span class="expert-card__resource"><span class="expert-card__status-dot" :class="{ 'expert-card__status-dot--ready': entry.state === 'ready' }" aria-hidden="true" />{{ expertResourceLabels[entry.state] }}</span>
+            <span v-if="entry.state !== 'available' && entry.state !== 'ready'" class="expert-card__resource"><span class="expert-card__status-dot" aria-hidden="true" />{{ expertResourceLabels[entry.state] }}</span>
           </span>
           <div class="expert-card__actions">
-            <NButton v-if="entry.state === 'available'" text size="small" :loading="experts.busy.has(key(entry))" :disabled="!experts.canManage || !!experts.operations[key(entry)] && ['pending', 'unknown'].includes(experts.operations[key(entry)]!.state)" @click="experts.execute(entry.display, 'prepare')">准备资源</NButton>
             <NButton class="expert-card__summon" text size="small" :disabled="!canSummon(entry)" :loading="summonBusy" @click.stop="emit('summon', entry)">{{ isSelected(entry) ? '已选用' : '召唤专家' }}<YjIcon v-if="!summonBusy" :name="isSelected(entry) ? 'check' : 'arrowUpRight'" size="xs" /></NButton>
           </div>
         </div>
@@ -145,27 +144,15 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
       </div>
     </section>
     <NModal v-if="selected !== null || missingRequestedDetails" :show="active" @update:show="value => { if (!value) void closeDetails(); }">
-      <NCard v-if="selected" class="expert-detail" role="dialog" aria-modal="true" :aria-labelledby="titleId" closable @close="closeDetails">
-        <template #header><div class="expert-detail__header"><ExpertAvatar :expert-id="selected.display.expertId" :icon-key="selected.display.iconKey" detail /><h2 :id="titleId">{{ selected.display.displayName }}</h2></div></template>
-        <div class="expert-detail__body">
+      <ExpertDetailCard v-if="selected" :name="selected.display.displayName" :developer="developer" :version="selected.display.version" :expert-id="selected.display.expertId" :description="selected.description" :tags="selected.tags" :quick-prompts="selected.quickPrompts" :knowledge-summary="selected.knowledgeSummary" interactive :disabled="!canSummon(selected)" @close="closeDetails" @prompt="prompt => selected && emit('summon', selected, prompt)">
+        <template #avatar><ExpertAvatar :expert-id="selected.display.expertId" :icon-key="selected.display.iconKey" detail /></template>
+        <template #action><NButton type="primary" size="small" :bordered="false" :disabled="!canSummon(selected)" :loading="summonBusy" @click="emit('summon', selected)">{{ isSelected(selected) ? '已选用' : '召唤专家' }}</NButton></template>
+        <template #feedback>
           <NAlert v-if="summonError" type="warning" :bordered="false">{{ summonError }}</NAlert>
-          <p>{{ selected.display.subtitle }} · {{ selected.display.version }}</p>
-          <p>{{ selected.description }}</p>
-          <div class="expert-card__tags"><NTag v-for="tag in selected.tags" :key="tag" :bordered="false">{{ tag }}</NTag></div>
-          <h3>知识范围</h3><p>{{ selected.knowledgeSummary }}</p>
-          <h3 v-if="selected.quickPrompts.length">可以这样提问</h3>
-          <div v-if="selected.quickPrompts.length" class="expert-detail__prompts"><NButton v-for="prompt in selected.quickPrompts" :key="prompt" secondary :disabled="!canSummon(selected)" @click="emit('summon', selected, prompt)">{{ prompt }}</NButton></div>
-          <p>当前版本仅获本地开发使用授权。资料可能涉及需要复核的平台规则，不能作为平台政策已核验的证明。</p>
-          <NAlert type="info" :bordered="false">参考问题只填入输入框；由你确认内容后发送。</NAlert>
           <p v-if="experts.operationErrors[key(selected)]" class="expert-market__error" role="alert">{{ experts.operationErrors[key(selected)] }}</p>
-        </div>
-        <template #footer><div class="expert-detail__actions">
-          <NButton v-if="selected.state === 'available'" secondary :disabled="!experts.canManage || !!experts.operations[key(selected)] && ['pending', 'unknown'].includes(experts.operations[key(selected)]!.state)" :loading="experts.busy.has(key(selected))" @click="experts.execute(selected.display, 'prepare')">准备资源</NButton>
-          <NButton v-if="selected.state === 'ready'" secondary :disabled="!experts.canManage || experts.busy.has(key(selected)) || !!experts.operations[key(selected)] && ['pending', 'unknown'].includes(experts.operations[key(selected)]!.state)" @click="remove(selected)">移除资源</NButton>
-          <NButton type="primary" :disabled="!canSummon(selected)" :loading="summonBusy" @click="emit('summon', selected)">{{ isSelected(selected) ? '已选用' : '召唤专家' }}</NButton>
-        </div></template>
-      </NCard>
-      <NCard v-else-if="missingRequestedDetails" class="expert-detail" role="dialog" aria-modal="true" :aria-labelledby="titleId" closable @close="closeDetails">
+        </template>
+      </ExpertDetailCard>
+      <NCard v-else-if="missingRequestedDetails" class="expert-detail-unavailable" role="dialog" aria-modal="true" :aria-labelledby="titleId" closable @close="closeDetails">
         <template #header><span :id="titleId">所选专家版本详情不可用</span></template>
         <div class="expert-detail__body">
           <p>所选版本 {{ openExpertVersion }} 当前不在可用目录中，不能用其他版本代替它的详情。</p>
@@ -206,7 +193,6 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
 .expert-card__platform { max-width: 100%; overflow-wrap: anywhere; }
 .expert-card__resource { display: inline-flex; align-items: center; gap: var(--yj-space-1); }
 .expert-card__status-dot { flex: none; width: var(--yj-space-1); height: var(--yj-space-1); border-radius: var(--yj-radius-full); background: currentColor; }
-.expert-card__status-dot--ready { background: var(--yj-color-semantic-success-ink); }
 .expert-card__actions { display: flex; flex: none; align-items: center; gap: var(--yj-space-3); margin-inline-start: auto; }
 .expert-detail__body { font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); color: var(--yj-color-text-secondary); }
 .expert-market__error { margin: 0; color: var(--yj-color-semantic-error-ink); font-size: var(--yj-font-size-caption); }
@@ -214,13 +200,7 @@ watch(() => experts.scope, () => { selectedKey.value = null; query.value = ""; }
 .expert-market__operation-actions { display: flex; flex-wrap: wrap; gap: var(--yj-space-2); }
 .expert-market__operations h2, .expert-detail__body h3 { margin: 0; color: var(--yj-color-text-primary); font-size: var(--yj-font-size-section-title); }
 .expert-market__operations p, .expert-detail__body p, .expert-detail__body ul { margin: 0; }
-.expert-detail { width: min(var(--yj-layout-form-max), calc(100vw - var(--yj-space-8))); max-height: calc(100vh - var(--yj-space-8)); overflow-y: auto; }
-.expert-detail__header { display: flex; align-items: center; gap: var(--yj-space-4); }
-.expert-detail__header h2 { min-width: 0; margin: 0; font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); font-weight: var(--yj-font-weight-semibold); overflow-wrap: anywhere; }
-.expert-detail__prompts { display: grid; gap: var(--yj-space-2); }
-.expert-detail__prompts :deep(.n-button__content) { white-space: normal; text-align: left; }
-.expert-detail__prompts :deep(.n-button) { height: auto; min-height: var(--yj-control-height-md); padding: var(--yj-space-3); justify-content: flex-start; }
-.expert-detail__actions { display: flex; justify-content: flex-end; gap: var(--yj-space-2); }
+.expert-detail-unavailable { width: min(var(--yj-layout-form-max), calc(100vw - var(--yj-space-8))); max-height: calc(100vh - var(--yj-space-8)); overflow-y: auto; }
 @container (max-width: 900px) { .expert-card { padding: var(--yj-space-4); } }
 @container (max-width: 720px) { .expert-market__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 480px) { .expert-market__grid { grid-template-columns: minmax(0, 1fr); } .expert-market__operation { flex-wrap: wrap; } }

@@ -203,10 +203,10 @@ const outputHeading = computed(() => {
 const outputStateMessage = computed<string | null>(() => {
   if (native.value) {
     const {item, lastMethod} = native.value;
-    if (item.outputText === "") return "已收到的安全输出为空。";
+    if (item.outputText === "") return "命令已结束，没有输出内容。";
     if (item.outputText != null) return null;
     if (lastMethod === "thread/read") return "原生历史未提供可显示的输出。";
-    if (lastMethod === "item/completed") return "命令结束记录未提供可显示的输出。";
+    if (lastMethod === "item/completed") return "命令已结束，无可显示输出。";
     return props.item.busy === true
       ? "输出将在收到命令结束记录后展示。"
       : "未观察到命令结束记录，暂无结果输出。";
