@@ -21,6 +21,7 @@ const trigger = ref<HTMLButtonElement | null>(null);
 const menu = ref<HTMLElement | null>(null);
 const presentation: Record<ProfileId, { label: string; icon: YjIconName }> = {
   "kimi-k3-max-v1": { label: "Kimi-K3", icon: "modelKimi" },
+  "kimi-k3-1-pro-max-v1": { label: "Kimi K3.1 Pro", icon: "modelKimi" },
   "minimax-m3-high-v1": { label: "MiniMax-M3", icon: "modelMiniMax" },
 };
 // Display-only placeholders deliberately have no runtime profile IDs or handlers.

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { legacyProfile } from "../../api/chat-model-client";
 import { computed, onBeforeUnmount, reactive, ref, useId, watch } from "vue";
 import { NAlert, NButton, NCard, NCheckbox, NCheckboxGroup, NForm, NFormItem, NInput, NModal, NSelect, useDialog } from "naive-ui";
 import type { PlanDefinition, PlanView, TimePreview, TimeRule } from "../../domain/scheduled-plan.generated";
@@ -24,7 +25,7 @@ let previewEpoch = 0; let targetEpoch = 0; let alive = true; let previewTimer: R
 const frequencyOptions = Object.entries(frequencyLabels).map(([value,label]) => ({value,label}));
 const modeOptions = Object.entries(targetLabels).map(([value,label]) => ({value,label}));
 const weekLabels = ["一", "二", "三", "四", "五", "六", "日"];
-const valid = computed(() => (!chatModelsEnabled || (modelReady.value && modelOptions.some(m=>m.value===form.modelProfile && !m.disabled))) && Array.from(form.name.trim()).length > 0 && Array.from(form.name.trim()).length <= 80 && Array.from(form.content.trim()).length > 0 && Array.from(form.content.trim()).length <= 10000 && previewValid.value && (form.mode !== "existing_chat" || !!form.conversationId));
+const valid = computed(() => (!chatModelsEnabled || (!!legacyProfile(form.modelProfile) && modelReady.value && modelOptions.some(m=>m.value===form.modelProfile && !m.disabled))) && Array.from(form.name.trim()).length > 0 && Array.from(form.name.trim()).length <= 80 && Array.from(form.content.trim()).length > 0 && Array.from(form.content.trim()).length <= 10000 && previewValid.value && (form.mode !== "existing_chat" || !!form.conversationId));
 watch(rule, () => {
   const epoch = ++previewEpoch; previewValid.value = false; previewText.value = "正在计算…";
   clearTimeout(previewTimer);
@@ -56,7 +57,9 @@ function close() {
 }
 function submit() {
   if (!valid.value || blocked.value) return;
-  emit("save", { ...(chatModelsEnabled ? {model_profile:form.modelProfile} : {}), name: form.name.trim(), content: form.content.trim(), rule: rule.value, target: { mode: form.mode, ...(form.mode === "existing_chat" && form.conversationId ? { conversation_id: form.conversationId } : {}) } });
+  const modelProfile = legacyProfile(form.modelProfile);
+  if (chatModelsEnabled && !modelProfile) return;
+  emit("save", { ...(chatModelsEnabled ? {model_profile:modelProfile} : {}), name: form.name.trim(), content: form.content.trim(), rule: rule.value, target: { mode: form.mode, ...(form.mode === "existing_chat" && form.conversationId ? { conversation_id: form.conversationId } : {}) } });
 }
 onBeforeUnmount(() => { alive = false; previewEpoch++; targetEpoch++; clearTimeout(previewTimer); clearTimeout(targetTimer); });
 defineExpose({ dirty, close });

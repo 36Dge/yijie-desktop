@@ -17,10 +17,11 @@ impl HostBridge {
     }
     pub(crate) async fn model_catalog(&self) -> Result<wire::Catalog, HostBridgeError> {
         let value: wire::Catalog = self
-            .recovery_get("/v1/model-chat/catalog")
+            .recovery_get(&format!("{}catalog", model_prefix()))
             .await?
             .ok_or_else(protocol_error)?;
-        if value.schema_version != 1 || value.models.len() != 2 {
+        if value.schema_version != crate::chat::models::schema_version() || value.models.len() != 2
+        {
             return Err(protocol_error());
         }
         Ok(value)
@@ -30,7 +31,7 @@ impl HostBridge {
         session: Uuid,
     ) -> Result<wire::Selection, HostBridgeError> {
         let value: wire::Selection = self
-            .recovery_get(&format!("/v1/model-chat/agent-sessions/{session}/model"))
+            .recovery_get(&format!("{}agent-sessions/{session}/model", model_prefix()))
             .await?
             .ok_or_else(protocol_error)?;
         validate_selection(value, session)
@@ -43,7 +44,7 @@ impl HostBridge {
         let response = self
             .send_json(
                 Method::POST,
-                &format!("/v1/model-chat/agent-sessions/{session}/model"),
+                &format!("{}agent-sessions/{session}/model", model_prefix()),
                 &request,
             )
             .await?;
@@ -51,10 +52,14 @@ impl HostBridge {
             let bytes = read_json_body(response).await?;
             let error: wire::Error =
                 serde_json::from_slice(&bytes).map_err(|_| protocol_error())?;
-            if error.schema_version != 1 {
+            if error.schema_version != crate::chat::models::schema_version() {
                 return Err(protocol_error());
             }
             return Err(HostBridgeError::rejected(match error.code {
+                #[cfg(feature = "kimi-k31-pro-candidate")]
+                wire::ErrorCode::ModelRetired | wire::ErrorCode::ActivationRequired => {
+                    HostErrorCode::SessionNotUsable
+                }
                 wire::ErrorCode::InvalidRequest => HostErrorCode::InvalidRequest,
                 wire::ErrorCode::Unauthorized => HostErrorCode::Unauthorized,
                 wire::ErrorCode::NotFound => HostErrorCode::SessionNotFound,
@@ -73,7 +78,7 @@ impl HostBridge {
             serde_json::from_slice(&bytes).map_err(|_| accepted_response_invalid())?,
             session,
         )?;
-        if value.profile_id != Some(request.profile_id)
+        if value.profile_id != Some(request.profile_id.into())
             || value.operation_id.as_deref() != Some(request.operation_id.as_str())
             || value.state != wire::SelectionState::Ready
             || value.revision < request.expected_revision
@@ -87,7 +92,7 @@ fn validate_selection(
     value: wire::Selection,
     session: Uuid,
 ) -> Result<wire::Selection, HostBridgeError> {
-    if value.schema_version != 1
+    if value.schema_version != crate::chat::models::schema_version()
         || value.agent_session_id != session.to_string()
         || value.revision < 0
         || value.revision > 9007199254740991
@@ -98,13 +103,16 @@ fn validate_selection(
     Ok(value)
 }
 pub(super) fn route(path: &str) -> Option<String> {
+    if cfg!(feature = "kimi-k31-pro-candidate") && path.starts_with("/v1/model-chat/") {
+        return Some(path.replacen("/v1/model-chat/", "/v2/model-chat/", 1));
+    }
     if path.starts_with("/v1/tasks/") && path.ends_with("/agent-sessions")
         || path.starts_with("/v1/scheduled-plan-draft-sessions")
     {
-        return Some(path.replacen("/v1/", "/v1/model-chat/", 1));
+        return Some(path.replacen("/v1/", model_prefix(), 1));
     }
     if path.starts_with("/v2/agent-sessions/") && path.ends_with("/turns") {
-        return Some(path.replacen("/v2/", "/v1/model-chat/", 1));
+        return Some(path.replacen("/v2/", model_prefix(), 1));
     }
     if path.starts_with("/v1/agent-sessions/") {
         let suffix = path.trim_start_matches("/v1/agent-sessions/");
@@ -112,8 +120,16 @@ pub(super) fn route(path: &str) -> Option<String> {
             || suffix.ends_with("/resume")
             || suffix.ends_with("/permission-turns")
         {
-            return Some(path.replacen("/v1/", "/v1/model-chat/", 1));
+            return Some(path.replacen("/v1/", model_prefix(), 1));
         }
     }
     None
+}
+
+fn model_prefix() -> &'static str {
+    if cfg!(feature = "kimi-k31-pro-candidate") {
+        "/v2/model-chat/"
+    } else {
+        "/v1/model-chat/"
+    }
 }

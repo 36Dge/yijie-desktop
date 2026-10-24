@@ -863,6 +863,14 @@ impl ChatRepository {
             })
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         migrations::validate_reader(&connection)?;
+        if super::models::v2_enabled() {
+            let version: i64 = connection
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .map_err(map_sqlite_error)?;
+            if version != 0 && version != migrations::KIMI_K31_SCHEMA_VERSION {
+                return Err(ChatError::OrchestrationUnavailable);
+            }
+        }
         configure_connection(&connection)?;
         migrations::validate_embedded_migrations()?;
         if schedule_mode == super::schedules::ScheduleStorageMode::TimingFoundation {
@@ -943,6 +951,9 @@ impl ChatRepository {
                 &mut connection,
                 migrations::ARTIFACT_MEDIA_SCHEMA_VERSION,
             )?;
+        }
+        if super::models::v2_enabled() {
+            migrations::migrate_to_target(&mut connection, migrations::KIMI_K31_SCHEMA_VERSION)?;
         }
         protect_database_files(&database_path)?;
         let mut repository = Self {

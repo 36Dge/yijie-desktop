@@ -5338,9 +5338,21 @@ impl AuthorizedConversationApplication {
             return Err(ChatError::OrchestrationUnavailable);
         }
         let _expert_gate = self.authorization.market_admission_lock().await;
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        let target = match intent.profile_id {
+            super::models_generated::ProfileId::KimiK31ProMaxV1 => {
+                super::models_generated::ActiveProfileId::KimiK31ProMaxV1
+            }
+            super::models_generated::ProfileId::MinimaxM3HighV1 => {
+                super::models_generated::ActiveProfileId::MinimaxM3HighV1
+            }
+            _ => return Err(ChatError::ConversationConflict),
+        };
+        #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+        let target = intent.profile_id;
         let request = super::models_generated::SelectRequest {
-            schema_version: 1,
-            profile_id: intent.profile_id,
+            schema_version: super::models::schema_version(),
+            profile_id: target,
             expected_revision: intent.expected_revision,
             operation_id: op.to_string(),
         };

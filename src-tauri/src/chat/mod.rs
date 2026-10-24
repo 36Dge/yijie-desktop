@@ -1863,7 +1863,14 @@ pub mod native_conversation_v3_generated;
 mod turn_timing;
 pub(crate) mod turn_timing_generated;
 
+#[cfg(test)]
+mod kimi_k31_tests;
 pub(crate) mod models;
+#[cfg(not(feature = "kimi-k31-pro-candidate"))]
+pub(crate) mod models_generated;
+#[cfg(feature = "kimi-k31-pro-candidate")]
+#[allow(dead_code)]
+#[path = "models_v2_generated.rs"]
 pub(crate) mod models_generated;
 
 pub mod artifact_media;

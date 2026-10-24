@@ -179,6 +179,13 @@ impl SidecarConfig {
         let minimax_provider_enabled =
             parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
         let chat_models_enabled = super::models::enabled();
+        if super::models::v2_enabled()
+            && (super::connectors::enabled()
+                || super::experts::enabled()
+                || super::artifact_media::enabled())
+        {
+            return Err(ChatError::InvalidConfiguration);
+        }
         let kimi_api_key_file = if chat_models_enabled {
             optional_owner_only_provider_key_file("YIJIE_KIMI_API_KEY_FILE")?
         } else {
@@ -393,6 +400,9 @@ impl SidecarConfig {
         }
         if self.chat_models_enabled {
             values.push(("YIJIE_CHAT_MODELS_ENABLED", "true".to_owned()));
+            if cfg!(feature = "kimi-k31-pro-candidate") {
+                values.push(("YIJIE_KIMI_K31_PRO_CANDIDATE", "true".to_owned()));
+            }
             if let Some(file) = &self.kimi_api_key_file {
                 values.push((
                     "YIJIE_KIMI_API_KEY_FILE",

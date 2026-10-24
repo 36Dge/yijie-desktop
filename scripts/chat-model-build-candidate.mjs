@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyKimiK31BuildCandidate } from './kimi-k31-build-candidate.mjs';
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const inputs=['cmd','internal','api','go.mod','go.sum'];
 const modelFamilies=['chat-models','scheduled-plan','scheduled-execution','scheduled-draft','scheduled-task-recovery','runtime-input-only','runtime-chat-models','native-turn-timing'];
@@ -66,6 +67,7 @@ function verifyArtifactMedia(desktopRoot,contractsRoot,record){
 }
 
 export function verifyChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot,environment=process.env){
+ if(environment.YIJIE_KIMI_K31_PRO_CANDIDATE==='true')return verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,environment);
  const selected=chatModelBuildCandidateSelection(environment),expert=environment.YIJIE_EXPERTS_ENABLED==='true',media=selected.feature==='FEAT-159';
  const actual=JSON.parse(readFileSync(path.join(desktopRoot,'contracts',selected.file)));
  assert.equal(actual.schema_version,1);assert.equal(actual.feature,selected.feature);assert.equal(actual.mode,'local_worktree_candidate');assert.equal(actual.release,false);

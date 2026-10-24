@@ -1629,6 +1629,8 @@ async fn parse_session_response_for_model(
     let wire: SessionEnvelope = serde_json::from_slice(&body).map_err(|_| protocol_error())?;
     let expected = match profile {
         Some("kimi-k3-max-v1") => ("kimi-k3", "kimi"),
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        Some("kimi-k3-1-pro-max-v1") => ("kimi-k3.1-pro", "kimi"),
         Some("minimax-m3-high-v1") => ("MiniMax-M3", "minimax"),
         _ => return Err(protocol_error()),
     };
@@ -1659,6 +1661,8 @@ impl TryFrom<WireSession> for HostSession {
         let model_ready = match (wire.model.as_str(), wire.model_provider.as_str()) {
             ("", "") => false,
             ("MiniMax-M3", "minimax") | ("kimi-k3", "kimi") => true,
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            ("kimi-k3.1-pro", "kimi") => true,
             _ => return Err(protocol_error()),
         };
         let failure_code = match wire.failure_code.as_str() {

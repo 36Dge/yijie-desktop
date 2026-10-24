@@ -1,3 +1,4 @@
+import { legacyProfile } from "../../api/chat-model-client";
 import { chatModelsEnabled, type ModelIntent } from "../../api/chat-model-client";
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { createScheduledTaskNativeClient, ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
@@ -126,7 +127,9 @@ export function useScheduledDraft(
   async function submit(text: string, modelIntent?: ModelIntent) {
     if (!canSubmit.value || !scope.value || !text.trim()) return null;
     const conversation = session();
-    pending.value = Object.freeze({ kind: "submit", id: crypto.randomUUID(), scope: scope.value, payload: { text: text.trim(), ...(modelIntent ? { model_intent: {profile_id:modelIntent.profileId,expected_revision:modelIntent.expectedRevision} } : {}), ...(conversation ? { conversation_id: conversation } : {}) } });
+    const modelProfile = modelIntent && legacyProfile(modelIntent.profileId);
+    if (modelIntent && !modelProfile) { error.value = "draft_unavailable"; return null; }
+    pending.value = Object.freeze({ kind: "submit", id: crypto.randomUUID(), scope: scope.value, payload: { text: text.trim(), ...(modelIntent && modelProfile ? { model_intent: {profile_id:modelProfile,expected_revision:modelIntent.expectedRevision} } : {}), ...(conversation ? { conversation_id: conversation } : {}) } });
     return runPending();
   }
   async function confirm(definition: PlanDefinition, expected: { source: string; digest: string }) {

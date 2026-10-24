@@ -9,19 +9,53 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub fn v2_enabled() -> bool {
+    cfg!(feature = "kimi-k31-pro-candidate")
+        && std::env::var("YIJIE_KIMI_K31_PRO_CANDIDATE").as_deref() == Ok("true")
+}
+pub fn schema_version() -> i64 {
+    if cfg!(feature = "kimi-k31-pro-candidate") {
+        2
+    } else {
+        1
+    }
+}
+pub fn executable_profile(id: &str) -> bool {
+    if cfg!(feature = "kimi-k31-pro-candidate") {
+        matches!(id, "kimi-k3-1-pro-max-v1" | "minimax-m3-high-v1")
+    } else {
+        matches!(id, "kimi-k3-max-v1" | "minimax-m3-high-v1")
+    }
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+impl From<wire::ActiveProfileId> for wire::ProfileId {
+    fn from(value: wire::ActiveProfileId) -> Self {
+        match value {
+            wire::ActiveProfileId::KimiK31ProMaxV1 => Self::KimiK31ProMaxV1,
+            wire::ActiveProfileId::MinimaxM3HighV1 => Self::MinimaxM3HighV1,
+        }
+    }
+}
+
 pub fn enabled() -> bool {
+    if cfg!(feature = "kimi-k31-pro-candidate") && !v2_enabled() {
+        return false;
+    }
     std::env::var("YIJIE_ENV").as_deref() == Ok("local")
         && std::env::var("YIJIE_LOCAL_PROFILE").as_deref() == Ok("demo_fast")
         && std::env::var("YIJIE_CHAT_MODELS_ENABLED").as_deref() == Ok("true")
 }
-pub fn profile_id(p: wire::ProfileId) -> &'static str {
-    match p {
+pub fn profile_id(p: impl Into<wire::ProfileId>) -> &'static str {
+    match p.into() {
         wire::ProfileId::KimiK3MaxV1 => "kimi-k3-max-v1",
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        wire::ProfileId::KimiK31ProMaxV1 => "kimi-k3-1-pro-max-v1",
         wire::ProfileId::MinimaxM3HighV1 => "minimax-m3-high-v1",
     }
 }
 pub fn valid_profile(p: &str) -> bool {
-    matches!(p, "kimi-k3-max-v1" | "minimax-m3-high-v1")
+    executable_profile(p)
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -71,6 +105,9 @@ pub(super) fn freeze(
     session: Uuid,
     intent: &ModelIntent,
 ) -> Result<(), ChatError> {
+    if !executable_profile(profile_id(intent.profile_id)) {
+        return Err(ChatError::ConversationConflict);
+    }
     db.execute("INSERT INTO chat_operation_models(operation_id,session_id,profile_id,revision) VALUES(?1,?2,?3,?4) ON CONFLICT(operation_id) DO NOTHING",params![id.to_string(),session.to_string(),profile_id(intent.profile_id),intent.expected_revision]).map_err(db_error)?;
     Ok(())
 }
@@ -252,7 +289,7 @@ impl ChatRepository {
         let host = self
             .agent_session_id_for_session_optional_model(session)?
             .ok_or(ChatError::ConversationConflict)?;
-        if value.schema_version != 1
+        if value.schema_version != schema_version()
             || value.agent_session_id != host.to_string()
             || value.revision < 0
         {
@@ -285,6 +322,9 @@ impl ChatRepository {
         op: Uuid,
     ) -> Result<Uuid, ChatError> {
         self.require_model_storage()?;
+        if cfg!(feature = "kimi-k31-pro-candidate") {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
         // The versioned Host model path clears market capability/configuration
         // before its existing idle model switch. Legacy turn/resume stay fenced.
         if !super::connectors::enabled() {
@@ -384,6 +424,9 @@ pub(super) fn freeze_conversation(
 
 // A compatible rollback reader must leave model-aware outboxes untouched.
 pub(super) fn dispatch_predicate(db: &Connection, alias: &str) -> Result<String, ChatError> {
+    if enabled() && cfg!(feature = "kimi-k31-pro-candidate") && table(db)? {
+        return Ok(format!("EXISTS(SELECT 1 FROM chat_operation_models model WHERE model.operation_id={alias}.operation_id AND model.profile_id IN ('kimi-k3-1-pro-max-v1','minimax-m3-high-v1'))"));
+    }
     if enabled() || !table(db)? {
         return Ok("1=1".into());
     }
@@ -485,7 +528,9 @@ mod tests {
         let selection = Uuid::now_v7().to_string();
         repo.connection.execute("UPDATE chat_model_selections SET state='switching',operation_id=?2,requested_profile_id='minimax-m3-high-v1',expected_revision=1 WHERE session_id=?1",params![p.session_id.to_string(),selection]).unwrap();
         let stale = wire::Selection {
-            schema_version: 1,
+            schema_version: schema_version(),
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            availability: wire::SelectionAvailability::Retired,
             agent_session_id: host.to_string(),
             state: wire::SelectionState::Ready,
             revision: 1,
@@ -499,7 +544,9 @@ mod tests {
             "switching"
         );
         let selected = wire::Selection {
-            schema_version: 1,
+            schema_version: schema_version(),
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            availability: wire::SelectionAvailability::Ready,
             agent_session_id: host.to_string(),
             state: wire::SelectionState::Ready,
             revision: 2,

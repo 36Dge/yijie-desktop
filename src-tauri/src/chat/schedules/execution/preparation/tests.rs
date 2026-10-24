@@ -1427,7 +1427,9 @@ fn feat156_bound_targets_reject_changed_model_without_consuming_grant() {
         r.sync_model_selection(
             chat_id,
             crate::chat::models_generated::Selection {
-                schema_version: 1,
+                schema_version: crate::chat::models::schema_version(),
+                #[cfg(feature = "kimi-k31-pro-candidate")]
+                availability: crate::chat::models_generated::SelectionAvailability::Ready,
                 agent_session_id: host.to_string(),
                 revision: 2,
                 profile_id: Some(crate::chat::models_generated::ProfileId::MinimaxM3HighV1),

@@ -1,6 +1,6 @@
 import { ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
-import type { ProfileId } from "../api/chat-model-client";
+import { defaultModelProfile, type ProfileId } from "../api/chat-model-client";
 import { createChatComposerDrafts, clearChatComposerDraft, updateChatComposerDraft, type ChatComposerDraftKey } from "../domain/chat-composer-draft";
 import type { CatalogEntry, ExpertDisplay } from "../domain/experts.generated";
 import { expertDefaultPrompt } from "../domain/expert-composer";
@@ -44,14 +44,14 @@ export const useChatComposerDraftStore = defineStore("chat-composer-drafts", () 
   function expert(target: ChatComposerDraftKey): ExpertDisplay | null { return experts.value[target] ?? null; }
   function setExpert(target: ChatComposerDraftKey, value: ExpertDisplay | null): void { const next = { ...experts.value }; if (value) next[target] = Object.freeze({ ...value }); else { delete next[target]; clearExpertPrompt(target); } experts.value = next; }
   const workspaceId = ref<string | null>(null);
-  const newProfile = ref<ProfileId>("kimi-k3-max-v1");
-  const planProfile = ref<ProfileId>("kimi-k3-max-v1");
+  const newProfile = ref<ProfileId>(defaultModelProfile);
+  const planProfile = ref<ProfileId>(defaultModelProfile);
   let tenant: string | null = null;
 
   function clear(): void {
     expertPrompts.clear();
     texts.value = createChatComposerDrafts(); selections.value = {}; experts.value = {}; skills.value = {}; workspaceId.value = null;
-    newProfile.value = "kimi-k3-max-v1"; planProfile.value = "kimi-k3-max-v1";
+    newProfile.value = defaultModelProfile; planProfile.value = defaultModelProfile;
   }
   function selection(target: ChatComposerDraftKey): readonly SelectionDisplay[] { return selections.value[target] ?? []; }
   function setSelection(target: ChatComposerDraftKey, values: readonly SelectionDisplay[]): void {

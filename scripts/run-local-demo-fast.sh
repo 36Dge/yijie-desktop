@@ -47,6 +47,24 @@ if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   packaged_app="true"
   shift
 fi
+# FEAT-164 uses the same canonical bootstrap with a separate app identity and
+# data/binary roots. Prepare-only builds the reviewable candidate without launch.
+kimi_k31_candidate="false"
+prepare_only="false"
+if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
+  [[ "$packaged_app" == "true" ]] || fail "Kimi candidate requires --packaged"
+  kimi_k31_candidate="true"
+  export YIJIE_KIMI_K31_PRO_CANDIDATE=true VITE_YIJIE_KIMI_K31_PRO_CANDIDATE=true
+  export YIJIE_FEAT155_SCHEDULED_CANDIDATE=true YIJIE_FEAT155_SCHEDULED_DAILY=false
+  export YIJIE_MARKET_CONNECTORS_ENABLED=false YIJIE_ARTIFACT_MEDIA_ENABLED=false
+  workflow_requested="false"
+  experts_requested="false"
+  host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
+  shift
+  if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
+elif [[ "${YIJIE_KIMI_K31_PRO_CANDIDATE:-false}" != "false" ]]; then
+  fail "Kimi candidate flag requires its explicit canonical entry"
+fi
 # A fixed acceptance profile isolates new content from retained conversations.
 # It changes deployment identity/roots only; all source and install gates remain.
 if [[ "$#" -ge 1 && "$1" == "--experts-local" ]]; then
@@ -59,7 +77,7 @@ elif [[ "$#" -ge 1 && ( "$1" == "--experts-content-v011" || "$1" == "--experts-c
   shift
 fi
 if [[ "$#" == "1" && "$1" == "--reopen" ]]; then
-  [[ "$packaged_app" == "true" && "$experts_requested" != "false" ]] || fail "--reopen requires an enabled packaged expert profile"
+  [[ "$packaged_app" == "true" && ( "$experts_requested" != "false" || "$kimi_k31_candidate" == "true" ) ]] || fail "--reopen requires an enabled packaged profile"
   reopen_app="true"
   shift
 fi
@@ -114,8 +132,8 @@ if [[ "$scheduled_candidate" == "true" || "$scheduled_daily" == "true" ]]; then
   codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/input-only/aarch64-apple-darwin}"
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
-  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
-  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
+  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write((v.runtime_artifact ?? v.authority.runtime_artifact).sha256)' "$candidate_lock")"
+  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write((v.runtime_manifest_sha256 ?? v.authority.runtime_manifest_sha256))' "$candidate_lock")"
 fi
 if [[ "$scheduled_candidate" == "true" ]]; then
   [[ "$stable_api_only" == "false" && "$workflow_requested" == "false" ]] || fail "scheduled local candidate requires the ordinary entry without external extensions"
@@ -160,14 +178,21 @@ export YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
+  if [[ "$kimi_k31_candidate" == "true" ]]; then
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit b0060c8bc4fb924cec14d98b193c32c69482b7b7 --check
+    node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
+    candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
+    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/kimi-k31-pro-r1/aarch64-apple-darwin"
+  else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
   candidate_lock="$desktop_root/contracts/runtime-chat-models.candidate.json"
   codex_runtime_root="${YIJIE_DEMO_FAST_RUNTIME_ROOT:-$workspace_root/yijie-codex/.yijie/build/chat-models-web-sources/aarch64-apple-darwin}"
+  fi
   codex_binary="$codex_runtime_root/codex"
   codex_manifest="$codex_runtime_root/runtime-manifest.json"
-  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_artifact.sha256)' "$candidate_lock")"
-  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(v.runtime_manifest_sha256)' "$candidate_lock")"
+  runtime_binary_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write((v.runtime_artifact ?? v.authority.runtime_artifact).sha256)' "$candidate_lock")"
+  runtime_manifest_sha256="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write((v.runtime_manifest_sha256 ?? v.authority.runtime_manifest_sha256))' "$candidate_lock")"
   # Unset selects the managed default; explicitly empty means not configured.
   if [[ -z "${YIJIE_KIMI_API_KEY_FILE+x}" && -f "$host_root/.local/secrets/kimi-api-key" ]]; then
     export YIJIE_KIMI_API_KEY_FILE="$host_root/.local/secrets/kimi-api-key"
@@ -177,8 +202,16 @@ if [[ "$chat_models_enabled" == "true" ]]; then
     host_home="$runtime_root/host-home"
     codex_home="$runtime_root/codex-home"
   fi
+  if [[ "$kimi_k31_candidate" == "true" ]]; then
+    node "$workspace_root/yijie-contracts/scripts/generate-chat-models-v2.mjs" --check
+    runtime_root="$desktop_root/.local/feat164-kimi-k31"
+    host_home="$runtime_root/host-home"
+    codex_home="$runtime_root/codex-home"
+    host_binary="$runtime_root/bin/yijie-agent-host"
+  else
   node "$workspace_root/yijie-contracts/scripts/generate-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-chat-models.mjs" --check
+  fi
 fi
 
 # FEAT-157 belongs to the normal daily client. Keep stable, legacy-model and
@@ -202,7 +235,7 @@ if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" && "$mark
 fi
 experts_requested="${experts_requested:-$experts_default}"
 [[ "$experts_requested" == "true" || "$experts_requested" == "false" ]] || fail "invalid expert selection"
-if [[ "$reopen_app" == "true" && "$experts_requested" != "true" ]]; then
+if [[ "$reopen_app" == "true" && "$experts_requested" != "true" && "$kimi_k31_candidate" != "true" ]]; then
   fail "--reopen requires an enabled packaged expert profile"
 fi
 # Host market admission excludes the legacy FEAT-128 dynamic-tool profile.
@@ -310,6 +343,9 @@ fi
 if [[ "$experts_requested" == "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
   expert_build_inputs="$(node scripts/expert-packaged-receipt.mjs --inputs-digest)"
 fi
+if [[ "$kimi_k31_candidate" == "true" && "$reopen_app" == "false" ]]; then
+  kimi_k31_build_inputs="$(node scripts/kimi-k31-packaged-receipt.mjs --inputs-digest)"
+fi
 if [[ "$reopen_app" == "false" ]]; then
   (
     cd "$host_root"
@@ -341,9 +377,14 @@ if [[ "$stable_api_only" == "true" ]]; then
   launch_command=("$bundle_binary")
 elif [[ "$packaged_app" == "true" ]]; then
   if [[ "$reopen_app" == "false" ]]; then
+    if [[ "$kimi_k31_candidate" == "true" ]]; then
+      pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate --config src-tauri/tauri.feat164-kimi-k31.conf.json
+    else
     pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
+    fi
   fi
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
+  if [[ "$kimi_k31_candidate" == "true" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app/Contents/MacOS/yijie-desktop"; fi
   if [[ "$experts_requested" == "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
   fi
@@ -370,6 +411,19 @@ if [[ "$experts_requested" == "true" && "$packaged_app" == "true" ]]; then
   else
     node scripts/expert-packaged-receipt.mjs --record "$expert_profile" "$codex_binary" "$codex_manifest" "$YIJIE_MARKET_WORKER_MANIFEST" "$expert_build_inputs" "$expert_worker_inputs"
   fi
+fi
+
+if [[ "$kimi_k31_candidate" == "true" ]]; then
+  if [[ "$reopen_app" == "true" ]]; then
+    node scripts/kimi-k31-packaged-receipt.mjs --check "$codex_binary" "$codex_manifest"
+  else
+    node scripts/kimi-k31-packaged-receipt.mjs --record "$codex_binary" "$codex_manifest" "$kimi_k31_build_inputs"
+  fi
+fi
+
+if [[ "$prepare_only" == "true" ]]; then
+  printf 'FEAT-164 candidate built; no App launch or model request: %s\n' "$bundle_binary"
+  exit 0
 fi
 
 exec env \

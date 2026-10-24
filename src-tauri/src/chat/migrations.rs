@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 37] = [
+const CATALOG: [CatalogEntry; 38] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -217,6 +217,11 @@ const CATALOG: [CatalogEntry; 37] = [
         name: "0037_connector_suspend",
         sql: include_str!("../../migrations/chat/0037_connector_suspend.sql"),
     },
+    CatalogEntry {
+        version: 38,
+        name: "0038_kimi_k31_models",
+        sql: include_str!("../../migrations/chat/0038_kimi_k31_models.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -235,6 +240,7 @@ pub const SCHEDULE_SINGLE_RUN_SCHEMA_VERSION: i64 = 25;
 pub const SCHEDULE_TIMING_SCHEMA_VERSION: i64 = 26;
 pub const PROJECTLESS_SCHEMA_VERSION: i64 = 27;
 pub const CHAT_MODELS_SCHEMA_VERSION: i64 = 28;
+pub const KIMI_K31_SCHEMA_VERSION: i64 = 38;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -279,6 +285,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         SCHEDULE_TIMING_SCHEMA_VERSION,
         PROJECTLESS_SCHEMA_VERSION,
         CHAT_MODELS_SCHEMA_VERSION,
+        KIMI_K31_SCHEMA_VERSION,
         SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
         MARKET_CONNECTORS_SCHEMA_VERSION,
         MARKET_SELECTION_SCHEMA_VERSION,
