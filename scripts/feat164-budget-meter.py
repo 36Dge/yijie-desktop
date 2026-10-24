@@ -123,6 +123,7 @@ class Budget:
             valid = (isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0
                      for k in ["input_tokens", "output_tokens"])
                      and usage["input_tokens"] <= CONTEXT and usage["output_tokens"] <= MAX_OUTPUT
+                     and observation.get("terminal") in ["response.completed", "response.incomplete", "response.failed"]
                      and observation.get("response_model") == MODEL
                      and observation.get("native_search_calls", 0) == 0
                      and observation.get("cache_ttl", "5m") == "5m")
@@ -222,8 +223,9 @@ def main():
                         chunk = response.read1(65536)
                         if not chunk:
                             break
-                        observer.feed(chunk); digest.update(chunk); count += len(chunk)
+                        observer.feed(chunk)
                         self.wfile.write(chunk); self.wfile.flush()
+                        digest.update(chunk); count += len(chunk)
                 except (OSError, http.client.HTTPException) as error:
                     observer.result = {"transport_error_class": type(error).__name__}
                     self.close_connection = True

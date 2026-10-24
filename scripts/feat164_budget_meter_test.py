@@ -23,7 +23,7 @@ class BudgetControls(unittest.TestCase):
         return self.budget.admit({"image_count": images})
 
     def settle(self, row, input_tokens=1000, output_tokens=100):
-        self.budget.settle(row, {"response_model": meter.MODEL,
+        self.budget.settle(row, {"response_model": meter.MODEL, "terminal": "response.completed",
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}})
 
     def test_request_and_reservation_are_bounded_before_network(self):
