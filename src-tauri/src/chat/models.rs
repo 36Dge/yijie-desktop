@@ -9,6 +9,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// One closed diagnostic per candidate process; never print paths, content or credentials.
+pub(super) fn report_candidate_startup_error(stage: &'static str, error: ChatError) {
+    static REPORTED: std::sync::Once = std::sync::Once::new();
+    if v2_enabled() {
+        REPORTED.call_once(|| {
+            eprintln!("FEAT-164 startup stage={stage} code={}", error.code());
+        });
+    }
+}
+
 pub fn v2_enabled() -> bool {
     cfg!(feature = "kimi-k31-pro-candidate")
         && std::env::var("YIJIE_KIMI_K31_PRO_CANDIDATE").as_deref() == Ok("true")

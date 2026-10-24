@@ -441,13 +441,15 @@ impl ChatRuntime {
                 })();
                 match prepared {
                     Ok(supervisor) => Some(Arc::new(supervisor)),
-                    Err(_) => {
+                    Err(error) => {
+                        models::report_candidate_startup_error("scheduled_paths", error);
                         mode = RuntimeMode::Invalid;
                         None
                     }
                 }
             }
-            Err(_) => {
+            Err(error) => {
+                models::report_candidate_startup_error("sidecar_configuration", error);
                 mode = RuntimeMode::Invalid;
                 None
             }
@@ -560,7 +562,10 @@ impl ChatRuntime {
                 Ok(_) => ChatStorageReadiness::Ready,
                 Err(error) => storage_readiness_for_error(error),
             },
-            Err(error) => storage_readiness_for_error(error),
+            Err(error) => {
+                models::report_candidate_startup_error("storage", error);
+                storage_readiness_for_error(error)
+            }
         }
     }
 
