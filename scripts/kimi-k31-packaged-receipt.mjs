@@ -38,7 +38,7 @@ if(action==="--inputs-digest"){
  assert(["--record","--check"].includes(action));assert.equal(process.argv.length,action==="--record"?6:5);
  assert(path.isAbsolute(runtimeBinary)&&path.isAbsolute(runtimeManifest));
  const bundle=path.join(root,"src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app");
- assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),"com.yijie.ai.feat164-kimi-k31");
+ assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),"com.yijie.ai.feat164-kimi-k31-r1");
  const bundleFiles=await tree(bundle);assert(bundleFiles["Contents/MacOS/yijie-desktop"].mode&0o111);
  const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,".local/feat164-kimi-k31/bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
  assert(current.artifacts.host.mode&0o111);assert(current.artifacts.runtime.mode&0o111);
