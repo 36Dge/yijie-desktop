@@ -255,7 +255,11 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
   [[ "$chat_models_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "market connectors require the current native runtime"
   node "$workspace_root/yijie-contracts/scripts/generate-market-connectors.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-market-connectors.mjs" --consumer=desktop --check
-  node "$desktop_root/scripts/sync-market-catalog.mjs" --check
+  if [[ "$kimi_k31_candidate" == "true" ]]; then
+    node "$desktop_root/scripts/feat164-market-catalog.mjs" --check
+  else
+    node "$desktop_root/scripts/sync-market-catalog.mjs" --check
+  fi
   if [[ "$kimi_k31_candidate" == "true" ]]; then
     node "$workspace_root/yijie-contracts/scripts/sync-model-call-surfaces-v2.mjs" --consumer=desktop --check
   else
