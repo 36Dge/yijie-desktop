@@ -30,7 +30,7 @@ import { PREVIEW_SHOPS, SHOP_PREVIEW_TIMING } from "../../domain/chat-shop-previ
 import ChatWorkspaceControl from "../../components/chat/ChatWorkspaceControl.vue";
 import { chatWorkspaceClient } from "../../api/chat-workspace-client";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
-import { chatModelClient, chatModelsEnabled } from "../../api/chat-model-client";
+import { chatModelClient, chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import { modelDefinitions } from "../../domain/chat-models.generated";
 import ChatTimeline from "../../components/chat/ChatTimeline.vue";
 import {
@@ -451,6 +451,26 @@ describe("FEAT-126 ChatPage", () => {
     await router.push("/chat");
     await flushPromises();
     expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-max-v1");
+    expect(select).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.skipIf(!kimiK31Candidate)("FEAT164 resets discarded shared plan draft to the current model without changing chat intent", async () => {
+    expertFlag.enabled = true;
+    const { modelDefinitions: current } = await import("../../domain/chat-models-v2.generated");
+    vi.spyOn(chatModelClient, "catalog").mockResolvedValue({schema_version:2,default_profile:"kimi-k3-1-pro-max-v1",models:current.map(profile=>({profile,available:true,reason:"ready"}))});
+    const select = vi.spyOn(chatModelClient, "select");
+    const {wrapper,router,pinia} = await mountPage("/chat?create=schedule", false, HISTORY, async () => false, false, {ScheduledDraftPanel: true});
+    const drafts = useChatComposerDraftStore(pinia);
+    drafts.newProfile = "minimax-m3-high-v1";
+    wrapper.getComponent(ChatModelControl).vm.$emit("select", "minimax-m3-high-v1");
+    await flushPromises();
+    expect(drafts.planProfile).toBe("minimax-m3-high-v1");
+    await router.push("/chat"); await flushPromises();
+    expect(drafts.planProfile).toBe("kimi-k3-1-pro-max-v1");
+    expect(drafts.newProfile).toBe("minimax-m3-high-v1");
+    await router.push("/chat?create=schedule"); await flushPromises();
+    expect(wrapper.getComponent(ChatModelControl).props("profile")).toBe("kimi-k3-1-pro-max-v1");
     expect(select).not.toHaveBeenCalled();
     wrapper.unmount();
   });

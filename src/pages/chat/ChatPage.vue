@@ -16,7 +16,7 @@ import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { useChatModels } from "../../composables/useChatModels";
 import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
 import { useChatDelivery } from "../../composables/useChatDelivery";
-import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
+import { chatModelsEnabled, kimiK31Candidate, defaultModelProfile } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
@@ -449,7 +449,7 @@ const delivery = useChatDelivery(
 );
 watch(isNewDraftMode, (active, previous) => {
   // Match the existing new-draft discard lifecycle, including its model intent.
-  if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = "kimi-k3-max-v1"; else models.resetNew(); }
+  if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = defaultModelProfile; else models.resetNew(); }
 }, { flush: "post" });
 
 const marketChat = useMarketChat(
