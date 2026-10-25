@@ -1,5 +1,8 @@
 """Ordinary in-process accounting/stream controls; no provider connection."""
 import importlib.util
+import copy
+import hashlib
+import fcntl
 import json
 from pathlib import Path
 import tempfile
@@ -24,6 +27,7 @@ class BudgetControls(unittest.TestCase):
 
     def settle(self, row, input_tokens=1000, output_tokens=100):
         self.budget.settle(row, {"response_model": meter.MODEL, "terminal": "response.completed",
+            "terminal_count": 1, "stream_complete": True,
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}})
 
     def test_request_and_reservation_are_bounded_before_network(self):
@@ -103,6 +107,116 @@ class BudgetControls(unittest.TestCase):
         self.assertEqual(self.budget.state["charged_upper_micro_cny"], meter.RESERVATION)
         self.assertEqual(meter.error_metadata(b"ordinary non-JSON response"),
             {"provider_error_category": "unclassified", "provider_error_mentions": []})
+
+    def prepare_resume(self):
+        row = self.admitted()
+        self.budget.settle(row, {"http_status": 400})
+        self.budget.state["meter_state"] = "stopped_normally"
+        self.budget.save()
+        authorization = {"schema_version": 1, "feature": "FEAT-164",
+            "authorization_id": meter.RESUME_ID, "approved_by": "ordinary Owner fixture",
+            "approved_on": "2026-10-25", "approval_source": "current-user-confirmation-2026-10-25",
+            "previous_ledger_sha256": hashlib.sha256(self.path.read_bytes()).hexdigest(),
+            "limit_micro_cny": 30_000_000, "additional_http_requests": 1,
+            "preserve_unknown_reservations": True, "failure_policy": "stop", "scope": "one_budgeted_text_g2v"}
+        return authorization
+
+    def test_resume_preserves_history_and_allows_only_one_request_across_restart(self):
+        authorization = self.prepare_resume()
+        original = copy.deepcopy(self.budget.state["requests"])
+        meter.resume_ledger(self.path, authorization)
+        self.budget = meter.Budget(self.path)
+        self.assertEqual(self.budget.state["requests"], original)
+        self.assertEqual(self.budget.state["charged_upper_micro_cny"], meter.RESERVATION)
+        row = self.admitted()
+        self.assertEqual(self.budget.state["charged_upper_micro_cny"], 2 * meter.RESERVATION)
+        self.assertLessEqual(2 * meter.RESERVATION, 30_000_000)
+        self.settle(row)
+        self.assertEqual(self.budget.state["requests"][:1], original)
+        for budget in [self.budget, meter.Budget(self.path)]:
+            with self.assertRaises(ValueError):
+                budget.admit({"image_count": 0})
+        before = self.path.read_bytes()
+        result = meter.resume_ledger(self.path, authorization)
+        self.assertTrue(result["already_applied"])
+        self.assertEqual(result["remaining_http_requests"], 0)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_failed_resume_keeps_both_reservations_and_cannot_refill(self):
+        authorization = self.prepare_resume()
+        meter.resume_ledger(self.path, authorization)
+        self.budget = meter.Budget(self.path)
+        row = self.admitted()
+        self.budget.settle(row, {"http_status": 400})
+        self.assertEqual(self.budget.state["charged_upper_micro_cny"], 2 * meter.RESERVATION)
+        self.assertTrue(meter.Budget(self.path).state["halted"])
+        meter.resume_ledger(self.path, authorization)
+        with self.assertRaises(ValueError):
+            meter.Budget(self.path).admit({"image_count": 0})
+
+    def test_resume_rejects_wrong_source_scope_and_active_meter_lock(self):
+        authorization = self.prepare_resume()
+        before = self.path.read_bytes()
+        for changed in [{"previous_ledger_sha256": "0" * 64}, {"additional_http_requests": 2},
+                        {"limit_micro_cny": 40_000_000}, {"preserve_unknown_reservations": False}]:
+            with self.assertRaises(ValueError):
+                meter.resume_ledger(self.path, {**authorization, **changed})
+            self.assertEqual(self.path.read_bytes(), before)
+        with open(self.path.with_suffix(".lock"), "a") as guard:
+            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(BlockingIOError):
+                meter.resume_ledger(self.path, authorization)
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_old_per_row_reservation_survives_global_policy_changes(self):
+        self.prepare_resume()
+        self.budget.state["requests"][0]["reserved_micro_cny"] = 10_000_000
+        self.budget.state["charged_upper_micro_cny"] = 10_000_000
+        self.budget.save()
+        self.assertEqual(meter.Budget(self.path).state["charged_upper_micro_cny"], 10_000_000)
+
+    def test_new_inflight_on_restart_is_closed_and_original_row_is_verified(self):
+        authorization = self.prepare_resume()
+        meter.resume_ledger(self.path, authorization)
+        self.budget = meter.Budget(self.path)
+        self.admitted()
+        with self.assertRaises(ValueError):
+            meter.Budget(self.path).admit({"image_count": 0})
+        altered = json.loads(self.path.read_text())
+        altered["requests"][0]["http_status"] = 200
+        self.path.write_text(json.dumps(altered))
+        with self.assertRaises(ValueError):
+            meter.Budget(self.path)
+
+    def test_duplicate_terminal_and_incomplete_stream_do_not_release_reservation(self):
+        observer = meter.Observer()
+        event = {"type": "response.completed", "response": {"model": meter.MODEL,
+            "status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "ordinary"}]}],
+            "usage": {"input_tokens": 10, "output_tokens": 5}}}
+        observer.feed(("data: " + json.dumps(event) + "\n\n").encode() * 2)
+        self.assertEqual(observer.result["terminal_count"], 2)
+        self.assertTrue(observer.result["output_text_present"])
+        row = self.admitted()
+        self.budget.settle(row, {**observer.result, "stream_complete": True})
+        self.assertEqual(self.budget.state["charged_upper_micro_cny"], meter.RESERVATION)
+        self.assertTrue(self.budget.state["halted"])
+        separate = meter.Budget(Path(self.directory.name) / "incomplete.json")
+        row = separate.admit({"image_count": 0})
+        separate.settle(row, {**observer.result, "terminal_count": 1, "stream_complete": False})
+        self.assertEqual(separate.state["charged_upper_micro_cny"], meter.RESERVATION)
+
+    def test_resume_rejection_closes_admission_without_spending_or_refilling(self):
+        authorization = self.prepare_resume()
+        meter.resume_ledger(self.path, authorization)
+        self.budget = meter.Budget(self.path)
+        with self.assertRaises(ValueError):
+            self.admitted(1)
+        self.budget.stop_resume_on_rejection()
+        meter.resume_ledger(self.path, authorization)
+        reopened = meter.Budget(self.path)
+        self.assertEqual(len(reopened.state["requests"]), 1)
+        with self.assertRaises(ValueError):
+            reopened.admit({"image_count": 0})
 
 
 if __name__ == "__main__":
