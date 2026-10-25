@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {createReadStream} from "node:fs";
-import {lstat,readdir,readFile,writeFile,rename} from "node:fs/promises";
+import {lstat,readdir,readFile,writeFile,rename,realpath} from "node:fs/promises";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {workerBuildInputs} from "./expert-packaged-receipt.mjs";
@@ -55,7 +55,7 @@ if(action==="--inputs-digest"){
   assert.equal(process.env.YIJIE_MARKET_WORKER_MANIFEST,manifest);
   const worker=JSON.parse(await readFile(manifest,"utf8"));
   assert.equal(worker.schemaVersion,2);assert.equal(worker.candidateOnly,true);assert.match(worker.sha256,/^[a-f0-9]{64}$/);
-  assert.equal(worker.binary,path.join(path.dirname(manifest),worker.sha256,"yijie-mcp-worker"));
+  assert.equal(worker.binary,path.join(await realpath(path.dirname(manifest)),worker.sha256,"yijie-mcp-worker"));
   current.artifacts.worker=await fileRecord(worker.binary);current.artifacts.workerManifest=await fileRecord(manifest);
   assert.equal(current.artifacts.worker.sha256,worker.sha256);assert.equal(current.artifacts.worker.bytes,worker.sizeBytes);
  }
