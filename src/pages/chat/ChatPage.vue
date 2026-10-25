@@ -1463,7 +1463,8 @@ onBeforeUnmount(() => {
   display: grid;
   width: 100%;
   height: 100%;
-  min-height: min(var(--yj-layout-window-min-height), var(--yj-ui-viewport-height, 100vh));
+  /* The shell already reserves the title bar; fit its remaining content area. */
+  min-height: 0;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: clip;
