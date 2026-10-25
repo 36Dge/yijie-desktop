@@ -171,7 +171,17 @@ impl ChatRepository {
         let mut result = Vec::new();
         for id in turn_ids {
             let row:Option<(String,String)>=self.connection.query_row("SELECT operation_id,submission_status FROM chat_turns WHERE session_id=?1 AND id=?2 AND submission_status IS NOT NULL",params![session_id.to_string(),id.to_string()],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_|ChatError::DatabaseUnavailable)?;
-            if let Some((operation_id, status)) = row {
+            if let Some((operation_id, mut status)) = row {
+                if status == "queued"
+                    && super::schedules::drafts::unresolved_create_submission(
+                        &self.connection,
+                        &self.scope,
+                        session_id,
+                        *id,
+                    )?
+                {
+                    status = "uncertain".into();
+                }
                 result.push(super::native_conversation_generated::LocalSubmissionView {
                     turn_id: id.to_string(),
                     operation_id,

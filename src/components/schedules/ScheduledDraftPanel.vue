@@ -7,7 +7,7 @@ import { ruleLabel, scheduleError, stateLabels, targetLabels } from "../../domai
 import type { useScheduledDraft } from "../../pages/schedules/use-scheduled-draft";
 const props = defineProps<{ model: ReturnType<typeof useScheduledDraft> }>();
 const emit = defineEmits<{ accepted: [conversationId: string]; viewPlan: [planId: string]; recover: [] }>();
-const { source, preview, saved, pending, writing, loading, error, notice, capabilities, readable, canConfirm, candidate, initialDefinition } = props.model;
+const { source, preview, saved, pending, writing, loading, error, notice, capabilities, readable, canConfirm, submissionUncertain, candidate, initialDefinition } = props.model;
 const form = ref<InstanceType<typeof ScheduledPlanForm>>();
 const editing = shallowRef<{ definition: PlanDefinition; source: string; digest: string } | null>(null);
 const dialog = useDialog();
@@ -63,7 +63,7 @@ defineExpose({ allowLeave });
       <NButton type="primary" :disabled="!canConfirm" @click="review">审阅并保存</NButton>
     </template>
     <template v-else-if="saved"><p role="status">{{ saved.definition.name }} · {{ stateLabels[saved.state] }}</p><NButton @click="emit('viewPlan', saved.plan_id)">查看定时任务</NButton></template>
-    <template v-else-if="source"><p role="status">尚无可确认的草案结果。当前执行状态见原对话；刷新不会重新发送。</p><NButton :disabled="writing || !!pending || !capabilities?.draft.available" @click="continueOriginal">检查并继续原请求</NButton></template>
+    <template v-else-if="source"><NAlert v-if="submissionUncertain" type="warning" role="status">原草案已尝试提交，结果尚未确认。请先核对原请求，勿重复提交或另建相同计划。查证无结果时会保留原记录，不会重新发送。</NAlert><p v-else role="status">尚无可确认的草案结果。当前执行状态见原对话；刷新不会重新发送。</p><NButton :disabled="writing || !!pending || !capabilities?.draft.available" @click="continueOriginal">检查并继续原请求</NButton></template>
     <div class="scheduled-draft-panel__actions"><NButton :loading="loading" :disabled="!readable || writing" @click="model.refresh">刷新草案状态</NButton></div>
     <ScheduledPlanForm v-if="editing" ref="form" :plan="null" :initial-definition="editing.definition" confirmation :busy="writing" :uncertain="!!pending" :error="error ? scheduleError(error) : ''" :preview="model.previewTime" :targets="model.targets" @close="editing = null" @save="confirm" @query="query" @retry="retry" />
   </NCard>

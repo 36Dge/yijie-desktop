@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
-import { effectScope, nextTick, reactive } from "vue";
+import { mount } from "@vue/test-utils";
+import { NDialogProvider } from "naive-ui";
+import ScheduledDraftPanel from "../../components/schedules/ScheduledDraftPanel.vue";
+import { defineComponent, h as hVue, effectScope, nextTick, reactive } from "vue";
 import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
 import type { DraftPreview, Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledDraft } from "./use-scheduled-draft";
@@ -15,7 +18,7 @@ const candidate: DraftPreview = { source_id: receipt.source_id, status: "candida
 const cleanup: (() => void)[] = [];
 afterEach(() => { cleanup.splice(0).forEach(f => f()); });
 function harness() {
-  const chat = reactive({ context: { contextId: crypto.randomUUID() } as {contextId:string} | null, isReady: true, selectedSessionId: null as string|null, selectedSessionPurpose: "ordinary", selectedAccessMode: "live" });
+  const chat = reactive({ context: { contextId: crypto.randomUUID() } as {contextId:string} | null, isReady: true, selectedSessionId: null as string|null, selectedSessionPurpose: "ordinary", selectedAccessMode: "live", conversationState: { turns: {} as Record<string, {threadId:string;turnId:string;source:string;submissionStatus:string}> } });
   const permission = reactive({ selectedTenantId: crypto.randomUUID(), isReady: true, authorizationRevision: 1, allowed: true, hasCapability() { return this.isReady && this.allowed; } });
   const route = reactive({ session: null as string|null, turn: null as string|null, busy: false });
   stores.chat = chat; stores.permission = permission;
@@ -76,4 +79,27 @@ it("queries the confirmed source after an uncertain save and never uses manageme
   h.output({source_id:receipt.source_id,status:"confirmed",plan_id:plan.plan_id});expect(await h.state.checkPending()).toEqual(plan);
   expect(h.calls.filter(c=>c.command==="schedule_confirm_active_draft_v1")).toHaveLength(1);
   expect(h.calls.some(c=>c.command==="schedule_read_plan_mutation_receipt_v1")).toBe(false);
+});
+
+it("shows only the selected source uncertainty and refreshes without submitting or continuing", async () => {
+  const h = harness(); await vi.waitFor(() => expect(h.state.canSubmit.value).toBe(true));
+  h.route.session=receipt.conversation_id; h.route.turn=receipt.local_turn_id;
+  h.chat.selectedSessionId=receipt.conversation_id; h.chat.selectedSessionPurpose="scheduled_plan_draft";
+  await vi.waitFor(() => expect(h.state.source.value).toEqual(receipt));
+  const turn={threadId:receipt.conversation_id,turnId:receipt.local_turn_id,source:"local_submission",submissionStatus:"uncertain"};
+  h.chat.conversationState.turns={old:{...turn,threadId:crypto.randomUUID()}};
+  expect(h.state.submissionUncertain.value).toBe(false);
+  h.chat.conversationState.turns={current:turn}; expect(h.state.submissionUncertain.value).toBe(true); expect(h.state.canSubmit.value).toBe(false);
+  const root=mount(defineComponent({setup:()=>()=>hVue(NDialogProvider,null,{default:()=>hVue(ScheduledDraftPanel,{model:h.state})})}),{attachTo:document.body});
+  cleanup.push(()=>{root.unmount();document.body.innerHTML="";});
+  expect(root.text()).toContain("原草案已尝试提交，结果尚未确认");
+  const buttons=root.findAll("button");
+  await buttons.find(b=>b.text()==="检查并继续原请求")!.trigger("click");
+  await vi.waitFor(()=>expect(document.body.textContent).toContain("检查并继续原请求？"));
+  const cancel=Array.from(document.body.querySelectorAll("button")).find(b=>b.textContent?.trim()==="取消")!;
+  cancel.click(); await nextTick();
+  await h.state.refresh(); await h.state.refresh();
+  expect(h.calls.every(c=>["schedule_operation_capabilities_v1","schedule_find_draft_source_v1","schedule_preview_draft_v1"].includes(c.command))).toBe(true);
+  expect(h.state.canConfirm.value).toBe(false);
+  h.chat.conversationState.turns.current!.submissionStatus="queued"; expect(h.state.submissionUncertain.value).toBe(false);
 });

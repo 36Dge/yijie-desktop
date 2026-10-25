@@ -60,7 +60,7 @@ it("FEAT158 uncertain local submission keeps its status without implying a queue
   const turn = selectConversationTimeline(state, THREAD_ID)!.turns[0]!;
   const wrapper = mount(ChatTurnGroup, { props: { turn, position: 0 } });
   expect(wrapper.text()).toContain("提交结果待确认");
-  expect(wrapper.get('[role="status"]').text()).toBe("原提交结果尚未确认，正在查询原操作，请勿重复发送。");
+  expect(wrapper.get('[role="status"]').text()).toBe("原提交结果尚未确认，请先核对原操作，勿重复发送。");
   expect(wrapper.text()).not.toContain("本轮正在等待处理");
   expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
 });

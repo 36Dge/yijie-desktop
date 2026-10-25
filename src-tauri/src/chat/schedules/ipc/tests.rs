@@ -937,3 +937,6 @@ mod default_activation_tests;
 
 #[cfg(feature = "kimi-k31-pro-candidate")]
 mod feat164_draft_fact_tests;
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+mod feat164_draft_status_tests;

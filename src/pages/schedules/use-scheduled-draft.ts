@@ -35,7 +35,13 @@ export function useScheduledDraft(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pollUntil = 0;
   const readable = computed(() => active() && permissions.isReady && permissions.hasCapability("schedule.read") && context.value !== null);
-  const canSubmit = computed(() => readable.value && capabilities.value?.draft.available === true && !pending.value && !writing.value && !executionPending() && chat.isReady &&
+  const submissionUncertain = computed(() => {
+    const current = source.value;
+    return current !== null && current.conversation_id === session() &&
+      Object.values(chat.conversationState.turns).some(turn => turn.threadId === current.conversation_id &&
+        turn.turnId === current.local_turn_id && turn.source === "local_submission" && turn.submissionStatus === "uncertain");
+  });
+  const canSubmit = computed(() => readable.value && capabilities.value?.draft.available === true && !submissionUncertain.value && !pending.value && !writing.value && !executionPending() && chat.isReady &&
     (session() === null || (chat.selectedSessionId === session() && chat.selectedSessionPurpose === "scheduled_plan_draft" && chat.selectedAccessMode === "live")));
   const canConfirm = computed(() => readable.value && capabilities.value?.save.available === true && preview.value?.status === "candidate" && !error.value && !pending.value && !writing.value);
   const candidate = computed(() => preview.value?.status === "candidate" && preview.value.output?.kind === "candidate" ? preview.value.output : null);
@@ -189,7 +195,7 @@ export function useScheduledDraft(
   }, { immediate: true });
   watch(latestTurn, turn => { if (turn && source.value?.local_turn_id !== turn) void selectTurn(turn); });
   onScopeDispose(() => { disposed = true; generation++; sourceRead++; clearTimeout(timer); });
-  return { source, preview, saved, pending, writing, loading, error, notice, capabilities, readable, canSubmit, canConfirm, candidate, initialDefinition,
+  return { source, preview, saved, pending, writing, loading, error, notice, capabilities, readable, canSubmit, canConfirm, submissionUncertain, candidate, initialDefinition,
     submit, confirm, continueSource, checkPending, retry: runPending, selectTurn, refresh,
     previewTime: (rule: TimeRule) => call("schedule_preview_time_v1", { rule }),
     targets: (search: string, cursor?: string) => call("schedule_list_targets_v1", { search, ...(cursor ? { cursor } : {}) }),

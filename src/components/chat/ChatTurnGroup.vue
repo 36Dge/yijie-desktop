@@ -270,7 +270,7 @@ function turnStatusIcon(turn: ConversationTimelineTurnViewModel): YjIconName {
 
 function progressLabel(progress: ConversationTimelineProgressViewModel): string {
   if (props.turn.source === "local_submission" && props.turn.submissionStatus === "uncertain") {
-    return "原提交结果尚未确认，正在查询原操作，请勿重复发送。";
+    return "原提交结果尚未确认，请先核对原操作，勿重复发送。";
   }
   switch (progress.domainStatus) {
     case "queued":

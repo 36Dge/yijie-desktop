@@ -37,6 +37,38 @@ pub(crate) fn present(db: &Connection) -> Result<bool, ChatError> {
         .map(|v| v >= 22)
         .map_err(|_| ChatError::DatabaseUnavailable)
 }
+// Read-only correction for a stopped create whose remote outcome is unconfirmed.
+// Never turn absence/404 into never-sent evidence or change dispatch authority.
+pub(crate) fn unresolved_create_submission(
+    db: &Connection,
+    scope: &ChatScope,
+    conversation: Uuid,
+    turn: Uuid,
+) -> Result<bool, ChatError> {
+    if !present(db)? {
+        return Ok(false);
+    }
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chat_scheduled_draft_sources x
+         JOIN chat_scheduled_draft_sessions d ON d.conversation_id=x.conversation_id
+         JOIN chat_sessions s ON s.id=x.conversation_id
+         JOIN chat_turns t ON t.id=x.local_turn_id AND t.session_id=s.id AND t.operation_id=x.operation_id
+         JOIN chat_outbox o ON o.operation_id=x.create_operation_id AND o.session_id=s.id
+         WHERE x.conversation_id=?1 AND x.local_turn_id=?2
+           AND x.owner_user_id=?3 AND x.tenant_id=?4
+           AND s.owner_user_id=x.owner_user_id AND s.tenant_id=x.tenant_id
+           AND d.owner_user_id=x.owner_user_id AND d.tenant_id=x.tenant_id
+           AND x.format_version=1 AND d.format_version=1 AND d.schema_version=1 AND d.policy_version=1
+           AND x.source_deleted=0 AND x.create_attempted=1
+           AND o.kind='create_session' AND o.payload_version=2 AND o.state='failed'
+           AND (s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL)
+           AND t.status='queued' AND t.runtime_turn_id IS NULL
+           AND NOT EXISTS(SELECT 1 FROM chat_native_bindings b WHERE b.session_id=s.id AND b.turn_id=t.id)
+           AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs j WHERE j.session_id=s.id))",
+        params![conversation.to_string(), turn.to_string(), scope.owner_user_id, scope.tenant_id],
+        |r| r.get(0),
+    ).map_err(|_| ChatError::DatabaseUnavailable)
+}
 pub(crate) fn is_draft(
     db: &Connection,
     scope: &ChatScope,
