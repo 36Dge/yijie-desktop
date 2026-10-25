@@ -56,7 +56,9 @@ def main():
         else:
             match = re.search(r"test result: ok\. (\d+) passed; 0 failed; (\d+) ignored", content)
             passed, skipped = (int(match[1]), int(match[2])) if match else (0, 0)
-        expected = {"host-temporal": 25, "host-routes": 2, "native-delivery": 12, "native-recovery-migration": 10, "native-host-boundary": 1}[name]
+        # The unchanged selector now includes seven reviewed reader/recovery
+        # regressions added after S2 (17 listed tests, not a relaxed minimum).
+        expected = {"host-temporal": 25, "host-routes": 2, "native-delivery": 12, "native-recovery-migration": 17, "native-host-boundary": 1}[name]
         complete = process.returncode == 0 and passed == expected and skipped == 0
         if name == "native-host-boundary":
             complete = complete and "FEAT164_NATIVE_BOUNDARY_PASS" in content
