@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "01e3c762a5678473afc1e55542331b45421d7dbf2cbcb46afda9cb71462b3499"
   },
   "host": {
-    "base_commit": "03d26a374fd5ea0dfd238276b735d445e93d4f2e",
+    "base_commit": "8a02f982b77dc59ddbd0b2f8376682083ae89087",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -209,7 +209,7 @@
       "internal/codex/expert_instructions_test.go": "8bf2c68106dee548a9a009832ec247f173e2a8b8123854116df7c9e69bfc8db7",
       "internal/codex/expert_web_search_integration_test.go": "3a2fa843480b62c516b598e937868d79f9751cc6c08d71f63ed410d797c9534c",
       "internal/codex/feat137_approval_test.go": "b18dd5aad8d740395ef8ad339787f1eefd63af2e401c79042d1b4ca06203286e",
-      "internal/codex/feat164_auxiliary_integration_test.go": "e9ca4dccb8e82ea44947a099822ceb60208d43e087c46c8265c134d12ede3ad2",
+      "internal/codex/feat164_auxiliary_integration_test.go": "bbddc620d3645fab5e965050fee60ab71c281e6eaafa69dd4ced507be87eee32",
       "internal/codex/feat164_meter.go": "3ce38737b15d0d857305e947b01c2a6e95b53eba3cb68d99765fd0cac8d14e6f",
       "internal/codex/feat164_meter_test.go": "8da44a8713af6b91061747e9eb5800b695b14065c286bf48e9d0594d36f7c0c9",
       "internal/codex/feat164_surfaces_integration_test.go": "7baf10e59f0e3e3da9703cc7e55d1b8e15f1624af3d6e21f2288bd29080f76f7",
