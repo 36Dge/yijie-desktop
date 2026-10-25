@@ -1,5 +1,5 @@
 mod market;
-mod models;
+pub(super) mod models;
 use super::artifact::{
     ArtifactCommit, ArtifactKind, ArtifactManifest, DownloadedArtifact, DownloadedResource,
     MAX_ARTIFACT_BYTES, MAX_IMAGE_BYTES,
@@ -1398,6 +1398,9 @@ impl HostBridge {
                 || path_and_query.ends_with("/agent-sessions")
                 || path_and_query.ends_with("/interrupt")
                 || path_and_query.ends_with("/model")
+                || (path_and_query.starts_with("/v2/model-chat/agent-sessions/")
+                    && path_and_query.contains("/model-operations/")
+                    && path_and_query.ends_with("/recover"))
                 || path_and_query.starts_with("/v1/scheduled-plan-draft-sessions")
                 || path_and_query == "/v1/market-chat/submissions");
         let permit = if execution {
@@ -1488,6 +1491,19 @@ impl HostBridge {
         let status = response.status();
         let body = read_limited(response, 4096).await?;
         if status == StatusCode::NOT_FOUND {
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            if path.starts_with("/v2/model-chat/agent-sessions/")
+                && path.contains("/model-operations/")
+            {
+                let error: super::models_generated::Error =
+                    serde_json::from_slice(&body).map_err(|_| protocol_error())?;
+                if error.schema_version != 2
+                    || error.code != super::models_generated::ErrorCode::NotFound
+                {
+                    return Err(protocol_error());
+                }
+                return Ok(None);
+            }
             if path.starts_with("/v1/scheduled-plan-draft-session-mappings/") {
                 let value: serde_json::Value =
                     serde_json::from_slice(&body).map_err(|_| protocol_error())?;
@@ -2507,6 +2523,87 @@ mod tests {
             instance_nonce: nonce.to_owned(),
         })
         .unwrap()
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[tokio::test]
+    async fn feat164_model_recovery_wire_reads_original_then_current_and_guards_writes() {
+        use crate::chat::models_generated as wire;
+        let token = TestToken::new(0o600);
+        let session = Uuid::now_v7();
+        let op = Uuid::now_v7();
+        let request = wire::SelectRequest {
+            schema_version: 2,
+            operation_id: op.to_string(),
+            expected_revision: 7,
+            profile_id: wire::ActiveProfileId::KimiK31ProMaxV1,
+        };
+        let committed = serde_json::json!({"schema_version":2,"agent_session_id":session,"operation_id":op,"state":"committed","request":{"schema_version":2,"operation_id":op,"expected_revision":7,"profile_id":"kimi-k3-1-pro-max-v1"},"result":{"schema_version":2,"agent_session_id":session,"operation_id":op,"state":"ready","revision":8,"profile_id":"kimi-k3-1-pro-max-v1","availability":"ready"}});
+        let current = serde_json::json!({"schema_version":2,"agent_session_id":session,"operation_id":Uuid::now_v7(),"state":"ready","revision":9,"profile_id":"minimax-m3-high-v1","availability":"ready"});
+        let health = || {
+            response(
+                "200 OK",
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Cache-Control", "no-store"),
+                    ("X-Yijie-Host-Instance-Nonce", NONCE),
+                ],
+                r#"{"service":"yijie-agent-host","status":"ok"}"#,
+            )
+        };
+        let (port, server) = serve(vec![
+            health(),
+            json_response(
+                "404 Not Found",
+                r#"{"schema_version":2,"code":"not_found"}"#,
+            ),
+            ready_response(NONCE),
+            json_response("200 OK", &committed.to_string()),
+            health(),
+            json_response("200 OK", &current.to_string()),
+        ])
+        .await;
+        let client = bridge(port, token.path.clone(), NONCE);
+        assert!(client
+            .model_operation(session, &request)
+            .await
+            .unwrap()
+            .is_none());
+        let receipt = client
+            .recover_model_operation(session, &request)
+            .await
+            .unwrap();
+        assert_eq!(receipt.result.unwrap().revision, 8);
+        assert_eq!(client.model_selection(session).await.unwrap().revision, 9);
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 6);
+        assert!(requests[0].starts_with("GET /healthz "));
+        assert!(requests[1].starts_with(&format!(
+            "GET /v2/model-chat/agent-sessions/{session}/model-operations/{op} "
+        )));
+        assert!(requests[3].starts_with(&format!(
+            "POST /v2/model-chat/agent-sessions/{session}/model-operations/{op}/recover "
+        )));
+        assert_eq!(
+            requests.iter().filter(|r| r.starts_with("POST ")).count(),
+            1
+        );
+        assert_eq!(
+            serde_json::from_str::<wire::RecoverRequest>(
+                requests[3].split("\r\n\r\n").nth(1).unwrap()
+            )
+            .unwrap()
+            .operation_id,
+            op.to_string()
+        );
+        client
+            .lifecycle
+            .transition(crate::chat::lifecycle::Phase::Stopping);
+        let rejected = client
+            .recover_model_operation(session, &request)
+            .await
+            .unwrap_err();
+        assert!(matches!(rejected.kind(), HostBridgeErrorKind::NotReady));
     }
 
     #[tokio::test]

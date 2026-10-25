@@ -14,4 +14,7 @@ it("uses the exact v2 catalog only in the candidate and preserves known old stat
  expect(client.parseModelState({profileId:"kimi-k3-max-v1",revision:7,state:"ready"}).profileId).toBe("kimi-k3-max-v1");
  expect(client.legacyModelIntent({profileId:client.defaultModelProfile,expectedRevision:0})).toBeUndefined();
  expect(client.legacyModelIntent({profileId:"minimax-m3-high-v1",expectedRevision:3})?.expectedRevision).toBe(3);
+ const pending={operationId:crypto.randomUUID(),profileId:"minimax-m3-high-v1",expectedRevision:7,recoveryAvailable:false};
+ expect(client.parseModelState({profileId:"kimi-k3-max-v1",revision:7,state:"unknown",pending}).pending?.recoveryAvailable).toBe(false);
+ expect(()=>client.parseModelState({profileId:"kimi-k3-max-v1",revision:7,state:"unknown",pending:{...pending,recoveryAvailable:"true"}})).toThrow();
 });

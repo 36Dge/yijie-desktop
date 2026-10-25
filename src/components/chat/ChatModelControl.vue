@@ -13,6 +13,7 @@ const props = defineProps<{
   loading: boolean;
   saving: boolean;
   error: string;
+  retryLabel?: string;
 }>();
 const emit = defineEmits<{ select: [id: ProfileId]; retry: [] }>();
 const overlay = ref<HTMLElement | null>(null);
@@ -30,7 +31,7 @@ const upcomingModels: readonly { label: string; icon: YjIconName }[] = [
   { label: "GLM-5.3", icon: "modelGlm" },
 ];
 const selected = computed(() => props.profile ? presentation[props.profile] : null);
-const label = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : selected.value?.label ?? "模型待识别");
+const label = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : selected.value ? `${selected.value.label}${props.catalog?.schema_version === 2 && props.profile === "kimi-k3-max-v1" ? "（已退役）" : ""}` : "模型待识别");
 const selectedAvailability = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile));
 const unavailable = computed(() => selectedAvailability.value?.available === false);
 function unavailableLabel(reason?: string): string {
@@ -95,7 +96,7 @@ function key(event: KeyboardEvent): void {
       </NTooltip>
     </div>
   </NPopover>
-  <button v-if="error" class="model-retry yj-control" type="button" :disabled="saving || disabled" :title="error" aria-label="重试模型操作" @click="emit('retry')">重试</button>
+  <button v-if="error" class="model-retry yj-control" type="button" :disabled="saving || disabled" :title="error" :aria-label="retryLabel ?? '重试模型操作'" @click="emit('retry')">{{ retryLabel ?? "重试" }}</button>
   <span class="sr-only" role="status">{{ error || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
 </template>
 

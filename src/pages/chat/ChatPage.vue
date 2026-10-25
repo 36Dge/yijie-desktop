@@ -1127,7 +1127,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />
@@ -1378,7 +1378,7 @@ onBeforeUnmount(() => {
           <ChatSkillControl :entries="skills.skills" :selected-ids="skillSelection.map(skill => skill.id)" :disabled="submitting || Boolean(expertSubmission) || modelBusy || chatStore.selectedAccessMode === 'history-only'" :loading="skills.phase === 'loading'" :refreshing="skills.refreshing" :error="skillError" :operations="skills.operations" :operation-errors="skills.operationErrors" @refresh="refreshSkills" @select="toggleSkill" @manage="manageSkills" @close="close" />
         </template>
         <template v-if="chatModelsEnabled" #model-control>
-          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" @select="models.select" @retry="models.retry" />
+          <ChatModelControl :catalog="models.catalog.value" :profile="models.profile.value" :disabled="modelBlocked" :disabled-reason="modelDisabledReason" :loading="models.loading.value" :saving="models.saving.value" :error="models.error.value" :retry-label="models.retryLabel.value" @select="models.select" @retry="models.retry" />
         </template>
         <template v-if="!isDraftMode && runtimePermissionsEnabled" #permission-control>
           <ChatPermissionControl :state="permissions.state.value" :disabled="!permissions.ready.value || permissions.busy.value" :saving="permissions.saving.value" @select="permissions.setMode" />

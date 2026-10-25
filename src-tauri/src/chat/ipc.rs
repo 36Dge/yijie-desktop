@@ -10212,6 +10212,26 @@ pub async fn chat_select_model_v1(
     Ok(CommandResponse::new(request.request_id, out))
 }
 #[tauri::command]
+pub async fn chat_recover_model_v2(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::models::ModelState>, ChatIpcError> {
+    let request: CommandRequest<ModelSelectionPayload> = decode_request(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .recover_model(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.intent,
+            request.payload.operation_id,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
+#[tauri::command]
 pub async fn chat_model_submit_v1(
     request: Value,
     app: AppHandle,

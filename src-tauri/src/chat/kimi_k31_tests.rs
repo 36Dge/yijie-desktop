@@ -2,6 +2,51 @@ use super::migrations;
 use rusqlite::Connection;
 
 #[test]
+fn feat164_native_recovery_schema_preserves_legacy_pending_without_backfill() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    migrations::migrate_to_target(&mut db, 38).unwrap();
+    db.execute_batch("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES('p','owner','tenant','Synthetic workspace','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',X'01',1);
+      INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at) VALUES('s','owner','tenant','p','Synthetic history','user','completed',1,1);
+      INSERT INTO chat_model_selections VALUES('s','kimi-k3-max-v1',7,'unknown','old-operation','minimax-m3-high-v1',7);
+      INSERT INTO chat_operation_models VALUES('old-delivery','s','kimi-k3-max-v1',7);").unwrap();
+    migrations::migrate_to_target(&mut db, migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION).unwrap();
+    migrations::migrate_to_target(&mut db, migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM chat_model_operations_v2", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        0
+    );
+    assert_eq!(db.query_row("SELECT profile_id||':'||state||':'||operation_id||':'||requested_profile_id FROM chat_model_selections",[],|r|r.get::<_,String>(0)).unwrap(),"kimi-k3-max-v1:unknown:old-operation:minimax-m3-high-v1");
+    assert_eq!(
+        db.query_row("SELECT profile_id FROM chat_operation_models", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+        "kimi-k3-max-v1"
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        39
+    );
+    migrations::validate_reader(&db).unwrap();
+    #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+    assert_eq!(super::models::dispatch_predicate(&db, "o").unwrap(), "0=1");
+}
+
+#[test]
 fn feat164_migration_expands_without_rewriting_model_facts() {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE chat_sessions(id TEXT PRIMARY KEY); CREATE TABLE chat_scheduled_plans(plan_id TEXT PRIMARY KEY); INSERT INTO chat_sessions VALUES('s'); INSERT INTO chat_scheduled_plans VALUES('p');").unwrap();

@@ -1870,6 +1870,8 @@ pub(crate) mod turn_timing_generated;
 
 #[cfg(test)]
 mod kimi_k31_tests;
+#[cfg(feature = "kimi-k31-pro-candidate")]
+pub(crate) mod model_recovery;
 pub(crate) mod models;
 #[cfg(not(feature = "kimi-k31-pro-candidate"))]
 pub(crate) mod models_generated;

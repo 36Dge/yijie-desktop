@@ -5302,6 +5302,10 @@ impl AuthorizedConversationApplication {
         session: Uuid,
     ) -> Result<super::models::ModelState, ChatError> {
         self.authorize(context, ChatAction::ReadSessions)?;
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        if super::models::v2_enabled() {
+            return self.read_model_state_v2(context, session).await;
+        }
         let host = self
             .application
             .database
@@ -5338,6 +5342,12 @@ impl AuthorizedConversationApplication {
             return Err(ChatError::OrchestrationUnavailable);
         }
         let _expert_gate = self.authorization.market_admission_lock().await;
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        if super::models::v2_enabled() {
+            return self
+                .select_model_v2(context, session, intent, op, false)
+                .await;
+        }
         #[cfg(feature = "kimi-k31-pro-candidate")]
         let target = match intent.profile_id {
             super::models_generated::ProfileId::KimiK31ProMaxV1 => {
@@ -5380,6 +5390,183 @@ impl AuthorizedConversationApplication {
             }
         }
     }
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    async fn read_model_state_v2(
+        &self,
+        context: Uuid,
+        session: Uuid,
+    ) -> Result<super::models::ModelState, ChatError> {
+        let local = self
+            .application
+            .database
+            .call(move |r| r.model_state(session))
+            .await?;
+        if let Some(pending) = &local.pending {
+            let op = Uuid::parse_str(&pending.operation_id)
+                .map_err(|_| ChatError::ConversationConflict)?;
+            let proof = self
+                .application
+                .database
+                .call(move |r| r.model_recovery(session, op))
+                .await?;
+            // An old pending selection has no v2 dispatch proof. Preserve it.
+            let Some(proof) = proof else { return Ok(local) };
+            let receipt = self
+                .application
+                .host()?
+                .model_operation(proof.host, &proof.request)
+                .await;
+            self.authorize(context, ChatAction::ReadSessions)?;
+            match receipt {
+                Ok(Some(value))
+                    if value.state == super::models_generated::ModelOperationState::Committed =>
+                {
+                    self.application
+                        .database
+                        .call(move |r| r.observe_model_recovery(session, op, value))
+                        .await?;
+                }
+                _ => return Ok(local),
+            }
+        }
+        let host = self
+            .application
+            .database
+            .call(move |r| r.agent_session_id_for_session_optional_model(session))
+            .await?;
+        let Some(host) = host else { return Ok(local) };
+        let current = self
+            .application
+            .host()?
+            .model_selection(host)
+            .await
+            .map_err(map_host_error)?;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        self.application
+            .database
+            .call(move |r| r.sync_model_selection(session, current))
+            .await
+    }
+
+    pub async fn recover_model(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        intent: super::models::ModelIntent,
+        op: Uuid,
+    ) -> Result<super::models::ModelState, ChatError> {
+        self.authorize(context, ChatAction::SubmitTurn)?;
+        if !super::models::v2_enabled() || !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let _gate = self.authorization.market_admission_lock().await;
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        {
+            self.select_model_v2(context, session, intent, op, true)
+                .await
+        }
+        #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+        {
+            let _ = (session, intent, op);
+            Err(ChatError::OrchestrationUnavailable)
+        }
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    async fn select_model_v2(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        intent: super::models::ModelIntent,
+        op: Uuid,
+        recovery: bool,
+    ) -> Result<super::models::ModelState, ChatError> {
+        use super::model_recovery::RecoveryAction;
+        let proof = if recovery {
+            let p = self
+                .application
+                .database
+                .call(move |r| r.model_recovery(session, op))
+                .await?
+                .ok_or(ChatError::ConversationConflict)?;
+            if p.request.expected_revision != intent.expected_revision
+                || super::models::profile_id(p.request.profile_id)
+                    != super::models::profile_id(intent.profile_id)
+            {
+                return Err(ChatError::ConversationConflict);
+            }
+            p
+        } else {
+            self.application
+                .database
+                .call(move |r| r.begin_model_recovery_intent(session, intent, op))
+                .await?
+        };
+        let outcome = async {
+            self.authorize(context, ChatAction::SubmitTurn)?;
+            let bridge = self.application.host()?;
+            let observed = bridge
+                .model_operation(proof.host, &proof.request)
+                .await
+                .map_err(map_host_error)?;
+            self.authorize(context, ChatAction::SubmitTurn)?;
+            let receipt = match super::model_recovery::recovery_action(&proof, observed.as_ref())? {
+                RecoveryAction::ReadCommitted => observed.ok_or(ChatError::ConversationConflict)?,
+                action => {
+                    if action == RecoveryAction::Reapply && !recovery {
+                        return Err(ChatError::ConversationConflict);
+                    }
+                    let dispatch = proof.clone();
+                    self.application
+                        .database
+                        .call(move |r| r.mark_model_recovery_dispatched(dispatch))
+                        .await?;
+                    self.authorize(context, ChatAction::SubmitTurn)?;
+                    if action == RecoveryAction::FirstSend {
+                        bridge
+                            .select_model(proof.host, proof.request.clone())
+                            .await
+                            .map_err(map_host_error)?;
+                        bridge
+                            .model_operation(proof.host, &proof.request)
+                            .await
+                            .map_err(map_host_error)?
+                            .ok_or(ChatError::ConversationConflict)?
+                    } else {
+                        bridge
+                            .recover_model_operation(proof.host, &proof.request)
+                            .await
+                            .map_err(map_host_error)?
+                    }
+                }
+            };
+            self.authorize(context, ChatAction::SubmitTurn)?;
+            self.application
+                .database
+                .call(move |r| r.observe_model_recovery(session, op, receipt))
+                .await?;
+            // Never install the original receipt as the current selection: a
+            // higher Host revision may already exist when its response arrives.
+            let current = bridge
+                .model_selection(proof.host)
+                .await
+                .map_err(map_host_error)?;
+            self.authorize(context, ChatAction::SubmitTurn)?;
+            self.application
+                .database
+                .call(move |r| r.sync_model_selection(session, current))
+                .await
+        }
+        .await;
+        if outcome.is_err() {
+            self.application
+                .database
+                .call(move |r| r.model_recovery_unknown(session, op))
+                .await?;
+        }
+        outcome
+    }
+
     pub async fn model_submit(
         &self,
         context: Uuid,

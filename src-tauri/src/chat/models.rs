@@ -87,6 +87,8 @@ pub struct PendingModelSelection {
     pub operation_id: String,
     pub profile_id: String,
     pub expected_revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_available: Option<bool>,
 }
 #[derive(Debug)]
 pub struct ModelSubmission {
@@ -96,6 +98,9 @@ pub struct ModelSubmission {
 }
 fn db_error(_: rusqlite::Error) -> ChatError {
     ChatError::DatabaseUnavailable
+}
+fn recovery_table(db: &Connection) -> Result<bool, ChatError> {
+    db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_model_operations_v2')",[],|r|r.get(0)).map_err(db_error)
 }
 pub(super) fn table(db: &Connection) -> Result<bool, ChatError> {
     db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_model_selections')",[],|r|r.get(0)).map_err(db_error)
@@ -115,7 +120,9 @@ pub(super) fn freeze(
     session: Uuid,
     intent: &ModelIntent,
 ) -> Result<(), ChatError> {
-    if !executable_profile(profile_id(intent.profile_id)) {
+    if (!cfg!(feature = "kimi-k31-pro-candidate") && recovery_table(db)?)
+        || !executable_profile(profile_id(intent.profile_id))
+    {
         return Err(ChatError::ConversationConflict);
     }
     db.execute("INSERT INTO chat_operation_models(operation_id,session_id,profile_id,revision) VALUES(?1,?2,?3,?4) ON CONFLICT(operation_id) DO NOTHING",params![id.to_string(),session.to_string(),profile_id(intent.profile_id),intent.expected_revision]).map_err(db_error)?;
@@ -131,7 +138,7 @@ impl ChatRepository {
     pub(super) fn model_state(&self, session: Uuid) -> Result<ModelState, ChatError> {
         self.require_model_storage()?;
         self.agent_session_id_for_session_optional_model(session)?;
-        Ok(self
+        let state = self
             .connection
             .query_row(
                 "SELECT profile_id,revision,state,operation_id,requested_profile_id,expected_revision FROM chat_model_selections WHERE session_id=?1",
@@ -142,7 +149,7 @@ impl ChatRepository {
                         revision: r.get(1)?,
                         state: r.get(2)?,
                         pending: match (r.get::<_,Option<String>>(3)?, r.get::<_,Option<String>>(4)?,r.get::<_,Option<i64>>(5)?) {
-                            (Some(operation_id),Some(profile_id),Some(expected_revision)) if r.get::<_,String>(2)? != "ready" => Some(PendingModelSelection{operation_id,profile_id,expected_revision}),
+                            (Some(operation_id),Some(profile_id),Some(expected_revision)) if r.get::<_,String>(2)? != "ready" => Some(PendingModelSelection{operation_id,profile_id,expected_revision,recovery_available:None}),
                             _ => None,
                         },
                     })
@@ -155,7 +162,21 @@ impl ChatRepository {
                 revision: 0,
                 state: "unknown".into(),
                 pending: None,
-            }))
+            });
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        let state = {
+            let mut state = state;
+            if let Some(pending) = &mut state.pending {
+                pending.recovery_available = Some(
+                    Uuid::parse_str(&pending.operation_id)
+                        .ok()
+                        .and_then(|id| self.model_recovery(session, id).ok().flatten())
+                        .is_some(),
+                );
+            }
+            state
+        };
+        Ok(state)
     }
     pub(super) fn agent_session_id_for_session_optional_model(
         &self,
@@ -295,6 +316,10 @@ impl ChatRepository {
         session: Uuid,
         value: wire::Selection,
     ) -> Result<ModelState, ChatError> {
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        if super::model_recovery::present(&self.connection)? {
+            return self.sync_model_selection_v2(session, value);
+        }
         self.require_model_storage()?;
         let host = self
             .agent_session_id_for_session_optional_model(session)?
@@ -332,7 +357,7 @@ impl ChatRepository {
         op: Uuid,
     ) -> Result<Uuid, ChatError> {
         self.require_model_storage()?;
-        if cfg!(feature = "kimi-k31-pro-candidate") {
+        if cfg!(feature = "kimi-k31-pro-candidate") || recovery_table(&self.connection)? {
             return Err(ChatError::OrchestrationUnavailable);
         }
         // The versioned Host model path clears market capability/configuration
@@ -434,6 +459,9 @@ pub(super) fn freeze_conversation(
 
 // A compatible rollback reader must leave model-aware outboxes untouched.
 pub(super) fn dispatch_predicate(db: &Connection, alias: &str) -> Result<String, ChatError> {
+    if !cfg!(feature = "kimi-k31-pro-candidate") && recovery_table(db)? {
+        return Ok("0=1".into());
+    }
     if enabled() && cfg!(feature = "kimi-k31-pro-candidate") && table(db)? {
         return Ok(format!("EXISTS(SELECT 1 FROM chat_operation_models model WHERE model.operation_id={alias}.operation_id AND model.profile_id IN ('kimi-k3-1-pro-max-v1','minimax-m3-high-v1'))"));
     }

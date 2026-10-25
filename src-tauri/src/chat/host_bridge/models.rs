@@ -78,7 +78,11 @@ impl HostBridge {
             serde_json::from_slice(&bytes).map_err(|_| accepted_response_invalid())?,
             session,
         )?;
-        if value.profile_id != Some(request.profile_id.into())
+        #[cfg(feature = "kimi-k31-pro-candidate")]
+        let requested_profile = request.profile_id.into();
+        #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+        let requested_profile = request.profile_id;
+        if value.profile_id != Some(requested_profile)
             || value.operation_id.as_deref() != Some(request.operation_id.as_str())
             || value.state != wire::SelectionState::Ready
             || value.revision < request.expected_revision
@@ -88,7 +92,7 @@ impl HostBridge {
         Ok(value)
     }
 }
-fn validate_selection(
+pub(crate) fn validate_selection(
     value: wire::Selection,
     session: Uuid,
 ) -> Result<wire::Selection, HostBridgeError> {
@@ -100,7 +104,130 @@ fn validate_selection(
     {
         return Err(accepted_response_invalid());
     }
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    {
+        if value
+            .operation_id
+            .as_ref()
+            .is_some_and(|id| !canonical_id(id))
+            || (value.profile_id == Some(wire::ProfileId::KimiK3MaxV1)
+                && value.availability != wire::SelectionAvailability::Retired)
+            || (value.availability == wire::SelectionAvailability::Retired
+                && value.profile_id != Some(wire::ProfileId::KimiK3MaxV1))
+            || (value.availability == wire::SelectionAvailability::Ready
+                && (value.state != wire::SelectionState::Ready
+                    || value.profile_id.is_none_or(|p| {
+                        !crate::chat::models::executable_profile(crate::chat::models::profile_id(p))
+                    })))
+        {
+            return Err(accepted_response_invalid());
+        }
+    }
     Ok(value)
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+fn canonical_id(id: &str) -> bool {
+    Uuid::parse_str(id).is_ok_and(|v| !v.is_nil() && v.to_string() == id)
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+pub(crate) fn validate_operation_receipt(
+    value: &wire::ModelOperationReceipt,
+    session: Uuid,
+    request: &wire::SelectRequest,
+) -> Result<(), HostBridgeError> {
+    if value.schema_version != 2
+        || value.agent_session_id != session.to_string()
+        || value.operation_id != request.operation_id
+        || !canonical_id(&value.operation_id)
+        || value.request.schema_version != 2
+        || value.request.operation_id != request.operation_id
+        || value.request.profile_id != request.profile_id.into()
+        || value.request.expected_revision != request.expected_revision
+        || !(0..9007199254740991).contains(&request.expected_revision)
+    {
+        return Err(accepted_response_invalid());
+    }
+    if value.state == wire::ModelOperationState::Committed {
+        let r = value
+            .result
+            .as_ref()
+            .ok_or_else(accepted_response_invalid)?;
+        if r.schema_version != 2
+            || r.agent_session_id != session.to_string()
+            || r.operation_id.as_deref() != Some(request.operation_id.as_str())
+            || r.profile_id != Some(request.profile_id.into())
+            || r.revision != request.expected_revision + 1
+            || r.state != wire::SelectionState::Ready
+            || r.availability != Some(wire::SelectionAvailability::Ready)
+        {
+            return Err(accepted_response_invalid());
+        }
+    } else if value.result.is_some() {
+        return Err(accepted_response_invalid());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+impl HostBridge {
+    pub(crate) async fn model_operation(
+        &self,
+        session: Uuid,
+        request: &wire::SelectRequest,
+    ) -> Result<Option<wire::ModelOperationReceipt>, HostBridgeError> {
+        if !canonical_id(&request.operation_id) {
+            return Err(protocol_error());
+        }
+        let value: Option<wire::ModelOperationReceipt> = self
+            .recovery_get(&format!(
+                "{}agent-sessions/{session}/model-operations/{}",
+                model_prefix(),
+                request.operation_id
+            ))
+            .await?;
+        if let Some(value) = &value {
+            validate_operation_receipt(value, session, request)?;
+        }
+        Ok(value)
+    }
+    pub(crate) async fn recover_model_operation(
+        &self,
+        session: Uuid,
+        request: &wire::SelectRequest,
+    ) -> Result<wire::ModelOperationReceipt, HostBridgeError> {
+        if !canonical_id(&request.operation_id) {
+            return Err(protocol_error());
+        }
+        let body = wire::RecoverRequest {
+            schema_version: 2,
+            operation_id: request.operation_id.clone(),
+            expected_revision: request.expected_revision,
+            profile_id: request.profile_id,
+        };
+        let response = self
+            .send_json(
+                Method::POST,
+                &format!(
+                    "{}agent-sessions/{session}/model-operations/{}/recover",
+                    model_prefix(),
+                    request.operation_id
+                ),
+                &body,
+            )
+            .await?;
+        if response.status() != StatusCode::OK {
+            // A failed recovery is not evidence of non-dispatch. Keep the Native
+            // original intent blocked and let a later explicit action recheck it.
+            return Err(HostBridgeError::rejected(HostErrorCode::SessionNotUsable));
+        }
+        let bytes = read_json_body(response).await?;
+        let value: wire::ModelOperationReceipt =
+            serde_json::from_slice(&bytes).map_err(|_| accepted_response_invalid())?;
+        validate_operation_receipt(&value, session, request)?;
+        Ok(value)
+    }
 }
 pub(super) fn route(path: &str) -> Option<String> {
     if cfg!(feature = "kimi-k31-pro-candidate") && path.starts_with("/v1/model-chat/") {
