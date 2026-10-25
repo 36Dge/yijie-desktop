@@ -739,7 +739,7 @@ impl ChatRuntime {
                 Err(ChatError::ConversationConflict) => continue,
                 Err(error) => return Err(error),
             };
-            if retain_unconfigured_model_history(
+            if retain_unavailable_model_history(
                 &candidate,
                 profile.as_deref(),
                 model_catalog.as_ref(),
@@ -1247,9 +1247,9 @@ fn validate_feat126_resumed_session(
     Ok(())
 }
 
-// Missing credentials do not make terminal local history unreadable. Active or
-// uncertain operations still need the original recovery path and remain blocked.
-fn retain_unconfigured_model_history(
+// Missing credentials or an explicitly paused Kimi do not make terminal local
+// history unreadable. Active or uncertain operations retain their recovery checks.
+fn retain_unavailable_model_history(
     candidate: &database::Feat126ResumeCandidate,
     profile: Option<&str>,
     catalog: Option<&models_generated::Catalog>,
@@ -1262,7 +1262,14 @@ fn retain_unconfigured_model_history(
                 catalog.models.iter().any(|entry| {
                     models::profile_id(entry.profile.profile_id) == profile
                         && !entry.available
-                        && entry.reason == models_generated::ModelAvailabilityReason::NotConfigured
+                        && match entry.reason {
+                            models_generated::ModelAvailabilityReason::NotConfigured => true,
+                            #[cfg(feature = "kimi-k31-pro-candidate")]
+                            models_generated::ModelAvailabilityReason::ActivationRequired => {
+                                profile == "kimi-k3-1-pro-max-v1"
+                            }
+                            _ => false,
+                        }
                 })
             })
         })
@@ -1487,18 +1494,18 @@ mod tests {
             }]
         })).unwrap();
         let profile = Some("kimi-k3-max-v1");
-        assert!(retain_unconfigured_model_history(
+        assert!(retain_unavailable_model_history(
             &terminal,
             profile,
             Some(&catalog)
         ));
-        assert!(!retain_unconfigured_model_history(
+        assert!(!retain_unavailable_model_history(
             &terminal,
             None,
             Some(&catalog)
         ));
-        assert!(!retain_unconfigured_model_history(&terminal, profile, None));
-        assert!(!retain_unconfigured_model_history(
+        assert!(!retain_unavailable_model_history(&terminal, profile, None));
+        assert!(!retain_unavailable_model_history(
             &terminal,
             Some("minimax-m3-high-v1"),
             Some(&catalog)
@@ -1517,7 +1524,7 @@ mod tests {
                 ..terminal.clone()
             },
         ] {
-            assert!(!retain_unconfigured_model_history(
+            assert!(!retain_unavailable_model_history(
                 &unfinished,
                 profile,
                 Some(&catalog)
@@ -1525,7 +1532,77 @@ mod tests {
         }
         catalog.models[0].available = true;
         catalog.models[0].reason = models_generated::ModelAvailabilityReason::Ready;
-        assert!(!retain_unconfigured_model_history(
+        assert!(!retain_unavailable_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    fn feat164_paused_terminal_history_does_not_require_model_resume() {
+        let terminal = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+        };
+        let mut catalog: models_generated::Catalog = serde_json::from_value(serde_json::json!({
+            "schema_version": 2, "default_profile": "kimi-k3-1-pro-max-v1", "models": [{
+                "profile": {"profile_id":"kimi-k3-1-pro-max-v1", "label":"Kimi K3.1 Pro", "provider":"kimi", "model":"kimi-k3.1-pro", "effort":"max", "context_window":1048576},
+                "available":false, "reason":"activation_required"
+            }]
+        })).unwrap();
+        let profile = Some("kimi-k3-1-pro-max-v1");
+        assert!(retain_unavailable_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
+        for unfinished in [
+            database::Feat126ResumeCandidate {
+                active_local_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_runtime_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_turn_operation_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+        ] {
+            assert!(!retain_unavailable_model_history(
+                &unfinished,
+                profile,
+                Some(&catalog)
+            ));
+        }
+        assert!(!retain_unavailable_model_history(&terminal, profile, None));
+        assert!(!retain_unavailable_model_history(
+            &terminal,
+            None,
+            Some(&catalog)
+        ));
+        assert!(!retain_unavailable_model_history(
+            &terminal,
+            Some("minimax-m3-high-v1"),
+            Some(&catalog)
+        ));
+        catalog.models[0].available = true;
+        assert!(!retain_unavailable_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
+        catalog.models[0].available = false;
+        catalog.models[0].reason = models_generated::ModelAvailabilityReason::RuntimeUnavailable;
+        assert!(!retain_unavailable_model_history(
             &terminal,
             profile,
             Some(&catalog)
