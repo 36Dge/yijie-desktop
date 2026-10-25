@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { marketHostNativeClient, marketChatErrorMessage, type MarketHostNativeClient } from "../api/market-host-native-client";
-import type { Decision, MarketApproval, NativeObservation } from "../domain/market-host-native.generated";
+import type { Decision, MarketApproval, NativeObservation } from "../domain/market-host-v2-native.generated";
 
 /** A scoped, bounded read loop. Unknown decisions only reconcile; never resend. */
 export function useMarketChat(context: () => string | null, session: () => string | null, running: () => boolean, client: MarketHostNativeClient = marketHostNativeClient) {

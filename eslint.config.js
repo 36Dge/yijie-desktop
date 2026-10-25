@@ -23,6 +23,9 @@ export default tseslint.config(
       "src/api/generated/workflow-local-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-v2-validator.gen.js",
+      "src/api/generated/market-selection-v2-validator.gen.js",
+      "src/api/generated/market-host-v2-native-validator.gen.js",
+      "src/api/generated/experts-v2-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-formats.gen.js",
     ],
   },
@@ -38,7 +41,7 @@ export default tseslint.config(
     rules: { "vue/multi-word-component-names": "off" },
   },
   {
-    files: ["src/domain/experts.generated.ts"],
+    files: ["src/domain/experts.generated.ts", "src/domain/experts-v2.generated.ts"],
     rules: { "@typescript-eslint/no-empty-object-type": "off" },
   },
   eslintConfigPrettier,

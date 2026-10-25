@@ -7,6 +7,16 @@ use crate::chat::{
 #[tokio::test]
 #[ignore = "requires the explicit local demo_fast model writer environment"]
 async fn feat156_model_draft_enters_original_claim_and_recovery_path() {
+    model_draft_claim("kimi-k3-max-v1").await;
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+#[tokio::test]
+async fn feat164_surfaces_draft_claim_and_recovery() {
+    model_draft_claim("kimi-k3-1-pro-max-v1").await;
+}
+
+async fn model_draft_claim(profile: &'static str) {
     assert!(crate::chat::models::enabled());
     let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
     f.worker
@@ -21,7 +31,7 @@ async fn feat156_model_draft_enters_original_claim_and_recovery_path() {
             "schedule_submit_draft_v1",
             json!({
                 "text":"每天北京时间九点回复验收完成，不调用工具。",
-                "model_intent":{"profile_id":"kimi-k3-max-v1","expected_revision":0}
+                "model_intent":{"profile_id":profile,"expected_revision":0}
             }),
         )
         .await
@@ -33,13 +43,10 @@ async fn feat156_model_draft_enters_original_claim_and_recovery_path() {
                 .draft_source_context(&source)
                 .expect("draft source context");
             let create = context.create.unwrap();
-            assert_eq!(
-                r.model_operation_profile(create)?.as_deref(),
-                Some("kimi-k3-max-v1")
-            );
+            assert_eq!(r.model_operation_profile(create)?.as_deref(), Some(profile));
             assert_eq!(
                 r.model_operation_profile(context.operation)?.as_deref(),
-                Some("kimi-k3-max-v1")
+                Some(profile)
             );
             r.schedule_draft_dispatch_authority = Some(auth());
             let claimed = r

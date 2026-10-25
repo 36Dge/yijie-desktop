@@ -1,4 +1,4 @@
-import type { MarketApproval, NativeObservation } from "../domain/market-host-native.generated";
+import type { MarketApproval, NativeObservation } from "../domain/market-host-v2-native.generated";
 export const marketTestId = (tail: number) => `15700000-0000-4000-8000-${tail.toString().padStart(12, "0")}`;
 export function marketApproval(): MarketApproval {
   const reference = { installationId: marketTestId(1), revision: 2, generation: 1 };

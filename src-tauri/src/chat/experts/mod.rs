@@ -1,6 +1,7 @@
 //! FEAT-158 local expert capability. The canonical daily launcher selects this
 //! profile; enabling it never replaces per-operation Native admission.
 #[allow(dead_code, unused_imports)]
+#[cfg_attr(feature = "kimi-k31-pro-candidate", path = "generated_v2.rs")]
 pub(crate) mod generated;
 pub(crate) mod store;
 

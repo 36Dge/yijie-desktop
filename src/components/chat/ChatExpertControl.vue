@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { NButton } from "naive-ui";
-import type { CatalogEntry, ExpertSelection } from "../../domain/experts.generated";
+import type { CatalogEntry, ExpertSelection } from "../../domain/experts-v2.generated";
 import { expertResourceLabels } from "../../domain/expert-ui";
 import ExpertAvatar from "../experts/ExpertAvatar.vue";
 import ChatResourcePanel from "./ChatResourcePanel.vue";

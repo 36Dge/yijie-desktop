@@ -10,10 +10,18 @@ export const defaultModelProfile: ProfileId = kimiK31Candidate ? "kimi-k3-1-pro-
 import { parseCreatedTurnResponse, type ChatCreatedTurn, type ChatTurnContentBlock } from "../domain/chat-ipc";
 export type { ProfileId, Catalog };
 export interface ModelIntent { readonly profileId: ProfileId; readonly expectedRevision: number }
-// Older market/expert/plan families remain closed until their own versioned
-// source migration. Do not silently coerce a new identity into the old DTO.
+// Legacy readers remain closed to new identities. Explicit paired v2 consumers
+// use executionProfile; no old model identity is silently rewritten.
 export function legacyProfile(profile: ProfileId): LegacyProfileId | undefined {
  return profile === "kimi-k3-max-v1" || profile === "minimax-m3-high-v1" ? profile : undefined;
+}
+/** Active identity for the explicitly paired v2 consumers; never coerce a retired ID. */
+export function executionProfile(profile: ProfileId): ProfileId | undefined {
+ return kimiK31Candidate ? (profile === "kimi-k3-1-pro-max-v1" || profile === "minimax-m3-high-v1" ? profile : undefined) : legacyProfile(profile);
+}
+export function executionModelIntent(intent: ModelIntent): ModelIntent | undefined {
+ const profileId=executionProfile(intent.profileId);
+ return profileId ? {profileId,expectedRevision:intent.expectedRevision} : undefined;
 }
 export function legacyModelIntent(intent: ModelIntent): { profileId: LegacyProfileId; expectedRevision: number } | undefined {
  const profileId = legacyProfile(intent.profileId);

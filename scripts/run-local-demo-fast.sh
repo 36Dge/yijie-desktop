@@ -58,7 +58,15 @@ if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
   export YIJIE_FEAT155_SCHEDULED_CANDIDATE=true YIJIE_FEAT155_SCHEDULED_DAILY=false
   export YIJIE_MARKET_CONNECTORS_ENABLED=false YIJIE_ARTIFACT_MEDIA_ENABLED=false
   workflow_requested="false"
-  experts_requested="false"
+  case "${YIJIE_KIMI_K31_CALL_SURFACES:-ordinary}" in
+    ordinary) experts_requested="false" ;;
+    market) export YIJIE_MARKET_CONNECTORS_ENABLED=true; experts_requested="false" ;;
+    experts) export YIJIE_MARKET_CONNECTORS_ENABLED=true; experts_requested="true" ;;
+    media) export YIJIE_MARKET_CONNECTORS_ENABLED=true YIJIE_ARTIFACT_MEDIA_ENABLED=true; experts_requested="true" ;;
+    *) fail "invalid FEAT-164 call surface profile" ;;
+  esac
+  export YIJIE_KIMI_K31_CALL_SURFACES="${YIJIE_KIMI_K31_CALL_SURFACES:-ordinary}"
+  if [[ "$experts_requested" == "true" ]]; then expert_profile="default"; fi
   host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
   shift
   if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
@@ -248,14 +256,21 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
   node "$workspace_root/yijie-contracts/scripts/generate-market-connectors.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-market-connectors.mjs" --consumer=desktop --check
   node "$desktop_root/scripts/sync-market-catalog.mjs" --check
-  node "$workspace_root/yijie-contracts/scripts/sync-market-selection.mjs" --consumer=desktop --check
-  node "$workspace_root/yijie-contracts/scripts/sync-market-host.mjs" --consumer=desktop --check
+  if [[ "$kimi_k31_candidate" == "true" ]]; then
+    node "$workspace_root/yijie-contracts/scripts/sync-model-call-surfaces-v2.mjs" --consumer=desktop --check
+  else
+    node "$workspace_root/yijie-contracts/scripts/sync-market-selection.mjs" --consumer=desktop --check
+    node "$workspace_root/yijie-contracts/scripts/sync-market-host.mjs" --consumer=desktop --check
+  fi
   node "$workspace_root/yijie-contracts/scripts/sync-market-provider.mjs" --consumer=desktop --check
   if [[ "$reopen_app" == "true" ]]; then
     python3 "$workspace_root/yijie-connectors/scripts/check-worker-source.py"
   else
-    if [[ "$experts_requested" == "true" && "$packaged_app" == "true" ]]; then
+    if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$packaged_app" == "true" ]]; then
       expert_worker_inputs="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
+    fi
+    if [[ "$kimi_k31_candidate" == "true" ]]; then
+      kimi_k31_worker_inputs="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
     fi
     bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
   fi
@@ -283,7 +298,11 @@ if [[ "$experts_requested" == "true" ]]; then
   if [[ "$expert_profile" == "daily" ]]; then
     [[ "$scheduled_daily" == "true" ]] || fail "daily experts require the existing daily data profile"
   fi
-  node "$workspace_root/yijie-contracts/scripts/sync-experts.mjs" --consumer=desktop --check
+  if [[ "$kimi_k31_candidate" == "true" ]]; then
+    node "$workspace_root/yijie-contracts/scripts/sync-model-call-surfaces-v2.mjs" --consumer=desktop --check
+  else
+    node "$workspace_root/yijie-contracts/scripts/sync-experts.mjs" --consumer=desktop --check
+  fi
   if [[ "$reopen_app" == "true" ]]; then
     node "$desktop_root/scripts/sync-desktop-expert-resources.mjs" --check
   else
@@ -291,6 +310,7 @@ if [[ "$experts_requested" == "true" ]]; then
   fi
   expert_profile_data="$(node "$desktop_root/scripts/expert-local-profile.mjs" "$expert_profile")" || fail "expert profile is invalid"
   IFS=$'\t' read -r expert_overlay expert_runtime_directory expert_host_port expert_product_name expert_identifier expert_host_binary <<< "$expert_profile_data"
+  if [[ "$kimi_k31_candidate" != "true" ]]; then
   [[ -z "${YIJIE_DEMO_FAST_HOST_PORT:-}" || "$YIJIE_DEMO_FAST_HOST_PORT" == "$expert_host_port" ]] || fail "expert candidates require their fixed profile port"
   experts_tauri_config=(--config "$expert_overlay")
   runtime_root="$desktop_root/.local/$expert_runtime_directory"
@@ -298,6 +318,11 @@ if [[ "$experts_requested" == "true" ]]; then
   host_home="$runtime_root/host-home"
   codex_home="$runtime_root/codex-home"
   host_binary="$expert_host_binary"
+  else
+    # Only resources come from the expert overlay; FEAT-164 keeps its identity,
+    # port and isolated roots. Its own receipt covers the worker and resources.
+    experts_tauri_config=(--config "$expert_overlay")
+  fi
 fi
 
 # Detached source verification may reuse the same existing audited Runtime and
@@ -340,7 +365,7 @@ if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
   fail "loopback port $host_port is already in use; close the existing local Demo first"
 fi
 
-if [[ "$experts_requested" == "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
+if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
   expert_build_inputs="$(node scripts/expert-packaged-receipt.mjs --inputs-digest)"
 fi
 if [[ "$kimi_k31_candidate" == "true" && "$reopen_app" == "false" ]]; then
@@ -353,7 +378,7 @@ if [[ "$reopen_app" == "false" ]]; then
   )
 fi
 
-if [[ "${YIJIE_ARTIFACT_MEDIA_ENABLED:-false}" == "true" ]]; then
+if [[ "${YIJIE_ARTIFACT_MEDIA_ENABLED:-false}" == "true" && ( "$kimi_k31_candidate" != "true" || "$reopen_app" == "false" ) ]]; then
   bash "$host_root/scripts/build-artifact-adapter.sh" "$(dirname "$host_binary")"
 fi
 
@@ -378,14 +403,14 @@ if [[ "$stable_api_only" == "true" ]]; then
 elif [[ "$packaged_app" == "true" ]]; then
   if [[ "$reopen_app" == "false" ]]; then
     if [[ "$kimi_k31_candidate" == "true" ]]; then
-      pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate --config src-tauri/tauri.feat164-kimi-k31.conf.json
+      pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-kimi-k31.conf.json
     else
     pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
     fi
   fi
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
   if [[ "$kimi_k31_candidate" == "true" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app/Contents/MacOS/yijie-desktop"; fi
-  if [[ "$experts_requested" == "true" ]]; then
+  if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
   fi
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
@@ -405,7 +430,7 @@ if [[ "$scheduled_enabled" == "true" ]]; then
   node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
 fi
 
-if [[ "$experts_requested" == "true" && "$packaged_app" == "true" ]]; then
+if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$packaged_app" == "true" ]]; then
   if [[ "$reopen_app" == "true" ]]; then
     node scripts/expert-packaged-receipt.mjs --check "$expert_profile" "$codex_binary" "$codex_manifest" "$YIJIE_MARKET_WORKER_MANIFEST"
   else
@@ -417,7 +442,7 @@ if [[ "$kimi_k31_candidate" == "true" ]]; then
   if [[ "$reopen_app" == "true" ]]; then
     node scripts/kimi-k31-packaged-receipt.mjs --check "$codex_binary" "$codex_manifest"
   else
-    node scripts/kimi-k31-packaged-receipt.mjs --record "$codex_binary" "$codex_manifest" "$kimi_k31_build_inputs"
+    node scripts/kimi-k31-packaged-receipt.mjs --record "$codex_binary" "$codex_manifest" "$kimi_k31_build_inputs" "${kimi_k31_worker_inputs:-}"
   fi
 fi
 

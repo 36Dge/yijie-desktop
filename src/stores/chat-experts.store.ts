@@ -1,7 +1,7 @@
 import { ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import { expertNativeClient, ExpertClientError, type ExpertNativeClient } from "../api/expert-native-client";
-import type { BindingView, BindingSetPayload, ExpertSelection, NativeSubmitPayload, NativeSubmissionResult } from "../domain/experts.generated";
+import type { BindingView, BindingSetPayload, ExpertSelection, NativeSubmitPayload, NativeSubmissionResult } from "../domain/experts-v2.generated";
 import { expertErrorMessage, expertSelection } from "../domain/expert-ui";
 
 export type ExpertTurnIntent = Pick<NativeSubmitPayload, "expectedBindingRevision" | "expert">;

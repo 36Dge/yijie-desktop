@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createExpertNativeClient, expertNativeClient } from "../../api/expert-native-client";
 import { useExpertSummon } from "../../composables/useExpertSummon";
 import { expertShowcaseCatalog } from "../../data/expert-showcase-catalog";
-import type { CatalogEntry, CatalogSnapshot } from "../../domain/experts.generated";
+import type { CatalogEntry, CatalogSnapshot } from "../../domain/experts-v2.generated";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
 import { useChatExpertsStore } from "../../stores/chat-experts.store";
 import { useExpertsStore } from "../../stores/experts.store";

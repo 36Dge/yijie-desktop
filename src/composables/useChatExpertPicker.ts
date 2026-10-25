@@ -1,6 +1,6 @@
 import { onScopeDispose, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import type { CatalogEntry } from "../domain/experts.generated";
+import type { CatalogEntry } from "../domain/experts-v2.generated";
 import { chatComposerDraftKey } from "../domain/chat-composer-draft";
 import { useExpertsStore } from "../stores/experts.store";
 import { useChatExpertsStore } from "../stores/chat-experts.store";

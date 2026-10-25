@@ -72,8 +72,20 @@ fn request(expert: bool) -> expert_wire::NativeSubmitPayload {
 
 #[test]
 fn feat158_expert_turn_freezes_with_existing_queue_and_replays_after_normal_reopen() {
+    expert_replay("kimi-k3-max-v1");
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+#[test]
+fn feat164_surfaces_expert_normal_reopen() {
+    expert_replay("kimi-k3-1-pro-max-v1");
+}
+
+fn expert_replay(profile: &str) {
     let mut fixture = Fixture::new();
-    let request = request(true);
+    let mut request = request(true);
+    request.submission.intent.profile_id =
+        serde_json::from_value(serde_json::json!(profile)).unwrap();
     let result = fixture
         .repo()
         .expert_submission_admitted(

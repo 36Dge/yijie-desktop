@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createExpertNativeClient, ExpertClientError, type ExpertNativeClient } from "../api/expert-native-client";
-import type { CatalogSnapshot, ResourceOperation } from "../domain/experts.generated";
+import type { CatalogSnapshot, ResourceOperation } from "../domain/experts-v2.generated";
 import { expertDisplay, expertEntry, expertSnapshot, expertTestId as id } from "../test/expert-fixture";
 import { createExpertsStoreDefinition } from "./experts.store";
 

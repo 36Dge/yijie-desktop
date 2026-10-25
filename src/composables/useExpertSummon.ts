@@ -6,7 +6,7 @@ import { useChatExpertsStore } from "../stores/chat-experts.store";
 import { useChatComposerDraftStore } from "../stores/chat-composer-drafts.store";
 import { useChatStore } from "../stores/chat.store";
 import { chatComposerDraftKey, updateChatComposerDraft } from "../domain/chat-composer-draft";
-import type { CatalogEntry } from "../domain/experts.generated";
+import type { CatalogEntry } from "../domain/experts-v2.generated";
 
 export function useExpertSummon() {
   const route = useRoute(), router = useRouter(), dialog = useDialog();

@@ -186,13 +186,15 @@ impl SidecarConfig {
                 .ok()
                 .as_deref(),
         )?;
-        if super::models::v2_enabled()
-            && (super::connectors::enabled()
-                || super::experts::enabled()
-                || super::artifact_media::enabled())
-        {
-            return Err(ChatError::InvalidConfiguration);
-        }
+        kimi_k31_surface_settings(
+            super::models::v2_enabled(),
+            std::env::var("YIJIE_KIMI_K31_CALL_SURFACES")
+                .ok()
+                .as_deref(),
+            super::connectors::enabled(),
+            super::experts::enabled(),
+            super::artifact_media::enabled(),
+        )?;
         let kimi_api_key_file = if chat_models_enabled {
             optional_owner_only_provider_key_file("YIJIE_KIMI_API_KEY_FILE")?
         } else {
@@ -485,6 +487,34 @@ fn feat137_exact_local_enabled(
         return Err(ChatError::InvalidConfiguration);
     }
     Ok(enabled)
+}
+
+fn kimi_k31_surface_settings(
+    candidate: bool,
+    profile: Option<&str>,
+    market: bool,
+    experts: bool,
+    media: bool,
+) -> Result<(), ChatError> {
+    if !candidate {
+        return if profile.is_none() {
+            Ok(())
+        } else {
+            Err(ChatError::InvalidConfiguration)
+        };
+    }
+    let expected = match profile.unwrap_or("ordinary") {
+        "ordinary" => (false, false, false),
+        "market" => (true, false, false),
+        "experts" => (true, true, false),
+        "media" => (true, true, true),
+        _ => return Err(ChatError::InvalidConfiguration),
+    };
+    if (market, experts, media) == expected {
+        Ok(())
+    } else {
+        Err(ChatError::InvalidConfiguration)
+    }
 }
 
 fn kimi_k31_pause_setting(candidate: bool, value: Option<&str>) -> Result<bool, ChatError> {
@@ -1932,6 +1962,25 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn feat164_surfaces_config_is_explicit_and_paired() {
+        for (profile, flags) in [
+            ("ordinary", (false, false, false)),
+            ("market", (true, false, false)),
+            ("experts", (true, true, false)),
+            ("media", (true, true, true)),
+        ] {
+            assert!(
+                kimi_k31_surface_settings(true, Some(profile), flags.0, flags.1, flags.2).is_ok()
+            );
+            assert!(
+                kimi_k31_surface_settings(true, Some(profile), !flags.0, flags.1, flags.2).is_err()
+            );
+        }
+        assert!(kimi_k31_surface_settings(true, None, false, false, false).is_ok());
+        assert!(kimi_k31_surface_settings(false, Some("market"), true, false, false).is_err());
+    }
 
     #[test]
     fn feat152_permission_policy_reaches_the_allowlisted_child_environment() {

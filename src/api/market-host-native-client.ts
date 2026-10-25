@@ -1,9 +1,16 @@
+import {kimiK31Candidate} from "./chat-model-client";
 import { invoke } from "@tauri-apps/api/core";
-import * as validators from "./generated/market-host-native-validator.gen";
-import * as selectionValidators from "./generated/market-selection-validator.gen";
-import schema from "../../contracts/market-host-native.schema.json";
-import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval } from "../domain/market-host-native.generated";
-import type { SubmitPayload, SubmissionReceipt } from "../domain/market-selection.generated";
+import * as validatorsLegacy from "./generated/market-host-native-validator.gen";
+import * as validatorsCurrent from "./generated/market-host-v2-native-validator.gen";
+const validators=kimiK31Candidate ? validatorsCurrent : validatorsLegacy;
+import * as selectionValidatorsLegacy from "./generated/market-selection-validator.gen";
+import * as selectionValidatorsCurrent from "./generated/market-selection-v2-validator.gen";
+const selectionValidators=kimiK31Candidate ? selectionValidatorsCurrent : selectionValidatorsLegacy;
+import legacySchema from "../../contracts/market-host-native.schema.json";
+import currentSchema from "../../contracts/market-host-v2-native.schema.json";
+const schema=kimiK31Candidate ? currentSchema : legacySchema;
+import type { Decision, ErrorCode, NativeApprovalDecidePayload, NativeObservation, MarketApproval } from "../domain/market-host-v2-native.generated";
+import type { SubmitPayload, SubmissionReceipt } from "../domain/market-selection-v2.generated";
 
 type Transport = (command: string, args: { request: unknown }) => Promise<unknown>;
 type Schema = { $ref?: string; type?: string; properties?: Record<string, Schema>; items?: Schema; anyOf?: Schema[] };

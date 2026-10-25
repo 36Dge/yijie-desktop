@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ExpertDisplay } from "../../domain/experts.generated";
+import type { ExpertDisplay } from "../../domain/experts-v2.generated";
 import YjIcon from "../yijie/YjIcon.vue";
 import ExpertAvatar from "./ExpertAvatar.vue";
 defineProps<{ expert: ExpertDisplay; disabled?: boolean; pending?: boolean }>();

@@ -2,7 +2,7 @@ import { ref, shallowRef, watch } from "vue";
 import { defineStore } from "pinia";
 import { defaultModelProfile, type ProfileId } from "../api/chat-model-client";
 import { createChatComposerDrafts, clearChatComposerDraft, updateChatComposerDraft, type ChatComposerDraftKey } from "../domain/chat-composer-draft";
-import type { CatalogEntry, ExpertDisplay } from "../domain/experts.generated";
+import type { CatalogEntry, ExpertDisplay } from "../domain/experts-v2.generated";
 import { expertDefaultPrompt } from "../domain/expert-composer";
 import type { SelectionDisplay } from "../domain/market-connectors.generated";
 import type { SelectedChatSkill } from "../domain/chat-skills";

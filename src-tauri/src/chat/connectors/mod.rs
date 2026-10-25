@@ -6,6 +6,7 @@ pub(crate) mod dispatch;
 #[allow(dead_code)]
 pub(crate) mod generated;
 #[allow(dead_code, unused_imports)]
+#[cfg_attr(feature = "kimi-k31-pro-candidate", path = "host_v2_generated.rs")]
 pub(crate) mod host_generated;
 pub(crate) mod observe;
 pub(crate) mod provider;
@@ -15,6 +16,7 @@ pub(crate) mod selection;
 #[cfg(test)]
 mod selection_gate_tests;
 #[allow(dead_code)]
+#[cfg_attr(feature = "kimi-k31-pro-candidate", path = "selection_v2_generated.rs")]
 pub(crate) mod selection_generated;
 mod store;
 #[cfg(test)]

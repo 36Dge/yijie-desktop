@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ExpertClientError, type ExpertNativeClient } from "../api/expert-native-client";
-import type { BindingResult, BindingSetPayload, BindingView, NativeSubmitPayload } from "../domain/experts.generated";
+import type { BindingResult, BindingSetPayload, BindingView, NativeSubmitPayload } from "../domain/experts-v2.generated";
 import { expertDisplay, expertTestId as id } from "../test/expert-fixture";
 import { bindingTurnIntent, createChatExpertsStoreDefinition } from "./chat-experts.store";
 

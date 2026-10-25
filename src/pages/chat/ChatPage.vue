@@ -23,7 +23,7 @@ import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
 import ChatExpertControl from "../../components/chat/ChatExpertControl.vue";
 import { useChatExpertPicker } from "../../composables/useChatExpertPicker";
-import type { CatalogEntry } from "../../domain/experts.generated";
+import type { CatalogEntry } from "../../domain/experts-v2.generated";
 import { skillMarketplaceUiEnabled } from "../../authorization/skill-marketplace-ui-config";
 import { expertsUiEnabled } from "../../authorization/experts-ui-config";
 import ChatExpertChip from "../../components/experts/ChatExpertChip.vue";

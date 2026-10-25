@@ -3,7 +3,7 @@ import { effectScope, ref } from "vue";
 import { flushPromises } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expertNativeClient } from "../api/expert-native-client";
-import type { DeveloperInfo, ExpertSelection } from "../domain/experts.generated";
+import type { DeveloperInfo, ExpertSelection } from "../domain/experts-v2.generated";
 import { useExpertDeveloper } from "./useExpertDeveloper";
 import { expertDisplay, expertTestId } from "../test/expert-fixture";
 

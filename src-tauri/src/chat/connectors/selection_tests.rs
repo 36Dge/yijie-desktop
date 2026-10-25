@@ -86,8 +86,19 @@ fn feat157_selection_unready_provider_does_not_enqueue_even_empty_selection() {
 
 #[test]
 fn feat157_selection_first_turn_snapshot_is_atomic_and_survives_normal_reopen() {
+    market_replay("kimi-k3-max-v1");
+}
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+#[test]
+fn feat164_surfaces_market_normal_reopen() {
+    market_replay("kimi-k3-1-pro-max-v1");
+}
+
+fn market_replay(profile: &str) {
     let mut f = Fixture::new();
     let mut request = f.request();
+    request.intent.profile_id = serde_json::from_value(serde_json::json!(profile)).unwrap();
     request.selection = vec![f.selection(1), f.selection(0)];
     // This tests storage using ordinary installation fixtures, not live tool
     // eligibility. Production requires current private-owner evidence.

@@ -1,7 +1,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { defineStore } from "pinia";
 import { expertNativeClient, ExpertClientError, type ExpertNativeClient } from "../api/expert-native-client";
-import type { CatalogSnapshot, ExpertSelection, ResourceOperation } from "../domain/experts.generated";
+import type { CatalogSnapshot, ExpertSelection, ResourceOperation } from "../domain/experts-v2.generated";
 import { expertErrorMessage, expertResourceOperationMessage, expertSelection } from "../domain/expert-ui";
 
 const key = (expert: ExpertSelection) => `${expert.expertId}@${expert.version}`;

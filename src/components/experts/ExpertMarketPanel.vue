@@ -2,7 +2,7 @@
 import { computed, nextTick, onScopeDispose, ref, useId, watch } from "vue";
 import { NAlert, NButton, NCard, NModal, NSkeleton, useDialog, type DialogReactive } from "naive-ui";
 import { useRoute } from "vue-router";
-import type { CatalogEntry, ExpertDisplay, ResourceOperation } from "../../domain/experts.generated";
+import type { CatalogEntry, ExpertDisplay, ResourceOperation } from "../../domain/experts-v2.generated";
 import type { ExpertShowcase } from "../../domain/expert-showcase";
 import { expertResourceLabels } from "../../domain/expert-ui";
 import { useExpertsStore } from "../../stores/experts.store";

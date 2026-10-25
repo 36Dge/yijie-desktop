@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from "vue";
 import { expertNativeClient } from "../api/expert-native-client";
-import type { ExpertSelection } from "../domain/experts.generated";
+import type { ExpertSelection } from "../domain/experts-v2.generated";
 
 import { defaultExpertDeveloper } from "../domain/expert-ui";
 

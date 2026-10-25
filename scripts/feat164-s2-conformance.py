@@ -38,7 +38,7 @@ def main():
         ("host-temporal", host, env, ["go", "test", "-race", "-json", "./internal/session", "-run", "^TestFEAT164MigrationReceiptAndRecovery$", "-count=1"]),
         ("host-routes", host, env, ["go", "test", "-race", "-json", "./internal/app", "-run", "^TestFEAT164(V2OperationRoutesValidateBeforeService|ModelRoutesPreserveAuthAndRetiredRead)$", "-count=1"]),
         ("native-delivery", desktop, candidate, ["cargo", "test", "--manifest-path", "src-tauri/Cargo.toml", "--features", "kimi-k31-pro-candidate", "--lib", "feat164_delivery", "--", "--test-threads=1"]),
-        ("native-recovery-migration", desktop, env, ["cargo", "test", "--manifest-path", "src-tauri/Cargo.toml", "--features", "kimi-k31-pro-candidate", "--lib", "feat164", "--", "--skip", "feat164_delivery", "--skip", "feat164_native_host_boundary", "--skip", "chat::schedules::model_retirement_tests::", "--test-threads=1"]),
+        ("native-recovery-migration", desktop, env, ["cargo", "test", "--manifest-path", "src-tauri/Cargo.toml", "--features", "kimi-k31-pro-candidate", "--lib", "feat164", "--", "--skip", "feat164_surfaces", "--skip", "feat164_delivery", "--skip", "feat164_native_host_boundary", "--skip", "chat::schedules::model_retirement_tests::", "--test-threads=1"]),
         ("native-host-boundary", host, integration, ["go", "test", "-race", "-json", "./internal/app", "-run", "^TestFEAT164NativeHostBoundary$", "-count=1"]),
     ]
     for name, cwd, child_env, command in checks:

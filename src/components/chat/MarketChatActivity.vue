@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { Decision, MarketApproval, NativeObservation } from "../../domain/market-host-native.generated";
+import type { Decision, MarketApproval, NativeObservation } from "../../domain/market-host-v2-native.generated";
 import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   observation: NativeObservation | null;

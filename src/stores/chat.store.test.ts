@@ -1,7 +1,7 @@
 import { expertNativeClient, ExpertClientError } from "../api/expert-native-client";
 import { useChatExpertsStore } from "./chat-experts.store";
 import { expertDisplay } from "../test/expert-fixture";
-import type { NativeSubmissionResult } from "../domain/experts.generated";
+import type { NativeSubmissionResult } from "../domain/experts-v2.generated";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
 import type {NativeConversationViewEvent} from "../api/generated/native-conversation-private.gen";
 import { createPinia,setActivePinia } from "pinia";

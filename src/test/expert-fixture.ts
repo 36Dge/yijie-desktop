@@ -1,4 +1,4 @@
-import type { CatalogEntry, CatalogSnapshot, ExpertDisplay } from "../domain/experts.generated";
+import type { CatalogEntry, CatalogSnapshot, ExpertDisplay } from "../domain/experts-v2.generated";
 
 /** Ordinary synthetic data only; no archives, filesystem or provider calls. */
 export const expertTestId = (index: number) => `019c1a00-0000-7000-8000-${index.toString().padStart(12, "0")}`;

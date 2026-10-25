@@ -1,8 +1,8 @@
 import { useChatExpertsStore, type ExpertTurnIntent } from "./chat-experts.store";
 import { ExpertClientError } from "../api/expert-native-client";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
-import type { SelectionRef } from "../domain/market-selection.generated";
-import { chatModelClient, legacyModelIntent, type ModelIntent } from "../api/chat-model-client";
+import type { SelectionRef } from "../domain/market-selection-v2.generated";
+import { chatModelClient, executionModelIntent, type ModelIntent } from "../api/chat-model-client";
 import { chatWorkspaceClient } from "../api/chat-workspace-client";
 import type { WorkspaceCreation } from "../domain/chat-workspace";
 import type { SessionPurpose } from "../domain/chat-session-purpose.generated";
@@ -3715,7 +3715,7 @@ export function createChatStoreDefinition(
     async function submitExpert(contextId: string, projectId: string | null, sessionId: string | null,
       contentBlocks: readonly ChatTurnContentBlock[], operationId: string, intent: ModelIntent | undefined,
       selection: readonly SelectionRef[], expert: ExpertTurnIntent) {
-      const compatibleIntent = intent && legacyModelIntent(intent);
+      const compatibleIntent = intent && executionModelIntent(intent);
       if (!compatibleIntent) throw new ExpertClientError("model_unavailable");
       const result = await useChatExpertsStore().submit(contextId, {
         submission: { operationId, projectId, ...(sessionId ? { sessionId } : {}), contentBlocks: [...contentBlocks], intent: compatibleIntent, selection: [...selection] },
@@ -3728,7 +3728,7 @@ export function createChatStoreDefinition(
     async function submitMarket(contextId: string, projectId: string | null, sessionId: string | null,
       contentBlocks: readonly ChatTurnContentBlock[], operationId: string, intent: ModelIntent | undefined,
       selection: readonly SelectionRef[]) {
-      const compatibleIntent = intent && legacyModelIntent(intent);
+      const compatibleIntent = intent && executionModelIntent(intent);
       if (!compatibleIntent) throw new MarketChatError("model_unavailable");
       const result = await marketHostNativeClient.submit(contextId, {
         operationId, projectId, ...(sessionId ? { sessionId } : {}), contentBlocks: [...contentBlocks], intent: compatibleIntent,

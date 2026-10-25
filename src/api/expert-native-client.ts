@@ -1,6 +1,9 @@
+import {kimiK31Candidate} from "./chat-model-client";
 import { invoke } from "@tauri-apps/api/core";
-import { EXPERT_COMMANDS, type BindingReadResponse, type BindingSetResponse, type BindingSetPayload, type CatalogSnapshot, type DeveloperInfo, type ErrorCode, type ExpertSelection, type NativeSubmitPayload, type NativeSubmitResponse, type ResourceOperation, type SnapshotResponse, type PrepareResponse } from "../domain/experts.generated";
-import * as validators from "./generated/experts-validator.gen";
+import { EXPERT_COMMANDS, type BindingReadResponse, type BindingSetResponse, type BindingSetPayload, type CatalogSnapshot, type DeveloperInfo, type ErrorCode, type ExpertSelection, type NativeSubmitPayload, type NativeSubmitResponse, type ResourceOperation, type SnapshotResponse, type PrepareResponse } from "../domain/experts-v2.generated";
+import * as validatorsLegacy from "./generated/experts-validator.gen";
+import * as validatorsCurrent from "./generated/experts-v2-validator.gen";
+const validators=kimiK31Candidate ? validatorsCurrent : validatorsLegacy;
 import { expertSelection } from "../domain/expert-ui";
 
 type Command = typeof EXPERT_COMMANDS[number]["command"];
