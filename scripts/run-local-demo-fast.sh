@@ -179,7 +179,7 @@ export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit b0060c8bc4fb924cec14d98b193c32c69482b7b7 --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit f2819c66a2368aaff37216a46c48d5cd81df1747 --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
     codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/kimi-k31-pro-r2/aarch64-apple-darwin"
