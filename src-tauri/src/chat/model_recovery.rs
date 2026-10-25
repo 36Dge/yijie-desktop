@@ -70,7 +70,12 @@ fn idle(
         return Err(conflict());
     }
     super::experts::store::require_settled(db, &session.to_string()).map_err(|_| conflict())?;
-    let ok:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id AND p.owner_user_id=s.owner_user_id AND p.tenant_id=s.tenant_id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs j WHERE j.session_id=s.id) AND NOT EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=s.id AND o.state IN ('pending','inflight')) AND NOT EXISTS(SELECT 1 FROM chat_turns t WHERE t.session_id=s.id AND t.status IN ('queued','streaming','stopping')))",params![session.to_string(),scope.owner_user_id,scope.tenant_id],|r|r.get(0)).map_err(db_error)?;
+    let cancelled = if super::delivery::present(db)? {
+        "AND NOT (t.submission_status='cancelled' AND EXISTS(SELECT 1 FROM chat_delivery_proofs dp WHERE dp.operation_id=t.operation_id AND dp.session_id=t.session_id AND dp.turn_id=t.id AND dp.phase='cancelled' AND dp.receipt_json IS NOT NULL))"
+    } else {
+        ""
+    };
+    let ok:bool=db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM chat_sessions s JOIN chat_projects p ON p.id=s.project_id AND p.owner_user_id=s.owner_user_id AND p.tenant_id=s.tenant_id WHERE s.id=?1 AND s.owner_user_id=?2 AND s.tenant_id=?3 AND s.agent_session_id IS NOT NULL AND s.runtime_thread_id IS NOT NULL AND p.removed_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs j WHERE j.session_id=s.id) AND NOT EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=s.id AND o.state IN ('pending','inflight')) AND NOT EXISTS(SELECT 1 FROM chat_turns t WHERE t.session_id=s.id AND t.status IN ('queued','streaming','stopping') {cancelled}))"),params![session.to_string(),scope.owner_user_id,scope.tenant_id],|r|r.get(0)).map_err(db_error)?;
     if !ok {
         return Err(conflict());
     }

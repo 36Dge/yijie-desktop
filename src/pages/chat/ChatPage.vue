@@ -14,7 +14,9 @@ import RuntimeApprovalList from "../../components/chat/RuntimeApprovalList.vue";
 import { useRuntimePermissions } from "../../composables/useRuntimePermissions";
 import ChatModelControl from "../../components/chat/ChatModelControl.vue";
 import { useChatModels } from "../../composables/useChatModels";
-import { chatModelsEnabled } from "../../api/chat-model-client";
+import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
+import { useChatDelivery } from "../../composables/useChatDelivery";
+import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
@@ -438,6 +440,13 @@ const models = useChatModels(() => chatStore.context?.contextId ?? null, () => r
   get: () => isNewDraftMode.value ? sharedDrafts.planProfile : sharedDrafts.newProfile,
   set: profile => { if (isNewDraftMode.value) sharedDrafts.planProfile = profile; else sharedDrafts.newProfile = profile; },
 } : undefined);
+const delivery = useChatDelivery(
+  () => kimiK31Candidate && chatModelsEnabled && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions") ? chatStore.context?.contextId ?? null : null,
+  () => routeSessionId.value,
+  () => chatStore.hasAction("interrupt_turn"),
+  () => Object.values(chatStore.conversationState.turns).filter(turn => turn.threadId === routeSessionId.value && turn.source === "local_submission").map(turn => `${turn.turnId}:${turn.submissionStatus}`).join("|"),
+  async () => { await chatStore.resyncSelected(); await models.refresh(); },
+);
 watch(isNewDraftMode, (active, previous) => {
   // Match the existing new-draft discard lifecycle, including its model intent.
   if (previous && !active) { if (sharedComposerDraftsEnabled) sharedDrafts.planProfile = "kimi-k3-max-v1"; else models.resetNew(); }
@@ -1068,6 +1077,7 @@ onBeforeUnmount(() => {
       <p v-if="skillNotice" class="chat-workspace__composer-error" role="status">{{ skillNotice }}</p>
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
+      <ChatDeliveryControl v-if="kimiK31Candidate && chatModelsEnabled && !isDraftMode && normalPurposeReady && routeSessionId && chatStore.hasAction('read_sessions')" :states="delivery.states.value" :loading="delivery.loading.value" :cancelling="delivery.cancelling.value" :can-cancel="chatStore.hasAction('interrupt_turn')" :error="delivery.error.value" :notice="delivery.notice.value" @refresh="delivery.refresh" @cancel="delivery.cancel" />
       <ChatComposer
         ref="composer"
         v-model="prompt"

@@ -10211,6 +10211,45 @@ pub async fn chat_select_model_v1(
         .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
     Ok(CommandResponse::new(request.request_id, out))
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CancelDeliveryPayload {
+    session_id: Uuid,
+    operation_id: Uuid,
+}
+#[tauri::command]
+pub async fn chat_delivery_state_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<Vec<super::delivery::DeliveryState>>, ChatIpcError> {
+    let request: CommandRequest<ModelSessionPayload> = decode_request(request)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .delivery_state(request.context_id, request.payload.session_id)
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
+#[tauri::command]
+pub async fn chat_cancel_unsent_delivery_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    _ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<CommandResponse<super::delivery::CancelReceipt>, ChatIpcError> {
+    let request: CommandRequest<CancelDeliveryPayload> = decode_request(request)?;
+    validate_operation(request.payload.operation_id, request.request_id)?;
+    let (_, authorized, _) = applications(&chat_runtime, request.request_id).await?;
+    let out = authorized
+        .cancel_unsent_delivery(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.operation_id,
+        )
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, out))
+}
 #[tauri::command]
 pub async fn chat_recover_model_v2(
     request: Value,

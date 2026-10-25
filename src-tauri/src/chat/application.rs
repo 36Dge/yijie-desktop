@@ -1864,6 +1864,16 @@ impl ConversationApplication {
                         }
                     })
                     .await?;
+                let delivery_operation = dispatch.operation_id;
+                self.database
+                    .call(move |r| {
+                        if r.delivery_managed_operation(delivery_operation)? {
+                            r.begin_delivery_send(delivery_operation, "public")?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
+                self.lifecycle.validate(epoch)?;
                 let outcome = if let Some((authority, scope)) = local {
                     super::public_tasks::NativePublicTaskControlPlane::new(
                         authority,
@@ -5446,6 +5456,48 @@ impl AuthorizedConversationApplication {
             .database
             .call(move |r| r.sync_model_selection(session, current))
             .await
+    }
+
+    pub async fn delivery_state(
+        &self,
+        context: Uuid,
+        session: Uuid,
+    ) -> Result<Vec<super::delivery::DeliveryState>, ChatError> {
+        self.authorize(context, ChatAction::ReadSessions)?;
+        if !super::models::v2_enabled() || !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let result = self
+            .application
+            .database
+            .call(move |r| r.delivery_states(session))
+            .await;
+        self.authorize(context, ChatAction::ReadSessions)?;
+        result
+    }
+    pub async fn cancel_unsent_delivery(
+        &self,
+        context: Uuid,
+        session: Uuid,
+        operation: Uuid,
+    ) -> Result<super::delivery::CancelReceipt, ChatError> {
+        self.authorize(context, ChatAction::InterruptTurn)?;
+        if !super::models::v2_enabled() || !super::models::enabled() {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
+        let _gate = self.authorization.market_admission_lock().await;
+        let authority = self.authorization.clone();
+        let result = self
+            .application
+            .database
+            .call(move |r| {
+                let now = unix_seconds()?;
+                authority.authorize(context, ChatAction::InterruptTurn, now)?;
+                r.cancel_unsent_delivery(session, operation, now)
+            })
+            .await;
+        self.authorize(context, ChatAction::InterruptTurn)?;
+        result
     }
 
     pub async fn recover_model(

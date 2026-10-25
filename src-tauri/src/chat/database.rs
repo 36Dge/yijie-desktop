@@ -871,6 +871,7 @@ impl ChatRepository {
                 0,
                 migrations::KIMI_K31_SCHEMA_VERSION,
                 migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION,
+                migrations::DELIVERY_PROOF_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -961,7 +962,7 @@ impl ChatRepository {
         if super::models::v2_enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION,
+                migrations::DELIVERY_PROOF_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;
@@ -2748,6 +2749,7 @@ impl ChatRepository {
             self.schedule_trigger_lifecycle.as_ref(),
             &self.manual_runtime,
         )?;
+        let proof_exhaustion_gate = super::delivery::claim_predicate(&transaction, "chat_outbox")?;
         let model_exhaustion_gate = super::models::dispatch_predicate(&transaction, "chat_outbox")?;
         let market_exhaustion_gate =
             super::connectors::selection::dispatch_predicate(&transaction, "chat_outbox")?;
@@ -2761,7 +2763,7 @@ impl ChatRepository {
                 &format!("UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE kind IN ('start_turn', 'interrupt_turn')
                    AND attempt_count >= ?1
-                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate} AND {model_exhaustion_gate} AND {market_exhaustion_gate}"),
+                   AND (state='pending' OR (state='inflight' AND next_attempt_at IS NOT NULL AND next_attempt_at<=?2)) AND {gate} AND {model_exhaustion_gate} AND {market_exhaustion_gate} AND {proof_exhaustion_gate}"),
                 params![OUTBOX_MAX_ATTEMPTS, now],
             )
             .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -2782,6 +2784,7 @@ impl ChatRepository {
             Some(id) => format!("({normal} OR o.operation_id='{id}')"),
             None => normal,
         };
+        let proof_gate = super::delivery::claim_predicate(&transaction, "o")?;
         let model_gate = super::models::dispatch_predicate(&transaction, "o")?;
         let market_gate = super::connectors::selection::dispatch_predicate(&transaction, "o")?;
         let row: Option<(String, String, String, i64)> = transaction
@@ -2801,7 +2804,7 @@ impl ChatRepository {
                    AND o.attempt_count < ?3
                    AND ((o.state='pending' AND (o.next_attempt_at IS NULL OR o.next_attempt_at<=?4))
                      OR (o.state='inflight' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?4))
-                 AND {gate} AND {model_gate} AND {market_gate}
+                 AND {gate} AND {model_gate} AND {market_gate} AND {proof_gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
                  LIMIT 1"),
                 params![
@@ -2845,6 +2848,7 @@ impl ChatRepository {
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
         }
+        super::delivery::mark_claim(&transaction, parse_uuid_value(&operation_id)?)?;
         let is_scheduled = scheduled.is_some_and(|v| v.to_string() == operation_id);
         if is_scheduled {
             transaction.execute("UPDATE chat_scheduled_recovery SET native_claim=1 WHERE run_id=(SELECT scheduled_run_id FROM chat_outbox WHERE operation_id=?1)",[&operation_id]).map_err(map_sqlite_error)?;
@@ -2878,6 +2882,8 @@ impl ChatRepository {
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let gate = super::schedules::execution_guard::outbox_predicate(&transaction, "o")?;
         let market_gate = super::connectors::selection::dispatch_predicate(&transaction, "o")?;
+        let model_gate = super::models::dispatch_predicate(&transaction, "o")?;
+        let delivery_gate = super::delivery::claim_predicate(&transaction, "o")?;
         let row: Option<(String, String)> = transaction
             .query_row(
                 &format!(
@@ -2894,7 +2900,7 @@ impl ChatRepository {
                    AND (b.state!='bound' OR (
                      s.agent_session_id IS NULL OR s.runtime_thread_id IS NULL
                    ))
-                 AND {gate} AND {market_gate}
+                 AND {gate} AND {market_gate} AND {model_gate} AND {delivery_gate}
                  ORDER BY COALESCE(o.next_attempt_at, 0), o.operation_id
                  LIMIT 1"
                 ),
@@ -3459,6 +3465,12 @@ impl ChatRepository {
         {
             return Err(ChatError::ConversationConflict);
         }
+        super::delivery::observe_binding(
+            transaction,
+            create_operation_id,
+            agent_session_id,
+            codex_thread_id,
+        )?;
         transaction
             .execute(
                 "UPDATE chat_sessions SET agent_session_id=?1, runtime_thread_id=?2

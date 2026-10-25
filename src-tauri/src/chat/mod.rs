@@ -1868,6 +1868,7 @@ pub mod native_conversation_v3_generated;
 mod turn_timing;
 pub(crate) mod turn_timing_generated;
 
+pub(crate) mod delivery;
 #[cfg(test)]
 mod kimi_k31_tests;
 #[cfg(feature = "kimi-k31-pro-candidate")]

@@ -442,6 +442,7 @@ impl ChatRepository {
         };
         receipt.validate().map_err(invalid)?;
         tx.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at,authorization_revision,permission_mode,native_process_epoch) VALUES(?1,?2,?3,?4,1,?5,?6,?7,?8,?9,?10,?11,?12)",params![receipt.submission_operation_id,receipt.session_id,receipt.local_turn_id,receipt.turn_operation_id,request_digest,serde_json::to_string(&snapshot).map_err(invalid)?,serde_json::to_string(&display).map_err(invalid)?,serde_json::to_string(&receipt).map_err(invalid)?,now,i64::try_from(authorization_revision).map_err(invalid)?,permission_mode,admission.native_process_epoch]).map_err(db_error)?;
+        let delivery_family = if expert.is_some() { "expert" } else { "market" };
         if let Some((request, resolved)) = expert {
             expert_store::freeze_submission(&tx, &self.scope, request, resolved, &receipt, now)
                 .map_err(expert_storage_error)?;
@@ -450,6 +451,15 @@ impl ChatRepository {
         for alias in std::iter::once(op).chain((op != turn_operation).then_some(turn_operation)) {
             tx.execute("INSERT INTO chat_market_operation_refs(operation_id,submission_operation_id) VALUES(?1,?2)",params![alias.to_string(),op.to_string()]).map_err(db_error)?;
         }
+        crate::chat::delivery::initialize(
+            &tx,
+            session,
+            local_turn,
+            turn_operation,
+            create_operation,
+            delivery_family,
+            now,
+        )?;
         tx.commit().map_err(db_error)?;
         Ok(receipt)
     }

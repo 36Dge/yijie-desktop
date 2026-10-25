@@ -81,7 +81,8 @@ impl ChatRepository {
         } else {
             ""
         };
-        let sql = format!("SELECT m.submission_operation_id,m.session_id,m.local_turn_id,m.turn_operation_id,m.snapshot_json,m.authorization_revision,m.permission_mode,d.state,m.native_process_epoch,b.public_task_id,b.client_reference_id,s.project_id,s.agent_session_id FROM chat_market_submissions m JOIN chat_market_dispatch d ON d.submission_operation_id=m.submission_operation_id JOIN chat_sessions s ON s.id=m.session_id JOIN chat_public_task_bindings b ON b.session_id=s.id WHERE s.owner_user_id=?1 AND s.tenant_id=?2 AND m.format_version=1 AND d.format_version=1 AND m.authorization_revision>0 AND (d.state='pending' OR (d.state IN ('inflight','uncertain') AND d.updated_at<=?3)) AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs j WHERE j.session_id=s.id) {expert_filter} ORDER BY m.created_at,m.submission_operation_id LIMIT 1");
+        let delivery_gate = crate::chat::delivery::market_claim_predicate(&self.connection)?;
+        let sql = format!("SELECT m.submission_operation_id,m.session_id,m.local_turn_id,m.turn_operation_id,m.snapshot_json,m.authorization_revision,m.permission_mode,d.state,m.native_process_epoch,b.public_task_id,b.client_reference_id,s.project_id,s.agent_session_id FROM chat_market_submissions m JOIN chat_market_dispatch d ON d.submission_operation_id=m.submission_operation_id JOIN chat_sessions s ON s.id=m.session_id JOIN chat_public_task_bindings b ON b.session_id=s.id WHERE s.owner_user_id=?1 AND s.tenant_id=?2 AND m.format_version=1 AND d.format_version=1 AND m.authorization_revision>0 AND (d.state='pending' OR (d.state IN ('inflight','uncertain') AND d.updated_at<=?3)) AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs j WHERE j.session_id=s.id) {expert_filter} AND {delivery_gate} ORDER BY m.created_at,m.submission_operation_id LIMIT 1");
         let mut q = self.connection.prepare(&sql).map_err(db_error)?;
         type Row = (
             String,
@@ -610,6 +611,9 @@ pub(crate) async fn next(
         return Ok(Some(DispatchOutcome::Idle));
     }
     let _admission = authority.market_admission_lock().await;
+    database
+        .call(move |r| r.claim_market_delivery(operation))
+        .await?;
     let control = host.market_control().ok_or(ChatError::SidecarUnavailable)?;
     let create = pending.operation != pending.turn_operation;
     let admission_now = super::now().map_err(|_| ChatError::OrchestrationUnavailable)?;
@@ -710,6 +714,10 @@ pub(crate) async fn next(
         database
             .call(move |r| r.market_public_claim(&saved, now))
             .await?;
+        database
+            .call(move |r| r.begin_delivery_send(operation, "public"))
+            .await?;
+        lifecycle.validate(epoch)?;
         match public_tasks
             .create_task(PublicTaskCreateIntent {
                 operation_id: operation,
@@ -763,6 +771,10 @@ pub(crate) async fn next(
             return Err(error);
         }
     };
+    lifecycle.validate(epoch)?;
+    database
+        .call(move |r| r.begin_delivery_send(operation, "create"))
+        .await?;
     lifecycle.validate(epoch)?;
     let registration: Result<wire::GrantRegistration, ()> =
         if let Some(snapshot) = &pending.expert_snapshot {
@@ -845,7 +857,10 @@ pub(crate) async fn next(
     }
     let instance = host.instance_nonce().to_owned();
     database
-        .call(move |r| r.market_mark(operation, "inflight", Some(&instance), None, now))
+        .call(move |r| {
+            r.begin_delivery_send(operation, "turn")?;
+            r.market_mark(operation, "inflight", Some(&instance), None, now)
+        })
         .await?;
     let trigger = wire::SubmitRequest {
         schema_version: 1,

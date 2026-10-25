@@ -64,6 +64,14 @@ pub fn profile_id(p: impl Into<wire::ProfileId>) -> &'static str {
         wire::ProfileId::MinimaxM3HighV1 => "minimax-m3-high-v1",
     }
 }
+pub(crate) fn dispatch_profile_available(p: &str) -> bool {
+    executable_profile(p)
+        && (p != "kimi-k3-1-pro-max-v1"
+            || matches!(
+                std::env::var("YIJIE_KIMI_K31_EXECUTION_PAUSED").as_deref(),
+                Err(_) | Ok("false")
+            ))
+}
 pub fn valid_profile(p: &str) -> bool {
     executable_profile(p)
 }
@@ -235,6 +243,7 @@ impl ChatRepository {
             .map_err(|_| ChatError::InvalidInput)?
             .as_secs() as i64;
         let tx = self.connection.transaction().map_err(db_error)?;
+        let fresh:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_outbox WHERE operation_id=?1) AND NOT EXISTS(SELECT 1 FROM chat_public_task_bindings WHERE create_operation_id=?1) AND NOT EXISTS(SELECT 1 FROM chat_operation_models WHERE operation_id=?1)",[op.to_string()],|r|r.get(0)).map_err(db_error)?;
         if let Some((id, _)) = operation(&tx, op)? {
             if id != profile_id(intent.profile_id) {
                 return Err(ChatError::ConversationConflict);
@@ -257,6 +266,17 @@ impl ChatRepository {
         tx.execute("INSERT INTO chat_model_selections(session_id,profile_id,revision,state) VALUES(?1,?2,1,'ready') ON CONFLICT(session_id) DO NOTHING",params![result.session_id.to_string(),profile_id(intent.profile_id)]).map_err(db_error)?;
         freeze(&tx, result.create_operation_id, result.session_id, &intent)?;
         freeze(&tx, result.turn_operation_id, result.session_id, &intent)?;
+        if fresh {
+            super::delivery::initialize(
+                &tx,
+                result.session_id,
+                result.turn_id,
+                result.turn_operation_id,
+                Some(result.create_operation_id),
+                "ordinary",
+                now,
+            )?;
+        }
         tx.commit().map_err(db_error)?;
         Ok(result)
     }
@@ -284,6 +304,13 @@ impl ChatRepository {
             .map_err(|_| ChatError::InvalidInput)?
             .as_secs() as i64;
         let tx = self.connection.transaction().map_err(db_error)?;
+        let fresh: bool = tx
+            .query_row(
+                "SELECT NOT EXISTS(SELECT 1 FROM chat_turns WHERE operation_id=?1)",
+                [op.to_string()],
+                |r| r.get(0),
+            )
+            .map_err(db_error)?;
         if let Some((id, rev)) = operation(&tx, op)? {
             if id != profile_id(intent.profile_id) || rev != intent.expected_revision {
                 return Err(ChatError::ConversationConflict);
@@ -308,6 +335,9 @@ impl ChatRepository {
             op,
         )?;
         freeze(&tx, op, session, &intent)?;
+        if fresh {
+            super::delivery::initialize(&tx, session, turn, op, None, "ordinary", now)?;
+        }
         tx.commit().map_err(db_error)?;
         Ok(turn)
     }
@@ -460,10 +490,15 @@ pub(super) fn freeze_conversation(
 // A compatible rollback reader must leave model-aware outboxes untouched.
 pub(super) fn dispatch_predicate(db: &Connection, alias: &str) -> Result<String, ChatError> {
     if !cfg!(feature = "kimi-k31-pro-candidate") && recovery_table(db)? {
-        return Ok("0=1".into());
+        return Ok(format!("{alias}.kind='interrupt_turn'"));
     }
     if enabled() && cfg!(feature = "kimi-k31-pro-candidate") && table(db)? {
-        return Ok(format!("EXISTS(SELECT 1 FROM chat_operation_models model WHERE model.operation_id={alias}.operation_id AND model.profile_id IN ('kimi-k3-1-pro-max-v1','minimax-m3-high-v1'))"));
+        let profiles = if dispatch_profile_available("kimi-k3-1-pro-max-v1") {
+            "'kimi-k3-1-pro-max-v1','minimax-m3-high-v1'"
+        } else {
+            "'minimax-m3-high-v1'"
+        };
+        return Ok(format!("({alias}.kind='interrupt_turn' OR EXISTS(SELECT 1 FROM chat_operation_models model WHERE model.operation_id={alias}.operation_id AND model.profile_id IN ({profiles})))"));
     }
     if enabled() || !table(db)? {
         return Ok("1=1".into());

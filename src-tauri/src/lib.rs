@@ -431,6 +431,8 @@ pub fn run() {
         chat::ipc::chat_model_state_v1,
         chat::ipc::chat_select_model_v1,
         chat::ipc::chat_recover_model_v2,
+        chat::ipc::chat_delivery_state_v1,
+        chat::ipc::chat_cancel_unsent_delivery_v1,
         chat::ipc::chat_model_submit_v1,
         chat::connectors::market_connectors_snapshot_v1,
         chat::connectors::market_connectors_install_v1,

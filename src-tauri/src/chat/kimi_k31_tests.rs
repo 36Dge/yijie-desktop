@@ -43,7 +43,10 @@ fn feat164_native_recovery_schema_preserves_legacy_pending_without_backfill() {
     );
     migrations::validate_reader(&db).unwrap();
     #[cfg(not(feature = "kimi-k31-pro-candidate"))]
-    assert_eq!(super::models::dispatch_predicate(&db, "o").unwrap(), "0=1");
+    assert_eq!(
+        super::models::dispatch_predicate(&db, "o").unwrap(),
+        "o.kind='interrupt_turn'"
+    );
 }
 
 #[test]

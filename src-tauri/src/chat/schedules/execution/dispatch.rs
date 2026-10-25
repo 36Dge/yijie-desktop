@@ -446,6 +446,13 @@ pub(crate) async fn admitted_host(
             .begin_conversation_dispatch(operation, host.instance_nonce().to_owned())
             .await?;
         gate.validate(epoch)?;
-        Ok(host.clone())
+        Ok(
+            host.with_delivery_admission(crate::chat::delivery::Admission {
+                database: database.clone(),
+                lifecycle: gate.clone(),
+                epoch,
+                operation,
+            }),
+        )
     }
 }

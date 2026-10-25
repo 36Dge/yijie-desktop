@@ -79,6 +79,7 @@ pub struct HostBridge {
     model_profile: Option<String>,
     schedule_admission: Option<super::schedules::dispatch::Admission>,
     draft_admission: Option<super::schedules::draft_admission::Admission>,
+    delivery_admission: Option<super::delivery::Admission>,
     lifecycle: super::lifecycle::Lifecycle,
     origin: Url,
     token_path: PathBuf,
@@ -519,6 +520,7 @@ impl HostBridge {
             model_profile: None,
             schedule_admission: None,
             draft_admission: None,
+            delivery_admission: None,
             lifecycle: super::lifecycle::Lifecycle::default(),
             origin,
             token_path: connection.token_path,
@@ -546,6 +548,11 @@ impl HostBridge {
         self
     }
 
+    pub(crate) fn with_delivery_admission(&self, admission: super::delivery::Admission) -> Self {
+        let mut bridge = self.clone();
+        bridge.delivery_admission = Some(admission);
+        bridge
+    }
     pub(crate) fn with_schedule_admission(
         &self,
         admission: super::schedules::dispatch::Admission,
@@ -1375,6 +1382,12 @@ impl HostBridge {
                 .as_ref()
                 .ok_or_else(|| HostBridgeError::new(HostBridgeErrorKind::NotReady))?
                 .begin(self, path_and_query, &body)
+                .await
+                .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?;
+        }
+        if let Some(admission) = &self.delivery_admission {
+            admission
+                .begin(path_and_query, self.model_profile.as_deref(), &body)
                 .await
                 .map_err(|_| HostBridgeError::new(HostBridgeErrorKind::NotReady))?;
         }
@@ -2604,6 +2617,118 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(rejected.kind(), HostBridgeErrorKind::NotReady));
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[tokio::test]
+    async fn feat164_delivery_http_admission_blocks_cancelled_and_sends_live_once() {
+        use crate::chat::{
+            database::{ChatScope, DraftContentBlock},
+            delivery::Admission,
+            error::ChatError,
+            keychain::{DatabaseKey, DatabaseKeyStore, ReceiptKey, ReceiptKeyStore},
+            models::ModelIntent,
+            models_generated::ProfileId,
+            worker::DatabaseWorker,
+        };
+        struct Keys;
+        impl DatabaseKeyStore for Keys {
+            fn load_or_create(&self, _: bool) -> Result<DatabaseKey, ChatError> {
+                Ok(DatabaseKey::from_bytes([164; 32]))
+            }
+        }
+        impl ReceiptKeyStore for Keys {
+            fn load_or_create(&self, _: bool) -> Result<ReceiptKey, ChatError> {
+                Ok(ReceiptKey::from_bytes([165; 32]))
+            }
+        }
+        for cancel in [true, false] {
+            let token = TestToken::new(0o600);
+            let workspace = token.directory.join("workspace");
+            fs::create_dir(&workspace).unwrap();
+            let worker = DatabaseWorker::start(
+                token.directory.join("chat"),
+                ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap(),
+                Box::new(Keys),
+                Box::new(Keys),
+            )
+            .unwrap();
+            let cwd = workspace.clone();
+            let task = Uuid::now_v7();
+            let pending = worker
+                .call(move |r| {
+                    crate::chat::migrations::migrate_to_target(&mut r.connection, 40)?;
+                    let project =
+                        Uuid::parse_str(&r.register_project(&cwd, b"ordinary-bookmark")?.id)
+                            .unwrap();
+                    let pending = r.create_model_session(
+                        Some(project),
+                        vec![DraftContentBlock::Text("Synthetic HTTP proof".into())],
+                        Uuid::now_v7(),
+                        1,
+                        ModelIntent {
+                            profile_id: ProfileId::MinimaxM3HighV1,
+                            expected_revision: 0,
+                        },
+                    )?;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64;
+                    r.claim_next_conversation_outbox(now, 30)?.unwrap();
+                    if cancel {
+                        r.cancel_unsent_delivery(
+                            pending.session_id,
+                            pending.turn_operation_id,
+                            now,
+                        )?;
+                    } else {
+                        r.begin_delivery_send(pending.create_operation_id, "public")?;
+                        r.bind_public_task(pending.create_operation_id, task, now)?;
+                    }
+                    Ok(pending)
+                })
+                .await
+                .unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (stop, mut shutdown) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let mut requests = Vec::new();
+                loop {
+                    tokio::select! {
+                        _=&mut shutdown=>break,
+                        accepted=listener.accept()=>{let(mut stream,_)=accepted.unwrap();let request=read_request(&mut stream).await;let out=if request.starts_with("GET /readyz "){ready_response(NONCE)}else{json_response("201 Created",&session_body())};requests.push(request);stream.write_all(out.as_bytes()).await.unwrap();stream.shutdown().await.unwrap();}
+                    }
+                }
+                requests
+            });
+            let lifecycle = crate::chat::lifecycle::Lifecycle::default();
+            let client = bridge(port, token.path.clone(), NONCE)
+                .with_model_profile(Some("minimax-m3-high-v1".into()))
+                .unwrap()
+                .with_delivery_admission(Admission {
+                    database: worker.clone(),
+                    epoch: lifecycle.epoch(),
+                    lifecycle,
+                    operation: pending.create_operation_id,
+                });
+            let result = client
+                .start_session(task, &workspace, &HostTrace::default())
+                .await;
+            assert_eq!(result.is_ok(), !cancel);
+            stop.send(()).unwrap();
+            let requests = server.await.unwrap();
+            assert_eq!(
+                requests.iter().filter(|r| r.starts_with("POST ")).count(),
+                usize::from(!cancel)
+            );
+            if !cancel {
+                assert!(requests[1].contains("x-yijie-model-profile: minimax-m3-high-v1"));
+            }
+            drop(client);
+            drop(worker);
+        }
     }
 
     #[tokio::test]
