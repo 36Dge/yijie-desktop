@@ -65,7 +65,22 @@ fn idle(
     session: Uuid,
 ) -> Result<(), ChatError> {
     super::schedules::execution_guard::foreground(db)?;
-    super::connectors::selection::require_legacy_session(db, scope, session)?;
+    // v2 model selection is not legacy business dispatch. Settled market and
+    // expert histories keep their frozen payloads while a new model operation
+    // selects the same thread's future configuration. Missing/unfinished
+    // delivery evidence must still block both intent creation and dispatch.
+    let cancelled_market = if super::delivery::present(db)? {
+        "d.state='blocked' AND COALESCE(d.issue_code,'')='cancelled_never_sent' AND EXISTS(SELECT 1 FROM chat_delivery_proofs p WHERE p.operation_id=m.turn_operation_id AND p.session_id=m.session_id AND p.turn_id=m.local_turn_id AND p.format_version=1 AND p.family IN ('market','expert') AND p.phase='cancelled' AND p.receipt_json IS NOT NULL AND p.public_attempts=0 AND p.create_attempts=0 AND p.turn_attempts=0)"
+    } else {
+        "0"
+    };
+    let market_unsettled: bool = db.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM chat_market_submissions m LEFT JOIN chat_market_dispatch d ON d.submission_operation_id=m.submission_operation_id WHERE m.session_id=?1 AND (m.format_version!=1 OR d.format_version IS NULL OR d.format_version!=1 OR (d.state!='accepted' AND NOT ({cancelled_market}))))"),
+        [session.to_string()], |r| r.get(0),
+    ).map_err(db_error)?;
+    if market_unsettled {
+        return Err(conflict());
+    }
     if super::schedules::drafts::is_draft(db, scope, &session.to_string())? {
         return Err(conflict());
     }
@@ -395,6 +410,84 @@ mod tests {
     fn close(f: Fixture) {
         drop(f.repo);
         std::fs::remove_dir_all(f.root).unwrap();
+    }
+    #[test]
+    fn feat164_native_settled_expert_model_selection_is_not_legacy_dispatch() {
+        let mut f = fixture();
+        // A normal settled managed binding; no existing request is rewritten.
+        f.repo.connection.execute("INSERT INTO chat_expert_bindings(session_id,binding_revision,state,updated_at) VALUES(?1,0,'none',1)",[f.session.to_string()]).unwrap();
+        let p = f
+            .repo
+            .begin_model_recovery_intent(f.session, intent(), Uuid::now_v7())
+            .unwrap();
+        f.repo.mark_model_recovery_dispatched(p).unwrap();
+        let count: i64 = f
+            .repo
+            .connection
+            .query_row(
+                "SELECT count(*) FROM chat_expert_bindings WHERE session_id=?1 AND state='none'",
+                [f.session.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        close(f);
+    }
+    #[test]
+    fn feat164_native_market_model_selection_requires_settled_delivery_twice() {
+        for state in [
+            "accepted",
+            "pending",
+            "inflight",
+            "uncertain",
+            "blocked",
+            "missing",
+            "cancelled",
+            "cancelled_unmarked",
+        ] {
+            let mut f = fixture();
+            migrations::migrate_to_target(&mut f.repo.connection, 40).unwrap();
+            let turn = Uuid::now_v7().to_string();
+            let operation = Uuid::now_v7().to_string();
+            let submission = Uuid::now_v7().to_string();
+            f.repo.connection.execute("INSERT INTO chat_turns(id,session_id,operation_id,status) VALUES(?1,?2,?3,'completed')",params![turn,f.session.to_string(),operation]).unwrap();
+            f.repo.connection.execute("INSERT INTO chat_market_submissions(submission_operation_id,session_id,local_turn_id,turn_operation_id,format_version,request_digest,snapshot_json,display_json,receipt_json,created_at) VALUES(?1,?2,?3,?4,1,?5,'{}','[]','{}',1)",params![submission,f.session.to_string(),turn,operation,"a".repeat(64)]).unwrap();
+            if state != "missing" {
+                f.repo.connection.execute("INSERT INTO chat_market_dispatch(submission_operation_id,format_version,state,updated_at) VALUES(?1,1,?2,1)",params![submission,if state.starts_with("cancelled") {"blocked"} else {state}]).unwrap();
+            }
+            if state.starts_with("cancelled") {
+                let receipt = super::super::delivery::CancelReceipt {
+                    schema_version: 1,
+                    operation_id: operation.clone(),
+                    session_id: f.session.to_string(),
+                    turn_id: turn.clone(),
+                    outcome: "cancelled_never_sent".into(),
+                    cancelled_at: 1,
+                };
+                f.repo.connection.execute("INSERT INTO chat_delivery_proofs(operation_id,session_id,turn_id,format_version,family,profile_id,model_revision,fingerprint,phase,created_at,receipt_json) VALUES(?1,?2,?3,1,'market','kimi-k3-max-v1',7,?4,'cancelled',1,?5)",params![operation,f.session.to_string(),turn,"a".repeat(64),serde_json::to_string(&receipt).unwrap()]).unwrap();
+                if state == "cancelled" {
+                    f.repo.connection.execute("UPDATE chat_market_dispatch SET issue_code='cancelled_never_sent' WHERE submission_operation_id=?1",[&submission]).unwrap();
+                }
+            }
+            let before: String=f.repo.connection.query_row("SELECT snapshot_json || request_digest || receipt_json FROM chat_market_submissions WHERE submission_operation_id=?1",[&submission],|r|r.get(0)).unwrap();
+            let result = f
+                .repo
+                .begin_model_recovery_intent(f.session, intent(), Uuid::now_v7());
+            if matches!(state, "accepted" | "cancelled") {
+                let proof = result.unwrap();
+                f.repo
+                    .mark_model_recovery_dispatched(proof.clone())
+                    .unwrap();
+                // A new normal in-flight delivery is a blocker even after intent.
+                f.repo.connection.execute("UPDATE chat_market_dispatch SET state='inflight' WHERE submission_operation_id=?1",[&submission]).unwrap();
+                assert!(f.repo.mark_model_recovery_dispatched(proof).is_err());
+            } else {
+                assert!(result.is_err(), "{state}");
+            }
+            let after: String=f.repo.connection.query_row("SELECT snapshot_json || request_digest || receipt_json FROM chat_market_submissions WHERE submission_operation_id=?1",[&submission],|r|r.get(0)).unwrap();
+            assert_eq!(before, after);
+            close(f);
+        }
     }
     #[test]
     fn feat164_native_intent_survives_normal_reopen_and_404_never_proves_unsent() {
