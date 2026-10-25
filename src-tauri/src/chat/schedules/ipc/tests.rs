@@ -934,3 +934,6 @@ async fn feat155_final_important_updates_do_not_open_ordinary_storage() {
 }
 
 mod default_activation_tests;
+
+#[cfg(feature = "kimi-k31-pro-candidate")]
+mod feat164_draft_fact_tests;
