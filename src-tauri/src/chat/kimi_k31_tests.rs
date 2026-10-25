@@ -106,6 +106,91 @@ fn feat164_canonical_migration_paths_and_repeat_are_valid() {
     }
 }
 
+#[test]
+fn feat164_populated_migrations_preserve_history_and_delivery_facts() {
+    use rusqlite::types::Value;
+    fn rows(db: &Connection, query: &str) -> Vec<Vec<Value>> {
+        let mut statement = db.prepare(query).unwrap();
+        let columns = statement.column_count();
+        statement
+            .query_map([], |row| (0..columns).map(|i| row.get(i)).collect())
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+    for previous in [15, 29, 37, 38] {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        migrations::migrate_to_target(&mut db, previous).unwrap();
+        db.execute_batch("INSERT INTO chat_projects(id,owner_user_id,tenant_id,safe_name,canonical_hash,bookmark_ref,last_used_at) VALUES('p','owner','tenant','Synthetic workspace','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',X'0102',1);
+          INSERT INTO chat_sessions(id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at,agent_session_id,runtime_thread_id) VALUES('s','owner','tenant','p','Synthetic history','user','completed',1,2,'host','thread');
+          INSERT INTO chat_messages(id,session_id,role,content,status,ordinal,created_at) VALUES('m','s','assistant','Preserved synthetic answer','committed',0,2);
+          INSERT INTO chat_turns(id,session_id,operation_id,runtime_turn_id,status,terminal_at) VALUES('t','s','accepted','native-turn','completed',2);
+          INSERT INTO chat_outbox(operation_id,session_id,kind,state,attempt_count,payload_version,encrypted_payload) VALUES('accepted','s','start_turn','done',1,1,X'01020304');
+          INSERT INTO chat_outbox(operation_id,session_id,kind,state,attempt_count,payload_version,encrypted_payload) VALUES('uncertain','s','start_turn','inflight',1,1,X'05060708');
+          INSERT INTO chat_outbox(operation_id,session_id,kind,state,attempt_count,payload_version,encrypted_payload) VALUES('queued','s','start_turn','pending',0,1,X'090a0b0c');").unwrap();
+        let mut queries = vec![
+            "SELECT id,owner_user_id,tenant_id,project_id,title,title_source,title_job_status,created_at,last_activity_at,agent_session_id,runtime_thread_id FROM chat_sessions ORDER BY id",
+            "SELECT * FROM chat_messages ORDER BY id",
+            "SELECT * FROM chat_turns ORDER BY id",
+            "SELECT operation_id,session_id,kind,state,attempt_count,payload_version,encrypted_payload FROM chat_outbox ORDER BY operation_id",
+        ];
+        if previous >= 29 {
+            db.execute_batch("INSERT INTO chat_model_selections VALUES('s','kimi-k3-max-v1',4,'unknown','switch','minimax-m3-high-v1',4);
+              INSERT INTO chat_operation_models VALUES('accepted','s','kimi-k3-max-v1',3);
+              INSERT INTO chat_operation_models VALUES('uncertain','s','kimi-k3-max-v1',4);
+              INSERT INTO chat_operation_models VALUES('queued','s','kimi-k3-max-v1',4);").unwrap();
+            queries.extend([
+                "SELECT * FROM chat_model_selections ORDER BY session_id",
+                "SELECT * FROM chat_operation_models ORDER BY operation_id",
+            ]);
+        }
+        // Compare every pre-existing column. Older canonical migrations may add
+        // columns with defaults; SELECT * must not mistake that for data loss.
+        let queries: Vec<String> = queries
+            .iter()
+            .map(|query| {
+                if query.contains("SELECT *") {
+                    let statement = db.prepare(query).unwrap();
+                    query.replacen('*', &statement.column_names().join(","), 1)
+                } else {
+                    (*query).to_owned()
+                }
+            })
+            .collect();
+        let before: Vec<_> = queries.iter().map(|q| rows(&db, q)).collect();
+        let ledger = rows(
+            &db,
+            "SELECT version,name,sha256,applied_at FROM chat_schema_migrations ORDER BY version",
+        );
+        migrations::migrate_to_target(&mut db, migrations::KIMI_K31_SCHEMA_VERSION).unwrap();
+        migrations::migrate_to_target(&mut db, migrations::KIMI_K31_SCHEMA_VERSION).unwrap();
+        for (query, expected) in queries.iter().zip(before) {
+            assert_eq!(rows(&db, query), expected, "{previous}: {query}");
+        }
+        let upgraded = rows(
+            &db,
+            "SELECT version,name,sha256,applied_at FROM chat_schema_migrations ORDER BY version",
+        );
+        assert_eq!(&upgraded[..ledger.len()], ledger.as_slice());
+        assert_eq!(upgraded.len(), 38);
+        assert!(db
+            .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+            .unwrap());
+        assert_eq!(rows(&db, "SELECT * FROM pragma_foreign_key_check").len(), 0);
+        migrations::validate_reader(&db).unwrap();
+        // These existing states are observations, not never-sent cancellation
+        // authority. Migration must not settle, relabel or release any of them.
+        assert_eq!(
+            rows(
+                &db,
+                "SELECT state,attempt_count FROM chat_outbox WHERE operation_id='uncertain'"
+            ),
+            vec![vec![Value::Text("inflight".into()), Value::Integer(1)]]
+        );
+    }
+}
+
 #[cfg(feature = "kimi-k31-pro-candidate")]
 #[test]
 fn feat164_candidate_decoder_separates_readable_and_executable_identity() {
