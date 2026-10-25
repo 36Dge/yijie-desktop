@@ -307,10 +307,12 @@ if [[ "$experts_requested" == "true" ]]; then
   else
     node "$workspace_root/yijie-contracts/scripts/sync-experts.mjs" --consumer=desktop --check
   fi
+  expert_resource_sync="$desktop_root/scripts/sync-desktop-expert-resources.mjs"
+  if [[ "$kimi_k31_candidate" == "true" ]]; then expert_resource_sync="$desktop_root/scripts/sync-feat164-expert-resources.mjs"; fi
   if [[ "$reopen_app" == "true" ]]; then
-    node "$desktop_root/scripts/sync-desktop-expert-resources.mjs" --check
+    node "$expert_resource_sync" --check
   else
-    node "$desktop_root/scripts/sync-desktop-expert-resources.mjs"
+    node "$expert_resource_sync"
   fi
   expert_profile_data="$(node "$desktop_root/scripts/expert-local-profile.mjs" "$expert_profile")" || fail "expert profile is invalid"
   IFS=$'\t' read -r expert_overlay expert_runtime_directory expert_host_port expert_product_name expert_identifier expert_host_binary <<< "$expert_profile_data"
@@ -325,7 +327,7 @@ if [[ "$experts_requested" == "true" ]]; then
   else
     # Only resources come from the expert overlay; FEAT-164 keeps its identity,
     # port and isolated roots. Its own receipt covers the worker and resources.
-    experts_tauri_config=(--config "$expert_overlay")
+    experts_tauri_config=(--config src-tauri/tauri.feat164-experts.conf.json)
   fi
 fi
 

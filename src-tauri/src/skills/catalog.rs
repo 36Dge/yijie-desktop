@@ -244,10 +244,11 @@ fn validate_expert_manifest(
     root: &Path,
     revision: &str,
 ) -> Result<(), CatalogError> {
-    let pin: ExpertAssetsPin = serde_json::from_str(include_str!(
-        "../../../contracts/experts-assets.candidate.json"
-    ))
-    .map_err(|_| CatalogError::Invalid)?;
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    let raw_pin = include_str!("../../../contracts/experts-assets-feat164.candidate.json");
+    #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+    let raw_pin = include_str!("../../../contracts/experts-assets.candidate.json");
+    let pin: ExpertAssetsPin = serde_json::from_str(raw_pin).map_err(|_| CatalogError::Invalid)?;
     let authority_path = root.join("authority.json");
     let info = fs::symlink_metadata(&authority_path).map_err(|_| CatalogError::Unavailable)?;
     if info.file_type().is_symlink()

@@ -43,7 +43,7 @@ if(action==="--inputs-digest"){
  assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),"com.yijie.ai.feat164-kimi-k31-r1");
  const bundleFiles=await tree(bundle);assert(bundleFiles["Contents/MacOS/yijie-desktop"].mode&0o111);
  if(kimiCallSurfaces().experts)for(const slot of ["skill-packages","skill-packages-experts"]){
-  const expected=await tree(path.join(root,".local",slot));
+  const expected=await tree(path.join(root,".local",slot==="skill-packages-experts"?"feat164-kimi-k31/skill-packages-experts":slot));
   const prefix=`Contents/Resources/${slot}/`;
   const actual=Object.fromEntries(Object.entries(bundleFiles).filter(([name])=>name.startsWith(prefix)).map(([name,v])=>[name.slice(prefix.length),v]));
   const content=files=>Object.fromEntries(Object.entries(files).map(([name,v])=>[name,{sha256:v.sha256,bytes:v.bytes}]));

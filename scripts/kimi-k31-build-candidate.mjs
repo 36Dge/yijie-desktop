@@ -36,7 +36,7 @@ export function kimiCallSurfaces(env=process.env){
  if(market)assert.equal(env.YIJIE_RUNTIME_PERMISSIONS_ENABLED,"true","Market requires original permission boundary");
  return {mode,market,experts,media};
 }
-function checkSurfaces(desktopRoot,contractsRoot,selection){
+function checkSurfaces(desktopRoot,contractsRoot,selection,env){
  for(const family of ["market-selection","market-host","experts"]){
   const lock=JSON.parse(readFileSync(path.join(desktopRoot,`contracts/${family}-v2.candidate.json`)));
   assert.equal(lock.source_commit,"eddc64f95d81c26ca1678cc648d177c081f7904d");
@@ -46,13 +46,13 @@ function checkSurfaces(desktopRoot,contractsRoot,selection){
   for(const [family,consumers] of [["market-connectors",["desktop","agent-host","connectors"]],["market-provider",["desktop","agent-host","connectors"]],["market-broker",["agent-host","connectors"]]])for(const consumer of consumers)execFileSync(process.execPath,[`scripts/sync-${family}.mjs`,`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
   execFileSync(process.execPath,["scripts/feat164-market-catalog.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  }
- if(selection.experts)execFileSync(process.execPath,["scripts/sync-desktop-expert-resources.mjs","--check"],{cwd:desktopRoot,stdio:"pipe",env:{...process.env,YIJIE_ENV:"local",YIJIE_LOCAL_PROFILE:"demo_fast",YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot}});
+ if(selection.experts)execFileSync(process.execPath,["scripts/sync-feat164-expert-resources.mjs","--check"],{cwd:desktopRoot,stdio:"pipe",env:{...process.env,...env,YIJIE_ENV:"local",YIJIE_LOCAL_PROFILE:"demo_fast",YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot}});
  if(selection.media)for(const consumer of ["host","desktop"])execFileSync(process.execPath,["scripts/generate-artifact-media.mjs","--check",`--consumer=${consumer}`],{cwd:contractsRoot,stdio:"pipe"});
 }
 export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,env=process.env){
  assert(env.YIJIE_ENV==="local"&&env.YIJIE_LOCAL_PROFILE==="demo_fast"&&env.YIJIE_CHAT_MODELS_ENABLED==="true"&&env.YIJIE_KIMI_K31_PRO_CANDIDATE==="true","Explicit local candidate required");
  const selection=kimiCallSurfaces(env);
- checkSurfaces(desktopRoot,contractsRoot,selection);
+ checkSurfaces(desktopRoot,contractsRoot,selection,env);
  const planLock=JSON.parse(readFileSync(path.join(desktopRoot,"contracts/scheduled-plan-v2.candidate.json")));
  assert.equal(planLock.source_commit,"2dd214d6a702064edae78510c035442854bf9789");
  execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
