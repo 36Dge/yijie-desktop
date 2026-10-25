@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "bc2f07d7cef04a27f805fdbadd972a179eba3a7f8e4e24ff4ce2bec25c921d6e"
   },
   "host": {
-    "base_commit": "7927ee7b385cb5536c3647632d1bac0cb7c56fea",
+    "base_commit": "090c2dbeeeceb0fc87e576d8e13f5c339bf106f0",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -339,7 +339,7 @@
       "internal/session/chat_models_test.go": "8ff392cc1ff5ca733f0eca1322075ba3c614c26cf5b11e09f15f94e5522fb7ba",
       "internal/session/chat_models_v2.go": "e6801ee6c5ac7dd979f2791fbc44f22f6290eb2bf99d344fb06818c077b06237",
       "internal/session/chat_models_v2_native_test.go": "8ae332b0627063d44bafd515af3f490ebdd0ad2aac342872bb9104e348dc2fc0",
-      "internal/session/chat_models_v2_operation.go": "eb9abd693ba43588d5ebc703475bcf8722abba353be0e332361c78ea0fba5e6d",
+      "internal/session/chat_models_v2_operation.go": "f2c255b3633cf24c6b5a0e0625894fe7beddce84d76192a7c0ffc35c26bc2c83",
       "internal/session/chat_models_v2_operation_test.go": "2da32b6b6df040dda309e016a2d1a90c07e33d1e2558d99a026d7a2d9c22597a",
       "internal/session/chat_models_v2_storage.go": "4e1558e267b658dd653a2b8a155be3385f83b61dbf47d7771dde2b4fe232df83",
       "internal/session/chat_models_v2_test.go": "098754095fc78d05ab9e3fdd2da825b63ecfe340732ba81e09b8bdb76a3efe07",
@@ -364,7 +364,7 @@
       "internal/session/feat137_approval.go": "98b4f461a9b0c3607a5d188d9516520a48ece31a4ef13ccfe1ecb2566cfc3486",
       "internal/session/feat137_approval_test.go": "b0c64d9d47adc7503c8f91cff11acd7dc933c40b80af74cdf750de330770a2f7",
       "internal/session/feat164_migration_conformance_test.go": "d3598b4c63a53968b4c5e8ada69f9de3a03ddf3ee1ed5ffe4ea012367297fc7a",
-      "internal/session/feat164_surfaces_test.go": "69b9322ceb62aea2d3b2831e589dac9d25947c008b5682e608717b4730eddf22",
+      "internal/session/feat164_surfaces_test.go": "ba505c8c44799709db0be2d0c8a792ff9221a4877b4bd770d9cba74802e1c082",
       "internal/session/fixtures/synthetic-video-16x16.mp4.base64": "d8a7a55c786dcde9367125d806e0cf5b014fb8f70801c97b80a70d5160f95f8a",
       "internal/session/id.go": "934ecfb8891ca36d5355b5132f53188f3764d9b0cc7ef1abcee86ca2aba04895",
       "internal/session/kimi_k31_title_test.go": "0baf042df45e7e767623c9daaa6efb263447ed378bde634dccced4d43b07c5c5",
