@@ -79,6 +79,31 @@ class BudgetControls(unittest.TestCase):
         self.assertEqual(observer.result["usage"]["output_tokens"], 100)
         self.assertNotIn("普通合成回答", json.dumps(observer.result, ensure_ascii=False))
 
+    def test_search_removal_also_removes_only_documented_search_include(self):
+        request = {"model": meter.MODEL, "reasoning": {"effort": "max"}, "stream": True,
+            "input": "ordinary", "tools": [{"type": "web_search"}],
+            "include": ["web_search_call.action.sources"]}
+        raw, metadata = meter.prepare_request(json.dumps(request).encode())
+        self.assertEqual(json.loads(raw)["include"], [])
+        self.assertEqual(metadata["native_search_include_omitted"], request["include"])
+        request["include"].append("reasoning.encrypted_content")
+        with self.assertRaises(ValueError):
+            meter.prepare_request(json.dumps(request).encode())
+
+    def test_http_error_hints_are_closed_and_never_release_unknown_usage(self):
+        payload = json.dumps({"error": {"type": "invalid_request_error",
+            "message": "Unsupported include reasoning.encrypted_content. Ordinary diagnostic marker.",
+            "code": "ordinary-unretained-value"}}).encode()
+        observed = meter.error_metadata(payload)
+        self.assertEqual(observed, {"provider_error_category": "invalid_request_error",
+            "provider_error_mentions": ["reasoning.encrypted_content"]})
+        self.assertNotIn("diagnostic marker", json.dumps(observed))
+        row = self.admitted(); self.budget.settle(row, observed)
+        self.assertTrue(self.budget.state["halted"])
+        self.assertEqual(self.budget.state["charged_upper_micro_cny"], meter.RESERVATION)
+        self.assertEqual(meter.error_metadata(b"ordinary non-JSON response"),
+            {"provider_error_category": "unclassified", "provider_error_mentions": []})
+
 
 if __name__ == "__main__":
     unittest.main()

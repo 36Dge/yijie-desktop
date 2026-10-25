@@ -62,6 +62,14 @@ def prepare_request(payload):
         raise ValueError("Invalid tool declarations")
     omitted = sum(t.get("type") == "web_search" for t in tools)
     body["tools"] = [t for t in tools if t.get("type") != "web_search"]
+    include = body.get("include", [])
+    search_includes = {"web_search_call.action.sources", "web_search_call.results"}
+    if not isinstance(include, list) or any(not isinstance(v, str) or v not in search_includes for v in include):
+        raise ValueError("Kimi Responses include differs from documented enum")
+    # The budget adapter removes native search, so its dependent include values
+    # must also be omitted. Unsupported product values are rejected, not hidden.
+    if include:
+        body["include"] = []
     def images(value):
         if isinstance(value, dict):
             return int(value.get("type") == "input_image") + sum(images(v) for v in value.values())
@@ -73,7 +81,8 @@ def prepare_request(payload):
         "model": MODEL, "effort": "max", "original_max_output_tokens": original_cap,
         "max_output_tokens": body["max_output_tokens"], "image_count": count,
         "tool_choice_preserved": body.get("tool_choice"), "native_search_omitted": omitted,
-        "request_adjustments": ["bounded_max_output_tokens", "omit_unpriced_native_search", "json_encoding"],
+        "native_search_include_omitted": include,
+        "request_adjustments": ["bounded_max_output_tokens", "omit_unpriced_native_search", "omit_search_include", "json_encoding"],
     }
 
 
@@ -166,6 +175,32 @@ class Observer:
                 continue
 
 
+def error_metadata(payload):
+    """Closed diagnostic hints only; never persist provider error prose."""
+    result = {"provider_error_category": "unclassified", "provider_error_mentions": []}
+    if len(payload) > 16384:
+        return result
+    try:
+        error = json.loads(payload).get("error")
+        if not isinstance(error, dict):
+            return result
+        category = error.get("type")
+        if category in {"invalid_request_error", "content_filter", "invalid_authentication_error",
+                        "incorrect_api_key_error", "permission_denied_error", "resource_not_found_error",
+                        "exceeded_current_quota_error", "rate_limit_reached_error", "engine_overloaded_error",
+                        "server_error", "server_unavailable"}:
+            result["provider_error_category"] = category
+        message = error.get("message")
+        if isinstance(message, str):
+            result["provider_error_mentions"] = [field for field in (
+                "reasoning.encrypted_content", "web_search_call.action.sources", "web_search_call.results",
+                "max_output_tokens", "client_metadata", "tool_choice", "parallel_tool_calls",
+                "reasoning.effort", "namespace", "prompt_cache_key") if field in message]
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ledger", required=True, type=Path)
@@ -211,7 +246,7 @@ def main():
                 except (ValueError, TypeError, AttributeError):
                     self.send_error(429, "Verification admission unavailable"); return
                 connection = http.client.HTTPSConnection("api.moonshot.cn", timeout=240)
-                observer = Observer(); digest = hashlib.sha256(); count = 0
+                observer = Observer(); digest = hashlib.sha256(); count = 0; error_bytes = bytearray()
                 try:
                     connection.request("POST", "/v1/responses", body=payload,
                         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
@@ -223,6 +258,8 @@ def main():
                         chunk = response.read1(65536)
                         if not chunk:
                             break
+                        if response.status >= 400:
+                            error_bytes.extend(chunk[:max(0, 16385 - len(error_bytes))])
                         observer.feed(chunk)
                         self.wfile.write(chunk); self.wfile.flush()
                         digest.update(chunk); count += len(chunk)
@@ -231,6 +268,8 @@ def main():
                     self.close_connection = True
                 finally:
                     connection.close()
+                    if row.get("http_status", 0) >= 400:
+                        observer.result.update(error_metadata(error_bytes))
                     observer.result.update({"forwarded_response_sha256": digest.hexdigest(), "forwarded_response_bytes": count})
                     budget.settle(row, observer.result)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 18083), Handler)
