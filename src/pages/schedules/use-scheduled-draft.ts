@@ -2,8 +2,8 @@ import { legacyProfile } from "../../api/chat-model-client";
 import { chatModelsEnabled, type ModelIntent } from "../../api/chat-model-client";
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { createScheduledTaskNativeClient, ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { DraftConfirmation, DraftPreview, DraftReceipt, DraftSubmit, IpcErrorCode, OperationCapabilities, Requests, Responses } from "../../api/generated/scheduled-task-ipc.gen";
-import type { PlanDefinition, PlanView, TimeRule } from "../../domain/scheduled-plan.generated";
+import type { DraftConfirmation, DraftPreview, DraftReceipt, DraftSubmit, IpcErrorCode, OperationCapabilities, Requests, Responses } from "../../api/generated/scheduled-task-ipc-v2.gen";
+import type { PlanDefinition, PlanView, TimeRule } from "../../domain/scheduled-plan-v2.generated";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 

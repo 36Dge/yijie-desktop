@@ -4,12 +4,13 @@ use serde_json::Value;
 use std::sync::OnceLock;
 fn schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/scheduled-task-ipc-resolved.schema.json"
-        ))
-        .expect("generated IPC schema")
-    })
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    const SOURCE: &str =
+        include_str!("../../../../schemas/scheduled-task-ipc-v2-resolved.schema.json");
+    #[cfg(not(feature = "kimi-k31-pro-candidate"))]
+    const SOURCE: &str =
+        include_str!("../../../../schemas/scheduled-task-ipc-resolved.schema.json");
+    SCHEMA.get_or_init(|| serde_json::from_str(SOURCE).expect("generated IPC schema"))
 }
 pub(in crate::chat::schedules) fn valid(name: &str, value: &Value) -> bool {
     schema()["$defs"]

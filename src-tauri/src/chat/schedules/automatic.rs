@@ -79,6 +79,9 @@ impl ChatRepository {
         let Some(c) = self.scheduled_recovery_candidate(&a, n)? else {
             return Ok(());
         };
+        if super::model_retirement::retired_run(&self.connection, &self.scope, &c.run)? {
+            return Ok(());
+        }
         let rerun: bool = self
             .connection
             .query_row(
@@ -120,7 +123,12 @@ impl ChatRepository {
             n,
         )
         .map_err(|_| E::ScopeDenied)?;
-        let future:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM chat_scheduled_plans p JOIN chat_scheduled_grants g ON g.grant_id=p.authorization_ref JOIN chat_scheduled_enable_receipts e ON e.grant_id=g.grant_id WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND g.owner_user_id=p.owner_user_id AND g.tenant_id=p.tenant_id AND p.state='enabled' AND p.future_hold IS NULL AND p.next_at IS NOT NULL AND g.plan_revision=p.revision AND g.authorization_revision=?3 AND g.expires_at>?4 AND g.occupied_runs<g.max_runs AND e.format_version=1 AND e.automatic_consent_version=1)",params![self.scope.owner_user_id,self.scope.tenant_id,a.revision,n],|r|r.get(0)).map_err(|_|E::DatabaseUnavailable)?;
+        let model_sql = if crate::chat::models::table(&self.connection)? {
+            "COALESCE((SELECT m.profile_id FROM chat_plan_models m WHERE m.plan_id=p.plan_id),'minimax-m3-high-v1')"
+        } else {
+            "'minimax-m3-high-v1'"
+        };
+        let future:bool=self.connection.query_row(&format!("SELECT EXISTS(SELECT 1 FROM chat_scheduled_plans p JOIN chat_scheduled_grants g ON g.grant_id=p.authorization_ref JOIN chat_scheduled_enable_receipts e ON e.grant_id=g.grant_id WHERE p.owner_user_id=?1 AND p.tenant_id=?2 AND g.owner_user_id=p.owner_user_id AND g.tenant_id=p.tenant_id AND p.state='enabled' AND p.future_hold IS NULL AND p.next_at IS NOT NULL AND g.plan_revision=p.revision AND g.authorization_revision=?3 AND g.expires_at>?4 AND g.occupied_runs<g.max_runs AND e.format_version=1 AND e.automatic_consent_version=1 AND (?5=0 OR {model_sql}!='kimi-k3-max-v1') AND (?6=0 OR {model_sql}!='kimi-k3-1-pro-max-v1'))"),params![self.scope.owner_user_id,self.scope.tenant_id,a.revision,n,cfg!(feature="kimi-k31-pro-candidate"),!crate::chat::models::v2_enabled() || !crate::chat::models::dispatch_profile_available("kimi-k3-1-pro-max-v1")],|r|r.get(0)).map_err(|_|E::DatabaseUnavailable)?;
         let pending:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM chat_scheduled_runs r LEFT JOIN chat_scheduled_recovery e ON e.run_id=r.run_id WHERE r.owner_user_id=?1 AND r.tenant_id=?2 AND (e.release_kind IS NULL OR EXISTS(SELECT 1 FROM chat_scheduled_reservation v WHERE v.run_id=r.run_id)))",params![self.scope.owner_user_id,self.scope.tenant_id],|r|r.get(0)).map_err(|_|E::DatabaseUnavailable)?;
         Ok((future, pending))
     }

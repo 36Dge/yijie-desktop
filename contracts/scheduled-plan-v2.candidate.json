@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "contract_version": "0.2.0",
+  "mode": "local_candidate",
+  "release": false,
+  "repository": "https://github.com/36Dge/yijie-contracts.git",
+  "base_commit": "f2819c66a2368aaff37216a46c48d5cd81df1747",
+  "sources": [
+    {
+      "path": "jsonschema/chat/model-selection-v2.schema.json",
+      "sha256": "fa0ae10205dd9d0d2fead4366b67a03d21beda874f1fdb401e871390f72813af"
+    },
+    {
+      "path": "scripts/scheduled-schema-source.mjs",
+      "sha256": "833e22e5c80967d01a0b4f690dacedaffdafd5a1d1c82736fec257b76feaf8ba"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/plan-storage-v2.schema.json",
+      "sha256": "fa23496f1a07ce7944752d468679013aa452c82b07fa90551b6a5839b86b54e9"
+    },
+    {
+      "path": "jsonschema/scheduled-tasks/plan-draft-v1.schema.json",
+      "sha256": "267efaf2f7ba9ada27f7494c9042473c6775b7d9eeecab4f3673cc84d0814171"
+    },
+    {
+      "path": "scripts/generate-scheduled-plan-v2.mjs",
+      "sha256": "79ec1de3d48191d345624653328f2591abf699706149dc0930a6f67cfd7290ff"
+    },
+    {
+      "path": "scripts/sync-scheduled-plan-v2.mjs",
+      "sha256": "768ce11d12759099faee06b004068b3d42194acd5c9bf0b4116716867cf564c7"
+    },
+    {
+      "path": "scripts/scheduled-consumer-source.mjs",
+      "sha256": "69e7fa6b1b4371d1d6c9456fe68b9ede76cc3a0896253597428729f531fde015"
+    },
+    {
+      "path": "scripts/chat-model-consumer-source.mjs",
+      "sha256": "9930c321840c103b21afa2dcaa8f04d039297e76c30dffb8b18a9096a61546ed"
+    }
+  ],
+  "generated": [
+    {
+      "path": "sdks/rust/scheduled-plan-v2/types.gen.rs",
+      "sha256": "8ada1d3f0e70c14a7c3885b66ceae113155d8eb9e2730dc686121479e7654814"
+    },
+    {
+      "path": "sdks/typescript/src/jsonschema/scheduled-plan-v2.gen.ts",
+      "sha256": "2f61d11cdba93d321c5538f07ea8f8ab1e3b421c61fd7501f2e423135bc0faf9"
+    },
+    {
+      "path": "sdks/jsonschema/scheduled-plan-v2.schema.json",
+      "sha256": "2dc8d90043f5716076496e8e93bece9eb375081fe5d19577472411530cb30e20"
+    }
+  ],
+  "generators": {
+    "rust_typescript": "source-local closed schema subset v1; serde validation plus native semantics",
+    "jsonschema": "canonical context-preserving draft references v2"
+  },
+  "source_commit": "2dd214d6a702064edae78510c035442854bf9789",
+  "source_lock_path": "compatibility/scheduled-plan-v2/source.lock.json"
+}

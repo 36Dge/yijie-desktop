@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 40] = [
+const CATALOG: [CatalogEntry; 41] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -232,6 +232,11 @@ const CATALOG: [CatalogEntry; 40] = [
         name: "0040_delivery_proofs",
         sql: include_str!("../../migrations/chat/0040_delivery_proofs.sql"),
     },
+    CatalogEntry {
+        version: 41,
+        name: "0041_plan_model_retirements",
+        sql: include_str!("../../migrations/chat/0041_plan_model_retirements.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -253,6 +258,7 @@ pub const CHAT_MODELS_SCHEMA_VERSION: i64 = 28;
 pub const KIMI_K31_SCHEMA_VERSION: i64 = 38;
 pub const KIMI_K31_RECOVERY_SCHEMA_VERSION: i64 = 39;
 pub const DELIVERY_PROOF_SCHEMA_VERSION: i64 = 40;
+pub const PLAN_RETIREMENT_SCHEMA_VERSION: i64 = 41;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -275,7 +281,9 @@ pub fn migrate(connection: &mut Connection) -> Result<(), ChatError> {
 
 pub(super) fn validate_reader(connection: &Connection) -> Result<(), ChatError> {
     let current = user_version(connection)?;
-    if !(0..=MAX_READABLE_SCHEMA_VERSION).contains(&current) {
+    if !(0..=MAX_READABLE_SCHEMA_VERSION).contains(&current)
+        || (current >= PLAN_RETIREMENT_SCHEMA_VERSION && !cfg!(feature = "kimi-k31-pro-candidate"))
+    {
         return Err(ChatError::MigrationFailed);
     }
     verify_ledger(connection, current)
@@ -300,6 +308,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         KIMI_K31_SCHEMA_VERSION,
         KIMI_K31_RECOVERY_SCHEMA_VERSION,
         DELIVERY_PROOF_SCHEMA_VERSION,
+        PLAN_RETIREMENT_SCHEMA_VERSION,
         SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
         MARKET_CONNECTORS_SCHEMA_VERSION,
         MARKET_SELECTION_SCHEMA_VERSION,

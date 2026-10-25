@@ -1,5 +1,6 @@
 //! 3B-1: local manual preparation, never an execution/accepted receipt.
 use super::*;
+use crate::chat::schedules::generated::PlanDefinitionModelProfile;
 use crate::chat::schedules::workspace as directories;
 use crate::chat::{
     database::{ConversationEnqueueContext, DraftContentBlock, ScheduledEnqueue},
@@ -337,7 +338,9 @@ impl ChatRepository {
                 Some(create.to_string()),
             )
         };
-        if let Some(profile) = p.definition.model_profile {
+        if let Some(profile) = p.definition.model_profile.or_else(|| {
+            crate::chat::models::v2_enabled().then_some(PlanDefinitionModelProfile::MinimaxM3HighV1)
+        }) {
             let profile_id = serde_json::from_value(
                 serde_json::to_value(profile).map_err(|_| Error::FormatUnsupported)?,
             )

@@ -872,6 +872,7 @@ impl ChatRepository {
                 migrations::KIMI_K31_SCHEMA_VERSION,
                 migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION,
                 migrations::DELIVERY_PROOF_SCHEMA_VERSION,
+                migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -962,7 +963,12 @@ impl ChatRepository {
         if super::models::v2_enabled() {
             migrations::migrate_to_target(
                 &mut connection,
-                migrations::DELIVERY_PROOF_SCHEMA_VERSION,
+                migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
+            )?;
+            super::schedules::model_retirement::retire_before_worker(
+                &mut connection,
+                &scope,
+                chrono::Utc::now().timestamp(),
             )?;
         }
         protect_database_files(&database_path)?;

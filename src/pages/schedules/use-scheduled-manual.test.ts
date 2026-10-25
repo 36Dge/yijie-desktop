@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { effectScope, nextTick, reactive } from "vue";
 import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
-import type { Requests } from "../../api/generated/scheduled-task-ipc.gen";
+import type { Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledManagement } from "./use-scheduled-management";
 import { useScheduledManual } from "./use-scheduled-manual";
 

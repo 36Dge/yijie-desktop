@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { scheduleModelLabel } from "../../domain/scheduled-task-ui";
-import { chatModelsEnabled } from "../../api/chat-model-client";
+import { chatModelsEnabled, kimiK31Candidate } from "../../api/chat-model-client";
 import { computed, inject, nextTick, ref, shallowRef, watch } from "vue";
 import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { queueScheduleDraftIntent, clearScheduleDraftIntent } from "../../domain/scheduled-draft-intent";
@@ -18,8 +18,8 @@ import ScheduledPlanForm from "../../components/schedules/ScheduledPlanForm.vue"
 import { CHAT_AUTHORITY_RETRY_KEY, CHAT_EXECUTION_PREPARE_KEY } from "../../authorization/chat-authority-recovery";
 import { usePermissionStore } from "../../stores/permission.store";
 import { ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { PlanDefinition, PlanView } from "../../domain/scheduled-plan.generated";
-import type { PlanSummary, RecordDetail, RecordRow } from "../../api/generated/scheduled-task-ipc.gen";
+import type { PlanDefinition, PlanView } from "../../domain/scheduled-plan-v2.generated";
+import type { PlanSummary, RecordDetail, RecordRow } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { pauseReasonLabels, executionError, recordStatus, ruleLabel, scheduleError, stateLabels, stateOptions, targetLabels, timeLabel, recordElementId } from "../../domain/scheduled-task-ui";
 import { useScheduledManagement } from "./use-scheduled-management";
 import { useScheduledManual } from "./use-scheduled-manual";
@@ -254,16 +254,17 @@ onBeforeRouteLeave(() => {
           <YjEmpty v-else-if="!(tab === 'plans' ? cards.length : records.length) && !error" class="schedules-empty" :title="search || state !== 'all' || planFilter ? '没有匹配的记录' : tab === 'plans' ? '还没有定时任务' : '还没有执行记录'" :description="tab === 'plans' ? '通过对话或手动设置创建计划，保存后可随时调整。' : '计划保存和未来时间预览不会产生执行记录。'" icon="scheduledTask"><template #actions><NButton v-if="search || state !== 'all' || planFilter" @click="search = ''; state = 'all'; planFilter = null">清空筛选</NButton><NButton v-else-if="tab === 'plans'" type="primary" :disabled="!canManage" @click="create">新建定时任务</NButton></template></YjEmpty>
           <div v-else-if="tab === 'plans'" class="schedules-grid">
             <NCard v-for="card in cards" :key="card.summary.plan_id" class="schedule-card schedule-plan-card" content-style="padding: var(--yj-space-5); display: flex; flex-direction: column" :aria-label="card.summary.name" @click="cardClick($event, card.summary)">
-              <div class="schedule-card__heading"><h2><button :id="`schedule-plan-${card.summary.plan_id}`" class="schedule-card__title" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click.stop="edit(card.summary)" :aria-label="`编辑 ${card.summary.name}`">{{ card.summary.name }}</button></h2><div class="schedule-card__state" @click.stop><NSwitch class="schedule-switch" :id="`schedule-enable-${card.summary.plan_id}`" :value="card.summary.effective_state === 'enabled'" :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`" :loading="writing && pending?.payload.plan_id === card.summary.plan_id" :disabled="!(writing && pending?.payload.plan_id === card.summary.plan_id) && ((card.summary.effective_state === 'enabled' ? !canManage : !canPrepareAutomatic) || writing || !!pending || autoBusy || autoPending || runningAction || runPending || card.summary.target_state === 'missing')" @update:value="value => togglePlan(value, card.summary)" /></div></div>
+              <div class="schedule-card__heading"><h2><button :id="`schedule-plan-${card.summary.plan_id}`" class="schedule-card__title" :disabled="!canManage || writing || autoBusy || autoPending || runningAction || runPending" @click.stop="edit(card.summary)" :aria-label="`编辑 ${card.summary.name}`">{{ card.summary.name }}</button></h2><div class="schedule-card__state" @click.stop><NSwitch class="schedule-switch" :id="`schedule-enable-${card.summary.plan_id}`" :value="card.summary.effective_state === 'enabled'" :aria-label="`${card.summary.effective_state === 'enabled' ? '关闭' : '开启'} ${card.summary.name}`" :loading="writing && pending?.payload.plan_id === card.summary.plan_id" :disabled="!(writing && pending?.payload.plan_id === card.summary.plan_id) && ((card.summary.effective_state === 'enabled' ? !canManage : !canPrepareAutomatic) || writing || !!pending || autoBusy || autoPending || runningAction || runPending || card.summary.target_state === 'missing' || (kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1'))" @update:value="value => togglePlan(value, card.summary)" /></div></div>
               <p class="schedule-card__content">{{ card.content_preview }}</p>
               <p v-if="chatModelsEnabled" class="schedules-meta">执行模型：{{ scheduleModelLabel(card.model_profile) }}</p>
+              <p v-if="kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1'" class="schedules-meta" role="status">旧模型已退役。请编辑计划、确认新模型并保存，再重新开启或授权执行。</p>
               <div class="schedule-card__footer"><div class="schedule-card__timing">
                 <p :title="ruleLabel(card.rule)"><YjIcon name="pending" size="sm" tone="muted" /><span>{{ ruleLabel(card.rule).split(' · ')[0] }}</span></p>
                 <p><YjIcon :name="card.summary.effective_state === 'enabled' ? 'arrowRight' : 'stop'" size="sm" tone="muted" /><span>{{ card.summary.effective_state === 'enabled' ? `下次执行 ${timeLabel(card.summary.next_at, card.rule.time_zone)}` : card.summary.pause_reason ? pauseReasonLabels[card.summary.pause_reason] : card.summary.effective_state === 'paused' ? '已关闭' : stateLabels[card.summary.effective_state] }}</span></p>
               </div>
               <div class="schedule-card__actions">
                 <ScheduledCardAction icon="taskHistory" label="查看历史记录" @click="viewHistory(card.summary)" />
-                <ScheduledCardAction :id="`schedule-run-${card.summary.plan_id}`" icon="run" label="立即执行" :loading="runningAction && runningPlanId === card.summary.plan_id" :disabled="!canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending || card.summary.raw_state === 'deleted' || card.summary.target_state === 'missing'" @click="runNow(card.summary.plan_id)" />
+                <ScheduledCardAction :id="`schedule-run-${card.summary.plan_id}`" icon="run" label="立即执行" :loading="runningAction && runningPlanId === card.summary.plan_id" :disabled="!canPrepare || autoBusy || autoPending || runningAction || runPending || writing || !!pending || card.summary.raw_state === 'deleted' || card.summary.target_state === 'missing' || (kimiK31Candidate && card.model_profile === 'kimi-k3-max-v1')" @click="runNow(card.summary.plan_id)" />
                 <ScheduledCardAction :id="`schedule-delete-${card.summary.plan_id}`" icon="trash" label="删除任务" :disabled="deleteDisabled" @click="confirmMutation(card.summary)" />
               </div></div>
             </NCard>

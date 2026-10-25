@@ -4,7 +4,7 @@ import { chatModelsEnabled } from "../../api/chat-model-client";
 import { computed } from "vue";
 import { NButton, NCard, NModal } from "naive-ui";
 import YjIcon from "../yijie/YjIcon.vue";
-import type { RecordDetail } from "../../api/generated/scheduled-task-ipc.gen";
+import type { RecordDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { durationLabel, executionTimeLabel, recordStatus, recordTone, timingNote } from "../../domain/scheduled-task-ui";
 
 const props = defineProps<{ detail: RecordDetail | null; name: string; rerunDisabled: boolean; error?: string }>();

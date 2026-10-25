@@ -361,6 +361,9 @@ impl ChatRepository {
         let Some(c) = self.scheduled_recovery_candidate(&a, n)? else {
             return Ok(());
         };
+        if super::model_retirement::retired_run(&self.connection, &self.scope, &c.run)? {
+            return Ok(());
+        }
         let manual: bool = self
             .connection
             .query_row(

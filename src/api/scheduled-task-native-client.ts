@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { commands, type Requests, type Responses, type IpcErrorCode } from "./generated/scheduled-task-ipc.gen";
-import * as validators from "./generated/scheduled-task-ipc-validator.gen.js";
+import { commands, type Requests, type Responses, type IpcErrorCode } from "./generated/scheduled-task-ipc-v2.gen";
+import * as legacyValidators from "./generated/scheduled-task-ipc-validator.gen.js";
+import * as currentValidators from "./generated/scheduled-task-ipc-v2-validator.gen.js";
+import { kimiK31Candidate } from "./chat-model-client";
+const validators = kimiK31Candidate ? currentValidators : legacyValidators;
 
 type Command = keyof Requests;
 type Invoker = (command: string, args: Record<string, unknown>) => Promise<unknown>;

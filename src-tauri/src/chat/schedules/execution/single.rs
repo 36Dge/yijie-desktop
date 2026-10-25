@@ -151,6 +151,7 @@ impl ChatRepository {
             return Err(Error::InvalidInput);
         }
         let p = plan(&tx, &scope, &req.plan_id)?;
+        super::super::model_retirement::require_execution(&tx, &scope, &p)?;
         if p.state == PlanState::Deleted {
             return Err(Error::NotFound);
         }

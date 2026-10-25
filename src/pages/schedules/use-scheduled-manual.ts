@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
 import type { GrantConfirmation, GrantView, RunView } from "../../domain/scheduled-execution.generated";
-import type { IpcErrorCode, PlanDetail, RecordDetail, RerunPreview, RerunReview, SingleRunKind, SingleRunGrantResult } from "../../api/generated/scheduled-task-ipc.gen";
+import type { IpcErrorCode, PlanDetail, RecordDetail, RerunPreview, RerunReview, SingleRunKind, SingleRunGrantResult } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { usePermissionStore } from "../../stores/permission.store";
 import type { useScheduledManagement } from "./use-scheduled-management";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { durationLabel, executionTimeLabel, timingNote } from "./scheduled-task-ui";
-import type { Timing } from "../api/generated/scheduled-task-ipc.gen";
+import type { Timing } from "../api/generated/scheduled-task-ipc-v2.gen";
 const clock: Timing = { execution_time: "known", duration: "known", source: "runtime_read", started_at: 1790151297, duration_ms: 440, time_zone: "Asia/Shanghai" };
 describe("scheduled native timing display", () => {
   it("keeps subsecond duration and native second resolution without subtracting clocks", () => {

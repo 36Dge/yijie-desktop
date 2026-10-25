@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { NAlert, NButton, NCard, useDialog } from "naive-ui";
 import ScheduledPlanForm from "./ScheduledPlanForm.vue";
-import type { PlanDefinition } from "../../domain/scheduled-plan.generated";
+import type { PlanDefinition } from "../../domain/scheduled-plan-v2.generated";
 import { ruleLabel, scheduleError, stateLabels, targetLabels } from "../../domain/scheduled-task-ui";
 import type { useScheduledDraft } from "../../pages/schedules/use-scheduled-draft";
 const props = defineProps<{ model: ReturnType<typeof useScheduledDraft> }>();

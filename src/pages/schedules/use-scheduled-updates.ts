@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, watch } from "vue";
 import { createScheduledTaskNativeClient, ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { ImportantUpdate } from "../../api/generated/scheduled-task-ipc.gen";
+import type { ImportantUpdate } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 

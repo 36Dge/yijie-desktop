@@ -2,6 +2,7 @@
 mod execution;
 pub mod execution_generated;
 pub(crate) mod execution_guard;
+#[cfg_attr(feature = "kimi-k31-pro-candidate", path = "generated_v2.rs")]
 pub mod generated;
 pub(crate) mod recovery;
 pub mod recovery_generated;
@@ -21,6 +22,7 @@ mod tests;
 pub(crate) mod ipc;
 pub(crate) mod ipc_commands_generated;
 #[allow(dead_code)]
+#[cfg_attr(feature = "kimi-k31-pro-candidate", path = "ipc_v2_generated.rs")]
 pub(crate) mod ipc_generated;
 
 #[allow(dead_code)]
@@ -38,3 +40,8 @@ pub(crate) mod timing;
 #[allow(dead_code)]
 pub(crate) mod timing_generated;
 pub(crate) mod timing_runtime;
+
+pub(crate) mod model_retirement;
+
+#[cfg(all(test, feature = "kimi-k31-pro-candidate"))]
+mod model_retirement_tests;

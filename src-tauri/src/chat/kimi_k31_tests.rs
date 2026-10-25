@@ -131,16 +131,16 @@ fn feat164_migration_expands_without_rewriting_model_facts() {
 
 #[test]
 fn feat164_canonical_migration_paths_and_repeat_are_valid() {
-    for previous in [15, 29, 37, 38, 39, 40] {
+    for previous in [15, 29, 37, 38, 39, 40, 41] {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         migrations::migrate_to_target(&mut db, previous).unwrap();
-        migrations::migrate_to_target(&mut db, migrations::DELIVERY_PROOF_SCHEMA_VERSION).unwrap();
-        migrations::migrate_to_target(&mut db, migrations::DELIVERY_PROOF_SCHEMA_VERSION).unwrap();
+        migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
+        migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
         assert_eq!(
             db.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            40
+            41
         );
         migrations::validate_reader(&db).unwrap();
         assert_eq!(
@@ -166,7 +166,7 @@ fn feat164_populated_migrations_preserve_history_and_delivery_facts() {
             .collect::<Result<Vec<_>, _>>()
             .unwrap()
     }
-    for previous in [15, 29, 37, 38, 39, 40] {
+    for previous in [15, 29, 37, 38, 39, 40, 41] {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         migrations::migrate_to_target(&mut db, previous).unwrap();
@@ -211,8 +211,8 @@ fn feat164_populated_migrations_preserve_history_and_delivery_facts() {
             &db,
             "SELECT version,name,sha256,applied_at FROM chat_schema_migrations ORDER BY version",
         );
-        migrations::migrate_to_target(&mut db, migrations::DELIVERY_PROOF_SCHEMA_VERSION).unwrap();
-        migrations::migrate_to_target(&mut db, migrations::DELIVERY_PROOF_SCHEMA_VERSION).unwrap();
+        migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
+        migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
         for (query, expected) in queries.iter().zip(before) {
             assert_eq!(rows(&db, query), expected, "{previous}: {query}");
         }
@@ -221,7 +221,7 @@ fn feat164_populated_migrations_preserve_history_and_delivery_facts() {
             "SELECT version,name,sha256,applied_at FROM chat_schema_migrations ORDER BY version",
         );
         assert_eq!(&upgraded[..ledger.len()], ledger.as_slice());
-        assert_eq!(upgraded.len(), 40);
+        assert_eq!(upgraded.len(), 41);
         assert_eq!(
             rows(&db, "SELECT count(*) FROM chat_model_operations_v2"),
             vec![vec![Value::Integer(0)]]

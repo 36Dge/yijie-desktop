@@ -8,10 +8,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import ScheduledTasksPage from "./ScheduledTasksPage.vue";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
-import type { PlanSummary, Requests, RecordDetail } from "../../api/generated/scheduled-task-ipc.gen";
+import type { PlanSummary, Requests, RecordDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { CHAT_EXECUTION_PREPARE_KEY } from "../../authorization/chat-authority-recovery";
 import type { GrantView, RunView } from "../../domain/scheduled-execution.generated";
-import type { PlanView } from "../../domain/scheduled-plan.generated";
+import type { PlanView } from "../../domain/scheduled-plan-v2.generated";
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));

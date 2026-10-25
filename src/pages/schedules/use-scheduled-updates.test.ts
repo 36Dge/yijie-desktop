@@ -2,7 +2,7 @@
 import { effectScope, reactive, nextTick } from "vue";
 import { afterEach, expect, it, vi } from "vitest";
 import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
-import type { ImportantUpdate, Requests } from "../../api/generated/scheduled-task-ipc.gen";
+import type { ImportantUpdate, Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledUpdates } from "./use-scheduled-updates";
 const stores = vi.hoisted(() => ({ chat: {} as object, permission: {} as object }));
 vi.mock("../../stores/chat.store", () => ({ useChatStore: () => stores.chat }));

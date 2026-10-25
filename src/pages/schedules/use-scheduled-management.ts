@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { createScheduledTaskNativeClient, ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { Requests, Responses, PlanCard, RecordRow, PlanCardOrder, FilterState, OperationCapabilities, IpcErrorCode, PlanMutation, PlanDetail } from "../../api/generated/scheduled-task-ipc.gen";
-import type { SavePlanRequest } from "../../domain/scheduled-plan.generated";
+import type { Requests, Responses, PlanCard, RecordRow, PlanCardOrder, FilterState, OperationCapabilities, IpcErrorCode, PlanMutation, PlanDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
+import type { SavePlanRequest } from "../../domain/scheduled-plan-v2.generated";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 

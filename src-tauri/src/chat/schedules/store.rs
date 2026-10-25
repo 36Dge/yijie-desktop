@@ -1,6 +1,6 @@
 use super::generated::{
-    PlanDefinition, PlanState, PlanView, SavePlanRequest, ScheduleErrorCode as Error, TargetMode,
-    TargetReference, TargetState, TimeRuleFrequency,
+    PlanDefinition, PlanDefinitionModelProfile, PlanState, PlanView, SavePlanRequest,
+    ScheduleErrorCode as Error, TargetMode, TargetReference, TargetState, TimeRuleFrequency,
 };
 use super::time::{self, Continuity, RULE_VERSION};
 use crate::chat::database::{ChatRepository, ChatScope};
@@ -474,6 +474,11 @@ impl ChatRepository {
         if plan.revision != expected_revision {
             return Err(Error::RevisionConflict);
         }
+        if cfg!(feature = "kimi-k31-pro-candidate")
+            && plan.definition.model_profile == Some(PlanDefinitionModelProfile::KimiK3MaxV1)
+        {
+            return Ok(plan); // retired plans have no new future slots until explicit save
+        }
         let cursor = cursor_at(&tx, &scope, id)?;
         if now <= cursor {
             return Ok(plan);
@@ -591,12 +596,19 @@ pub(super) fn save_active_in_transaction(
     use super::execution::plan_error;
     use super::execution_generated::ExecutionErrorCode as E;
     let replay: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM chat_scheduled_requests WHERE owner_user_id=?1 AND tenant_id=?2 AND request_id=?3)", params![scope.owner_user_id,scope.tenant_id,request.request_id], |r| r.get(0)).map_err(|_| E::StorageUnavailable)?;
-    let active = match request.plan_id.as_deref() {
-        None => true,
-        Some(id) => read_plan(tx, scope, id).map_err(plan_error)?.state == PlanState::Enabled,
-    };
+    let prior = request
+        .plan_id
+        .as_deref()
+        .map(|id| read_plan(tx, scope, id).map_err(plan_error))
+        .transpose()?;
+    let active = prior.as_ref().is_none_or(|p| p.state == PlanState::Enabled);
+    let needs_review = crate::chat::models::v2_enabled()
+        && (super::model_retirement::profile(&request.definition)? != "minimax-m3-high-v1"
+            || prior
+                .as_ref()
+                .is_some_and(|p| p.definition.model_profile != request.definition.model_profile));
     let mut plan = save_in_transaction(tx, scope, request, now).map_err(plan_error)?;
-    if active && !replay {
+    if active && !replay && !needs_review {
         if super::execution_guard::plan_held(tx, scope, &plan.plan_id)
             .map_err(|_| E::StorageUnavailable)?
         {
@@ -634,12 +646,20 @@ pub(super) fn save_in_transaction(
         }
         return read_plan(tx, scope, &id); // Current view; no replay mutation/resurrection.
     }
+    super::model_retirement::require_definition(&request.definition)
+        .map_err(|_| Error::ExecutionNotReady)?;
     let prior = request
         .plan_id
         .as_deref()
         .map(|id| read_plan(tx, scope, id))
         .transpose()?;
     if let Some(plan) = &prior {
+        if crate::chat::models::v2_enabled()
+            && plan.definition.model_profile == Some(PlanDefinitionModelProfile::KimiK3MaxV1)
+            && request.definition.model_profile.is_none()
+        {
+            return Err(Error::InvalidInput);
+        }
         if plan.state == PlanState::Deleted {
             return Err(Error::NotFound);
         }

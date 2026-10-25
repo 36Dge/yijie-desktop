@@ -321,6 +321,7 @@ impl ChatRepository {
             return Err(Error::InvalidInput);
         }
         let mut p = plan(&tx, &scope, &request.plan_id)?;
+        super::super::model_retirement::require_execution(&tx, &scope, &p)?;
         if p.state == PlanState::Deleted {
             return Err(Error::NotFound);
         }
@@ -419,6 +420,7 @@ pub(in crate::chat::schedules) fn activate_default(
     p: &mut PlanView,
     now: i64,
 ) -> Result<(), Error> {
+    super::super::model_retirement::require_execution(tx, scope, p)?;
     authority.require(scope, ScheduleCapability::ScheduleManage, now)?;
     authority.require(scope, ScheduleCapability::ScheduleRun, now)?;
     if !super::super::automatic::present(tx)? {
@@ -668,21 +670,18 @@ impl ChatRepository {
         if lifecycle.ticket().ok().as_ref() != Some(&ticket) {
             return Ok(vec![]);
         }
-        let ids = {
-            let mut q=self.connection.prepare("SELECT plan_id FROM chat_scheduled_plans WHERE owner_user_id=?1 AND tenant_id=?2 AND state NOT IN ('deleted','completed') AND next_at<=?3 ORDER BY next_at,plan_id LIMIT 32").map_err(|_|E::DatabaseUnavailable)?;
-            let rows = q
-                .query_map(
-                    params![self.scope.owner_user_id, self.scope.tenant_id, now],
-                    |r| r.get::<_, String>(0),
-                )
-                .map_err(|_| E::DatabaseUnavailable)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(|_| E::DatabaseUnavailable)?;
-            rows
-        };
+        let ids = super::super::model_retirement::due_plan_ids(
+            &self.connection,
+            &self.scope,
+            now,
+            SCAN_LIMIT as i64,
+        )?;
         let mut result = Vec::new();
         for id in ids {
             let p = plan(&self.connection, &self.scope, &id).map_err(err)?;
+            if !super::super::model_retirement::execution_available(&p.definition) {
+                continue;
+            }
             let at = p.next_at.ok_or(E::DatabaseUnavailable)?;
             let slot:Option<String>=self.connection.query_row("SELECT logical_slot FROM chat_scheduled_occurrences WHERE plan_id=?1 AND schedule_epoch=?2 AND scheduled_at=?3 AND disposition='planned' AND run_id IS NULL",params![id,p.schedule_epoch,at],|r|r.get(0)).optional().map_err(|_|E::DatabaseUnavailable)?;
             let Some(slot) = slot else {
@@ -741,6 +740,9 @@ impl ChatRepository {
             .map_err(|_| E::ScopeDenied)?;
         let p = plan(&self.connection, &self.scope, &c.slot.plan)
             .map_err(|_| E::DatabaseUnavailable)?;
+        if !super::super::model_retirement::execution_available(&p.definition) {
+            return Ok(());
+        }
         if p.revision != c.slot.revision
             || p.schedule_epoch != c.slot.epoch
             || p.next_at != Some(c.slot.at)
@@ -868,6 +870,9 @@ impl ChatRepository {
         let Some((id, create, _, at)) = row else {
             return Ok(());
         };
+        if super::super::model_retirement::retired_run(&self.connection, &self.scope, &id)? {
+            return Ok(());
+        }
         let run =
             read_run(&self.connection, &self.scope, &id).map_err(|_| E::DatabaseUnavailable)?;
         let time_bad = validate_send(

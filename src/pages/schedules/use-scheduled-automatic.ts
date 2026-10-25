@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { ScheduledTaskNativeError } from "../../api/scheduled-task-native-client";
-import type { EnableConfirmation, EnableResult, IpcErrorCode, PlanDetail } from "../../api/generated/scheduled-task-ipc.gen";
+import type { EnableConfirmation, EnableResult, IpcErrorCode, PlanDetail } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { usePermissionStore } from "../../stores/permission.store";
 import type { useScheduledManagement } from "./use-scheduled-management";
 

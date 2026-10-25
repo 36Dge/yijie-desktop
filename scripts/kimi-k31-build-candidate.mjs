@@ -26,6 +26,10 @@ function checkPins(desktopRoot,hostRoot){
 export function verifyKimiK31BuildCandidate(desktopRoot,contractsRoot,hostRoot,env=process.env){
  assert(env.YIJIE_ENV==="local"&&env.YIJIE_LOCAL_PROFILE==="demo_fast"&&env.YIJIE_CHAT_MODELS_ENABLED==="true"&&env.YIJIE_KIMI_K31_PRO_CANDIDATE==="true","Explicit local candidate required");
  for(const flag of ["YIJIE_EXPERTS_ENABLED","YIJIE_MARKET_CONNECTORS_ENABLED","YIJIE_ARTIFACT_MEDIA_ENABLED","YIJIE_WORKFLOW_ENABLED"])assert(env[flag]!=="true","Ordinary walking skeleton only: "+flag);
+ const planLock=JSON.parse(readFileSync(path.join(desktopRoot,"contracts/scheduled-plan-v2.candidate.json")));
+ assert.equal(planLock.source_commit,"2dd214d6a702064edae78510c035442854bf9789");
+ execFileSync(process.execPath,["scripts/sync-scheduled-plan-v2.mjs","--check"],{cwd:contractsRoot,stdio:"pipe"});
+ execFileSync(process.execPath,["scripts/generate-scheduled-ipc-v2.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
  const actual=JSON.parse(readFileSync(path.join(desktopRoot,lockFile)));
  assert.equal(actual.feature,"FEAT-164");assert(["local_worktree_candidate","immutable_local_candidate"].includes(actual.mode));assert.equal(actual.release,false);
  assert.equal(actual.contracts_commit,commit);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton } from "naive-ui";
-import type { RecordRow, RecordView } from "../../api/generated/scheduled-task-ipc.gen";
+import type { RecordRow, RecordView } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { durationLabel, executionTimeLabel, recordElementId, recordStatus, recordTone } from "../../domain/scheduled-task-ui";
 import YjIcon from "../yijie/YjIcon.vue";
 import ScheduledCardAction from "./ScheduledCardAction.vue";

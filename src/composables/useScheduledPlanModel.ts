@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, reactive, ref, watch } from "vue";
-import { chatModelClient, chatModelsEnabled, type ProfileId } from "../api/chat-model-client";
+import { chatModelClient, chatModelsEnabled, kimiK31Candidate, defaultModelProfile, type ProfileId } from "../api/chat-model-client";
 import { useChatStore } from "../stores/chat.store";
-import type { TargetMode } from "../domain/scheduled-plan.generated";
+import type { TargetMode } from "../domain/scheduled-plan-v2.generated";
 
 /** Plan execution selection is independent of the conversation used to draft it. */
 export function useScheduledPlanModel(
@@ -10,14 +10,16 @@ export function useScheduledPlanModel(
 ) {
   const chat = chatModelsEnabled ? useChatStore() : null;
   const modelOptions = reactive<{ label: string; value: string; disabled: boolean }[]>([
-    { label: "Kimi K3 · max", value: "kimi-k3-max-v1", disabled: false },
+    { label: kimiK31Candidate ? "Kimi K3.1 Pro · max" : "Kimi K3 · max", value: defaultModelProfile, disabled: true },
     { label: "MiniMax M3", value: "minimax-m3-high-v1", disabled: false },
   ]);
   const target = computed(() => form.mode === "existing_chat" ? form.conversationId : form.mode === "dedicated_chat" ? boundConversation() : null);
   const modelLocked = computed(() => form.mode === "existing_chat" || target.value !== null);
   const modelReady = ref(!chatModelsEnabled), notice = ref("");
   let epoch = 0;
-  const modelNotice = computed(() => modelReady.value && modelOptions.some(m => m.value === form.modelProfile && m.disabled)
+  const modelNotice = computed(() => kimiK31Candidate && form.modelProfile === "kimi-k3-max-v1"
+    ? (modelLocked.value ? "关联聊天使用已退役的 Kimi K3。请先在聊天中确认切换模型，再重新打开计划审阅。" : "Kimi K3 已退役。请明确选择新模型并保存，再重新授权。")
+    : modelReady.value && modelOptions.some(m => m.value === form.modelProfile && m.disabled)
     ? "执行模型未配置，请选择可用模型。" : notice.value);
   watch([() => form.mode, target, () => chat?.context?.contextId], async () => {
     const current = ++epoch;
@@ -40,8 +42,11 @@ export function useScheduledPlanModel(
       }
       modelOptions.splice(0, modelOptions.length, ...catalog.models.map(m => ({
         label: m.profile.label + (m.profile.effort === "max" ? " · max" : "") + (m.available ? "" : "（未配置）"),
-        value: m.profile.profile_id, disabled: !m.available,
+        value: m.profile.profile_id, disabled: !m.available || (kimiK31Candidate && m.profile.profile_id === "kimi-k3-max-v1"),
       })));
+      if (kimiK31Candidate && form.modelProfile === "kimi-k3-max-v1" && !modelOptions.some(m => m.value === form.modelProfile)) {
+        modelOptions.push({label:"Kimi K3（已退役）",value:"kimi-k3-max-v1",disabled:true});
+      }
       modelReady.value = true;
       notice.value = modelLocked.value
         ? "采用关联聊天当前已确认的模型；保存后需按新配置重新授权，聊天不会被自动切换。"

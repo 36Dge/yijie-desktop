@@ -245,6 +245,7 @@ fn validate_grant(
         GrantState::Active => {}
     }
     let p = plan(db, scope, &g.plan_id)?;
+    super::model_retirement::require_execution(db, scope, &p)?;
     let w = workspace(db, scope, &p)?;
     if definition_digest(&p, &w)? != g.definition_digest || w != g.workspace {
         return Err(Error::GrantStale);
@@ -292,6 +293,7 @@ impl ChatRepository {
             return grant(&tx, &scope, &gid, now); // replay never refreshes/rebinds authority
         }
         let p = plan(&tx, &scope, &request.plan_id)?;
+        super::model_retirement::require_execution(&tx, &scope, &p)?;
         if p.state == PlanState::Deleted {
             return Err(Error::NotFound);
         }

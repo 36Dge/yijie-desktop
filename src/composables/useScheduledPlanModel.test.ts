@@ -4,10 +4,10 @@ import { defineComponent, reactive, ref } from "vue";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { modelDefinitions } from "../domain/chat-models.generated";
 import type { ProfileId } from "../api/chat-model-client";
-import type { TargetMode } from "../domain/scheduled-plan.generated";
+import type { TargetMode } from "../domain/scheduled-plan-v2.generated";
 import { useScheduledPlanModel } from "./useScheduledPlanModel";
 const client = vi.hoisted(() => ({ catalog: vi.fn(), state: vi.fn() }));
-vi.mock("../api/chat-model-client", () => ({ chatModelsEnabled: true, chatModelClient: client }));
+vi.mock("../api/chat-model-client", () => ({ chatModelsEnabled: true, chatModelClient: client, kimiK31Candidate: false, defaultModelProfile: "kimi-k3-max-v1" }));
 vi.mock("../stores/chat.store", () => ({ useChatStore: () => ({ context: { contextId: "scope" } }) }));
 const roots: ReturnType<typeof mount>[] = [];
 function setup(mode: TargetMode, bound: string | null = null) {

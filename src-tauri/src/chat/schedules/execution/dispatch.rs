@@ -88,6 +88,7 @@ pub(crate) fn validate_operation(
     triggers::validate_send(db, &r, lifecycle, at).map_err(denied)?;
     let g = grant(db, scope, &r.grant_id, at).map_err(denied)?;
     let p = plan(db, scope, &r.plan_id).map_err(denied)?;
+    super::super::model_retirement::require_execution(db, scope, &p).map_err(denied)?;
     let w = workspace(db, scope, &p).map_err(denied)?;
     if matches!(g.state, GrantState::Expired | GrantState::Stale)
         || g.authorization_revision != a.revision

@@ -22,6 +22,7 @@ export default tseslint.config(
       "src/api/generated/chat-turn-timing-validator.gen.js",
       "src/api/generated/workflow-local-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-validator.gen.js",
+      "src/api/generated/scheduled-task-ipc-v2-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-formats.gen.js",
     ],
   },

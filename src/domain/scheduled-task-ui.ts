@@ -1,5 +1,5 @@
-import type { TimeRule, TargetMode, PlanState } from "./scheduled-plan.generated";
-import type { IpcErrorCode, RecordView, PauseReason, Timing } from "../api/generated/scheduled-task-ipc.gen";
+import type { TimeRule, TargetMode, PlanState } from "./scheduled-plan-v2.generated";
+import type { IpcErrorCode, RecordView, PauseReason, Timing } from "../api/generated/scheduled-task-ipc-v2.gen";
 
 export const stateLabels: Record<PlanState, string> = { paused: "已暂停", enabled: "已开启", completed: "已完成", deleted: "已删除" };
 export const targetLabels: Record<TargetMode, string> = { dedicated_chat: "专属聊天", new_chat_each_run: "每次新建聊天", existing_chat: "已有聊天" };
@@ -112,5 +112,5 @@ export const pauseReasonLabels: Record<PauseReason, string> = {
 };
 
 export function scheduleModelLabel(profile?: string): string {
-  return profile === "kimi-k3-max-v1" ? "Kimi K3 · max" : profile === "minimax-m3-high-v1" ? "MiniMax M3" : "MiniMax M3（既有配置）";
+  return profile === "kimi-k3-1-pro-max-v1" ? "Kimi K3.1 Pro · max" : profile === "kimi-k3-max-v1" ? "Kimi K3 · max（历史模型）" : profile === "minimax-m3-high-v1" ? "MiniMax M3" : "MiniMax M3（既有配置）";
 }

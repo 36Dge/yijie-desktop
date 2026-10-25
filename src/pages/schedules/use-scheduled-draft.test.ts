@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { effectScope, nextTick, reactive } from "vue";
 import { createScheduledTaskNativeClient } from "../../api/scheduled-task-native-client";
-import type { DraftPreview, Requests } from "../../api/generated/scheduled-task-ipc.gen";
+import type { DraftPreview, Requests } from "../../api/generated/scheduled-task-ipc-v2.gen";
 import { useScheduledDraft } from "./use-scheduled-draft";
 
 const stores = vi.hoisted(() => ({ chat: {} as object, permission: {} as object }));
