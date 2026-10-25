@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "01e3c762a5678473afc1e55542331b45421d7dbf2cbcb46afda9cb71462b3499"
   },
   "host": {
-    "base_commit": "3f6b609bc9755f9125636317209f4de07a867590",
+    "base_commit": "3c5289854d88ca6ed69b17bd806fca2efc0bbbcd",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -320,8 +320,8 @@
       "internal/session/chat_models_test.go": "8ff392cc1ff5ca733f0eca1322075ba3c614c26cf5b11e09f15f94e5522fb7ba",
       "internal/session/chat_models_v2.go": "e6801ee6c5ac7dd979f2791fbc44f22f6290eb2bf99d344fb06818c077b06237",
       "internal/session/chat_models_v2_native_test.go": "8ae332b0627063d44bafd515af3f490ebdd0ad2aac342872bb9104e348dc2fc0",
-      "internal/session/chat_models_v2_operation.go": "ecc4165715e1726e87431a5494121e4292cb8fd94cc90177e54945ab8fbe6904",
-      "internal/session/chat_models_v2_operation_test.go": "66d424432ba5ce76a9673a2c2b122d6e182318d0f8112bfec192ee745b041c9b",
+      "internal/session/chat_models_v2_operation.go": "eb9abd693ba43588d5ebc703475bcf8722abba353be0e332361c78ea0fba5e6d",
+      "internal/session/chat_models_v2_operation_test.go": "2da32b6b6df040dda309e016a2d1a90c07e33d1e2558d99a026d7a2d9c22597a",
       "internal/session/chat_models_v2_storage.go": "4e1558e267b658dd653a2b8a155be3385f83b61dbf47d7771dde2b4fe232df83",
       "internal/session/chat_models_v2_test.go": "098754095fc78d05ab9e3fdd2da825b63ecfe340732ba81e09b8bdb76a3efe07",
       "internal/session/content_blocks.go": "54a00e4802e3a6f1df88a770558b3a0be27726a8b1d6b5d11de5c1b49cf0084c",
