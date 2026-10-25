@@ -31,7 +31,13 @@ const upcomingModels: readonly { label: string; icon: YjIconName }[] = [
 ];
 const selected = computed(() => props.profile ? presentation[props.profile] : null);
 const label = computed(() => props.saving ? "正在切换模型…" : props.loading ? "模型加载中" : selected.value?.label ?? "模型待识别");
-const unavailable = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile)?.available === false);
+const selectedAvailability = computed(() => props.catalog?.models.find((entry) => entry.profile.profile_id === props.profile));
+const unavailable = computed(() => selectedAvailability.value?.available === false);
+function unavailableLabel(reason?: string): string {
+  if (reason === "activation_required") return "模型暂未启用";
+  if (reason === "runtime_unavailable") return "模型暂不可用";
+  return "模型未配置";
+}
 const blocked = computed(() => props.disabled || props.loading || props.saving);
 watch(blocked, (value) => { if (value) open.value = false; });
 watch(open, async (value) => {
@@ -63,7 +69,7 @@ function key(event: KeyboardEvent): void {
   <Teleport to="body"><div ref="overlay" class="model-overlay chat-control-overlay" /></Teleport>
   <NPopover :to="overlay ?? false" v-model:show="open" trigger="click" placement="top-end" :show-arrow="false" :disabled="blocked" raw>
     <template #trigger>
-      <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" :title="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? '模型未配置，请选择可用模型' : label" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
+      <button ref="trigger" class="model-trigger yj-control yj-control--pill" type="button" :disabled="blocked" :aria-label="`选择对话模型，当前 ${label}`" :aria-expanded="open" aria-haspopup="menu" :title="disabled ? (disabledReason ?? '当前任务结束后可切换模型') : unavailable ? `${unavailableLabel(selectedAvailability?.reason)}，请选择可用模型` : label" @keydown.stop @keydown.down.prevent="open = !blocked" @keydown.esc="open = false">
         <span v-if="selected" class="model-brand model-trigger-brand" :class="{ 'is-kimi': selected.icon === 'modelKimi' }"><YjIcon :name="selected.icon" size="sm" /></span>
         <span>{{ label }}</span>
         <YjIcon class="yj-control__chevron" name="chevronDown" size="xs" tone="muted" />
@@ -73,7 +79,7 @@ function key(event: KeyboardEvent): void {
       <button v-for="entry in catalog?.models ?? []" :key="entry.profile.profile_id" class="chat-control-option" type="button" role="menuitemradio" :aria-checked="entry.profile.profile_id === profile" :disabled="!entry.available" @click="choose(entry.profile.profile_id)">
         <span class="model-brand" :class="{ 'is-kimi': presentation[entry.profile.profile_id].icon === 'modelKimi' }"><YjIcon :name="presentation[entry.profile.profile_id].icon" size="sm" /></span>
         <span class="model-option-label">{{ presentation[entry.profile.profile_id].label }}</span>
-        <span v-if="!entry.available" class="model-option-status">模型未配置</span>
+        <span v-if="!entry.available" class="model-option-status">{{ unavailableLabel(entry.reason) }}</span>
       </button>
       <span v-if="!catalog?.models.length" class="model-menu-empty">暂无可用模型</span>
       <NTooltip v-for="entry in upcomingModels" :key="entry.label" :to="overlay ?? false" placement="top" :show-arrow="false" :style="{ zoom: 'var(--yj-ui-scale, 1)' }">
@@ -90,7 +96,7 @@ function key(event: KeyboardEvent): void {
     </div>
   </NPopover>
   <button v-if="error" class="model-retry yj-control" type="button" :disabled="saving || disabled" :title="error" aria-label="重试模型操作" @click="emit('retry')">重试</button>
-  <span class="sr-only" role="status">{{ error || (unavailable ? '模型未配置' : '') }}</span>
+  <span class="sr-only" role="status">{{ error || (unavailable ? unavailableLabel(selectedAvailability?.reason) : '') }}</span>
 </template>
 
 <style scoped>

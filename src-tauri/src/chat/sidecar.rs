@@ -89,6 +89,7 @@ pub struct SidecarConfig {
     minimax_api_key_file: Option<PathBuf>,
     chat_models_enabled: bool,
     kimi_api_key_file: Option<PathBuf>,
+    kimi_k31_execution_paused: bool,
 }
 
 impl SidecarConfig {
@@ -179,6 +180,12 @@ impl SidecarConfig {
         let minimax_provider_enabled =
             parse_minimax_provider(&read_optional_environment(MODEL_PROVIDER_ENV)?)?;
         let chat_models_enabled = super::models::enabled();
+        let kimi_k31_execution_paused = kimi_k31_pause_setting(
+            super::models::v2_enabled() && chat_models_enabled,
+            std::env::var("YIJIE_KIMI_K31_EXECUTION_PAUSED")
+                .ok()
+                .as_deref(),
+        )?;
         if super::models::v2_enabled()
             && (super::connectors::enabled()
                 || super::experts::enabled()
@@ -248,6 +255,7 @@ impl SidecarConfig {
             minimax_api_key_file,
             chat_models_enabled,
             kimi_api_key_file,
+            kimi_k31_execution_paused,
         }))
     }
 
@@ -402,6 +410,9 @@ impl SidecarConfig {
             values.push(("YIJIE_CHAT_MODELS_ENABLED", "true".to_owned()));
             if cfg!(feature = "kimi-k31-pro-candidate") {
                 values.push(("YIJIE_KIMI_K31_PRO_CANDIDATE", "true".to_owned()));
+                values.extend(kimi_k31_activation_environment(
+                    self.kimi_k31_execution_paused,
+                ));
             }
             if let Some(file) = &self.kimi_api_key_file {
                 values.push((
@@ -474,6 +485,21 @@ fn feat137_exact_local_enabled(
         return Err(ChatError::InvalidConfiguration);
     }
     Ok(enabled)
+}
+
+fn kimi_k31_pause_setting(candidate: bool, value: Option<&str>) -> Result<bool, ChatError> {
+    match value {
+        None | Some("") | Some("false") => Ok(false),
+        Some("true") if candidate => Ok(true),
+        _ => Err(ChatError::InvalidConfiguration),
+    }
+}
+fn kimi_k31_activation_environment(paused: bool) -> Vec<(&'static str, String)> {
+    if paused {
+        vec![("YIJIE_KIMI_K31_EXECUTION_PAUSED", "true".to_owned())]
+    } else {
+        Vec::new()
+    }
 }
 
 fn read_exact_boolean_environment(name: &str) -> Result<bool, ChatError> {
@@ -2041,6 +2067,25 @@ mod tests {
     }
 
     #[test]
+    fn feat164_pause_is_explicit_and_reaches_only_candidate_child() {
+        for candidate in [false, true] {
+            for value in [None, Some(""), Some("false")] {
+                assert_eq!(kimi_k31_pause_setting(candidate, value), Ok(false));
+            }
+            assert_eq!(
+                kimi_k31_pause_setting(candidate, Some("true")).is_ok(),
+                candidate
+            );
+            assert!(kimi_k31_pause_setting(candidate, Some("yes")).is_err());
+        }
+        assert!(kimi_k31_activation_environment(false).is_empty());
+        assert_eq!(
+            kimi_k31_activation_environment(true),
+            vec![("YIJIE_KIMI_K31_EXECUTION_PAUSED", "true".into())]
+        );
+    }
+
+    #[test]
     fn sidecar_environment_is_allowlisted_and_contains_no_provider_secret() {
         let config = SidecarConfig {
             binary: PathBuf::from("/synthetic/host"),
@@ -2060,6 +2105,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let environment = config.environment(
             "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
@@ -2187,6 +2233,7 @@ mod tests {
             minimax_api_key_file: Some(PathBuf::from("/ordinary/key-file")),
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         for demo in [false, true] {
             let values = config.environment("native-check", None, None, demo, None);
@@ -2232,6 +2279,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let child_environment = |config: &SidecarConfig| {
             config.environment(
@@ -2319,6 +2367,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let roots = SkillRoots {
             bundle_root: PathBuf::from("/Applications/YiJie.app/Contents/Resources/skill-packages"),
@@ -2379,6 +2428,7 @@ mod tests {
             minimax_api_key_file: Some(canonical.clone()),
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         assert_eq!(config.validate_provider_key_file(), Ok(()));
         let environment = config.environment(
@@ -2598,6 +2648,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -2682,6 +2733,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let host_root = create_private_directory(&root.join("host")).unwrap();
         let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
@@ -2808,6 +2860,7 @@ mod tests {
                 minimax_api_key_file: None,
                 chat_models_enabled: false,
                 kimi_api_key_file: None,
+                kimi_k31_execution_paused: false,
             };
             let supervisor = SidecarSupervisor {
                 market_provider_only: false,
@@ -2907,6 +2960,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let supervisor = SidecarSupervisor {
             market_provider_only: false,
@@ -3279,6 +3333,7 @@ mod tests {
             minimax_api_key_file: None,
             chat_models_enabled: false,
             kimi_api_key_file: None,
+            kimi_k31_execution_paused: false,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

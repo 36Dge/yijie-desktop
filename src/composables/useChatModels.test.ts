@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { modelDefinitions } from "../domain/chat-models.generated";
 import { useChatModels } from "./useChatModels";
 const client=vi.hoisted(()=>({catalog:vi.fn(),state:vi.fn(),select:vi.fn()}));
-vi.mock("../api/chat-model-client",()=>({chatModelsEnabled:true,chatModelClient:client}));
+vi.mock("../api/chat-model-client",()=>({chatModelsEnabled:true,defaultModelProfile:"kimi-k3-max-v1",chatModelClient:client}));
 const wrappers:ReturnType<typeof mount>[]=[];
 function setup(id:string|null=null){const session=ref(id),busy=ref(false);let models!:ReturnType<typeof useChatModels>;wrappers.push(mount(defineComponent({setup(){models=useChatModels(()=>"scope",()=>session.value,()=>busy.value);return()=>null;}})));return{models,session,busy};}
 beforeEach(()=>{vi.resetAllMocks();client.catalog.mockResolvedValue({schema_version:1,default_profile:"kimi-k3-max-v1",models:modelDefinitions.map(profile=>({profile,available:true,reason:"ready"}))});client.state.mockResolvedValue({profileId:"minimax-m3-high-v1",revision:0,state:"ready"});});
