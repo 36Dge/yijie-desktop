@@ -1884,3 +1884,6 @@ pub(crate) mod models_generated;
 pub mod artifact_media;
 #[allow(dead_code)] // Shared generated tool DTOs are consumed by the Host adapter.
 mod artifact_media_generated;
+
+#[cfg(all(test, feature = "kimi-k31-pro-candidate"))]
+mod feat164_boundary_tests;

@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "01e3c762a5678473afc1e55542331b45421d7dbf2cbcb46afda9cb71462b3499"
   },
   "host": {
-    "base_commit": "3c5289854d88ca6ed69b17bd806fca2efc0bbbcd",
+    "base_commit": "57c29ea03e3de39161a7c28080f9388f00cd1735",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -154,6 +154,7 @@
       "internal/app/feat136_handler_test.go": "0f25fc2cdf0337be293f63d99fbdfb1adb103fcdb368be0d50a033abaca88cde",
       "internal/app/feat137_config_test.go": "4e8b63e0cf518a7320b9e6c9a0f8c86165cc0dde2c7fc4fd5dcbbb8cddf3ec11",
       "internal/app/feat137_handler_test.go": "8b0ddadb8179a619997aeb6884ddcb18cb154b7d978af19dcfdc0a4b409e06c4",
+      "internal/app/feat164_native_boundary_test.go": "46e0d8c58cfadaf2d3dd719bc4b0a2b8b8f82679965e0c7138633a279de50029",
       "internal/app/kimi_k31_activation.go": "506f8c24ac06feea524b50c9c8300c781071d606b304d5c78a90227f6dba084d",
       "internal/app/kimi_k31_activation_test.go": "a11eaad852a7d62074c2550fcd2bedef678a28c06925bf123120e7fe3001a910",
       "internal/app/market_config.go": "2566a24ebbd2542a7e467d4a6cf5d364030a2cd36eb65b5c9ced9a19c61f435d",
@@ -344,6 +345,7 @@
       "internal/session/feat136_redaction.go": "f4d5f07c1b1572e7bd6a10d6ba35d6c9c6739cbe7ca34ea90a5597ec1f6f64b9",
       "internal/session/feat137_approval.go": "98b4f461a9b0c3607a5d188d9516520a48ece31a4ef13ccfe1ecb2566cfc3486",
       "internal/session/feat137_approval_test.go": "b0c64d9d47adc7503c8f91cff11acd7dc933c40b80af74cdf750de330770a2f7",
+      "internal/session/feat164_migration_conformance_test.go": "d3598b4c63a53968b4c5e8ada69f9de3a03ddf3ee1ed5ffe4ea012367297fc7a",
       "internal/session/fixtures/synthetic-video-16x16.mp4.base64": "d8a7a55c786dcde9367125d806e0cf5b014fb8f70801c97b80a70d5160f95f8a",
       "internal/session/id.go": "934ecfb8891ca36d5355b5132f53188f3764d9b0cc7ef1abcee86ca2aba04895",
       "internal/session/kimi_k31_title_test.go": "0baf042df45e7e767623c9daaa6efb263447ed378bde634dccced4d43b07c5c5",
