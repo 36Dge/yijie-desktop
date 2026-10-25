@@ -29,6 +29,8 @@ RESERVATION = CONTEXT * 13 + MAX_OUTPUT * 68
 LIMIT = 20_000_000
 RESUME_LIMIT = 30_000_000
 RESUME_ID = "FEAT-164-20261025-30CNY-ONE-HTTP"
+SUCCESSOR_ID = "FEAT-164-20261026-30CNY-THREE-HTTP"
+SUCCESSOR_NAME = "g2v-real-budget-ledger-r3.json"
 
 
 def canonical_digest(value):
@@ -62,6 +64,34 @@ def validate_resume_authorization(value):
             or value["preserve_unknown_reservations"] is not True
             or value["failure_policy"] != "stop" or value["scope"] != "one_budgeted_text_g2v"):
         raise ValueError("Resume authorization differs from the approved one-request scope")
+
+
+def validate_successor_authorization(value):
+    expected = {"schema_version", "feature", "authorization_id", "approved_by", "approved_on",
+                "approval_source", "previous_ledger_sha256", "limit_micro_cny",
+                "additional_http_requests", "preserve_unknown_reservations", "failure_policy", "scope",
+                "successor_ledger_name"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Closed successor authorization required")
+    digest = value["previous_ledger_sha256"]
+    if (type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or value["feature"] != "FEAT-164" or value["authorization_id"] != SUCCESSOR_ID
+            or value["approved_on"] != "2026-10-26"
+            or value["approval_source"] != "current-user-confirmation-2026-10-26-plus-two"
+            or not isinstance(value["approved_by"], str) or not value["approved_by"].strip()
+            or len(value["approved_by"]) > 128 or not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or type(value["limit_micro_cny"]) is not int or value["limit_micro_cny"] != RESUME_LIMIT
+            or type(value["additional_http_requests"]) is not int or value["additional_http_requests"] != 3
+            or value["preserve_unknown_reservations"] is not True or value["failure_policy"] != "stop"
+            or value["scope"] != "bounded_text_g2v_successor" or value["successor_ledger_name"] != SUCCESSOR_NAME):
+        raise ValueError("Successor authorization differs from the approved three-request scope")
+
+
+def successful_terminal(row):
+    return (row.get("http_status") == 200 and row.get("terminal") == "response.completed"
+            and row.get("response_status") == "completed" and row.get("terminal_count") == 1
+            and row.get("stream_complete") is True and row.get("response_model") == MODEL)
 
 
 def credential(path):
@@ -124,15 +154,15 @@ def prepare_request(payload):
 
 
 class Budget:
-    def __init__(self, ledger):
+    def __init__(self, ledger, *, _state=None):
         self.path = ledger
-        self.state = json.loads(ledger.read_text()) if ledger.exists() else {
+        self.state = copy.deepcopy(_state) if _state is not None else json.loads(ledger.read_text()) if ledger.exists() else {
             "feature": "FEAT-164", "limit_micro_cny": LIMIT, "max_http_requests": 8,
             "scope": "budgeted_text_image_g2v_not_raw_request_or_search_qualification",
             "charged_upper_micro_cny": 0, "requests": [], "halted": False,
         }
         version = self.state.get("schema_version", 1)
-        if self.state.get("feature") != "FEAT-164" or version not in (1, 2):
+        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3):
             raise ValueError("Independent approved FEAT-164 ledger required")
         rows = self.state["requests"]
         if not isinstance(rows, list) or any(r.get("ordinal") != i + 1 or r.get("status") not in
@@ -142,7 +172,7 @@ class Budget:
         if version == 1:
             if self.state["limit_micro_cny"] != LIMIT or self.state["max_http_requests"] != 8:
                 raise ValueError("Legacy budget limits differ")
-        else:
+        elif version == 2:
             receipt = self.state.get("resume_receipt", {})
             authorization = receipt.get("authorization")
             validate_resume_authorization(authorization)
@@ -157,6 +187,33 @@ class Budget:
                     or self.state["max_http_requests"] != 2):
                 raise ValueError("Resume receipt or preserved history differs")
             self.acknowledged_unknown = {1}
+        else:
+            receipt = self.state.get("successor_receipt", {})
+            authorization = receipt.get("authorization")
+            validate_successor_authorization(authorization)
+            prior = receipt.get("predecessor_state", {})
+            raw_prior = receipt.get("predecessor_json")
+            if (not isinstance(prior, dict) or prior.get("schema_version") != 2
+                    or not isinstance(raw_prior, str) or len(raw_prior) > 256 * 1024
+                    or hashlib.sha256(raw_prior.encode()).hexdigest() != authorization["previous_ledger_sha256"]
+                    or json.loads(raw_prior) != prior):
+                raise ValueError("An exact schema2 predecessor is required")
+            previous = Budget(ledger, _state=prior)
+            if (len(previous.state["requests"]) != 2 or prior.get("halted") is not True
+                    or prior.get("meter_state") != "stopped_normally"
+                    or previous.state["requests"][1]["status"] != "settled"
+                    or not successful_terminal(previous.state["requests"][1])
+                    or receipt.get("authorization_sha256") != canonical_digest(authorization)
+                    or receipt.get("predecessor_state_sha256") != canonical_digest(prior)
+                    or receipt.get("base_request_count") != 2 or not 2 <= len(rows) <= 5
+                    or receipt.get("base_requests_sha256") != canonical_digest(rows[:2])
+                    or rows[:2] != previous.state["requests"]
+                    or self.state["limit_micro_cny"] != RESUME_LIMIT or self.state["max_http_requests"] != 5):
+                raise ValueError("Successor receipt or preserved predecessor differs")
+            self.acknowledged_unknown = {1}
+            # Settled cost is not permission to continue after an unsuccessful response.
+            if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[2:]):
+                self.state["halted"] = True
         expected = sum(row_charge(r) for r in rows)
         if expected != self.state["charged_upper_micro_cny"] or not 0 <= expected <= self.state["limit_micro_cny"]:
             raise ValueError("Ledger cost accounting differs")
@@ -194,7 +251,7 @@ class Budget:
                     or self.state["charged_upper_micro_cny"] + RESERVATION > self.state["limit_micro_cny"]):
                 raise ValueError("Verification budget unavailable")
             if self.acknowledged_unknown and metadata["image_count"] != 0:
-                raise ValueError("The one-request resume is text-only")
+                raise ValueError("The approved resume is text-only")
             if metadata["image_count"] and sum(r["image_count"] for r in self.state["requests"]) >= 1:
                 raise ValueError("Image budget unavailable")
             row = {**metadata, "ordinal": len(self.state["requests"]) + 1,
@@ -223,7 +280,11 @@ class Budget:
             else:
                 row["status"] = "unknown_reserved"
                 self.state["halted"] = True
-            if self.acknowledged_unknown:
+            if self.state.get("schema_version") == 3:
+                if not valid or not successful_terminal(row) or len(self.state["requests"]) >= 5:
+                    self.state["halted"] = True
+                    self.state["stop_reason"] = "successor_failed_or_exhausted"
+            elif self.acknowledged_unknown:
                 # Success also exhausts the one additional request. Failed or
                 # incomplete responses may settle cost, but never reopen quota.
                 self.state["halted"] = True
@@ -262,6 +323,47 @@ def resume_ledger(ledger, authorization):
             raise ValueError("Preserved budget exceeds the approved resume limit")
         budget.save()
         return {"authorization_id": RESUME_ID, "already_applied": False, "remaining_http_requests": 1}
+
+
+def create_successor_ledger(previous_ledger, ledger, authorization):
+    """Create one separately named successor; never rewrite the old ledger or perform HTTP."""
+    validate_successor_authorization(authorization)
+    if (ledger.name != SUCCESSOR_NAME or ledger.resolve() == previous_ledger.resolve()
+            or ledger.parent.resolve() != previous_ledger.parent.resolve()):
+        raise ValueError("Use the separate approved successor name")
+    with open(previous_ledger.with_suffix(".lock"), "a") as old_guard, open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(old_guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = previous_ledger.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != authorization["previous_ledger_sha256"]:
+            raise ValueError("Predecessor bytes differ from approval")
+        previous = Budget(previous_ledger)
+        prior = copy.deepcopy(previous.state)
+        if (prior.get("schema_version") != 2 or len(prior["requests"]) != 2 or prior.get("halted") is not True
+                or prior.get("meter_state") != "stopped_normally" or prior["requests"][1]["status"] != "settled"
+                or not successful_terminal(prior["requests"][1]) or prior["charged_upper_micro_cny"] + RESERVATION > RESUME_LIMIT):
+            raise ValueError("Stopped predecessor or remaining budget not qualified")
+        if ledger.exists():
+            existing = Budget(ledger)
+            receipt = existing.state.get("successor_receipt", {})
+            if receipt.get("authorization") != authorization or receipt.get("predecessor_state") != prior:
+                raise ValueError("An existing ledger cannot be replaced or refilled")
+            return {"authorization_id": SUCCESSOR_ID, "already_applied": True,
+                    "remaining_http_requests": 0 if existing.state["halted"] else max(0, 5 - len(existing.state["requests"]))}
+        state = copy.deepcopy(prior)
+        state.update(schema_version=3, max_http_requests=5, halted=False, meter_state="created",
+                     scope="bounded_text_g2v_successor")
+        state.pop("stop_reason", None)
+        state["successor_receipt"] = {"authorization": copy.deepcopy(authorization),
+            "authorization_sha256": canonical_digest(authorization), "predecessor_state": prior, "predecessor_json": raw.decode(),
+            "predecessor_state_sha256": canonical_digest(prior), "base_request_count": 2,
+            "base_requests_sha256": canonical_digest(prior["requests"]),
+            "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        budget = Budget(ledger, _state=state)
+        budget.save()
+        if previous_ledger.read_bytes() != raw:
+            raise ValueError("Predecessor changed during successor creation")
+        return {"authorization_id": SUCCESSOR_ID, "already_applied": False, "remaining_http_requests": 3}
 
 
 class Observer:
@@ -330,7 +432,15 @@ def main():
     parser.add_argument("--kimi-key-file", type=Path)
     parser.add_argument("--control-token-file", type=Path)
     parser.add_argument("--apply-resume-authorization", type=Path)
+    parser.add_argument("--create-successor-from", type=Path)
+    parser.add_argument("--successor-authorization", type=Path)
     args = parser.parse_args()
+    if args.create_successor_from or args.successor_authorization:
+        if not (args.create_successor_from and args.successor_authorization) or args.apply_resume_authorization or args.kimi_key_file or args.control_token_file:
+            parser.error("Successor creation is an offline paired action without credentials")
+        print(json.dumps(create_successor_ledger(args.create_successor_from, args.ledger,
+            json.loads(args.successor_authorization.read_text()))))
+        return
     if args.apply_resume_authorization:
         if args.kimi_key_file or args.control_token_file:
             parser.error("Resume is an offline action; do not pass credentials")
