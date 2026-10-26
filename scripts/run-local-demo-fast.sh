@@ -351,7 +351,7 @@ fi
   fail "Codex Runtime binary differs from the selected pinned artifact"
 [[ "$(sha256_file "$codex_manifest")" == "$runtime_manifest_sha256" ]] ||
   fail "Codex Runtime manifest differs from the selected pinned artifact"
-if [[ "$market_provider_only" != "true" ]]; then
+if [[ "$market_provider_only" != "true" && "$migrate_isolated_k3" != "true" ]]; then
   [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 fi
 
