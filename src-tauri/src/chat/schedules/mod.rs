@@ -19,6 +19,9 @@ pub use store::{ScheduleService, ScheduleStorageMode};
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod feat164_natural_plan_tests;
+
 pub(crate) mod ipc;
 pub(crate) mod ipc_commands_generated;
 #[allow(dead_code)]
