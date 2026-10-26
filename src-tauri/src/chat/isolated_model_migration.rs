@@ -46,13 +46,16 @@ fn admit(application_support: &Path, identifier: &str) -> Result<PathBuf, ChatEr
     if !cfg!(target_os = "macos")
         || !crate::chat::models::v2_enabled()
         || !crate::chat::models::enabled()
-        || identifier != IDENTIFIER
+        || !matches!(
+            identifier,
+            IDENTIFIER | crate::feat164_qualification::IDENTIFIER
+        )
         || std::env::var("YIJIE_FEAT155_SCHEDULED_CANDIDATE").as_deref() != Ok("true")
         || std::env::var("YIJIE_FEAT155_SCHEDULED_DAILY").as_deref() != Ok("false")
     {
         return Err(invalid());
     }
-    let base = application_support.join(IDENTIFIER).join(DIRECTORY);
+    let base = application_support.join(identifier).join(DIRECTORY);
     if !base.is_absolute() || fs::canonicalize(&base).map_err(|_| invalid())? != base {
         return Err(invalid());
     }

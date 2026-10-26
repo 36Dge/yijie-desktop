@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b"
   },
   "host": {
-    "base_commit": "894671b7288b34ca0493064cded3e461c924cd32",
+    "base_commit": "8cd6bccbdc1ac3906aea53d95441299f7cfefcce",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -120,7 +120,7 @@
       "api/openapi/scheduled-plan-draft.yaml": "bb0e63ef235ef0f20ef5226632eb92887a2b5dbbd073472976ef01ba3469427f",
       "api/openapi/scheduled-task-recovery.yaml": "47a1d7f4e5e858116d9f0b80faf86a0e1e5936dfab1ebf6673c9579e5246e9e2",
       "api/protobuf/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "api/runtime-chat-models.candidate.json": "77368ef9db9366a1a511fbda8fff3a0a954b854124af69255f8cac9e1ed4d430",
+      "api/runtime-chat-models.candidate.json": "55d5acf851843731038c594a48dafb2e1ec199ec484fd9959f2f1a4409bb80e1",
       "api/runtime-input-only.candidate.json": "f3dff38e087538e6f3a5a12b7b6a18c1f9737af10db0559c68e038c26d5716fb",
       "api/runtime-kimi-k31-pro.candidate.json": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b",
       "api/runtime-permissions.lock.json": "6fde8a4201efa80808c37c5fff5259fcc6e2ffda0d015ab4411adf52721b07fa",

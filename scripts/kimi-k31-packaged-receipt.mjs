@@ -11,19 +11,23 @@ import {workerBuildInputs} from "./expert-packaged-receipt.mjs";
 import {kimiCallSurfaces} from "./kimi-k31-build-candidate.mjs";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const hash=v=>createHash("sha256").update(v).digest("hex");
-const receipt=path.join(root,".local/feat164-kimi-k31/packaged-launch-receipt.json");
+const qualification=process.env.YIJIE_FEAT164_QUALIFICATION==="true";
+const runtimeRoot=qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
+const receipt=path.join(root,runtimeRoot,"packaged-launch-receipt.json");
+const bundleName=qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
+const identifier=qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
 async function fileRecord(file){
  const stat=await lstat(file);assert(stat.isFile(),"Regular file required");
  const digest=createHash("sha256");for await(const bytes of createReadStream(file))digest.update(bytes);
  return {sha256:digest.digest("hex"),bytes:stat.size,mode:stat.mode&0o777};
 }
 async function inputs(){
- assert.equal(process.env.YIJIE_KIMI_K31_PRO_CANDIDATE,"true");
+ assert(process.env.YIJIE_KIMI_K31_PRO_CANDIDATE==="true" || (qualification && process.env.YIJIE_KIMI_K31_PRO_CANDIDATE==="false"));
  assert(!process.env.TAURI_CONFIG,"Ambient Tauri configuration is unsupported");
  const names=execFileSync("git",["-C",root,"ls-files","-co","--exclude-standard","-z","--","src","src-tauri","scripts","contracts","public","patches","tools","sidecars","package.json","pnpm-lock.yaml","pnpm-workspace.yaml","rust-toolchain.toml","index.html","vite.config.*","tsconfig*.json",".cargo",".npmrc",".gitignore",".gitattributes"],{encoding:"utf8",maxBuffer:32*1024*1024}).split("\0").filter(Boolean);
  for(const name of [".env",".env.local",".env.production",".env.production.local"]){try{await lstat(path.join(root,name));names.push(name);}catch(error){if(error.code!=="ENOENT")throw error;}}
  const sources={};for(const name of [...new Set(names)].sort())sources[name]=await fileRecord(path.join(root,name));
- const keys=[...new Set(["YIJIE_KIMI_K31_CALL_SURFACES","YIJIE_MARKET_CONNECTORS_ENABLED","YIJIE_EXPERTS_ENABLED","YIJIE_ARTIFACT_MEDIA_ENABLED","YIJIE_RUNTIME_PERMISSIONS_ENABLED","YIJIE_MARKET_PROVIDER_ONLY","YIJIE_PERMISSION_VERIFICATION_BASE_URL","NODE_ENV","NODE_OPTIONS","CC","CXX","CFLAGS","CXXFLAGS","LDFLAGS","SDKROOT","MACOSX_DEPLOYMENT_TARGET","PKG_CONFIG_PATH",...Object.keys(process.env).filter(key=>/^(VITE_|TAURI_|CARGO_|RUST)/.test(key))])].sort();
+ const keys=[...new Set(["YIJIE_FEAT164_QUALIFICATION","YIJIE_KIMI_K31_PRO_CANDIDATE","YIJIE_KIMI_K31_CALL_SURFACES","YIJIE_MARKET_CONNECTORS_ENABLED","YIJIE_EXPERTS_ENABLED","YIJIE_ARTIFACT_MEDIA_ENABLED","YIJIE_RUNTIME_PERMISSIONS_ENABLED","YIJIE_MARKET_PROVIDER_ONLY","YIJIE_PERMISSION_VERIFICATION_BASE_URL","NODE_ENV","NODE_OPTIONS","CC","CXX","CFLAGS","CXXFLAGS","LDFLAGS","SDKROOT","MACOSX_DEPLOYMENT_TARGET","PKG_CONFIG_PATH",...Object.keys(process.env).filter(key=>/^(VITE_|TAURI_|CARGO_|RUST)/.test(key))])].sort();
  const environment=Object.fromEntries(keys.map(key=>[key,hash(JSON.stringify(process.env[key]??null))]));
  return {sources,environment,...(kimiCallSurfaces().market?{workerSources:await workerBuildInputs()}: {})};
 }
@@ -39,8 +43,8 @@ if(action==="--inputs-digest"){
 }else{
  assert(["--record","--check"].includes(action));assert.equal(process.argv.length,action==="--record"?7:5);
  assert(path.isAbsolute(runtimeBinary)&&path.isAbsolute(runtimeManifest));
- const bundle=path.join(root,"src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app");
- assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),"com.yijie.ai.feat164-kimi-k31-r1");
+ const bundle=path.join(root,"src-tauri/target/debug/bundle/macos",bundleName);
+ assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),identifier);
  const bundleFiles=await tree(bundle);assert(bundleFiles["Contents/MacOS/yijie-desktop"].mode&0o111);
  if(kimiCallSurfaces().experts)for(const slot of ["skill-packages","skill-packages-experts"]){
   const expected=await tree(path.join(root,".local",slot==="skill-packages-experts"?"feat164-kimi-k31/skill-packages-experts":slot));
@@ -49,7 +53,7 @@ if(action==="--inputs-digest"){
   const content=files=>Object.fromEntries(Object.entries(files).map(([name,v])=>[name,{sha256:v.sha256,bytes:v.bytes}]));
   assert.deepEqual(content(actual),content(expected),"Packaged expert resources differ from the checked slot");
  }
- const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,".local/feat164-kimi-k31/bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
+ const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
  if(kimiCallSurfaces().market){
   const manifest=path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
   assert.equal(process.env.YIJIE_MARKET_WORKER_MANIFEST,manifest);
@@ -59,7 +63,7 @@ if(action==="--inputs-digest"){
   current.artifacts.worker=await fileRecord(worker.binary);current.artifacts.workerManifest=await fileRecord(manifest);
   assert.equal(current.artifacts.worker.sha256,worker.sha256);assert.equal(current.artifacts.worker.bytes,worker.sizeBytes);
  }
- if(kimiCallSurfaces().media)current.artifacts.adapter=await fileRecord(path.join(root,".local/feat164-kimi-k31/bin/yijie-artifact-mcp"));
+ if(kimiCallSurfaces().media)current.artifacts.adapter=await fileRecord(path.join(root,runtimeRoot,"bin/yijie-artifact-mcp"));
  assert(current.artifacts.host.mode&0o111);assert(current.artifacts.runtime.mode&0o111);
  if(action==="--check"){
   assert.deepEqual(JSON.parse(await readFile(receipt,"utf8")),current,"Candidate sources/environment/artifacts changed; rebuild through the canonical entry");

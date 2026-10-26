@@ -47,6 +47,23 @@ if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   packaged_app="true"
   shift
 fi
+# Fixed offline qualification identity; legacy and candidate share only this root.
+feat164_qualification="false"
+if [[ "$#" -ge 1 && "$1" == "--feat164-qualification" ]]; then
+  [[ "$packaged_app" == "true" ]] || fail "qualification requires --packaged"
+  [[ -z "${TAURI_CONFIG:-}" ]] || fail "qualification rejects ambient Tauri config"
+  [[ "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" == "http://127.0.0.1:18083/v1" ]] || fail "qualification requires the fixed loopback provider"
+  feat164_qualification="true"
+  export YIJIE_FEAT164_QUALIFICATION=true
+  export YIJIE_FEAT155_SCHEDULED_CANDIDATE=true YIJIE_FEAT155_SCHEDULED_DAILY=false
+  export YIJIE_CHAT_MODELS_ENABLED=true YIJIE_MARKET_CONNECTORS_ENABLED=false YIJIE_ARTIFACT_MEDIA_ENABLED=false
+  workflow_requested="false"
+  experts_requested="false"
+  host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
+  shift
+elif [[ "${YIJIE_FEAT164_QUALIFICATION:-false}" != "false" ]]; then
+  fail "qualification requires its explicit canonical selector"
+fi
 # FEAT-164 uses the same canonical bootstrap with a separate app identity and
 # data/binary roots. Prepare-only builds the reviewable candidate without launch.
 kimi_k31_candidate="false"
@@ -79,6 +96,11 @@ if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
 elif [[ "${YIJIE_KIMI_K31_PRO_CANDIDATE:-false}" != "false" ]]; then
   fail "Kimi candidate flag requires its explicit canonical entry"
 fi
+if [[ "$feat164_qualification" == "true" && "$kimi_k31_candidate" == "false" ]]; then
+  export YIJIE_KIMI_K31_PRO_CANDIDATE=false VITE_YIJIE_KIMI_K31_PRO_CANDIDATE=false
+  export YIJIE_KIMI_K31_CALL_SURFACES=ordinary
+  if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
+fi
 # A fixed acceptance profile isolates new content from retained conversations.
 # It changes deployment identity/roots only; all source and install gates remain.
 if [[ "$#" -ge 1 && "$1" == "--experts-local" ]]; then
@@ -91,7 +113,7 @@ elif [[ "$#" -ge 1 && ( "$1" == "--experts-content-v011" || "$1" == "--experts-c
   shift
 fi
 if [[ "$#" == "1" && "$1" == "--reopen" ]]; then
-  [[ "$packaged_app" == "true" && ( "$experts_requested" != "false" || "$kimi_k31_candidate" == "true" ) ]] || fail "--reopen requires an enabled packaged profile"
+  [[ "$packaged_app" == "true" && ( "$experts_requested" != "false" || "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) ]] || fail "--reopen requires an enabled packaged profile"
   reopen_app="true"
   shift
 fi
@@ -228,6 +250,12 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   fi
 fi
 
+if [[ "$feat164_qualification" == "true" ]]; then
+  runtime_root="$desktop_root/.local/feat164-qualification"
+  host_home="$runtime_root/host-home"
+  codex_home="$runtime_root/codex-home"
+  host_binary="$runtime_root/bin/yijie-agent-host"
+fi
 # FEAT-157 belongs to the normal daily client. Keep stable, legacy-model and
 # isolated qualification profiles opt-in, and preserve an explicit false rollback.
 # It selects the Native-owned market Host/worker path; it is not an execution grant.
@@ -249,7 +277,7 @@ if [[ "$scheduled_daily" == "true" && "$chat_models_enabled" == "true" && "$mark
 fi
 experts_requested="${experts_requested:-$experts_default}"
 [[ "$experts_requested" == "true" || "$experts_requested" == "false" ]] || fail "invalid expert selection"
-if [[ "$reopen_app" == "true" && "$experts_requested" != "true" && "$kimi_k31_candidate" != "true" ]]; then
+if [[ "$reopen_app" == "true" && "$experts_requested" != "true" && "$kimi_k31_candidate" != "true" && "$feat164_qualification" != "true" ]]; then
   fail "--reopen requires an enabled packaged expert profile"
 fi
 # Host market admission excludes the legacy FEAT-128 dynamic-tool profile.
@@ -385,7 +413,7 @@ fi
 if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
   expert_build_inputs="$(node scripts/expert-packaged-receipt.mjs --inputs-digest)"
 fi
-if [[ "$kimi_k31_candidate" == "true" && "$reopen_app" == "false" ]]; then
+if [[ ( "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) && "$reopen_app" == "false" ]]; then
   kimi_k31_build_inputs="$(node scripts/kimi-k31-packaged-receipt.mjs --inputs-digest)"
 fi
 if [[ "$reopen_app" == "false" ]]; then
@@ -419,7 +447,11 @@ if [[ "$stable_api_only" == "true" ]]; then
   launch_command=("$bundle_binary")
 elif [[ "$packaged_app" == "true" ]]; then
   if [[ "$reopen_app" == "false" ]]; then
-    if [[ "$kimi_k31_candidate" == "true" ]]; then
+    if [[ "$feat164_qualification" == "true" ]]; then
+      qualification_features=()
+      if [[ "$kimi_k31_candidate" == "true" ]]; then qualification_features=(--features kimi-k31-pro-candidate); fi
+      pnpm tauri:build:demo-fast "${qualification_features[@]+"${qualification_features[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-qualification.conf.json
+    elif [[ "$kimi_k31_candidate" == "true" ]]; then
       pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-kimi-k31.conf.json
     else
     pnpm tauri:build:demo-fast "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
@@ -430,6 +462,7 @@ elif [[ "$packaged_app" == "true" ]]; then
   if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
   fi
+  if [[ "$feat164_qualification" == "true" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164 验收.app/Contents/MacOS/yijie-desktop"; fi
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "Desktop app bundle is missing"
   launch_command=("$bundle_binary")
 else
@@ -455,7 +488,7 @@ if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$pac
   fi
 fi
 
-if [[ "$kimi_k31_candidate" == "true" ]]; then
+if [[ "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ]]; then
   if [[ "$reopen_app" == "true" ]]; then
     node scripts/kimi-k31-packaged-receipt.mjs --check "$codex_binary" "$codex_manifest"
   else

@@ -16,6 +16,10 @@ const git=(root,...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8
 export function chatModelBuildCandidateSelection(environment=process.env){
  assert(environment.YIJIE_ENV==='local'&&environment.YIJIE_LOCAL_PROFILE==='demo_fast'&&environment.YIJIE_CHAT_MODELS_ENABLED==='true','Model candidate is local-only');
  assert([undefined,'','false','true'].includes(environment.YIJIE_EXPERTS_ENABLED),'Invalid expert candidate selection');
+ if(environment.YIJIE_FEAT164_QUALIFICATION==='true'){
+  assert(environment.YIJIE_EXPERTS_ENABLED!=='true' && environment.YIJIE_MARKET_CONNECTORS_ENABLED!=='true' && environment.YIJIE_ARTIFACT_MEDIA_ENABLED!=='true','Legacy qualification is ordinary only');
+  return {feature:'FEAT-156',file:'feat164-legacy-host-build.candidate.json'};
+ }
  if(environment.YIJIE_EXPERTS_ENABLED==='true'){
   assert(environment.YIJIE_MARKET_CONNECTORS_ENABLED==='true'&&environment.YIJIE_RUNTIME_PERMISSIONS_ENABLED==='true','Expert candidate requires the existing model, permission and market families');
   return environment.YIJIE_ARTIFACT_MEDIA_ENABLED==='true' ? {feature:'FEAT-159',file:'artifact-media-host-build.candidate.json'} : {feature:'FEAT-158',file:'experts-host-build.candidate.json'};

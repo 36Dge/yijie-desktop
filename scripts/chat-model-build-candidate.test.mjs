@@ -29,3 +29,13 @@ it.skipIf(process.env.YIJIE_EXPERT_CANDIDATE_CHECK !== "true")("checks the actua
   expect(sources["api/experts.candidate.json"]).toMatch(/^[a-f0-9]{64}$/);
   expect(readFileSync(modelPin).equals(previous)).toBe(true);
 }, 120_000);
+
+
+it("keeps the fixed legacy qualification source separate from daily and expert builds", () => {
+  const qualification = { ...model, YIJIE_FEAT164_QUALIFICATION: "true" };
+  expect(chatModelBuildCandidateSelection(qualification)).toEqual({ feature: "FEAT-156", file: "feat164-legacy-host-build.candidate.json" });
+  expect(chatModelBuildCandidateSelection(model).file).toBe("chat-model-host-build.candidate.json");
+  for (const flag of ["YIJIE_EXPERTS_ENABLED", "YIJIE_MARKET_CONNECTORS_ENABLED", "YIJIE_ARTIFACT_MEDIA_ENABLED"]) {
+    expect(() => chatModelBuildCandidateSelection({ ...qualification, [flag]: "true" })).toThrow();
+  }
+});

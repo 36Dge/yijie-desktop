@@ -6,6 +6,7 @@ mod feat126_secure_storage;
 mod feat128_s10d_runtime;
 #[cfg(feature = "feat128-s7b-runtime")]
 mod feat128_s7b_runtime;
+mod feat164_qualification;
 mod local_profile;
 mod native_auth;
 #[cfg(target_os = "macos")]
@@ -137,6 +138,10 @@ pub fn run() {
             std::process::exit(1);
         }
         return;
+    }
+    if !feat164_qualification::admitted(&context.config().identifier) {
+        eprintln!("FEAT-164 qualification requires its isolated offline assembly");
+        std::process::exit(1);
     }
     #[cfg(target_os = "macos")]
     let _single_instance =
