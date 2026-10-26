@@ -13,3 +13,5 @@ qualification仅接受原已支持的 `http://127.0.0.1:18083/v1` 本机模型�
 资格只能覆盖实跑来源和场景；锁屏时UI记NOT RUN，合成结果不代表供应商真实质量。原候选unknown选择、已消耗grant、旧账本和预占均不处理。
 
 来源复审补充：旧Runtime投影历史base_commit缺少后来加入的被审计源文件，已由原Contracts generator唯一刷新至完整11fd450；旧artifact/patch/schema/Go保持。来源ca06d0999c9a08afe80ab3f34a537d492b830ac7 → Host8cd6bccbdc1ac3906aea53d95441299f7cfefcce（仅consumer元数据），Desktop经原sync更新consumer并冻结独立legacy Host锁与K3.1 Host锁。r5投影仍5b5dad，旧默认Host锁未重写；不能将独立入口资格扩成日常资格。
+
+正常自然旧App实跑后发现Native未传递既有Host前身许可。仅固定qualification identity的编译candidate显式 `YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR=true` 可传递；其它编译identity不接受qualification flag，原普通候选不默认允许。Host仍校验冻结旧配置对，未决配置拒绝不覆盖；该许可不选择thread、不发送turn、不授予计划权限。此为本轮固定旧→新资格接线，Runtime/Host实现不改。

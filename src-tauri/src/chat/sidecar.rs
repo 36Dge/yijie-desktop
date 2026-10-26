@@ -90,6 +90,7 @@ pub struct SidecarConfig {
     chat_models_enabled: bool,
     kimi_api_key_file: Option<PathBuf>,
     kimi_k31_execution_paused: bool,
+    kimi_k31_allow_managed_predecessor: bool,
 }
 
 impl SidecarConfig {
@@ -186,6 +187,13 @@ impl SidecarConfig {
                 .ok()
                 .as_deref(),
         )?;
+        let kimi_k31_allow_managed_predecessor = kimi_k31_predecessor_setting(
+            super::models::v2_enabled() && chat_models_enabled,
+            std::env::var("YIJIE_FEAT164_QUALIFICATION").as_deref() == Ok("true"),
+            std::env::var("YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR")
+                .ok()
+                .as_deref(),
+        )?;
         kimi_k31_surface_settings(
             super::models::v2_enabled(),
             std::env::var("YIJIE_KIMI_K31_CALL_SURFACES")
@@ -258,6 +266,7 @@ impl SidecarConfig {
             chat_models_enabled,
             kimi_api_key_file,
             kimi_k31_execution_paused,
+            kimi_k31_allow_managed_predecessor,
         }))
     }
 
@@ -415,6 +424,12 @@ impl SidecarConfig {
                 values.extend(kimi_k31_activation_environment(
                     self.kimi_k31_execution_paused,
                 ));
+                if self.kimi_k31_allow_managed_predecessor {
+                    values.push((
+                        "YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR",
+                        "true".to_owned(),
+                    ));
+                }
             }
             if let Some(file) = &self.kimi_api_key_file {
                 values.push((
@@ -514,6 +529,20 @@ fn kimi_k31_surface_settings(
         Ok(())
     } else {
         Err(ChatError::InvalidConfiguration)
+    }
+}
+
+// The compiled fixed identity is checked before Native startup. This permission
+// admits only Host's already-reviewed exact predecessor pair, never a turn.
+fn kimi_k31_predecessor_setting(
+    candidate: bool,
+    qualification: bool,
+    value: Option<&str>,
+) -> Result<bool, ChatError> {
+    match value {
+        None | Some("") | Some("false") => Ok(false),
+        Some("true") if candidate && qualification => Ok(true),
+        _ => Err(ChatError::InvalidConfiguration),
     }
 }
 
@@ -2116,6 +2145,27 @@ mod tests {
     }
 
     #[test]
+    fn feat164_predecessor_permission_requires_candidate_and_fixed_qualification() {
+        for candidate in [false, true] {
+            for qualification in [false, true] {
+                for value in [None, Some(""), Some("false")] {
+                    assert_eq!(
+                        kimi_k31_predecessor_setting(candidate, qualification, value),
+                        Ok(false)
+                    );
+                }
+                assert_eq!(
+                    kimi_k31_predecessor_setting(candidate, qualification, Some("true")).is_ok(),
+                    candidate && qualification
+                );
+                assert!(
+                    kimi_k31_predecessor_setting(candidate, qualification, Some("yes")).is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn feat164_pause_is_explicit_and_reaches_only_candidate_child() {
         for candidate in [false, true] {
             for value in [None, Some(""), Some("false")] {
@@ -2155,6 +2205,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let environment = config.environment(
             "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
@@ -2175,6 +2226,7 @@ mod tests {
                 "YIJIE_AGENT_HOST_HOME",
                 "YIJIE_AGENT_HOST_V2_RAW_REASONING_ENABLED",
                 "YIJIE_AGENT_HOST_V2_TITLE_ENABLED",
+                "YIJIE_NATIVE_REASONING_ENABLED",
                 "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED",
                 "YIJIE_AGENT_HOST_V2_MULTIMODAL_TURNS_ENABLED",
                 "YIJIE_AGENT_HOST_INSTANCE_NONCE",
@@ -2182,6 +2234,9 @@ mod tests {
                 "PATH",
             ]
         );
+        assert!(environment
+            .iter()
+            .any(|(name, value)| *name == "YIJIE_NATIVE_REASONING_ENABLED" && value == "false"));
         assert!(!names.iter().any(|name| name.contains("KEY")));
         assert!(!names.iter().any(|name| name.contains("MINIMAX")));
         assert_eq!(
@@ -2201,6 +2256,26 @@ mod tests {
         assert!(environment.iter().any(|(name, value)| {
             *name == "YIJIE_AGENT_HOST_V2_CLEANUP_ENABLED" && value == "true"
         }));
+        let mut candidate = config.clone();
+        candidate.chat_models_enabled = true;
+        candidate.kimi_k31_allow_managed_predecessor = true;
+        let child = candidate.environment(
+            "019fbd88-cbc3-7bf1-934d-7b05cd693f80",
+            None,
+            None,
+            false,
+            None,
+        );
+        assert_eq!(
+            child
+                .iter()
+                .filter(
+                    |(name, value)| *name == "YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR"
+                        && value == "true"
+                )
+                .count(),
+            usize::from(cfg!(feature = "kimi-k31-pro-candidate")),
+        );
     }
 
     #[test]
@@ -2283,6 +2358,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         for demo in [false, true] {
             let values = config.environment("native-check", None, None, demo, None);
@@ -2329,6 +2405,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let child_environment = |config: &SidecarConfig| {
             config.environment(
@@ -2417,6 +2494,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let roots = SkillRoots {
             bundle_root: PathBuf::from("/Applications/YiJie.app/Contents/Resources/skill-packages"),
@@ -2478,6 +2556,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         assert_eq!(config.validate_provider_key_file(), Ok(()));
         let environment = config.environment(
@@ -2698,6 +2777,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let nonce = NONCE;
         let prepared = prepare_capture(&config, nonce).unwrap();
@@ -2783,6 +2863,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let host_root = create_private_directory(&root.join("host")).unwrap();
         let log_directory = create_private_directory(&host_root.join(NONCE)).unwrap();
@@ -2910,6 +2991,7 @@ mod tests {
                 chat_models_enabled: false,
                 kimi_api_key_file: None,
                 kimi_k31_execution_paused: false,
+                kimi_k31_allow_managed_predecessor: false,
             };
             let supervisor = SidecarSupervisor {
                 market_provider_only: false,
@@ -3010,6 +3092,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let supervisor = SidecarSupervisor {
             market_provider_only: false,
@@ -3383,6 +3466,7 @@ mod tests {
             chat_models_enabled: false,
             kimi_api_key_file: None,
             kimi_k31_execution_paused: false,
+            kimi_k31_allow_managed_predecessor: false,
         };
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

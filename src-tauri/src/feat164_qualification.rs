@@ -2,8 +2,10 @@
 pub(crate) const IDENTIFIER: &str = "com.yijie.ai.feat164-qualification-v1";
 
 pub(crate) fn admitted(identifier: &str) -> bool {
-    identifier != IDENTIFIER
-        || (crate::chat::models::enabled()
+    (identifier != IDENTIFIER
+        && std::env::var("YIJIE_FEAT164_QUALIFICATION").as_deref() != Ok("true"))
+        || (identifier == IDENTIFIER
+            && crate::chat::models::enabled()
             && std::env::var("YIJIE_FEAT155_SCHEDULED_CANDIDATE").as_deref() == Ok("true")
             && std::env::var("YIJIE_FEAT155_SCHEDULED_DAILY").as_deref() == Ok("false")
             && std::env::var("YIJIE_PERMISSION_VERIFICATION_BASE_URL").as_deref()
