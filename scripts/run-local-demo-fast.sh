@@ -288,6 +288,11 @@ if [[ "$market_connectors_enabled" == "true" && ! -e "$provider_key_file" ]]; th
   provider_environment=()
 fi
 export YIJIE_MARKET_PROVIDER_ONLY="$market_provider_only"
+# FEAT-164's persisted model-v2 candidate requires the chat reader assembly.
+# Management-only mode intentionally omits that authority; never weaken it.
+if [[ "$kimi_k31_candidate" == "true" && "$market_provider_only" == "true" && "$prepare_only" != "true" ]]; then
+  fail "FEAT-164 chat launch requires its configured model profile; provider-only management cannot open this candidate. Use --prepare-only for a credential-free build."
+fi
 
 # FEAT-158 uses a separately pinned local resource slot in the selected profile;
 # selecting it does not start a conversation or issue an execution grant.
