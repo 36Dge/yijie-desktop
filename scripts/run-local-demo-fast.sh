@@ -98,7 +98,7 @@ elif [[ "${YIJIE_KIMI_K31_PRO_CANDIDATE:-false}" != "false" ]]; then
 fi
 if [[ "$feat164_qualification" == "true" && "$kimi_k31_candidate" == "false" ]]; then
   export YIJIE_KIMI_K31_PRO_CANDIDATE=false VITE_YIJIE_KIMI_K31_PRO_CANDIDATE=false
-  export YIJIE_KIMI_K31_CALL_SURFACES=ordinary
+  unset YIJIE_KIMI_K31_CALL_SURFACES
   if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
 fi
 # A fixed acceptance profile isolates new content from retained conversations.
