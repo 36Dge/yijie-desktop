@@ -3,17 +3,17 @@
   "feature": "FEAT-164",
   "mode": "immutable_local_candidate",
   "release": false,
-  "contracts_commit": "1b357cce0575c492f3715b316ee5f254051acf80",
+  "contracts_commit": "5b5dad9d837ba92abc7c2660d1de1a60f4ed1ba2",
   "contracts": {
-    "chat-models-v2": "3e42b34ee668d42804542f6099ba6919c28e3c3be912b20e0c11878c9e933dbf",
-    "runtime-kimi-k31-pro": "bc2f07d7cef04a27f805fdbadd972a179eba3a7f8e4e24ff4ce2bec25c921d6e"
+    "chat-models-v2": "ab65d904aa5be12b48d703dd6341b96c0706b13daeafba0e58b427381eb8124f",
+    "runtime-kimi-k31-pro": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b"
   },
   "host": {
-    "base_commit": "090c2dbeeeceb0fc87e576d8e13f5c339bf106f0",
+    "base_commit": "894671b7288b34ca0493064cded3e461c924cd32",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
-      "api/chat-models-v2.candidate.json": "3e42b34ee668d42804542f6099ba6919c28e3c3be912b20e0c11878c9e933dbf",
+      "api/chat-models-v2.candidate.json": "ab65d904aa5be12b48d703dd6341b96c0706b13daeafba0e58b427381eb8124f",
       "api/chat-models.candidate.json": "5b1794bf49a55b14a37a89706f0234f0c00d125ab0cf591d9405f7fc07054ae9",
       "api/compatibility/agent-host-runtime-approval-v6-v2.json": "ab5333f9ff1e76dc06827d72ff81f83701d234f91a2cbf6664f146247f24db60",
       "api/compatibility/agent-host-runtime-approval-v6-v3.json": "9c196a0f6e34dfa917f9c3e6f27400307d991b81d37ba911c0f717d40642c90a",
@@ -122,7 +122,7 @@
       "api/protobuf/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "api/runtime-chat-models.candidate.json": "77368ef9db9366a1a511fbda8fff3a0a954b854124af69255f8cac9e1ed4d430",
       "api/runtime-input-only.candidate.json": "f3dff38e087538e6f3a5a12b7b6a18c1f9737af10db0559c68e038c26d5716fb",
-      "api/runtime-kimi-k31-pro.candidate.json": "bc2f07d7cef04a27f805fdbadd972a179eba3a7f8e4e24ff4ce2bec25c921d6e",
+      "api/runtime-kimi-k31-pro.candidate.json": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b",
       "api/runtime-permissions.lock.json": "6fde8a4201efa80808c37c5fff5259fcc6e2ffda0d015ab4411adf52721b07fa",
       "api/scheduled-draft.candidate.json": "2120913718e5cc7b07707b7651e87f137962fe07fa644ea4fa2278588ceb875c",
       "api/scheduled-task-recovery.candidate.json": "b111633640c57639415d3a20e0a4028561e3c7d707b9fe08dc2e132cece32186",
@@ -297,7 +297,7 @@
       "internal/contracts/runtimeinputonly/types.gen.go": "4c5dcf2b892bc5f86dcb8b613e19842b081f90ea38cadba7a84b30256114ff00",
       "internal/contracts/runtimeinputonly/validate.go": "b523495b1ef297a1a586a2559ee6e8afdc6f9c84aa8044c9c48001e13e262d1c",
       "internal/contracts/runtimeinputonly/validate_test.go": "1c059be78b4e68ba850a08831dbaf830bed7ee3395c27efe0d5b32c0dc125f14",
-      "internal/contracts/runtimekimik31pro/artifact.gen.go": "38707bc5f93967d0f304f41019703b2b656882148df4db6a45008177b6012636",
+      "internal/contracts/runtimekimik31pro/artifact.gen.go": "5faadd3adec75a6f76569e389886a6500f6ec9c870ef8200839dd6027194657c",
       "internal/contracts/runtimepermissions/types.gen.go": "6f26e5e2d6b9b27b9af010021854431066de2eb35ef5f172d031c30b343934ef",
       "internal/contracts/runtimepermissionsv2/types.gen.go": "3782b0eb05f6534cfca6d86c0504a7264cb3a806fb6603f85aa41c51842ac9fc",
       "internal/contracts/scheduledraft/output.schema.json": "f7844573f4a65e9b9493a1a5039ce6688e7e3a077279133bd6be30795cdde2e5",
