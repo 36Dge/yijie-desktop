@@ -2,7 +2,8 @@
 """Opt-in FEAT-164 G2V budget adapter, never a product provider or fake model.
 
 Only api.moonshot.cn receives real requests. Output is capped to 8192 and native
-search is omitted until its Responses billing bound is established. Both
+search is omitted for legacy text qualification. Explicit schema5 preserves search
+and images, retains the full reserve for unreconciled search fees, and stops. Both
 adjustments are explicit in the ledger; this cannot qualify raw/default tool
 behavior. SSE bytes are forwarded unchanged. No prompt, answer or key is logged.
 """
@@ -31,6 +32,8 @@ RESUME_LIMIT = 30_000_000
 RESUME_ID = "FEAT-164-20261025-30CNY-ONE-HTTP"
 SUCCESSOR_ID = "FEAT-164-20261026-30CNY-THREE-HTTP"
 SUCCESSOR_NAME = "g2v-real-budget-ledger-r3.json"
+FUNCTIONAL_NAME = "g2v-real-budget-ledger-functional.json"
+FUNCTIONAL_ID = "FEAT-164-R5-FUNCTIONAL-FOUR-HTTP"
 R5_ID = "FEAT-164-R5-30CNY-ONE-HTTP"
 R5_NAME = "g2v-real-budget-ledger-r5.json"
 R5_BINARY_SHA256 = "283d12e16b124942302fcdc8281c729a8a7f676498f06df1d2646292905f579e"
@@ -133,6 +136,30 @@ def validate_r5_budget_basis(value):
         raise ValueError("r5 historical estimate or Owner instruction differs")
 
 
+def validate_functional_authorization(value):
+    expected = {"schema_version", "feature", "authorization_id", "approval_source", "approved_by", "approved_on",
+                "previous_ledger_sha256", "app_sha256", "runtime_sha256", "additional_http_requests",
+                "limit_micro_cny", "scope", "successor_ledger_name", "preserve_unknown_reservations", "failure_policy"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Closed functional authorization required")
+    if (type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or value["feature"] != "FEAT-164" or value["authorization_id"] != FUNCTIONAL_ID
+            or value["approval_source"] != "owner-necessary-functional-calls-search-images"
+            or not isinstance(value["approved_by"], str) or not value["approved_by"].strip()
+            or type(value["additional_http_requests"]) is not int or value["additional_http_requests"] != 4
+            or type(value["limit_micro_cny"]) is not int or value["limit_micro_cny"] != RESUME_LIMIT
+            or value["scope"] != "image_function_roundtrip_then_search"
+            or value["successor_ledger_name"] != FUNCTIONAL_NAME
+            or value["runtime_sha256"] != R5_BINARY_SHA256
+            or value["preserve_unknown_reservations"] is not True or value["failure_policy"] != "stop"):
+        raise ValueError("Functional scope differs from the bounded execution plan")
+    for name in ["previous_ledger_sha256", "app_sha256"]:
+        digest = value[name]
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("Functional provenance digest required")
+    datetime.date.fromisoformat(value["approved_on"])
+
+
 def successful_terminal(row):
     return (row.get("http_status") == 200 and row.get("terminal") == "response.completed"
             and row.get("response_status") == "completed" and row.get("terminal_count") == 1
@@ -155,7 +182,7 @@ def credential(path):
     return value
 
 
-def prepare_request(payload):
+def prepare_request(payload, *, functional=False):
     body = json.loads(payload)
     if (not isinstance(body, dict) or body.get("model") != MODEL
             or body.get("reasoning", {}).get("effort") != "max"
@@ -172,15 +199,16 @@ def prepare_request(payload):
     tools = body.get("tools", [])
     if not isinstance(tools, list) or any(not isinstance(t, dict) for t in tools):
         raise ValueError("Invalid tool declarations")
-    omitted = sum(t.get("type") == "web_search" for t in tools)
-    body["tools"] = [t for t in tools if t.get("type") != "web_search"]
+    omitted = 0 if functional else sum(t.get("type") == "web_search" for t in tools)
+    if not functional:
+        body["tools"] = [t for t in tools if t.get("type") != "web_search"]
     include = body.get("include", [])
     search_includes = {"web_search_call.action.sources", "web_search_call.results"}
     if not isinstance(include, list) or any(not isinstance(v, str) or v not in search_includes for v in include):
         raise ValueError("Kimi Responses include differs from documented enum")
     # The budget adapter removes native search, so its dependent include values
     # must also be omitted. Unsupported product values are rejected, not hidden.
-    if include:
+    if include and not functional:
         body["include"] = []
     def images(value):
         if isinstance(value, dict):
@@ -193,15 +221,17 @@ def prepare_request(payload):
         "model": MODEL, "effort": "max", "original_max_output_tokens": original_cap,
         "max_output_tokens": body["max_output_tokens"], "image_count": count,
         "tool_choice_preserved": body.get("tool_choice"), "native_search_omitted": omitted,
-        "native_search_include_omitted": include,
-        "request_adjustments": ["bounded_max_output_tokens", "omit_unpriced_native_search", "omit_search_include", "json_encoding"],
+        "native_search_include_omitted": [] if functional else include,
+        "request_adjustments": ["bounded_max_output_tokens", "json_encoding"] if functional else ["bounded_max_output_tokens", "omit_unpriced_native_search", "omit_search_include", "json_encoding"],
+        **({"function_output_inputs": sum(isinstance(i,dict) and i.get("type")=="function_call_output" for i in body.get("input",[])),
+            "native_search_offered": sum(t.get("type")=="web_search" for t in tools)} if functional else {}),
     }
 
 
 class Budget:
     def __init__(self, ledger, *, _state=None):
         self.path = ledger
-        if ledger.name == R5_NAME and _state is None and not ledger.exists():
+        if ledger.name in (R5_NAME, FUNCTIONAL_NAME) and _state is None and not ledger.exists():
             raise ValueError("r5 ledger requires prior offline authorization and explicit accounting basis")
         self.state = copy.deepcopy(_state) if _state is not None else json.loads(ledger.read_text()) if ledger.exists() else {
             "feature": "FEAT-164", "limit_micro_cny": LIMIT, "max_http_requests": 8,
@@ -209,7 +239,7 @@ class Budget:
             "charged_upper_micro_cny": 0, "requests": [], "halted": False,
         }
         version = self.state.get("schema_version", 1)
-        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4):
+        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4, 5):
             raise ValueError("Independent approved FEAT-164 ledger required")
         rows = self.state["requests"]
         if not isinstance(rows, list) or any(r.get("ordinal") != i + 1 or r.get("status") not in
@@ -261,7 +291,7 @@ class Budget:
             # Settled cost is not permission to continue after an unsuccessful response.
             if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[2:]):
                 self.state["halted"] = True
-        else:
+        elif version == 4:
             receipt = self.state.get("r5_receipt", {})
             authorization = receipt.get("authorization")
             validate_r5_authorization(authorization)
@@ -285,6 +315,27 @@ class Budget:
                 raise ValueError("r5 receipt or preserved history differs")
             self.acknowledged_unknown = {1}
             if len(rows) == 6:
+                self.state["halted"] = True
+        else:
+            receipt = self.state.get("functional_receipt", {})
+            authorization = receipt.get("authorization")
+            validate_functional_authorization(authorization)
+            raw = receipt.get("predecessor_json")
+            if not isinstance(raw, str) or len(raw) > 512 * 1024:
+                raise ValueError("Exact stopped r5 predecessor required")
+            prior = json.loads(raw)
+            previous = Budget(ledger, _state=prior)
+            if (prior.get("schema_version") != 4 or len(prior["requests"]) != 6
+                    or not prior.get("halted") or prior.get("meter_state") != "stopped_normally"
+                    or not successful_terminal(prior["requests"][-1])
+                    or hashlib.sha256(raw.encode()).hexdigest() != authorization["previous_ledger_sha256"]
+                    or receipt.get("authorization_sha256") != canonical_digest(authorization)
+                    or receipt.get("base_request_count") != 6 or not 6 <= len(rows) <= 10
+                    or rows[:6] != previous.state["requests"]
+                    or self.state["limit_micro_cny"] != RESUME_LIMIT or self.state["max_http_requests"] != 10):
+                raise ValueError("Functional receipt or preserved history differs")
+            self.acknowledged_unknown = {1}
+            if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[6:]):
                 self.state["halted"] = True
         expected = sum(row_charge(r) for r in rows)
         if expected != self.state["charged_upper_micro_cny"] or not 0 <= expected <= self.state["limit_micro_cny"]:
@@ -322,7 +373,7 @@ class Budget:
                     or len(self.state["requests"]) >= self.state["max_http_requests"]
                     or self.state["charged_upper_micro_cny"] + RESERVATION > self.state["limit_micro_cny"]):
                 raise ValueError("Verification budget unavailable")
-            if self.acknowledged_unknown and metadata["image_count"] != 0:
+            if self.acknowledged_unknown and self.state.get("schema_version") != 5 and metadata["image_count"] != 0:
                 raise ValueError("The approved resume is text-only")
             if metadata["image_count"] and sum(r["image_count"] for r in self.state["requests"]) >= 1:
                 raise ValueError("Image budget unavailable")
@@ -352,7 +403,13 @@ class Budget:
             else:
                 row["status"] = "unknown_reserved"
                 self.state["halted"] = True
-            if self.state.get("schema_version") == 3:
+            if self.state.get("schema_version") == 5:
+                if observation.get("native_search_calls", 0):
+                    row["accounting_reason"] = "native_search_fee_unreconciled_full_reserve_retained"
+                if not valid or not successful_terminal(row) or len(self.state["requests"]) >= 10:
+                    self.state["halted"] = True
+                    self.state["stop_reason"] = "functional_failure_reserve_or_exhausted"
+            elif self.state.get("schema_version") == 3:
                 if not valid or not successful_terminal(row) or len(self.state["requests"]) >= 5:
                     self.state["halted"] = True
                     self.state["stop_reason"] = "successor_failed_or_exhausted"
@@ -475,6 +532,38 @@ def create_r5_ledger(previous_ledger, ledger, authorization, pricing):
         return {"already_applied": False, "remaining_http_requests": 1}
 
 
+def create_functional_ledger(previous_ledger, ledger, authorization):
+    """Fresh append-only phase; old ledgers and their reservations remain byte exact."""
+    validate_functional_authorization(authorization)
+    if (ledger.name != FUNCTIONAL_NAME or ledger.resolve() == previous_ledger.resolve()
+            or ledger.parent.resolve() != previous_ledger.parent.resolve()):
+        raise ValueError("Use the separate functional ledger beside r5")
+    with open(previous_ledger.with_suffix(".lock"), "a") as old_guard, open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(old_guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = previous_ledger.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != authorization["previous_ledger_sha256"]:
+            raise ValueError("Functional predecessor digest differs")
+        prior = Budget(previous_ledger).state
+        if ledger.exists():
+            existing = Budget(ledger)
+            if existing.state.get("functional_receipt", {}).get("authorization") != authorization:
+                raise ValueError("Existing functional ledger cannot be replaced or refilled")
+            return {"already_applied": True, "remaining_http_requests": 0 if existing.state["halted"] else 10-len(existing.state["requests"])}
+        state = copy.deepcopy(prior)
+        state.update(schema_version=5, max_http_requests=10, halted=False, meter_state="created", scope="image_function_roundtrip_then_search")
+        state.pop("stop_reason", None)
+        state["functional_receipt"] = {"authorization": copy.deepcopy(authorization), "authorization_sha256": canonical_digest(authorization),
+            "predecessor_json": raw.decode(), "base_request_count": 6}
+        budget = Budget(ledger, _state=state)
+        if budget.state["halted"] or prior["charged_upper_micro_cny"] + RESERVATION > RESUME_LIMIT:
+            raise ValueError("Functional request cannot fit the retained estimate budget")
+        budget.save()
+        if previous_ledger.read_bytes() != raw:
+            raise ValueError("Predecessor changed")
+        return {"already_applied": False, "remaining_http_requests": 4}
+
+
 class Observer:
     def __init__(self):
         self.buffer = b""; self.result = {}; self.invalid = False; self.terminals = 0
@@ -497,6 +586,12 @@ class Observer:
                     usage = response.get("usage")
                     if isinstance(usage, dict):
                         self.result["usage"] = {k: usage[k] for k in ["input_tokens", "output_tokens"] if k in usage}
+                    output = response.get("output", [])
+                    functions = [i for i in output if isinstance(i, dict) and i.get("type") == "function_call"]
+                    sources = [source for i in output if isinstance(i, dict) and i.get("type") == "web_search_call"
+                               for source in (i.get("action") or {}).get("sources", []) if isinstance(source, dict)]
+                    self.result.update({"function_calls": len(functions), "function_arguments_sha256": [hashlib.sha256(str(i.get("arguments", "")).encode()).hexdigest() for i in functions],
+                        "native_search_sources_count": len(sources), "native_search_sources_sha256": canonical_digest(sources)})
                     self.result.update({"terminal": event["type"], "response_model": response.get("model"),
                         "terminal_count": self.terminals, "response_status": response.get("status"),
                         "output_text_present": any(item.get("type") == "message" and any(
@@ -546,7 +641,14 @@ def main():
     parser.add_argument("--create-r5-from", type=Path)
     parser.add_argument("--r5-authorization", type=Path)
     parser.add_argument("--r5-budget-basis", type=Path)
+    parser.add_argument("--create-functional-from", type=Path)
+    parser.add_argument("--functional-authorization", type=Path)
     args = parser.parse_args()
+    if args.create_functional_from or args.functional_authorization:
+        if not (args.create_functional_from and args.functional_authorization) or any((args.create_successor_from,args.successor_authorization,args.apply_resume_authorization,args.create_r5_from,args.r5_authorization,args.r5_budget_basis,args.kimi_key_file,args.control_token_file)):
+            parser.error("Functional creation requires only predecessor and authorization, no credentials")
+        print(json.dumps(create_functional_ledger(args.create_functional_from,args.ledger,json.loads(args.functional_authorization.read_text()))))
+        return
     if args.create_r5_from or args.r5_authorization or args.r5_budget_basis:
         if not (args.create_r5_from and args.r5_authorization and args.r5_budget_basis) or any((args.create_successor_from, args.successor_authorization, args.apply_resume_authorization, args.kimi_key_file, args.control_token_file)):
             parser.error("r5 creation requires predecessor, authorization and the explicit accounting basis without credentials")
@@ -599,7 +701,7 @@ def main():
                     length = int(self.headers.get("Content-Length", "0"))
                     if not 0 < length <= 4 * 1024 * 1024:
                         raise ValueError("Request size")
-                    payload, metadata = prepare_request(self.rfile.read(length))
+                    payload, metadata = prepare_request(self.rfile.read(length), functional=budget.state.get("schema_version") == 5)
                     row = budget.admit(metadata)
                 except (ValueError, TypeError, AttributeError):
                     budget.stop_resume_on_rejection()
@@ -635,7 +737,7 @@ def main():
                     budget.settle(row, observer.result)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 18083), Handler)
         budget.state["meter_state"] = "running"; budget.save()
-        print("FEAT-164 meter ready; bounded output, native search omitted, no automatic requests", flush=True)
+        print("FEAT-164 meter ready; bounded output; functional schema5 preserves search/images, legacy policies unchanged; no automatic requests", flush=True)
         try:
             server.serve_forever()
         finally:
