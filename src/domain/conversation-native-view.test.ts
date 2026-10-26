@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
+import type { NativeConversationView, NativeConversationViewEvent } from "../api/generated/native-conversation-private.gen";
 import { composeConversationView, selectConversationTurn, type ConversationSnapshot } from "./conversation-view";
 import { validateNativeHistory, validateNativeViewEvent } from "../api/generated/native-conversation-validator.gen.js";
 const legacy: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"failed",terminalStatus:"failed"}],items:[{threadId:"local-session",turnId:"local-turn",itemId:"old-display",ordinal:0,kind:"assistant_message",status:"completed",contentBlocks:[{type:"text",blockIndex:0,text:"old archive"}]}]};
@@ -14,7 +14,7 @@ describe("FEAT-132 readonly native view",()=>{
  });
 
  it("shows an unsupported saved format without inventing a native view or changing execution facts",()=>{
-   const view=composeConversationView(legacy,[native],[],[{sessionId:"local-session",turnId:"local-turn",formatVersion:3,code:"format_unsupported"}]);
+   const view=composeConversationView(legacy,[native],[],[{sessionId:"local-session",turnId:"local-turn",formatVersion:5,code:"format_unsupported"}]);
    expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({source:"native_observed",status:"failed",terminalStatus:"failed",availability:"unavailable",diagnostic:"native_format_unsupported"});
    expect(Object.values(view.items).map(i=>i.itemId)).toEqual(["native-a","native-r"]);
  });
@@ -23,9 +23,14 @@ describe("FEAT-132 readonly native view",()=>{
  it("renders final values directly without prefix comparison",()=>{const view=composeConversationView(legacy,[{...native,items:[{...native.items[0]!,item:{...native.items[0]!.item,text:"completely revised final"}}]}]);expect(Object.values(view.items)[0]?.contentBlocks).toEqual([{type:"text",blockIndex:0,text:"completely revised final"}]);});
  it("keeps legacy IDs and archive provenance when no native facts exist",()=>{const view=composeConversationView(legacy,[]);expect(Object.values(view.items)[0]?.itemId).toBe("old-display");expect(Object.values(view.turns)[0]?.source).toBe("legacy_archive");});
  it("marks queued submission failure separately from native execution",()=>{const view=composeConversationView(legacy,[],[{turnId:"local-turn",operationId:"operation",status:"failed"}]);expect(Object.values(view.turns)[0]).toMatchObject({source:"local_submission",submissionStatus:"failed",status:"queued",terminalStatus:null});});
- it("validates the generated private boundary and rejects unknown status/version",()=>{
-   const event={schemaVersion:3,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native};expect(validateNativeViewEvent(event)).toBe(true);
-   expect(validateNativeViewEvent({...event,schemaVersion:4})).toBe(false);expect(validateNativeViewEvent({...event,view:{...native,status:"guess-failed"}})).toBe(false);
+ it("accepts current v4 IPC while rejecting legacy envelopes, future versions and unknown status",()=>{
+   // Stored v3 records have a separate Rust decoder; they are not v3 IPC events.
+   // The generated type makes a future protocol upgrade expose this fixture drift.
+   const event={schemaVersion:4,contextId:"c",subscriptionId:"s",sessionId:native.sessionId,view:native} satisfies NativeConversationViewEvent;
+   expect(validateNativeViewEvent(event)).toBe(true);
+   expect(validateNativeViewEvent({...event,schemaVersion:3})).toBe(false);
+   expect(validateNativeViewEvent({...event,schemaVersion:5})).toBe(false);
+   expect(validateNativeViewEvent({...event,view:{...native,status:"guess-failed"}})).toBe(false);
    expect(validateNativeHistory({views:[native],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
  });
 });
