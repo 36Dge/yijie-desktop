@@ -3,8 +3,11 @@
 
 Only api.moonshot.cn receives real requests. Output is capped to 8192 and native
 search is omitted for legacy text qualification. Explicit schema5 preserves search
-and images, retains the full reserve for unreconciled search fees, and stops. Both
-adjustments are explicit in the ledger; this cannot qualify raw/default tool
+and images, retains the full reserve for unreconciled search fees, and stops.
+Schema6 allows at most two source-specific attempts within 45 CNY, stops after
+each, and requires an explicit settled-result review before a second request.
+Only native search tools are offered in schema6; old ledgers/reserves stay exact.
+All adjustments are explicit in the ledger; this cannot qualify raw/default tool
 behavior. SSE bytes are forwarded unchanged. No prompt, answer or key is logged.
 """
 import argparse
@@ -34,6 +37,10 @@ SUCCESSOR_ID = "FEAT-164-20261026-30CNY-THREE-HTTP"
 SUCCESSOR_NAME = "g2v-real-budget-ledger-r3.json"
 FUNCTIONAL_NAME = "g2v-real-budget-ledger-functional.json"
 FUNCTIONAL_ID = "FEAT-164-R5-FUNCTIONAL-FOUR-HTTP"
+SEARCH_NAME = "g2v-real-budget-ledger-search.json"
+SEARCH_ID = "FEAT-164-S4AB-45CNY-TWO-HTTP"
+SEARCH_LIMIT = 45_000_000
+SEARCH_APP = "179dbd187220694d4666af5822466572f3b245a911501991cb0194f4308db195"
 R5_ID = "FEAT-164-R5-30CNY-ONE-HTTP"
 R5_NAME = "g2v-real-budget-ledger-r5.json"
 R5_BINARY_SHA256 = "283d12e16b124942302fcdc8281c729a8a7f676498f06df1d2646292905f579e"
@@ -160,6 +167,25 @@ def validate_functional_authorization(value):
     datetime.date.fromisoformat(value["approved_on"])
 
 
+def validate_search_authorization(value):
+    expected = {"schema_version", "feature", "authorization_id", "approval_source", "approved_by", "approved_on",
+                "previous_ledger_sha256", "app_sha256", "runtime_sha256", "additional_http_requests",
+                "limit_micro_cny", "scope", "successor_ledger_name", "preserve_unknown_reservations", "failure_policy"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Closed search revalidation authorization required")
+    fixed = {"schema_version": 1, "feature": "FEAT-164", "authorization_id": SEARCH_ID,
+             "approval_source": "owner-20261027-cap45-then-two-attempts", "approved_on": "2026-10-27",
+             "app_sha256": SEARCH_APP, "runtime_sha256": R5_BINARY_SHA256, "additional_http_requests": 2,
+             "limit_micro_cny": SEARCH_LIMIT, "scope": "source_specific_native_search_one_at_a_time",
+             "successor_ledger_name": SEARCH_NAME, "preserve_unknown_reservations": True,
+             "failure_policy": "stop_and_review_before_second"}
+    digest = value["previous_ledger_sha256"]
+    if (any(type(value[k]) is not type(v) or value[k] != v for k, v in fixed.items())
+            or not isinstance(value["approved_by"], str) or not value["approved_by"].strip()
+            or not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)):
+        raise ValueError("Search revalidation differs from Owner's bounded scope")
+
+
 def successful_terminal(row):
     return (row.get("http_status") == 200 and row.get("terminal") == "response.completed"
             and row.get("response_status") == "completed" and row.get("terminal_count") == 1
@@ -182,7 +208,7 @@ def credential(path):
     return value
 
 
-def prepare_request(payload, *, functional=False):
+def prepare_request(payload, *, functional=False, search_only=False):
     body = json.loads(payload)
     if (not isinstance(body, dict) or body.get("model") != MODEL
             or body.get("reasoning", {}).get("effort") != "max"
@@ -199,6 +225,8 @@ def prepare_request(payload, *, functional=False):
     tools = body.get("tools", [])
     if not isinstance(tools, list) or any(not isinstance(t, dict) for t in tools):
         raise ValueError("Invalid tool declarations")
+    if search_only and not functional:
+        raise ValueError("Search-only qualification requires functional preservation")
     omitted = 0 if functional else sum(t.get("type") == "web_search" for t in tools)
     if not functional:
         body["tools"] = [t for t in tools if t.get("type") != "web_search"]
@@ -214,6 +242,8 @@ def prepare_request(payload, *, functional=False):
         if isinstance(value, dict):
             return int(value.get("type") == "input_image") + sum(images(v) for v in value.values())
         return sum(images(v) for v in value) if isinstance(value, list) else 0
+    if search_only:
+        body["tools"] = [t for t in tools if t.get("type") == "web_search"]
     count = images(body.get("input"))
     if count > 1:
         raise ValueError("At most one ordinary image in this minimal run")
@@ -222,7 +252,7 @@ def prepare_request(payload, *, functional=False):
         "max_output_tokens": body["max_output_tokens"], "image_count": count,
         "tool_choice_preserved": body.get("tool_choice"), "native_search_omitted": omitted,
         "native_search_include_omitted": [] if functional else include,
-        "request_adjustments": ["bounded_max_output_tokens", "json_encoding"] if functional else ["bounded_max_output_tokens", "omit_unpriced_native_search", "omit_search_include", "json_encoding"],
+        "request_adjustments": (["bounded_max_output_tokens", "json_encoding"] + (["search_only_tool_declarations"] if search_only else [])) if functional else ["bounded_max_output_tokens", "omit_unpriced_native_search", "omit_search_include", "json_encoding"],
         **({"function_output_inputs": sum(isinstance(i,dict) and i.get("type")=="function_call_output" for i in body.get("input",[])),
             "native_search_offered": sum(t.get("type")=="web_search" for t in tools)} if functional else {}),
     }
@@ -231,7 +261,7 @@ def prepare_request(payload, *, functional=False):
 class Budget:
     def __init__(self, ledger, *, _state=None):
         self.path = ledger
-        if ledger.name in (R5_NAME, FUNCTIONAL_NAME) and _state is None and not ledger.exists():
+        if ledger.name in (R5_NAME, FUNCTIONAL_NAME, SEARCH_NAME) and _state is None and not ledger.exists():
             raise ValueError("r5 ledger requires prior offline authorization and explicit accounting basis")
         self.state = copy.deepcopy(_state) if _state is not None else json.loads(ledger.read_text()) if ledger.exists() else {
             "feature": "FEAT-164", "limit_micro_cny": LIMIT, "max_http_requests": 8,
@@ -239,7 +269,7 @@ class Budget:
             "charged_upper_micro_cny": 0, "requests": [], "halted": False,
         }
         version = self.state.get("schema_version", 1)
-        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4, 5):
+        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4, 5, 6):
             raise ValueError("Independent approved FEAT-164 ledger required")
         rows = self.state["requests"]
         if not isinstance(rows, list) or any(r.get("ordinal") != i + 1 or r.get("status") not in
@@ -316,7 +346,7 @@ class Budget:
             self.acknowledged_unknown = {1}
             if len(rows) == 6:
                 self.state["halted"] = True
-        else:
+        elif version == 5:
             receipt = self.state.get("functional_receipt", {})
             authorization = receipt.get("authorization")
             validate_functional_authorization(authorization)
@@ -336,6 +366,35 @@ class Budget:
                 raise ValueError("Functional receipt or preserved history differs")
             self.acknowledged_unknown = {1}
             if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[6:]):
+                self.state["halted"] = True
+        else:
+            receipt = self.state.get("search_receipt", {})
+            authorization = receipt.get("authorization")
+            validate_search_authorization(authorization)
+            raw = receipt.get("predecessor_json")
+            if not isinstance(raw, str) or len(raw) > 1024 * 1024:
+                raise ValueError("Exact stopped functional predecessor required")
+            prior = json.loads(raw)
+            previous = Budget(ledger, _state=prior)
+            if (prior.get("schema_version") != 5 or len(prior["requests"]) != 10
+                    or prior.get("meter_state") != "stopped_normally" or not prior.get("halted")
+                    or not successful_terminal(prior["requests"][-1])
+                    or prior["requests"][-1].get("accounting_reason") != "native_search_fee_unreconciled_full_reserve_retained"
+                    or prior["requests"][-1]["status"] != "unknown_reserved"
+                    or hashlib.sha256(raw.encode()).hexdigest() != authorization["previous_ledger_sha256"]
+                    or receipt.get("authorization_sha256") != canonical_digest(authorization)
+                    or receipt.get("base_request_count") != 10 or not 10 <= len(rows) <= 12
+                    or rows[:10] != previous.state["requests"]
+                    or self.state["limit_micro_cny"] != SEARCH_LIMIT or self.state["max_http_requests"] != 12):
+                raise ValueError("Search receipt or preserved history differs")
+            self.acknowledged_unknown = {1, 10}
+            review = receipt.get("second_attempt_review")
+            if review is not None and (len(rows) < 11 or set(review) != {"first_row_sha256", "reason"}
+                    or review["first_row_sha256"] != canonical_digest(rows[10])
+                    or not isinstance(review["reason"], str) or not review["reason"].strip()
+                    or rows[10]["status"] != "settled"):
+                raise ValueError("Explicit second-attempt review differs")
+            if len(rows) >= 12 or (len(rows) == 11 and review is None):
                 self.state["halted"] = True
         expected = sum(row_charge(r) for r in rows)
         if expected != self.state["charged_upper_micro_cny"] or not 0 <= expected <= self.state["limit_micro_cny"]:
@@ -373,6 +432,8 @@ class Budget:
                     or len(self.state["requests"]) >= self.state["max_http_requests"]
                     or self.state["charged_upper_micro_cny"] + RESERVATION > self.state["limit_micro_cny"]):
                 raise ValueError("Verification budget unavailable")
+            if self.state.get("schema_version") == 6 and (metadata["image_count"] != 0 or metadata.get("native_search_offered") != 1 or metadata.get("function_output_inputs") != 0):
+                raise ValueError("Search qualification excludes images and tool followups")
             if self.acknowledged_unknown and self.state.get("schema_version") != 5 and metadata["image_count"] != 0:
                 raise ValueError("The approved resume is text-only")
             if metadata["image_count"] and sum(r["image_count"] for r in self.state["requests"]) >= 1:
@@ -403,7 +464,12 @@ class Budget:
             else:
                 row["status"] = "unknown_reserved"
                 self.state["halted"] = True
-            if self.state.get("schema_version") == 5:
+            if self.state.get("schema_version") == 6:
+                if observation.get("native_search_calls", 0):
+                    row["accounting_reason"] = "native_search_fee_unreconciled_full_reserve_retained"
+                self.state["halted"] = True
+                self.state["stop_reason"] = "search_attempt_finished_review_required"
+            elif self.state.get("schema_version") == 5:
                 if observation.get("native_search_calls", 0):
                     row["accounting_reason"] = "native_search_fee_unreconciled_full_reserve_retained"
                 if not valid or not successful_terminal(row) or len(self.state["requests"]) >= 10:
@@ -564,6 +630,54 @@ def create_functional_ledger(previous_ledger, ledger, authorization):
         return {"already_applied": False, "remaining_http_requests": 4}
 
 
+def create_search_ledger(previous_ledger, ledger, authorization):
+    """Offline, separately named successor; never releases either old reserve."""
+    validate_search_authorization(authorization)
+    if ledger.name != SEARCH_NAME or ledger.resolve() == previous_ledger.resolve() or ledger.parent.resolve() != previous_ledger.parent.resolve():
+        raise ValueError("Separate search ledger beside its predecessor required")
+    with open(previous_ledger.with_suffix(".lock"), "a") as old_guard, open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(old_guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = previous_ledger.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != authorization["previous_ledger_sha256"]:
+            raise ValueError("Search predecessor bytes differ")
+        if ledger.exists():
+            existing = Budget(ledger)
+            if existing.state["search_receipt"]["authorization"] != authorization:
+                raise ValueError("Existing search ledger cannot be replaced")
+            return {"already_applied": True, "admissible": not existing.state["halted"]}
+        prior = Budget(previous_ledger).state
+        state = copy.deepcopy(prior)
+        state.update(schema_version=6, limit_micro_cny=SEARCH_LIMIT, max_http_requests=12,
+                     halted=False, meter_state="created", scope="source_specific_native_search_one_at_a_time")
+        state.pop("stop_reason", None)
+        state["search_receipt"] = {"authorization": copy.deepcopy(authorization),
+            "authorization_sha256": canonical_digest(authorization), "predecessor_json": raw.decode(), "base_request_count": 10}
+        budget = Budget(ledger, _state=state)
+        if budget.state["halted"] or budget.state["charged_upper_micro_cny"] + RESERVATION > SEARCH_LIMIT:
+            raise ValueError("Preserved reservations leave no admissible request")
+        budget.save()
+        assert previous_ledger.read_bytes() == raw
+        return {"already_applied": False, "admissible": True}
+
+
+def review_second_search_attempt(ledger, reason):
+    """Explicit review only; may not acknowledge a new unknown reserve or exceed cap."""
+    with open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        budget = Budget(ledger)
+        rows = budget.state["requests"]
+        if (budget.state.get("schema_version") != 6 or budget.state.get("meter_state") != "stopped_normally"
+                or len(rows) != 11 or rows[-1]["status"] != "settled"
+                or budget.state["charged_upper_micro_cny"] + RESERVATION > SEARCH_LIMIT
+                or not isinstance(reason, str) or not reason.strip()):
+            raise ValueError("Second attempt requires a settled first result, review and available budget")
+        budget.state["search_receipt"]["second_attempt_review"] = {"first_row_sha256": canonical_digest(rows[-1]), "reason": reason}
+        budget.state["halted"] = False
+        Budget(ledger, _state=budget.state)
+        budget.save()
+
+
 class Observer:
     def __init__(self):
         self.buffer = b""; self.result = {}; self.invalid = False; self.terminals = 0
@@ -701,7 +815,7 @@ def main():
                     length = int(self.headers.get("Content-Length", "0"))
                     if not 0 < length <= 4 * 1024 * 1024:
                         raise ValueError("Request size")
-                    payload, metadata = prepare_request(self.rfile.read(length), functional=budget.state.get("schema_version") == 5)
+                    payload, metadata = prepare_request(self.rfile.read(length), functional=budget.state.get("schema_version") in (5, 6), search_only=budget.state.get("schema_version") == 6)
                     row = budget.admit(metadata)
                 except (ValueError, TypeError, AttributeError):
                     budget.stop_resume_on_rejection()
@@ -737,7 +851,7 @@ def main():
                     budget.settle(row, observer.result)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 18083), Handler)
         budget.state["meter_state"] = "running"; budget.save()
-        print("FEAT-164 meter ready; bounded output; functional schema5 preserves search/images, legacy policies unchanged; no automatic requests", flush=True)
+        print("FEAT-164 meter ready; bounded output; schema5 preserves search/images; schema6 search-only stops after every request; legacy policies unchanged; no automatic requests", flush=True)
         try:
             server.serve_forever()
         finally:
