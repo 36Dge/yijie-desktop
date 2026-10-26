@@ -31,6 +31,10 @@ RESUME_LIMIT = 30_000_000
 RESUME_ID = "FEAT-164-20261025-30CNY-ONE-HTTP"
 SUCCESSOR_ID = "FEAT-164-20261026-30CNY-THREE-HTTP"
 SUCCESSOR_NAME = "g2v-real-budget-ledger-r3.json"
+R5_ID = "FEAT-164-R5-30CNY-ONE-HTTP"
+R5_NAME = "g2v-real-budget-ledger-r5.json"
+R5_BINARY_SHA256 = "283d12e16b124942302fcdc8281c729a8a7f676498f06df1d2646292905f579e"
+R5_APP_SHA256 = "42a23cfbc11cc047b005b8d80dafa2aff243fcc469dd1510d04d88196e85f6a9"
 
 
 def canonical_digest(value):
@@ -86,6 +90,47 @@ def validate_successor_authorization(value):
             or value["preserve_unknown_reservations"] is not True or value["failure_policy"] != "stop"
             or value["scope"] != "bounded_text_g2v_successor" or value["successor_ledger_name"] != SUCCESSOR_NAME):
         raise ValueError("Successor authorization differs from the approved three-request scope")
+
+
+def validate_r5_authorization(value):
+    expected = {"schema_version", "feature", "authorization_id", "approved_by", "approved_on",
+                "approval_source", "previous_ledger_sha256", "limit_micro_cny",
+                "additional_http_requests", "preserve_unknown_reservations", "failure_policy", "scope",
+                "successor_ledger_name", "runtime_sha256", "app_sha256", "budget_basis_sha256"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Closed r5 authorization required")
+    digests = [value.get("previous_ledger_sha256"), value.get("budget_basis_sha256")]
+    if (value["schema_version"] != 1 or type(value["schema_version"]) is not int
+            or value["feature"] != "FEAT-164" or value["authorization_id"] != R5_ID
+            or value["approval_source"] != "explicit-user-r5-one-http"
+            or not isinstance(value["approved_by"], str) or not value["approved_by"].strip()
+            or len(value["approved_by"]) > 128 or not isinstance(value["approved_on"], str)
+            or len(value["approved_on"]) != 10
+            or value["limit_micro_cny"] != RESUME_LIMIT or type(value["limit_micro_cny"]) is not int
+            or value["additional_http_requests"] != 1 or type(value["additional_http_requests"]) is not int
+            or value["preserve_unknown_reservations"] is not True or value["failure_policy"] != "stop"
+            or value["scope"] != "r5_single_text_qualification" or value["successor_ledger_name"] != R5_NAME
+            or value["runtime_sha256"] != R5_BINARY_SHA256 or value["app_sha256"] != R5_APP_SHA256
+            or any(not isinstance(d, str) or len(d) != 64 or any(c not in "0123456789abcdef" for c in d) for d in digests)):
+        raise ValueError("r5 authorization differs from the single-text scope")
+    datetime.date.fromisoformat(value["approved_on"])
+
+
+def validate_r5_budget_basis(value):
+    # The Owner explicitly prioritized functional validation over a fresh exact
+    # price lookup. Keep the old accounting estimate, never call it a bill.
+    expected = {"model", "basis", "exact_pricing_required", "owner_instruction",
+                "input_estimate_micro_cny_per_token", "output_estimate_micro_cny_per_token", "ttl"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("Explicit r5 estimate basis required")
+    if (value["model"] != MODEL or value["basis"] != "retained_historical_estimate"
+            or value["exact_pricing_required"] is not False
+            or value["owner_instruction"] != "2026-10-26-functional-validation-no-exact-pricing"
+            or type(value["input_estimate_micro_cny_per_token"]) is not int
+            or value["input_estimate_micro_cny_per_token"] != 13
+            or type(value["output_estimate_micro_cny_per_token"]) is not int
+            or value["output_estimate_micro_cny_per_token"] != 68 or value["ttl"] != "5m"):
+        raise ValueError("r5 historical estimate or Owner instruction differs")
 
 
 def successful_terminal(row):
@@ -156,13 +201,15 @@ def prepare_request(payload):
 class Budget:
     def __init__(self, ledger, *, _state=None):
         self.path = ledger
+        if ledger.name == R5_NAME and _state is None and not ledger.exists():
+            raise ValueError("r5 ledger requires prior offline authorization and explicit accounting basis")
         self.state = copy.deepcopy(_state) if _state is not None else json.loads(ledger.read_text()) if ledger.exists() else {
             "feature": "FEAT-164", "limit_micro_cny": LIMIT, "max_http_requests": 8,
             "scope": "budgeted_text_image_g2v_not_raw_request_or_search_qualification",
             "charged_upper_micro_cny": 0, "requests": [], "halted": False,
         }
         version = self.state.get("schema_version", 1)
-        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3):
+        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4):
             raise ValueError("Independent approved FEAT-164 ledger required")
         rows = self.state["requests"]
         if not isinstance(rows, list) or any(r.get("ordinal") != i + 1 or r.get("status") not in
@@ -187,7 +234,7 @@ class Budget:
                     or self.state["max_http_requests"] != 2):
                 raise ValueError("Resume receipt or preserved history differs")
             self.acknowledged_unknown = {1}
-        else:
+        elif version == 3:
             receipt = self.state.get("successor_receipt", {})
             authorization = receipt.get("authorization")
             validate_successor_authorization(authorization)
@@ -213,6 +260,31 @@ class Budget:
             self.acknowledged_unknown = {1}
             # Settled cost is not permission to continue after an unsuccessful response.
             if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[2:]):
+                self.state["halted"] = True
+        else:
+            receipt = self.state.get("r5_receipt", {})
+            authorization = receipt.get("authorization")
+            validate_r5_authorization(authorization)
+            pricing = receipt.get("budget_basis")
+            validate_r5_budget_basis(pricing)
+            raw_prior = receipt.get("predecessor_json")
+            if not isinstance(raw_prior, str) or len(raw_prior) > 256 * 1024:
+                raise ValueError("Exact schema3 predecessor required")
+            prior = json.loads(raw_prior)
+            previous = Budget(ledger, _state=prior)
+            if (prior.get("schema_version") != 3 or len(prior["requests"]) != 5
+                    or prior.get("halted") is not True or prior.get("meter_state") != "stopped_normally"
+                    or any(r["status"] != "settled" or not successful_terminal(r) for r in prior["requests"][1:])
+                    or hashlib.sha256(raw_prior.encode()).hexdigest() != authorization["previous_ledger_sha256"]
+                    or receipt.get("authorization_sha256") != canonical_digest(authorization)
+                    or receipt.get("budget_basis_sha256") != canonical_digest(pricing)
+                    or receipt["budget_basis_sha256"] != authorization["budget_basis_sha256"]
+                    or receipt.get("base_request_count") != 5 or not 5 <= len(rows) <= 6
+                    or rows[:5] != previous.state["requests"]
+                    or self.state["limit_micro_cny"] != RESUME_LIMIT or self.state["max_http_requests"] != 6):
+                raise ValueError("r5 receipt or preserved history differs")
+            self.acknowledged_unknown = {1}
+            if len(rows) == 6:
                 self.state["halted"] = True
         expected = sum(row_charge(r) for r in rows)
         if expected != self.state["charged_upper_micro_cny"] or not 0 <= expected <= self.state["limit_micro_cny"]:
@@ -288,7 +360,7 @@ class Budget:
                 # Success also exhausts the one additional request. Failed or
                 # incomplete responses may settle cost, but never reopen quota.
                 self.state["halted"] = True
-                self.state["stop_reason"] = "single_resume_request_consumed"
+                self.state["stop_reason"] = "r5_request_consumed" if self.state.get("schema_version") == 4 else "single_resume_request_consumed"
             self.save()
 
 
@@ -366,6 +438,43 @@ def create_successor_ledger(previous_ledger, ledger, authorization):
         return {"authorization_id": SUCCESSOR_ID, "already_applied": False, "remaining_http_requests": 3}
 
 
+def create_r5_ledger(previous_ledger, ledger, authorization, pricing):
+    """Offline preparation after explicit consent; never rewrites schema3 or emits HTTP."""
+    validate_r5_authorization(authorization)
+    validate_r5_budget_basis(pricing)
+    if canonical_digest(pricing) != authorization["budget_basis_sha256"]:
+        raise ValueError("Accounting basis differs from authorization")
+    if (ledger.name != R5_NAME or ledger.resolve() == previous_ledger.resolve()
+            or ledger.parent.resolve() != previous_ledger.parent.resolve()):
+        raise ValueError("Use the separate r5 ledger beside its predecessor")
+    with open(previous_ledger.with_suffix(".lock"), "a") as old_guard, open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(old_guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = previous_ledger.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != authorization["previous_ledger_sha256"]:
+            raise ValueError("Predecessor differs from authorization")
+        prior = Budget(previous_ledger).state
+        if prior.get("schema_version") != 3 or len(prior["requests"]) != 5 or prior.get("meter_state") != "stopped_normally" or not prior.get("halted"):
+            raise ValueError("Stopped exhausted schema3 predecessor required")
+        if ledger.exists():
+            existing = Budget(ledger)
+            if existing.state.get("r5_receipt", {}).get("authorization") != authorization:
+                raise ValueError("Existing r5 ledger cannot be replaced or refilled")
+            return {"already_applied": True, "remaining_http_requests": int(not existing.state["halted"])}
+        state = copy.deepcopy(prior)
+        state.update(schema_version=4, max_http_requests=6, halted=False, meter_state="created", scope="r5_single_text_qualification")
+        state.pop("stop_reason", None)
+        state["r5_receipt"] = {"authorization": copy.deepcopy(authorization), "authorization_sha256": canonical_digest(authorization),
+            "budget_basis": copy.deepcopy(pricing), "budget_basis_sha256": canonical_digest(pricing), "predecessor_json": raw.decode(), "base_request_count": 5}
+        budget = Budget(ledger, _state=state)
+        if budget.state["halted"] or prior["charged_upper_micro_cny"] + RESERVATION > RESUME_LIMIT:
+            raise ValueError("r5 request cannot fit the preserved budget")
+        budget.save()
+        if previous_ledger.read_bytes() != raw:
+            raise ValueError("Predecessor changed")
+        return {"already_applied": False, "remaining_http_requests": 1}
+
+
 class Observer:
     def __init__(self):
         self.buffer = b""; self.result = {}; self.invalid = False; self.terminals = 0
@@ -434,7 +543,15 @@ def main():
     parser.add_argument("--apply-resume-authorization", type=Path)
     parser.add_argument("--create-successor-from", type=Path)
     parser.add_argument("--successor-authorization", type=Path)
+    parser.add_argument("--create-r5-from", type=Path)
+    parser.add_argument("--r5-authorization", type=Path)
+    parser.add_argument("--r5-budget-basis", type=Path)
     args = parser.parse_args()
+    if args.create_r5_from or args.r5_authorization or args.r5_budget_basis:
+        if not (args.create_r5_from and args.r5_authorization and args.r5_budget_basis) or any((args.create_successor_from, args.successor_authorization, args.apply_resume_authorization, args.kimi_key_file, args.control_token_file)):
+            parser.error("r5 creation requires predecessor, authorization and the explicit accounting basis without credentials")
+        print(json.dumps(create_r5_ledger(args.create_r5_from, args.ledger, json.loads(args.r5_authorization.read_text()), json.loads(args.r5_budget_basis.read_text()))))
+        return
     if args.create_successor_from or args.successor_authorization:
         if not (args.create_successor_from and args.successor_authorization) or args.apply_resume_authorization or args.kimi_key_file or args.control_token_file:
             parser.error("Successor creation is an offline paired action without credentials")
