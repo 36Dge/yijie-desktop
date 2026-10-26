@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b"
   },
   "host": {
-    "base_commit": "8cd6bccbdc1ac3906aea53d95441299f7cfefcce",
+    "base_commit": "4f966e8ea810d5b094d0b797d291955d6c774844",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -71,6 +71,7 @@
       "api/fixtures/agent/session-event-v6/approval-resolved-cancelled.json": "f608af545895b78e725a3a47fd6483dc4b1337829cc9b6370981b2d555745ea7",
       "api/fixtures/agent/session-event-v6/approval-resolved-elsewhere.json": "4a41092824b7be173997edc02092ee8b7a926def74ac425261c4a3c0368a3f17",
       "api/fixtures/agent/session-event-v6/approval-resolved-expired.json": "dceff1d7b34daebdfeb1fe8e1e88616e9b80e9cdcadae28148c952fa85e573e7",
+      "api/fixtures/native-search-ordinary-url-components.json": "79b5d56d803b7dba0f0c05bff6be6129b12786bca5fd96336ce288a7442cae9f",
       "api/fixtures/skills/bundle-v1/manifest-checksum-mismatch.json": "8a08f52a66130b3b2a30f086fc79f18b359ebc96a61a412fd80530a89e5f5ce7",
       "api/fixtures/skills/bundle-v1/manifest-valid.json": "b6342e9b5263842cc6882549aef99e05546f267fc4550de28cbd371affbb0039",
       "api/fixtures/skills/bundle-v1/manifest-zip-slip.json": "ea17010ef2505031793f2aa8f59d22ca74c867e70a6064b545920cd225c3074f",
@@ -106,7 +107,8 @@
       "api/market-selection-v2.candidate.json": "d5ddcaf4ad26f0504b5584af8d5d1e387fada56cefe3de912bab417bf5bbfcd8",
       "api/native-conversation.lock.json": "243995316d147ce50c638dff4f100cdb5fa68030f112f548fa02b04dce8717fa",
       "api/native-mcp.lock.json": "85b90428494e131c5237c4125095dd096016c442fb48647160a2eacd7db01bc4",
-      "api/native-process.candidate.json": "b4cde19dd327e0ab19944c34a0de17da09c57c95a51721fadf572fb8ebab5229",
+      "api/native-process.candidate.json": "19e72ab957ce714b40be7886d22177a21e1408a6009f957957ac1a5233db96f8",
+      "api/native-process.lock.json": "ce1b10ea60d36fb3c6c1f7a964679a79e0431910748f1cdcb49fbc0d31cb047f",
       "api/native-turn-timing.candidate.json": "9c40c175cf192de6f2a1ce33bc847ecd56b323e899e667878202ac1c75800f9b",
       "api/openapi/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "api/openapi/agent-host.yaml": "8716d11ebae140d7c2cec72f6528bbd39ac5976c898c28e0044bec71fb004083",
@@ -384,8 +386,8 @@
       "internal/session/native_conversation_test.go": "d6755986285fab24110979070a6cd6b3cb1ff7d141a5d3555ebd652ffae13a84",
       "internal/session/native_mcp.go": "1902cbde7a50c8d995757509a318681cada15f0465cebb99dc036389bcb5b6f4",
       "internal/session/native_mcp_test.go": "9708e289fdab12daf8ab5c14c70f8978210771a3a71ca0613114b2e6178e5e53",
-      "internal/session/native_process.go": "fec243e37d35e11910c0c32ade22257bd8541f76ba9b11a83140911871ae7ec3",
-      "internal/session/native_process_test.go": "52633bcdf5b7dca0cdd81d8868ce572098493ffb7e256afc1fddf022176d138c",
+      "internal/session/native_process.go": "9e330d134763b3670e5985291d30c1fc632df53be62a6379c59ac26d5abb6bd5",
+      "internal/session/native_process_test.go": "ccf39b64d23992ec8d01de1752365f67e880fbe1aba0fa6059057326f8f3e100",
       "internal/session/native_reasoning_test.go": "cdeb2372d71258e7fc3a111814ff4da4ad1a39512aee4c08250e333b7b173a46",
       "internal/session/native_thread_status.go": "a41d8f3903c2febe2f3297cbc17ef83bbe75496b03b88181c8ae335b3551f6fc",
       "internal/session/native_thread_status_test.go": "6da02571ad6263af14ee8b22c18a44e06416158dcb03dab644703ebbb339e5af",
