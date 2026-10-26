@@ -566,3 +566,128 @@ fn feat164_delivery_pause_blocks_claim_but_preserves_explicit_unsent_cancel() {
         .cancel_unsent_delivery(p.session_id, p.turn_operation_id, now())
         .unwrap();
 }
+
+// This opt-in test stops at ordinary queue boundaries. It does not launch a
+// dispatcher, inject a failure, rewrite acceptance facts or delete its evidence.
+#[test]
+#[ignore = "requires a fresh retained evidence directory; no App or model service"]
+fn feat164_delivery_retained_normal_queue_cancel() {
+    let root = std::path::PathBuf::from(
+        std::env::var("YIJIE_FEAT164_DELIVERY_EVIDENCE_ROOT").expect("explicit output required"),
+    );
+    assert!(root.is_absolute() && !root.exists());
+    assert!(root
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("feat164-retained-delivery-"));
+    assert!(!root.components().any(|part| part.as_os_str() == "Library"));
+    std::fs::create_dir(&root).unwrap();
+    let scope = ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap();
+    let open = || {
+        ChatRepository::open(
+            &root.join("chat"),
+            &DatabaseKey::from_bytes([164; 32]),
+            ReceiptKey::from_bytes([165; 32]),
+            scope.clone(),
+        )
+        .unwrap()
+    };
+    let mut repo = open();
+    let workspace = root.join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let project = Uuid::parse_str(
+        &repo
+            .register_project(&workspace, b"ordinary-retained-bookmark")
+            .unwrap()
+            .id,
+    )
+    .unwrap();
+    let queued = repo
+        .create_model_session(Some(project), blocks(), Uuid::now_v7(), 1, intent(0))
+        .unwrap();
+    let original = proof(&repo.connection, queued.turn_operation_id).unwrap();
+    let prepared = repo.delivery_states(queued.session_id).unwrap();
+    assert_eq!(prepared.len(), 1);
+    assert_eq!(prepared[0].status, "never_sent");
+    assert!(prepared[0].cancellable);
+    let claimed = repo
+        .claim_next_conversation_outbox(now(), 30)
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed.operation_id, queued.create_operation_id);
+    let claimed_states = repo.delivery_states(queued.session_id).unwrap();
+    assert_eq!(claimed_states[0].status, "never_sent");
+    assert!(claimed_states[0].cancellable);
+    let receipt = repo
+        .cancel_unsent_delivery(queued.session_id, queued.turn_operation_id, now())
+        .unwrap();
+    assert_eq!(
+        fingerprint(&repo.connection, &original).unwrap(),
+        original.fingerprint
+    );
+    assert_eq!(
+        count(
+            &repo,
+            "SELECT count(*) FROM chat_messages WHERE role='user'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &repo,
+            "SELECT public_attempts+create_attempts+turn_attempts FROM chat_delivery_proofs"
+        ),
+        0
+    );
+    assert!(repo
+        .claim_next_conversation_outbox(now() + 60, 30)
+        .unwrap()
+        .is_none());
+    drop(repo);
+    let mut reopened = open();
+    let replay = reopened
+        .cancel_unsent_delivery(queued.session_id, queued.turn_operation_id, now() + 10)
+        .unwrap();
+    assert_eq!(replay, receipt);
+    assert!(reopened
+        .delivery_states(queued.session_id)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        fingerprint(&reopened.connection, &original).unwrap(),
+        original.fingerprint
+    );
+    assert_eq!(count(&reopened, "SELECT count(*) FROM chat_sessions"), 1);
+    assert_eq!(
+        count(
+            &reopened,
+            "SELECT count(*) FROM chat_messages WHERE role='user'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(&reopened, "SELECT count(*) FROM pragma_foreign_key_check"),
+        0
+    );
+    assert!(reopened
+        .claim_next_conversation_outbox(now() + 120, 30)
+        .unwrap()
+        .is_none());
+    let result = serde_json::json!({
+        "scope": "normal Native acceptance/claim/cancel/reopen; not a full App run",
+        "prepared": prepared, "claimed": claimed_states,
+        "receipt": receipt, "replayed_receipt": replay,
+        "original_input_fingerprint": original.fingerprint,
+        "message_rows_retained": 1, "dispatch_attempts": 0,
+        "model_http": 0, "runtime_started": false, "retained": true
+    });
+    drop(reopened);
+    std::fs::write(
+        root.join("result.json"),
+        serde_json::to_vec_pretty(&result).unwrap(),
+    )
+    .unwrap();
+    println!("retained normal delivery acceptance/cancel/reopen: PASS");
+}
