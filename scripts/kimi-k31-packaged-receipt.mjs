@@ -12,10 +12,12 @@ import {kimiCallSurfaces} from "./kimi-k31-build-candidate.mjs";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const hash=v=>createHash("sha256").update(v).digest("hex");
 const qualification=process.env.YIJIE_FEAT164_QUALIFICATION==="true";
-const runtimeRoot=qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
+const daily=process.env.YIJIE_FEAT164_DAILY==="true";
+assert(!(daily&&qualification),"Daily and qualification receipts cannot be mixed");
+const runtimeRoot=daily?".local/feat164-daily":qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
 const receipt=path.join(root,runtimeRoot,"packaged-launch-receipt.json");
-const bundleName=qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
-const identifier=qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
+const bundleName=daily?"易界 AI.app":qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
+const identifier=daily?"com.yijie.ai":qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
 async function fileRecord(file){
  const stat=await lstat(file);assert(stat.isFile(),"Regular file required");
  const digest=createHash("sha256");for await(const bytes of createReadStream(file))digest.update(bytes);
@@ -27,7 +29,7 @@ async function inputs(){
  const names=execFileSync("git",["-C",root,"ls-files","-co","--exclude-standard","-z","--","src","src-tauri","scripts","contracts","public","patches","tools","sidecars","package.json","pnpm-lock.yaml","pnpm-workspace.yaml","rust-toolchain.toml","index.html","vite.config.*","tsconfig*.json",".cargo",".npmrc",".gitignore",".gitattributes"],{encoding:"utf8",maxBuffer:32*1024*1024}).split("\0").filter(Boolean);
  for(const name of [".env",".env.local",".env.production",".env.production.local"]){try{await lstat(path.join(root,name));names.push(name);}catch(error){if(error.code!=="ENOENT")throw error;}}
  const sources={};for(const name of [...new Set(names)].sort())sources[name]=await fileRecord(path.join(root,name));
- const keys=[...new Set(["YIJIE_FEAT164_QUALIFICATION","YIJIE_KIMI_K31_PRO_CANDIDATE","YIJIE_KIMI_K31_CALL_SURFACES","YIJIE_MARKET_CONNECTORS_ENABLED","YIJIE_EXPERTS_ENABLED","YIJIE_ARTIFACT_MEDIA_ENABLED","YIJIE_RUNTIME_PERMISSIONS_ENABLED","YIJIE_MARKET_PROVIDER_ONLY","YIJIE_PERMISSION_VERIFICATION_BASE_URL","NODE_ENV","NODE_OPTIONS","CC","CXX","CFLAGS","CXXFLAGS","LDFLAGS","SDKROOT","MACOSX_DEPLOYMENT_TARGET","PKG_CONFIG_PATH",...Object.keys(process.env).filter(key=>/^(VITE_|TAURI_|CARGO_|RUST)/.test(key))])].sort();
+ const keys=[...new Set([...(daily?["YIJIE_FEAT164_DAILY","YIJIE_FEAT155_SCHEDULED_DAILY","YIJIE_FEAT155_SCHEDULED_CANDIDATE","YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR"]:[]),"YIJIE_FEAT164_QUALIFICATION","YIJIE_KIMI_K31_PRO_CANDIDATE","YIJIE_KIMI_K31_CALL_SURFACES","YIJIE_MARKET_CONNECTORS_ENABLED","YIJIE_EXPERTS_ENABLED","YIJIE_ARTIFACT_MEDIA_ENABLED","YIJIE_RUNTIME_PERMISSIONS_ENABLED","YIJIE_MARKET_PROVIDER_ONLY","YIJIE_PERMISSION_VERIFICATION_BASE_URL","NODE_ENV","NODE_OPTIONS","CC","CXX","CFLAGS","CXXFLAGS","LDFLAGS","SDKROOT","MACOSX_DEPLOYMENT_TARGET","PKG_CONFIG_PATH",...Object.keys(process.env).filter(key=>/^(VITE_|TAURI_|CARGO_|RUST)/.test(key))])].sort();
  const environment=Object.fromEntries(keys.map(key=>[key,hash(JSON.stringify(process.env[key]??null))]));
  return {sources,environment,...(kimiCallSurfaces().market?{workerSources:await workerBuildInputs()}: {})};
 }

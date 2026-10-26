@@ -76,3 +76,5 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 FEAT-125 本地类生产认证环境的受限 CA、`localhost` origin、Keychain v2 迁移与签名验证边界见
 [`docs/security/FEAT-125-G3-NP-LOCAL.md`](docs/security/FEAT-125-G3-NP-LOCAL.md)。
+
+FEAT-164 now also has an explicit, separate `--packaged --kimi-k31-daily --prepare-only` build path. It retains the daily workflow/media composition without launching the App or workflow services. The daily maintenance action requires its own fixed identity and storage admission; actual daily data activation is not authorized by this candidate implementation. See [daily deployment](docs/feat164-daily-deployment.md).

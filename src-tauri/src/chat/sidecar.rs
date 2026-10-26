@@ -189,7 +189,10 @@ impl SidecarConfig {
         )?;
         let kimi_k31_allow_managed_predecessor = kimi_k31_predecessor_setting(
             super::models::v2_enabled() && chat_models_enabled,
-            std::env::var("YIJIE_FEAT164_QUALIFICATION").as_deref() == Ok("true"),
+            std::env::var("YIJIE_FEAT164_QUALIFICATION").as_deref() == Ok("true")
+                || crate::feat164_qualification::daily_admitted(
+                    crate::feat164_qualification::DAILY_IDENTIFIER,
+                ),
             std::env::var("YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR")
                 .ok()
                 .as_deref(),
@@ -532,7 +535,7 @@ fn kimi_k31_surface_settings(
     }
 }
 
-// The compiled fixed identity is checked before Native startup. This permission
+// The compiled qualification or daily identity is checked before Native startup. This permission
 // admits only Host's already-reviewed exact predecessor pair, never a turn.
 fn kimi_k31_predecessor_setting(
     candidate: bool,

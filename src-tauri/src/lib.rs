@@ -121,14 +121,19 @@ async fn get_my_capabilities(
 pub fn run() {
     let context = tauri::generate_context!();
     let isolated_migration = std::env::args().any(|arg| arg == "--feat164-migrate-isolated-k3");
-    if isolated_migration {
+    let daily_migration = std::env::args().any(|arg| arg == "--feat164-migrate-daily-k3");
+    if isolated_migration || daily_migration {
         // Maintenance returns before auth, DatabaseWorker, sidecars or WebView.
         // The maintenance entry acquires the same App instance guard itself.
         #[cfg(target_os = "macos")]
-        match chat::migrate_isolated_k3(&context.config().identifier) {
+        match if daily_migration {
+            chat::migrate_daily_k3(&context.config().identifier)
+        } else {
+            chat::migrate_isolated_k3(&context.config().identifier)
+        } {
             Ok(result) => println!("{result}"),
             Err(error) => {
-                eprintln!("FEAT-164 isolated migration rejected: {}", error.code());
+                eprintln!("FEAT-164 explicit migration rejected: {}", error.code());
                 std::process::exit(1);
             }
         }
@@ -140,7 +145,7 @@ pub fn run() {
         return;
     }
     if !feat164_qualification::admitted(&context.config().identifier) {
-        eprintln!("FEAT-164 qualification requires its isolated offline assembly");
+        eprintln!("FEAT-164 deployment identity requires its matching canonical assembly");
         std::process::exit(1);
     }
     #[cfg(target_os = "macos")]

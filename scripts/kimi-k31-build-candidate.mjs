@@ -32,7 +32,18 @@ export function kimiCallSurfaces(env=process.env){
   assert([undefined,"false","true"].includes(env[flag]),"Invalid feature flag: "+flag);
   assert.equal(env[flag]==="true",expected,"Explicit call surface mismatch: "+flag);
  }
- assert(env.YIJIE_WORKFLOW_ENABLED!=="true","Workflow remains outside this candidate");
+ const daily=env.YIJIE_FEAT164_DAILY==="true";
+ assert([undefined,"false","true"].includes(env.YIJIE_FEAT164_DAILY),"Invalid daily selector");
+ if(daily){
+  assert.equal(mode,"media","Daily Kimi preserves the complete media surface");
+  assert.equal(env.YIJIE_KIMI_K31_PRO_CANDIDATE,"true");
+  assert.equal(env.YIJIE_FEAT155_SCHEDULED_DAILY,"true");
+  assert.equal(env.YIJIE_FEAT155_SCHEDULED_CANDIDATE,"false");
+  assert(env.YIJIE_FEAT164_QUALIFICATION!=="true","Daily identity cannot use qualification storage");
+  assert(["false","true"].includes(env.VITE_YIJIE_WORKFLOW_ENABLED),"Daily workflow choice must be explicit");
+ }else{
+  assert(env.YIJIE_WORKFLOW_ENABLED!=="true"&&env.VITE_YIJIE_WORKFLOW_ENABLED!=="true","Workflow remains outside this candidate");
+ }
  if(market)assert.equal(env.YIJIE_RUNTIME_PERMISSIONS_ENABLED,"true","Market requires original permission boundary");
  return {mode,market,experts,media};
 }

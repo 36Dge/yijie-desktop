@@ -15,6 +15,19 @@ use std::process::Command;
 
 const IDENTIFIER: &str = "com.yijie.ai.feat164-kimi-k31-r1";
 const DIRECTORY: &str = "demo-fast-model-candidate-v1";
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Isolated,
+    Daily,
+}
+impl Target {
+    fn directory(self) -> &'static str {
+        match self {
+            Self::Isolated => DIRECTORY,
+            Self::Daily => "demo-fast-v1",
+        }
+    }
+}
 
 fn invalid() -> ChatError {
     ChatError::InvalidConfiguration
@@ -24,12 +37,22 @@ fn storage() -> ChatError {
 }
 
 pub(crate) fn run(identifier: &str) -> Result<String, ChatError> {
-    if std::env::args().skip(1).collect::<Vec<_>>() != ["--feat164-migrate-isolated-k3"] {
+    run_target(
+        identifier,
+        Target::Isolated,
+        "--feat164-migrate-isolated-k3",
+    )
+}
+pub(crate) fn run_daily(identifier: &str) -> Result<String, ChatError> {
+    run_target(identifier, Target::Daily, "--feat164-migrate-daily-k3")
+}
+fn run_target(identifier: &str, target: Target, argument: &str) -> Result<String, ChatError> {
+    if std::env::args().skip(1).collect::<Vec<_>>() != [argument] {
         return Err(invalid());
     }
     let home = PathBuf::from(std::env::var_os("HOME").ok_or_else(invalid)?);
     let application_support = home.join("Library/Application Support");
-    let result = migrate(&application_support, identifier)?;
+    let result = migrate_target(&application_support, identifier, target)?;
     serde_json::to_string(&result).map_err(|_| storage())
 }
 
@@ -42,26 +65,47 @@ pub(crate) struct ResultSummary {
     model_http: u8,
 }
 
+#[cfg(test)]
 fn admit(application_support: &Path, identifier: &str) -> Result<PathBuf, ChatError> {
+    admit_target(application_support, identifier, Target::Isolated)
+}
+fn admit_target(
+    application_support: &Path,
+    identifier: &str,
+    target: Target,
+) -> Result<PathBuf, ChatError> {
     if !cfg!(target_os = "macos")
         || !crate::chat::models::v2_enabled()
         || !crate::chat::models::enabled()
-        || !matches!(
-            identifier,
-            IDENTIFIER | crate::feat164_qualification::IDENTIFIER
-        )
-        || std::env::var("YIJIE_FEAT155_SCHEDULED_CANDIDATE").as_deref() != Ok("true")
-        || std::env::var("YIJIE_FEAT155_SCHEDULED_DAILY").as_deref() != Ok("false")
     {
         return Err(invalid());
     }
-    let base = application_support.join(identifier).join(DIRECTORY);
+    let allowed = match target {
+        Target::Isolated => {
+            matches!(
+                identifier,
+                IDENTIFIER | crate::feat164_qualification::IDENTIFIER
+            ) && !crate::feat164_qualification::daily_selected()
+                && std::env::var("YIJIE_FEAT155_SCHEDULED_CANDIDATE").as_deref() == Ok("true")
+                && std::env::var("YIJIE_FEAT155_SCHEDULED_DAILY").as_deref() == Ok("false")
+        }
+        Target::Daily => crate::feat164_qualification::daily_admitted(identifier),
+    };
+    if !allowed {
+        return Err(invalid());
+    }
+    let base = application_support
+        .join(identifier)
+        .join(target.directory());
     if !base.is_absolute() || fs::canonicalize(&base).map_err(|_| invalid())? != base {
         return Err(invalid());
     }
     for p in [&base, &base.join("chat"), &base.join("secrets")] {
         let m = fs::symlink_metadata(p).map_err(|_| invalid())?;
-        if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } || m.mode() & 0o777 != 0o700 {
+        // The existing daily parent can be 0755. Do not change its permissions.
+        let mode = m.mode() & 0o777;
+        let valid_mode = mode == 0o700 || (target == Target::Daily && p == &base && mode == 0o755);
+        if !m.is_dir() || m.uid() != unsafe { libc::geteuid() } || !valid_mode {
             return Err(invalid());
         }
     }
@@ -224,8 +268,12 @@ fn preflight(db: &Connection) -> Result<i64, ChatError> {
     Ok(version)
 }
 
-fn migrate(application_support: &Path, identifier: &str) -> Result<ResultSummary, ChatError> {
-    let base = admit(application_support, identifier)?;
+fn migrate_target(
+    application_support: &Path,
+    identifier: &str,
+    target: Target,
+) -> Result<ResultSummary, ChatError> {
+    let base = admit_target(application_support, identifier, target)?;
     let _instance = crate::single_instance::acquire(identifier, crate::chat::experts::enabled())
         .map_err(|_| ChatError::CleanupIncomplete)?;
     no_open_handles(&base)?;
@@ -364,27 +412,56 @@ mod tests {
     #[test]
     #[ignore = "requires fresh retained natural legacy fixture and isolated test output"]
     fn feat164_controlled_isolated_migration() {
+        controlled_migration(Target::Isolated);
+    }
+    #[test]
+    #[ignore = "requires fresh retained natural legacy fixture; never the actual daily data root"]
+    fn feat164_controlled_daily_migration() {
+        controlled_migration(Target::Daily);
+    }
+    fn controlled_migration(target: Target) {
+        let identifier = if target == Target::Daily {
+            crate::feat164_qualification::DAILY_IDENTIFIER
+        } else {
+            IDENTIFIER
+        };
         let source = PathBuf::from(std::env::var("YIJIE_FEAT164_NATURAL_SOURCE").unwrap());
         let output = PathBuf::from(std::env::var("YIJIE_FEAT164_MIGRATION_TEST_ROOT").unwrap());
         assert!(output.is_absolute() && !output.exists());
         fs::DirBuilder::new().mode(0o700).create(&output).unwrap();
-        assert!(admit(Path::new("relative"), IDENTIFIER).is_err());
-        assert!(admit(&output, "com.yijie.ai").is_err());
+        assert!(admit_target(Path::new("relative"), identifier, target).is_err());
+        let other = if target == Target::Daily {
+            IDENTIFIER
+        } else {
+            crate::feat164_qualification::DAILY_IDENTIFIER
+        };
+        assert!(admit_target(&output, other, target).is_err());
         for held in [true, false] {
             let case = if held { "held" } else { "review" };
             let support = output.join(case).join("Application Support");
-            let base = support.join(IDENTIFIER).join(DIRECTORY);
+            let base = support.join(identifier).join(target.directory());
+            if target == Target::Daily {
+                // A normal daily parent, not a permission-failure fixture.
+                fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o755)
+                    .create(&base)
+                    .unwrap();
+            }
             copy_case(&source.join(case), &base);
+            if target == Target::Daily {
+                assert_eq!(fs::metadata(&base).unwrap().mode() & 0o777, 0o755);
+            }
             let before = files(&base).unwrap();
             // Normal concurrent ownership, not a process fault or permission fixture.
-            let guard = crate::single_instance::acquire(IDENTIFIER, false).unwrap();
+            let guard = crate::single_instance::acquire(identifier, false).unwrap();
             assert!(matches!(
-                migrate(&support, IDENTIFIER),
+                migrate_target(&support, identifier, target),
                 Err(ChatError::CleanupIncomplete)
             ));
             drop(guard);
             assert_eq!(files(&base).unwrap(), before);
-            let result = migrate(&support, IDENTIFIER);
+            let result = migrate_target(&support, identifier, target);
             if held {
                 assert!(matches!(result, Err(ChatError::ConversationConflict)));
                 assert_eq!(
@@ -434,7 +511,7 @@ mod tests {
             let still_enabled:i64=db.query_row("SELECT count(*) FROM chat_scheduled_plans p JOIN chat_plan_models m ON m.plan_id=p.plan_id WHERE m.profile_id='kimi-k3-max-v1' AND (p.state!='paused' OR p.authorization_ref IS NOT NULL OR p.next_at IS NOT NULL)",[],|r|r.get(0)).unwrap();
             assert_eq!(still_enabled, 0);
             drop(db);
-            let repeated = migrate(&support, IDENTIFIER).unwrap();
+            let repeated = migrate_target(&support, identifier, target).unwrap();
             assert_eq!((repeated.from_schema, repeated.to_schema), (41, 41));
             let repo = ChatRepository::open_with_schedule_storage(
                 &base.join("chat"),
@@ -463,6 +540,12 @@ mod tests {
     #[ignore = "explicit feature-off process; no database access"]
     fn feat164_disabled_migration_is_rejected() {
         assert!(!crate::chat::models::v2_enabled());
+        assert!(admit_target(
+            Path::new("/"),
+            crate::feat164_qualification::DAILY_IDENTIFIER,
+            Target::Daily
+        )
+        .is_err());
         assert!(matches!(
             admit(Path::new("/"), IDENTIFIER),
             Err(ChatError::InvalidConfiguration)

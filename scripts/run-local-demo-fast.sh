@@ -42,10 +42,25 @@ packaged_app="false"
 expert_profile="daily"
 reopen_app="false"
 feat134_environment=()
+kimi_k31_daily="false"
+daily_workflow_requested="$workflow_requested"
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
   packaged_app="true"
   shift
+fi
+# Daily K31 is explicit. Preparation builds only; data maintenance is a separate action.
+if [[ "$#" -ge 1 && "$1" == "--kimi-k31-daily" ]]; then
+  [[ "$packaged_app" == "true" ]] || fail "daily Kimi requires --packaged"
+  [[ "${YIJIE_FEAT164_QUALIFICATION:-false}" == "false" ]] || fail "daily and qualification profiles cannot be mixed"
+  kimi_k31_daily="true"
+  export YIJIE_FEAT164_DAILY=true
+  [[ "${YIJIE_KIMI_K31_CALL_SURFACES:-media}" == "media" ]] || fail "daily Kimi preserves the full media profile"
+  export YIJIE_KIMI_K31_CALL_SURFACES=media
+  shift
+  set -- --kimi-k31-pro "$@"
+elif [[ "${YIJIE_FEAT164_DAILY:-false}" != "false" ]]; then
+  fail "daily Kimi requires its explicit canonical selector"
 fi
 # Fixed offline qualification identity; legacy and candidate share only this root.
 feat164_qualification="false"
@@ -69,6 +84,7 @@ fi
 kimi_k31_candidate="false"
 prepare_only="false"
 migrate_isolated_k3="false"
+migrate_daily_k3="false"
 if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
   [[ "$packaged_app" == "true" ]] || fail "Kimi candidate requires --packaged"
   kimi_k31_candidate="true"
@@ -85,12 +101,25 @@ if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
   esac
   export YIJIE_KIMI_K31_CALL_SURFACES="${YIJIE_KIMI_K31_CALL_SURFACES:-ordinary}"
   if [[ "$experts_requested" == "true" ]]; then expert_profile="default"; fi
+  if [[ "$kimi_k31_daily" == "true" ]]; then
+    export YIJIE_FEAT155_SCHEDULED_CANDIDATE=false YIJIE_FEAT155_SCHEDULED_DAILY=true
+    workflow_requested="${daily_workflow_requested:-true}"
+    expert_profile="daily"
+    export YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR="${YIJIE_KIMI_K31_ALLOW_MANAGED_PREDECESSOR:-true}"
+  fi
   host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
+  if [[ "$kimi_k31_daily" == "true" ]]; then host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18081}"; fi
   shift
   if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
   if [[ "$#" -ge 1 && "$1" == "--migrate-isolated-k3" ]]; then
+    [[ "$kimi_k31_daily" == "false" ]] || fail "daily profile requires its daily maintenance action"
     [[ "$prepare_only" == "false" ]] || fail "migration cannot be combined with prepare-only"
     migrate_isolated_k3="true"
+    shift
+  fi
+  if [[ "$#" -ge 1 && "$1" == "--migrate-daily-k3" ]]; then
+    [[ "$kimi_k31_daily" == "true" && "$prepare_only" == "false" ]] || fail "daily maintenance requires the daily profile without prepare-only"
+    migrate_daily_k3="true"
     shift
   fi
 elif [[ "${YIJIE_KIMI_K31_PRO_CANDIDATE:-false}" != "false" ]]; then
@@ -190,11 +219,13 @@ if [[ "$workflow_requested" == "true" ]]; then
   workflow_credential_file="${workflow_credential_file:-$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json}"
   [[ -z "${TAURI_CONFIG:-}" ]] || fail "workflow entry does not accept an ambient Tauri config override"
   [[ "$stable_api_only" != "true" ]] || fail "workflow uses the ordinary main App, not the separate stable entry"
+  if [[ "$prepare_only" != "true" && "$migrate_daily_k3" != "true" ]]; then
   [[ "$workflow_credential_file" == /* && -f "$workflow_credential_file" && ! -L "$workflow_credential_file" ]] || fail "workflow credential path must be an existing absolute regular file"
   workflow_file_info="$(stat -f '%u:%Lp:%l:%z' "$workflow_credential_file")" || fail "workflow credential metadata is unavailable"
   IFS=: read -r workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size <<< "$workflow_file_info"
   [[ "$workflow_file_uid" == "$(id -u)" && ( "$workflow_file_mode" == "400" || "$workflow_file_mode" == "600" ) && "$workflow_file_links" == "1" && "$workflow_file_size" -gt 0 && "$workflow_file_size" -le 1024 ]] || fail "workflow credential file must be owner-only and bounded"
   workflow_environment=(YIJIE_WORKFLOW_ENABLED=true "YIJIE_WORKFLOW_CREDENTIAL_FILE=$workflow_credential_file")
+  fi
   workflow_tauri_config=(--config src-tauri/tauri.workflow-local.conf.json)
   unset workflow_file_info workflow_file_uid workflow_file_mode workflow_file_links workflow_file_size
 fi
@@ -250,6 +281,12 @@ if [[ "$chat_models_enabled" == "true" ]]; then
   fi
 fi
 
+if [[ "$kimi_k31_daily" == "true" ]]; then
+  runtime_root="$desktop_root/.local/feat164-daily"
+  host_home="$runtime_root/host-home"
+  codex_home="$runtime_root/codex-home"
+  host_binary="$runtime_root/bin/yijie-agent-host"
+fi
 if [[ "$feat164_qualification" == "true" ]]; then
   runtime_root="$desktop_root/.local/feat164-qualification"
   host_home="$runtime_root/host-home"
@@ -321,10 +358,16 @@ if [[ "$market_connectors_enabled" == "true" && ! -e "$provider_key_file" ]]; th
   image_generation_enabled="false"
   provider_environment=()
 fi
+# A daily build/maintenance describes the full chat profile without credentials.
+# Normal launch still rejects missing providers before any App is started.
+if [[ "$kimi_k31_daily" == "true" && ( "$prepare_only" == "true" || "$migrate_daily_k3" == "true" ) ]]; then
+  market_provider_only="false"
+  provider_environment=()
+fi
 export YIJIE_MARKET_PROVIDER_ONLY="$market_provider_only"
 # FEAT-164's persisted model-v2 candidate requires the chat reader assembly.
 # Management-only mode intentionally omits that authority; never weaken it.
-if [[ "$kimi_k31_candidate" == "true" && "$market_provider_only" == "true" && "$prepare_only" != "true" && "$migrate_isolated_k3" != "true" ]]; then
+if [[ "$kimi_k31_candidate" == "true" && "$market_provider_only" == "true" && "$prepare_only" != "true" && "$migrate_isolated_k3" != "true" && "$migrate_daily_k3" != "true" ]]; then
   fail "FEAT-164 chat launch requires its configured model profile; provider-only management cannot open this candidate. Use --prepare-only for a credential-free build."
 fi
 
@@ -379,7 +422,7 @@ fi
   fail "Codex Runtime binary differs from the selected pinned artifact"
 [[ "$(sha256_file "$codex_manifest")" == "$runtime_manifest_sha256" ]] ||
   fail "Codex Runtime manifest differs from the selected pinned artifact"
-if [[ "$market_provider_only" != "true" && "$migrate_isolated_k3" != "true" ]]; then
+if [[ "$market_provider_only" != "true" && "$migrate_isolated_k3" != "true" && "$migrate_daily_k3" != "true" && ! ( "$kimi_k31_daily" == "true" && "$prepare_only" == "true" ) ]]; then
   [[ -f "$provider_key_file" && ! -L "$provider_key_file" ]] || fail "MiniMax provider key file is missing"
 fi
 
@@ -436,7 +479,7 @@ fi
 
 # Reuse Infra's existing lifecycle and authenticated readiness checks. Never
 # initialize a new dataset, rebuild services, or bypass recovery gates here.
-if [[ "$workflow_requested" == "true" ]]; then
+if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_daily_k3" != "true" ]]; then
   make -C "$workspace_root/yijie-infra" workflow-up
 fi
 
@@ -451,6 +494,8 @@ elif [[ "$packaged_app" == "true" ]]; then
       qualification_features=()
       if [[ "$kimi_k31_candidate" == "true" ]]; then qualification_features=(--features kimi-k31-pro-candidate); fi
       pnpm tauri:build:demo-fast "${qualification_features[@]+"${qualification_features[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-qualification.conf.json
+    elif [[ "$kimi_k31_daily" == "true" ]]; then
+      pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${workflow_tauri_config[@]+"${workflow_tauri_config[@]}"}" "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}"
     elif [[ "$kimi_k31_candidate" == "true" ]]; then
       pnpm tauri:build:demo-fast --features kimi-k31-pro-candidate "${experts_tauri_config[@]+"${experts_tauri_config[@]}"}" --config src-tauri/tauri.feat164-kimi-k31.conf.json
     else
@@ -458,7 +503,7 @@ elif [[ "$packaged_app" == "true" ]]; then
     fi
   fi
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
-  if [[ "$kimi_k31_candidate" == "true" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app/Contents/MacOS/yijie-desktop"; fi
+  if [[ "$kimi_k31_candidate" == "true" && "$kimi_k31_daily" == "false" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app/Contents/MacOS/yijie-desktop"; fi
   if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"
   fi
@@ -496,6 +541,13 @@ if [[ "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ]]; 
   fi
 fi
 
+if [[ "$migrate_daily_k3" == "true" ]]; then
+  exec env -i PATH="$PATH" HOME="$HOME" \
+    YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast \
+    YIJIE_CHAT_MODELS_ENABLED=true YIJIE_KIMI_K31_PRO_CANDIDATE=true \
+    YIJIE_FEAT164_DAILY=true YIJIE_FEAT155_SCHEDULED_CANDIDATE=false YIJIE_FEAT155_SCHEDULED_DAILY=true \
+    "$bundle_binary" --feat164-migrate-daily-k3
+fi
 if [[ "$migrate_isolated_k3" == "true" ]]; then
   # Same canonical artifact, but no UI, provider credentials, Host or Runtime.
   exec env -i PATH="$PATH" HOME="$HOME" \
