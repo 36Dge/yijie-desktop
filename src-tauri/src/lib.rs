@@ -119,6 +119,25 @@ async fn get_my_capabilities(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+    let isolated_migration = std::env::args().any(|arg| arg == "--feat164-migrate-isolated-k3");
+    if isolated_migration {
+        // Maintenance returns before auth, DatabaseWorker, sidecars or WebView.
+        // The maintenance entry acquires the same App instance guard itself.
+        #[cfg(target_os = "macos")]
+        match chat::migrate_isolated_k3(&context.config().identifier) {
+            Ok(result) => println!("{result}"),
+            Err(error) => {
+                eprintln!("FEAT-164 isolated migration rejected: {}", error.code());
+                std::process::exit(1);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            eprintln!("FEAT-164 isolated migration is unavailable on this platform");
+            std::process::exit(1);
+        }
+        return;
+    }
     #[cfg(target_os = "macos")]
     let _single_instance =
         match single_instance::acquire(&context.config().identifier, chat::experts::enabled()) {

@@ -51,6 +51,9 @@ const OUTBOX_PAYLOAD_VERSION: i64 = 1;
 const DELETION_RECEIPT_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
 #[path = "deletion_recovery.rs"]
 mod deletion_recovery;
+#[path = "isolated_model_migration.rs"]
+#[cfg(target_os = "macos")]
+pub(crate) mod isolated_model_migration;
 // Deleting a queued chat cancels its outbox but retains the historical queued
 // projection. Only a turn that never reached start_turn may stop blocking the
 // existing cleanup worker. create_session can have retries: it initializes an

@@ -75,3 +75,7 @@ SQL26兼容reader先行，仅TimingFoundation允许写时间缓存。回退保�
 Owner已明确移除防自动空闲睡眠与“睡眠后停止发送”；本修复不重新启用上述需求，也不增加系统通知、云调度或常驻服务。
 
 日常旧历史适配不删除未知运行：预约和发送前共用同源占用条件，仅排除明确failed且无native绑定的旧排队记录与已无lease的耗尽清理。专属聊天占位重建仅接受同一scope/计划下never_sent_cancel+退款、create/turn均never、create计数0且无Host/Runtime绑定的证据；在组合事务中重验，旧操作保持禁止重发。
+
+### FEAT-164 isolated storage maintenance
+
+The explicit canonical `--migrate-isolated-k3` mode is limited to the compiled FEAT-164 candidate identity and fixed isolated data root. It holds the existing App lock, verifies closed/compatible state and retains encrypted DB/WAL/SHM plus existing keys in private snapshots before using the existing migration authority. Pending/unknown work and occupied grants are refused, never cleared or refunded. It returns before auth, worker, sidecar or UI initialization, carries no model credentials, and grants no execution authority. Daily data and implicit startup are unchanged; failures retain evidence without automatic restore or manual WAL operations. See [the migration entrance](docs/feat164-isolated-model-migration.md).

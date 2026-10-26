@@ -51,6 +51,7 @@ fi
 # data/binary roots. Prepare-only builds the reviewable candidate without launch.
 kimi_k31_candidate="false"
 prepare_only="false"
+migrate_isolated_k3="false"
 if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
   [[ "$packaged_app" == "true" ]] || fail "Kimi candidate requires --packaged"
   kimi_k31_candidate="true"
@@ -70,6 +71,11 @@ if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
   host_port="${YIJIE_DEMO_FAST_HOST_PORT:-18086}"
   shift
   if [[ "$#" -ge 1 && "$1" == "--prepare-only" ]]; then prepare_only="true"; shift; fi
+  if [[ "$#" -ge 1 && "$1" == "--migrate-isolated-k3" ]]; then
+    [[ "$prepare_only" == "false" ]] || fail "migration cannot be combined with prepare-only"
+    migrate_isolated_k3="true"
+    shift
+  fi
 elif [[ "${YIJIE_KIMI_K31_PRO_CANDIDATE:-false}" != "false" ]]; then
   fail "Kimi candidate flag requires its explicit canonical entry"
 fi
@@ -290,7 +296,7 @@ fi
 export YIJIE_MARKET_PROVIDER_ONLY="$market_provider_only"
 # FEAT-164's persisted model-v2 candidate requires the chat reader assembly.
 # Management-only mode intentionally omits that authority; never weaken it.
-if [[ "$kimi_k31_candidate" == "true" && "$market_provider_only" == "true" && "$prepare_only" != "true" ]]; then
+if [[ "$kimi_k31_candidate" == "true" && "$market_provider_only" == "true" && "$prepare_only" != "true" && "$migrate_isolated_k3" != "true" ]]; then
   fail "FEAT-164 chat launch requires its configured model profile; provider-only management cannot open this candidate. Use --prepare-only for a credential-free build."
 fi
 
@@ -455,6 +461,15 @@ if [[ "$kimi_k31_candidate" == "true" ]]; then
   else
     node scripts/kimi-k31-packaged-receipt.mjs --record "$codex_binary" "$codex_manifest" "$kimi_k31_build_inputs" "${kimi_k31_worker_inputs:-}"
   fi
+fi
+
+if [[ "$migrate_isolated_k3" == "true" ]]; then
+  # Same canonical artifact, but no UI, provider credentials, Host or Runtime.
+  exec env -i PATH="$PATH" HOME="$HOME" \
+    YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast \
+    YIJIE_CHAT_MODELS_ENABLED=true YIJIE_KIMI_K31_PRO_CANDIDATE=true \
+    YIJIE_FEAT155_SCHEDULED_CANDIDATE=true YIJIE_FEAT155_SCHEDULED_DAILY=false \
+    "$bundle_binary" --feat164-migrate-isolated-k3
 fi
 
 if [[ "$prepare_only" == "true" ]]; then

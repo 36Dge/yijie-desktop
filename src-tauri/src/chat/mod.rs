@@ -8,6 +8,8 @@ mod attachment;
 mod authorization;
 pub(crate) mod connectors;
 mod database;
+#[cfg(target_os = "macos")]
+pub(crate) use database::isolated_model_migration::run as migrate_isolated_k3;
 mod error;
 pub(crate) mod exit_owner;
 pub(crate) mod experts;
