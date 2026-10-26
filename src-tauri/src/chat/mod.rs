@@ -1260,6 +1260,12 @@ fn retain_unavailable_model_history(
         && candidate.active_runtime_turn_id.is_none()
         && candidate.active_turn_operation_id.is_none()
         && profile.is_some_and(|profile| {
+            // Retired-known identity is readable but cannot be eagerly resumed
+            // as an executable model. Explicit selection owns the later switch.
+            #[cfg(feature = "kimi-k31-pro-candidate")]
+            if profile == "kimi-k3-max-v1" {
+                return catalog.is_some_and(|catalog| catalog.schema_version == 2);
+            }
             catalog.is_some_and(|catalog| {
                 catalog.models.iter().any(|entry| {
                     models::profile_id(entry.profile.profile_id) == profile
@@ -1539,6 +1545,60 @@ mod tests {
             profile,
             Some(&catalog)
         ));
+    }
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    fn feat164_retired_terminal_history_is_read_only_until_explicit_selection() {
+        let terminal = database::Feat126ResumeCandidate {
+            task_id: Uuid::now_v7(),
+            session_id: Uuid::now_v7(),
+            agent_session_id: Uuid::now_v7(),
+            codex_thread_id: Uuid::now_v7(),
+            active_local_turn_id: None,
+            active_runtime_turn_id: None,
+            active_turn_operation_id: None,
+        };
+        let catalog: models_generated::Catalog = serde_json::from_value(serde_json::json!({
+            "schema_version":2,"default_profile":"kimi-k3-1-pro-max-v1","models":[{
+                "profile":{"profile_id":"kimi-k3-1-pro-max-v1","label":"Kimi K3.1 Pro","provider":"kimi","model":"kimi-k3.1-pro","effort":"max","context_window":1048576},
+                "available":true,"reason":"ready"
+            }]
+        })).unwrap();
+        let profile = Some("kimi-k3-max-v1");
+        assert!(retain_unavailable_model_history(
+            &terminal,
+            profile,
+            Some(&catalog)
+        ));
+        for active in [
+            database::Feat126ResumeCandidate {
+                active_local_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_runtime_turn_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+            database::Feat126ResumeCandidate {
+                active_turn_operation_id: Some(Uuid::now_v7()),
+                ..terminal.clone()
+            },
+        ] {
+            assert!(!retain_unavailable_model_history(
+                &active,
+                profile,
+                Some(&catalog)
+            ));
+        }
+        assert!(!retain_unavailable_model_history(&terminal, profile, None));
+        for current in [None, Some("unknown-profile"), Some("kimi-k3-1-pro-max-v1")] {
+            assert!(!retain_unavailable_model_history(
+                &terminal,
+                current,
+                Some(&catalog)
+            ));
+        }
     }
 
     #[cfg(feature = "kimi-k31-pro-candidate")]
