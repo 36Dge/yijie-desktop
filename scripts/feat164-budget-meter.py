@@ -7,6 +7,7 @@ and images, retains the full reserve for unreconciled search fees, and stops.
 Schema6 allows at most two source-specific attempts within 45 CNY, stops after
 each, and requires an explicit settled-result review before a second request.
 Only native search tools are offered in schema6; old ledgers/reserves stay exact.
+Schema7 is one further reviewed request with original product tools and content-free item-type diagnostics.
 All adjustments are explicit in the ledger; this cannot qualify raw/default tool
 behavior. SSE bytes are forwarded unchanged. No prompt, answer or key is logged.
 """
@@ -39,6 +40,8 @@ FUNCTIONAL_NAME = "g2v-real-budget-ledger-functional.json"
 FUNCTIONAL_ID = "FEAT-164-R5-FUNCTIONAL-FOUR-HTTP"
 SEARCH_NAME = "g2v-real-budget-ledger-search.json"
 SEARCH_ID = "FEAT-164-S4AB-45CNY-TWO-HTTP"
+THIRD_NAME = "g2v-real-budget-ledger-search-third.json"
+THIRD_ID = "FEAT-164-S4AB-THIRD-ORIGINAL-TOOLS"
 SEARCH_LIMIT = 45_000_000
 SEARCH_APP = "179dbd187220694d4666af5822466572f3b245a911501991cb0194f4308db195"
 R5_ID = "FEAT-164-R5-30CNY-ONE-HTTP"
@@ -186,6 +189,20 @@ def validate_search_authorization(value):
         raise ValueError("Search revalidation differs from Owner's bounded scope")
 
 
+def validate_third_authorization(value):
+    if not isinstance(value, dict):
+        raise ValueError("Third attempt authorization required")
+    changes = {"authorization_id": THIRD_ID, "approval_source": "owner-20261027-third-attempt",
+               "additional_http_requests": 1, "scope": "third_search_original_product_tools",
+               "successor_ledger_name": THIRD_NAME, "failure_policy": "stop"}
+    if any(type(value.get(k)) is not type(v) or value.get(k) != v for k, v in changes.items()):
+        raise ValueError("Third attempt scope differs")
+    base = {**value, "authorization_id": SEARCH_ID, "approval_source": "owner-20261027-cap45-then-two-attempts",
+            "additional_http_requests": 2, "scope": "source_specific_native_search_one_at_a_time",
+            "successor_ledger_name": SEARCH_NAME, "failure_policy": "stop_and_review_before_second"}
+    validate_search_authorization(base)
+
+
 def successful_terminal(row):
     return (row.get("http_status") == 200 and row.get("terminal") == "response.completed"
             and row.get("response_status") == "completed" and row.get("terminal_count") == 1
@@ -261,7 +278,7 @@ def prepare_request(payload, *, functional=False, search_only=False):
 class Budget:
     def __init__(self, ledger, *, _state=None):
         self.path = ledger
-        if ledger.name in (R5_NAME, FUNCTIONAL_NAME, SEARCH_NAME) and _state is None and not ledger.exists():
+        if ledger.name in (R5_NAME, FUNCTIONAL_NAME, SEARCH_NAME, THIRD_NAME) and _state is None and not ledger.exists():
             raise ValueError("r5 ledger requires prior offline authorization and explicit accounting basis")
         self.state = copy.deepcopy(_state) if _state is not None else json.loads(ledger.read_text()) if ledger.exists() else {
             "feature": "FEAT-164", "limit_micro_cny": LIMIT, "max_http_requests": 8,
@@ -269,7 +286,7 @@ class Budget:
             "charged_upper_micro_cny": 0, "requests": [], "halted": False,
         }
         version = self.state.get("schema_version", 1)
-        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4, 5, 6):
+        if self.state.get("feature") != "FEAT-164" or version not in (1, 2, 3, 4, 5, 6, 7):
             raise ValueError("Independent approved FEAT-164 ledger required")
         rows = self.state["requests"]
         if not isinstance(rows, list) or any(r.get("ordinal") != i + 1 or r.get("status") not in
@@ -367,7 +384,7 @@ class Budget:
             self.acknowledged_unknown = {1}
             if any(r["status"] != "settled" or not successful_terminal(r) for r in rows[6:]):
                 self.state["halted"] = True
-        else:
+        elif version == 6:
             receipt = self.state.get("search_receipt", {})
             authorization = receipt.get("authorization")
             validate_search_authorization(authorization)
@@ -395,6 +412,27 @@ class Budget:
                     or rows[10]["status"] != "settled"):
                 raise ValueError("Explicit second-attempt review differs")
             if len(rows) >= 12 or (len(rows) == 11 and review is None):
+                self.state["halted"] = True
+        else:
+            receipt = self.state.get("third_receipt", {})
+            authorization = receipt.get("authorization")
+            validate_third_authorization(authorization)
+            raw = receipt.get("predecessor_json")
+            if not isinstance(raw, str) or len(raw) > 2 * 1024 * 1024:
+                raise ValueError("Exact stopped search predecessor required")
+            prior = json.loads(raw)
+            previous = Budget(ledger, _state=prior)
+            if (prior.get("schema_version") != 6 or len(prior["requests"]) != 12
+                    or prior.get("meter_state") != "stopped_normally" or not prior.get("halted")
+                    or any(r["status"] != "settled" or not successful_terminal(r) for r in prior["requests"][-2:])
+                    or hashlib.sha256(raw.encode()).hexdigest() != authorization["previous_ledger_sha256"]
+                    or receipt.get("authorization_sha256") != canonical_digest(authorization)
+                    or receipt.get("base_request_count") != 12 or not 12 <= len(rows) <= 13
+                    or rows[:12] != previous.state["requests"]
+                    or self.state["limit_micro_cny"] != SEARCH_LIMIT or self.state["max_http_requests"] != 13):
+                raise ValueError("Third receipt or preserved history differs")
+            self.acknowledged_unknown = set(previous.acknowledged_unknown)
+            if len(rows) == 13:
                 self.state["halted"] = True
         expected = sum(row_charge(r) for r in rows)
         if expected != self.state["charged_upper_micro_cny"] or not 0 <= expected <= self.state["limit_micro_cny"]:
@@ -432,7 +470,7 @@ class Budget:
                     or len(self.state["requests"]) >= self.state["max_http_requests"]
                     or self.state["charged_upper_micro_cny"] + RESERVATION > self.state["limit_micro_cny"]):
                 raise ValueError("Verification budget unavailable")
-            if self.state.get("schema_version") == 6 and (metadata["image_count"] != 0 or metadata.get("native_search_offered") != 1 or metadata.get("function_output_inputs") != 0):
+            if self.state.get("schema_version") in (6, 7) and (metadata["image_count"] != 0 or metadata.get("native_search_offered") != 1 or metadata.get("function_output_inputs") != 0):
                 raise ValueError("Search qualification excludes images and tool followups")
             if self.acknowledged_unknown and self.state.get("schema_version") != 5 and metadata["image_count"] != 0:
                 raise ValueError("The approved resume is text-only")
@@ -464,7 +502,7 @@ class Budget:
             else:
                 row["status"] = "unknown_reserved"
                 self.state["halted"] = True
-            if self.state.get("schema_version") == 6:
+            if self.state.get("schema_version") in (6, 7):
                 if observation.get("native_search_calls", 0):
                     row["accounting_reason"] = "native_search_fee_unreconciled_full_reserve_retained"
                 self.state["halted"] = True
@@ -678,9 +716,41 @@ def review_second_search_attempt(ledger, reason):
         budget.save()
 
 
+def create_third_search_ledger(previous_ledger, ledger, authorization):
+    """One extra Owner-authorized attempt; original product tools, same total cap."""
+    validate_third_authorization(authorization)
+    if ledger.name != THIRD_NAME or ledger.resolve() == previous_ledger.resolve() or ledger.parent.resolve() != previous_ledger.parent.resolve():
+        raise ValueError("Separate third-attempt ledger required")
+    with open(previous_ledger.with_suffix(".lock"), "a") as old_guard, open(ledger.with_suffix(".lock"), "a") as guard:
+        fcntl.flock(old_guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = previous_ledger.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != authorization["previous_ledger_sha256"]:
+            raise ValueError("Third predecessor bytes differ")
+        if ledger.exists():
+            existing = Budget(ledger)
+            if existing.state["third_receipt"]["authorization"] != authorization:
+                raise ValueError("Existing third ledger cannot be replaced")
+            return {"already_applied": True, "admissible": not existing.state["halted"]}
+        prior = Budget(previous_ledger).state
+        state = copy.deepcopy(prior)
+        state.update(schema_version=7, max_http_requests=13, halted=False, meter_state="created", scope="third_search_original_product_tools")
+        state.pop("stop_reason", None)
+        state["third_receipt"] = {"authorization": copy.deepcopy(authorization),
+            "authorization_sha256": canonical_digest(authorization), "predecessor_json": raw.decode(), "base_request_count": 12}
+        budget = Budget(ledger, _state=state)
+        if budget.state["halted"] or budget.state["charged_upper_micro_cny"] + RESERVATION > SEARCH_LIMIT:
+            raise ValueError("Third request cannot fit preserved budget")
+        budget.save()
+        assert previous_ledger.read_bytes() == raw
+        return {"already_applied": False, "admissible": True}
+
+
 class Observer:
-    def __init__(self):
+    def __init__(self, diagnostics=False):
         self.buffer = b""; self.result = {}; self.invalid = False; self.terminals = 0
+        self.diagnostics = diagnostics
+        self.item_types = []
 
     def feed(self, data):
         if self.invalid:
@@ -694,6 +764,11 @@ class Observer:
                 continue
             try:
                 event = json.loads(line[5:].strip())
+                known = {"message", "reasoning", "function_call", "custom_tool_call", "web_search_call", "tool_search_call", "image_generation_call", "compaction"}
+                if self.diagnostics and event.get("type") == "response.output_item.done" and len(self.item_types) < 64:
+                    kind = (event.get("item") or {}).get("type")
+                    self.item_types.append(kind if kind in known else "other")
+                    self.result["stream_completed_item_types"] = list(self.item_types)
                 if event.get("type") in ["response.completed", "response.incomplete", "response.failed"]:
                     self.terminals += 1
                     response = event.get("response", {})
@@ -701,6 +776,9 @@ class Observer:
                     if isinstance(usage, dict):
                         self.result["usage"] = {k: usage[k] for k in ["input_tokens", "output_tokens"] if k in usage}
                     output = response.get("output", [])
+                    if self.diagnostics:
+                        self.result["terminal_output_item_types"] = [i.get("type") if i.get("type") in known else "other" for i in output[:64] if isinstance(i, dict)]
+                        self.result["terminal_output_item_count"] = len(output)
                     functions = [i for i in output if isinstance(i, dict) and i.get("type") == "function_call"]
                     sources = [source for i in output if isinstance(i, dict) and i.get("type") == "web_search_call"
                                for source in (i.get("action") or {}).get("sources", []) if isinstance(source, dict)]
@@ -815,13 +893,13 @@ def main():
                     length = int(self.headers.get("Content-Length", "0"))
                     if not 0 < length <= 4 * 1024 * 1024:
                         raise ValueError("Request size")
-                    payload, metadata = prepare_request(self.rfile.read(length), functional=budget.state.get("schema_version") in (5, 6), search_only=budget.state.get("schema_version") == 6)
+                    payload, metadata = prepare_request(self.rfile.read(length), functional=budget.state.get("schema_version") in (5, 6, 7), search_only=budget.state.get("schema_version") == 6)
                     row = budget.admit(metadata)
                 except (ValueError, TypeError, AttributeError):
                     budget.stop_resume_on_rejection()
                     self.send_error(429, "Verification admission unavailable"); return
                 connection = http.client.HTTPSConnection("api.moonshot.cn", timeout=240)
-                observer = Observer(); digest = hashlib.sha256(); count = 0; error_bytes = bytearray(); complete = False
+                observer = Observer(diagnostics=budget.state.get("schema_version") == 7); digest = hashlib.sha256(); count = 0; error_bytes = bytearray(); complete = False
                 try:
                     connection.request("POST", "/v1/responses", body=payload,
                         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
