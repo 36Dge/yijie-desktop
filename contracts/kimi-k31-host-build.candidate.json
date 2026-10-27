@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b"
   },
   "host": {
-    "base_commit": "4f966e8ea810d5b094d0b797d291955d6c774844",
+    "base_commit": "a3d8767add3855a28c18adbbd51251fae3520ac0",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -219,14 +219,16 @@
       "internal/codex/feat164_meter_test.go": "8da44a8713af6b91061747e9eb5800b695b14065c286bf48e9d0594d36f7c0c9",
       "internal/codex/feat164_surfaces_integration_test.go": "7baf10e59f0e3e3da9703cc7e55d1b8e15f1624af3d6e21f2288bd29080f76f7",
       "internal/codex/feat164_title_test.go": "60f15f337f6b09a81dc0c2d1e35a1ec8989e723778dfc2c1b95d4aab0a08e7e0",
-      "internal/codex/kimi_k31_activation.go": "62ab986d46fe81381bca7f7c1b1ac6704baa1503d9f245897c6f325d5f0c9c19",
-      "internal/codex/kimi_k31_activation_test.go": "45dd5348be320eb32f295dba3e0891a799482fdbbff4cd42a6c5e9869a6df82a",
+      "internal/codex/kimi_k31_activation.go": "72222afcf90cf6d24c8d3087115e419bad603952334f173d5d316893f13d55d0",
+      "internal/codex/kimi_k31_activation_test.go": "7d4f4aea506c12604cf73d72471d176790aff5f607c46a8452fb3c394c45b4ee",
       "internal/codex/kimi_k31_candidate.go": "015b1322a997d2f88580d85a4fe43c80fd9dc8cb275e83f715bdf6257362bddf",
       "internal/codex/kimi_k31_candidate_test.go": "e8f4a6f5537095b22afdf387233f339d8b8ddab07ecef217cb77fc93bda16ca2",
       "internal/codex/kimi_k31_integration_test.go": "cc4ccc7e7cf2b14779841290de6da317247ec844f3c0b86665172321fcb071e9",
       "internal/codex/kimi_k31_predecessors/provenance.json": "4845507560f73224d9f5862d525f282bd47331d70360a93e1315b3067d775ad3",
       "internal/codex/kimi_k31_predecessors/v1-current.json": "c061c648f9d98115cdc5ae69ceb44b01fe0129c0006fc3f2f5b542e358a6e0fb",
       "internal/codex/kimi_k31_predecessors/v1-early.json": "c97ca0d28865a0051ea8cbca5c8ede0f5e14436d21f29824c01e44bba8721b80",
+      "internal/codex/kimi_k31_predecessors/v1-feat163-reviewed.json": "4b0b3fab2e6ca7d8b924248204c745c8e5abbe271e815ba21ecdd8527b1d31af",
+      "internal/codex/kimi_k31_predecessors/v1-feat163-reviewed.provenance.json": "7977397f6553b8772f522d04811769d532e78ae4ec3ad7f4c35c0b664de6ef9d",
       "internal/codex/kimi_k31_predecessors/v1.toml.tpl": "b7f6080338431ae330cdf67958ef8f9d33a9145b1e4d18707845f9e3847a88bc",
       "internal/codex/market_approvals.go": "6abf118ec297c33d831a391b5100e34555df27ced7c4b7534ae7a05ecb2a2532",
       "internal/codex/market_approvals_test.go": "476ab0531a8d8b834eac1e300f22b89ba7438f377b10d645981f35e140f3c039",
