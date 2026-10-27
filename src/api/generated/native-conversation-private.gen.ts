@@ -1,7 +1,7 @@
 /* Generated from native conversation source contracts. Do not edit. */
 
 export interface NativeConversationViewEvent {
-  schemaVersion: 4;
+  schemaVersion: 5;
   contextId: string;
   subscriptionId: string;
   sessionId: string;
@@ -36,7 +36,15 @@ export interface NativeDisplayItem {
 }
 export interface NativeItem {
   id: string;
-  type: "userMessage" | "agentMessage" | "reasoning" | "commandExecution" | "mcpToolCall" | "webSearch" | "unknown";
+  type:
+    | "userMessage"
+    | "agentMessage"
+    | "reasoning"
+    | "commandExecution"
+    | "mcpToolCall"
+    | "webSearch"
+    | "fileChange"
+    | "unknown";
   clientId?: string | null;
   text?: string;
   phase?: ("commentary" | "final_answer") | null;
@@ -81,6 +89,16 @@ export interface NativeItem {
   toolLabel?: string;
   mcp?: NativeMcpDisplay;
   webSearch?: NativeWebSearchDisplay;
+  /**
+   * Bounded whole-line redacted native command; inert text, never execution input.
+   */
+  commandPreview?: string;
+  /**
+   * @maxItems 32
+   */
+  commandActions?: NativeCommandActionDisplay[];
+  fileChange?: NativeFileChangeDisplay;
+  appContext?: NativeAppContextDisplay;
 }
 /**
  * Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.
@@ -514,6 +532,46 @@ export interface NativeWebSearchDisplay {
 export interface NativeWebSearchSourceDisplay {
   url: string;
   title?: string;
+}
+/**
+ * Original native action array index, not a distinct execution. Classification is best-effort. Path labels are safe workspace-relative paths only; absence means not displayable. No raw command parsing or filesystem discovery.
+ */
+export interface NativeCommandActionDisplay {
+  index: number;
+  type: "read" | "listFiles" | "search" | "unknown";
+  pathLabel?: string;
+  name?: string;
+  query?: string;
+  commandPreview?: string;
+}
+/**
+ * Existing native fileChange Item, at most 64KiB total projected diff per Item. Completion snapshot supplies definitive changes; patchUpdated chunks are not concatenated or promised live. Status remains native Item status.
+ */
+export interface NativeFileChangeDisplay {
+  /**
+   * @maxItems 128
+   */
+  changes: NativeFileUpdateDisplay[];
+}
+/**
+ * One native reported file change; not a worktree net diff. Safe relative paths and whole-line redacted diff. Counts exist only for completed, fully observed and parseable changes: add/delete content lines, update unified diff hunks. Missing or truncated counts are unavailable, never zero. No actionable raw paths.
+ */
+export interface NativeFileUpdateDisplay {
+  index: number;
+  kind: "add" | "delete" | "update" | "unknown";
+  pathLabel?: string;
+  movePathLabel?: string;
+  diffText?: string;
+  addedLines?: number;
+  removedLines?: number;
+}
+/**
+ * Only bounded redacted native display identity. No resourceUri, linkId, templateId or plugin payload. Does not grant access, fetch a resource, or infer business results. Empty context omitted.
+ */
+export interface NativeAppContextDisplay {
+  connectorId?: string;
+  appName?: string;
+  actionName?: string;
 }
 export interface NativePlanStep {
   step: string;

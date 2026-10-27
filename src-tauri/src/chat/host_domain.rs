@@ -1144,7 +1144,7 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let raw: Value = serde_json::from_str(data).map_err(|_| protocol_error())?;
-    if matches!(schema_version, 7 | 8 | 10 | 11) {
+    if matches!(schema_version, 7 | 8 | 10 | 11 | 12) {
         let raw = if schema_version == 7 {
             let legacy: super::native_conversation_legacy_generated::NativeEvent =
                 serde_json::from_value(raw).map_err(|_| protocol_error())?;
@@ -1155,6 +1155,10 @@ fn parse_event_json(
             serde_json::to_value(previous).map_err(|_| protocol_error())?
         } else if schema_version == 10 {
             let previous: super::native_conversation_v3_generated::NativeEvent =
+                serde_json::from_value(raw).map_err(|_| protocol_error())?;
+            serde_json::to_value(previous).map_err(|_| protocol_error())?
+        } else if schema_version == 11 {
+            let previous: super::native_conversation_v4_generated::NativeEvent =
                 serde_json::from_value(raw).map_err(|_| protocol_error())?;
             serde_json::to_value(previous).map_err(|_| protocol_error())?
         } else {

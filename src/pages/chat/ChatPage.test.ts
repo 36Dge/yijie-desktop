@@ -856,7 +856,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
     expect(wrapper.text()).toContain("处理过程");
-    expect(wrapper.text()).toContain("正在思考");
+    expect(wrapper.text()).toContain("正在处理…");
     expect(wrapper.text()).not.toContain("当前进度待确认");
     expect(wrapper.text()).not.toContain("仅包含状态元数据");
   });

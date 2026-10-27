@@ -2,8 +2,8 @@
 import { computed, ref, watch } from "vue";
 
 const props = withDefaults(defineProps<{ text: string; streaming?: boolean }>(), { streaming: false });
-// Only animation ranges are retained. Every received character is rendered immediately;
-// there is no playback queue or second authoritative copy of the model output.
+// Only decoration ranges are retained here. The message-level presentation cursor
+// supplies frame-sized additions in Markdown order; each addition gets a short fade.
 const ranges = ref<{ start: number; end: number }[]>([]);
 const prefix = computed(() => props.text.slice(0, ranges.value[0]?.start ?? props.text.length));
 watch(() => [props.text, props.streaming] as const, ([text, streaming], previous) => {
@@ -31,7 +31,7 @@ function settle(end: number) {
 
 <style scoped>
 .chat-stream-text__fresh {
-  animation: chat-stream-arrive var(--yj-motion-slow) var(--yj-ease-standard) both;
+  animation: chat-stream-arrive var(--yj-motion-fast) var(--yj-ease-standard) both;
 }
 @keyframes chat-stream-arrive {
   from { opacity: var(--yj-opacity-chat-stream-start); }

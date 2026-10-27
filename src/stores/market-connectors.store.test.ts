@@ -384,3 +384,32 @@ it("keeps bounded application recovery observation when the page becomes hidden"
     store.setOperationObservation(false, "app"); store.clear();
   } finally { vi.useRealTimers(); }
 });
+
+
+describe("built-in Kimi automatic preparation", () => {
+  it.each([true, false])("prepares without Configure once, available=%s", async available => {
+    const item: Installation = { ...installed, serviceId: "kimi-web", desiredEnabled: true, configurationStatus: "unconfigured", authorizationStatus: "unknown" };
+    const data = snapshot([item]); data.catalog = [{ ...service, serviceId: "kimi-web", authMode: "api_key" }];
+    const { client, store } = setup(data);
+    client.setEnabled.mockImplementation(async (_context, _item, desired, id) => {
+      expect(desired).toBe(true);
+      const next: Installation = { ...item, revision: 2, configurationStatus: available ? "configured" : "unknown", authorizationStatus: available ? "authorized" : "failed", effectiveEnabled: available, connectionStatus: available ? "ready" : "failed", ...(available ? {} : { errorCode: "not_configured" }) };
+      client.snapshot.mockResolvedValue({ ...data, installations: [next], executionAvailable: available });
+      return { installation: next, operation: { ...operation(id, available ? "succeeded" : "failed"), serviceId: "kimi-web", ...(available ? {} : { errorCode: "not_configured" as const }) } };
+    });
+    await store.bind("context-a", "local:tenant-a");
+    await vi.waitFor(() => expect(store.entries[0]?.enabled).toBe(available));
+    await vi.waitFor(() => expect(client.setEnabled).toHaveBeenCalledTimes(1));
+    await store.refresh(); await store.bind("renewed-context", "local:tenant-a");
+    expect(client.setEnabled).toHaveBeenCalledTimes(1);
+    expect(client.configure).not.toHaveBeenCalled(); expect(client.authorize).not.toHaveBeenCalled();
+    expect(store.entries[0]?.selectable).toBe(available);
+  });
+  it("keeps Kimi disabled when Native reports explicit disabled intent", async () => {
+    const data = snapshot([{ ...installed, serviceId: "kimi-web", desiredEnabled: false }]);
+    data.catalog = [{ ...service, serviceId: "kimi-web", authMode: "api_key" }];
+    const { client, store } = setup(data); await store.bind("context-a"); await store.refresh();
+    expect(client.setEnabled).not.toHaveBeenCalled(); expect(client.configure).not.toHaveBeenCalled();
+    expect(store.entries[0]?.status.label).toBe("已停用");
+  });
+});

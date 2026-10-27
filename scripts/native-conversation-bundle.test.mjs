@@ -30,7 +30,7 @@ test("browser bundle validates native Items and preserves Unicode length limits"
       ordinal: 0, lastMethod: "item/completed",
     }],
   };
-  const event = { schemaVersion: 4, contextId: "context", subscriptionId: "subscription", sessionId: view.sessionId, view };
+  const event = { schemaVersion: 5, contextId: "context", subscriptionId: "subscription", sessionId: view.sessionId, view };
   const history = { views: [view], submissions: [], remainingTurnIds: [], historyAvailability: "partial" };
   expect(validator.validateNativeViewEvent(event)).toBe(true);
   expect(validator.validateNativeHistory(history)).toBe(true);

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { mount } from "@vue/test-utils";
-import { defineComponent, ref } from "vue";
+import { defineComponent, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatScroll } from "./useChatScroll";
 
@@ -62,5 +62,81 @@ describe("useChatScroll", () => {
     });
     await wrapper.vm.preservePositionWhile(async () => { scrollHeight = 1320; });
     expect(scrollTop).toBe(500);
+  });
+
+  it("follows streamed frames immediately while keeping explicit return-to-bottom smooth", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const wrapper = mount(Harness);
+    const scrollTo = vi.fn();
+    Object.defineProperties(wrapper.element, {
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    await wrapper.vm.followNewContent();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: "auto" });
+    wrapper.vm.scrollToBottom();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: "smooth" });
+    wrapper.unmount();
+  });
+
+  it("does not pull the reader down if they scroll up or select text during a pending frame", async () => {
+    const wrapper = mount(Harness, { attachTo: document.body });
+    const scrollTo = vi.fn();
+    Object.defineProperties(wrapper.element, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, value: 100 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    const pending = wrapper.vm.followNewContent();
+    wrapper.vm.update();
+    await pending;
+    expect(scrollTo).not.toHaveBeenCalled();
+    wrapper.vm.following = true;
+    wrapper.element.textContent = "选中的正文";
+    const range = document.createRange();
+    range.selectNodeContents(wrapper.element);
+    document.getSelection()!.addRange(range);
+    await wrapper.vm.followNewContent();
+    expect(scrollTo).not.toHaveBeenCalled();
+    document.getSelection()!.removeAllRanges();
+    wrapper.unmount();
+  });
+
+  it("follows content height changes between source events, respects turn location and disconnects", async () => {
+    let resized: () => void = () => {};
+    const disconnect = vi.fn();
+    const observe = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { resized = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const located = ref(false);
+    const wrapper = mount(defineComponent({
+      setup() {
+        const element = ref<HTMLElement | null>(null);
+        const content = ref<HTMLElement | null>(null);
+        return { element, content, ...useChatScroll(element, content, () => !located.value) };
+      },
+      template: '<div ref="element"><div ref="content">正文</div></div>',
+    }));
+    await nextTick();
+    const scrollTo = vi.fn();
+    Object.defineProperties(wrapper.element, {
+      scrollHeight: { configurable: true, value: 1500 },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+    expect(observe).toHaveBeenCalledWith(wrapper.element.firstElementChild);
+    resized();
+    await nextTick();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1500, behavior: "auto" });
+    scrollTo.mockClear();
+    located.value = true;
+    resized();
+    await nextTick();
+    expect(scrollTo).not.toHaveBeenCalled();
+    wrapper.unmount();
+    expect(disconnect).toHaveBeenCalled();
   });
 });

@@ -1941,6 +1941,7 @@ pub mod native_conversation_legacy_generated;
 mod native_conversation_storage;
 pub mod native_conversation_v2_generated;
 pub mod native_conversation_v3_generated;
+pub mod native_conversation_v4_generated;
 
 mod turn_timing;
 pub(crate) mod turn_timing_generated;

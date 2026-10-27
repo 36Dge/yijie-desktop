@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ChatStreamText from "./ChatStreamText.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 
@@ -48,6 +48,7 @@ describe("stream text arrival", () => {
     const wrapper = mount(ChatSafeContent, {props: {streaming: true, blocks: block("稳定的前文。")}});
     const paragraph = wrapper.get("p").element;
     await wrapper.setProps({blocks: block("稳定的前文。\n\n## 标题\n\n- **强调**\n\n| 类型 | 结果 |\n| --- | --- |\n| 普通 | 完整 |\n\n```js\nconst value = 1;\n```")});
+    await vi.waitFor(() => expect(wrapper.find("pre code").text()).toBe("const value = 1;"));
     expect(wrapper.get("p").element).toBe(paragraph);
     expect(wrapper.get("h2").text()).toBe("标题");
     expect(wrapper.get("li strong").text()).toBe("强调");
@@ -65,6 +66,7 @@ it("keeps open Markdown emphasis/code formatted while their delimiters are still
   const strong = wrapper.get('strong').element;
   expect(wrapper.text()).toBe("重点");
   await wrapper.setProps({blocks: blocks("**重点内容**")});
+  await vi.waitFor(() => expect(wrapper.text()).toBe("重点内容"));
   expect(wrapper.get('strong').element).toBe(strong);
   expect(wrapper.text()).toBe("重点内容");
   await wrapper.setProps({blocks: blocks("正文 `value")});
@@ -73,6 +75,7 @@ it("keeps open Markdown emphasis/code formatted while their delimiters are still
   const code = wrapper.get('pre code').element;
   expect(wrapper.get('pre').text()).toBe("const value =");
   await wrapper.setProps({blocks: blocks("```js\nconst value = 1;\n```")});
+  await vi.waitFor(() => expect(wrapper.get('pre').text()).toBe("const value = 1;"));
   expect(wrapper.get('pre code').element).toBe(code);
   expect(wrapper.get('pre').text()).toBe("const value = 1;");
   await wrapper.setProps({blocks: blocks("**未闭合"), streaming: false});

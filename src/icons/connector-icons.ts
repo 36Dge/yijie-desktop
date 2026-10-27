@@ -1,4 +1,5 @@
 import linkfoxIcon from "../assets/connectors/linkfox.png?url";
+import kimiIcon from "./custom/brands/kimi.svg?no-inline";
 // Bundled user-provided artwork; keys preserve the catalogue serverName.
 import icon0 from "../assets/connectors/cue.png?url";
 import icon1 from "../assets/connectors/baixiao-mcp.png?url";
@@ -63,6 +64,7 @@ import crossBorder8 from "../assets/connectors/sorftime.svg?url";
 import chuhaijiangIcon from "../assets/connectors/chuhaijiang.svg?url";
 
 const connectorIcons: Readonly<Record<string, string>> = Object.freeze({
+  "kimi-web": kimiIcon,
   "linkfox": linkfoxIcon,
   "chuhaijiang": chuhaijiangIcon,
   "lingxing": crossBorder0,

@@ -2,26 +2,49 @@
 //! Host mapping with confirmed Runtime cleanup.
 use super::*;
 
-// A cancelled attempted submission can be handed to the existing Host cleanup
-// endpoint only with its original bound identity and no remaining dispatch.
-// Host atomically excludes active/unconfirmed turns and confirms thread deletion.
-pub(super) const CANCELLED_HOST_CLEANUP_TURN: &str = "(
-    t.submission_status='cancelled' AND t.runtime_turn_id IS NULL
-    AND NOT EXISTS(SELECT 1 FROM chat_native_bindings n WHERE n.turn_id=t.id)
-    AND EXISTS(SELECT 1 FROM chat_sessions s
+// A persisted running/uncertain marker cannot establish current Runtime state.
+// A bound session with no remaining dispatch can reach Host cleanup, which
+// observes/interrupts the native turn and confirms deletion. This is NOT local
+// completion evidence and never changes the saved turn status.
+pub(super) const BOUND_HOST_CLEANUP_TURN: &str = "(
+    EXISTS(SELECT 1 FROM chat_sessions s
       JOIN chat_public_task_bindings b ON b.session_id=s.id AND b.state='bound'
       WHERE s.id=t.session_id AND s.agent_session_id IS NOT NULL
         AND s.runtime_thread_id IS NOT NULL)
-    AND EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=t.session_id
-      AND o.operation_id=t.operation_id AND o.kind='start_turn'
-      AND o.state='failed' AND o.attempt_count>0 AND o.payload_version IN (1,2)
-      AND CASE WHEN json_valid(CAST(o.encrypted_payload AS TEXT))
-        THEN json_extract(CAST(o.encrypted_payload AS TEXT),'$.turn_id')=t.id ELSE 0 END)
     AND NOT EXISTS(SELECT 1 FROM chat_outbox o WHERE o.session_id=t.session_id
-      AND o.state IN ('pending','inflight'))
+      AND (o.state='pending' OR (o.state='inflight'
+        AND (o.kind!='start_turn' OR o.next_attempt_at IS NOT NULL))))
 )";
 
 impl ChatRepository {
+    pub(super) fn retry_deletion(
+        &mut self,
+        status: DeletionStatus,
+        session_id: Uuid,
+        keyed_hash: &str,
+        now: i64,
+    ) -> Result<DeletionStatus, ChatError> {
+        if status.completed_at.is_some() || status.outcome_code != "retry_limit_exceeded" {
+            return Ok(status);
+        }
+        let changed = self.connection.execute(
+            "UPDATE chat_deletion_jobs
+             SET desktop_state=CASE WHEN desktop_state='complete' THEN desktop_state ELSE 'pending' END,
+                 host_state=CASE WHEN host_state='complete' THEN host_state ELSE 'pending' END,
+                 runtime_state=CASE WHEN runtime_state='complete' THEN runtime_state ELSE 'pending' END,
+                 updated_at=?1, next_attempt_at=?1, attempt_count=0,
+                 lease_expires_at=0, outcome_code='pending', last_error_code=NULL
+             WHERE operation_id=?2 AND session_id=?3 AND keyed_session_hash=?4
+               AND outcome_code='retry_limit_exceeded'",
+            params![now, status.operation_id.to_string(), session_id.to_string(), keyed_hash],
+        ).map_err(|_| ChatError::DatabaseUnavailable)?;
+        if changed != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
+        self.deletion_status(status.operation_id)?
+            .ok_or(ChatError::DatabaseUnavailable)
+    }
+
     /// Called only after the authenticated, nonce-checked cleanup endpoint
     /// returns its typed session_not_found response. Other failures never enter
     /// this path. The receipt explicitly retains unconfirmed remote surfaces.

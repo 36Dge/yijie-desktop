@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 // Explicit versioned writer. Old readers retain their format-unsupported guard;
 // existing records are decoded in place and are never migrated on read.
-pub const NATIVE_WRITE_FORMAT: i64 = 4;
-const NATIVE_READ_FORMAT: i64 = 4;
+pub const NATIVE_WRITE_FORMAT: i64 = 5;
+const NATIVE_READ_FORMAT: i64 = 5;
 
 fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView, ChatError> {
     match format {
@@ -37,50 +37,16 @@ fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView,
             )
             .map_err(|_| ChatError::DatabaseUnavailable)
         }
-        4 => serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable),
+        4 => {
+            let old: super::native_conversation_v4_generated::NativeConversationView =
+                serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable)?;
+            serde_json::from_value(
+                serde_json::to_value(old).map_err(|_| ChatError::DatabaseUnavailable)?,
+            )
+            .map_err(|_| ChatError::DatabaseUnavailable)
+        }
+        5 => serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable),
         _ => Err(ChatError::DatabaseUnavailable),
-    }
-}
-
-#[cfg(test)]
-mod source_reader_tests {
-    use super::*;
-
-    #[test]
-    fn native_sources_read_v3_and_v4_without_rewriting_history() {
-        let mut value = serde_json::json!({
-            "sessionId":"session","turnId":"turn","runtimeThreadId":"runtime","runtimeTurnId":"runtime-turn",
-            "source":"native_observed","revision":"1","availability":"available","status":"completed",
-            "statusSource":"runtime_notification","terminalObserved":true,
-            "items":[{"ordinal":0,"lastMethod":"item/completed","item":{"id":"search","type":"webSearch","availability":"available","webSearch":{"action":"search","queries":["annual statistics"]}}}]
-        });
-        let old_json = value.to_string();
-        let old = decode_native_view(&old_json, 3).unwrap();
-        assert!(old.items[0]
-            .item
-            .web_search
-            .as_ref()
-            .unwrap()
-            .sources
-            .is_none());
-        value["items"][0]["item"]["webSearch"]["sources"] = serde_json::json!([{"url":"https://example.org/statistics/2025","title":"Annual statistics"}]);
-        let new_json = value.to_string();
-        let new = decode_native_view(&new_json, 4).unwrap();
-        assert_eq!(
-            new.items[0]
-                .item
-                .web_search
-                .as_ref()
-                .unwrap()
-                .sources
-                .as_ref()
-                .unwrap()[0]
-                .url,
-            "https://example.org/statistics/2025"
-        );
-        assert!(decode_native_view(&new_json, 3).is_err());
-        assert!(decode_native_view(&new_json, 5).is_err());
-        assert!(!old_json.contains("sources"));
     }
 }
 
@@ -506,5 +472,66 @@ impl ChatRepository {
         .map_err(|_| ChatError::DatabaseUnavailable)?;
         tx.commit().map_err(|_| ChatError::DatabaseUnavailable)?;
         Ok(view)
+    }
+}
+
+#[cfg(test)]
+mod source_reader_tests {
+    use super::*;
+
+    #[test]
+    fn native_activity_v5_preserves_file_actions_and_strict_old_readers() {
+        let value = serde_json::json!({
+            "sessionId":"session","turnId":"turn","runtimeThreadId":"runtime","runtimeTurnId":"runtime-turn",
+            "source":"native_observed","revision":"1","availability":"available","status":"completed",
+            "statusSource":"runtime_notification","terminalObserved":true,
+            "items":[{"ordinal":0,"lastMethod":"item/completed","item":{"id":"file","type":"fileChange","status":"completed","availability":"available","fileChange":{"changes":[{"index":0,"kind":"add","pathLabel":"note.md","diffText":"one\ntwo\n","addedLines":2,"removedLines":0}]}}}]
+        });
+        let json = value.to_string();
+        let view = decode_native_view(&json, 5).unwrap();
+        assert_eq!(
+            view.items[0].item.file_change.as_ref().unwrap().changes[0].added_lines,
+            Some(2)
+        );
+        assert!(decode_native_view(&json, 4).is_err());
+        assert!(decode_native_view(&json, 6).is_err());
+        assert_eq!(serde_json::to_value(view).unwrap(), value);
+    }
+
+    #[test]
+    fn native_sources_read_v3_and_v4_without_rewriting_history() {
+        let mut value = serde_json::json!({
+            "sessionId":"session","turnId":"turn","runtimeThreadId":"runtime","runtimeTurnId":"runtime-turn",
+            "source":"native_observed","revision":"1","availability":"available","status":"completed",
+            "statusSource":"runtime_notification","terminalObserved":true,
+            "items":[{"ordinal":0,"lastMethod":"item/completed","item":{"id":"search","type":"webSearch","availability":"available","webSearch":{"action":"search","queries":["annual statistics"]}}}]
+        });
+        let old_json = value.to_string();
+        let old = decode_native_view(&old_json, 3).unwrap();
+        assert!(old.items[0]
+            .item
+            .web_search
+            .as_ref()
+            .unwrap()
+            .sources
+            .is_none());
+        value["items"][0]["item"]["webSearch"]["sources"] = serde_json::json!([{"url":"https://example.org/statistics/2025","title":"Annual statistics"}]);
+        let new_json = value.to_string();
+        let new = decode_native_view(&new_json, 4).unwrap();
+        assert_eq!(
+            new.items[0]
+                .item
+                .web_search
+                .as_ref()
+                .unwrap()
+                .sources
+                .as_ref()
+                .unwrap()[0]
+                .url,
+            "https://example.org/statistics/2025"
+        );
+        assert!(decode_native_view(&new_json, 3).is_err());
+        assert!(decode_native_view(&new_json, 6).is_err());
+        assert!(!old_json.contains("sources"));
     }
 }

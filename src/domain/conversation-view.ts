@@ -379,7 +379,7 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
   };
-  if (item.type === "mcpToolCall") return {
+  if (item.type === "mcpToolCall" || item.type === "fileChange") return {
     kind: "tool", status: item.status === "inProgress" ? "in_progress" :
       item.status === "completed" || item.status === "failed" || item.status === "declined" ? item.status : "unknown",
     native: {source: view.source, lastMethod: entry.lastMethod, item},
@@ -409,7 +409,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
     for (const k of old?.itemKeys ?? []) delete items[k];
     const nativeItems: ConversationItem[] = view.items.map(entry => {
       const item = entry.item;
-      const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
+      const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : (item.type === "mcpToolCall" || item.type === "fileChange") ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
       const contentBlocks: TextContentBlock[] = item.type === "reasoning"
         ? (["summary", "content"] as const).flatMap(reasoningSource =>
           (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))

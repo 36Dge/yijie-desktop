@@ -4,6 +4,22 @@ import { describe, expect, it } from "vitest";
 import { marketObservation, marketTestId as id } from "../../test/market-chat-fixture";
 import MarketChatActivity from "./MarketChatActivity.vue";
 describe("market review and result presentation", () => {
+  it("does not turn an expert's empty managed binding into an execution log", () => {
+    const observation=marketObservation(); observation.selectionDisplay=[]; observation.approvals!.requests=[]; observation.tools!.items=[];
+    observation.availableTurns=[{nativeTurnId:id(11),selectionDisplay:[]}];
+    const wrapper=mount(MarketChatActivity,{props:{observation,connected:true,refreshing:false,deciding:null,error:null,actionable:()=>false}});
+    expect(wrapper.find('.market-activity').exists()).toBe(false);wrapper.unmount();
+  });
+  it("retains real approval and tool records even when selection display is absent", () => {
+    const observation=marketObservation(); observation.selectionDisplay=[];
+    const wrapper=mount(MarketChatActivity,{props:{observation,connected:true,refreshing:false,deciding:null,error:null,actionable:()=>true}});
+    expect(wrapper.text()).toContain('需要你的批准');expect(wrapper.text()).toContain('正在等待工具返回');wrapper.unmount();
+  });
+  it("keeps incomplete history visible even when no individual record is available", () => {
+    const observation=marketObservation();observation.selectionDisplay=[];observation.approvals!.requests=[];observation.tools!.items=[];observation.tools!.truncated=true;
+    const wrapper=mount(MarketChatActivity,{props:{observation,connected:true,refreshing:false,deciding:null,error:null,actionable:()=>false}});
+    expect(wrapper.text()).toContain('调用记录较多，仅展示当前返回的部分记录');wrapper.unmount();
+  });
   it("shows the qualified review and requires an explicit decision", async () => {
     const wrapper = mount(MarketChatActivity, { props: { observation: marketObservation(), connected: true, refreshing: false, deciding: null, error: null, actionable: () => true } });
     expect(wrapper.text()).toContain("读取合成标的指定日期的一条行情数据。");

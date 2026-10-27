@@ -68,6 +68,24 @@ const legacy = computed(() => "native" in props.execution ? null : props.executi
 const commandSummary = computed(() => native.value
   ? native.value.item.commandLabel ?? "命令信息不可用"
   : legacy.value?.commandSummary.text ?? "命令执行");
+const actionRows = computed(() => native.value?.item.commandActions ?? []);
+// The disclosure label is a reading preview. The original safe text remains in details.
+function compactLabel(text: string): string {
+  const line = text.split(/\r?\n/, 1)[0] ?? "";
+  const chars = Array.from(line);
+  return chars.slice(0, 120).join("") + (line !== text || chars.length > 120 ? "…" : "");
+}
+const commandLabel = computed(() => {
+  if (!props.processPresentation) return "命令执行";
+  if (!native.value) return props.execution.status === "completed" ? "运行了命令" : "命令执行";
+  const done = props.execution.status === "completed";
+  if (!actionRows.value.length) return compactLabel(`${done ? "已运行" : "运行命令"}${native.value.item.commandPreview ? ` ${native.value.item.commandPreview}` : ""}`);
+  return compactLabel(actionRows.value.map(action => {
+    const verb = action.type === "read" ? "读取" : action.type === "listFiles" ? "列出文件" : action.type === "search" ? "搜索文件" : "运行命令";
+    const object = action.pathLabel ?? action.name ?? (action.type === "unknown" ? action.commandPreview : action.query);
+    return `${done ? "已" : ""}${verb}${object ? ` ${object}` : ""}`;
+  }).join("、"));
+});
 const summaryTruncation = computed(() => legacy.value
   ? safeTextTruncation(legacy.value.commandSummary) : null);
 const exitCode = computed(() => native.value
@@ -301,7 +319,7 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
     :item="item"
-    :label="processPresentation ? (execution.status === 'completed' ? '运行了命令' : '命令执行') : '命令执行'"
+    :label="commandLabel"
     :status-label="statusPresentation.label"
     icon="workspace"
     :status-icon="statusPresentation.icon"
@@ -329,10 +347,13 @@ function forwardApprovalDecision(request: ChatApprovalDecisionRequest): void {
         @decision="forwardApprovalDecision"
       />
 
+      <ul v-if="actionRows.length > 1" aria-label="本条命令的原生动作">
+        <li v-for="action in actionRows" :key="`${item.identity}:action:${action.index}`">{{ action.type === 'read' ? '读取' : action.type === 'listFiles' ? '列出文件' : action.type === 'search' ? '搜索文件' : '运行命令' }} {{ action.pathLabel ?? action.name ?? action.query ?? action.commandPreview }}</li>
+      </ul>
       <dl class="chat-command-item__facts">
         <div>
-          <dt>安全摘要</dt>
-          <dd>{{ commandSummary || "命令执行" }}</dd>
+          <dt>命令</dt>
+          <dd>{{ native?.item.commandPreview ?? commandSummary }}</dd>
         </div>
         <div>
           <dt>工作目录</dt>

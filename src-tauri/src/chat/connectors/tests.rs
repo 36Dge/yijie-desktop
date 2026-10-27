@@ -22,10 +22,10 @@ fn install_request(service: &str) -> wire::InstallPayload {
     }
 }
 #[test]
-fn feat157_catalog_preserves_60_distinct_non_secret_services() {
+fn feat162_catalog_preserves_61_distinct_non_secret_services() {
     let product = catalog();
-    assert_eq!(product.catalog_revision, 9);
-    assert_eq!(product.catalog.len(), 60);
+    assert_eq!(product.catalog_revision, 11);
+    assert_eq!(product.catalog.len(), 61);
     assert_eq!(
         product
             .catalog
@@ -33,7 +33,7 @@ fn feat157_catalog_preserves_60_distinct_non_secret_services() {
             .map(|e| &e.service_id)
             .collect::<HashSet<_>>()
             .len(),
-        60
+        61
     );
     assert_eq!(
         product
@@ -41,7 +41,7 @@ fn feat157_catalog_preserves_60_distinct_non_secret_services() {
             .iter()
             .filter(|e| e.transport == wire::Transport::Http)
             .count(),
-        60
+        61
     );
     assert!(product.catalog.iter().all(
         |e| e.service_id == e.icon_asset_id && e.availability != wire::Availability::Available
@@ -68,9 +68,9 @@ fn feat157_cross_border_installations_fit_snapshot_and_keyless_enable_keeps_live
         .unwrap();
     }
     let items = store::list(&db, &owner, &catalog().catalog).unwrap();
-    assert_eq!(items.len(), 60);
+    assert_eq!(items.len(), 61);
     let snapshot = wire::Snapshot {
-        catalog_revision: 9,
+        catalog_revision: 10,
         catalog: projected_catalog(true),
         installations: items.clone(),
         capabilities: vec![],
@@ -98,7 +98,19 @@ fn feat157_cross_border_installations_fit_snapshot_and_keyless_enable_keeps_live
         assert_eq!(item.connection_status, wire::ConnectionStatus::Disconnected);
         assert!(!item.desired_enabled && !item.effective_enabled && item.credential_ref.is_none());
     }
-    for service in ["shopify", "sorftime", "chuhaijiang", "linkfox"] {
+    let kimi = items.iter().find(|i| i.service_id == "kimi-web").unwrap();
+    assert_eq!(
+        kimi.configuration_status,
+        wire::ConfigurationStatus::Unconfigured
+    );
+    assert_eq!(
+        kimi.authorization_status,
+        wire::AuthorizationStatus::Unknown
+    );
+    assert_eq!(kimi.connection_status, wire::ConnectionStatus::Disconnected);
+    assert!(!kimi.desired_enabled && !kimi.effective_enabled && kimi.credential_ref.is_none());
+    assert!(!uses_credential_form("kimi-web"));
+    for service in ["shopify", "sorftime", "chuhaijiang", "linkfox", "kimi-web"] {
         let item = items.iter().find(|i| i.service_id == service).unwrap();
         let key = wire::InstallationOperationPayload {
             installation_id: item.installation_id.clone(),
@@ -113,7 +125,7 @@ fn feat157_cross_border_installations_fit_snapshot_and_keyless_enable_keeps_live
             Some(item.generation),
             wire::OperationAction::Enable,
         );
-        assert_eq!(result.is_ok(), service == "shopify");
+        assert_eq!(result.is_ok(), matches!(service, "shopify" | "kimi-web"));
     }
 }
 #[test]
@@ -368,7 +380,7 @@ fn feat157_snapshot_and_mutation_follow_the_generated_wire_contract() {
     let response =
         serde_json::json!({"schemaVersion":1,"requestId":Uuid::now_v7().to_string(),"data":data});
     let validated: wire::SnapshotResponse = serde_json::from_value(response).unwrap();
-    assert_eq!(validated.data.catalog.len(), 60);
+    assert_eq!(validated.data.catalog.len(), 61);
     assert!(!validated.data.execution_available);
     let installed = apply(
         &mut db,
@@ -457,14 +469,14 @@ fn feat157_authorization_adapter_availability_does_not_claim_execution_readiness
             .iter()
             .filter(|entry| entry.availability == wire::Availability::Available)
             .count(),
-        60
+        61
     );
     assert_eq!(
         enabled
             .iter()
             .filter(|entry| entry.authorization_available == Some(true))
             .count(),
-        48
+        50
     );
     for entry in enabled {
         assert_eq!(

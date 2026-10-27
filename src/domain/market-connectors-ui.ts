@@ -23,7 +23,8 @@ const errors: Readonly<Record<ErrorCode, string>> = {
   selection_stale: "连接已变化，请重新选择本轮使用的连接器。",
 };
 
-export function connectorErrorMessage(code: string | null | undefined): string {
+export function connectorErrorMessage(code: string | null | undefined, serviceId?: string): string {
+  if (serviceId === "kimi-web" && code === "not_configured") return "客户端尚未配置 Kimi 模型凭据，请先完成统一模型配置。";
   return code && Object.prototype.hasOwnProperty.call(errors, code) ? errors[code as ErrorCode] : "连接器状态暂不可用，请刷新后重试。";
 }
 
@@ -51,14 +52,17 @@ export function connectorCanReopen(operation: Operation | undefined, canConfigur
 function statusFor(entry: CatalogEntry, installation: Installation | undefined, pending: boolean): ConnectorStatusView {
   if (pending) return { label: "正在提交操作", tone: "neutral" };
   const operation = installation?.activeOperation;
+  if (entry.serviceId === "kimi-web" && operation && ["configure", "enable"].includes(operation.action) && operation.status === "pending") return { label: "正在准备", tone: "neutral" };
   if (operation?.status === "pending" || operation?.status === "unknown") return connectorOperationStatus(operation);
   if (!installation || installation.status === "removed") return entry.availability === "blocked" ? { label: "接入待完成", tone: "warning" } : { label: "未安装", tone: "neutral" };
   if (installation.status === "removing") return { label: "清理待完成", tone: "warning" };
   if (entry.availability === "blocked") return { label: "接入待完成", tone: "warning" };
   if (installation.authorizationStatus === "expired") return { label: "需要重新授权", tone: "warning" };
   if (entry.authorizationAvailable && installation.authorizationStatus === "authorized" && ["blocked", "unverified"].includes(entry.availability) && (!installation.errorCode || installation.errorCode === "provider_onboarding_required")) return { label: "已授权，工具待验证", tone: "warning" };
+  if (entry.serviceId === "kimi-web" && installation.errorCode === "not_configured") return { label: "模型凭据未配置", tone: "warning" };
   if (installation.errorCode || installation.connectionStatus === "failed" || installation.authorizationStatus === "failed") return { label: "连接未完成", tone: "warning" };
-  if (installation.effectiveEnabled && installation.connectionStatus === "ready") return { label: "已启用", tone: "success" };
+  if (installation.effectiveEnabled && installation.connectionStatus === "ready") return { label: entry.serviceId === "kimi-web" ? "可使用" : "已启用", tone: "success" };
+  if (entry.serviceId === "kimi-web") return { label: installation.desiredEnabled ? "正在准备" : "已停用", tone: "neutral" };
   if (installation.authorizationStatus === "authorizing" || installation.connectionStatus === "connecting") return { label: "正在连接", tone: "neutral" };
   if (entry.authorizationAvailable && ["required", "expired", "failed"].includes(installation.authorizationStatus)) return { label: "待授权", tone: "warning" };
   if (entry.availability === "unverified") return { label: "接入待完成", tone: "warning" };
@@ -69,6 +73,7 @@ function statusFor(entry: CatalogEntry, installation: Installation | undefined, 
 }
 
 function configurationLabel(entry: CatalogEntry): string {
+  if (entry.serviceId === "kimi-web") return "自动使用客户端已有的 Kimi 模型凭据，无需单独配置。准备过程不联网；搜索和网页读取可能计费，调用前仍需批准。";
   const unavailable = entry.availability === "blocked" || entry.availability === "unverified";
   switch (entry.authMode) {
     case "none": return "无需账号密钥。启用时检查公开商品目录与支持工具，每次调用仍需批准。";
@@ -100,7 +105,7 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
       actions.push("retry");
       const canCancel = operation && ["configure", "authorize"].includes(operation.action) ? canConfigure : canManage;
       if (canCancel && operation?.cancellable) actions.push("cancel");
-      if (connectorCanReopen(operation, canConfigure)) actions.push("reopen");
+      if (entry.serviceId !== "kimi-web" && connectorCanReopen(operation, canConfigure)) actions.push("reopen");
     } else if (!busy) {
       if (!installed && canManage && entry.availability !== "blocked") actions.push("install");
       else if (installation && installation.status !== "removing") {
@@ -112,14 +117,22 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
         if (entry.authorizationAvailable === true && canConfigure && ["required", "expired", "failed", "unknown"].includes(installation.authorizationStatus)) {
           actions.push("authorize");
         } else if (!enabled && entry.availability !== "blocked" && entry.availability !== "unverified") {
-          if (installation.configurationStatus !== "configured" && canConfigure) actions.push("configure");
+          if (entry.serviceId === "kimi-web" && canManage) actions.push("enable");
+          else if (installation.configurationStatus !== "configured" && canConfigure) actions.push("configure");
           else if (["authorized", "not_required"].includes(installation.authorizationStatus) && canManage) actions.push("enable");
         }
       }
     }
     if (!pending && installation?.status === "removing") actions.push("retry");
-    const issue = installation?.errorCode ?? operation?.errorCode ?? entry.blockerCodes[0];
-    const explanation = issue === "provider_onboarding_required" && entry.authorizationAvailable === true
+    const operationIssue = installation?.errorCode ?? operation?.errorCode;
+    const catalogIssue = entry.serviceId === "kimi-web" && installed && entry.blockerCodes[0] === "not_configured"
+      ? undefined : entry.blockerCodes[0];
+    const issue = operationIssue ?? catalogIssue;
+    const explanation = entry.serviceId === "kimi-web" && issue === "not_configured"
+      ? operationIssue === "not_configured"
+        ? "客户端尚未配置可用的 Kimi 模型凭据。完成统一模型配置并重开后会自动准备，无需另填连接器密钥。"
+        : "此组件自动使用客户端的 Kimi 模型凭据。"
+      : issue === "provider_onboarding_required" && entry.authorizationAvailable === true
       ? installation?.authorizationStatus === "authorized"
         ? "账户授权已完成；支持工具尚待验证，暂不能启用或用于对话。"
         : "可先完成账户授权；支持工具尚待验证，暂不能启用或用于对话。"
@@ -132,7 +145,7 @@ export function connectorViews(snapshot: Snapshot, pendingIds: ReadonlySet<strin
       status: statusFor(entry, installation, pending),
       explanation,
       configurationLabel: operation?.action === "enable" && operation.status === "pending"
-        ? "正在检查连接与支持工具，请等待本次启用结果。"
+        ? entry.serviceId === "kimi-web" ? "正在自动准备网页检索工具，此步骤不联网。" : "正在检查连接与支持工具，请等待本次启用结果。"
         : entry.authMode === "oauth" && installation?.authorizationStatus === "authorized"
           ? "已保存账户授权；启用时会重新确认连接和支持工具。"
           : configurationLabel(entry), busy, actions,

@@ -64,7 +64,7 @@ describe("FEAT-134 native streaming presentation", () => {
     expect(copyableTimelineItemText(messageDone.turns[0]!.items[0]!)).toBe("**原始正文**");
     await wrapper.get('[aria-label="复制文本"]').trigger("click");
     expect(copied).toEqual(["**原始正文**"]);
-    if (phase === "commentary") expect(wrapper.get(".chat-turn-group__progress").text()).toContain("执行进度");
+    if (phase === "commentary") expect(wrapper.get(".chat-turn-group__progress").text()).toContain("正在处理…");
     else expect(wrapper.find(".chat-turn-group__progress").exists()).toBe(false);
 
     const turnDone = timeline({...messageCompleted, revision: "3", status: "completed", terminalObserved: true}, "turn");
@@ -168,7 +168,7 @@ it.each([undefined, "final_answer"] as const)("moves from factual waiting progre
     {ordinal: 0, lastMethod: "item/completed", item: {id: "user", type: "userMessage", text: "请介绍一下", availability: "available"}},
   ]});
   const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2秒"}}});
-  expect(wrapper.get('.chat-execution-progress').text()).toContain("本轮已开始，正在等待模型输出。");
+  expect(wrapper.get('.chat-execution-progress').text()).toContain("正在处理…");
   expect(wrapper.find('.chat-turn-group__header').exists()).toBe(false);
   expect(wrapper.get('.chat-turn-group__items').element.nextElementSibling)
     .toBe(wrapper.get('.chat-turn-group__progress').element);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useChatTurnTiming } from "../../composables/useChatTurnTiming";
+import { provideChatDisclosureChoices } from "../../composables/useChatDisclosureChoice";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -310,6 +311,9 @@ const reasoningLoading = ref<ReadonlySet<string>>(new Set());
 const reasoningFailed = ref<ReadonlySet<string>>(new Set());
 const conversationScroller = ref<HTMLElement | null>(null);
 const renderedConversationView = shallowRef(chatStore.conversationState);
+provideChatDisclosureChoices(() => routeSessionId.value === null ? null :
+  `${permissionScope.selectedTenantId}:${routeSessionId.value}`);
+const conversationColumn = ref<HTMLElement | null>(null);
 let dragDropUnlisten: UnlistenFn | null = null;
 let dragDropDisposed = false;
 const {
@@ -318,7 +322,7 @@ const {
   scrollToBottom,
   followNewContent,
   preservePositionWhile,
-} = useChatScroll(conversationScroller);
+} = useChatScroll(conversationScroller, conversationColumn, () => !requestedTurn.value);
 
 const isSessionRoute = computed(() => routeSessionId.value !== null);
 const selectedSession = computed(() => chatStore.sessions.find((session) =>
@@ -1175,7 +1179,7 @@ onBeforeUnmount(() => {
         :aria-busy="isHistoryLoading || chatStore.phase === 'binding-pending' || chatStore.phase === 'resyncing'"
         @scroll="updateScrollPosition"
       >
-        <div class="chat-workspace__column">
+        <div ref="conversationColumn" class="chat-workspace__column">
           <button
             v-if="chatStore.history?.nextCursor"
             class="chat-workspace__load-history"
@@ -1318,7 +1322,7 @@ onBeforeUnmount(() => {
         title="滚动到对话底部"
         @click="scrollToBottom(true)"
       >
-        <YjIcon name="backToBottom" size="lg" />
+        <YjIcon name="backToBottom" size="sm" :stroke-width="1.5" />
       </button>
     </div>
 
@@ -1571,8 +1575,8 @@ onBeforeUnmount(() => {
   right: 50%;
   bottom: var(--yj-space-4);
   display: inline-flex;
-  width: var(--yj-space-10);
-  height: var(--yj-space-10);
+  width: var(--yj-space-8);
+  height: var(--yj-space-8);
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -1583,7 +1587,7 @@ onBeforeUnmount(() => {
   background: var(--yj-color-bg-elevated);
   box-shadow: none;
 }
-.chat-workspace__bottom-button:hover { border-color: var(--yj-color-border-control-hover); background: var(--yj-color-control-hover); }
+.chat-workspace__bottom-button:hover { background: var(--yj-color-control-hover); }
 .chat-workspace__bottom-button:focus-visible,
 .chat-workspace__load-history:focus-visible,
 .chat-notice__action:focus-visible,

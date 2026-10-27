@@ -60,6 +60,30 @@ pub struct NativeItem {
     pub mcp: Option<NativeMcpDisplay>,
     #[serde(rename = "webSearch", default, skip_serializing_if = "Option::is_none")]
     pub web_search: Option<NativeWebSearchDisplay>,
+    #[serde(
+        rename = "commandPreview",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_preview: Option<String>,
+    #[serde(
+        rename = "commandActions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_actions: Option<Vec<NativeCommandActionDisplay>>,
+    #[serde(
+        rename = "fileChange",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub file_change: Option<NativeFileChangeDisplay>,
+    #[serde(
+        rename = "appContext",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub app_context: Option<NativeAppContextDisplay>,
 }
 impl std::fmt::Debug for NativeItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -318,6 +342,104 @@ pub struct NativeWebSearchSourceDisplay {
 impl std::fmt::Debug for NativeWebSearchSourceDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeWebSearchSourceDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeCommandActionDisplay {
+    #[serde(rename = "index")]
+    pub index: i64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(rename = "pathLabel", default, skip_serializing_if = "Option::is_none")]
+    pub path_label: Option<String>,
+    #[serde(rename = "name", default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "query", default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(
+        rename = "commandPreview",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_preview: Option<String>,
+}
+impl std::fmt::Debug for NativeCommandActionDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeCommandActionDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeFileUpdateDisplay {
+    #[serde(rename = "index")]
+    pub index: i64,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    #[serde(rename = "pathLabel", default, skip_serializing_if = "Option::is_none")]
+    pub path_label: Option<String>,
+    #[serde(
+        rename = "movePathLabel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub move_path_label: Option<String>,
+    #[serde(rename = "diffText", default, skip_serializing_if = "Option::is_none")]
+    pub diff_text: Option<String>,
+    #[serde(
+        rename = "addedLines",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub added_lines: Option<i64>,
+    #[serde(
+        rename = "removedLines",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub removed_lines: Option<i64>,
+}
+impl std::fmt::Debug for NativeFileUpdateDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeFileUpdateDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeFileChangeDisplay {
+    #[serde(rename = "changes")]
+    pub changes: Vec<NativeFileUpdateDisplay>,
+}
+impl std::fmt::Debug for NativeFileChangeDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeFileChangeDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeAppContextDisplay {
+    #[serde(
+        rename = "connectorId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub connector_id: Option<String>,
+    #[serde(rename = "appName", default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    #[serde(
+        rename = "actionName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub action_name: Option<String>,
+}
+impl std::fmt::Debug for NativeAppContextDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeAppContextDisplay([REDACTED])")
     }
 }
 

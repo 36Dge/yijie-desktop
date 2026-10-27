@@ -2581,7 +2581,7 @@ describe("chat view-model store", () => {
     }
     expect(submitTurnV2).toHaveBeenCalledOnce();
 
-    emitNative({schemaVersion:4,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
+    emitNative({schemaVersion:5,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:"019c1a00-0000-7000-8000-00000000000a",view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
     expect(store.phase).toBe("streaming");
     expect(store.canSend).toBe(false);
     delayedSubmit.resolve({
@@ -2601,7 +2601,7 @@ describe("chat view-model store", () => {
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
     expect(store.nativeLiveTurnId).toBeNull();
-    const event: NativeConversationViewEvent = {schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A,
+    const event: NativeConversationViewEvent = {schemaVersion:5, contextId:CONTEXT, sessionId:SESSION_A,
       subscriptionId:"019c1a00-0000-7000-8000-00000000000a", view:{sessionId:SESSION_A, turnId:TURN_A,
         runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
         availability:"partial", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};
@@ -2620,7 +2620,7 @@ describe("chat view-model store", () => {
     const store = createStore(client);
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
-    const nativeEvent: NativeConversationViewEvent = {schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A,
+    const nativeEvent: NativeConversationViewEvent = {schemaVersion:5, contextId:CONTEXT, sessionId:SESSION_A,
       subscriptionId:LOCAL_SUBSCRIPTION_A, view:{sessionId:SESSION_A, turnId:TURN_A,
         runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn", source:"native_observed", revision:"1",
         availability:"available", status:"inProgress", statusSource:"runtime_notification", terminalObserved:false, items:[]}};
@@ -2649,7 +2649,7 @@ describe("chat view-model store", () => {
     }});
     const store=createStore(client);
     await store.bind(TENANT);await store.selectSession(SESSION_A);
-    emitNative({schemaVersion:4,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:LOCAL_SUBSCRIPTION_A,
+    emitNative({schemaVersion:5,contextId:CONTEXT,sessionId:SESSION_A,subscriptionId:LOCAL_SUBSCRIPTION_A,
       view:{sessionId:SESSION_A,turnId:TURN_A,runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",
         revision:"1",availability:"available",status:"inProgress",statusSource:"runtime_notification",terminalObserved:false,items:[]}});
     failRead=true;
@@ -2668,7 +2668,7 @@ describe("chat view-model store", () => {
     const store = createStore(client);
     await store.bind(TENANT);
     await store.selectSession(SESSION_A);
-    emitNative({schemaVersion:4, contextId:CONTEXT, sessionId:SESSION_A, subscriptionId:LOCAL_SUBSCRIPTION_A,
+    emitNative({schemaVersion:5, contextId:CONTEXT, sessionId:SESSION_A, subscriptionId:LOCAL_SUBSCRIPTION_A,
       view:{sessionId:SESSION_A, turnId:TURN_A, runtimeThreadId:"runtime-thread", runtimeTurnId:"runtime-turn",
         source:"native_observed", revision:"1", availability:"available", status:"inProgress",
         statusSource:"runtime_notification", terminalObserved:false, items:[]}});
@@ -3526,6 +3526,31 @@ describe("chat view-model store", () => {
     });
   });
 
+  it("waits for the durable receipt before removing a fully cleaned selection", async () => {
+    const operation = "019c1a00-0000-7000-8000-000000000073";
+    const pending = {
+      operationId: operation, desktopState: "complete" as const,
+      hostState: "complete" as const, runtimeState: "complete" as const,
+      outcomeCode: "pending", lastErrorCode: null, requestedAt: 1, completedAt: null, expiresAt: null,
+    };
+    const complete = { ...pending, outcomeCode: "cleanup_complete", completedAt: 2, expiresAt: 3 };
+    let lists = 0;
+    const { client } = fakeClient({
+      listSessions: async () => ({ sessions: ++lists === 1 ? [session(SESSION_A)] : [], nextCursor: null }),
+      deleteSession: async () => pending,
+      getCleanupStatus: async () => complete,
+    });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(store.selectedSessionId).toBeNull();
+    expect(store.sessions).toEqual([]);
+    expect(store.deleteDisposition).toMatchObject({ kind: "navigate", path: "/chat" });
+  });
+
   it("resumes the same cleanup operation after the retry limit is reached", async () => {
     const retryLimit = {
       operationId: "019c1a00-0000-7000-8000-000000000073",
@@ -3554,6 +3579,7 @@ describe("chat view-model store", () => {
     await expect(store.deleteSelected()).resolves.toMatchObject({ kind: "cleanup_pending" });
 
     expect(deleteSession).toHaveBeenCalledTimes(2);
+    expect(deleteSession).toHaveBeenLastCalledWith(CONTEXT, SESSION_A, retryLimit.operationId);
     expect(store.cleanupStatus).toEqual(resumed);
   });
 

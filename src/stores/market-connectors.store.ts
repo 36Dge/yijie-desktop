@@ -62,7 +62,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
           const canMutate = snapshot.value?.capabilities.includes(permission) === true;
           const actions: ConnectorAction[] = !attempt.resubmitAllowed || canMutate ? ["retry"] : [];
           if (attempt.receipt?.cancellable && canMutate) actions.push("cancel");
-          if (connectorCanReopen(attempt.receipt, snapshot.value?.capabilities.includes("connector.credentials.manage") === true)) actions.push("reopen");
+          if (entry.id !== "kimi-web" && connectorCanReopen(attempt.receipt, snapshot.value?.capabilities.includes("connector.credentials.manage") === true)) actions.push("reopen");
           return { ...entry, selectable: false, busy: attempt.receipt?.status === "pending", status: connectorOperationStatus(attempt.receipt, attempt.resubmitAllowed), actions };
         }
         return entry;
@@ -159,7 +159,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       snapshot.value = { ...current, installations: [...current.installations.filter(item => item.serviceId !== result.installation.serviceId), ...(result.installation.status === "removed" ? [] : [result.installation])] };
     }
     function receiptError(receipt: Operation): string | null {
-      return receipt.status === "failed" ? connectorErrorMessage(receipt.errorCode) : receipt.status === "unknown" ? connectorErrorMessage("outcome_unknown") : null;
+      return receipt.status === "failed" ? connectorErrorMessage(receipt.errorCode, receipt.serviceId) : receipt.status === "unknown" ? connectorErrorMessage("outcome_unknown") : null;
     }
     async function dispatch(context: string, serviceId: string, attempt: UnconfirmedOperation): Promise<MutationResult> {
       const { action, operationId, installation: item } = attempt;
@@ -231,7 +231,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
         if (!stillCurrent()) return false;
         const code = failure instanceof ConnectorClientError ? failure.code : "temporarily_unavailable";
         if (!["temporarily_unavailable", "outcome_unknown", "operation_pending", "cleanup_pending", "context_invalid"].includes(code)) forgetAttempt(serviceId);
-        setError(serviceId, connectorErrorMessage(code));
+        setError(serviceId, connectorErrorMessage(code, serviceId));
         if (code === "revision_conflict" || code === "permission_denied" || code === "context_invalid") await refresh();
         return false;
       } finally { if (stillCurrent()) setPending(serviceId, false); scheduleOperationPoll(); }

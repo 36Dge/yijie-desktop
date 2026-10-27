@@ -957,7 +957,7 @@ impl TurnProjectionSink for ChatEventBridge {
                 })
                 .map(|(id, record)| {
                     super::native_conversation_generated::NativeConversationViewEvent {
-                        schema_version: 4,
+                        schema_version: 5,
                         context_id: record.context_id.to_string(),
                         subscription_id: id.to_string(),
                         session_id: session_id.to_string(),
@@ -974,6 +974,7 @@ impl TurnProjectionSink for ChatEventBridge {
             let mut previous =
                 serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
             previous["schemaVersion"] = serde_json::json!(2);
+            strip_native_activity_extension(&mut previous["view"]);
             strip_native_process_extension(&mut previous["view"]);
             let previous: super::native_conversation_v2_generated::NativeConversationViewEvent =
                 serde_json::from_value(previous)
@@ -993,14 +994,24 @@ impl TurnProjectionSink for ChatEventBridge {
             let mut third =
                 serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
             third["schemaVersion"] = serde_json::json!(3);
+            strip_native_activity_extension(&mut third["view"]);
             strip_native_source_extension(&mut third["view"]);
             let third: super::native_conversation_v3_generated::NativeConversationViewEvent =
                 serde_json::from_value(third).map_err(|_| ChatError::OrchestrationUnavailable)?;
             window
                 .emit("chat:native-view:v3", third)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            let mut fourth =
+                serde_json::to_value(&event).map_err(|_| ChatError::OrchestrationUnavailable)?;
+            fourth["schemaVersion"] = serde_json::json!(4);
+            strip_native_activity_extension(&mut fourth["view"]);
+            let fourth: super::native_conversation_v4_generated::NativeConversationViewEvent =
+                serde_json::from_value(fourth).map_err(|_| ChatError::OrchestrationUnavailable)?;
             window
-                .emit("chat:native-view:v4", event)
+                .emit("chat:native-view:v4", fourth)
+                .map_err(|_| ChatError::OrchestrationUnavailable)?;
+            window
+                .emit("chat:native-view:v5", event)
                 .map_err(|_| ChatError::OrchestrationUnavailable)?;
         }
         Ok(())
@@ -8567,8 +8578,48 @@ pub async fn chat_load_native_history_v3(
     Ok(response)
 }
 
+fn strip_native_activity_extension(view: &mut Value) {
+    if let Some(items) = view.get_mut("items").and_then(Value::as_array_mut) {
+        for entry in items {
+            if let Some(item) = entry.get_mut("item") {
+                if item.get("type").and_then(Value::as_str) == Some("fileChange") {
+                    *item = serde_json::json!({"id":item["id"],"type":"unknown","availability":"unavailable"});
+                } else if let Some(fields) = item.as_object_mut() {
+                    for key in [
+                        "commandPreview",
+                        "commandActions",
+                        "fileChange",
+                        "appContext",
+                    ] {
+                        fields.remove(key);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn chat_load_native_history_v4(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+) -> Result<Value, ChatIpcError> {
+    let mut response = chat_load_native_history_v5(request, chat_runtime, ipc_runtime).await?;
+    if let Some(views) = response
+        .get_mut("data")
+        .and_then(|v| v.get_mut("views"))
+        .and_then(Value::as_array_mut)
+    {
+        for view in views {
+            strip_native_activity_extension(view);
+        }
+    }
+    Ok(response)
+}
+
+#[tauri::command]
+pub async fn chat_load_native_history_v5(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
     ipc_runtime: State<'_, ChatIpcRuntime>,

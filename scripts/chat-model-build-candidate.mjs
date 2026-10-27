@@ -38,7 +38,7 @@ function candidateContracts(desktopRoot,expert){
 function expertAuthority(contractsRoot){
  return Object.fromEntries(expertSourceLocks.map(f=>[f,digest(readFileSync(path.join(contractsRoot,`compatibility/${f}/source.lock.json`)))]));
 }
-function verifyConsumers(desktopRoot,contractsRoot,expert){
+function verifyConsumers(desktopRoot,contractsRoot,hostRoot,expert){
  execFileSync(process.execPath,['scripts/generate-native-process.mjs','--check'],{cwd:contractsRoot,stdio:'pipe'});
  execFileSync(process.execPath,['scripts/sync-native-process.mjs','--candidate','--check'],{cwd:contractsRoot,stdio:'pipe'});
  for(const family of modelFamilies){
@@ -58,7 +58,7 @@ function verifyConsumers(desktopRoot,contractsRoot,expert){
  // The source-owned asset validator checks both producer bytes and the separate
  // packaged resource slot. Check mode never installs or rebuilds resources.
  execFileSync(process.execPath,['scripts/sync-market-catalog.mjs','--check'],{cwd:desktopRoot,stdio:'pipe'});
- execFileSync(process.execPath,['scripts/sync-desktop-expert-resources.mjs','--check'],{cwd:desktopRoot,stdio:'pipe',env:{...process.env,YIJIE_ENV:'local',YIJIE_LOCAL_PROFILE:'demo_fast',YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot}});
+ execFileSync(process.execPath,['scripts/sync-desktop-expert-resources.mjs','--check'],{cwd:desktopRoot,stdio:'pipe',env:{...process.env,YIJIE_ENV:'local',YIJIE_LOCAL_PROFILE:'demo_fast',YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot,YIJIE_DESKTOP_AGENT_HOST_DIR:hostRoot}});
 }
 
 function verifyArtifactMedia(desktopRoot,contractsRoot,record){
@@ -74,7 +74,7 @@ export function verifyChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot
  if(JSON.stringify(actual.host)!==JSON.stringify(snapshot(hostRoot,media)))throw Error('Model Host source candidate drift; freeze a newly reviewed local snapshot before building.');
  assert.deepEqual(actual.contracts,candidateContracts(desktopRoot,expert),'Candidate contract pin drift');
  if(expert)assert.deepEqual(actual.contracts_source_locks,expertAuthority(contractsRoot),'Expert source authority drift');
- verifyConsumers(desktopRoot,contractsRoot,expert);
+ verifyConsumers(desktopRoot,contractsRoot,hostRoot,expert);
  if(media)verifyArtifactMedia(desktopRoot,contractsRoot,actual);
  return actual.host.sources;
 }
@@ -82,7 +82,7 @@ export function freezeChatModelBuildCandidate(desktopRoot,contractsRoot,hostRoot
  const selected=chatModelBuildCandidateSelection(environment),expert=environment.YIJIE_EXPERTS_ENABLED==='true',media=selected.feature==='FEAT-159';
  // An explicit freeze records reviewed implementation bytes only after all
  // generated projections and resource evidence pass their existing checks.
- verifyConsumers(desktopRoot,contractsRoot,expert);
+ verifyConsumers(desktopRoot,contractsRoot,hostRoot,expert);
  const record={schema_version:1,feature:selected.feature,mode:'local_worktree_candidate',release:false,host:snapshot(hostRoot,media),contracts:candidateContracts(desktopRoot,expert)};
  if(media)record.artifact_media=digest(readFileSync(path.join(desktopRoot,'contracts/artifact-media.candidate.json')));
  if(media)verifyArtifactMedia(desktopRoot,contractsRoot,record);

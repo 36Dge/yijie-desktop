@@ -11,6 +11,7 @@ const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureC
 const native = computed(() => props.execution.native.item);
 const mcp = computed(() => native.value.mcp);
 const identity = computed(() => mcp.value?.server && mcp.value.tool ? `${mcp.value.server} / ${mcp.value.tool}` : "工具身份信息不完整");
+const label = computed(() => native.value.appContext?.appName ? `${props.execution.status === "completed" ? "已使用" : "使用"} ${native.value.appContext.appName}${native.value.appContext.actionName ? ` · ${native.value.appContext.actionName}` : ""}` : native.value.toolLabel ?? "工具调用");
 const status = computed(() => {
   switch (props.execution.status) {
     case "completed": return "已完成";
@@ -46,7 +47,7 @@ const diagnosticLabels = {
 <template>
   <ChatTimelineItemShell
     :process-presentation="processPresentation"
-    :item="item" label="工具调用" :status-label="status" icon="skillOperations"
+    :item="item" :label="label" :status-label="status" icon="skillOperations"
     :status-icon="item.busy ? 'pending' : execution.status === 'completed' ? 'check' : 'warning'"
     :status-tone="item.busy ? 'primary' : execution.status === 'completed' ? 'success' : 'muted'"
     collapsible :default-expanded="processPresentation ? false : item.busy"

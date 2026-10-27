@@ -118,6 +118,9 @@ function selectAction(key: string | number): void {
   color: var(--yj-color-text-primary);
   background: transparent;
   text-align: left;
+  /* Keep WebKit from selecting title text when opening the context menu. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 .chat-tree__session-link--active { color: var(--yj-color-text-primary); background: var(--yj-color-control-hover); }
 .chat-tree__session-link:hover { background: var(--yj-color-control-hover); }

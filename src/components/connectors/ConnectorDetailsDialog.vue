@@ -15,6 +15,7 @@ const title = computed(() => {
   if (!entry) return "连接器详情";
   if (entry.busy) return `${entry.name} · ${entry.status.label}`;
   if (!entry.installed) return `安装 ${entry.name}`;
+  if (entry.id === "kimi-web" && !entry.enabled) return `${entry.name} · ${entry.status.label}`;
   return entry.enabled ? entry.name : `${entry.name} 已安装但未启用`;
 });
 </script>
@@ -28,9 +29,9 @@ const title = computed(() => {
         <h2 :id="titleId">{{ title }}</h2>
         <p class="connector-details__description">{{ connector.description }}</p>
         <div class="connector-details__principles">
-          <div><YjIcon name="skillOperations" size="md" /><span><strong>扩展对话能力</strong><span>启用后，可在对话中选择此连接器。</span></span></div>
-          <div><YjIcon name="shield" size="md" /><span><strong>遵循当前权限设置</strong><span>授权连接不会替代任务中的操作审批。</span></span></div>
-          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>停用会保留配置和授权；卸载才会清除本机配置和凭据。</span></span></div>
+          <div><YjIcon name="skillOperations" size="md" /><span><strong>扩展对话能力</strong><span>{{ connector.id === "kimi-web" ? "准备完成后，可直接在对话中选用，无需单独启用。" : "启用后，可在对话中选择此连接器。" }}</span></span></div>
+          <div><YjIcon name="shield" size="md" /><span><strong>遵循当前权限设置</strong><span>{{ connector.id === "kimi-web" ? "搜索或读取网页前，仍需批准本次操作。" : "授权连接不会替代任务中的操作审批。" }}</span></span></div>
+          <div><YjIcon name="settings" size="md" /><span><strong>随时管理连接</strong><span>{{ connector.id === "kimi-web" ? "停用或卸载会保留你的选择，不会删除模型凭据。" : "停用会保留配置和授权；卸载才会清除本机配置和凭据。" }}</span></span></div>
         </div>
         <p v-if="connector.configurationLabel" class="connector-details__configuration">{{ connector.configurationLabel }}</p>
         <NAlert v-if="connector.explanation && connector.explanation !== error" :type="connector.status.tone === 'error' ? 'error' : connector.status.tone === 'warning' ? 'warning' : 'info'" :bordered="false">{{ connector.explanation }}</NAlert>

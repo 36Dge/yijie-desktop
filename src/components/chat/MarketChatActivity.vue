@@ -19,6 +19,13 @@ const labels = { pending: "需要你的批准", approved: "已批准本次", rej
 const toolLabels = { in_progress: "执行中", completed: "已完成", failed: "执行失败" };
 const names = computed(() => new Map(props.observation?.selectionDisplay.map(item => [item.serviceId, item.displayName])));
 const displayed = computed(() => props.toolObservation === undefined ? props.observation : props.toolObservation);
+// Experts also use managed sessions with an empty connector selection. A
+// submission binding alone is not a tool invocation or a reason to show logs.
+const hasActivity = computed(() => !!props.error || !!props.historyError || !!props.historyRefreshing ||
+  !!props.observation?.approvals?.requests.length || !!displayed.value?.tools?.items.length ||
+  !!displayed.value?.tools?.truncated || !!props.observation?.turnsTruncated ||
+  !!props.observation?.selectionDisplay.length ||
+  !!props.observation?.availableTurns?.some(turn => turn.selectionDisplay.length > 0));
 const toolNames = computed(() => new Map(displayed.value?.selectionDisplay.map(item => [item.serviceId, item.displayName])));
 function approvalName(approval: MarketApproval): string {
   const display = props.observation?.availableTurns?.find(turn => turn.nativeTurnId === approval.identity.nativeTurnId)?.selectionDisplay;
@@ -26,7 +33,7 @@ function approvalName(approval: MarketApproval): string {
 }
 </script>
 <template>
-  <section v-if="observation?.managed || error" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
+  <section v-if="hasActivity && (observation?.managed || error || historyError)" class="market-activity" aria-label="连接器调用" :aria-busy="refreshing" aria-live="polite">
     <p v-if="error" class="market-activity__notice" role="alert">{{ error }} <button class="yj-control" type="button" :disabled="refreshing || !!deciding" @click="$emit('refresh')">{{ refreshing ? '正在核对' : '刷新状态' }}</button></p>
     <article v-for="approval in observation?.approvals?.requests ?? []" :key="approval.approvalId" class="market-activity__card" :aria-label="approval.review.title">
       <header><YjIcon name="shield" size="md" /><strong>{{ labels[approval.state] }}</strong><span>{{ approvalName(approval) }}</span></header>

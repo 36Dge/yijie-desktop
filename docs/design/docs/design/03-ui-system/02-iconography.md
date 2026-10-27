@@ -50,6 +50,13 @@ src/icons/registry.ts
 
 默认线宽为 2。单页不得混用明显不同线宽。
 
+2026-10-23 用户指定的 Chat「回到底部」局部调整：圆形按钮由 40px 缩为 32px，
+箭头由 20px 缩为 `sm`（16px），通过 `YjIcon.strokeWidth` 使用 1.5 线宽。
+保留原有居中位置、底部间距、键盘焦点与点击行为，不改变其他图标默认值。
+悬停仅使用轻微中性背景反馈，边框保持默认浅色，不加深为黑色描边；键盘焦点环继续保留。
+`contract-impact = none`：仅 Desktop 进程内尺寸与线宽变化，Desktop/API/Agent Host、
+Native IPC 及本地持久化/重放状态无变化。
+
 2026-10-03 关联店铺入口使用既有 `store`（Lucide Store）门面轮廓，遵从用户要求不使用链条。
 演示店铺改为名称意象图标：拾光家居 `shopHome`（House）、山海户外 `shopOutdoors`（Mountain）、
 晴日生活 `shopSunny`（Sun）、Northstar Home `shopNorthstar`（Sparkle 四芒星）、

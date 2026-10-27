@@ -160,11 +160,11 @@ describe("cross-border catalog", () => {
     const data: Snapshot = { ...snapshot([]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
     const entries = connectorViews(data);
     const cross = entries.filter(entry => entry.categoryId === "cross_border_ecommerce");
-    expect(entries).toHaveLength(60);
+    expect(entries).toHaveLength(61);
     expect(cross.map(entry => entry.id)).toEqual(["lingxing", "sif", "keepa", "pangolinfo", "datahawk", "seller-labs", "shopify", "sellersprite", "sorftime", "FastMoss", "chuhaijiang", "linkfox"]);
     const wrapper = mount(ConnectorMarketView, { props: { model: { phase: "ready", entries, canManage: true, refreshing: false, error: null } }, attachTo: document.body });
     wrappers.push(wrapper);
-    expect(wrapper.findAll(".connector-card")).toHaveLength(60);
+    expect(wrapper.findAll(".connector-card")).toHaveLength(61);
     await wrapper.get("input").setValue("跨境电商");
     expect(wrapper.findAll(".connector-card")).toHaveLength(12);
     for (const entry of cross) {
@@ -175,6 +175,41 @@ describe("cross-border catalog", () => {
     expect(wrapper.findAll(".connector-card")).toHaveLength(1);
     await wrapper.get(".connector-card").trigger("click"); await flushPromises();
     expect(document.body.textContent).toContain("安装 领星 ERP");
+  });
+});
+
+describe("Kimi web retrieval catalog", () => {
+  it("finds the bundled Kimi service and shows its existing install entry without selecting it", async () => {
+    const data: Snapshot = { ...snapshot([]), catalogRevision: catalog.catalogRevision, catalog: catalog.catalog as CatalogEntry[] };
+    const entries = connectorViews(data);
+    const kimi = entries.find(entry => entry.id === "kimi-web")!;
+    expect(kimi).toMatchObject({ installed: false, enabled: false, selectable: false, actions: ["install"] });
+    const wrapper = mount(ConnectorMarketView, { props: { model: { phase: "ready", entries, canManage: true, refreshing: false, error: null } }, attachTo: document.body });
+    wrappers.push(wrapper);
+    await wrapper.get("input").setValue("Kimi");
+    expect(wrapper.findAll(".connector-card")).toHaveLength(1);
+    expect(connectorIconUrl(kimi.iconAssetId)).toContain("kimi.svg");
+    expect(wrapper.get(".connector-card img").attributes("src")).toBe(connectorIconUrl(kimi.iconAssetId));
+    await wrapper.get(".connector-card").trigger("click"); await flushPromises();
+    expect(document.body.textContent).toContain("安装 Kimi 网页检索");
+    expect(document.body.textContent).toContain("可能计费");
+    expect(wrapper.emitted("action")).toBeUndefined();
+  });
+
+  it("does not offer Kimi configuration or a manual initial enable step", async () => {
+    const entry = catalog.catalog.find(item => item.serviceId === "kimi-web")!;
+    const data: Snapshot = { ...snapshot([{ ...installed, serviceId: entry.serviceId, authorizationStatus: "unknown", desiredEnabled: true }], ["connector.read", "connector.manage", "connector.credentials.manage", "connector.use"]), catalogRevision: catalog.catalogRevision, catalog: [{ ...entry, availability: "available", blockerCodes: [] } as CatalogEntry], executionAvailable: true };
+    const view = connectorViews(data)[0]!;
+    expect(view).toMatchObject({ installed: true, enabled: false, selectable: false });
+    expect(view.actions).not.toContain("configure");
+    expect(view.actions).toContain("enable");
+    const wrapper = mount(ConnectorDetailsDialog, { props: { show: true, connector: view, canManage: true }, attachTo: document.body });
+    wrappers.push(wrapper); await flushPromises();
+    expect(document.body.textContent).toContain("无需单独配置");
+    expect(document.body.textContent).toContain("不会删除模型凭据");
+    expect(document.body.textContent).not.toContain("使用现有 Kimi 密钥");
+    expect(document.body.textContent).not.toContain("检查连接并启用");
+    expect(wrapper.emitted("action")).toBeUndefined();
   });
 });
 

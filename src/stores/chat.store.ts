@@ -77,7 +77,7 @@ CHAT_NEW_DRAFT_TARGET,
 ChatClientError,
 chatSessionDraftTarget,
 } from "../domain/chat-ipc";
-import { CHAT_INPUT_MAX_BYTES, localHistoryDeletionFinished } from "../domain/chat-ui";
+import { CHAT_INPUT_MAX_BYTES, confirmedDeletionFinished, localHistoryDeletionFinished } from "../domain/chat-ui";
 import {
 createConversationApprovalState,
 disconnectConversationApprovals,
@@ -4056,7 +4056,7 @@ export function createChatStoreDefinition(
 
     function cleanupIsFinished(status: ChatCleanupStatus): boolean {
       return localHistoryDeletionFinished(status)
-        || (status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete");
+        || confirmedDeletionFinished(status);
     }
 
     function cleanupSurfaceRank(state: ChatCleanupStatus["desktopState"]): number {
@@ -4225,7 +4225,7 @@ export function createChatStoreDefinition(
       clearCleanupPoll();
       invalidateCleanupObservations();
       try {
-        const status = await client.deleteSession(bound.contextId, sessionId, operationId());
+        const status = await client.deleteSession(bound.contextId, sessionId, currentCleanup?.operationId ?? operationId());
         if (
           context.value?.contextId !== bound.contextId ||
           selectedSessionId.value !== sessionId

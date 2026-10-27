@@ -21,3 +21,7 @@
 
 四者经 `model-icons.ts` 注册为 `modelKimi` / `modelMiniMax` / `modelDeepSeek` / `modelGlm`，由 `YjIcon` 引用，
 运行时不请求官方站点。
+
+2026-10-24：FEAT-162 经用户授权复用同一 `kimi.svg`，在连接器市场和会话选择器中识别
+“Kimi 网页检索”。由 `connector-icons.ts` 映射 `kimi-web`；不复制或改写图形、不添加外部请求，
+仍仅用于服务身份识别，不表示合作、官方背书或额外素材授权。

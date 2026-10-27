@@ -3,8 +3,7 @@ defineProps<{text: string}>();
 </script>
 
 <template>
-  <div class="chat-execution-progress" aria-label="执行进度（系统根据实际执行记录提供）" data-progress-source="runtime_records">
-    <span class="chat-execution-progress__source">执行进度</span>
+  <div class="chat-execution-progress" aria-label="正在处理" data-progress-source="runtime_records">
     <p>{{ text }}</p>
   </div>
 </template>

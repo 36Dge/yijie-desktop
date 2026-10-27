@@ -131,7 +131,7 @@ impl NativeDisplayBuffer {
     /// Transport ordering is checked exactly once here. It never changes the
     /// native execution status and never requests or retries a model operation.
     pub fn observe(&mut self, event: &NativeEvent) -> Result<bool, ChatError> {
-        if !matches!(event.schema_version, 7 | 8 | 10 | 11)
+        if !matches!(event.schema_version, 7 | 8 | 10 | 11 | 12)
             || event.event_type != "native.notification"
             || event.task_id != self.context.task_id.to_string()
             || event.agent_session_id != self.context.agent_session_id.to_string()

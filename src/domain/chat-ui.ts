@@ -248,6 +248,11 @@ export function localHistoryDeletionFinished(status: ChatCleanupStatus): boolean
     && status.desktopState === "complete" && status.completedAt !== null;
 }
 
+export function confirmedDeletionFinished(status: ChatCleanupStatus): boolean {
+  return status.outcomeCode === "cleanup_complete" && status.completedAt !== null
+    && status.desktopState === "complete" && status.hostState === "complete" && status.runtimeState === "complete";
+}
+
 export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | null {
   if (status === null) return null;
   if (localHistoryDeletionFinished(status)) {
@@ -259,19 +264,29 @@ export function cleanupNotice(status: ChatCleanupStatus | null): ChatUiNotice | 
     };
   }
   const states = [status.desktopState, status.hostState, status.runtimeState];
-  if (states.every((state) => state === "complete")) {
+  if (confirmedDeletionFinished(status)) {
     return {
       title: "任务已永久删除",
-      detail: "本地对话、Host 映射与 Runtime thread 已完成清理。",
+      detail: "聊天及关联运行记录已清理，重新打开应用后也无法恢复。",
       actionLabel: null,
       tone: "success",
+    };
+  }
+  if (status.lastErrorCode === "active_turn" && status.outcomeCode !== "retry_limit_exceeded") {
+    return {
+      title: "正在停止任务并删除记录",
+      detail: "正在确认任务已停止，确认后会继续清理。完成前记录会保留。",
+      actionLabel: "检查删除状态",
+      tone: "warning",
     };
   }
   if (states.some((state) => state === "incomplete")) {
     return {
       title: "任务删除尚未完成",
       detail: status.outcomeCode === "retry_limit_exceeded"
-        ? "自动重试已暂停，可以重新尝试删除。"
+        ? status.lastErrorCode === "active_turn"
+          ? "尚未确认任务已停止，自动重试已暂停。可以重新尝试删除。"
+          : "自动重试已暂停，可以重新尝试删除。"
         : "部分本地清理失败，应用会保留状态以便重试。",
       actionLabel: status.outcomeCode === "retry_limit_exceeded" ? "重新尝试删除" : "检查删除状态",
       tone: "error",

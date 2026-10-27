@@ -5418,37 +5418,10 @@ impl ChatRepository {
             if stored_hash.as_deref() != Some(keyed_hash.as_str()) {
                 return Err(ChatError::ConversationConflict);
             }
-            return Ok(status);
+            return self.retry_deletion(status, session_id, &keyed_hash, now);
         }
         if let Some(status) = self.deletion_status_for_session(session_id)? {
-            if status.completed_at.is_none() && status.outcome_code == "retry_limit_exceeded" {
-                let changed = self
-                    .connection
-                    .execute(
-                        "UPDATE chat_deletion_jobs
-                         SET desktop_state=CASE WHEN desktop_state='complete' THEN desktop_state ELSE 'pending' END,
-                             host_state=CASE WHEN host_state='complete' THEN host_state ELSE 'pending' END,
-                             runtime_state=CASE WHEN runtime_state='complete' THEN runtime_state ELSE 'pending' END,
-                             updated_at=?1, next_attempt_at=?1, attempt_count=0,
-                             lease_expires_at=0, outcome_code='pending', last_error_code=NULL
-                         WHERE operation_id=?2 AND session_id=?3 AND keyed_session_hash=?4
-                           AND outcome_code='retry_limit_exceeded'",
-                        params![
-                            now,
-                            status.operation_id.to_string(),
-                            session_id.to_string(),
-                            keyed_hash
-                        ],
-                    )
-                    .map_err(|_| ChatError::DatabaseUnavailable)?;
-                if changed != 1 {
-                    return Err(ChatError::ConversationConflict);
-                }
-                return self
-                    .deletion_status(status.operation_id)?
-                    .ok_or(ChatError::DatabaseUnavailable);
-            }
-            return Ok(status);
+            return self.retry_deletion(status, session_id, &keyed_hash, now);
         }
         let transaction = self
             .connection
@@ -5624,12 +5597,12 @@ impl ChatRepository {
                    AND d.outcome_code='pending'
                    AND NOT EXISTS(
                      SELECT 1 FROM chat_turns t WHERE t.session_id=d.session_id
-                       AND (t.status IN ('streaming', 'stopping')
-                         OR (t.status='queued' AND NOT COALESCE(
-                           {CANCELLED_UNSTARTED_TURN} OR {host_cleanup_turn},0)))
+                       AND t.status IN ('queued', 'streaming', 'stopping')
+                       AND NOT COALESCE({host_cleanup_turn}
+                         OR (t.status='queued' AND {CANCELLED_UNSTARTED_TURN}),0)
                    )
                  ORDER BY d.next_attempt_at, d.operation_id LIMIT 1",
-                        host_cleanup_turn = deletion_recovery::CANCELLED_HOST_CLEANUP_TURN,
+                        host_cleanup_turn = deletion_recovery::BOUND_HOST_CLEANUP_TURN,
                     ),
                 )?,
                 params![OUTBOX_MAX_ATTEMPTS, now],
@@ -5996,6 +5969,7 @@ impl ChatRepository {
                 .prepare(
                     &super::schedules::recovery::coordination_sql(&self.connection,"SELECT DISTINCT s.id FROM chat_sessions s JOIN chat_turns t ON t.session_id=s.id
                      WHERE s.owner_user_id=?1 AND s.tenant_id=?2
+                       AND NOT EXISTS(SELECT 1 FROM chat_deletion_jobs d WHERE d.session_id=s.id)
                        AND t.status IN ('streaming', 'stopping') ORDER BY s.id")?,
                 )
                 .map_err(|_| ChatError::DatabaseUnavailable)?;
@@ -9020,6 +8994,207 @@ mod tests {
     }
 
     #[test]
+    fn deletion_recovery_stale_bound_turn_reaches_host_and_survives_reopen() {
+        for status in ["queued", "streaming", "stopping"] {
+            let root = std::env::temp_dir().join(format!("cleanup-stale-{}", Uuid::now_v7()));
+            fs::create_dir(&root).unwrap();
+            let owner = scope();
+            let mut repo = open_repository_for_scope(&root, 48, owner.clone());
+            let project = register_synthetic_project(&mut repo, &root);
+            let chat = repo
+                .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+                .unwrap();
+            let now = unix_seconds().unwrap();
+            bind_and_accept_first_turn(&mut repo, &chat, now);
+            // Ordinary retained legacy projection, independent of current native
+            // execution. Neither claiming deletion nor reopening may seal it.
+            repo.connection
+                .execute(
+                    "UPDATE chat_turns SET status=?1 WHERE id=?2",
+                    params![status, chat.turn_id.to_string()],
+                )
+                .unwrap();
+            let operation = Uuid::now_v7();
+            repo.begin_session_deletion(chat.session_id, operation, now)
+                .unwrap();
+            assert!(
+                repo.recovery_snapshot()
+                    .unwrap()
+                    .active_session_ids
+                    .is_empty(),
+                "deleting sessions must not block the next cleanup retry with a stale stream"
+            );
+            if status != "queued" {
+                assert!(
+                    repo.claim_next_deletion(now + 1, 30).unwrap().is_none(),
+                    "pending interruption must be dispatched first"
+                );
+                assert_eq!(
+                    repo.claim_next_conversation_outbox(now + 1, 30)
+                        .unwrap()
+                        .unwrap()
+                        .operation_id,
+                    operation
+                );
+                repo.complete_interrupt(operation).unwrap();
+            }
+            let saved: String = repo
+                .connection
+                .query_row(
+                    "SELECT status FROM chat_turns WHERE id=?1",
+                    [chat.turn_id.to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            drop(repo);
+            let mut repo = open_repository_for_scope(&root, 48, owner.clone());
+            assert_eq!(
+                repo.claim_next_deletion(now + 2, 30)
+                    .unwrap()
+                    .unwrap()
+                    .operation_id,
+                operation
+            );
+            let after: String = repo
+                .connection
+                .query_row(
+                    "SELECT status FROM chat_turns WHERE id=?1",
+                    [chat.turn_id.to_string()],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(saved, after);
+            assert_eq!(
+                repo.complete_local_deletion(operation),
+                Err(ChatError::CleanupIncomplete)
+            );
+            repo.record_cleanup_surfaces(
+                operation,
+                CleanupSurfaceState::Complete,
+                CleanupSurfaceState::Complete,
+                "cleanup_complete",
+                now + 3,
+            )
+            .unwrap();
+            repo.complete_local_deletion(operation).unwrap();
+            repo.finalize_deletion_receipt(operation, now + 3).unwrap();
+            drop(repo);
+            let repo = open_repository_for_scope(&root, 48, owner);
+            for table in [
+                "chat_sessions",
+                "chat_messages",
+                "chat_turns",
+                "chat_native_facts",
+                "chat_native_views",
+                "chat_native_bindings",
+                "chat_outbox",
+                "chat_message_content_blocks",
+            ] {
+                let count: i64 = repo
+                    .connection
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(count, 0, "{table} after normal reopen");
+            }
+            assert!(repo
+                .deletion_status(operation)
+                .unwrap()
+                .unwrap()
+                .completed_at
+                .is_some());
+            assert_eq!(
+                repo.connection
+                    .query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+            drop(repo);
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn deletion_recovery_same_operation_explicit_retry_preserves_confirmed_surfaces() {
+        let root = std::env::temp_dir().join(format!("cleanup-retry-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 48, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let chat = repo
+            .create_session_and_enqueue(project, "首条消息", Uuid::now_v7())
+            .unwrap();
+        let now = unix_seconds().unwrap();
+        let operation = Uuid::now_v7();
+        repo.begin_session_deletion(chat.session_id, operation, now)
+            .unwrap();
+        // Exhaust the ordinary bounded retry API; do not edit the saved job.
+        for attempt in 0..OUTBOX_MAX_ATTEMPTS {
+            assert!(repo
+                .claim_next_deletion(now + attempt, 30)
+                .unwrap()
+                .is_some());
+            repo.reschedule_deletion(operation, now + attempt + 1)
+                .unwrap();
+        }
+        assert!(repo
+            .claim_next_deletion(now + OUTBOX_MAX_ATTEMPTS, 30)
+            .unwrap()
+            .is_none());
+        drop(repo);
+        let mut repo = open_repository_for_scope(&root, 48, owner);
+        let resumed = repo
+            .begin_session_deletion(chat.session_id, operation, now + 100)
+            .unwrap();
+        assert_eq!(resumed.operation_id, operation);
+        assert_eq!(resumed.outcome_code, "pending");
+        assert_eq!(resumed.host_state, CleanupSurfaceState::Complete);
+        assert_eq!(resumed.runtime_state, CleanupSurfaceState::Complete);
+        let claimed = repo.claim_next_deletion(now + 100, 30).unwrap().unwrap();
+        assert_eq!(claimed.attempt_count, 1);
+        repo.complete_local_deletion(operation).unwrap();
+        repo.finalize_deletion_receipt(operation, now + 100)
+            .unwrap();
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletion_recovery_more_than_one_page_remains_empty_after_reopen() {
+        let root = std::env::temp_dir().join(format!("cleanup-pages-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repo = open_repository_for_scope(&root, 48, owner.clone());
+        let project = register_synthetic_project(&mut repo, &root);
+        let now = unix_seconds().unwrap();
+        for _ in 0..(DEFAULT_PAGE_SIZE + 5) {
+            let chat = repo
+                .create_session_and_enqueue(project, "普通合成清理验收", Uuid::now_v7())
+                .unwrap();
+            repo.begin_session_deletion(chat.session_id, Uuid::now_v7(), now)
+                .unwrap();
+        }
+        let mut deleted = 0;
+        while let Some(job) = repo.claim_next_deletion(now + 1, 30).unwrap() {
+            repo.complete_local_deletion(job.operation_id).unwrap();
+            repo.finalize_deletion_receipt(job.operation_id, now + 1)
+                .unwrap();
+            deleted += 1;
+        }
+        assert_eq!(deleted, DEFAULT_PAGE_SIZE + 5);
+        drop(repo);
+        let repo = open_repository_for_scope(&root, 48, owner);
+        assert!(repo.list_sessions(None, None).unwrap().sessions.is_empty());
+        assert!(repo
+            .recovery_snapshot()
+            .unwrap()
+            .active_session_ids
+            .is_empty());
+        assert!(repo.recovery_snapshot().unwrap().deletions.is_empty());
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn deletion_recovery_attempted_cancel_requires_confirmed_host_cleanup() {
         let root = std::env::temp_dir().join(format!("deletion-recovery-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -11172,7 +11347,7 @@ mod tests {
         // An ordinary future-format record is retained, not interpreted as a
         // missing snapshot or an invitation to reconstruct it from native history.
         repo.connection
-            .execute("UPDATE chat_native_views SET format_version=5", [])
+            .execute("UPDATE chat_native_views SET format_version=6", [])
             .unwrap();
         let records = repo
             .native_recovery_records(pending.session_id, &[pending.turn_id], None, true)
@@ -11183,7 +11358,7 @@ mod tests {
             records.record_diagnostics[0].turn_id,
             pending.turn_id.to_string()
         );
-        assert_eq!(records.record_diagnostics[0].format_version, 5);
+        assert_eq!(records.record_diagnostics[0].format_version, 6);
         assert!(repo
             .native_views(pending.session_id, &[pending.turn_id])
             .is_err());
@@ -11626,6 +11801,42 @@ mod tests {
                 .unwrap()[0]
                 .url,
             "https://example.org/statistics/2025"
+        );
+        let command = views[0]
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-command")
+            .unwrap();
+        assert_eq!(command.item.command_preview.as_deref(), Some("cat note.md"));
+        assert_eq!(command.item.command_actions.as_ref().unwrap()[0].index, 0);
+        let change = views[0]
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-change")
+            .unwrap();
+        assert_eq!(
+            change.item.file_change.as_ref().unwrap().changes[0].added_lines,
+            Some(2)
+        );
+        let app = views[0]
+            .items
+            .iter()
+            .find(|i| i.item.id == "host-app")
+            .unwrap();
+        assert_eq!(
+            app.item.app_context.as_ref().unwrap().app_name.as_deref(),
+            Some("Example App")
+        );
+        assert_eq!(
+            reopened
+                .connection
+                .query_row(
+                    "SELECT format_version FROM chat_native_views LIMIT 1",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            5
         );
         assert!(!views[0].items.iter().any(|i| i.item.id == "item-0"));
         assert_eq!(

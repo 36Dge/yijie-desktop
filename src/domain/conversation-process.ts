@@ -1,22 +1,36 @@
 import type { ConversationTimelineItemViewModel, ConversationTimelineTurnViewModel } from "./conversation-timeline";
 
 /** Only explicit process kinds participate; an unclassified answer stays readable. */
-export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel, observedProgress = false): boolean {
+export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel, observedProgress = false, rebuilt = false): boolean {
   if (!["commentary", "reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation) && !observedProgress) return false;
+  if (item.presentation === "reasoning" && item.availability !== undefined) return true;
   // An unsupported display type is not a failed execution. Keep its original
   // record in details rather than turning every successful search into an alert.
   if (item.presentation === "unknown" && item.domainStatus === "completed" && !item.approval && !item.activityLabel) return true;
   // Keep decisions and incomplete/error information visible even when the Turn is folded.
-  if (item.approval?.status === "pending" || item.domainStatus === "incomplete" || item.activityLabel ||
+  // A history read cannot establish live item completion. It can still supply
+  // explicit commentary and confirmed execution facts for the reading layout.
+  const readableHistory = rebuilt && item.availability === "available" &&
+    (item.presentation === "commentary" || confirmedNativeExecution(item));
+  if (item.approval?.status === "pending" || (item.domainStatus === "incomplete" && !readableHistory) || item.activityLabel ||
       (item.availability && item.availability !== "available" &&
-        !(item.presentation === "web_search" && item.domainStatus === "completed"))) return false;
+        !(["web_search", "command", "tool"].includes(item.presentation) && item.availability === "partial"))) return false;
   if (item.reasoning && (item.reasoning.reasonCode !== null ||
       !["complete", "in_progress"].includes(item.reasoning.status))) return false;
   if (item.presentation === "command" || item.presentation === "tool") {
+    // A confirmed native failure may use a compact record, but its group must
+    // keep an attention marker visible even when the rest of the Turn folds.
+    if (item.execution && "native" in item.execution && (item.domainStatus === "completed" || readableHistory) &&
+        ["failed", "declined"].includes(item.execution.status)) return true;
     if (!item.execution || !["running", "in_progress", "completed"].includes(item.execution.status)) return false;
     if ("error" in item.execution && item.execution.error !== null) return false;
   }
   return true;
+}
+
+function confirmedNativeExecution(item: ConversationTimelineItemViewModel): boolean {
+  return !!item.execution && "native" in item.execution &&
+    ["completed", "failed", "declined"].includes(item.execution.status);
 }
 
 /** Reading layout only: never rewrite a phase, lifecycle, Item, or saved view. */
@@ -43,13 +57,7 @@ export function observedProgressMessages(items: readonly ConversationTimelineIte
 }
 
 export function processDetailItems(items: readonly ConversationTimelineItemViewModel[]): ReadonlySet<string> {
-  return new Set(items.filter(item => {
-    if (item.presentation === "reasoning" || item.presentation === "unknown") return true;
-    const execution = item.execution;
-    if (item.presentation !== "command" || execution?.kind !== "command" || execution.status !== "completed") return false;
-    if ("native" in execution) return (execution.native.item.exitCode == null || execution.native.item.exitCode === 0) && !execution.native.item.outputText?.trim();
-    return execution.exitCode === 0 && execution.output?.retention === "complete" && !execution.output.text?.trim();
-  }).map(item => item.identity));
+  return new Set(items.filter(item => item.presentation === "reasoning" || item.presentation === "unknown").map(item => item.identity));
 }
 
 /** Collapse exact repeated completed summaries in details; retain every Item. */
@@ -66,75 +74,101 @@ export function repeatedSummaryItems(items: readonly ConversationTimelineItemVie
   return repeated;
 }
 
-export type ExecutionProgressDescription = Readonly<{
+export type ProcessActivityGroup = Readonly<{
+  identity: string;
   source: "runtime_records";
   itemIdentities: readonly string[];
   text: string;
+  active: number;
+  failed: number;
+  declined: number;
 }>;
 
-/** A reading projection of existing facts, never an assistant Item or event log. */
-export function executionProgressDescriptions(
+/** Compact adjacent work, not generated prose. Original Items remain in order. */
+export function processActivityGroups(
   turn: ConversationTimelineTurnViewModel,
   processKeys: ReadonlySet<string>,
   detailKeys: ReadonlySet<string>,
-): ReadonlyMap<string, ExecutionProgressDescription> {
-  const result = new Map<string, ExecutionProgressDescription>();
-  if (turn.source !== "native_observed") return result;
+): ReadonlyMap<string, ProcessActivityGroup> {
+  const result = new Map<string, ProcessActivityGroup>();
+  if (turn.source !== "native_observed" && turn.source !== "native_rebuilt") return result;
   const live = turn.liveObserved === true && turn.statusSource === "runtime_notification" &&
     turn.domainStatus === "in_progress" && turn.availability !== "unavailable";
-  type Group = { kind: string; noun: string; identities: string[]; completed: number; active: number };
+  type Group = { actions: Map<string, {label: string; completed: string; paths: Set<string>}>; identities: string[]; active: number; failed: number; declined: number };
   const groups: Group[] = [];
   let continuation = false;
   const seen = new Set<string>();
   for (const item of turn.items) {
     if (seen.has(item.identity)) continue;
     seen.add(item.identity);
-    // Detailed records retain their original placement, but cannot generate
-    // extra public prose or make an empty command appear active again.
-    if (detailKeys.has(item.identity)) continue;
+    // Reasoning and unsupported details do not interrupt adjacent tool work.
+    // Empty commands still count as actual executions, with details available.
+    if (detailKeys.has(item.identity) && item.presentation !== "command") continue;
     if (!processKeys.has(item.identity) || item.activityLabel || item.approval?.status === "pending" ||
         item.availability === "unavailable") { continuation = false; continue; }
-    let kind: string | null = null;
-    let noun = "";
-    if (item.presentation === "web_search") {
-      const action = item.webSearch?.action;
-      if (action === "search") { kind = action; noun = "网页搜索"; }
-      else if (action === "openPage") { kind = action; noun = "网页读取"; }
-      else if (action === "findInPage") { kind = action; noun = "网页内容查找"; }
-    } else if ((item.presentation === "command" || item.presentation === "tool") &&
-        item.execution && "native" in item.execution && item.availability === "available" &&
-        ["running", "in_progress", "completed"].includes(item.execution.status) &&
-        (!("error" in item.execution) || item.execution.error === null)) {
-      // Do not turn a nonzero or unreported exit code into a success claim.
-      if (item.presentation !== "command" || item.execution.native.item.exitCode === 0 || item.busy) {
-        kind = item.presentation;
-        noun = kind === "command" ? "命令执行" : "工具调用";
-      }
-    }
-    const completed = item.domainStatus === "completed" && (!item.execution || item.execution.status === "completed");
+    const actions = nativeActivityDescriptions(item);
+    const ended = turn.source === "native_rebuilt" ? confirmedNativeExecution(item) :
+      item.domainStatus === "completed" && (!item.execution || ["completed", "failed", "declined"].includes(item.execution.status));
     const active = live && item.busy === true;
-    if (kind === null || (!completed && !active)) { continuation = false; continue; }
+    if (!actions.length || (!ended && !active)) { continuation = false; continue; }
     const previous = groups[groups.length - 1];
-    const group: Group = continuation && previous?.kind === kind ? previous : {kind, noun, identities: [], completed: 0, active: 0};
+    const group: Group = continuation && previous ? previous : {actions: new Map(), identities: [], active: 0, failed: 0, declined: 0};
     if (group !== previous) groups.push(group);
     continuation = true;
     group.identities.push(item.identity);
-    if (completed) group.completed++;
-    else group.active++;
+    for (const action of actions) {
+      const previous = group.actions.get(action.key);
+      if (previous) { for (const path of action.paths) previous.paths.add(path); }
+      else group.actions.set(action.key, {...action, paths: new Set(action.paths)});
+    }
+    if (active && !ended) group.active++;
+    if (item.execution?.status === "failed") group.failed++;
+    if (item.execution?.status === "declined") group.declined++;
   }
-  for (const {noun, completed, active, identities} of groups) {
-    const ended = completed === 1 ? `已完成${noun}` : `已完成 ${completed} 次${noun}`;
-    const text = active > 0
-      ? completed > 0 ? `${ended}，另有 ${active} 次尚未收到结束记录。`
-        : `${active === 1 ? `正在进行${noun}` : `正在进行 ${active} 次${noun}`}，尚未收到结束记录。`
-      : `${ended}。具体情况可展开下方记录查看。`;
-    result.set(identities[0]!, Object.freeze({source: "runtime_records", itemIdentities: Object.freeze(identities), text}));
+  for (const {actions, active, failed, declined, identities} of groups) {
+    const identity = identities[0]!;
+    const text = [...actions.values()].map(action => {
+      const label = active || failed || declined ? action.label : action.completed;
+      return action.paths.size > 1 ? label.replace("文件", "多个文件") : label;
+    }).join("、");
+    result.set(identity, Object.freeze({identity, source: "runtime_records", itemIdentities: Object.freeze(identities), text, active, failed, declined}));
   }
   return result;
 }
 
+type ActivityDescription = { key: string; label: string; completed: string; paths: string[] };
+
+/** Deterministic reading labels from native facts, never from model/tool prose. */
+export function nativeActivityDescriptions(item: ConversationTimelineItemViewModel): ActivityDescription[] {
+  const action = (key: string, label: string, completed: string, paths: string[] = []): ActivityDescription => ({key, label, completed, paths});
+  if (item.presentation === "web_search") {
+    const kind = item.webSearch?.action;
+    return [kind === "openPage" ? action("web_read", "读取网页", "读取了网页") :
+      kind === "findInPage" ? action("web_find", "查找网页内容", "查找了网页内容") : action("web_search", "搜索网页", "搜索了网页")];
+  }
+  if (!item.execution || !("native" in item.execution)) return [];
+  const native = item.execution.native.item;
+  if (native.type === "commandExecution") return (native.commandActions?.length ? native.commandActions : [{type: "unknown"}]).map(a => {
+    const path = "pathLabel" in a && a.pathLabel ? [a.pathLabel] : [];
+    if (a.type === "read") return action("read", "读取文件", "读取了文件", path);
+    if (a.type === "listFiles") return action("listFiles", "列出文件", "列出了文件");
+    if (a.type === "search") return action("search", "搜索文件", "搜索了文件");
+    return action("command", "运行命令", "运行了命令");
+  });
+  if (native.type === "fileChange") return native.fileChange?.changes.map(change => {
+    const path = change.pathLabel ? [change.pathLabel] : [];
+    if (change.kind === "add") return action("add", "创建文件", "创建了文件", path);
+    if (change.kind === "delete") return action("delete", "删除文件", "删除了文件", path);
+    return action("edit", "编辑文件", "编辑了文件", path);
+  }) ?? [action("file", "变更文件", "变更了文件")];
+  const app = native.appContext?.appName;
+  if (app && app !== "[内容已脱敏]") return [action(`app:${native.appContext?.connectorId ?? app}`, `使用 ${app}`, `已使用 ${app}`)];
+  const tool = native.mcp?.tool;
+  return [tool ? action(`tool:${native.mcp?.server ?? ""}:${tool}`, `调用 ${tool}`, `已调用 ${tool}`) : action("tool", "调用工具", "调用了工具")];
+}
+
 export function nativeWaitingDescription(turn: ConversationTimelineTurnViewModel): string {
   return turn.items.some(item => item.presentation !== "user_message")
-    ? "已收到本轮处理记录，正在等待模型的后续输出。"
-    : "本轮已开始，正在等待模型输出。";
+    ? "正在处理…"
+    : "正在处理…";
 }

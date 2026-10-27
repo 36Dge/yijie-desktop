@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "NativeConversationViewV3",
+  "title": "NativeConversationViewV5",
   "$ref": "#/definitions/NativeConversationViewEvent",
   "definitions": {
     "NativeItem": {
@@ -25,6 +25,7 @@
             "commandExecution",
             "mcpToolCall",
             "webSearch",
+            "fileChange",
             "unknown"
           ]
         },
@@ -156,6 +157,24 @@
         },
         "webSearch": {
           "$ref": "#/definitions/NativeWebSearchDisplay"
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Bounded whole-line redacted native command; inert text, never execution input."
+        },
+        "commandActions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/NativeCommandActionDisplay"
+          }
+        },
+        "fileChange": {
+          "$ref": "#/definitions/NativeFileChangeDisplay"
+        },
+        "appContext": {
+          "$ref": "#/definitions/NativeAppContextDisplay"
         }
       }
     },
@@ -325,7 +344,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            4
+            5
           ]
         },
         "source": {
@@ -375,7 +394,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            11
+            12
           ]
         },
         "event_id": {
@@ -673,6 +692,131 @@
         }
       }
     },
+    "NativeCommandActionDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "type"
+      ],
+      "description": "Original native action array index, not a distinct execution. Classification is best-effort. Path labels are safe workspace-relative paths only; absence means not displayable. No raw command parsing or filesystem discovery.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "read",
+            "listFiles",
+            "search",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    },
+    "NativeFileUpdateDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind"
+      ],
+      "description": "One native reported file change; not a worktree net diff. Safe relative paths and whole-line redacted diff. Counts exist only for completed, fully observed and parseable changes: add/delete content lines, update unified diff hunks. Missing or truncated counts are unavailable, never zero. No actionable raw paths.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "add",
+            "delete",
+            "update",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "movePathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "diffText": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "addedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "removedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        }
+      }
+    },
+    "NativeFileChangeDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes"
+      ],
+      "description": "Existing native fileChange Item, at most 64KiB total projected diff per Item. Completion snapshot supplies definitive changes; patchUpdated chunks are not concatenated or promised live. Status remains native Item status.",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/definitions/NativeFileUpdateDisplay"
+          }
+        }
+      }
+    },
+    "NativeAppContextDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "description": "Only bounded redacted native display identity. No resourceUri, linkId, templateId or plugin payload. Does not grant access, fetch a resource, or infer business results. Empty context omitted.",
+      "properties": {
+        "connectorId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "appName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actionName": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    },
     "NativeDisplayItem": {
       "type": "object",
       "additionalProperties": false,
@@ -866,7 +1010,7 @@
         "schemaVersion": {
           "type": "integer",
           "enum": [
-            4
+            5
           ]
         },
         "contextId": {

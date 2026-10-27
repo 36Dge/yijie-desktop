@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, useId } from "vue";
+import { computed, useId } from "vue";
+import { useChatDisclosureChoice } from "../../composables/useChatDisclosureChoice";
 import type { ConversationTimelineItemViewModel } from "../../domain/conversation-timeline";
 import type { YjIconName } from "../../icons/registry";
 import YjIcon from "../yijie/YjIcon.vue";
@@ -35,13 +36,15 @@ const slots = defineSlots<{
   actions(): unknown;
 }>();
 
-const expansionChoice = ref<boolean | null>(null);
+const expansionChoice = useChatDisclosureChoice<boolean | null>(() => props.item.identity, () => null);
 const expanded = computed(() => expansionChoice.value ?? props.defaultExpanded);
 const plainProcess = computed(() => props.processPresentation &&
   ["commentary", "reasoning", "assistant_unclassified"].includes(props.item.presentation));
 const availabilityInDetails = computed(() => props.collapsible && props.processPresentation &&
-  props.item.presentation === "web_search" && props.item.domainStatus === "completed" &&
+  ["web_search", "command", "tool"].includes(props.item.presentation) && props.item.domainStatus === "completed" &&
   props.item.availability === "partial" && !props.item.activityLabel && !props.item.approval);
+const hideNormalProcessStatus = computed(() => props.processPresentation && !props.item.activityLabel && !props.item.approval &&
+  props.item.domainStatus === "completed" && (props.item.execution?.status === "completed" || props.item.presentation === "web_search"));
 const id = useId();
 const titleId = `${id}-title`;
 const statusId = `${id}-status`;
@@ -78,7 +81,7 @@ function toggle(): void {
     ]"
     :aria-label="item.role === 'user' || plainProcess || isAnswer ? label : undefined"
     :aria-labelledby="item.role === 'user' || plainProcess || isAnswer ? undefined : titleId"
-    :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus ? undefined : statusId"
+    :aria-describedby="item.role === 'user' || plainProcess || hideNormalAnswerStatus || hideNormalProcessStatus ? undefined : statusId"
     :aria-busy="busy ? 'true' : 'false'"
   >
     <p v-if="!availabilityInDetails && item.role !== 'user' && item.availability && item.availability !== 'available'" class="chat-timeline-item-shell__availability" role="note">
@@ -97,7 +100,7 @@ function toggle(): void {
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">
+        <span v-if="!hideNormalProcessStatus" :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
             v-if="statusIcon"
             :name="statusIcon"
@@ -114,7 +117,7 @@ function toggle(): void {
           <YjIcon :name="icon" size="sm" :tone="iconTone" />
           <strong :id="titleId">{{ label }}</strong>
         </span>
-        <span :id="statusId" class="chat-timeline-item-shell__status">
+        <span v-if="!hideNormalProcessStatus" :id="statusId" class="chat-timeline-item-shell__status">
           <YjIcon
             v-if="statusIcon"
             :name="statusIcon"

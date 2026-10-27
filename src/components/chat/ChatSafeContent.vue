@@ -7,6 +7,7 @@ import type {
 } from "../../domain/conversation-timeline";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatStreamText from "./ChatStreamText.vue";
+import { useChatStreamPresentation } from "../../composables/useChatStreamPresentation";
 
 type SafeInlineNode = Readonly<{
   key: string;
@@ -73,10 +74,14 @@ const props = withDefaults(defineProps<{
   blocks: readonly ConversationTimelineContentBlock[];
   mode?: "rich" | "plain";
   streaming?: boolean;
+  nested?: boolean;
 }>(), {
   mode: "rich",
   streaming: false,
+  nested: false,
 });
+
+const displayedBlocks = useChatStreamPresentation(() => props.blocks, () => props.streaming, () => !props.nested);
 
 defineSlots<{
   "text-prefix"(): unknown;
@@ -506,7 +511,13 @@ function contentNodes(
   return Object.freeze(nodes);
 }
 
-const nodes = computed(() => contentNodes(props.blocks, props.mode));
+const sourceNodes = computed(() => contentNodes(props.blocks, props.mode));
+const nodes = computed(() => displayedBlocks.value === props.blocks
+  ? sourceNodes.value : contentNodes(displayedBlocks.value, props.mode));
+function codeActionText(node: Extract<SafeContentNode, { kind: "code" }>): string {
+  const source = sourceNodes.value.find(candidate => candidate.key === node.key && candidate.kind === "code");
+  return source?.kind === "code" ? source.text : node.text;
+}
 const firstParagraphKey = computed(() => nodes.value.find(node => node.kind === "paragraph")?.key);
 
 function nestedBlocks(node: { key: string; text: string }): readonly ConversationTimelineContentBlock[] {
@@ -552,7 +563,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
       <hr v-else-if="node.kind === 'rule'" class="chat-safe-content__rule">
 
       <blockquote v-else-if="node.kind === 'quote'" class="chat-safe-content__quote">
-        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich" :streaming="streaming">
+        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich" :streaming="streaming" nested>
           <template v-if="$slots['code-actions']" #code-actions="scope">
             <slot name="code-actions" v-bind="scope" />
           </template>
@@ -566,7 +577,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         class="chat-safe-content__list"
       >
         <li v-for="item in node.items" :key="item.key">
-          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich" :streaming="streaming">
+          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich" :streaming="streaming" nested>
             <template v-if="$slots['code-actions']" #code-actions="scope">
               <slot name="code-actions" v-bind="scope" />
             </template>
@@ -595,7 +606,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             <slot
               name="code-actions"
               :code-identity="node.key"
-              :text="node.text"
+              :text="codeActionText(node)"
               :language="node.language"
             />
           </div>

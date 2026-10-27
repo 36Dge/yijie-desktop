@@ -2747,6 +2747,19 @@ impl ConversationApplication {
         if dispatch != DispatchOutcome::Idle {
             return Ok(CoordinatorOutcome::Dispatched(dispatch));
         }
+        // A stale streaming projection must not monopolize recovery before its
+        // user-requested cleanup. Host confirms native quiescence/deletion;
+        // local historical status is not permission to erase a running turn.
+        let now = unix_seconds()?;
+        if !background_only {
+            if let Some(claimed) = self
+                .database
+                .claim_next_deletion(now, OUTBOX_LEASE_SECONDS)
+                .await?
+            {
+                return self.drive_cleanup(claimed, now).await;
+            }
+        }
         let recovery = self.database.recovery_snapshot().await?;
         if let Some(session_id) = recovery.active_session_ids.first().copied() {
             self.stream_active_sessions_with_projection_sink(recovery.active_session_ids, sink)
@@ -2757,16 +2770,8 @@ impl ConversationApplication {
         if background_only {
             return Ok(CoordinatorOutcome::Idle);
         }
-        let now = unix_seconds()?;
-        let Some(claimed) = self
-            .database
-            .claim_next_deletion(now, OUTBOX_LEASE_SECONDS)
-            .await?
-        else {
-            self.database.purge_expired_deletion_receipts(now).await?;
-            return Ok(CoordinatorOutcome::Idle);
-        };
-        self.drive_cleanup(claimed, now).await
+        self.database.purge_expired_deletion_receipts(now).await?;
+        Ok(CoordinatorOutcome::Idle)
     }
 
     async fn drive_cleanup(
@@ -3679,6 +3684,130 @@ mod tests {
             requests
         });
         (port, task)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn deletion_recovery_coordinator_cleans_stale_stream_before_subscribing() {
+        const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fa1";
+        let (root, database, pending, turn, _) =
+            prepare_v2_turn_outbox("cleanup-coordinator").await;
+        database
+            .call(move |repo| {
+                repo.suspend_started_turn_retry(turn.operation_id, Uuid::now_v7())?;
+                repo.connection
+                    .execute(
+                        "UPDATE chat_turns SET status='streaming' WHERE id=?1",
+                        [pending.turn_id.to_string()],
+                    )
+                    .map_err(|_| ChatError::DatabaseUnavailable)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let token_directory = root.join("host");
+        fs::create_dir(&token_directory).unwrap();
+        fs::set_permissions(&token_directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let token_path = token_directory.join("api-token");
+        fs::write(&token_path, "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE\n").unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let operation = Uuid::now_v7();
+        let body = format!(
+            r#"{{"operation_id":"{operation}","outcome":"complete","surfaces":{{"runtime_thread_tree":"complete","host_mapping":"complete","host_replay":"complete"}}}}"#
+        );
+        let waiting = format!(
+            r#"{{"operation_id":"{operation}","outcome":"incomplete","surfaces":{{"runtime_thread_tree":"not_attempted","host_mapping":"not_attempted","host_replay":"not_attempted"}},"error":{{"code":"cleanup_incomplete","message":"waiting for ordinary interruption","reason_code":"active_turn"}}}}"#
+        );
+        let (port, server) = serve_http(vec![
+            ready_response(NONCE),
+            json_response("409 Conflict", &waiting),
+            ready_response(NONCE),
+            json_response("200 OK", &body),
+        ])
+        .await;
+        let application = ConversationApplication::new(
+            database.clone(),
+            Arc::new(
+                HostBridge::from_connection(HostConnection {
+                    port,
+                    token_path,
+                    instance_nonce: NONCE.into(),
+                })
+                .unwrap(),
+            ),
+            Arc::new(FixedPublicTaskControlPlane::new([])),
+        );
+        application
+            .begin_session_deletion(pending.session_id, operation)
+            .await
+            .unwrap();
+        database
+            .call(move |repo| {
+                let interrupt = repo
+                    .claim_next_conversation_outbox(unix_seconds()?, 30)?
+                    .ok_or(ChatError::NotFound)?;
+                assert_eq!(interrupt.operation_id, operation);
+                repo.complete_interrupt(operation)
+            })
+            .await
+            .unwrap();
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(5), application.run_background_once())
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(
+            matches!(outcome,CoordinatorOutcome::CleanupRetryScheduled { operation_id } if operation_id == operation)
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), application.run_background_once())
+                .await
+                .unwrap()
+                .unwrap(),
+            CoordinatorOutcome::Idle,
+            "retry backoff must not enter the stale session's indefinite event stream"
+        );
+        database
+            .reschedule_deletion(operation, unix_seconds().unwrap())
+            .await
+            .unwrap();
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(5), application.run_background_once())
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(
+            matches!(outcome,CoordinatorOutcome::CleanupComplete(ref receipt) if receipt.operation_id == operation && receipt.completed_at.is_some())
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].contains("/cleanup-operations"));
+        assert!(requests[3].contains("/cleanup-operations"));
+        database
+            .call(|repo| {
+                for table in [
+                    "chat_sessions",
+                    "chat_messages",
+                    "chat_turns",
+                    "chat_native_facts",
+                    "chat_native_views",
+                    "chat_outbox",
+                    "chat_attachments",
+                    "chat_attachment_chunks",
+                ] {
+                    let count: i64 = repo
+                        .connection
+                        .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                        .map_err(|_| ChatError::DatabaseUnavailable)?;
+                    assert_eq!(count, 0, "{table}");
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(application);
+        drop(database);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(target_os = "macos")]
