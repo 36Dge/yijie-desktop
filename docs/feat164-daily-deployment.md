@@ -118,3 +118,12 @@ Host仅增加已核实旧producer的整文件精确前身，保留原v1和trust�
 ## D4 读取兼容修正（第66号）
 
 D3 已完成的 SQL41 不重跑迁移。Owner 授权修复 D4 阻塞：冻结已存在的 format5 展示词汇，只读兼容原历史并实际验证 decoder；旧候选曾把已完成历史显示为待提交，不能作为合格日常 reader。新候选保留 v4 writer/Host 协议和所有旧 JSON，附加详情仅同源只读显示。见 [读取方案与回退边界](feat164-native-archive-v5.md)。D4 继续要求完整备份、原 Home、workflow ready、Kimi 暂停与零模型派发；D5 单独决策。
+
+
+## D5 日常启用
+
+Owner于2026-10-27要求执行并完成D5。新的schema2 `feat164-daily-activated-homes-v2`记录与schema1短时D3/D4明确区分；不删除旧准入条件。日常只绑定精确source/receipt/原Home，不会因日期跨天自动失效；用户新聊天/计划仍遵守产品现有授权，旧K3及旧grant不恢复。本次Agent验收0模型调用与今后Owner正常使用分别记录。
+
+`install-feat164-daily-entry.py`验证新启用记录和环境摘要后，仅创建不存在的`~/Desktop/易界 AI.command`；可用`--paused`创建同源`易界 AI（暂停 Kimi）.command`用于回退。通过入口启动，勿直接从Finder打开原始bundle（缺少canonical装配）。所有旧App/入口保留，未改登录项、默认程序或签名。
+
+workflow保持existing-ready-only：Docker或既有服务不可用时启动拒绝，按原Infra受控恢复流程处理，入口不自行up/恢复/迁移。停用日常入口时先正常退出，再移走新增入口或启用记录；不删除库、备份或WAL。更换候选、Home、policy或回执需重新审阅绑定。完整协议、方向兼容和验收见`feat164-daily-activation.md`。

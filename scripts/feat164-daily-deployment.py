@@ -11,6 +11,7 @@ import stat
 import sys
 
 POLICY = "feat164-daily-existing-homes-v1"
+ACTIVATION_POLICY = "feat164-daily-activated-homes-v2"
 INFRA_SHA256 = "7fd0450319467d5ad97eb56f2bb713ac411ea19c8708ab2529ffcf6d350194ea"
 
 
@@ -69,14 +70,35 @@ def unique_object(pairs):
     return result
 
 
+def validate_activation(approval, *, stage, paused, now):
+    """Owner-approved daily use, distinct from one-off zero-dispatch admission."""
+    fields = {"stage", "reference", "approved_at", "active", "d4_evidence_sha256",
+              "activation_preflight_sha256", "kimi_model", "permission_policy", "workflow_mode",
+              "verification_model_http_limit", "authority_adr", "scope"}
+    require(isinstance(approval, dict) and set(approval) == fields, "activation fields")
+    require(stage == "D5" and approval["stage"] == "D5", "activation stage")
+    require(approval["active"] is True, "activation is not active")
+    require(approval["authority_adr"] == "ADR-0022" and approval["scope"] == "single-owner-local-only", "activation scope decision")
+    require(isinstance(approval["reference"], str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", approval["reference"]), "approval reference")
+    approved = dt.datetime.fromisoformat(approval["approved_at"])
+    require(approved.tzinfo is not None and approved <= now, "activation approval time")
+    require(hexadecimal(approval["d4_evidence_sha256"]) and hexadecimal(approval["activation_preflight_sha256"]), "activation evidence")
+    require(approval["kimi_model"] == "kimi-k3.1-pro" and paused in {"true", "false"}, "explicit approved model/pause")
+    require(approval["permission_policy"] == "existing-native-user-and-plan-authorization", "activation permissions")
+    require(approval["workflow_mode"] == "existing-ready-only", "activation workflow mode")
+    require(type(approval["verification_model_http_limit"]) is int and approval["verification_model_http_limit"] == 0, "activation verification budget")
+
+
 def validate_binding(value, *, desktop, receipt_sha, native_directory, stage, paused, now):
     """Pure validation; native_directory is fixed by the CLI, injectable only in unit tests."""
     require(isinstance(value, dict), "binding object")
     require(set(value) == {"schema_version", "feature", "policy", "identifier", "receipt_sha256",
                           "native_data_directory", "original_desktop_root", "host_home", "runtime_home",
                           "providers", "workflow", "approval"}, "binding fields")
-    require(type(value["schema_version"]) is int and value["schema_version"] == 1 and value["feature"] == "FEAT-164"
-            and value["policy"] == POLICY and value["identifier"] == "com.yijie.ai", "binding identity")
+    version = value["schema_version"]
+    require(type(version) is int and version in {1, 2} and value["feature"] == "FEAT-164"
+            and value["policy"] == (POLICY if version == 1 else ACTIVATION_POLICY)
+            and value["identifier"] == "com.yijie.ai", "binding identity")
     require(hexadecimal(value["receipt_sha256"]) and value["receipt_sha256"] == receipt_sha, "candidate receipt")
     require(absolute(value["native_data_directory"]) == native_directory, "fixed Native identity")
     origin = absolute(value["original_desktop_root"])
@@ -86,16 +108,19 @@ def validate_binding(value, *, desktop, receipt_sha, native_directory, stage, pa
             and absolute(value["runtime_home"]) == base / "codex-home", "original daily Homes")
     require(not origin.is_relative_to(desktop) and not desktop.is_relative_to(origin), "overlapping sources")
     approval = value["approval"]
-    require(isinstance(approval, dict) and set(approval) == {"stage", "reference", "expires_at", "preflight_sha256",
-                                                          "model_http_limit", "no_dispatchable_work"}, "approval fields")
-    require(stage in {"D3", "D4", "D5"} and approval["stage"] == stage, "stage approval")
-    require(isinstance(approval["reference"], str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", approval["reference"]), "approval reference")
-    require(hexadecimal(approval["preflight_sha256"]) and type(approval["model_http_limit"]) is int
-            and approval["model_http_limit"] == 0 and approval["no_dispatchable_work"] is True, "zero-dispatch approval")
-    expires = dt.datetime.fromisoformat(approval["expires_at"])
-    require(expires.tzinfo is not None and now < expires <= now + dt.timedelta(hours=24), "approval expiry")
-    require(stage == "D3" or paused in {"true", "false"}, "explicit Kimi pause")
-    require(stage != "D4" or paused == "true", "first start must pause Kimi")
+    if version == 2:
+        validate_activation(approval, stage=stage, paused=paused, now=now)
+    else:
+        require(isinstance(approval, dict) and set(approval) == {"stage", "reference", "expires_at", "preflight_sha256",
+                                                              "model_http_limit", "no_dispatchable_work"}, "approval fields")
+        require(stage in {"D3", "D4", "D5"} and approval["stage"] == stage, "stage approval")
+        require(isinstance(approval["reference"], str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", approval["reference"]), "approval reference")
+        require(hexadecimal(approval["preflight_sha256"]) and type(approval["model_http_limit"]) is int
+                and approval["model_http_limit"] == 0 and approval["no_dispatchable_work"] is True, "zero-dispatch approval")
+        expires = dt.datetime.fromisoformat(approval["expires_at"])
+        require(expires.tzinfo is not None and now < expires <= now + dt.timedelta(hours=24), "approval expiry")
+        require(stage == "D3" or paused in {"true", "false"}, "explicit Kimi pause")
+        require(stage != "D4" or paused == "true", "first start must pause Kimi")
     providers = value["providers"]
     require(isinstance(providers, dict) and set(providers) == {"minimax_key_file", "kimi_key_file"}, "provider references")
     provider_root = origin.parent / "yijie-agent-host/.local/secrets"
@@ -119,6 +144,8 @@ def load_binding(desktop, stage, environ):
     receipt = read_regular(desktop / ".local/feat164-daily/packaged-launch-receipt.json", 4194304)
     receipt_value = json.loads(receipt)
     require(receipt_value.get("deployment_policy") == POLICY and receipt_value.get("release") is False, "daily build policy")
+    if value.get("schema_version") == 2:
+        require(receipt_value.get("activation_policy") == ACTIVATION_POLICY, "artifact activation policy")
     require(receipt_value["inputs"]["sources"]["scripts/feat164-daily-deployment.py"]["sha256"]
             == digest(read_regular(Path(__file__).resolve(), 131072)), "helper build binding")
     validate_binding(value, desktop=desktop, receipt_sha=digest(receipt),

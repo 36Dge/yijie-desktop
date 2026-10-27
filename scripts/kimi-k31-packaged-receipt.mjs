@@ -55,7 +55,7 @@ if(action==="--inputs-digest"){
   const content=files=>Object.fromEntries(Object.entries(files).map(([name,v])=>[name,{sha256:v.sha256,bytes:v.bytes}]));
   assert.deepEqual(content(actual),content(expected),"Packaged expert resources differ from the checked slot");
  }
- const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,...(daily?{deployment_policy:"feat164-daily-existing-homes-v1"}:{}),inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
+ const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,...(daily?{deployment_policy:"feat164-daily-existing-homes-v1",activation_policy:"feat164-daily-activated-homes-v2"}:{}),inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
  if(kimiCallSurfaces().market){
   const manifest=path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
   assert.equal(process.env.YIJIE_MARKET_WORKER_MANIFEST,manifest);

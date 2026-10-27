@@ -108,3 +108,10 @@ execution; the actual daily maintenance and App activation remain separate steps
 ### FEAT-164 D4 archived display compatibility
 
 The Owner-authorized D4 repair adds a read-only format-5 display decoder and a typed, bounded private history companion. Current Host/SSE, Native event v4 and format-4 writer stay unchanged; old bytes are never rewritten or downgraded. Only a matching whole saved view can supply file-change, command or app display details; these are escaped text with no executable actions. Submitted unreadable records remain history, never queued work. Actual decoder and generated schema checks precede admission. No new permission, command, external target, credential access or Runtime patch is introduced. See [the compatibility and rollback boundary](docs/feat164-native-archive-v5.md).
+
+
+### FEAT-164 D5 durable local activation
+
+Owner-authorized D5 adds a distinct schema2 activation policy bound to the exact local artifact receipt, D4 evidence and original Homes. It permits normal user-authorized K3.1 Pro use without daily expiry; it is not a model test allowance, plan grant, remote credential or security token. Existing Native scope, user intent, plan approval, old-model retirement and uncertain-operation protections remain mandatory. Schema1 D3/D4 expiry/zero-dispatch checks remain intact; schema2 cannot authorize migration or first-start qualification.
+
+The canonical installer creates only a new owner-executable Desktop command entry, never overwriting an App or existing entry. It contains only fixed paths, approved environment values and record digests; no credentials. Every launch still verifies the complete source/artifact receipt, original Homes and authenticated workflow readiness. It does not start or migrate workflow, create data Homes, restore data, grant plan execution or call a model. An exact compatible paused entry is the Kimi rollback; normal exit precedes it. See [D5 interface and scope](docs/feat164-daily-activation.md).
