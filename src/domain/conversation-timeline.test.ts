@@ -80,7 +80,7 @@ describe("selectConversationTimeline", () => {
     expect(source).toContain(
       'import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";',
     );
-    expect(source).toContain("{ protectApprovalProcessContent: feat137ApprovalUiEnabled }");
+    expect(source).toContain("{ protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId }");
   });
 
   it("protects commentary, reasoning, unclassified assistant content, and plans behind the approval policy", () => {
@@ -358,9 +358,9 @@ describe("selectConversationTimeline", () => {
       ConversationTimelineTurnPhase,
       ConversationTimelineTurnPhase | null,
     ][] = [
-      ["queued", null, "pending", "pending"],
-      ["in_progress", null, "active", "active"],
-      ["waiting_approval", null, "waiting", "waiting"],
+      ["queued", null, "pending", null],
+      ["in_progress", null, "active", null],
+      ["waiting_approval", null, "waiting", null],
       ["completed", "completed", "complete", null],
       ["interrupted", "interrupted", "interrupted", null],
       ["failed", "failed", "failed", null],
@@ -574,7 +574,7 @@ describe("selectConversationTimeline", () => {
     expect(item.contentBlocks.every(Object.isFrozen)).toBe(true);
   });
 
-  it("keeps Turn progress and aggregated notices separate from domain Items", () => {
+  it("preserves archived notices without presenting a historical state as live progress", () => {
     const state = hydrate({
       threads: [{ threadId: THREAD_ID, status: "active" }],
       turns: [{
@@ -594,11 +594,8 @@ describe("selectConversationTimeline", () => {
     const turn = selectConversationTimeline(state, THREAD_ID)!.turns[0]!;
 
     expect(turn.items).toEqual([]);
-    expect(turn.progress).toMatchObject({
-      role: "process",
-      domainStatus: "waiting_approval",
-      phase: "waiting",
-    });
+    expect(turn.source).toBe("legacy_archive");
+    expect(turn.progress).toBeNull();
     expect(turn.notices).toEqual([
       expect.objectContaining({
         role: "system",

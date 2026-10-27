@@ -15,6 +15,7 @@ export default tseslint.config(
       "**/.vitepress/**",
       "**/*.d.ts",
       "src/api/generated/native-conversation-validator.gen.js",
+      "scripts/generated/native-saved-views-validator.gen.mjs",
       "src/api/generated/market-connectors-validator.gen.js",
       "src/api/generated/market-selection-validator.gen.js",
       "src/api/generated/market-host-native-validator.gen.js",

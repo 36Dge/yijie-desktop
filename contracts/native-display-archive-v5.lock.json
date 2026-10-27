@@ -1,0 +1,8 @@
+{
+  "contractId": "native-display-archive-v5",
+  "version": "0.1.0",
+  "sourceCommit": "d5792d6aad18352ce8d1c5d510d345004cab3bd6",
+  "sourcePath": "compatibility/native-display-archive-v5.json",
+  "sha256": "bbe1f2129e41b58e3d0cea08b798ded2a7a131a76d8712317f1741f4f1ef7b55",
+  "scope": "read-only saved display; no live protocol or writer activation"
+}

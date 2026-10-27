@@ -1,4 +1,4 @@
-import type {LocalSubmissionView, NativeRecordDiagnostic} from "../api/generated/native-conversation-history.gen";
+import type {LocalSubmissionView, NativeRecordDiagnostic, ArchiveV5NativeConversationView, ArchiveV5NativeItem} from "../api/generated/native-conversation-history.gen";
 import type { NativeConversationView } from "../api/generated/native-conversation-private.gen";
 import { safeConversationDiagnostic } from "./conversation-diagnostics";
 
@@ -245,6 +245,7 @@ export interface ConversationTurn {
 }
 
 export interface ConversationItem {
+  readonly archiveV5?: ArchiveV5NativeItem;
   readonly webSearch?: NativeConversationView["items"][number]["item"]["webSearch"];
   readonly availability?: NativeConversationView["availability"];
   readonly threadId: string;
@@ -387,7 +388,7 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
   return null;
 }
 /** Select whole Item sets by documented source. Never match cold and live IDs or compare content. */
-export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = [], artifactReferences: readonly ConversationItemSnapshot[] = []): ConversationView {
+export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = [], artifactReferences: readonly ConversationItemSnapshot[] = [], archivesV5: readonly ArchiveV5NativeConversationView[] = []): ConversationView {
   const legacy = viewFromLegacySnapshot(snapshot);
   const productReferences = viewFromLegacySnapshot({...snapshot, turns: [], items: artifactReferences.filter(item => item.kind === "artifact")}).items;
   const turns = {...legacy.turns}; const items = {...legacy.items}; const threads = {...legacy.threads};
@@ -407,8 +408,13 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       ...Object.values(productReferences).filter(item => item.threadId === view.sessionId && item.turnId === view.turnId),
     ].map(item => [item.itemId, item])).values()];
     for (const k of old?.itemKeys ?? []) delete items[k];
+    // Same saved whole view only; never merge an archive companion with a
+    // different storage revision, cold reconstruction or live item set.
+    const archive = archivesV5.find(a => a.sessionId === view.sessionId && a.turnId === view.turnId && a.revision === view.revision && a.source === view.source && a.status === view.status && a.terminalObserved === view.terminalObserved && a.runtimeThreadId === view.runtimeThreadId && a.runtimeTurnId === view.runtimeTurnId && a.items.length === view.items.length && a.items.every((entry,index) => entry.item.id === view.items[index]?.item.id && entry.ordinal === view.items[index]?.ordinal));
     const nativeItems: ConversationItem[] = view.items.map(entry => {
       const item = entry.item;
+      const archiveItem = archive?.items.find(e => e.ordinal === entry.ordinal && e.item.id === item.id)?.item;
+      const archiveV5 = archiveItem && (archiveItem.type === "fileChange" || archiveItem.commandActions || archiveItem.commandPreview || archiveItem.appContext) ? archiveItem : undefined;
       const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
       const contentBlocks: TextContentBlock[] = item.type === "reasoning"
         ? (["summary", "content"] as const).flatMap(reasoningSource =>
@@ -416,6 +422,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
         : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
       return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
         availability: item.availability,
+        ...(archiveV5 ? {archiveV5} : {}),
         ...(item.webSearch ? {webSearch: item.webSearch} : {}),
         status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
         agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,
@@ -448,7 +455,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
   }
   for (const submission of submissions) {
     const turn = Object.values(turns).find(t => t.turnId === submission.turnId);
-    if (turn && turn.source === "legacy_archive") turns[turnKey(turn.threadId, turn.turnId)] = {...turn, source: "local_submission", submissionStatus: submission.status, status: "queued", terminalStatus: null};
+    if (turn && turn.source === "legacy_archive" && submission.status !== "submitted") turns[turnKey(turn.threadId, turn.turnId)] = {...turn, source: "local_submission", submissionStatus: submission.status, status: "queued", terminalStatus: null};
   }
   // Local format diagnostics have an exact local record scope, not a guessed
   // native Item/Turn identity. Keep any observed execution facts unchanged.

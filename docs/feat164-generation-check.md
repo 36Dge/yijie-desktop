@@ -15,3 +15,6 @@
 回退只移除新增alias/检查文件，产品及旧检查行为不变；新检查PASS不替代通用默认入口、不替代剩余S4/完整G3。不得通过此入口执行历史攻击/故障fixture，相关完整测试仍单独报告未运行。
 
 S4I：Connectors pin更新至7ea3df41818fd69f4736722d01f0686d584d1a71，仅新增r4 wrapper允许项，codex-rs树755f32c45a4c30e805e3c7fe1db89dcb4dcc6e41和catalog字节不变。全目标media构建发现并修复该来源缺口；原S4h仅ordinary生成资格，不曾验证Worker构建。
+
+
+D4 修复资格树将 Contracts 固定为 d5792d6aad18352ce8d1c5d510d345004cab3bd6，Host 保持 a3d8767、Connectors cc56cda、Runtime 11fd450、Skills 595c927。19 项入口中的 Native generation 现在同时核验新的 archive 精确 Git 对象/摘要和 saved-format validator；所有旧 wire 家族仍保持原锁。

@@ -11172,10 +11172,50 @@ mod tests {
                 .index,
             1
         );
+        // A known saved display format keeps every archive-only detail while
+        // the current writer remains unable to replace it with format 4.
+        let mut archived: serde_json::Value = serde_json::from_str(&next_json).unwrap();
+        archived["items"].as_array_mut().unwrap().push(serde_json::json!({"ordinal":1,"lastMethod":"item/completed","item":{"id":"saved-file","type":"fileChange","status":"completed","availability":"available","fileChange":{"changes":[{"index":0,"kind":"add","pathLabel":"report.md","diffText":"Saved report\n","addedLines":1,"removedLines":0}]}}}));
+        let archived_json = archived.to_string();
+        repo.connection
+            .execute(
+                "UPDATE chat_native_views SET view_json=?1,format_version=5",
+                [&archived_json],
+            )
+            .unwrap();
+        let records = repo
+            .native_view_records(pending.session_id, &[pending.turn_id])
+            .unwrap();
+        assert!(records.record_diagnostics.is_empty());
+        assert_eq!(records.views[0].items[1].item.kind, "unknown");
+        assert_eq!(
+            records.archived_views_v5.unwrap()[0].items[1]
+                .item
+                .file_change
+                .as_ref()
+                .unwrap()
+                .changes[0]
+                .diff_text
+                .as_deref(),
+            Some("Saved report\n")
+        );
+        assert!(repo
+            .commit_native_view(&context, view.clone(), None, unix_seconds().unwrap())
+            .is_err());
+        let retained: (String, i64) = repo
+            .connection
+            .query_row(
+                "SELECT view_json,format_version FROM chat_native_views",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (archived_json.clone(), 5));
+
         // An ordinary future-format record is retained, not interpreted as a
         // missing snapshot or an invitation to reconstruct it from native history.
         repo.connection
-            .execute("UPDATE chat_native_views SET format_version=5", [])
+            .execute("UPDATE chat_native_views SET format_version=6", [])
             .unwrap();
         let records = repo
             .native_recovery_records(pending.session_id, &[pending.turn_id], None, true)
@@ -11186,7 +11226,7 @@ mod tests {
             records.record_diagnostics[0].turn_id,
             pending.turn_id.to_string()
         );
-        assert_eq!(records.record_diagnostics[0].format_version, 5);
+        assert_eq!(records.record_diagnostics[0].format_version, 6);
         assert!(repo
             .native_views(pending.session_id, &[pending.turn_id])
             .is_err());
@@ -11197,7 +11237,7 @@ mod tests {
             .connection
             .query_row("SELECT view_json FROM chat_native_views", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(retained, next_json);
+        assert_eq!(retained, archived_json);
         let fact_count: i64 = repo
             .connection
             .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |r| r.get(0))

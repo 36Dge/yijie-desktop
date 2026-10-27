@@ -68,7 +68,7 @@ mod feat144_reader_tests {
         let session = pending.session_id;
         let turn = pending.turn_id;
         worker.call(move |repo| {
-            repo.connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES(?1,?2,'native_observed',1,?3,3)",rusqlite::params![turn.to_string(),session.to_string(),"{\"futureFormat\":true}"]).map_err(|_|ChatError::DatabaseUnavailable)?;
+            repo.connection.execute("INSERT INTO chat_native_views(turn_id,session_id,source,revision,view_json,format_version) VALUES(?1,?2,'native_observed',1,?3,6)",rusqlite::params![turn.to_string(),session.to_string(),"{\"futureFormat\":true}"]).map_err(|_|ChatError::DatabaseUnavailable)?;
             Ok(())
         }).await.unwrap();
         let app = super::super::application::ConversationApplication::new_offline(worker.clone());
@@ -89,7 +89,7 @@ mod feat144_reader_tests {
                         |r| Ok((r.get(0)?, r.get(1)?)),
                     )
                     .unwrap();
-                assert_eq!(row, ("{\"futureFormat\":true}".into(), 3));
+                assert_eq!(row, ("{\"futureFormat\":true}".into(), 6));
                 assert_eq!(
                     repo.connection
                         .query_row("SELECT COUNT(*) FROM chat_native_facts", [], |r| r

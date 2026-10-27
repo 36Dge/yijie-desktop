@@ -154,6 +154,7 @@ export type ConversationTimelinePlanViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineItemViewModel = Readonly<{
+  archiveV5?: ConversationItem["archiveV5"];
   webSearch?: ConversationItem["webSearch"];
   identity: string;
   threadId: string;
@@ -181,6 +182,7 @@ export type ConversationTimelineItemViewModel = Readonly<{
 }>;
 
 export type ConversationTimelineTurnViewModel = Readonly<{
+  diagnostic?: ConversationTurn["diagnostic"];
   liveObserved?: boolean;
   source?: ConversationTurn["source"];
   statusSource?: ConversationTurn["statusSource"];
@@ -495,7 +497,7 @@ function projectItem(
     : undefined;
   return Object.freeze({
     identity,
-    busy, activityLabel, availability: item.availability,
+    busy, activityLabel, availability: item.availability, archiveV5: item.archiveV5,
     ...(item.webSearch ? {webSearch: item.webSearch} : {}),
     threadId: item.threadId,
     turnId: item.turnId,
@@ -671,7 +673,7 @@ function projectTurn(
 ): ConversationTimelineTurnViewModel {
   return Object.freeze({
     liveObserved: policy?.liveTurnId === turn.turnId,
-    source: turn.source, statusSource: turn.statusSource, availability: turn.availability, submissionStatus: turn.submissionStatus,
+    source: turn.source, statusSource: turn.statusSource, availability: turn.availability, submissionStatus: turn.submissionStatus, diagnostic: turn.diagnostic,
     identity: stableIdentity("timeline-turn", turn.threadId, turn.turnId),
     threadId: turn.threadId,
     turnId: turn.turnId,

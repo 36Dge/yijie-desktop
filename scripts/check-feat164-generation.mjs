@@ -7,7 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const sourcePins = Object.freeze({
-  'yijie-contracts':'c5d138374c102f1a8a11e328a869ec8f91724efd',
+  'yijie-contracts':'d5792d6aad18352ce8d1c5d510d345004cab3bd6',
   'yijie-agent-host':'a3d8767add3855a28c18adbbd51251fae3520ac0',
   'yijie-connectors':'cc56cdaa616c9d9eff8efa1f9e1307d084f3dff9',
   'yijie-codex':'11fd4504c28afd0f65c6f5f62a6b5328dd437f5a',

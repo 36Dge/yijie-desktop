@@ -14,7 +14,7 @@ describe("FEAT-132 readonly native view",()=>{
  });
 
  it("shows an unsupported saved format without inventing a native view or changing execution facts",()=>{
-   const view=composeConversationView(legacy,[native],[],[{sessionId:"local-session",turnId:"local-turn",formatVersion:5,code:"format_unsupported"}]);
+   const view=composeConversationView(legacy,[native],[],[{sessionId:"local-session",turnId:"local-turn",formatVersion:6,code:"format_unsupported"}]);
    expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({source:"native_observed",status:"failed",terminalStatus:"failed",availability:"unavailable",diagnostic:"native_format_unsupported"});
    expect(Object.values(view.items).map(i=>i.itemId)).toEqual(["native-a","native-r"]);
  });
@@ -32,5 +32,27 @@ describe("FEAT-132 readonly native view",()=>{
    expect(validateNativeViewEvent({...event,schemaVersion:5})).toBe(false);
    expect(validateNativeViewEvent({...event,view:{...native,status:"guess-failed"}})).toBe(false);
    expect(validateNativeHistory({views:[native],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
+ });
+});
+
+describe("FEAT164 saved archive compatibility", () => {
+ it("does not reinterpret a submitted future-format record as queued work", () => {
+  const view=composeConversationView(legacy,[],[{turnId:"local-turn",operationId:"accepted-operation",status:"submitted"}],[{sessionId:"local-session",turnId:"local-turn",formatVersion:6,code:"format_unsupported"}]);
+  expect(selectConversationTurn(view,"local-session","local-turn")).toMatchObject({source:"legacy_archive",status:"failed",terminalStatus:"failed",availability:"unavailable",diagnostic:"native_format_unsupported"});
+ });
+ it("attaches full typed saved details only to the same whole projected view", () => {
+  const base={...native,items:[{ordinal:0,lastMethod:"item/completed" as const,item:{id:"file",type:"unknown" as const,status:"completed" as const,availability:"available" as const}}]};
+  const archive={...base,items:[{...base.items[0]!,item:{...base.items[0]!.item,type:"fileChange" as const,fileChange:{changes:[{index:0,kind:"add" as const,pathLabel:"report.md",diffText:"Saved report\n",addedLines:1,removedLines:0}]}}}]};
+  const input=JSON.stringify(archive);
+  expect(validateNativeHistory({views:[base],archivedViewsV5:[archive],submissions:[],remainingTurnIds:[],historyAvailability:"partial"})).toBe(true);
+  const view=composeConversationView(legacy,[base],[],[],[],[archive]);
+  expect(Object.values(view.items)[0]?.archiveV5?.fileChange?.changes[0]?.diffText).toBe("Saved report\n");
+  expect(selectConversationTurn(view,"local-session","local-turn")?.status).toBe("failed");
+  expect(JSON.stringify(archive)).toBe(input);
+  const later=composeConversationView(legacy,[{...base,revision:"3"}],[],[],[],[archive]);
+  expect(Object.values(later.items)[0]?.archiveV5).toBeUndefined();
+  for (const changed of [{...base,source:"native_rebuilt" as const},{...base,status:"completed" as const},{...base,terminalObserved:false}]) {
+   expect(Object.values(composeConversationView(legacy,[changed],[],[],[],[archive]).items)[0]?.archiveV5).toBeUndefined();
+  }
  });
 });

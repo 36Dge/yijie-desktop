@@ -113,3 +113,8 @@ Host仅增加已核实旧producer的整文件精确前身，保留原v1和trust�
 独立提交后更新。新canonical prepare-only制品单独构建，原b789与D2备份保留。
 恢复既有workflow使用Infra现有恢复/启停入口，不能手改state或直接删除异常容器。
 本阶段不执行真实日常D3迁移或D4 App启动；长期D5与local G5/G6决策仍独立。
+
+
+## D4 读取兼容修正（第66号）
+
+D3 已完成的 SQL41 不重跑迁移。Owner 授权修复 D4 阻塞：冻结已存在的 format5 展示词汇，只读兼容原历史并实际验证 decoder；旧候选曾把已完成历史显示为待提交，不能作为合格日常 reader。新候选保留 v4 writer/Host 协议和所有旧 JSON，附加详情仅同源只读显示。见 [读取方案与回退边界](feat164-native-archive-v5.md)。D4 继续要求完整备份、原 Home、workflow ready、Kimi 暂停与零模型派发；D5 单独决策。

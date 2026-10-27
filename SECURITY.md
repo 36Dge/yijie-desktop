@@ -103,3 +103,8 @@ Only retained versioned terminal/refund proofs with matching scope/revision,
 target lifecycle and quota totals qualify. Unknown, unproved, active or reserved
 work remains blocking. This check is read-only and never refunds quota or grants
 execution; the actual daily maintenance and App activation remain separate steps.
+
+
+### FEAT-164 D4 archived display compatibility
+
+The Owner-authorized D4 repair adds a read-only format-5 display decoder and a typed, bounded private history companion. Current Host/SSE, Native event v4 and format-4 writer stay unchanged; old bytes are never rewritten or downgraded. Only a matching whole saved view can supply file-change, command or app display details; these are escaped text with no executable actions. Submitted unreadable records remain history, never queued work. Actual decoder and generated schema checks precede admission. No new permission, command, external target, credential access or Runtime patch is introduced. See [the compatibility and rollback boundary](docs/feat164-native-archive-v5.md).

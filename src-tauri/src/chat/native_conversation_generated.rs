@@ -450,6 +450,12 @@ pub struct NativeConversationHistory {
         skip_serializing_if = "Option::is_none"
     )]
     pub record_diagnostics: Option<Vec<NativeRecordDiagnostic>>,
+    #[serde(
+        rename = "archivedViewsV5",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub archived_views_v5: Option<Vec<ArchiveV5NativeConversationView>>,
 }
 impl std::fmt::Debug for NativeConversationHistory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -512,10 +518,380 @@ pub struct NativeViewRecords {
     pub views: Vec<NativeConversationView>,
     #[serde(rename = "recordDiagnostics")]
     pub record_diagnostics: Vec<NativeRecordDiagnostic>,
+    #[serde(
+        rename = "archivedViewsV5",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub archived_views_v5: Option<Vec<ArchiveV5NativeConversationView>>,
 }
 impl std::fmt::Debug for NativeViewRecords {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeViewRecords([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeConversationView {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(rename = "turnId")]
+    pub turn_id: String,
+    #[serde(rename = "runtimeThreadId")]
+    pub runtime_thread_id: String,
+    #[serde(rename = "runtimeTurnId")]
+    pub runtime_turn_id: String,
+    #[serde(rename = "source")]
+    pub source: String,
+    #[serde(rename = "revision")]
+    pub revision: String,
+    #[serde(rename = "availability")]
+    pub availability: String,
+    #[serde(rename = "status", default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(rename = "terminalObserved")]
+    pub terminal_observed: bool,
+    #[serde(rename = "items")]
+    pub items: Vec<ArchiveV5NativeDisplayItem>,
+    #[serde(rename = "plan", default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Vec<ArchiveV5NativePlanStep>>,
+    #[serde(
+        rename = "explanation",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub explanation: Option<String>,
+    #[serde(
+        rename = "diagnostic",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub diagnostic: Option<String>,
+    #[serde(rename = "cursor", default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<ArchiveV5NativeViewCursor>,
+    #[serde(
+        rename = "terminalErrorCode",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub terminal_error_code: Option<String>,
+    #[serde(rename = "ordinal", default, skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<i64>,
+    #[serde(
+        rename = "statusSource",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status_source: Option<String>,
+}
+impl std::fmt::Debug for ArchiveV5NativeConversationView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeConversationView([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeDisplayItem {
+    #[serde(rename = "item")]
+    pub item: ArchiveV5NativeItem,
+    #[serde(rename = "lastMethod")]
+    pub last_method: String,
+    #[serde(rename = "ordinal")]
+    pub ordinal: i64,
+}
+impl std::fmt::Debug for ArchiveV5NativeDisplayItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeDisplayItem([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeItem {
+    #[serde(rename = "id")]
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(rename = "clientId", default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(rename = "text", default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(rename = "phase", default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(rename = "summary", default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Vec<String>>,
+    #[serde(rename = "content", default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<String>>,
+    #[serde(rename = "status", default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(rename = "exitCode", default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(
+        rename = "durationMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duration_ms: Option<i64>,
+    #[serde(
+        rename = "argumentsSummary",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub arguments_summary: Option<String>,
+    #[serde(
+        rename = "resultSummary",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub result_summary: Option<String>,
+    #[serde(rename = "availability")]
+    pub availability: String,
+    #[serde(
+        rename = "commandLabel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_label: Option<String>,
+    #[serde(rename = "cwdLabel", default, skip_serializing_if = "Option::is_none")]
+    pub cwd_label: Option<String>,
+    #[serde(
+        rename = "outputText",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_text: Option<String>,
+    #[serde(rename = "toolLabel", default, skip_serializing_if = "Option::is_none")]
+    pub tool_label: Option<String>,
+    #[serde(rename = "mcp", default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<ArchiveV5NativeMcpDisplay>,
+    #[serde(rename = "webSearch", default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<ArchiveV5NativeWebSearchDisplay>,
+    #[serde(
+        rename = "commandPreview",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_preview: Option<String>,
+    #[serde(
+        rename = "commandActions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_actions: Option<Vec<ArchiveV5NativeCommandActionDisplay>>,
+    #[serde(
+        rename = "fileChange",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub file_change: Option<ArchiveV5NativeFileChangeDisplay>,
+    #[serde(
+        rename = "appContext",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub app_context: Option<ArchiveV5NativeAppContextDisplay>,
+}
+impl std::fmt::Debug for ArchiveV5NativeItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeItem([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeMcpDisplay {
+    #[serde(rename = "server", default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    #[serde(rename = "tool", default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(rename = "resultKind")]
+    pub result_kind: String,
+    #[serde(rename = "texts")]
+    pub texts: Vec<ArchiveV5NativeMcpText>,
+    #[serde(rename = "diagnostics")]
+    pub diagnostics: Vec<String>,
+}
+impl std::fmt::Debug for ArchiveV5NativeMcpDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeMcpDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeMcpText {
+    #[serde(rename = "index")]
+    pub index: i64,
+    #[serde(rename = "text")]
+    pub text: String,
+}
+impl std::fmt::Debug for ArchiveV5NativeMcpText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeMcpText([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeWebSearchDisplay {
+    #[serde(rename = "action")]
+    pub action: String,
+    #[serde(rename = "queries")]
+    pub queries: Vec<String>,
+    #[serde(rename = "pageLabel", default, skip_serializing_if = "Option::is_none")]
+    pub page_label: Option<String>,
+    #[serde(rename = "pattern", default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(rename = "sources", default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<ArchiveV5NativeWebSearchSourceDisplay>>,
+}
+impl std::fmt::Debug for ArchiveV5NativeWebSearchDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeWebSearchDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeWebSearchSourceDisplay {
+    #[serde(rename = "url")]
+    pub url: String,
+    #[serde(rename = "title", default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+impl std::fmt::Debug for ArchiveV5NativeWebSearchSourceDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeWebSearchSourceDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeCommandActionDisplay {
+    #[serde(rename = "index")]
+    pub index: i64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(rename = "pathLabel", default, skip_serializing_if = "Option::is_none")]
+    pub path_label: Option<String>,
+    #[serde(rename = "name", default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "query", default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(
+        rename = "commandPreview",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub command_preview: Option<String>,
+}
+impl std::fmt::Debug for ArchiveV5NativeCommandActionDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeCommandActionDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeFileChangeDisplay {
+    #[serde(rename = "changes")]
+    pub changes: Vec<ArchiveV5NativeFileUpdateDisplay>,
+}
+impl std::fmt::Debug for ArchiveV5NativeFileChangeDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeFileChangeDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeFileUpdateDisplay {
+    #[serde(rename = "index")]
+    pub index: i64,
+    #[serde(rename = "kind")]
+    pub kind: String,
+    #[serde(rename = "pathLabel", default, skip_serializing_if = "Option::is_none")]
+    pub path_label: Option<String>,
+    #[serde(
+        rename = "movePathLabel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub move_path_label: Option<String>,
+    #[serde(rename = "diffText", default, skip_serializing_if = "Option::is_none")]
+    pub diff_text: Option<String>,
+    #[serde(
+        rename = "addedLines",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub added_lines: Option<i64>,
+    #[serde(
+        rename = "removedLines",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub removed_lines: Option<i64>,
+}
+impl std::fmt::Debug for ArchiveV5NativeFileUpdateDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeFileUpdateDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeAppContextDisplay {
+    #[serde(
+        rename = "connectorId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub connector_id: Option<String>,
+    #[serde(rename = "appName", default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    #[serde(
+        rename = "actionName",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub action_name: Option<String>,
+}
+impl std::fmt::Debug for ArchiveV5NativeAppContextDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeAppContextDisplay([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativePlanStep {
+    #[serde(rename = "step")]
+    pub step: String,
+    #[serde(rename = "status")]
+    pub status: String,
+}
+impl std::fmt::Debug for ArchiveV5NativePlanStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativePlanStep([REDACTED])")
+    }
+}
+
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveV5NativeViewCursor {
+    #[serde(rename = "streamId")]
+    pub stream_id: String,
+    #[serde(rename = "sequence")]
+    pub sequence: String,
+    #[serde(rename = "eventId")]
+    pub event_id: String,
+}
+impl std::fmt::Debug for ArchiveV5NativeViewCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ArchiveV5NativeViewCursor([REDACTED])")
     }
 }
 

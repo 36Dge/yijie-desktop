@@ -265,6 +265,28 @@ fn preflight(db: &Connection) -> Result<i64, ChatError> {
     ] {
         if db.query_row(sql, [], |r| r.get::<_, bool>(0)).map_err(|_| storage())? { return Err(ChatError::ConversationConflict); }
     }
+    // Schema/version ranges alone do not establish reader compatibility.
+    // Decode the actual saved payload with the same reader used by history.
+    let mut query = db
+        .prepare("SELECT session_id,turn_id,view_json,format_version FROM chat_native_views")
+        .map_err(|_| storage())?;
+    let rows = query
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })
+        .map_err(|_| storage())?;
+    for row in rows {
+        let (session, turn, json, format) = row.map_err(|_| storage())?;
+        let view = crate::chat::native_conversation_storage::decode_native_view(&json, format)?;
+        if view.session_id != session || view.turn_id != turn {
+            return Err(ChatError::ConversationConflict);
+        }
+    }
     Ok(version)
 }
 
@@ -350,6 +372,37 @@ fn migrate_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "explicit actual inspection copy only; no original database access"]
+    fn feat164_archive_readonly_preflight() {
+        let root = PathBuf::from(
+            std::env::var("YIJIE_FEAT164_ARCHIVE_COPY_ROOT").expect("inspection copy required"),
+        );
+        assert_eq!(root.file_name().unwrap(), "inspection");
+        assert_eq!(fs::canonicalize(&root).unwrap(), root);
+        let base = root.join("native/demo-fast-v1");
+        let key_bytes: [u8; 32] = fs::read(base.join("secrets/chat-sqlcipher-v1.secret"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let key = DatabaseKey::from_bytes(key_bytes);
+        let path = base.join("chat/conversations.db");
+        let before = fs::read(&path).unwrap();
+        let db = open_read(&path, &key).unwrap();
+        assert_eq!(preflight(&db).unwrap(), 41);
+        let count: i64 = db
+            .query_row(
+                "SELECT count(*) FROM chat_native_views WHERE format_version=5",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(count > 0, "actual v5 records required");
+        drop(db);
+        assert_eq!(fs::read(&path).unwrap(), before);
+        println!("FEAT164_ARCHIVE_READONLY_PASS: actual format5 count={count}; schema41; no history rewrite or model call");
+    }
 
     fn copy_case(source: &Path, destination: &Path) {
         fs::DirBuilder::new()

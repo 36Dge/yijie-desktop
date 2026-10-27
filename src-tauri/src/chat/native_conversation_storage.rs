@@ -9,9 +9,12 @@ use uuid::Uuid;
 // Explicit versioned writer. Old readers retain their format-unsupported guard;
 // existing records are decoded in place and are never migrated on read.
 pub const NATIVE_WRITE_FORMAT: i64 = 4;
-const NATIVE_READ_FORMAT: i64 = 4;
+const NATIVE_READ_FORMAT: i64 = 5;
 
-fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView, ChatError> {
+pub(crate) fn decode_native_view(
+    json: &str,
+    format: i64,
+) -> Result<NativeConversationView, ChatError> {
     match format {
         1 => {
             let old: super::native_conversation_legacy_generated::NativeConversationView =
@@ -38,6 +41,7 @@ fn decode_native_view(json: &str, format: i64) -> Result<NativeConversationView,
             .map_err(|_| ChatError::DatabaseUnavailable)
         }
         4 => serde_json::from_str(json).map_err(|_| ChatError::DatabaseUnavailable),
+        5 => super::native_archive::decode_v5(json).map(|(view, _)| view),
         _ => Err(ChatError::DatabaseUnavailable),
     }
 }
@@ -91,6 +95,7 @@ impl ChatRepository {
         let mut result = NativeViewRecords {
             views: Vec::new(),
             record_diagnostics: Vec::new(),
+            archived_views_v5: Some(Vec::new()),
         };
         for id in turn_ids {
             let row: Option<(String, i64)> = self.connection.query_row(
@@ -107,7 +112,17 @@ impl ChatRepository {
                     });
                     continue;
                 }
-                let view = decode_native_view(&json, version)?;
+                let view = if version == 5 {
+                    let (view, archive) = super::native_archive::decode_v5(&json)?;
+                    result
+                        .archived_views_v5
+                        .as_mut()
+                        .ok_or(ChatError::DatabaseUnavailable)?
+                        .push(archive);
+                    view
+                } else {
+                    decode_native_view(&json, version)?
+                };
                 if view.session_id != session_id.to_string() || view.turn_id != id.to_string() {
                     return Err(ChatError::ConversationConflict);
                 }
@@ -174,6 +189,7 @@ impl ChatRepository {
         let records = self.native_view_records(session_id, turn_ids)?;
         let mut views = records.views;
         let record_diagnostics = records.record_diagnostics;
+        let archived_views_v5 = records.archived_views_v5;
         for view in &mut views {
             let rebuilt = snapshot
                 .filter(|s| s.thread_id == view.runtime_thread_id)
@@ -277,6 +293,7 @@ impl ChatRepository {
         Ok(NativeViewRecords {
             views,
             record_diagnostics,
+            archived_views_v5,
         })
     }
 
@@ -504,7 +521,7 @@ mod source_reader_tests {
             "https://example.org/statistics/2025"
         );
         assert!(decode_native_view(&new_json, 3).is_err());
-        assert!(decode_native_view(&new_json, 5).is_err());
+        assert!(decode_native_view(&new_json, 6).is_err());
         assert!(!old_json.contains("sources"));
     }
 }

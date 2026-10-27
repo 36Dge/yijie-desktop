@@ -1999,6 +1999,7 @@ mod tests {
         assert!(artifacts_v3_transfer_enabled(Some("true")));
     }
 }
+mod native_archive;
 pub mod native_conversation;
 pub mod native_conversation_generated;
 pub mod native_conversation_legacy_generated;

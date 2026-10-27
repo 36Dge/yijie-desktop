@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Typed format5 archive companions for the atomic Native/renderer read response",
+  "definitions": {
+    "NativeConversationHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "historyAvailability",
+        "submissions",
+        "remainingTurnIds"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          },
+          "maxItems": 50
+        },
+        "historyAvailability": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "unavailable"
+          ]
+        },
+        "submissions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/LocalSubmissionView"
+          }
+        },
+        "remainingTurnIds": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
+        },
+        "archivedViewsV5": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeConversationView"
+          }
+        }
+      }
+    },
+    "NativeViewRecords": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "views",
+        "recordDiagnostics"
+      ],
+      "properties": {
+        "views": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeConversationView"
+          }
+        },
+        "recordDiagnostics": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/NativeRecordDiagnostic"
+          }
+        },
+        "archivedViewsV5": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeConversationView"
+          }
+        }
+      }
+    }
+  }
+}

@@ -941,6 +941,7 @@ impl ConversationApplication {
             .local_submissions(session_id, turn_ids.clone())
             .await?;
         let mut views = Vec::new();
+        let mut archived_views_v5 = Vec::new();
         let mut bytes = 0_usize;
         let mut remaining_turn_ids = Vec::new();
         let mut record_diagnostics = Vec::new();
@@ -957,12 +958,14 @@ impl ConversationApplication {
                 break;
             }
             bytes += size;
+            archived_views_v5.extend(candidates.archived_views_v5.unwrap_or_default());
             views.extend(candidates.views);
             record_diagnostics.extend(candidates.record_diagnostics);
         }
         Ok(
             super::native_conversation_generated::NativeConversationHistory {
                 record_diagnostics: Some(record_diagnostics),
+                archived_views_v5: Some(archived_views_v5),
                 submissions,
                 views,
                 remaining_turn_ids,

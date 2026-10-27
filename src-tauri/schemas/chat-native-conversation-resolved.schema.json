@@ -934,6 +934,13 @@
           "items": {
             "$ref": "#/definitions/NativeRecordDiagnostic"
           }
+        },
+        "archivedViewsV5": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeConversationView"
+          }
         }
       }
     },
@@ -1038,8 +1045,664 @@
           "items": {
             "$ref": "#/definitions/NativeRecordDiagnostic"
           }
+        },
+        "archivedViewsV5": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeConversationView"
+          }
         }
       }
+    },
+    "ArchiveV5NativeConversationView": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "runtimeThreadId": {
+          "type": "string"
+        },
+        "runtimeTurnId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "native_observed",
+            "native_rebuilt",
+            "legacy_archive"
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "inProgress",
+                "completed",
+                "interrupted",
+                "failed"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminalObserved": {
+          "type": "boolean"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeDisplayItem"
+          },
+          "maxItems": 512
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ArchiveV5NativePlanStep"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArchiveV5NativeViewCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminalErrorCode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "statusSource": {
+          "type": "string",
+          "enum": [
+            "runtime_notification",
+            "runtime_read"
+          ]
+        }
+      },
+      "required": [
+        "sessionId",
+        "turnId",
+        "runtimeThreadId",
+        "runtimeTurnId",
+        "source",
+        "revision",
+        "availability",
+        "terminalObserved",
+        "items"
+      ]
+    },
+    "ArchiveV5NativeDisplayItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "$ref": "#/definitions/ArchiveV5NativeItem"
+        },
+        "lastMethod": {
+          "type": "string",
+          "enum": [
+            "item/started",
+            "item/completed",
+            "thread/read"
+          ]
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "item",
+        "lastMethod",
+        "ordinal"
+      ]
+    },
+    "ArchiveV5NativeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "availability"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "userMessage",
+            "agentMessage",
+            "reasoning",
+            "commandExecution",
+            "mcpToolCall",
+            "webSearch",
+            "fileChange",
+            "unknown"
+          ]
+        },
+        "clientId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "commentary",
+                "final_answer"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "content": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "inProgress",
+                "completed",
+                "failed",
+                "declined"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exitCode": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "format": "int32"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "argumentsSummary": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Metadata display only; raw native arguments never leave Host."
+        },
+        "resultSummary": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "Metadata display only, omitted when native result is absent or null."
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable"
+          ],
+          "description": "Completeness of this safe display projection, independent of the native execution status."
+        },
+        "commandLabel": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "Security projection label, not the original command. No execution semantics are inferred."
+        },
+        "cwdLabel": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Workspace-relative display label; never the native absolute path."
+        },
+        "outputText": {
+          "type": "string",
+          "maxLength": 1048576,
+          "description": "Bounded, redacted projection of native aggregatedOutput. Omitted when native output is null or unavailable."
+        },
+        "toolLabel": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Safe display label, not a registered tool identifier. Tool registration is outside FEAT-132."
+        },
+        "mcp": {
+          "$ref": "#/definitions/ArchiveV5NativeMcpDisplay"
+        },
+        "webSearch": {
+          "$ref": "#/definitions/ArchiveV5NativeWebSearchDisplay"
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Bounded whole-line redacted native command; inert text, never execution input."
+        },
+        "commandActions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeCommandActionDisplay"
+          }
+        },
+        "fileChange": {
+          "$ref": "#/definitions/ArchiveV5NativeFileChangeDisplay"
+        },
+        "appContext": {
+          "$ref": "#/definitions/ArchiveV5NativeAppContextDisplay"
+        }
+      }
+    },
+    "ArchiveV5NativeMcpDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resultKind",
+        "texts",
+        "diagnostics"
+      ],
+      "description": "Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.",
+      "properties": {
+        "server": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "tool": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "resultKind": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "null",
+            "empty",
+            "text",
+            "unsupported",
+            "omitted"
+          ]
+        },
+        "texts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeMcpText"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "identity_unavailable",
+              "arguments_unavailable",
+              "unsupported_content",
+              "content_redacted",
+              "content_truncated",
+              "content_limit",
+              "result_unavailable",
+              "display_limit"
+            ]
+          }
+        }
+      }
+    },
+    "ArchiveV5NativeMcpText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "text"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "Original native content array index; never renumber after filtering."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 262144,
+          "description": "Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert."
+        }
+      }
+    },
+    "ArchiveV5NativeWebSearchDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "queries"
+      ],
+      "description": "Safe display of the native WebSearchAction only. No execution or lifecycle inference. Queries/pattern are bounded and redacted; pageLabel is a hostname only, never an actionable URL. Optional sources are actual search hits, never inferred citations. Absence means no source metadata observed.",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "search",
+            "openPage",
+            "findInPage",
+            "other"
+          ]
+        },
+        "queries": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "pageLabel": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeWebSearchSourceDisplay"
+          }
+        }
+      }
+    },
+    "ArchiveV5NativeWebSearchSourceDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "description": "Actual provider search hit. Inert text only; not a verified citation or executable link. URL must be safe HTTP(S), no credentials, bounded and redacted; unsafe entries are omitted with partial availability.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "ArchiveV5NativeCommandActionDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "type"
+      ],
+      "description": "Original native action array index, not a distinct execution. Classification is best-effort. Path labels are safe workspace-relative paths only; absence means not displayable. No raw command parsing or filesystem discovery.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "read",
+            "listFiles",
+            "search",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    },
+    "ArchiveV5NativeFileChangeDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes"
+      ],
+      "description": "Existing native fileChange Item, at most 64KiB total projected diff per Item. Completion snapshot supplies definitive changes; patchUpdated chunks are not concatenated or promised live. Status remains native Item status.",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/definitions/ArchiveV5NativeFileUpdateDisplay"
+          }
+        }
+      }
+    },
+    "ArchiveV5NativeFileUpdateDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind"
+      ],
+      "description": "One native reported file change; not a worktree net diff. Safe relative paths and whole-line redacted diff. Counts exist only for completed, fully observed and parseable changes: add/delete content lines, update unified diff hunks. Missing or truncated counts are unavailable, never zero. No actionable raw paths.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "add",
+            "delete",
+            "update",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "movePathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "diffText": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "addedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "removedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        }
+      }
+    },
+    "ArchiveV5NativeAppContextDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "description": "Only bounded redacted native display identity. No resourceUri, linkId, templateId or plugin payload. Does not grant access, fetch a resource, or infer business results. Empty context omitted.",
+      "properties": {
+        "connectorId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "appName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actionName": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    },
+    "ArchiveV5NativePlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "status"
+      ],
+      "properties": {
+        "step": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "inProgress",
+            "completed"
+          ]
+        }
+      }
+    },
+    "ArchiveV5NativeViewCursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$"
+        },
+        "eventId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId",
+        "sequence",
+        "eventId"
+      ]
     },
     "McpApprovalScope": {
       "type": "object",

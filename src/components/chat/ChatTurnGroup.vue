@@ -18,6 +18,7 @@ import ChatCommandItem, {
 import { presentSkillMessage, type SelectedChatSkill } from "../../domain/chat-skills";
 import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
+import ChatArchiveActivityDetails from "./ChatArchiveActivityDetails.vue";
 import ChatExecutionProgress from "./ChatExecutionProgress.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
@@ -220,6 +221,7 @@ function itemStatusLabel(item: ConversationTimelineItemViewModel): string {
 }
 
 function turnStatusLabel(turn: ConversationTimelineTurnViewModel): string {
+  if (turn.diagnostic === "native_format_unsupported") return "历史记录暂不可读";
   if (["queued", "in_progress", "waiting_approval"].includes(turn.domainStatus) && turn.source === "legacy_archive") return "旧版记录，当前执行状态未确认";
   if (turn.source === "native_observed" && turn.domainStatus === "in_progress" && !turn.liveObserved) return "上次记录为进行中，当前进度待确认";
   if (turn.source === "local_submission") {
@@ -283,6 +285,7 @@ function progressLabel(progress: ConversationTimelineProgressViewModel): string 
 }
 
 function turnStateMessage(turn: ConversationTimelineTurnViewModel): string | null {
+  if (turn.diagnostic === "native_format_unsupported") return "这条历史由较新版本保存，请使用兼容版本查看。原记录已保留，不会重新提交。";
   if (turn.source === "local_submission") {
     if (turn.submissionStatus === "failed") return "本次提交未成功，原消息已保留。";
     if (turn.submissionStatus === "cancelled") return "本次提交已取消，原消息已保留。";
@@ -375,7 +378,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
     :class="`chat-turn-group--${turn.phase}`"
     :aria-label="`对话 ${position}`"
   >
-    <header v-if="turn.domainStatus !== 'completed' && !nativeLiveProgress" class="chat-turn-group__header">
+    <header v-if="turn.diagnostic === 'native_format_unsupported' || (turn.domainStatus !== 'completed' && !nativeLiveProgress)" class="chat-turn-group__header">
       <span class="chat-turn-group__status">
         <YjIcon
           :name="turnStatusIcon(turn)"
@@ -434,7 +437,8 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             class="chat-turn-group__progress-source" data-progress-source="model">模型进度</p>
           <p v-else-if="observedProgressKeys.has(item.identity)"
             class="chat-turn-group__progress-source" data-message-source="model">模型消息</p>
-          <ChatWebSearchItem v-if="item.presentation === 'web_search'" :item="item"
+          <ChatArchiveActivityDetails v-if="item.archiveV5?.type === 'fileChange'" :item="item.archiveV5" />
+          <ChatWebSearchItem v-else-if="item.presentation === 'web_search'" :item="item"
             :process-presentation="processKeys.has(item.identity)" @disclosure-change="forwardDisclosure" />
           <ChatCommandItem
             v-else-if="item.presentation === 'command' && item.execution?.kind === 'command'"
@@ -552,11 +556,12 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               <slot name="item-actions" :item="item" />
             </template>
           </ChatTimelineItemShell>
+          <ChatArchiveActivityDetails v-if="item.archiveV5 && item.archiveV5.type !== 'fileChange'" :item="item.archiveV5" />
         </li>
       </template>
     </ol>
 
-    <div v-if="showProgress && turn.progress" class="chat-turn-group__progress" role="status" aria-live="polite" aria-atomic="true">
+    <div v-if="showProgress && turn.progress && turn.diagnostic !== 'native_format_unsupported'" class="chat-turn-group__progress" role="status" aria-live="polite" aria-atomic="true">
       <ChatExecutionProgress v-if="thinking" :text="nativeWaitingDescription(turn)" />
       <span v-else>{{ progressLabel(turn.progress) }}</span>
     </div>

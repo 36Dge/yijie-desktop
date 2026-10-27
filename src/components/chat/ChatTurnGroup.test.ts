@@ -815,3 +815,14 @@ it("keeps an empty process control out of answer-only Turns and supports plans w
   await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
   expect(wrapper.get(".chat-turn-plan").isVisible()).toBe(true);
 });
+
+it("FEAT164 unreadable submitted history is never displayed as waiting to submit", () => {
+ const state=composeConversationView({threads:[{threadId:THREAD_ID,status:"ready"}],turns:[{threadId:THREAD_ID,turnId:TURN_ID,ordinal:0,status:"completed",terminalStatus:"completed"}],items:[]},[],[{turnId:TURN_ID,operationId:"accepted-operation",status:"submitted"}],[{sessionId:THREAD_ID,turnId:TURN_ID,formatVersion:6,code:"format_unsupported"}]);
+ const turn=selectConversationTimeline(state,THREAD_ID)!.turns[0]!;
+ const wrapper=mount(ChatTurnGroup,{props:{turn,position:0}});
+ expect(wrapper.text()).toContain("历史记录暂不可读");
+ expect(wrapper.text()).toContain("原记录已保留，不会重新提交");
+ expect(wrapper.text()).not.toContain("等待提交");
+ expect(wrapper.text()).not.toContain("本轮正在等待处理");
+ wrapper.unmount();
+});

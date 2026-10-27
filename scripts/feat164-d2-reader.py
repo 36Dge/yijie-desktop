@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 
 LIB_SHA = "555cce3be011978081b2e1d20781fe18d253bcf43afaca86d53e7e3b25fccf4d"
 OWNER = "12500000-0000-4000-8000-000000000001"
@@ -133,6 +134,17 @@ def native(reader):
         except ValueError:
             result["checks"][name] = None
             result["query_errors"].append(name)
+    # Exact saved-format schema validation, not a permissive version range.
+    try:
+        records = reader.query("SELECT format_version,view_json FROM chat_native_views")
+        process = subprocess.run(["node", str(Path(__file__).resolve().with_name("feat164-native-readability.mjs"))], input=json.dumps(records), text=True, capture_output=True)
+        require(process.returncode == 0, "saved reader validation unavailable")
+        validation = json.loads(process.stdout)
+        require(validation["records"] == len(records), "saved reader result mismatch")
+        result["checks"]["native_saved_decode_failures"] = validation["unreadable"]
+    except (ValueError, OSError, KeyError):
+        result["checks"]["native_saved_decode_failures"] = None
+        result["query_errors"].append("native_saved_decode_failures")
     # One private SQL authority shared with the actual Rust maintenance preflight.
     try:
         result["checks"]["unsettled_grant_history"] = reader.query(SETTLED_QUERY)[0]["unsettled_grant_history"]

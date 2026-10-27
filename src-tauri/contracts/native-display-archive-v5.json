@@ -1,0 +1,425 @@
+{
+  "schema_version": 1,
+  "contract_id": "native-display-archive-v5",
+  "version": "0.1.0",
+  "purpose": "Read-only input vocabulary for existing Native display format 5. No new live endpoint, SSE version, execution or writer activation.",
+  "source": {
+    "path": "openapi/native-conversation-v5/native-conversation-v5.yaml",
+    "sha256": "fa5eb2d015974132c543091eef3faeb73ceb39050eb57441fcaa953df4ac675a",
+    "producer": "Existing reviewed local FEAT-163 writer; only its closed display vocabulary is frozen for FEAT-164 compatibility",
+    "root": "#/components/schemas/NativeItem"
+  },
+  "schemas": {
+    "NativeAppContextDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "description": "Only bounded redacted native display identity. No resourceUri, linkId, templateId or plugin payload. Does not grant access, fetch a resource, or infer business results. Empty context omitted.",
+      "properties": {
+        "connectorId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "appName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actionName": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    },
+    "NativeCommandActionDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "type"
+      ],
+      "description": "Original native action array index, not a distinct execution. Classification is best-effort. Path labels are safe workspace-relative paths only; absence means not displayable. No raw command parsing or filesystem discovery.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "read",
+            "listFiles",
+            "search",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      }
+    },
+    "NativeFileChangeDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "changes"
+      ],
+      "description": "Existing native fileChange Item, at most 64KiB total projected diff per Item. Completion snapshot supplies definitive changes; patchUpdated chunks are not concatenated or promised live. Status remains native Item status.",
+      "properties": {
+        "changes": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/components/schemas/NativeFileUpdateDisplay"
+          }
+        }
+      }
+    },
+    "NativeFileUpdateDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind"
+      ],
+      "description": "One native reported file change; not a worktree net diff. Safe relative paths and whole-line redacted diff. Counts exist only for completed, fully observed and parseable changes: add/delete content lines, update unified diff hunks. Missing or truncated counts are unavailable, never zero. No actionable raw paths.",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "add",
+            "delete",
+            "update",
+            "unknown"
+          ]
+        },
+        "pathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "movePathLabel": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "diffText": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "addedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "removedLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        }
+      }
+    },
+    "NativeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "availability"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "userMessage",
+            "agentMessage",
+            "reasoning",
+            "commandExecution",
+            "mcpToolCall",
+            "webSearch",
+            "fileChange",
+            "unknown"
+          ]
+        },
+        "clientId": {
+          "type": "string",
+          "maxLength": 512,
+          "nullable": true
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1048576
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "commentary",
+            "final_answer"
+          ],
+          "nullable": true
+        },
+        "summary": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "content": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "inProgress",
+            "completed",
+            "failed",
+            "declined"
+          ],
+          "nullable": true
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32",
+          "nullable": true
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "nullable": true
+        },
+        "argumentsSummary": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Metadata display only; raw native arguments never leave Host."
+        },
+        "resultSummary": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "Metadata display only, omitted when native result is absent or null."
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable"
+          ],
+          "description": "Completeness of this safe display projection, independent of the native execution status."
+        },
+        "commandLabel": {
+          "type": "string",
+          "maxLength": 8192,
+          "description": "Security projection label, not the original command. No execution semantics are inferred."
+        },
+        "cwdLabel": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Workspace-relative display label; never the native absolute path."
+        },
+        "outputText": {
+          "type": "string",
+          "maxLength": 1048576,
+          "description": "Bounded, redacted projection of native aggregatedOutput. Omitted when native output is null or unavailable."
+        },
+        "toolLabel": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Safe display label, not a registered tool identifier. Tool registration is outside FEAT-132."
+        },
+        "mcp": {
+          "$ref": "#/components/schemas/NativeMcpDisplay"
+        },
+        "webSearch": {
+          "$ref": "#/components/schemas/NativeWebSearchDisplay"
+        },
+        "commandPreview": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Bounded whole-line redacted native command; inert text, never execution input."
+        },
+        "commandActions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/components/schemas/NativeCommandActionDisplay"
+          }
+        },
+        "fileChange": {
+          "$ref": "#/components/schemas/NativeFileChangeDisplay"
+        },
+        "appContext": {
+          "$ref": "#/components/schemas/NativeAppContextDisplay"
+        }
+      }
+    },
+    "NativeMcpDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resultKind",
+        "texts",
+        "diagnostics"
+      ],
+      "description": "Display-only native MCP facts. No raw arguments/error/meta/resources/structuredContent and no business field parsing. Limits do not change execution status. Host bounds total UTF-8 text at 256KiB and first 32 original content entries. Confidentiality may replace entire lines.",
+      "properties": {
+        "server": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "tool": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "resultKind": {
+          "type": "string",
+          "enum": [
+            "absent",
+            "null",
+            "empty",
+            "text",
+            "unsupported",
+            "omitted"
+          ]
+        },
+        "texts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/components/schemas/NativeMcpText"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "identity_unavailable",
+              "arguments_unavailable",
+              "unsupported_content",
+              "content_redacted",
+              "content_truncated",
+              "content_limit",
+              "result_unavailable",
+              "display_limit"
+            ]
+          }
+        }
+      }
+    },
+    "NativeMcpText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "text"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "Original native content array index; never renumber after filtering."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 262144,
+          "description": "Complete native text block after existing whole-line confidentiality projection, then UTF-8 truncation. Plain text only; links remain inert."
+        }
+      }
+    },
+    "NativeWebSearchDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "queries"
+      ],
+      "description": "Safe display of the native WebSearchAction only. No execution or lifecycle inference. Queries/pattern are bounded and redacted; pageLabel is a hostname only, never an actionable URL. Optional sources are actual search hits, never inferred citations. Absence means no source metadata observed.",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "search",
+            "openPage",
+            "findInPage",
+            "other"
+          ]
+        },
+        "queries": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "pageLabel": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "pattern": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/components/schemas/NativeWebSearchSourceDisplay"
+          }
+        }
+      }
+    },
+    "NativeWebSearchSourceDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "description": "Actual provider search hit. Inert text only; not a verified citation or executable link. URL must be safe HTTP(S), no credentials, bounded and redacted; unsafe entries are omitted with partial availability.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}
