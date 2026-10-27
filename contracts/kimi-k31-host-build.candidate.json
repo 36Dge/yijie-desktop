@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "2cff758e64574c95166922f7aba15e74abecfa86c1330a509d8d036778eb513b"
   },
   "host": {
-    "base_commit": "a3d8767add3855a28c18adbbd51251fae3520ac0",
+    "base_commit": "7309101726dcecd48b2caa02401cfcdd6126f1fb",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "f5f4249e00e5a430733eeb9304c164e6a273c3ccb71bfd0e09d10455d0afd57c",
@@ -213,8 +213,9 @@
       "internal/codex/expert_web_search_integration_test.go": "3a2fa843480b62c516b598e937868d79f9751cc6c08d71f63ed410d797c9534c",
       "internal/codex/feat137_approval_test.go": "b18dd5aad8d740395ef8ad339787f1eefd63af2e401c79042d1b4ca06203286e",
       "internal/codex/feat164_auxiliary_integration_test.go": "bbddc620d3645fab5e965050fee60ab71c281e6eaafa69dd4ced507be87eee32",
-      "internal/codex/feat164_cutover_integration_test.go": "4e11fc8f4acf711b50145f6c0ff655897bfeb71e8754b7053aa8a31dbaf69a6f",
+      "internal/codex/feat164_cutover_integration_test.go": "82ecc5ff9497afea3ccb8e77e99f1965058f7ef10d4fe50583c565c13b9abd2c",
       "internal/codex/feat164_history_writer_test.go": "154b19041e6218cc3202525cfd720300ba873e3188833255bb4a79c85459d0f7",
+      "internal/codex/feat164_loaded_migration_test.go": "d25f4814e821e8cc8eeaa39b7c4f3eb22329b0f9e27b611ef17b337aa0f4ffcf",
       "internal/codex/feat164_meter.go": "3ce38737b15d0d857305e947b01c2a6e95b53eba3cb68d99765fd0cac8d14e6f",
       "internal/codex/feat164_meter_test.go": "8da44a8713af6b91061747e9eb5800b695b14065c286bf48e9d0594d36f7c0c9",
       "internal/codex/feat164_surfaces_integration_test.go": "7baf10e59f0e3e3da9703cc7e55d1b8e15f1624af3d6e21f2288bd29080f76f7",
