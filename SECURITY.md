@@ -87,3 +87,12 @@ FEAT-164 daily deployment is an explicit compiled/local profile, separate from t
 FEAT-164 D1 daily execution now requires an exact, owner-approved local deployment binding and a previously prepared artifact. Build output location no longer selects data Homes: Native retains its fixed identity; Host/Runtime retain the original reviewed daily Homes. Preparation never opens the binding or creates those Homes. Missing/changed/expired/stage-mismatched bindings fail before credentials or services; no automatic directory repair, data cloning or schema change is added. The binding is an audit record, not a cryptographic authorization or substitute for later backup, quiescence and no-dispatch preflight.
 
 Daily workflow startup is existing-ready-only after the bundle receipt check. The exact reviewed Infra module is verified by SHA before evaluating its real source; only its read-state, container inspection/ownership and authenticated readiness chain is used. Its lifecycle/status recording, migration, credential rotation and editor registration functions are not called. No secrets or inner exceptions are printed. Non-daily entry behavior is unchanged. D1 authorization permits only implementation, synthetic offline checks and a separate prepare-only build; actual daily data and D2—D5 remain unapproved.
+
+The subsequent FEAT-164 report61 D2 authorization permits a complete cold backup,
+a separate inspection copy and existing-workflow read-only readiness checks. The
+D2 scripts do not call product database open, migration, service startup or model
+APIs. The normal daily instance lock and closed-handle checks protect copying;
+original and sealed files are compared afterwards. SQLCipher/SQLite and bbolt
+readers open only inspection copies. Missing observations remain unknown and
+block admission; historical consumed grant counts and managed-file drift are
+reported, never cleared or overwritten. D3—D5 remain separately unapproved.

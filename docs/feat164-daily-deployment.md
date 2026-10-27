@@ -60,3 +60,35 @@ D2以后才可产生真实绑定文件；本轮只有正常合成目录测试。
 维护仍不读取workflow状态或启动服务；正常daily在exact receipt检查后才执行只读ready helper。helper读取固定SHA的真实Infra源码，在内存执行该已审模块，限`read_state/all_containers/validate_owned/observed_ready`链；不调用`record/status/up/init/build/render/credentials/verify_editor`。`observed_ready`会由Infra自身验证K_NA/K_AC配对和epoch，再进行原鉴权GET及editor观察；凭据不返回Desktop/Host/renderer，不导出环境/日志。模块以`-B`运行、不写pycache；不读取数据库、不启动/停止/重建容器、不做migration。只有明确ready=true才退出0；任何错误只返回无敏感详情的固定失败信息。
 
 D1测试中的SQLite历史是普通合成记录，只验证绑定后读取原Home及字节保持，不冒称已验证真实Host Store或日常数据库。workflow测试是进程内正常状态输入，未调用Docker/HTTP，不能标记真实日常服务ready。新的实际daily backup/迁移/启动始终需D2—D5各自授权。
+
+## D2：完整冷备份和只读检查（2026-10-27）
+
+Owner随后明确批准第61号的D1正向组合补证、D2工具及整个D2。当前补证用真实
+`load_binding`读取正常合成binding/receipt，覆盖D3/D4/D5和原Home交接；没有启动App。
+这些parser样例不是canonical制品回执，也不能用于授权实际执行。
+
+新增运维工具不改变产品运行或迁移语义（contract-impact=none）；仍使用b789原候选，
+新增工具提交不冒充已重新构建的App来源：
+
+- `scripts/feat164-d2-backup.py`：固定日常identity与原workspace布局，正常单实例flock、
+  无活动项目进程/句柄、空间检查；创建全App树、原Host/Runtime、必要provider secret
+  的私有冷备份和第二检查副本。目录/文件字节、mode、mtime保持，不跟随符号链接。
+  新目录外层0700；备份不是独立密钥加密归档，secret不进Git。
+- `scripts/feat164-d2-reader.py`：精确校验保留的SQLCipher库摘要，只打开manifest绑定的
+  inspection；query_only、integrity/FK、逐表hash、实际迁移谓词和全模型保守自动工作上界。
+  查询失败记录unknown，不转成零计数；Runtime rollout按副本目录映射，不访问原路径。
+- `scripts/feat164-d2-host-reader.go`：使用Host已锁定bbolt依赖，ReadOnly事务和Check，输出
+  桶计数、摘要及hash化映射；不调用Host OpenStore，不写migration/receipt。
+- `scripts/feat164-d2-workflow-ready.py`：直接复用固定SHA的真实Infra只读链，不伪造D4绑定。
+  失败保存阶段与异常类型，不输出凭据/内部错误；保留state/key字节。Docker不可用即停，
+  不执行up/status/record或服务迁移。
+
+检查副本允许SQLite自然更新SHM，封存层不连接数据库；操作后重新核验原数据和封存层。
+正常退出本就会清理临时Artifact spool，备份只覆盖当时实际存在的内容。临时wrapper
+符号链接原样保留、记录项目构建目标摘要，不运行或伪装binary。实际执行由已审私有runner
+在同一个App锁内串起冷备份、SQL/Host副本读取、workflow观察及最终原文件核验。
+
+本轮实际结果见元仓第62号：日常SQL37/Host10，8条三存储映射完整；6个已消费的历史grant
+导致当前维护谓词拒绝，受管catalog前身不在当前精确允许表，Docker socket拒绝连接。
+D2完成检查不代表D3可执行；不重置grant、不自动接管配置、不启动Docker或workflow。
+所有新工具只服务D2，未实现长期D5入口，也未改变G5/G6共享规则。
