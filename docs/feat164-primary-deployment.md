@@ -23,3 +23,7 @@ The current operation keeps all original WIP in separately labelled local recove
 ## Validation
 
 Use ordinary synthetic directories and parser values to verify schema 1/2 parity, schema3 D4/D5, exact primary root/generation matching, changed digest rejection, D3 rejection, no automatic activation and new-output preservation. No replacement executables, broken permissions, malicious archives or forced process exits. Actual preparation and zero-model normal App start/history/quit are separate qualification steps. Preserve the owner's existing exclusions and accepted layered evidence.
+
+## System Quit lifecycle
+
+The first primary build revealed that macOS Quit AppleEvents reached NSApplication termination outside the custom menu action. An exit code alone did not prove cleanup: the stopped-generation record was absent and Native WAL remained. Desktop now registers only its standard `aevt/quit` event with Foundation and routes it to the existing ExitOwner. Menu, window and system Quit share the same idempotent stop/wait/checkpoint chain; no process kill, external command, Runtime patch, new IPC permission or database migration is added. Main-thread registration is retained until cleanup finishes. Failure retains STOP_PENDING and ownership. Each new build still requires actual normal shutdown/post-state qualification; the first failed candidate remains failed.

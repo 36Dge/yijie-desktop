@@ -348,6 +348,8 @@ pub fn run() {
                 skill_roots,
             ));
             chat::platform_lifecycle::install(app.state::<ChatRuntime>().lifecycle.clone());
+            #[cfg(all(target_os = "macos", not(feature = "feat126-s10-driver")))]
+            chat::exit_owner::install_system_quit(app.handle())?;
             let scheduled_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = scheduled_app
