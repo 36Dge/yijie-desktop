@@ -13,9 +13,12 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const hash=v=>createHash("sha256").update(v).digest("hex");
 const qualification=process.env.YIJIE_FEAT164_QUALIFICATION==="true";
 const daily=process.env.YIJIE_FEAT164_DAILY==="true";
+const primaryGeneration=process.env.YIJIE_FEAT164_PRIMARY_GENERATION;
+assert(!primaryGeneration || daily,"Primary requires the daily profile");
+const primary=primaryGeneration?JSON.parse(execFileSync("python3",["-B",path.join(root,"scripts/feat164_primary.py"),"layout","--generation",primaryGeneration],{encoding:"utf8"})):null;
 assert(!(daily&&qualification),"Daily and qualification receipts cannot be mixed");
-const runtimeRoot=daily?".local/feat164-daily":qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
-const receipt=path.join(root,runtimeRoot,"packaged-launch-receipt.json");
+const runtimeRoot=primary?path.relative(root,primary.output_root):daily?".local/feat164-daily":qualification?".local/feat164-qualification":".local/feat164-kimi-k31";
+const receipt=primary?.receipt??path.join(root,runtimeRoot,"packaged-launch-receipt.json");
 const bundleName=daily?"易界 AI.app":qualification?"易界 AI FEAT-164 验收.app":"易界 AI FEAT-164.app";
 const identifier=daily?"com.yijie.ai":qualification?"com.yijie.ai.feat164-qualification-v1":"com.yijie.ai.feat164-kimi-k31-r1";
 async function fileRecord(file){
@@ -45,7 +48,7 @@ if(action==="--inputs-digest"){
 }else{
  assert(["--record","--check"].includes(action));assert.equal(process.argv.length,action==="--record"?7:5);
  assert(path.isAbsolute(runtimeBinary)&&path.isAbsolute(runtimeManifest));
- const bundle=path.join(root,"src-tauri/target/debug/bundle/macos",bundleName);
+ const bundle=primary?.bundle??path.join(root,"src-tauri/target/debug/bundle/macos",bundleName);
  assert.equal(execFileSync("/usr/bin/plutil",["-extract","CFBundleIdentifier","raw","-o","-",path.join(bundle,"Contents/Info.plist")],{encoding:"utf8"}).trim(),identifier);
  const bundleFiles=await tree(bundle);assert(bundleFiles["Contents/MacOS/yijie-desktop"].mode&0o111);
  if(kimiCallSurfaces().experts)for(const slot of ["skill-packages","skill-packages-experts"]){
@@ -56,8 +59,9 @@ if(action==="--inputs-digest"){
   assert.deepEqual(content(actual),content(expected),"Packaged expert resources differ from the checked slot");
  }
  const current={schema_version:1,feature:"FEAT-164",mode:"local_worktree_candidate",release:false,...(daily?{deployment_policy:"feat164-daily-existing-homes-v1",activation_policy:"feat164-daily-activated-homes-v2"}:{}),inputs:source,artifacts:{bundle:bundleFiles,host:await fileRecord(path.join(root,runtimeRoot,"bin/yijie-agent-host")),runtime:await fileRecord(runtimeBinary),runtimeManifest:await fileRecord(runtimeManifest)}};
+ if(primary){current.primary_policy="feat164-primary-existing-homes-v3";current.primary_source=primary;}
  if(kimiCallSurfaces().market){
-  const manifest=path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
+  const manifest=primary?.worker_manifest??path.resolve(root,"../yijie-connectors/bin/market-worker/current.json");
   assert.equal(process.env.YIJIE_MARKET_WORKER_MANIFEST,manifest);
   const worker=JSON.parse(await readFile(manifest,"utf8"));
   assert.equal(worker.schemaVersion,2);assert.equal(worker.candidateOnly,true);assert.match(worker.sha256,/^[a-f0-9]{64}$/);

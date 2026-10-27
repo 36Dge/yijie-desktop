@@ -17,7 +17,7 @@ const buildEnvironmentKeys = ["YIJIE_ENV", "YIJIE_LOCAL_PROFILE", "YIJIE_EXPERTS
 export async function workerBuildInputs(root = path.resolve(desktopRoot, "../yijie-connectors")) {
   // main.rs and provider_registry.rs include the two catalog JSON files. The
   // worker subtree also contains Cargo locks, local assets and generated types.
-  const inputs = ["worker", "catalog", "scripts/build-market-worker.sh", "scripts/check-worker-source.py", ".cargo", "rust-toolchain", "rust-toolchain.toml", ".gitignore"];
+  const inputs = ["worker", "catalog", "scripts/build-market-worker.sh", "scripts/check-worker-source.py", "scripts/worker_build_output.py", ".cargo", "rust-toolchain", "rust-toolchain.toml", ".gitignore"];
   const listed = execFileSync("git", ["-C", root, "ls-files", "-co", "--exclude-standard", "-z", "--", ...inputs], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
   const sources = {};
   for (const file of [...new Set(listed.split("\0").filter(Boolean))].sort()) {

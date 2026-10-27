@@ -1,5 +1,9 @@
 # Security Policy
 
+### FEAT-164 原主目录部署
+
+Owner要求从原主checkout构建运行。新[primary部署v3](docs/feat164-primary-deployment.md)仅将已审源码和受控新输出generation绑定到原日常Home；legacy1/2的分离来源约束保持。实际主checkout、源码commit/完整输入、制品、显式环境与D4/D5批准均重验；不复制旧授权、不自动刷新摘要、不执行D3、不改变Native身份/权限或计划grant。原源码WIP先独立可恢复保全，Runtime r5不改。没有新的模型/工具授权或隐式workflow恢复。
+
 ### FEAT-158 日常接入（2026-10-13）
 
 Owner已授权canonical本地日常入口启用专家。保持原App身份、SQLCipher密钥与数据根、Host/Runtime Home及日常单实例锁；专家开关不同的日常实例不能同时打开同一库。复用SQL34/35和Host10增量迁移，旧会话、消息、outbox及审批/原生历史不回填专家、不重发；普通Skills仍使用原受管安装根，专家不投影到全局Skills。

@@ -168,6 +168,16 @@ esac
 
 # FEAT-164 D1: preparation has no data authority; use one qualified artifact for D3-D5.
 # Resolve before credentials/builds/services. No default empty Host/Runtime Home.
+primary_output=""
+primary_worker_manifest=""
+primary_bundle=""
+if [[ -n "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" ]]; then
+  [[ "$kimi_k31_daily" == "true" && "$migrate_daily_k3" == "false" && "$migrate_isolated_k3" == "false" ]] || fail "primary requires daily build/open and never migration"
+  primary_layout="$(python3 -B "$desktop_root/scripts/feat164_primary.py" layout --generation "$YIJIE_FEAT164_PRIMARY_GENERATION")" || fail "primary generation is not ready"
+  primary_paths="$(python3 -c 'import json,sys;v=json.loads(sys.argv[1]);print("\t".join(v[k] for k in ("output_root","target","worker_target","worker_manifest","bundle")))' "$primary_layout")"
+  IFS=$'\t' read -r primary_output primary_target primary_worker_target primary_worker_manifest primary_bundle <<< "$primary_paths"
+  [[ "${CARGO_TARGET_DIR:-}" == "$primary_target" && "${YIJIE_WORKER_TARGET_DIR:-}" == "$primary_worker_target" ]] || fail "primary output environment differs"
+fi
 if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
   [[ "$reopen_app" == "true" ]] || fail "daily execution requires its prepared artifact and --reopen"
   daily_stage="${YIJIE_FEAT164_DAILY_STAGE:-}"
@@ -298,7 +308,7 @@ if [[ "$chat_models_enabled" == "true" ]]; then
 fi
 
 if [[ "$kimi_k31_daily" == "true" ]]; then
-  runtime_root="$desktop_root/.local/feat164-daily"
+  runtime_root="${primary_output:-$desktop_root/.local/feat164-daily}"
   # This is an artifact root only; prepare-only does not create data Homes.
   host_home="${daily_bound_host_home:-}"
   codex_home="${daily_bound_codex_home:-}"
@@ -364,9 +374,13 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
     if [[ "$kimi_k31_candidate" == "true" ]]; then
       kimi_k31_worker_inputs="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
     fi
-    bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+    if [[ -n "$primary_output" ]]; then
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$primary_output/worker"
+    else
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+    fi
   fi
-  export YIJIE_MARKET_WORKER_MANIFEST="$workspace_root/yijie-connectors/bin/market-worker/current.json"
+  export YIJIE_MARKET_WORKER_MANIFEST="${primary_worker_manifest:-$workspace_root/yijie-connectors/bin/market-worker/current.json}"
 fi
 market_provider_only="false"
 provider_environment=(YIJIE_MODEL_PROVIDER=minimax "YIJIE_MINIMAX_API_KEY_FILE=$provider_key_file")
@@ -525,6 +539,7 @@ elif [[ "$packaged_app" == "true" ]]; then
     fi
   fi
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI.app/Contents/MacOS/yijie-desktop"
+  if [[ -n "$primary_bundle" ]]; then bundle_binary="$primary_bundle/Contents/MacOS/yijie-desktop"; fi
   if [[ "$kimi_k31_candidate" == "true" && "$kimi_k31_daily" == "false" ]]; then bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-164.app/Contents/MacOS/yijie-desktop"; fi
   if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" ]]; then
     bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/$expert_product_name.app/Contents/MacOS/yijie-desktop"

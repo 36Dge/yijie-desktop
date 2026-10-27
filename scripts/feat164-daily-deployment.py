@@ -12,6 +12,7 @@ import sys
 
 POLICY = "feat164-daily-existing-homes-v1"
 ACTIVATION_POLICY = "feat164-daily-activated-homes-v2"
+PRIMARY_POLICY = "feat164-primary-existing-homes-v3"
 INFRA_SHA256 = "7fd0450319467d5ad97eb56f2bb713ac411ea19c8708ab2529ffcf6d350194ea"
 
 
@@ -92,23 +93,32 @@ def validate_activation(approval, *, stage, paused, now):
 def validate_binding(value, *, desktop, receipt_sha, native_directory, stage, paused, now):
     """Pure validation; native_directory is fixed by the CLI, injectable only in unit tests."""
     require(isinstance(value, dict), "binding object")
+    version = value.get("schema_version")
     require(set(value) == {"schema_version", "feature", "policy", "identifier", "receipt_sha256",
                           "native_data_directory", "original_desktop_root", "host_home", "runtime_home",
-                          "providers", "workflow", "approval"}, "binding fields")
-    version = value["schema_version"]
-    require(type(version) is int and version in {1, 2} and value["feature"] == "FEAT-164"
-            and value["policy"] == (POLICY if version == 1 else ACTIVATION_POLICY)
+                          "providers", "workflow", "approval"} | ({"primary_source"} if version == 3 else set()), "binding fields")
+    require(type(version) is int and version in {1, 2, 3} and value["feature"] == "FEAT-164"
+            and value["policy"] == {1: POLICY, 2: ACTIVATION_POLICY, 3: PRIMARY_POLICY}.get(version)
             and value["identifier"] == "com.yijie.ai", "binding identity")
     require(hexadecimal(value["receipt_sha256"]) and value["receipt_sha256"] == receipt_sha, "candidate receipt")
     require(absolute(value["native_data_directory"]) == native_directory, "fixed Native identity")
     origin = absolute(value["original_desktop_root"])
-    require(origin != desktop, "candidate cannot be the original daily source")
+    if version == 3:
+        require(stage in {"D4", "D5"}, "primary never authorizes D3 migration")
+        require(origin == desktop, "primary must be the original main source")
+        primary = value["primary_source"]
+        require(isinstance(primary, dict) and set(primary) == {"kind", "root", "generation", "descriptor_sha256"}, "primary fields")
+        require(primary["kind"] == "original-main-checkout" and absolute(primary["root"]) == desktop
+                and isinstance(primary["generation"], str) and re.fullmatch(r"[0-9]{8}-[0-9]{2}", primary["generation"])
+                and hexadecimal(primary["descriptor_sha256"]), "primary source identity")
+    else:
+        require(origin != desktop, "candidate cannot be the original daily source")
+        require(not origin.is_relative_to(desktop) and not desktop.is_relative_to(origin), "overlapping sources")
     base = origin / ".local/demo-fast"
     require(absolute(value["host_home"]) == base / "host-home"
             and absolute(value["runtime_home"]) == base / "codex-home", "original daily Homes")
-    require(not origin.is_relative_to(desktop) and not desktop.is_relative_to(origin), "overlapping sources")
     approval = value["approval"]
-    if version == 2:
+    if version == 2 or (version == 3 and stage == "D5"):
         validate_activation(approval, stage=stage, paused=paused, now=now)
     else:
         require(isinstance(approval, dict) and set(approval) == {"stage", "reference", "expires_at", "preflight_sha256",
@@ -141,11 +151,26 @@ def load_binding(desktop, stage, environ):
     raw = read_regular(binding_file, 16384, private=True)
     require(digest(raw) == expected, "binding digest")
     value = json.loads(raw, object_pairs_hook=unique_object)
-    receipt = read_regular(desktop / ".local/feat164-daily/packaged-launch-receipt.json", 4194304)
+    generation = environ.get("YIJIE_FEAT164_PRIMARY_GENERATION")
+    require(bool(generation) == (value.get("schema_version") == 3), "explicit primary selection")
+    receipt_path = desktop / ".local/feat164-daily/packaged-launch-receipt.json"
+    if generation:
+        spec = importlib.util.spec_from_file_location("feat164_primary_layout", Path(__file__).with_name("feat164_primary.py"))
+        primary = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(primary)
+        paths, _, descriptor_sha, _ = primary.checked_generation(desktop, generation)
+        require(value.get("primary_source") == {"kind": "original-main-checkout", "root": str(desktop),
+                "generation": generation, "descriptor_sha256": descriptor_sha}, "primary descriptor binding")
+        receipt_path = Path(paths["receipt"])
+    receipt = read_regular(receipt_path, 4194304)
     receipt_value = json.loads(receipt)
     require(receipt_value.get("deployment_policy") == POLICY and receipt_value.get("release") is False, "daily build policy")
     if value.get("schema_version") == 2:
         require(receipt_value.get("activation_policy") == ACTIVATION_POLICY, "artifact activation policy")
+    if generation:
+        require(receipt_value.get("primary_policy") == PRIMARY_POLICY
+                and receipt_value.get("primary_source", {}).get("descriptor_sha256") == descriptor_sha,
+                "artifact primary policy")
     require(receipt_value["inputs"]["sources"]["scripts/feat164-daily-deployment.py"]["sha256"]
             == digest(read_regular(Path(__file__).resolve(), 131072)), "helper build binding")
     validate_binding(value, desktop=desktop, receipt_sha=digest(receipt),

@@ -228,3 +228,8 @@ Owner已授权将定时任务接到普通客户端。`pnpm tauri:dev`、`pnpm ta
 数据库目录在连接打开前统一设置备份排除；不要对打开的 db、WAL、SHM 文件调用 Foundation
 `getResourceValue` 或绕过 SQLite 另开/关闭同 inode 描述符，后者会释放进程的 POSIX 锁。
 验收保留对照仅在正常退出后运行。修复证据与真实模型复验见元仓 FEAT-158/19。
+# 原主工作目录日常入口（FEAT-164，2026-10-28）
+
+本机primary模式直接使用原`yijie-desktop`实际源码，不转调元仓`daily-source`。新generation只存构建产物；已有工作保留在独立恢复提交/私有归档，未采纳改动不自动进入当前构建。具体准入、回执、权限及回退见[primary部署规范](feat164-primary-deployment.md)。
+
+在本仓执行`pnpm daily:prepare --generation YYYYMMDD-NN`创建新的prepare-only制品；`pnpm daily:verify --generation YYYYMMDD-NN`需要该新制品自己的D4短期批准；`pnpm daily:open --generation YYYYMMDD-NN`及追加`--pause-kimi`需要已验收的D5记录。缺少批准时拒绝，不会自动授权或迁移。日常Home、Native身份、业务/计划授权和workflow ready-only保持；普通开发命令的历史语义不在本次静默替换。

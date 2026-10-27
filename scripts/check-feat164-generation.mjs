@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 export const sourcePins = Object.freeze({
   'yijie-contracts':'d5792d6aad18352ce8d1c5d510d345004cab3bd6',
   'yijie-agent-host':'7309101726dcecd48b2caa02401cfcdd6126f1fb',
-  'yijie-connectors':'cc56cdaa616c9d9eff8efa1f9e1307d084f3dff9',
+  'yijie-connectors':'8e62101ff8ca94c2f9e12f4e415f20df41a7deed',
   'yijie-codex':'11fd4504c28afd0f65c6f5f62a6b5328dd437f5a',
   'yijie-skills':'595c927ae101d3d31c234f60565041eee0864680',
 });
