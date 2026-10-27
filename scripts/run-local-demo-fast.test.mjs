@@ -304,6 +304,7 @@ describe("local demo launcher profiles", () => {
       set -euo pipefail
       fail() { exit 1; }
       experts_requested="$1"; shift
+      workflow_requested=""
       ${runner.slice(start, end)}
       printf '%s:%s:%s:%s' "$packaged_app" "$expert_profile" "$reopen_app" "$stable_api_only"
     `, "expert-arguments", experts, ...args]);
@@ -324,7 +325,7 @@ describe("local demo launcher profiles", () => {
     await expect(exec(runnerPath, args, {
       cwd: repositoryRoot,
       env: { ...process.env, YIJIE_EXPERTS_ENABLED: enabled },
-    })).rejects.toMatchObject({ stderr: expect.stringContaining("--reopen requires an enabled packaged expert profile") });
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("--reopen requires an enabled packaged profile") });
   });
 
   it.each([
@@ -342,6 +343,7 @@ describe("local demo launcher profiles", () => {
       set -euo pipefail
       desktop_root="$1"
       expert_profile="$2"
+      kimi_k31_candidate="false"
       fail() { exit 1; }
       unset YIJIE_DEMO_FAST_HOST_PORT
       ${runner.slice(start, end)}
@@ -433,4 +435,102 @@ it("retires Sorftime startup input while retaining environment scrubbing", async
   expect(entry).not.toContain("sorftime_requested=");
   expect(entry).not.toContain("display dialog");
   expect(entry).not.toContain("export YIJIE_FEAT144");
+});
+
+// D1 uses ordinary retained synthetic directories and pure status inputs only.
+// No App/Host/Runtime, real credentials, Docker, network or daily store is opened.
+describe("FEAT-164 daily deployment binding", () => {
+  it("preserves original synthetic Homes and rejects incomplete stage/source approval", async () => {
+    const script = String.raw`
+import importlib.util, pathlib, tempfile, os, datetime as dt, copy, json, hashlib, sqlite3
+p=pathlib.Path(__import__('sys').argv[1]); spec=importlib.util.spec_from_file_location('d1',p);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+root=pathlib.Path(tempfile.mkdtemp(prefix='feat164-d1-binding-',dir=os.environ.get('FEAT164_D1_TEST_ROOT')))
+origin=root/'original/yijie-desktop';candidate=root/'candidate/yijie-desktop';candidate.mkdir(parents=True)
+for home in ['host-home','codex-home']:
+ d=origin/'.local/demo-fast'/home;d.mkdir(parents=True,mode=0o700)
+ db=sqlite3.connect(d/'normal-records.sqlite');db.execute('CREATE TABLE retained(id TEXT PRIMARY KEY, value TEXT)');db.execute('INSERT INTO retained VALUES(?,?)',(home,'ordinary retained history'));db.commit();db.close()
+now=dt.datetime.now(dt.timezone.utc);v={'schema_version':1,'feature':'FEAT-164','policy':m.POLICY,'identifier':'com.yijie.ai','receipt_sha256':'a'*64,'native_data_directory':str(root/'native/demo-fast-v1'),'original_desktop_root':str(origin),'host_home':str(origin/'.local/demo-fast/host-home'),'runtime_home':str(origin/'.local/demo-fast/codex-home'),'providers':{'minimax_key_file':str(origin.parent/'yijie-agent-host/.local/secrets/minimax-api-key'),'kimi_key_file':str(origin.parent/'yijie-agent-host/.local/secrets/kimi-api-key')},'workflow':{'infra_root':str(origin.parent/'yijie-infra'),'source_sha256':m.INFRA_SHA256,'credential_file':str(origin.parent/'yijie-infra/environments/local/generated/feat-153/private/k-na.json')},'approval':{'stage':'D4','reference':'synthetic-D1','expires_at':(now+dt.timedelta(hours=1)).isoformat(),'preflight_sha256':'b'*64,'model_http_limit':0,'no_dispatchable_work':True}}
+args={'desktop':candidate,'receipt_sha':'a'*64,'native_directory':root/'native/demo-fast-v1','stage':'D4','paused':'true','now':now}
+paths=[pathlib.Path(v[n])/'normal-records.sqlite' for n in ['host_home','runtime_home']];before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+result=m.validate_binding(v,**args)
+for n in ['host_home','runtime_home']:
+ h=pathlib.Path(result[n]);m.existing_directory(h,private=True)
+ db=sqlite3.connect('file:'+str(h/'normal-records.sqlite')+'?mode=ro',uri=True);assert db.execute('SELECT value FROM retained').fetchone()[0]=='ordinary retained history';db.close()
+assert before=={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+assert not (candidate/'.local/feat164-daily/host-home').exists()
+changes=[('identifier','com.yijie.ai.feat164-qualification-v1'),('receipt_sha256','c'*64),('host_home',str(candidate/'.local/feat164-daily/host-home')),('runtime_home',v['host_home']),('native_data_directory',str(root/'another-native'))]
+rejected=0
+for k,val in changes:
+ bad=copy.deepcopy(v);bad[k]=val
+ try:m.validate_binding(bad,**args)
+ except ValueError:rejected+=1
+ else:raise AssertionError(k)
+for k,val in [('stage','D3'),('expires_at',(now-dt.timedelta(seconds=1)).isoformat()),('no_dispatchable_work',False),('model_http_limit',1),('preflight_sha256','')]:
+ bad=copy.deepcopy(v);bad['approval'][k]=val
+ try:m.validate_binding(bad,**args)
+ except ValueError:rejected+=1
+ else:raise AssertionError(k)
+try:m.validate_binding(v,**{**args,'paused':'false'})
+except ValueError:rejected+=1
+else:raise AssertionError('first start pause')
+for stage in ['D3','D5']:
+ variant=copy.deepcopy(v);variant['approval']['stage']=stage
+ m.validate_binding(variant,**{**args,'stage':stage,'paused':'false'})
+print(json.dumps({'status':'PASS','ordinary_cases':14,'refusals':rejected,'retained_root':str(root),'original_records_unchanged':True,'model_http':0,'real_daily_access':False}))
+`;
+    const { stdout } = await exec("python3", ["-B", "-c", script, path.join(repositoryRoot, "scripts/feat164-daily-deployment.py")]);
+    const result = JSON.parse(stdout);
+    expect(result).toMatchObject({ status: "PASS", ordinary_cases: 14, refusals: 11, original_records_unchanged: true, model_http: 0, real_daily_access: false });
+    console.info(`FEAT164_D1_RETAINED ${result.retained_root}`);
+  });
+
+  it("requires actual ready=true and never calls workflow lifecycle or record functions", async () => {
+    const script = String.raw`
+import importlib.util,json,types,sys
+spec=importlib.util.spec_from_file_location('d1',sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+for phase,ready,expected in [('ready',True,True),('ready',False,False),('stopped',False,False)]:
+ calls=[];state={'phase':phase,'run_epoch':'ordinary-epoch'}
+ def read_state():calls.append('read_state');return state
+ def all_containers():calls.append('all_containers');return [{'name':'ordinary-owned-container'}]
+ def validate_owned(items,s):calls.append('validate_owned');assert s is state and len(items)==1
+ def observed_ready(s,items):calls.append('observed_ready');return ready
+ module=types.SimpleNamespace(read_state=read_state,all_containers=all_containers,validate_owned=validate_owned,observed_ready=observed_ready)
+ try:result=m.check_existing_ready(module)
+ except ValueError:assert not expected
+ else:assert expected and result=='ordinary-epoch'
+ assert calls==(['read_state'] if phase!='ready' else ['read_state','all_containers','validate_owned','observed_ready'])
+print(json.dumps({'status':'PASS','normal_status_cases':3,'live_infra_loaded':False,'network_calls':0,'lifecycle_calls':0}))
+`;
+    const { stdout } = await exec("python3", ["-B", "-c", script, path.join(repositoryRoot, "scripts/feat164-daily-deployment.py")]);
+    expect(JSON.parse(stdout)).toMatchObject({ status: "PASS", normal_status_cases: 3, live_infra_loaded: false, network_calls: 0, lifecycle_calls: 0 });
+  });
+
+  it.each([
+    [["--packaged", "--kimi-k31-daily"], {}, "daily execution requires its prepared artifact"],
+    [["--packaged", "--kimi-k31-daily", "--reopen"], {}, "daily launch requires explicit D4 or D5 approval"],
+    [["--packaged", "--kimi-k31-daily", "--migrate-daily-k3", "--reopen"], {}, "daily maintenance requires explicit D3 approval"],
+    [["--packaged", "--kimi-k31-daily", "--reopen"], { YIJIE_FEAT164_DAILY_STAGE: "D4" }, "daily deployment binding is not ready"],
+  ])("rejects unapproved daily execution before any credential or Home access (%s)", async (args, extra, message) => {
+    await expect(exec("bash", [runnerPath, ...args], {
+      cwd: repositoryRoot, env: { PATH: process.env.PATH, HOME: process.env.HOME, ...extra },
+    })).rejects.toMatchObject({ stderr: expect.stringContaining(message), stdout: "" });
+  });
+
+  it("separates preparation, original data binding and existing-only workflow readiness", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+    const start = runner.indexOf('# This is an artifact root only;');
+    const end = runner.indexOf('\nfi', start);
+    expect(runner.slice(start, end)).toContain('host_home="${daily_bound_host_home:-}"');
+    expect(runner.slice(start, end)).toContain('codex_home="${daily_bound_codex_home:-}"');
+    const prepare = runner.slice(runner.indexOf('  if [[ "$kimi_k31_daily" == "true" ]]; then\n    mkdir'), runner.indexOf('\nif lsof', runner.indexOf('  if [[ "$kimi_k31_daily" == "true" ]]; then\n    mkdir')));
+    const dailyBranch = prepare.slice(0, prepare.indexOf('\n  else'));
+    expect(dailyBranch).not.toContain('"$host_home"');
+    expect(dailyBranch).not.toContain('"$codex_home"');
+    const up = runner.slice(runner.indexOf('# Reuse Infra'), runner.indexOf('if [[ "$stable_api_only" == "true" ]]; then', runner.indexOf('# Reuse Infra')));
+    expect(up).toContain('"$kimi_k31_daily" != "true"');
+    expect(runner.indexOf('feat164-daily-deployment.py" ready')).toBeGreaterThan(runner.indexOf('kimi-k31-packaged-receipt.mjs --check'));
+    expect(runner).toContain('"$migrate_daily_k3" != "true" && "$workflow_requested" == "true"');
+    const receipt = await readFile(path.join(repositoryRoot, "scripts/kimi-k31-packaged-receipt.mjs"), "utf8");
+    expect(receipt).toContain('deployment_policy:"feat164-daily-existing-homes-v1"');
+  });
 });

@@ -165,6 +165,22 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
+
+# FEAT-164 D1: preparation has no data authority; use one qualified artifact for D3-D5.
+# Resolve before credentials/builds/services. No default empty Host/Runtime Home.
+if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
+  [[ "$reopen_app" == "true" ]] || fail "daily execution requires its prepared artifact and --reopen"
+  daily_stage="${YIJIE_FEAT164_DAILY_STAGE:-}"
+  if [[ "$migrate_daily_k3" == "true" ]]; then
+    [[ "$daily_stage" == "D3" ]] || fail "daily maintenance requires explicit D3 approval"
+  else
+    [[ "$daily_stage" == "D4" || "$daily_stage" == "D5" ]] || fail "daily launch requires explicit D4 or D5 approval"
+  fi
+  daily_binding_data="$(python3 -B "$desktop_root/scripts/feat164-daily-deployment.py" resolve --stage "$daily_stage" --desktop-root "$desktop_root")" || fail "daily deployment binding is not ready"
+  IFS=$'\t' read -r daily_bound_host_home daily_bound_codex_home provider_key_file daily_kimi_key_file workflow_credential_file daily_binding_sha <<< "$daily_binding_data"
+  export YIJIE_KIMI_API_KEY_FILE="$daily_kimi_key_file"
+fi
+
 # The normal local entry now uses scheduled storage in the original daily data
 # roots. The existing isolated candidate remains an explicit test selection.
 # Neither selection is a plan grant or an execution permission.
@@ -283,8 +299,9 @@ fi
 
 if [[ "$kimi_k31_daily" == "true" ]]; then
   runtime_root="$desktop_root/.local/feat164-daily"
-  host_home="$runtime_root/host-home"
-  codex_home="$runtime_root/codex-home"
+  # This is an artifact root only; prepare-only does not create data Homes.
+  host_home="${daily_bound_host_home:-}"
+  codex_home="${daily_bound_codex_home:-}"
   host_binary="$runtime_root/bin/yijie-agent-host"
 fi
 if [[ "$feat164_qualification" == "true" ]]; then
@@ -445,8 +462,13 @@ else
   YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts" \
   YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root" \
     pnpm skills:sync:local
-  mkdir -p "$(dirname "$host_binary")" "$host_home" "$codex_home"
-  chmod 0700 "$runtime_root" "$host_home" "$codex_home"
+  if [[ "$kimi_k31_daily" == "true" ]]; then
+    mkdir -p "$(dirname "$host_binary")"
+    chmod 0700 "$runtime_root"
+  else
+    mkdir -p "$(dirname "$host_binary")" "$host_home" "$codex_home"
+    chmod 0700 "$runtime_root" "$host_home" "$codex_home"
+  fi
 fi
 
 if lsof -nP -iTCP:"$host_port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -479,7 +501,7 @@ fi
 
 # Reuse Infra's existing lifecycle and authenticated readiness checks. Never
 # initialize a new dataset, rebuild services, or bypass recovery gates here.
-if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_daily_k3" != "true" ]]; then
+if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_daily_k3" != "true" && "$kimi_k31_daily" != "true" ]]; then
   make -C "$workspace_root/yijie-infra" workflow-up
 fi
 
@@ -541,6 +563,15 @@ if [[ "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ]]; 
   fi
 fi
 
+
+# Daily readiness is checked only after the exact bundle receipt, never repaired.
+if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
+  if [[ "$migrate_daily_k3" != "true" && "$workflow_requested" == "true" ]]; then
+    python3 -B "$desktop_root/scripts/feat164-daily-deployment.py" ready --stage "$daily_stage" --desktop-root "$desktop_root"
+  fi
+  printf 'FEAT-164 daily deployment binding verified: %s; stage=%s\n' "$daily_binding_sha" "$daily_stage"
+fi
+
 if [[ "$migrate_daily_k3" == "true" ]]; then
   exec env -i PATH="$PATH" HOME="$HOME" \
     YIJIE_ENV=local YIJIE_LOCAL_PROFILE=demo_fast \
@@ -563,6 +594,9 @@ if [[ "$prepare_only" == "true" ]]; then
 fi
 
 exec env \
+  -u YIJIE_FEAT164_DAILY_BINDING_FILE \
+  -u YIJIE_FEAT164_DAILY_BINDING_SHA256 \
+  -u YIJIE_FEAT164_DAILY_STAGE \
   -u YIJIE_WORKFLOW_ENABLED \
   -u YIJIE_WORKFLOW_CREDENTIAL_FILE \
   -u YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE \
