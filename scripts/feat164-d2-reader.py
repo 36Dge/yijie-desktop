@@ -14,6 +14,7 @@ import sqlite3
 LIB_SHA = "555cce3be011978081b2e1d20781fe18d253bcf43afaca86d53e7e3b25fccf4d"
 OWNER = "12500000-0000-4000-8000-000000000001"
 TENANT = "12500000-0000-4000-8000-100000000001"
+SETTLED_QUERY = (Path(__file__).resolve().parents[1] / "src-tauri/src/chat/settled_schedule_history.sql").read_text()
 
 
 def require(ok, code):
@@ -74,7 +75,7 @@ class CipherReader:
 
     def query(self, sql):
         # All callers use fixed queries or quoted identifiers enumerated from sqlite_schema.
-        require(sql.lstrip().upper().startswith(("SELECT", "PRAGMA")), "readonly query required")
+        require(sql.lstrip().upper().startswith(("SELECT", "PRAGMA")) or sql == SETTLED_QUERY, "readonly query required")
         s = C.c_void_p()
         require(self.lib.sqlite3_prepare_v2(self.db, sql.encode(), -1, C.byref(s), None) == 0, "readonly prepare failed")
         result = []
@@ -132,11 +133,17 @@ def native(reader):
         except ValueError:
             result["checks"][name] = None
             result["query_errors"].append(name)
+    # One private SQL authority shared with the actual Rust maintenance preflight.
+    try:
+        result["checks"]["unsettled_grant_history"] = reader.query(SETTLED_QUERY)[0]["unsettled_grant_history"]
+    except (ValueError, OSError):
+        result["checks"]["unsettled_grant_history"] = None
+        result["query_errors"].append("unsettled_grant_history")
     try:
         result["session_mapping"] = [{k: identity(v) for k, v in row.items()} for row in reader.query("SELECT id,agent_session_id,runtime_thread_id FROM chat_sessions")]
     except ValueError:
         result["query_errors"].append("session_mapping")
-    result["migration_preflight_clear"] = result["schema_qualified"] and result["integrity_ok"] and result["foreign_key_failures"] == 0 and not result["query_errors"] and all(v == 0 for k, v in result["checks"].items() if not k.startswith("all_model_"))
+    result["migration_preflight_clear"] = result["schema_qualified"] and result["integrity_ok"] and result["foreign_key_failures"] == 0 and not result["query_errors"] and all(v == 0 for k, v in result["checks"].items() if not k.startswith("all_model_") and k != "occupied_grants")
     result["zero_dispatch_upper_bound_clear"] = all(result["checks"].get(k) == 0 for k in ["all_model_enabled_future", "all_model_pending_recovery"])
     return result
 

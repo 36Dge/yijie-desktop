@@ -96,3 +96,10 @@ original and sealed files are compared afterwards. SQLCipher/SQLite and bbolt
 readers open only inspection copies. Missing observations remain unknown and
 block admission; historical consumed grant counts and managed-file drift are
 reported, never cleared or overwritten. D3—D5 remain separately unapproved.
+
+The report63 pre-D3 fix replaces the blanket positive-quota rejection with exact
+settled-history accounting, using one SQL authority in Rust and the D2 reader.
+Only retained versioned terminal/refund proofs with matching scope/revision,
+target lifecycle and quota totals qualify. Unknown, unproved, active or reserved
+work remains blocking. This check is read-only and never refunds quota or grants
+execution; the actual daily maintenance and App activation remain separate steps.

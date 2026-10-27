@@ -92,3 +92,24 @@ Owner随后明确批准第61号的D1正向组合补证、D2工具及整个D2。�
 导致当前维护谓词拒绝，受管catalog前身不在当前精确允许表，Docker socket拒绝连接。
 D2完成检查不代表D3可执行；不重置grant、不自动接管配置、不启动Docker或workflow。
 所有新工具只服务D2，未实现长期D5入口，也未改变G5/G6共享规则。
+
+## D3前阻塞修正（第63号）
+
+Owner随后要求执行并解决D3前全部阻塞。增量contract-impact=semantic，权威是本仓私有
+维护准入和Host精确受管文件前身；公共wire、SQL schema、历史数据和Runtime不变。
+
+正常Native终态释放执行预约但保留已消费额度；正常删除会话后，历史run/recovery仍保留，
+binding标记target_deleted。维护入口因此改用`settled_schedule_history.sql`，逐grant核对
+所有run和既有release证明，非退款终态数必须等于occupied_runs；可信never-sent退款另算。
+有缺失/未知proof、scope或revision不符、非终态、reservation、数量不符均拒绝。目标仍存在时
+还核对Native绑定与终态view；目标已正常删除时只接受原deleted标记和保留的完整release事实。
+不清零、不退款、不恢复旧授权，也不重建已删除会话。其它原预检条件保持。
+
+Rust入口与D2 reader共用同一个SQL源；occupied_grants计数继续显示，准入由独立的
+unsettled_grant_history决定。纯值状态矩阵、真实Rust对inspection副本的只读预检以及自然
+SQL29/37的维护/拒绝回归分别留证，不用Python自行宣称Rust通过。
+
+Host仅增加已核实旧producer的整文件精确前身，保留原v1和trust；本仓检查来源pin在Host
+独立提交后更新。新canonical prepare-only制品单独构建，原b789与D2备份保留。
+恢复既有workflow使用Infra现有恢复/启停入口，不能手改state或直接删除异常容器。
+本阶段不执行真实日常D3迁移或D4 App启动；长期D5与local G5/G6决策仍独立。

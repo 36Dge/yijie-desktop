@@ -259,7 +259,7 @@ fn preflight(db: &Connection) -> Result<i64, ChatError> {
         "SELECT EXISTS(SELECT 1 FROM chat_outbox WHERE state IN ('pending','inflight'))",
         "SELECT EXISTS(SELECT 1 FROM chat_model_selections WHERE state!='ready')",
         "SELECT EXISTS(SELECT 1 FROM chat_scheduled_reservation)",
-        "SELECT EXISTS(SELECT 1 FROM chat_scheduled_grants WHERE occupied_runs>0)",
+        include_str!("settled_schedule_history.sql"),
         "SELECT EXISTS(SELECT 1 FROM chat_turns WHERE submission_status='uncertain' OR status IN ('streaming','stopping'))",
         "SELECT EXISTS(SELECT 1 FROM chat_native_bindings b LEFT JOIN chat_native_views v ON v.turn_id=b.turn_id AND v.session_id=b.session_id WHERE v.turn_id IS NULL OR v.format_version NOT BETWEEN 1 AND 5 OR NOT json_valid(v.view_json) OR COALESCE(json_extract(v.view_json,'$.status'),'unknown') NOT IN ('completed','failed','interrupted'))",
     ] {
@@ -550,5 +550,48 @@ mod tests {
             admit(Path::new("/"), IDENTIFIER),
             Err(ChatError::InvalidConfiguration)
         ));
+    }
+
+    #[test]
+    #[ignore = "explicit retained inspection copy only; no original data or migration"]
+    fn feat164_settled_history_preflight_readonly_copy() {
+        let root = PathBuf::from(std::env::var("YIJIE_FEAT164_PREFLIGHT_COPY_ROOT").unwrap());
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        assert!(root.is_absolute() && root.starts_with(workspace));
+        assert_eq!(root.file_name().unwrap(), "inspection");
+        assert_eq!(fs::canonicalize(&root).unwrap(), root);
+        let native = root.join("native");
+        let key: [u8; 32] = bytes(&native.join("secrets/chat-sqlcipher-v1.secret"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let db = open_read(
+            &native.join("chat/conversations.db"),
+            &DatabaseKey::from_bytes(key),
+        )
+        .unwrap();
+        let occupied: i64 = db
+            .query_row(
+                "SELECT sum(occupied_runs) FROM chat_scheduled_grants",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(occupied > 0);
+        assert_eq!(preflight(&db).unwrap(), 37);
+        assert_eq!(
+            db.query_row(
+                "SELECT sum(occupied_runs) FROM chat_scheduled_grants",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            occupied
+        );
+        drop(db);
+        println!("FEAT164_SETTLED_PREFLIGHT_PASS: real Rust preflight, readonly inspection; consumed quota retained; no migration or model HTTP");
     }
 }
