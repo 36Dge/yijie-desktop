@@ -4,13 +4,11 @@ import { NButton, NSwitch, NTag, NTooltip } from "naive-ui";
 import {
   skillCanInstall,
   skillCatalogBlockedReasonLabel,
-  skillCapabilitySummary,
   skillFailureMessage,
-  skillRiskLabel,
-  skillSourceLabel,
   type ManagedSkillProjection,
 } from "../../domain/skill-marketplace";
-import { isYjIconName, type YjIconName } from "../../icons/registry";
+import { skillCardIcon } from "../../icons/skill-icons";
+import { skillInstallButtonTheme } from "../../design/theme/skill-card-theme";
 import type { SkillOperationKind } from "../../stores/skill.store";
 import YjIcon from "../yijie/YjIcon.vue";
 
@@ -34,17 +32,12 @@ const installTooltipFocused = ref(false);
 const installTooltipVisible = computed(
   () => installTooltipHovered.value || installTooltipFocused.value,
 );
-const iconName = computed<YjIconName>(() =>
-  isYjIconName(props.skill.iconKey) ? props.skill.iconKey : "plugin",
-);
+const iconName = computed(() => skillCardIcon(props.skill));
 const installed = computed(() => props.skill.installationStatus === "installed");
 const installable = computed(() => props.canManage && skillCanInstall(props.skill));
 const blockedReason = computed(() =>
   skillCatalogBlockedReasonLabel(props.skill.catalogBlockedReason),
 );
-const capabilitySummary = computed(() => skillCapabilitySummary(props.skill));
-const sourceLabel = computed(() => skillSourceLabel(props.skill.sourceType));
-const riskLabel = computed(() => skillRiskLabel(props.skill.riskLevel));
 const failureMessage = computed(() =>
   props.operationError ?? skillFailureMessage(props.skill.failureCode),
 );
@@ -52,18 +45,16 @@ const installActionLabel = computed(() =>
   failureMessage.value === null ? "安装" : "重试安装",
 );
 const pending = computed(() => props.operation !== null && props.operation !== undefined);
+const actionable = computed(() =>
+  props.canManage && !pending.value && (installed.value || installable.value),
+);
 const enabledLabel = computed(() =>
   props.skill.enabled ? `停用 ${props.skill.displayName}` : `启用 ${props.skill.displayName}`,
 );
-const riskTagType = computed<"default" | "warning" | "error">(() => {
-  if (props.skill.riskLevel === "medium") return "warning";
-  if (props.skill.riskLevel === "high" || props.skill.riskLevel === "critical") return "error";
-  return "default";
-});
 const status = computed<{
   label: string;
   type: "default" | "success" | "warning" | "error";
-}>(() => {
+} | null>(() => {
   switch (props.operation) {
     case "install":
       return { label: "正在安装", type: "default" };
@@ -96,7 +87,7 @@ const status = computed<{
   }
   if (!installed.value) {
     return props.skill.capabilityReadiness === "degraded"
-      ? { label: "可安装 · 需工具", type: "warning" }
+      ? null
       : { label: "未安装", type: "default" };
   }
   if (!props.skill.enabled) return { label: "已停用", type: "default" };
@@ -112,7 +103,7 @@ function requestUninstall(event: MouseEvent): void {
 <template>
   <article
     class="skill-card"
-    :class="{ 'skill-card--busy': pending }"
+    :class="{ 'skill-card--busy': pending, 'skill-card--actionable': actionable }"
     :aria-labelledby="titleId"
     :aria-describedby="descriptionId"
     :aria-busy="pending"
@@ -124,8 +115,12 @@ function requestUninstall(event: MouseEvent): void {
 
       <div class="skill-card__content">
         <div class="skill-card__title-row">
-          <h3 :id="titleId" class="skill-card__title">{{ skill.displayName }}</h3>
-          <n-tag size="small" :type="status.type" :bordered="false">{{ status.label }}</n-tag>
+          <h3 :id="titleId" class="skill-card__title" :title="skill.displayName">
+            {{ skill.displayName }}
+          </h3>
+          <n-tag v-if="status" size="small" :type="status.type" :bordered="false">
+            {{ status.label }}
+          </n-tag>
         </div>
         <p :id="descriptionId" class="skill-card__description">{{ skill.description }}</p>
       </div>
@@ -159,7 +154,8 @@ function requestUninstall(event: MouseEvent): void {
           <template #trigger>
             <n-button
               class="skill-card__install"
-              quaternary
+              :bordered="false"
+              :theme-overrides="skillInstallButtonTheme"
               circle
               :loading="operation === 'install'"
               :disabled="pending"
@@ -176,23 +172,6 @@ function requestUninstall(event: MouseEvent): void {
           {{ installActionLabel }}
         </n-tooltip>
       </div>
-    </div>
-
-    <div class="skill-card__metadata">
-      <span>v{{ skill.version }}</span>
-      <span>来源：{{ sourceLabel }}</span>
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <n-tag size="small" :type="riskTagType" :bordered="false" tabindex="0">
-            {{ riskLabel }}
-          </n-tag>
-        </template>
-        {{ skill.riskReasons.join('；') }}
-      </n-tooltip>
-      <span>适用：易界 AI 对话</span>
-      <span>{{ capabilitySummary }}</span>
-      <span :title="skill.licenseExpression">许可：{{ skill.licenseExpression }}</span>
-      <span v-if="skill.maintenanceStatus === 'unmaintained'">不再随客户端维护</span>
     </div>
 
     <p v-if="blockedReason" class="skill-card__blocked-reason" role="status">
@@ -216,15 +195,19 @@ function requestUninstall(event: MouseEvent): void {
   background: var(--yj-color-bg-card);
   box-shadow: none;
   gap: var(--yj-space-4);
-  transition:
-    border-color var(--yj-motion-fast) var(--yj-ease-standard),
-    box-shadow var(--yj-motion-fast) var(--yj-ease-standard);
+  transition: border-color var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
-.skill-card:hover,
-.skill-card:focus-within {
-  border-color: var(--yj-color-border-default);
-  box-shadow: none;
+.skill-card--actionable:is(:hover, :focus-within) {
+  --yj-skill-install-bg: var(--yj-color-brand-primary);
+  --yj-skill-install-ink: var(--yj-color-on-brand);
+  border-color: var(--yj-color-brand-primary);
+}
+
+.skill-card__install {
+  transition:
+    color var(--yj-motion-fast) var(--yj-ease-standard),
+    background-color var(--yj-motion-fast) var(--yj-ease-standard);
 }
 
 .skill-card__main {
@@ -256,6 +239,7 @@ function requestUninstall(event: MouseEvent): void {
 .skill-card__title-row {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--yj-space-2);
@@ -270,6 +254,7 @@ function requestUninstall(event: MouseEvent): void {
 
 .skill-card__title {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--yj-color-text-primary);
   font-size: var(--yj-font-size-card-title);
@@ -342,24 +327,6 @@ function requestUninstall(event: MouseEvent): void {
   cursor: not-allowed;
 }
 
-.skill-card__metadata {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--yj-space-1) var(--yj-space-3);
-  color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-}
-
-.skill-card__metadata > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .skill-card__blocked-reason,
 .skill-card__error {
   font-size: var(--yj-font-size-caption);
@@ -383,6 +350,7 @@ function requestUninstall(event: MouseEvent): void {
 
 @media (prefers-reduced-motion: reduce) {
   .skill-card,
+  .skill-card__install,
   .skill-card__delete {
     transition: none;
   }

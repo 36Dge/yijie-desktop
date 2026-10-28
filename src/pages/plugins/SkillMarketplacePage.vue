@@ -25,11 +25,11 @@ import YjPageHeader from "../../components/yijie/YjPageHeader.vue";
 import YjSection from "../../components/yijie/YjSection.vue";
 
 const CATEGORY_ICONS = {
-  "sourcing-selection": "skillSourcing",
-  "market-research": "skillResearch",
-  "content-marketing": "skillContent",
-  "traffic-advertising": "skillTraffic",
-  "store-operations": "skillOperations",
+  "sourcing-selection": "skillCategorySourcing",
+  "market-research": "skillCategoryResearch",
+  "content-marketing": "skillCategoryContent",
+  "traffic-advertising": "skillCategoryTraffic",
+  "store-operations": "skillCategoryOperations",
 } as const satisfies Readonly<Record<SkillCategory, YjIconName>>;
 
 const permissionStore = usePermissionStore();
