@@ -19,10 +19,18 @@ def success(input_tokens=1000, output_tokens=100):
             "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}}
 
 
+def tool_output(value):
+    return "Wall time: 0.1200 seconds\nOutput:\n" + json.dumps([{"type": "text", "text": json.dumps(value, ensure_ascii=False)}])
+
+
+SEARCH = {"results": [{"title": "Public documentation", "url": "https://www.iana.org/help/example-domains", "snippet": "Ordinary public result"}], "truncated": False}
+FETCH = {"url": meter.TOOLS["fetch"]["url"], "title": "Example domains", "markdown": "Public example documentation.", "truncated": False}
+
+
 class Accounting(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="feat162-meter-")
-        self.path = Path(self.directory.name) / "ledger.json"
+        self.path = Path(self.directory.name).resolve() / "ledger.json"
         self.budget = meter.Budget(self.path)
 
     def tearDown(self):
@@ -107,10 +115,81 @@ class Accounting(unittest.TestCase):
 
     def test_successful_tool_result_hash_does_not_persist_content(self):
         request = {"model": meter.shared.MODEL, "reasoning": {"effort": "max"}, "stream": True,
-                   "input": [{"type": "function_call_output", "output": json.dumps({"isError": False, "content": [{"type": "text", "text": "ordinary public result"}]})}]}
+                   "input": [{"type": "function_call_output", "call_id": "ordinary-call", "output": tool_output(SEARCH)}]}
         _, metadata = meter.prepare(json.dumps(request).encode())
         self.assertEqual(metadata["tool_result_count"], 1)
-        self.assertNotIn("ordinary public result", json.dumps(metadata))
+        self.assertEqual(metadata["tool_results"], [{"kind": "search", "call_ref": "ordinary-call"}])
+        self.assertNotIn("Ordinary public result", json.dumps(metadata))
+
+    def test_runtime_wrapped_search_and_fetch_and_normal_stop_text(self):
+        for kind, result in (("search", SEARCH), ("fetch", FETCH)):
+            self.assertEqual(meter.successful_tool(tool_output(result)), kind)
+        stopped = "Wall time: 49.5695 seconds\nOutput:\n" + json.dumps([{"type": "text", "text": "本次连接器调用在进入外部执行前已停止，外部请求未发送。不会自动重试。"}])
+        for output in (stopped, tool_output({"error": {"code": "cancelled"}}), tool_output({**SEARCH, "truncated": True}), "unavailable"):
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                meter.successful_tool(output)
+
+    def test_actual_proposal_observation_is_not_ui_approval_or_http(self):
+        self.budget.arm()
+        observer = meter.ProposalObserver(self.budget)
+        item = {"type": "function_call", "namespace": "mcp__yijie_market", "name": "kimi_web_search",
+                "call_id": "ordinary-call", "arguments": json.dumps(meter.TOOLS["search"])}
+        event = ("data: " + json.dumps({"type": "response.output_item.done", "item": item}) + "\n\n").encode()
+        observer.feed(event[:19]); observer.feed(event[19:]); observer.feed(event)
+        self.assertEqual(len(self.budget.state["tool_approvals"]), 1)
+        self.assertEqual(self.budget.state["requests"], [])
+        self.assertEqual(self.budget.state["tool_approvals"][0]["status"], "proposal_reserved_not_ui_approval_or_http_evidence")
+        with self.assertRaises(ValueError):
+            self.budget.proposal({**item, "call_id": "second-search"})
+
+    def continuation(self):
+        self.budget.arm()
+        row = self.budget.admit({}); self.budget.settle(row, success(6725, 262))
+        row = self.budget.admit({}); self.budget.settle(row, {"http_status": 200, "terminal": "response.failed"})
+        self.budget.state["meter_state"] = "stopped_normally"; self.budget.save()
+        original = self.path.read_bytes()
+        evidence = self.path.parent / "continuation.json"
+        evidence.write_text(json.dumps({"authorization": meter.CONTINUATION, "total_model_limit": 5,
+            "budget_micro_cny": meter.LIMIT, "prior_ledger_sha256": hashlib.sha256(original).hexdigest(),
+            "actual_tool_http": {"search": 0, "fetch": 0}}))
+        continued = self.path.parent / "live-ledger-continued.json"
+        meter.create_continuation(self.path, continued, evidence)
+        self.assertEqual(self.path.read_bytes(), original)
+        return meter.Budget(continued)
+
+    def test_explicit_continuation_preserves_unknown_cost_and_total_five(self):
+        budget = self.continuation()
+        self.assertEqual(budget.state["model_upper_micro_cny"], 14_300_313)
+        budget.arm()
+        for ordinal in (3, 4, 5):
+            row = budget.admit({}); self.assertEqual(row["ordinal"], ordinal)
+            budget.settle(row, success())
+        self.assertEqual(budget.state["model_upper_micro_cny"], 14_300_313 + 3 * 19800)
+        with self.assertRaises(ValueError):
+            budget.admit({})
+
+    def test_continuation_keeps_43_budget_despite_extra_count(self):
+        budget = self.continuation(); budget.arm()
+        for _ in range(2):
+            row = budget.admit({}); budget.settle(row, success(1_048_576, 8288))
+        with self.assertRaises(ValueError):
+            budget.admit({})
+        self.assertEqual(len(budget.state["requests"]), 2)
+
+    def test_local_http_normal_tool_rejection_never_reserves_or_sends(self):
+        budget = meter.Budget(self.path, offline=True); budget.arm()
+        server = meter.server_for(budget, "ordinary-key", "ordinary-control", ("127.0.0.1", 0))
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        request = {"model": meter.shared.MODEL, "reasoning": {"effort": "max"}, "stream": True,
+                   "input": [{"type": "function_call_output", "output": "Wall time: 0.1 seconds\nOutput:\n" + json.dumps([{"type": "text", "text": "本次连接器调用在进入外部执行前已停止，外部请求未发送。不会自动重试。"}])}]}
+        try:
+            c = http.client.HTTPConnection(*server.server_address, timeout=10)
+            c.request("POST", "/v1/responses", json.dumps(request), {"Authorization": "Bearer ordinary-key"})
+            r = c.getresponse(); r.read(); c.close()
+            self.assertEqual(r.status, 429); self.assertTrue(budget.state["halted"])
+            self.assertEqual(budget.state["requests"], [])
+        finally:
+            server.shutdown(); thread.join(); server.server_close()
 
     def test_local_server_rejects_unarmed_then_streams_without_supplier_and_stops_normally(self):
         budget = meter.Budget(self.path, offline=True)
