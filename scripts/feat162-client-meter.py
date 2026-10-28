@@ -269,6 +269,7 @@ class ProposalObserver:
     """Observe, never rewrite, actual SSE proposals before UI approval."""
     def __init__(self, budget):
         self.budget, self.buffer = budget, b""
+        self.failure_metadata = {}
 
     def feed(self, data):
         self.buffer += data
@@ -278,6 +279,17 @@ class ProposalObserver:
             if not line.startswith(b"data:") or line[5:].strip() == b"[DONE]":
                 continue
             event = json.loads(line[5:].strip())
+            if event.get("type") in {"response.failed", "response.incomplete"}:
+                response = event.get("response", {})
+                error = response.get("error")
+                self.failure_metadata["provider_error_present"] = isinstance(error, dict)
+                if isinstance(error, dict):
+                    self.failure_metadata.update(shared.error_metadata(json.dumps({"error": error}).encode()))
+                    code = error.get("code")
+                    allowed_codes = {"server_error", "rate_limit_exceeded", "invalid_prompt", "context_length_exceeded",
+                                     "insufficient_quota", "model_not_found", "invalid_api_key", "invalid_request_error"}
+                    self.failure_metadata["provider_error_code"] = code if isinstance(code, str) and code in allowed_codes else "unclassified"
+                    self.failure_metadata["provider_error_sha256"] = shared.canonical_digest(error)
             items = [event.get("item")] if event.get("type") == "response.output_item.done" else []
             if event.get("type") == "response.completed":
                 items += event.get("response", {}).get("output", [])
@@ -388,6 +400,7 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
             finally:
                 if connection:
                     connection.close()
+                observer.result.update(proposals.failure_metadata)
                 observer.result.update(stream_complete=complete, forwarded_response_sha256=digest.hexdigest(), forwarded_response_bytes=count)
                 budget.settle(row, observer.result)
     return http.server.ThreadingHTTPServer(address, Handler)

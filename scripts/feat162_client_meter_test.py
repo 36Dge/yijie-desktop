@@ -157,6 +157,17 @@ class Accounting(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), original)
         return meter.Budget(continued)
 
+    def test_sse_failure_retains_closed_diagnostics_without_provider_prose(self):
+        observer = meter.ProposalObserver(self.budget)
+        event = {"type": "response.failed", "response": {"error": {
+            "type": "invalid_request_error", "code": "invalid_prompt", "message": "ordinary diagnostic about namespace"}}}
+        observer.feed(("data: " + json.dumps(event) + "\n\n").encode())
+        self.assertEqual(observer.failure_metadata["provider_error_category"], "invalid_request_error")
+        self.assertEqual(observer.failure_metadata["provider_error_code"], "invalid_prompt")
+        self.assertEqual(observer.failure_metadata["provider_error_mentions"], ["namespace"])
+        self.assertNotIn("ordinary diagnostic", json.dumps(observer.failure_metadata))
+        self.assertEqual(self.budget.state["requests"], [])
+
     def test_explicit_continuation_preserves_unknown_cost_and_total_five(self):
         budget = self.continuation()
         self.assertEqual(budget.state["model_upper_micro_cny"], 14_300_313)
