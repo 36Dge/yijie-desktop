@@ -26,6 +26,7 @@ RESERVE = 1_048_576 * 13 + 8_288 * 68
 TOOLS_RESERVE = 20_000
 AUTHORITY = "FEAT-162-20261028-client-3-1-1-CNY43"
 CONTINUATION = "FEAT-162-20261028-client-total5-CNY43"
+ADDITIONAL_FOUR = "FEAT-162-20261028-client-total7-CNY43"
 TOOLS = {"search": {"query": "IANA example domains", "limit": 3},
          "fetch": {"url": "https://www.iana.org/help/example-domains"}}
 
@@ -119,26 +120,37 @@ class Budget:
             "armed": False, "armed_once": False, "halted": False,
             "requests": [], "tool_approvals": [], "meter_state": "created"}
         s = self.state
-        require(s["schema_version"] == 1 and s["feature"] == "FEAT-162" and s["authorization"] in {AUTHORITY, CONTINUATION},
+        require(s["schema_version"] == 1 and s["feature"] == "FEAT-162" and s["authorization"] in {AUTHORITY, CONTINUATION, ADDITIONAL_FOUR},
                 "Independent FEAT-162 authority required")
         self.carried_count = 0
         self.carried_cost = 0
-        if s["authorization"] == CONTINUATION:
-            require(not offline and s["model_http_limit"] == 5, "Explicit continuation only")
+        if s["authorization"] in {CONTINUATION, ADDITIONAL_FOUR}:
+            limit, previous_authority, expected_count = (5, AUTHORITY, 2) if s["authorization"] == CONTINUATION else (7, CONTINUATION, 3)
+            require(not offline and s["model_http_limit"] == limit, "Explicit continuation only")
             carried = s["carryover"]
             prior = Path(carried["ledger_path"])
             require(hashlib.sha256(prior.read_bytes()).hexdigest() == carried["ledger_sha256"], "Prior ledger changed")
             old = json.loads(prior.read_text())
-            require(old["authorization"] == AUTHORITY and old["meter_state"] == "stopped_normally"
-                    and old["halted"] and not old["armed"] and len(old["requests"]) == 2
+            require(old["authorization"] == previous_authority and old["meter_state"] == "stopped_normally"
+                    and old["halted"] and not old["armed"]
                     and all(r["status"] != "inflight" for r in old["requests"]), "Closed prior run required")
-            self.carried_count = len(old["requests"])
+            ancestor = old.get("carryover", {})
+            if ancestor:
+                ancestor_path = Path(ancestor["ledger_path"])
+                require(hashlib.sha256(ancestor_path.read_bytes()).hexdigest() == ancestor["ledger_sha256"], "Ancestor ledger changed")
+                root = json.loads(ancestor_path.read_text())
+                require(root["authorization"] == AUTHORITY and len(root["requests"]) == ancestor["model_http_count"]
+                        and root["model_upper_micro_cny"] == ancestor["model_upper_micro_cny"], "Ancestor accounting mismatch")
+            self.carried_count = len(old["requests"]) + ancestor.get("model_http_count", 0)
+            require(self.carried_count == expected_count, "Reviewed prior count required")
             self.carried_cost = old["model_upper_micro_cny"]
+            require(self.carried_cost == ancestor.get("model_upper_micro_cny", 0) + sum(
+                r.get("charged_upper_micro_cny", r["reserved_micro_cny"]) for r in old["requests"]), "Prior cost mismatch")
             require(carried["model_http_count"] == self.carried_count
                     and carried["model_upper_micro_cny"] == self.carried_cost, "Carryover mismatch")
             proof = json.loads(Path(carried["evidence_path"]).read_text())
             require(hashlib.sha256(Path(carried["evidence_path"]).read_bytes()).hexdigest() == carried["evidence_sha256"], "Continuation evidence changed")
-            require(proof["authorization"] == CONTINUATION and proof["total_model_limit"] == 5
+            require(proof["authorization"] == s["authorization"] and proof["total_model_limit"] == limit
                     and proof["budget_micro_cny"] == LIMIT and proof["prior_ledger_sha256"] == carried["ledger_sha256"]
                     and proof["actual_tool_http"] == {"search": 0, "fetch": 0}, "Explicit total limits and zero tool sends required")
         else:
@@ -241,17 +253,20 @@ class Budget:
 
 def create_continuation(previous, path, evidence):
     previous, path, evidence = Path(previous).resolve(strict=True), Path(path), Path(evidence).resolve(strict=True)
-    require(path.name == "live-ledger-continued.json" and not path.exists()
+    authorization = json.loads(evidence.read_text())["authorization"]
+    require(authorization in {CONTINUATION, ADDITIONAL_FOUR}, "Explicit continuation authority")
+    name, limit = ("live-ledger-continued.json", 5) if authorization == CONTINUATION else ("live-ledger-additional4.json", 7)
+    require(path.name == name and not path.exists()
             and path.parent == previous.parent, "One separately named continuation ledger")
     with open(previous.with_suffix(".lock"), "a") as guard:
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old = json.loads(previous.read_text())
-        state = {"schema_version": 1, "feature": "FEAT-162", "authorization": CONTINUATION,
-                 "offline": False, "model_http_limit": 5, "total_limit_micro_cny": LIMIT,
+        state = {"schema_version": 1, "feature": "FEAT-162", "authorization": authorization,
+                 "offline": False, "model_http_limit": limit, "total_limit_micro_cny": LIMIT,
                  "tool_reserved_micro_cny": TOOLS_RESERVE, "model_upper_micro_cny": old["model_upper_micro_cny"],
                  "armed": False, "armed_once": False, "halted": False, "requests": [], "tool_approvals": [], "meter_state": "created",
                  "carryover": {"ledger_path": str(previous), "ledger_sha256": hashlib.sha256(previous.read_bytes()).hexdigest(),
-                     "model_http_count": len(old["requests"]), "model_upper_micro_cny": old["model_upper_micro_cny"],
+                     "model_http_count": len(old["requests"]) + old.get("carryover", {}).get("model_http_count", 0), "model_upper_micro_cny": old["model_upper_micro_cny"],
                      "evidence_path": str(evidence), "evidence_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}}
         # Validate using a temporary ordinary document before creating the ledger.
         candidate = path.with_suffix(".candidate.json")
@@ -290,6 +305,15 @@ class ProposalObserver:
                                      "insufficient_quota", "model_not_found", "invalid_api_key", "invalid_request_error"}
                     self.failure_metadata["provider_error_code"] = code if isinstance(code, str) and code in allowed_codes else "unclassified"
                     self.failure_metadata["provider_error_sha256"] = shared.canonical_digest(error)
+                    message = str(error.get("message", "")).lower()
+                    terms = {"quota_or_balance": ("quota", "balance", "credit", "余额", "额度"),
+                             "rate_limit": ("rate limit", "too many requests", "限流"),
+                             "server_busy": ("overload", "server error", "server busy", "unavailable", "繁忙"),
+                             "authentication": ("authentication", "api key", "unauthorized", "鉴权"),
+                             "invalid_argument": ("invalid", "unsupported", "not support", "不支持", "参数"),
+                             "context_or_tokens": ("context", "token limit", "maximum token"),
+                             "tool_call": ("tool", "function", "namespace")}
+                    self.failure_metadata["provider_error_terms"] = [k for k, words in terms.items() if any(w in message for w in words)]
             items = [event.get("item")] if event.get("type") == "response.output_item.done" else []
             if event.get("type") == "response.completed":
                 items += event.get("response", {}).get("output", [])
@@ -411,15 +435,16 @@ def main():
     parser.add_argument("--ledger", required=True, type=Path)
     parser.add_argument("--kimi-key-file", type=Path)
     parser.add_argument("--control-token-file", type=Path)
-    parser.add_argument("--authorization", required=True, choices=[AUTHORITY, CONTINUATION])
+    parser.add_argument("--authorization", required=True, choices=[AUTHORITY, CONTINUATION, ADDITIONAL_FOUR])
     parser.add_argument("--create-continuation-from", type=Path)
     parser.add_argument("--continuation-evidence", type=Path)
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
     require(args.ledger.is_absolute() and args.ledger.parent.resolve(strict=True) == args.ledger.parent, "Canonical existing ledger directory")
     if args.create_continuation_from or args.continuation_evidence:
-        require(args.authorization == CONTINUATION and args.create_continuation_from and args.continuation_evidence
+        require(args.authorization in {CONTINUATION, ADDITIONAL_FOUR} and args.create_continuation_from and args.continuation_evidence
                 and not args.kimi_key_file and not args.control_token_file and not args.offline, "Creation does not read credentials")
+        require(json.loads(args.continuation_evidence.read_text())["authorization"] == args.authorization, "Matching continuation evidence")
         create_continuation(args.create_continuation_from, args.ledger, args.continuation_evidence)
         print("FEAT-162 continuation created unarmed; prior ledger and unknown cost preserved")
         return

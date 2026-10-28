@@ -187,6 +187,28 @@ class Accounting(unittest.TestCase):
             budget.admit({})
         self.assertEqual(len(budget.state["requests"]), 2)
 
+    def test_four_more_authorized_calls_carry_both_unknown_reservations(self):
+        budget = self.continuation(); budget.arm()
+        row = budget.admit({}); budget.settle(row, {"http_status": 200, "terminal": "response.failed"})
+        budget.state["meter_state"] = "stopped_normally"; budget.save()
+        previous = budget.path.read_bytes()
+        evidence = self.path.parent / "additional-four.json"
+        evidence.write_text(json.dumps({"authorization": meter.ADDITIONAL_FOUR, "total_model_limit": 7,
+            "budget_micro_cny": meter.LIMIT, "prior_ledger_sha256": hashlib.sha256(previous).hexdigest(),
+            "actual_tool_http": {"search": 0, "fetch": 0}}))
+        path = self.path.parent / "live-ledger-additional4.json"
+        meter.create_continuation(budget.path, path, evidence)
+        continued = meter.Budget(path)
+        self.assertEqual(continued.carried_count, 3)
+        self.assertEqual(continued.carried_cost, 28_495_385)
+        self.assertEqual(budget.path.read_bytes(), previous)
+        continued.arm(); row = continued.admit({})
+        self.assertEqual(row['ordinal'], 4)
+        self.assertEqual(continued.state['model_upper_micro_cny'] + meter.TOOLS_RESERVE, 42_710_457)
+        continued.settle(row, {"http_status": 200, "terminal": "response.failed"})
+        with self.assertRaises(ValueError):
+            continued.admit({})
+
     def test_local_http_normal_tool_rejection_never_reserves_or_sends(self):
         budget = meter.Budget(self.path, offline=True); budget.arm()
         server = meter.server_for(budget, "ordinary-key", "ordinary-control", ("127.0.0.1", 0))
