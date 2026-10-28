@@ -64,6 +64,10 @@ export function connectorPrimaryAction(view: ConnectorView): Readonly<{ action: 
   if (view.actions.includes("retry")) return { action: "retry", label: "重新确认状态" };
   if (!view.installed) return view.actions.includes("install") ? { action: "install", label: `安装 ${view.name}` } : null;
   if (view.enabled) return null;
+  if (view.id === "kimi-web" && view.actions.includes("enable")) {
+    if (view.desiredEnabled && view.status.tone === "neutral") return null;
+    return { action: "enable", label: view.desiredEnabled ? "重新准备" : "恢复使用" };
+  }
   if (view.actions.includes("configure")) return { action: "configure", label: "配置连接器" };
   if (view.actions.includes("authorize")) return { action: "authorize", label: "授权连接" };
   if (view.actions.includes("enable")) return { action: "enable", label: `启用 ${view.name}` };

@@ -9,6 +9,9 @@ use uuid::Uuid;
 type Error = wire::ErrorCode;
 type Result<T> = std::result::Result<T, Error>;
 const MAX_REVISION: i64 = 9_007_199_254_740_991;
+#[path = "store_builtin.rs"]
+mod builtin;
+pub(super) use builtin::prepare_kimi_default;
 
 fn sql<T>(r: rusqlite::Result<T>) -> Result<T> {
     r.map_err(|_| Error::TemporarilyUnavailable)
@@ -407,7 +410,9 @@ pub(super) fn check_provider_change(
         action,
         wire::OperationAction::Authorize | wire::OperationAction::Configure
     ) && item.credential_ref.is_none()
-        && !(action == wire::OperationAction::Enable && super::keyless_provider(&item.service_id))
+        && !(action == wire::OperationAction::Enable
+            && (super::keyless_provider(&item.service_id)
+                || item.service_id == wire::BUILTIN_MODEL_SERVICE_ID))
     {
         return Err(Error::NotConfigured);
     }
@@ -491,6 +496,7 @@ fn provider_error(code: super::provider_generated::ErrorCode) -> Error {
         P::AuthorityMismatch | P::ScopeExpired => Error::ContextInvalid,
         P::BindingMismatch => Error::RevisionConflict,
         P::NotFound => Error::NotFound,
+        P::NotConfigured => Error::NotConfigured,
         P::RequestConflict => Error::RequestConflict,
         P::NotQualified => Error::ProviderOnboardingRequired,
         P::AuthorizationRejected => Error::AuthorizationCancelled,

@@ -48,7 +48,7 @@ fn catalog() -> &'static Catalog {
         let value: Catalog =
             serde_json::from_str(include_str!("../../../../contracts/market-catalog.json"))
                 .expect("validated Connectors catalog");
-        assert_eq!(value.catalog.len(), 60);
+        assert_eq!(value.catalog.len(), 61);
         value
     })
 }
@@ -74,6 +74,9 @@ fn keyless_provider(service: &str) -> bool {
             .any(|entry| entry.service_id == service && entry.auth_mode == wire::AuthMode::None)
 }
 fn uses_credential_form(service: &str) -> bool {
+    if service == "kimi-web" {
+        return false;
+    }
     service == "google-calendar"
         || catalog().catalog.iter().any(|entry| {
             entry.service_id == service

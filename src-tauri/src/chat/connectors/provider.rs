@@ -56,6 +56,9 @@ fn terminal(op: &store::ProviderOperation) -> bool {
     )
 }
 fn browser_url(value: &str, service: &str) -> Result<url::Url, Error> {
+    if service == "kimi-web" {
+        return Err(Error::UnsupportedCapability);
+    }
     let url = url::Url::parse(value).map_err(|_| Error::OutcomeUnknown)?;
     if super::uses_credential_form(service)
         && (service != "google-calendar" || url.scheme() == "http")
@@ -607,6 +610,54 @@ async fn observe(
         .database()
         .await
         .map_err(|_| Error::TemporarilyUnavailable)?;
+    // The built-in policy is separately authorized. Read-only contexts keep a
+    // pure snapshot; no renderer value chooses the default service or key.
+    if matches!(action, Action::Snapshot)
+        && crate::chat::models::enabled()
+        && authorization
+            .with_market_authority(
+                context,
+                &scope,
+                &["connector.manage", "connector.credentials.manage"],
+                now()?,
+                |_| (),
+            )
+            .is_ok()
+    {
+        runtime
+            .ensure_demo_fast_sidecar()
+            .await
+            .map_err(|_| Error::TemporarilyUnavailable)?;
+        let current_host = runtime
+            .local_host_bridge()
+            .await
+            .map_err(|_| Error::TemporarilyUnavailable)?;
+        let host_id = current_host.instance_nonce().to_string();
+        let default_scope = scope.clone();
+        let default_auth = authorization.clone();
+        db.call(move |repo| {
+            Ok(default_auth
+                .with_market_authority(
+                    context,
+                    &default_scope,
+                    &["connector.manage", "connector.credentials.manage"],
+                    now().map_err(|_| crate::chat::error::ChatError::DatabaseUnavailable)?,
+                    |authority| {
+                        store::prepare_kimi_default(
+                            &mut repo.connection,
+                            &default_scope,
+                            &host_id,
+                            &authority,
+                            now().unwrap_or(-1),
+                        )
+                    },
+                )
+                .map_err(auth_error)
+                .and_then(|v| v))
+        })
+        .await
+        .map_err(|_| Error::TemporarilyUnavailable)??;
+    }
     let selection = if let Action::Selection(payload) = &action {
         payload.selection.clone()
     } else {
@@ -633,8 +684,8 @@ async fn observe(
         .await
         .map_err(|_| Error::TemporarilyUnavailable)??
     };
-    // Snapshot is always a read: do not ensure/start Host or a model merely to
-    // display installed intent. A missing or expired owner projects inactive.
+    // Observation itself only reads live admission. The separately authorized
+    // built-in default above grants no readiness; a missing owner stays inactive.
     let admission = if selection.is_empty() {
         None
     } else {
@@ -846,6 +897,77 @@ mod tests {
             authorization_url: None,
             error_code: None,
         }
+    }
+    #[test]
+    fn kimi_local_binding_maps_missing_source_and_never_enables_or_opens_a_browser() {
+        for available in [true, false] {
+            let (mut db, scope, _, host, authority) = setup();
+            let entry = catalog()
+                .catalog
+                .iter()
+                .find(|e| e.service_id == "kimi-web")
+                .unwrap();
+            let item = store::install(
+                &mut db,
+                &scope,
+                entry,
+                10,
+                ui::InstallPayload {
+                    service_id: entry.service_id.clone(),
+                    operation_id: Uuid::now_v7().to_string(),
+                    expected_revision: 0,
+                },
+                100,
+            )
+            .unwrap()
+            .installation;
+            let auth = begin(
+                &mut db,
+                &scope,
+                &item,
+                &host,
+                authority,
+                ui::OperationAction::Configure,
+            );
+            let mut observed = status(
+                &auth,
+                if available {
+                    p::OperationState::Succeeded
+                } else {
+                    p::OperationState::Failed
+                },
+            );
+            observed.connection_status = p::ConnectionStatus::Disconnected;
+            if !available {
+                observed.authorization_status = p::AuthorizationStatus::Unauthorized;
+                observed.error_code = Some(p::ErrorCode::NotConfigured);
+            }
+            let saved = store::finish_provider(&mut db, &scope, &auth, observed, 104).unwrap();
+            assert!(
+                !saved.result.installation.desired_enabled
+                    && !saved.result.installation.effective_enabled
+            );
+            assert_eq!(
+                saved.result.installation.connection_status,
+                ui::ConnectionStatus::Disconnected
+            );
+            if available {
+                assert_eq!(
+                    saved.result.installation.configuration_status,
+                    ui::ConfigurationStatus::Configured
+                );
+            } else {
+                assert_eq!(
+                    saved.result.installation.error_code,
+                    Some(Error::NotConfigured)
+                );
+            }
+        }
+        let old_form = format!("http://127.0.0.1:12345/credential/{}", Uuid::now_v7());
+        assert!(matches!(
+            browser_url(&old_form, "kimi-web"),
+            Err(Error::UnsupportedCapability)
+        ));
     }
     #[test]
     fn google_client_setup_and_registered_oauth_use_separate_owned_browser_steps() {

@@ -97,3 +97,26 @@ it("enables keyless Shopify without credentials while requiring fresh readiness 
   expect(view.actions).not.toContain("configure"); expect(view.actions).not.toContain("authorize");
   expect(view.selectable).toBe(false); expect(view.enabled).toBe(false);
 });
+
+it("automatically prepares Kimi without a configuration or initial enable button", () => {
+  const data = connectorSnapshot([{ ...installation, serviceId: "kimi-web", desiredEnabled: true, configurationStatus: "unconfigured", authorizationStatus: "unknown" }]);
+  data.catalog = [{ ...catalogEntry, serviceId: "kimi-web", authMode: "api_key", blockerCodes: ["not_configured"] }];
+  let view = connectorViews(data)[0]!;
+  expect(view.configurationLabel).toContain("无需单独配置");
+  expect(view.explanation).toBeNull();
+  expect(view.status.label).toBe("正在准备");
+  expect(view.actions).toContain("enable");
+  expect(view.actions).not.toContain("configure");
+  expect(connectorPrimaryAction(view)).toBeNull();
+  data.installations = [{ ...installation, serviceId: "kimi-web", desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" }];
+  data.executionAvailable = true;
+  view = connectorViews(data)[0]!;
+  expect(view).toMatchObject({ enabled: true, selectable: true, status: { label: "可使用" } });
+  data.installations = [{ ...installation, serviceId: "kimi-web", desiredEnabled: true, configurationStatus: "unknown", errorCode: "not_configured" }];
+  view = connectorViews(data)[0]!;
+  expect(view.explanation).toContain("统一模型配置");
+  expect(view.selectable).toBe(false);
+  expect(connectorPrimaryAction(view)).toEqual({ action: "enable", label: "重新准备" });
+  data.installations = [{ ...installation, serviceId: "kimi-web" }];
+  expect(connectorPrimaryAction(connectorViews(data)[0]!)).toEqual({ action: "enable", label: "恢复使用" });
+});

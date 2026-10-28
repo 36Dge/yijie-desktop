@@ -1643,6 +1643,8 @@ pub enum ErrorCode {
     AuthorizationTimeout,
     #[serde(rename = "not_qualified")]
     NotQualified,
+    #[serde(rename = "not_configured")]
+    NotConfigured,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "HelloRequestWire")]

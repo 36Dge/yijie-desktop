@@ -66,7 +66,8 @@ export type ReferencedErrorCode =
   | "authorization_timeout"
   | "not_qualified"
   | "cleanup_pending"
-  | "temporarily_unavailable";
+  | "temporarily_unavailable"
+  | "not_configured";
 
 export interface NativeObserveRequest {
   schemaVersion: 1;

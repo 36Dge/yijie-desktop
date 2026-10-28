@@ -50,12 +50,13 @@ export function kimiCallSurfaces(env=process.env){
 function checkSurfaces(desktopRoot,contractsRoot,selection,env){
  for(const family of ["market-selection","market-host","experts"]){
   const lock=JSON.parse(readFileSync(path.join(desktopRoot,`contracts/${family}-v2.candidate.json`)));
-  assert.equal(lock.source_commit,"eddc64f95d81c26ca1678cc648d177c081f7904d");
+  assert.equal(lock.source_commit,"2adfa2bef43d38a932f6249dbb0a229c173ff103");
  }
  for(const consumer of ["desktop","agent-host"])execFileSync(process.execPath,["scripts/sync-model-call-surfaces-v2.mjs",`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
  if(selection.market){
   for(const [family,consumers] of [["market-connectors",["desktop","agent-host","connectors"]],["market-provider",["desktop","agent-host","connectors"]],["market-broker",["agent-host","connectors"]]])for(const consumer of consumers)execFileSync(process.execPath,[`scripts/sync-${family}.mjs`,`--consumer=${consumer}`,"--check"],{cwd:contractsRoot,stdio:"pipe"});
   execFileSync(process.execPath,["scripts/feat164-market-catalog.mjs","--check"],{cwd:desktopRoot,stdio:"pipe"});
+  execFileSync(process.execPath,["scripts/sync-web-retrieval.mjs","--consumer=connectors","--check"],{cwd:contractsRoot,stdio:"pipe"});
  }
  if(selection.experts)execFileSync(process.execPath,["scripts/sync-feat164-expert-resources.mjs","--check"],{cwd:desktopRoot,stdio:"pipe",env:{...process.env,...env,YIJIE_ENV:"local",YIJIE_LOCAL_PROFILE:"demo_fast",YIJIE_DESKTOP_CONTRACTS_DIR:contractsRoot}});
  if(selection.media)for(const consumer of ["host","desktop"])execFileSync(process.execPath,["scripts/generate-artifact-media.mjs","--check",`--consumer=${consumer}`],{cwd:contractsRoot,stdio:"pipe"});

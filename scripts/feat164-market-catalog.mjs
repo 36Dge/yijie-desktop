@@ -12,15 +12,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = path.resolve(root, "../yijie-connectors");
 const source = "catalog/market-catalog.v1.json";
 const bytes = readFileSync(path.join(sourceRoot, source));
-const feat164Commit="8e62101ff8ca94c2f9e12f4e415f20df41a7deed";
+const feat164Commit="d88b8d0b8e95978ef3494c90bb5e0e619aa3a27d";
 if(feat164){
  assert.equal(execFileSync("git",["-C",sourceRoot,"rev-parse","HEAD"],{encoding:"utf8"}).trim(),feat164Commit);
  assert.deepEqual(bytes,execFileSync("git",["-C",sourceRoot,"show",`${feat164Commit}:${source}`]));
 }
 const catalog = JSON.parse(bytes);
-assert.equal(catalog.catalogRevision, 9);
-assert.equal(catalog.catalog.length, 60);
-assert.equal(new Set(catalog.catalog.map(item => item.serviceId)).size, 60);
+assert.equal(catalog.catalogRevision, 11);
+assert.equal(catalog.catalog.length, 61);
+assert.equal(new Set(catalog.catalog.map(item => item.serviceId)).size, 61);
 for (const entry of catalog.catalog) {
   assert.ok(validateCatalogEntry(entry), "Invalid catalog entry");
   assert.equal(entry.serviceId, entry.serverName);
@@ -42,4 +42,4 @@ for (const [name, data] of [[output, bytes], [feat164 ? "contracts/market-catalo
   if (process.argv.includes("--check")) assert.deepEqual(readFileSync(file), data, name);
   else writeFileSync(file, data);
 }
-console.log("60-entry non-secret Connectors catalog " + (process.argv.includes("--check") ? "verified" : "synchronized") + "; no provider activation.");
+console.log("61-entry non-secret Connectors catalog " + (process.argv.includes("--check") ? "verified" : "synchronized") + "; no provider activation.");

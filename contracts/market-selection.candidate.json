@@ -16,7 +16,7 @@
     },
     {
       "path": "openapi/market-connectors/market-connectors.yaml",
-      "sha256": "83e1e7084726ac7ff370db3fe4cdc157c144089e449e5807f4c321aed99c1caf"
+      "sha256": "f7e375ec4bfa2f51a71f98b6ba0c4cf325049f1718d4997e84bd2879923ebe20"
     },
     {
       "path": "jsonschema/chat/model-selection-v1.schema.json",

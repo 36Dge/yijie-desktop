@@ -7,11 +7,11 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const sourcePins = Object.freeze({
-  'yijie-contracts':'d5792d6aad18352ce8d1c5d510d345004cab3bd6',
-  'yijie-agent-host':'7309101726dcecd48b2caa02401cfcdd6126f1fb',
-  'yijie-connectors':'8e62101ff8ca94c2f9e12f4e415f20df41a7deed',
+  'yijie-contracts':'2adfa2bef43d38a932f6249dbb0a229c173ff103',
+  'yijie-agent-host':'20539889259587a66a574201e521c2ea9469c54d',
+  'yijie-connectors':'d88b8d0b8e95978ef3494c90bb5e0e619aa3a27d',
   'yijie-codex':'11fd4504c28afd0f65c6f5f62a6b5328dd437f5a',
-  'yijie-skills':'595c927ae101d3d31c234f60565041eee0864680',
+  'yijie-skills':'704d2cc85a85d0759e6103e3f539552f3d63b1e9',
 });
 const desktopStep=(id,file,args=[])=>({id,repository:'yijie-desktop',args:[`scripts/${file}.mjs`,...args]});
 const contractsStep=(id,file,args=[])=>({id,repository:'yijie-contracts',args:[`scripts/${file}.mjs`,...args]});

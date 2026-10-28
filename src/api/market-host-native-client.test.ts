@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMarketHostNativeClient, MarketChatError } from "./market-host-native-client";
+import { createMarketHostNativeClient, MarketChatError, marketChatErrorMessage } from "./market-host-native-client";
 import { marketObservation, marketTestId as id } from "../test/market-chat-fixture";
 
 describe("market Native UI wire", () => {
@@ -26,5 +26,12 @@ describe("market Native UI wire", () => {
   it("renders only typed errors from Native", async () => {
     const transport = vi.fn(async (_command, { request }) => { throw { schemaVersion: 1, requestId: request.requestId, code: "permission_mode_unavailable", retryable: false }; });
     await expect(createMarketHostNativeClient(transport).observe(id(20), id(21))).rejects.toEqual(new MarketChatError("permission_mode_unavailable"));
+  });
+  it("explains unavailable shared credentials without retrying the request", async () => {
+    const transport = vi.fn(async (_command, { request }) => { throw { schemaVersion: 1, requestId: request.requestId, code: "not_configured", retryable: false }; });
+    const error = await createMarketHostNativeClient(transport).observe(id(20), id(21)).catch((failure: unknown) => failure);
+    expect(error).toEqual(new MarketChatError("not_configured"));
+    expect(marketChatErrorMessage(error)).toBe("连接器所需凭据暂不可用，请检查对应模型或连接器的配置。");
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,6 @@
 // Generated from market-connectors source; DO NOT EDIT.
 export const CONNECTOR_CAPABILITIES = ["connector.read","connector.manage","connector.credentials.manage","connector.use"] as const;
+export const BUILTIN_MODEL_SERVICE_ID = "kimi-web" as const;
 export type CanonicalId = string;
 export type ServiceId = string;
 export type Revision = number;

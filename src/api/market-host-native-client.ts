@@ -37,6 +37,7 @@ export function marketChatErrorMessage(error: unknown): string {
     case "permission_denied": case "context_invalid": case "authority_mismatch": return "当前授权已变化，请刷新会话授权后重新核对。";
     case "approval_expired": case "approval_stale": case "approval_resolved": return "审批状态已变化，请刷新并查看当前结果。";
     case "selection_stale": return "连接器已变化，请重新选择。";
+    case "not_configured": return "连接器所需凭据暂不可用，请检查对应模型或连接器的配置。";
     case "execution_unavailable": case "not_qualified": return "连接器尚未就绪，请前往管理连接器检查授权和连接。";
     case "model_unavailable": return "模型尚未就绪，请检查模型设置。";
     case "operation_uncertain": return "操作结果待确认，请刷新核对原操作；不要重复提交。";

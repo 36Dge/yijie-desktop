@@ -95,11 +95,30 @@ fn feat164_surfaces_market_normal_reopen() {
     market_replay("kimi-k3-1-pro-max-v1");
 }
 
+#[cfg(feature = "kimi-k31-pro-candidate")]
+#[test]
+fn feat162_k31_kimi_selection_preserves_receipt_after_normal_reopen() {
+    market_replay_service("kimi-k3-1-pro-max-v1", Some("kimi-web"));
+}
+
 fn market_replay(profile: &str) {
+    market_replay_service(profile, None);
+}
+
+fn market_replay_service(profile: &str, service: Option<&str>) {
     let mut f = Fixture::new();
     let mut request = f.request();
     request.intent.profile_id = serde_json::from_value(serde_json::json!(profile)).unwrap();
-    request.selection = vec![f.selection(1), f.selection(0)];
+    request.selection = if let Some(service) = service {
+        let index = super::super::catalog()
+            .catalog
+            .iter()
+            .position(|entry| entry.service_id == service)
+            .expect("selected service is in the canonical catalog");
+        vec![f.selection(index)]
+    } else {
+        vec![f.selection(1), f.selection(0)]
+    };
     // This tests storage using ordinary installation fixtures, not live tool
     // eligibility. Production requires current private-owner evidence.
     let first = f
