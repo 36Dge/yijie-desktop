@@ -851,6 +851,12 @@ impl ChatRepository {
         scope: ChatScope,
         schedule_mode: super::schedules::ScheduleStorageMode,
     ) -> Result<Self, ChatError> {
+        // This local candidate is not authorized to migrate the daily profile.
+        if super::artifact_media::files_enabled()
+            && std::env::var("YIJIE_FEAT164_DAILY").as_deref() == Ok("true")
+        {
+            return Err(ChatError::OrchestrationUnavailable);
+        }
         prepare_chat_directory(chat_directory)?;
         let database_path = chat_directory.join(DATABASE_FILE_NAME);
         prepare_database_file(&database_path)?;
@@ -876,6 +882,7 @@ impl ChatRepository {
                 migrations::KIMI_K31_RECOVERY_SCHEMA_VERSION,
                 migrations::DELIVERY_PROOF_SCHEMA_VERSION,
                 migrations::PLAN_RETIREMENT_SCHEMA_VERSION,
+                migrations::ARTIFACT_FILES_SCHEMA_VERSION,
             ]
             .contains(&version)
             {
@@ -972,6 +979,12 @@ impl ChatRepository {
                 &mut connection,
                 &scope,
                 chrono::Utc::now().timestamp(),
+            )?;
+        }
+        if super::artifact_media::files_enabled() {
+            migrations::migrate_to_target(
+                &mut connection,
+                migrations::ARTIFACT_FILES_SCHEMA_VERSION,
             )?;
         }
         protect_database_files(&database_path)?;
@@ -1673,6 +1686,38 @@ impl ChatRepository {
             })
             .collect();
         attachments
+    }
+
+    // A display projection can only read the current unbound draft, never a
+    // supplied file path or a historical attachment belonging to another scope.
+    pub(super) fn draft_attachment_presentation(
+        &self,
+        id: Uuid,
+        target: DraftTarget,
+    ) -> Result<(String, Option<Vec<u8>>), ChatError> {
+        let now = unix_seconds()?;
+        validate_draft_target(
+            &self.connection,
+            &self.scope.owner_user_id,
+            &self.scope.tenant_id,
+            &target,
+        )?;
+        let row:Option<(String,Option<Vec<u8>>,i64,String)>=self.connection.query_row(
+          "SELECT media_type, CASE WHEN media_type IN ('image/jpeg','image/png','image/webp','image/gif','image/svg+xml') THEN content_blob ELSE NULL END, byte_size, sha256 FROM chat_attachments WHERE id=?1 AND owner_user_id=?2 AND tenant_id=?3 AND state='ready' AND message_id IS NULL AND expires_at>?4 AND draft_target_kind=?5 AND ((?5='new' AND draft_session_id IS NULL) OR (?5='session' AND draft_session_id=?6))",
+          params![id.to_string(),self.scope.owner_user_id,self.scope.tenant_id,now,target.kind(),target.session_id().map(|v|v.to_string())],
+          |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(map_sqlite_error)?;
+        let (mime, bytes, size, sha) = row.ok_or(ChatError::NotFound)?;
+        if let Some(bytes) = bytes.as_ref() {
+            use sha2::Digest;
+            if size <= 0
+                || size as usize > super::attachment::MAX_ATTACHMENT_BYTES
+                || bytes.len() != size as usize
+                || format!("{:x}", sha2::Sha256::digest(bytes)) != sha
+            {
+                return Err(ChatError::InvalidInput);
+            }
+        }
+        Ok((mime, bytes))
     }
 
     pub fn remove_ready_attachment(
@@ -9769,6 +9814,38 @@ mod tests {
                 .unwrap()
                 .host_session_bound
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat165_normal_draft_projection_is_scope_bound_and_metadata_only_for_files() {
+        let root = std::env::temp_dir().join(format!("yijie-feat165-draft-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let mut repository = open_repository_for_scope(&root, 43, scope());
+        let prepared = crate::chat::attachment::prepare_bytes(
+            "normal.txt".into(),
+            b"Normal input".to_vec(),
+            unix_seconds().unwrap(),
+        )
+        .unwrap();
+        let id = prepared.id;
+        repository
+            .store_attachment(prepared, DraftTarget::New)
+            .unwrap();
+        assert_eq!(
+            repository
+                .draft_attachment_presentation(id, DraftTarget::New)
+                .unwrap(),
+            ("text/plain".into(), None)
+        );
+        repository
+            .remove_ready_attachment(id, DraftTarget::New)
+            .unwrap();
+        assert_eq!(
+            repository.draft_attachment_presentation(id, DraftTarget::New),
+            Err(ChatError::NotFound)
+        );
+        drop(repository);
         fs::remove_dir_all(root).unwrap();
     }
 

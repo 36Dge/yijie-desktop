@@ -4,6 +4,7 @@
   "title": "Yijie Desktop Private Artifact Native Boundary v1",
   "description": "Identity-only image preview/save intent and content-free results. Content authority remains native SQLCipher storage.",
   "x-yijie-schema-version": 1,
+  "x-yijie-save-extension-aliases": {"image/jpeg": ["jpg", "jpeg"]},
   "x-yijie-preview-scheme": "yijie-artifact-preview",
   "x-yijie-command-names": [
     "chat_open_artifact_image_preview_v1",

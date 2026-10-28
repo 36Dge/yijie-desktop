@@ -73,6 +73,20 @@ async function readyWrapper(client = nativeClient([URL_A, URL_B, URL_C])) {
 }
 
 describe("ChatArtifactImage", () => {
+  it("keeps original saving independent while the ordinary preview is still loading", async () => {
+    const client = nativeClient();
+    const wrapper = await readyWrapper(client);
+    expect(wrapper.get("[data-testid='artifact-image-preview']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='artifact-image-save']").attributes("disabled")).toBeUndefined();
+    await wrapper.get("[data-testid='artifact-image-save']").trigger("click");
+    await flushPromises();
+    expect(client.saveImage).toHaveBeenCalledWith(CONTEXT_A, {
+      sessionId: SESSION_ID, turnId: TURN_ID, artifactId: ARTIFACT_ID,
+    });
+    expect(wrapper.get("[data-testid='artifact-image-feedback']").text()).toBe("图片已保存。");
+    wrapper.unmount();
+  });
+
   it("fails closed for non-image or non-ready Artifacts", async () => {
     const client = nativeClient();
     const announced = mount(ChatArtifactImage, {
@@ -104,6 +118,22 @@ describe("ChatArtifactImage", () => {
     wrapper.unmount();
     await flushPromises();
     expect(client.releaseImagePreview).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["artifact_native_expired", "图片已过期"],
+    ["artifact_native_not_found", "图片内容不可用"],
+  ] as const)("shows the ordinary %s reader state without regenerating", async (code, message) => {
+    const client = nativeClient();
+    vi.mocked(client.openImagePreview).mockRejectedValueOnce(new ChatArtifactNativeClientError({
+      schemaVersion: 1, requestId: null, code, retryable: false,
+    }));
+    const wrapper = await readyWrapper(client);
+    expect(wrapper.get("[role='alert']").text()).toContain(message);
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(client.openImagePreview).toHaveBeenCalledTimes(1);
+    expect(client.saveImage).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("maps expiry safely and retries a failed image with a fresh handle", async () => {

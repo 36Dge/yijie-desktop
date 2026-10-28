@@ -16,7 +16,7 @@ vi.mock("../../api/market-connectors-client", async original => {
   const actual = await original<typeof import("../../api/market-connectors-client")>();
   return { ...actual, marketConnectorsEnabled: true };
 });
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onDragDropEvent: async () => () => undefined }) }));
+vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ onDragDropEvent: async () => () => undefined }) }));
 vi.mock("../../authorization/experts-ui-config", () => ({ expertsUiEnabled: false }));
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
 const SESSION_ID = "019c1a00-0000-7000-8000-000000000002";

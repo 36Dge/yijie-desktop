@@ -531,6 +531,7 @@ function fakeClient(overrides: Partial<ChatClient> = {}): {
   let controlPlaneHandler: (event: ChatControlPlaneEvent) => void = () => undefined;
   let attachmentImportHandler: (event: ChatAttachmentImportEvent) => void = () => undefined;
   const client: ChatClient = {
+    attachmentPresentation: async () => ({sourcePath: null, imageUrl: null, expiresAt: Math.floor(NOW / 1000) + 30}),
     readTurnTiming: async (_context, sessionId, turnId) => ({sessionId, turnId, timing: null}),
     getSessionPurpose: async (_context, sessionId) => ({sessionId, purpose: "ordinary"}),
     loadNativeHistory: async () => ({views: [], submissions: [], remainingTurnIds: [], historyAvailability: "unavailable"}),
@@ -780,6 +781,69 @@ describe("chat view-model store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("FEAT165 preserves exact attachment bindings when older native history is paged and reopened", async () => {
+    const olderTurnId = "019c1a00-0000-7000-8000-000000000030";
+    const pageCursor = "abcdefghijklmnop";
+    const latestAttachment: ChatAttachment = { ...attachment("bound"), name: "same.txt", mediaType: "text/plain" };
+    const olderAttachment: ChatAttachment = { ...latestAttachment, attachmentId: "019c1a00-0000-7000-8000-000000000031" };
+    const makeTurn = (turnId: string, file: ChatAttachment, text: string, createdAt: number): ChatHistoryPage["turns"][number] => ({
+      turnId, status: "completed", terminalAt: createdAt + 1, reasoningStatus: "complete", reasoningReasonCode: null,
+      messages: [{ messageId: `local-${turnId}`, role: "user", content: text,
+        contentBlocks: [...(text ? [{ type: "text" as const, text }] : []), file],
+        status: "completed", ordinal: 0, createdAt }],
+      reasoning: [], artifacts: [],
+    });
+    const latestPage: ChatHistoryPage = { turns: [makeTurn(TURN_A, latestAttachment, "", 20)], nextCursor: pageCursor };
+    const olderPage: ChatHistoryPage = { turns: [makeTurn(olderTurnId, olderAttachment, "Read the older attachment", 10)], nextCursor: null };
+    const views: NativeConversationViewEvent["view"][] = [TURN_A, olderTurnId].map((turnId) => ({
+      sessionId: SESSION_A, turnId, runtimeThreadId: "runtime-thread", runtimeTurnId: `runtime-${turnId}`,
+      source: "native_observed", revision: "1", availability: "available", status: "completed", terminalObserved: true,
+      items: [{ ordinal: 0, lastMethod: "item/completed", item: {
+        id: `native-user-${turnId}`, type: "userMessage", availability: "available",
+        text: `File context: ordinary synthetic text for ${turnId}`,
+      } }],
+    }));
+    const originalNative = JSON.stringify(views);
+    const loadHistoryV3 = vi.fn<ChatClient["loadHistoryV3"]>(async (_context, _session, cursor) => cursor ? olderPage : latestPage);
+    const loadNativeHistory = vi.fn<ChatClient["loadNativeHistory"]>(async (_context, _session, turnIds) => ({
+      views: views.filter(view => turnIds.includes(view.turnId)), submissions: [], remainingTurnIds: [], historyAvailability: "partial",
+    }));
+    const { client } = fakeClient({ loadHistoryV3, loadNativeHistory });
+    const submit = vi.spyOn(client, "submitTurnV2");
+    const artifacts = createArtifactStoreDefinition(`artifact-feat165-paging-${storeSequence++}`)();
+    const store = createChatStoreDefinition(client, `chat-feat165-paging-${storeSequence++}`, () => ({
+      liveClient: { listen: async () => () => undefined }, store: artifacts,
+      authority: () => ({ authorizationRevision: 9, tenantId: TENANT }),
+    }))();
+    const assertTurn = (turnId: string, fileId: string, text: string) => {
+      const users = Object.values(store.conversationState.items).filter(item => item.turnId === turnId && item.kind === "user_message");
+      expect(users).toHaveLength(text ? 2 : 1);
+      const blocks = users.flatMap(item => item.contentBlocks);
+      expect(blocks.filter(block => block.type === "attachment_reference").map(block => block.attachmentId)).toEqual([fileId]);
+      expect(blocks.filter(block => block.type === "text").map(block => block.text)).toEqual(text ? [text] : []);
+    };
+    try {
+      await store.bind(TENANT);
+      for (let open = 0; open < 2; open++) {
+        await store.selectSession(SESSION_A);
+        expect(store.history?.turns).toHaveLength(1);
+        assertTurn(TURN_A, latestAttachment.attachmentId, "");
+        await store.loadOlderHistory();
+        expect(loadHistoryV3).toHaveBeenLastCalledWith(CONTEXT, SESSION_A, pageCursor, 20, expect.any(AbortSignal));
+        expect(store.history?.turns).toHaveLength(2);
+        expect(store.history?.nextCursor).toBeNull();
+        assertTurn(TURN_A, latestAttachment.attachmentId, "");
+        assertTurn(olderTurnId, olderAttachment.attachmentId, "Read the older attachment");
+        expect(JSON.stringify(views)).toBe(originalNative);
+        await store.clearSelectedSession();
+      }
+      expect(submit).not.toHaveBeenCalled();
+    } finally {
+      await store.dispose();
+      submit.mockRestore();
+    }
   });
 
   it("FEAT158 expert creation freezes the wrapper and never calls legacy submit", async () => {

@@ -2,7 +2,9 @@ use super::artifact::{
     ReadyFileContent, ReadyFileIdentity, ReadyFileReadError, MAX_ARTIFACT_BYTES,
 };
 use super::artifact_native::{ArtifactNativeCode, ArtifactNativeError, ArtifactNativeResponse};
-use super::attachment::{validate_pdf_artifact_content, validate_xlsx_artifact_content};
+use super::attachment::{
+    validate_office_artifact_content, validate_pdf_artifact_content, validate_xlsx_artifact_content,
+};
 use super::authorization::{AuthorizationFailure, ChatAction};
 use super::{ChatError, ChatRuntime, ConversationApplication};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -499,7 +501,7 @@ pub async fn chat_read_artifact_file_preview_v1(
     .map_err(|code| ArtifactNativeError::new(Some(request.request_id), code))?;
     if !matches!(
         first.media_type,
-        "text/plain" | "text/csv" | "application/json"
+        "text/plain" | "text/markdown" | "text/csv" | "application/json"
     ) {
         return Err(ArtifactNativeError::new(
             Some(request.request_id),
@@ -928,12 +930,16 @@ fn project_file_preview(
     if !(1..=MAX_PREVIEW_SOURCE_BYTES).contains(&bytes.len()) {
         return Err(ArtifactNativeCode::LimitExceeded);
     }
-    if !matches!(media_type, "text/plain" | "text/csv" | "application/json") {
+    if !matches!(
+        media_type,
+        "text/plain" | "text/markdown" | "text/csv" | "application/json"
+    ) {
         return Err(ArtifactNativeCode::Unsupported);
     }
     let normalized = normalized_text(bytes)?;
     match media_type {
         "text/plain" => bounded_text_projection("text/plain", &normalized),
+        "text/markdown" => bounded_text_projection("text/markdown", &normalized),
         "application/json" => {
             let value: Value = serde_json::from_str(&normalized)
                 .map_err(|_| ArtifactNativeCode::IntegrityFailed)?;
@@ -950,6 +956,9 @@ fn canonical_file_extension(media_type: &str) -> Option<&'static str> {
     match media_type {
         "text/html" => Some("html"),
         "text/plain" => Some("txt"),
+        "text/markdown" => Some("md"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Some("docx"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Some("pptx"),
         "text/csv" => Some("csv"),
         "application/json" => Some("json"),
         "application/pdf" => Some("pdf"),
@@ -963,7 +972,7 @@ fn validate_file_for_save(media_type: &str, bytes: &[u8]) -> Result<(), Artifact
         return Err(ArtifactNativeCode::LimitExceeded);
     }
     match media_type {
-        "text/html" | "text/plain" | "text/csv" => {
+        "text/html" | "text/plain" | "text/csv" | "text/markdown" => {
             std::str::from_utf8(bytes).map_err(|_| ArtifactNativeCode::IntegrityFailed)?;
             if bytes.contains(&0) {
                 return Err(ArtifactNativeCode::IntegrityFailed);
@@ -974,6 +983,14 @@ fn validate_file_for_save(media_type: &str, bytes: &[u8]) -> Result<(), Artifact
             serde_json::from_slice::<Value>(bytes)
                 .map_err(|_| ArtifactNativeCode::IntegrityFailed)?;
             Ok(())
+        }
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+            validate_office_artifact_content("docx", bytes)
+                .map_err(|_| ArtifactNativeCode::IntegrityFailed)
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+            validate_office_artifact_content("pptx", bytes)
+                .map_err(|_| ArtifactNativeCode::IntegrityFailed)
         }
         "application/pdf" => {
             validate_pdf_artifact_content(bytes).map_err(|_| ArtifactNativeCode::IntegrityFailed)
@@ -1074,6 +1091,9 @@ fn media_marker(media_type: &str) -> Option<&'static str> {
 fn marker_media_type(marker: &str) -> Option<&'static str> {
     match marker {
         "txt" => Some("text/plain"),
+        "md" => Some("text/markdown"),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
         "html" | "htm" => Some("text/html"),
         "csv" => Some("text/csv"),
         "json" => Some("application/json"),
@@ -1252,6 +1272,38 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn feat165_normal_markdown_preview_and_office_save() {
+        assert!(matches!(
+            project_file_preview("text/markdown", b"# Normal report\n").unwrap(),
+            FilePreviewProjection::Text {
+                media_type: "text/markdown",
+                ..
+            }
+        ));
+        let Some(root) = std::env::var_os("YIJIE_FEAT165_NORMAL_FILES") else {
+            return;
+        };
+        for (extension, media_type) in [
+            (
+                "docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                "pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ),
+        ] {
+            let bytes = fs::read(PathBuf::from(&root).join(format!("sample.{extension}"))).unwrap();
+            validate_file_for_save(media_type, &bytes).unwrap();
+            assert_eq!(canonical_file_extension(media_type), Some(extension));
+            assert_eq!(
+                project_file_preview(media_type, &bytes),
+                Err(ArtifactNativeCode::Unsupported)
+            );
+        }
+    }
+
+    #[test]
     fn text_json_and_csv_projection_is_bounded_and_inert() {
         assert_eq!(
             project_file_preview("text/plain", b"\xef\xbb\xbfalpha\r\nbeta\rgamma").unwrap(),
@@ -1387,7 +1439,7 @@ mod tests {
             validate_file_for_save(media_type, bytes).unwrap();
             assert_eq!(canonical_file_extension(media_type), Some(extension));
         }
-        assert_eq!(canonical_file_extension("text/markdown"), None);
+        assert_eq!(canonical_file_extension("text/markdown"), Some("md"));
         assert!(validate_file_for_save("application/json", b"invalid").is_err());
         assert_eq!(
             normalized_file_target(Path::new("/tmp/report"), "application/json").unwrap(),

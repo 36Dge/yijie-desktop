@@ -31,7 +31,7 @@ struct CatalogEntry {
     sql: &'static str,
 }
 
-const CATALOG: [CatalogEntry; 41] = [
+const CATALOG: [CatalogEntry; 42] = [
     CatalogEntry {
         version: 1,
         name: "0001_chat_core",
@@ -237,6 +237,11 @@ const CATALOG: [CatalogEntry; 41] = [
         name: "0041_plan_model_retirements",
         sql: include_str!("../../migrations/chat/0041_plan_model_retirements.sql"),
     },
+    CatalogEntry {
+        version: 42,
+        name: "0042_artifact_files_reader",
+        sql: include_str!("../../migrations/chat/0042_artifact_files_reader.sql"),
+    },
 ];
 
 // Preserve the existing activated-version surface; reader support is separate.
@@ -259,6 +264,7 @@ pub const KIMI_K31_SCHEMA_VERSION: i64 = 38;
 pub const KIMI_K31_RECOVERY_SCHEMA_VERSION: i64 = 39;
 pub const DELIVERY_PROOF_SCHEMA_VERSION: i64 = 40;
 pub const PLAN_RETIREMENT_SCHEMA_VERSION: i64 = 41;
+pub const ARTIFACT_FILES_SCHEMA_VERSION: i64 = 42;
 pub const SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION: i64 = 29;
 pub const MARKET_CONNECTORS_SCHEMA_VERSION: i64 = 30;
 pub const MARKET_SELECTION_SCHEMA_VERSION: i64 = 31;
@@ -309,6 +315,7 @@ pub(super) fn migrate_to_target(connection: &mut Connection, target: i64) -> Res
         KIMI_K31_RECOVERY_SCHEMA_VERSION,
         DELIVERY_PROOF_SCHEMA_VERSION,
         PLAN_RETIREMENT_SCHEMA_VERSION,
+        ARTIFACT_FILES_SCHEMA_VERSION,
         SCHEDULE_CHAT_WORKSPACE_SCHEMA_VERSION,
         MARKET_CONNECTORS_SCHEMA_VERSION,
         MARKET_SELECTION_SCHEMA_VERSION,
@@ -472,6 +479,25 @@ mod tests {
     use rusqlite::OpenFlags;
     use std::fs;
     use uuid::Uuid;
+
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    fn feat165_normal_reader_guard_preserves_existing_tables() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate_to_target(&mut connection, PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
+        let tables: String = connection.query_row("SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name)", [], |r|r.get(0)).unwrap();
+        migrate_to_target(&mut connection, ARTIFACT_FILES_SCHEMA_VERSION).unwrap();
+        assert_eq!(user_version(&connection).unwrap(), 42);
+        validate_reader(&connection).unwrap();
+        let after: String = connection.query_row("SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name)", [], |r|r.get(0)).unwrap();
+        assert_eq!(tables, after);
+        // Re-entering an older target is a no-op, never a downgrade write.
+        migrate_to_target(&mut connection, PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
+        assert_eq!(
+            user_version(&connection).unwrap(),
+            ARTIFACT_FILES_SCHEMA_VERSION
+        );
+    }
 
     #[test]
     fn feat158_expert_expand_preserves_history_and_default_writer() {

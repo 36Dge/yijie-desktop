@@ -458,6 +458,7 @@ pub fn run() {
         chat::ipc::chat_import_attachments_v2,
         chat::ipc::chat_list_draft_attachments_v2,
         chat::ipc::chat_remove_attachment_v2,
+        chat::ipc::chat_attachment_presentation_v2,
         chat::ipc::chat_model_catalog_v1,
         chat::ipc::chat_model_state_v1,
         chat::ipc::chat_select_model_v1,

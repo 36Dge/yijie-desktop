@@ -73,10 +73,16 @@ type MockDragDropPayload =
 const dragDropMock = vi.hoisted(() => ({
   handler: null as null | ((event: { payload: MockDragDropPayload }) => void),
   unlisten: vi.fn(),
+  windowListener: vi.fn(async () => () => undefined),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
+    onDragDropEvent: dragDropMock.windowListener,
+  }),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
     onDragDropEvent: async (handler: typeof dragDropMock.handler) => {
       dragDropMock.handler = handler;
       return dragDropMock.unlisten;
@@ -292,6 +298,7 @@ afterEach(() => {
   vi.useRealTimers();
   dragDropMock.handler = null;
   dragDropMock.unlisten.mockClear();
+  dragDropMock.windowListener.mockClear();
   document.body.innerHTML = "";
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -1682,8 +1689,10 @@ describe("FEAT-126 ChatPage", () => {
     selection.removeAllRanges();
   });
 
-  it("accepts native drops only inside the composer logical bounds", async () => {
+  it("accepts WebView-targeted native drops only inside the composer logical bounds", async () => {
     const { wrapper, store } = await mountPage("/chat");
+    expect(dragDropMock.windowListener).not.toHaveBeenCalled();
+    expect(dragDropMock.handler).not.toBeNull();
     const importAttachmentPaths = vi.spyOn(store, "importAttachmentPaths").mockResolvedValue([]);
     vi.spyOn(wrapper.get(".chat-composer").element, "getBoundingClientRect").mockReturnValue({
       left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300, x: 100, y: 100,

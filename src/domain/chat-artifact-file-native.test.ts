@@ -84,7 +84,7 @@ describe("private Artifact file native boundary", () => {
     });
 
     for (const data of [
-      { status: "previewed", mediaType: "text/markdown", text: "# title", truncated: false },
+      { status: "previewed", mediaType: "application/rtf", text: "title", truncated: false },
       { status: "previewed", mediaType: "text/plain", text: "alpha", truncated: false, path: "/tmp/a" },
       { status: "previewed", mediaType: "text/csv", rows: [["x"]], truncated: false, digest: "a".repeat(64) },
       { status: "previewed", mediaType: "text/csv", rows: [[1]], truncated: false },
@@ -94,6 +94,11 @@ describe("private Artifact file native boundary", () => {
       expect(() => parseArtifactFilePreviewResponse({ schemaVersion: 1, requestId: REQUEST_ID, data }))
         .toThrow();
     }
+  });
+
+  it("accepts FEAT165 ordinary Markdown through the existing bounded text projection", () => {
+    const data = { status: "previewed", mediaType: "text/markdown", text: "# title", truncated: false };
+    expect(parseArtifactFilePreviewResponse({ schemaVersion: 1, requestId: REQUEST_ID, data })).toEqual(data);
   });
 
   it("keeps save outcomes content-free", () => {

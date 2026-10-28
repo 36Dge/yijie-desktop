@@ -1,3 +1,4 @@
+import type { AttachmentPresentation } from "./chat-file-presentation";
 import { ARTIFACT_MEDIA_TYPES } from "../api/generated/artifact-media-policy.gen";
 import { isSessionPurposeView, type SessionPurposeView } from "./chat-session-purpose.generated";
 import { parseStrictRfc3339EpochNanoseconds } from "./rfc3339";
@@ -61,6 +62,7 @@ export const CHAT_V2_COMMAND_NAMES = Object.freeze([
   "chat_submit_turn_v2",
   "chat_load_history_v2",
   "chat_resync_session_v2",
+  "chat_attachment_presentation_v2",
 ] as const);
 
 export type ChatV2CommandName = (typeof CHAT_V2_COMMAND_NAMES)[number];
@@ -222,6 +224,8 @@ const CHAT_IMAGE_MEDIA_TYPES = Object.freeze([
 ] as const);
 
 const CHAT_FILE_MEDIA_TYPES = Object.freeze([
+  "image/svg+xml",
+  "video/mp4",
   "application/pdf",
   "text/plain",
   "text/markdown",
@@ -1456,6 +1460,15 @@ function parseContentBlock(value: unknown): ChatMessageContentBlock {
     return Object.freeze({ type: "text", text: plainText(block.text, 1024 * 1024) });
   }
   return parseAttachment(value, true);
+}
+
+export function parseAttachmentPresentationResponse(value: unknown): AttachmentPresentation {
+  return responseDataV2(value, data => {
+    const result = exactObject(data, ["sourcePath", "imageUrl", "expiresAt"]);
+    const imageUrl = nullable(result.imageUrl, value => stringValue(value, 700000));
+    if (imageUrl !== null && !/^data:image\/(?:png|svg\+xml);base64,[A-Za-z0-9+/]+=*$/.test(imageUrl)) throw new ChatContractError();
+    return Object.freeze({sourcePath: nullable(result.sourcePath, value => stringValue(value, 4096)), imageUrl, expiresAt: integer(result.expiresAt, 1)});
+  });
 }
 
 export function parseAttachmentListResponse(value: unknown): readonly ChatAttachment[] {

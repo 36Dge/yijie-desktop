@@ -3,13 +3,30 @@
 ## 文档状态
 
 - 状态：Accepted
-- 版本：1.7.2
-- 最后更新：2026-09-05
-- 适用 Feature：`FEAT-128`
+- 版本：1.7.3
+- 最后更新：2026-10-29
+- 适用 Feature：`FEAT-128`；下述限定扩展适用于已授权的 `FEAT-165` 候选
 - Contract impact：`semantic`
 - 适用仓库：`yijie-desktop`
 - 适用技术栈：Tauri v2、Vue 3、Vite、TypeScript、Pinia、Vue Router、Naive UI、ECharts、Lucide
 - 默认语言：中文
+
+### FEAT-165 已接受的候选扩展（2026-10-29）
+
+Owner于2026-10-28接受FEAT-165并授权实施。该候选复用本Pattern的Artifact shell、Native提交/ACK、
+历史、预览与原件另存机制；以下范围覆盖旧格式列表的对应缺口，不改写FEAT-128的历史门禁结论：
+
+- 目标原件扩展名为CSV、DOCX、PPTX、MD、TXT、JPG、PNG、JPEG、SVG、HTML、PDF、MP4，并保留已有受支持格式。
+  新输出值仅向已支持的显式v12 consumer发出；旧v9媒体闭集保持，不新增传输、播放器、生产者或重投递服务。
+- DOCX/PPTX/PDF提供文件信息与保存；TXT/CSV/MD使用现有有界文本/表格投影；HTML交互、SVG缩放和MP4音画/seek
+  沿既有组件。不得以信息卡代替内容预览，也不新增Office/PDF全文阅读器或视频理解能力。
+- “保存原件”独立于缩略图或内容预览是否成功，仍须通过原Native授权、状态及完整性检查；合法`.jpeg`别名保留，
+  系统保存面板承担改名、取消和覆盖确认，不转码、不新建二次确认。保存后的字节/摘要与接收原件一致。
+- 只保证已经Native提交且未过期的内容正常重开；不从Runtime正文或路径猜产物，不承诺Host暂存跨重启补领。
+  流终态、媒体事件版本与图片并发恢复继续使用原链的权威语义，不修改原生`userMessage`。
+
+输入附件的临时路径和图片投影只适用`13-feat-127-chat-attachments.md`中的FEAT-165增补，不扩大本Pattern的
+生成图片opaque-handle边界。实际验收状态见元仓FEAT-165，本文增补不构成发布或日常数据迁移批准。
 
 本文已由 Owner 在 2026-08-20 的 FEAT-128 G2 closure 中接受为 Design Pattern。Contracts S1/S2 与
 downstream pin-only preflight 随后通过，G2A 已批准。Desktop S4 native foundation 已实现 SQLCipher v8

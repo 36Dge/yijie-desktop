@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { chatFilePresentation } from "../../domain/chat-file-presentation";
 import { NProgress, NTag } from "naive-ui";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
 import type { ChatArtifactNativeClient } from "../../api/chat-artifact-native-client";
@@ -21,7 +22,7 @@ const props = defineProps<{
   reportNativeClient?: ChatArtifactReportNativeClient;
 }>();
 
-const kindPresentation = computed(() => ({
+const kindPresentation = computed(() => props.artifact.mediaType && props.artifact.kind !== "report" ? chatFilePresentation(props.artifact.mediaType) : ({
   image: { label: "图片", icon: "image" as const },
   video: { label: "视频", icon: "file" as const },
   file: { label: "文件", icon: "file" as const },
@@ -62,6 +63,12 @@ const busy = computed(() =>
   props.artifact.status === "processing" ||
   props.artifact.status === "transferring",
 );
+const sizeLabel = computed(() => {
+  const bytes = props.artifact.sizeBytes;
+  if (bytes === null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+});
 const titleId = computed(() => `artifact-${props.artifact.artifactId}-title`);
 const progressLabel = computed(() => `${displayName.value}处理进度`);
 </script>
@@ -80,7 +87,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       </span>
       <span class="artifact-shell__identity">
         <strong :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
-        <span class="artifact-shell__kind">{{ kindPresentation.label }}</span>
+        <span class="artifact-shell__kind">{{ kindPresentation.label }}<template v-if="sizeLabel"> · {{ sizeLabel }}</template></span>
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>
     </header>

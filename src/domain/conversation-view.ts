@@ -396,12 +396,21 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
     if (!threads[view.sessionId]) continue;
     const key = turnKey(view.sessionId, view.turnId);
     const old = turns[key];
+    const localUsers = (old?.itemKeys ?? []).map(k => items[k]).filter(item =>
+      item?.kind === "user_message" && item.contentBlocks.some(block => block.type === "attachment_reference"));
+    // The persisted local session/turn binding is authority for the submitted
+    // display text. Runtime's userMessage may contain Host-added file context.
+    // Only the unambiguous local submission replaces that view text; no native
+    // Item or wire content is changed, and cold/ambiguous history stays native.
+    const submittedText = localUsers.length === 1 && view.items.filter(entry => entry.item.type === "userMessage").length === 1
+      ? localUsers[0]!.contentBlocks.filter((block): block is TextContentBlock => block.type === "text")
+      : null;
     // Local attachments and Artifact references are separate product records, not native Items.
     const priorReferences = old?.itemKeys.flatMap(k => {
       const item = items[k];
       if (!item) return [];
       const blocks = item.contentBlocks.filter(b => b.type === "attachment_reference" || b.type === "artifact_reference");
-      return blocks.length ? [{...item, contentBlocks: blocks}] : [];
+      return blocks.length ? [{...item, contentBlocks: item.kind === "user_message" && !view.items.some(entry => entry.item.type === "userMessage") ? item.contentBlocks : blocks}] : [];
     }) ?? [];
     const localReferences = [...new Map([
       ...priorReferences,
@@ -416,7 +425,9 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       const archiveItem = archive?.items.find(e => e.ordinal === entry.ordinal && e.item.id === item.id)?.item;
       const archiveV5 = archiveItem && (archiveItem.type === "fileChange" || archiveItem.commandActions || archiveItem.commandPreview || archiveItem.appContext) ? archiveItem : undefined;
       const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
-      const contentBlocks: TextContentBlock[] = item.type === "reasoning"
+      const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
+        ? submittedText
+        : item.type === "reasoning"
         ? (["summary", "content"] as const).flatMap(reasoningSource =>
           (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
         : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
@@ -431,7 +442,10 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
         contentBlocks,
       };
     });
-    for (const item of [...nativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
+    // Attachment-only submissions already have their independent product row.
+    // Keep the native observation intact without adding an empty text bubble.
+    const displayedNativeItems = nativeItems.filter(item => !(submittedText !== null && item.kind === "user_message" && item.contentBlocks.length === 0));
+    for (const item of [...displayedNativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
     const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
     turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
       source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource,
@@ -442,7 +456,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       // The private view does not carry diagnostic scope. Do not assign a
       // thread-only warning to the Turn whose stream happened to observe it.
       notices: [],
-      itemKeys: [...nativeItems, ...localReferences].map(item => itemKey(item.threadId, item.turnId, item.itemId)),
+      itemKeys: [...displayedNativeItems, ...localReferences].map(item => itemKey(item.threadId, item.turnId, item.itemId)),
     };
     const thread = threads[view.sessionId];
     const diagnostic = view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;

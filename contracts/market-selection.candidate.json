@@ -24,7 +24,7 @@
     },
     {
       "path": "jsonschema/chat/message.schema.json",
-      "sha256": "3f277898f8204e02a400053cd56bec3b0eeb37ed2c50db3a6347e7fec61ddf34"
+      "sha256": "b1c427ee79f98145a3746b23fc2150995d43b464b5685c02bdaaa0ff275f0c51"
     },
     {
       "path": "scripts/market-selection-source.mjs",

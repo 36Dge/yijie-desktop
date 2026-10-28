@@ -4065,6 +4065,10 @@ pub enum StartTurnV2FileMediaType {
     ApplicationVndOpenxmlformatsOfficedocumentSpreadsheetmlSheet,
     #[serde(rename = "application/vnd.openxmlformats-officedocument.presentationml.presentation")]
     ApplicationVndOpenxmlformatsOfficedocumentPresentationmlPresentation,
+    #[serde(rename = "image/svg+xml")]
+    ImageSvgXml,
+    #[serde(rename = "video/mp4")]
+    VideoMp4,
 }
 fn canonical_id(s: &str) -> bool {
     let b = s.as_bytes();

@@ -36,7 +36,7 @@
     },
     {
       "path": "openapi/agent-host/agent-host.yaml",
-      "sha256": "8716d11ebae140d7c2cec72f6528bbd39ac5976c898c28e0044bec71fb004083"
+      "sha256": "7c7a2448141bab9a67f76a8127ec3ccc0cff6b831bf196e09a49e6fc4459470b"
     },
     {
       "path": "compatibility/market-provider/wire.schema.json",
@@ -74,15 +74,15 @@
   "generated": [
     {
       "path": "sdks/rust/market-host/types.gen.rs",
-      "sha256": "0d8f9f8979e82972543205e58349689a4f8148512082783d033f08b01c78d5db"
+      "sha256": "018ccfcc2f531ff8d93b502d83362e7e93e7d9cb64c3171f78d98e03e3f0ce1e"
     },
     {
       "path": "sdks/go/market-host/types.gen.go",
-      "sha256": "c7f7bc81a9b8b0bdaad74c6ea19436f8b8bad69d2f9fda81549a17027aa25e0c"
+      "sha256": "ab488445cfb46e34101bf9d1340093fd4f9b98eb26c703d2409e05a60c264086"
     },
     {
       "path": "sdks/jsonschema/market-host.schema.json",
-      "sha256": "8c97409d2df646d1ccabb3d0270ffcf8f2106b4358fd9f1b6ab1be562fb4e410"
+      "sha256": "f6be1069a4d35b54e3eed6ca6e2300653d2e49ab4a1f02e5104e7f03e75009b4"
     },
     {
       "path": "sdks/typescript/src/domain/market-host-native.generated.ts",
@@ -106,7 +106,7 @@
     {
       "source": "sdks/rust/market-host/types.gen.rs",
       "path": "src-tauri/src/chat/connectors/host_generated.rs",
-      "sha256": "0d8f9f8979e82972543205e58349689a4f8148512082783d033f08b01c78d5db"
+      "sha256": "018ccfcc2f531ff8d93b502d83362e7e93e7d9cb64c3171f78d98e03e3f0ce1e"
     },
     {
       "source": "sdks/rust/market-broker-control/types.gen.rs",
@@ -116,7 +116,7 @@
     {
       "source": "sdks/jsonschema/market-host.schema.json",
       "path": "contracts/market-host.schema.json",
-      "sha256": "8c97409d2df646d1ccabb3d0270ffcf8f2106b4358fd9f1b6ab1be562fb4e410"
+      "sha256": "f6be1069a4d35b54e3eed6ca6e2300653d2e49ab4a1f02e5104e7f03e75009b4"
     },
     {
       "source": "sdks/typescript/src/domain/market-host-native.generated.ts",

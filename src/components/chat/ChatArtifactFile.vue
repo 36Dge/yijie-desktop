@@ -30,8 +30,11 @@ const props = defineProps<{
   client?: ChatArtifactFileNativeClient;
 }>();
 
-const INLINE_MEDIA_TYPES = new Set(["text/plain", "text/csv", "application/json"]);
+const INLINE_MEDIA_TYPES = new Set(["text/markdown", "text/plain", "text/csv", "application/json"]);
 const SAVE_MEDIA_TYPES = new Set([
+  "text/markdown",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "text/html",
   "text/plain",
   "text/csv",
@@ -82,7 +85,7 @@ let disposed = false;
 let htmlIdentity: { contextId: string; identity: ArtifactFileNativeIdentity } | null = null;
 
 const busy = computed(() => phase.value === "loading");
-const textProjection = computed(() => projection.value?.mediaType === "text/plain" ||
+const textProjection = computed(() => projection.value?.mediaType === "text/plain" || projection.value?.mediaType === "text/markdown" ||
   projection.value?.mediaType === "application/json" ? projection.value : null);
 const csvProjection = computed(() => projection.value?.mediaType === "text/csv" ? projection.value : null);
 

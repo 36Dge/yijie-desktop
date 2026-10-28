@@ -65,6 +65,7 @@ describe("private chat IPC v1 contract", () => {
       "chat_submit_turn_v2",
       "chat_load_history_v2",
       "chat_resync_session_v2",
+      "chat_attachment_presentation_v2",
     ]);
   });
 

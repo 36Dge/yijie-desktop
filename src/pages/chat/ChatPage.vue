@@ -2,7 +2,7 @@
 import { useChatTurnTiming } from "../../composables/useChatTurnTiming";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { NCard, NModal } from "naive-ui";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type RouteLocationNormalized } from "vue-router";
 import ScheduledDraftPanel from "../../components/schedules/ScheduledDraftPanel.vue";
@@ -18,6 +18,8 @@ import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
 import { useChatDelivery } from "../../composables/useChatDelivery";
 import { chatModelsEnabled, kimiK31Candidate, defaultModelProfile } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
+import { useChatAttachmentPresentation } from "../../composables/useChatAttachmentPresentation";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
 import ChatConnectorControl from "../../components/chat/ChatConnectorControl.vue";
 import ChatSkillControl from "../../components/chat/ChatSkillControl.vue";
@@ -76,7 +78,6 @@ import type {
 import {
   selectConversationTimeline,
   type ConversationTimelineArtifactReferenceContentBlock,
-  type ConversationTimelineAttachmentReferenceContentBlock,
   type ConversationTimelineItemViewModel,
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
@@ -108,6 +109,14 @@ import { compileSkillInput, selectedSkillIssue, skillSelectionIssue, type ChatSk
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+const readAttachmentPresentation = useChatAttachmentPresentation(
+  () => chatStore.context?.contextId ?? null,
+  () => chatStore.draftTarget,
+  () => chatStore.draftAttachments.map(a => a.attachmentId),
+  () => chatStore.canSend && chatStore.submissionState === "idle",
+);
+const attachmentPresentationScope = computed(() => `${chatStore.context?.contextId ?? ""}:${JSON.stringify(chatStore.draftTarget)}`);
+
 const artifactStore = useArtifactStore();
 const permissionScope = usePermissionStore();
 const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
@@ -964,19 +973,9 @@ function showUnsupportedInput(message: string): void {
 
 
 
-function attachmentSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
-function timelineAttachmentStatus(
-  attachment: ConversationTimelineAttachmentReferenceContentBlock,
-): string {
-  if (attachment.status === "expired") return "已过期";
-  if (attachment.status === "error_terminal") return "处理失败";
-  return attachment.kind === "image" ? "图片" : "文件";
-}
+
+
 
 function itemCopyText(item: ConversationTimelineItemViewModel): string {
   return copyableTimelineItemText(item) ?? "";
@@ -1003,8 +1002,9 @@ function artifactsForTimelineReference(
 
 async function installDragDropListener(): Promise<void> {
   try {
-    const currentWindow = getCurrentWindow();
-    const unlisten = await currentWindow.onDragDropEvent((event) => {
+    // File drops originate from the WebView. A Window-only subscription misses
+    // WebView-targeted events in the current native runtime.
+    const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
       if (!attachmentInteractionAllowed.value) {
         dragActive.value = false;
         return;
@@ -1079,6 +1079,8 @@ onBeforeUnmount(() => {
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatDeliveryControl v-if="kimiK31Candidate && chatModelsEnabled && !isDraftMode && normalPurposeReady && routeSessionId && chatStore.hasAction('read_sessions')" :states="delivery.states.value" :loading="delivery.loading.value" :cancelling="delivery.cancelling.value" :can-cancel="chatStore.hasAction('interrupt_turn')" :error="delivery.error.value" :notice="delivery.notice.value" @refresh="delivery.refresh" @cancel="delivery.cancel" />
       <ChatComposer
+        :read-attachment-presentation="readAttachmentPresentation"
+        :presentation-scope="attachmentPresentationScope"
         ref="composer"
         v-model="prompt"
         mode="new"
@@ -1237,18 +1239,7 @@ onBeforeUnmount(() => {
               />
             </template>
             <template #attachment-reference="{ block }">
-              <div
-                class="chat-message__attachment"
-                :class="{ 'chat-message__attachment--expired': block.status === 'expired' }"
-              >
-                <span class="chat-message__attachment-icon" aria-hidden="true">
-                  <YjIcon :name="block.kind === 'image' ? 'image' : 'file'" size="sm" />
-                </span>
-                <span class="chat-message__attachment-copy">
-                  <strong :title="block.name">{{ block.name }}</strong>
-                  <span>{{ timelineAttachmentStatus(block) }} · {{ attachmentSize(block.sizeBytes) }}</span>
-                </span>
-              </div>
+              <ChatAttachmentChip :attachment-id="block.attachmentId" :name="block.name" :media-type="block.mediaType" :status="block.status" />
             </template>
             <template #artifact-reference="{ item, block }">
               <template
@@ -1341,6 +1332,8 @@ onBeforeUnmount(() => {
       <p v-if="expertNotice" class="chat-workspace__composer-error" role="status">{{ expertNotice }} <button type="button" class="yj-control" :disabled="submitting" @click="refreshExpert">{{ expertSubmission ? "确认原提交" : "重新读取" }}</button><template v-if="expertRecoveryOperation">恢复会重新应用原选择，不发送消息。<button type="button" class="yj-control" :disabled="expertRecoveryBlocked" @click="recoverExpertBinding">恢复原操作</button></template></p>
       <p v-if="uncertainLocalSubmission" class="chat-workspace__composer-error" role="status">原提交结果尚未确认，请勿重复发送。<button type="button" class="yj-control" :disabled="submitting || chatStore.phase === 'resyncing' || !chatStore.hasAction('read_sessions')" @click="chatStore.resyncSelected">重新读取原提交</button></p>
       <ChatComposer
+        :read-attachment-presentation="readAttachmentPresentation"
+        :presentation-scope="attachmentPresentationScope"
         ref="composer"
         v-model="prompt"
         mode="reply"

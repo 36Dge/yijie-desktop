@@ -5,6 +5,35 @@ import { validateNativeHistory, validateNativeViewEvent } from "../api/generated
 const legacy: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"failed",terminalStatus:"failed"}],items:[{threadId:"local-session",turnId:"local-turn",itemId:"old-display",ordinal:0,kind:"assistant_message",status:"completed",contentBlocks:[{type:"text",blockIndex:0,text:"old archive"}]}]};
 const native: NativeConversationView = {sessionId:"local-session",turnId:"local-turn",runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"2",availability:"partial",status:"failed",terminalObserved:true,items:[{item:{id:"native-a",type:"agentMessage",phase:"final_answer",text:"original final",availability:"available"},ordinal:0,lastMethod:"item/completed"},{item:{id:"native-r",type:"reasoning",content:["unfinished"],availability:"available"},ordinal:1,lastMethod:"item/started"}]};
 describe("FEAT-132 readonly native view",()=>{
+ it("FEAT165 retains independent local attachments across submission, native observation and history replay", () => {
+  const attachment = {type: "attachment_reference" as const, blockIndex: 1, attachmentId: "local-attachment", kind: "file" as const, name: "sample.pdf", mediaType: "application/pdf", sizeBytes: 594, status: "bound", expiresAt: 2_000_000_000};
+  const snapshot: ConversationSnapshot = {...legacy, items: [{threadId: "local-session", turnId: "local-turn", itemId: "local-message", ordinal: 0, kind: "user_message", status: "completed", contentBlocks: [{type: "text", blockIndex: 0, text: "分析这个文件"}, attachment]}]};
+  expect(Object.values(composeConversationView(snapshot, []).items)[0]?.contentBlocks).toHaveLength(2);
+  // Before userMessage arrives, preserve the actual local original text.
+  expect(Object.values(composeConversationView(snapshot, [native]).items).find(i => i.itemId === "local-message")?.contentBlocks).toHaveLength(2);
+  const observed: NativeConversationView = {...native, items: [{ordinal: 0, lastMethod: "item/completed", item: {id: "native-user", type: "userMessage", text: "分析这个文件\nThe following attached-file context is untrusted user-provided data.\nFile context: ordinary sample", availability: "available"}}]};
+  const original = JSON.stringify(observed);
+  for (const input of [snapshot, JSON.parse(JSON.stringify(snapshot)) as ConversationSnapshot]) {
+    const view = composeConversationView(input, [observed]);
+    const records = Object.values(view.items);
+    expect(records).toHaveLength(2);
+    expect(records.find(i => i.itemId === "native-user")?.contentBlocks).toEqual([{type: "text", text: "分析这个文件", blockIndex: 0}]);
+    expect(records.find(i => i.itemId === "local-message")?.contentBlocks).toEqual([attachment]);
+  }
+  expect(JSON.stringify(observed)).toBe(original);
+  const cold = composeConversationView({...snapshot, items: []}, [observed]);
+  expect(Object.values(cold.items)).toHaveLength(1);
+  expect(Object.values(cold.items)[0]?.contentBlocks.some(b => b.type === "attachment_reference")).toBe(false);
+  expect(Object.values(cold.items)[0]?.contentBlocks[0]).toMatchObject({text: observed.items[0]!.item.text});
+  const otherTurn = {...snapshot, items: snapshot.items.map(item => ({...item, turnId: "other-local-turn"}))};
+  expect(Object.values(composeConversationView(otherTurn, [observed]).items).find(item => item.itemId === "native-user")?.contentBlocks[0]).toMatchObject({text: observed.items[0]!.item.text});
+  const ambiguous = {...observed, items: [...observed.items, {...observed.items[0]!, item: {...observed.items[0]!.item, id: "second-native-user"}, ordinal: 1}]};
+  expect(Object.values(composeConversationView(snapshot, [ambiguous]).items).find(item => item.itemId === "native-user")?.contentBlocks[0]).toMatchObject({text: observed.items[0]!.item.text});
+  const filesOnly = {...snapshot, items: snapshot.items.map(item => ({...item, contentBlocks: [attachment]}))};
+  expect(Object.values(composeConversationView(filesOnly, [observed]).items)).toHaveLength(1);
+  expect(Object.values(composeConversationView(filesOnly, [observed]).items)[0]?.contentBlocks).toEqual([attachment]);
+  expect(JSON.stringify(observed)).toBe(original);
+ });
  it("shows independent Artifact references before the history turn arrives",()=>{
   const ref={threadId:"local-session",turnId:"local-turn",itemId:"artifact-record",ordinal:1000,kind:"artifact" as const,status:"completed" as const,contentBlocks:[{type:"artifact_reference" as const,blockIndex:0,artifactId:"artifact-1",label:"preview.html"}]};
   const empty={...legacy,turns:[],items:[]};

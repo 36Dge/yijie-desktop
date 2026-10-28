@@ -1184,7 +1184,7 @@ fn parse_event_json(
         validate_v5_explicit_nulls(&raw)?;
     }
     let wire: WireEvent = serde_json::from_value(raw).map_err(|_| protocol_error())?;
-    if !matches!(schema_version, 2..=6 | 9)
+    if !matches!(schema_version, 2..=6 | 9 | 12)
         || wire.schema_version != schema_version
         || wire.sequence == 0
         || wire.occurred_at.len() > 64
@@ -1267,7 +1267,7 @@ fn parse_event_json(
             payload: wire.payload,
         }));
     }
-    if matches!(schema_version, 3 | 9) && !is_v3_ordinary_event_type(&event_type) {
+    if matches!(schema_version, 3 | 9 | 12) && !is_v3_ordinary_event_type(&event_type) {
         return Err(protocol_error());
     }
     if schema_version == 4 && !is_v4_ordinary_event_type(&event_type) {
@@ -1289,7 +1289,7 @@ fn parse_event_json(
         return Err(protocol_error());
     }
     let kind = parse_event_kind(
-        if schema_version == 9 {
+        if matches!(schema_version, 9 | 12) {
             3
         } else {
             schema_version
@@ -1545,8 +1545,10 @@ fn parse_event_kind(
                 validate_optional_text_allow_empty(payload.code.as_deref(), MAX_EVENT_BYTES)?;
                 validate_optional_text_allow_empty(payload.message.as_deref(), MAX_EVENT_BYTES)?;
             } else {
-                validate_optional_text(payload.code.as_deref(), 256)?;
-                validate_optional_text(payload.message.as_deref(), 8 * 1024)?;
+                // v3 (also used by media v9/v12) permits present empty strings.
+                // A normal prior terminal must not break a continuation replay.
+                validate_optional_text_allow_empty(payload.code.as_deref(), 256)?;
+                validate_optional_text_allow_empty(payload.message.as_deref(), 8 * 1024)?;
             }
             Ok(HostEventKind::TurnCompleted {
                 status,
@@ -2556,6 +2558,55 @@ mod tests {
         let mut decoder = SseDecoder::new(stream, sequence.saturating_sub(1), schema_version);
         decoder.push(frame.as_bytes())?;
         decoder.next().ok_or_else(protocol_error)
+    }
+
+    #[test]
+    fn feat165_normal_host_media_stream_reaches_all_artifacts() {
+        let Ok(path) = std::env::var("YIJIE_FEAT165_NORMAL_EVENTS") else {
+            return;
+        };
+        let events: Vec<Value> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let mut artifact_count = 0;
+        for event in &events {
+            let parsed = decode_for_schema(event, 12).unwrap_or_else(|_| {
+                panic!(
+                    "normal media stream failed at sequence {}",
+                    event["sequence"]
+                )
+            });
+            if matches!(parsed, HostStreamEvent::Artifact(_)) {
+                artifact_count += 1;
+            }
+        }
+        assert_eq!(events.len(), 27);
+        assert_eq!(artifact_count, 24);
+    }
+
+    #[test]
+    fn feat165_normal_real_media_continuation_replay() {
+        let Ok(path) = std::env::var("YIJIE_FEAT165_REAL_MEDIA_EVENTS") else {
+            return;
+        };
+        let events: Vec<Value> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let mut terminal_turns = std::collections::HashSet::new();
+        let mut artifacts = 0;
+        for event in &events {
+            let parsed = decode_for_schema(event, 12).unwrap_or_else(|_| {
+                panic!(
+                    "normal captured replay failed at sequence {}",
+                    event["sequence"]
+                )
+            });
+            match parsed {
+                HostStreamEvent::Artifact(_) => artifacts += 1,
+                HostStreamEvent::Ordinary(event) if event.event_type == "turn.completed" => {
+                    terminal_turns.insert(event.turn_id);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(terminal_turns.len(), 2);
+        assert_eq!(artifacts, 24);
     }
 
     #[test]

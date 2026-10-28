@@ -19,10 +19,14 @@ import ChatSkillChips from "./ChatSkillChips.vue";
 import type { ChatSkillChip } from "../../domain/chat-skills";
 import ChatReadinessNotice from "./ChatReadinessNotice.vue";
 import ChatAddControl from "./ChatAddControl.vue";
+import ChatAttachmentChip from "./ChatAttachmentChip.vue";
+import type { AttachmentPresentationReader } from "../../domain/chat-file-presentation";
 import type { ConnectorChipView } from "../../domain/connector-ui";
 
 const props = withDefaults(defineProps<{
   modelValue: string;
+  readAttachmentPresentation?: AttachmentPresentationReader;
+  presentationScope?: string;
   mode: "new" | "reply";
   textOnly?: boolean;
   projects: readonly ChatProject[];
@@ -85,6 +89,8 @@ defineSlots<{
   }): unknown;
 }>();
 
+const activeAttachment = ref<string | null>(null);
+watch(() => [props.presentationScope, props.submissionState, props.canSend], () => { activeAttachment.value = null; });
 const composing = ref(false);
 const composerElement = ref<HTMLElement | null>(null);
 const textareaElement = ref<HTMLTextAreaElement | null>(null);
@@ -148,10 +154,6 @@ const ATTACHMENT_STATUS_LABELS = Object.freeze({
   expired: "已过期",
 });
 
-function attachmentStatus(attachment: ChatAttachment): string {
-  return ATTACHMENT_STATUS_LABELS[attachment.status];
-}
-
 function attachmentImportStatus(attempt: ChatAttachmentImportEvent): string {
   return ATTACHMENT_STATUS_LABELS[attempt.stage];
 }
@@ -166,11 +168,7 @@ const attachmentProgressAnnouncement = computed(() => {
   return `${attempt.itemCount} 个附件：${attachmentImportStatus(attempt)}`;
 });
 
-function attachmentSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+
 
 function attachmentErrorMessage(code: string | null): string | null {
   switch (code) {
@@ -415,31 +413,13 @@ function handlePaste(event: ClipboardEvent): void {
               </button>
             </span>
           </li>
-          <li
-            v-for="attachment in attachments"
-            :key="attachment.attachmentId"
-            class="chat-composer__attachment"
-            :class="`chat-composer__attachment--${attachment.status}`"
-          >
-            <span class="chat-composer__attachment-icon" aria-hidden="true">
-              <YjIcon :name="attachment.type === 'image' ? 'image' : 'file'" size="sm" />
-            </span>
-            <span class="chat-composer__attachment-copy">
-              <strong :title="attachment.name">{{ attachment.name }}</strong>
-              <span>{{ attachmentSize(attachment.sizeBytes) }} · {{ attachmentStatus(attachment) }}</span>
-            </span>
-            <span class="chat-composer__attachment-actions">
-              <button
-                type="button"
-                class="chat-composer__attachment-action"
-                :aria-label="`移除 ${attachment.name}`"
-                :title="`移除 ${attachment.name}`"
-                :disabled="submissionBusy"
-                @click="emit('remove-attachment', attachment.attachmentId)"
-              >
-                <YjIcon name="dismiss" size="sm" />
-              </button>
-            </span>
+          <li v-for="attachment in attachments" :key="attachment.attachmentId" class="chat-composer__capsule">
+            <ChatAttachmentChip
+              :attachment-id="attachment.attachmentId" :name="attachment.name" :media-type="attachment.mediaType" :status="attachment.status"
+              :active="activeAttachment === attachment.attachmentId" removable :disabled="submissionBusy || !canSend"
+              :read-presentation="readAttachmentPresentation"
+              @activate="activeAttachment = $event" @remove="emit('remove-attachment', $event)"
+            />
           </li>
         </ul>
         <div class="chat-composer__input" :class="{ 'chat-composer__input--inline-prefix': connectorPrefixWidth > 0, 'chat-composer__input--skills': hasSkillPrefix }" :style="{ '--connector-prefix-width': `${connectorPrefixWidth}px` }">
@@ -772,13 +752,15 @@ function handlePaste(event: ClipboardEvent): void {
 .chat-composer__attachments {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--yj-space-2);
   padding: var(--yj-space-3) var(--yj-space-3) 0;
   margin: 0;
   list-style: none;
 }
+
+.chat-composer__capsule { min-width: 0; max-width: 100%; display: flex; }
 
 .chat-composer__attachment {
   display: grid;

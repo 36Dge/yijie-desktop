@@ -14,17 +14,46 @@
     "chat_create_session_v2",
     "chat_submit_turn_v2",
     "chat_load_history_v2",
-    "chat_resync_session_v2"
+    "chat_resync_session_v2",
+    "chat_attachment_presentation_v2"
   ],
   "x-yijie-command-contracts": {
-    "chat_pick_attachments_v2": { "request": "#/$defs/pickAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
-    "chat_import_attachments_v2": { "request": "#/$defs/importAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
-    "chat_list_draft_attachments_v2": { "request": "#/$defs/listDraftAttachmentsRequest", "response": "#/$defs/attachmentListResponse" },
-    "chat_remove_attachment_v2": { "request": "#/$defs/removeAttachmentRequest", "response": "#/$defs/operationResponse" },
-    "chat_create_session_v2": { "request": "#/$defs/createSessionRequest", "response": "#/$defs/createdTurnResponse" },
-    "chat_submit_turn_v2": { "request": "#/$defs/submitTurnRequest", "response": "#/$defs/createdTurnResponse" },
-    "chat_load_history_v2": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/historyPageResponse" },
-    "chat_resync_session_v2": { "request": "#/$defs/sessionReadRequest", "response": "#/$defs/resyncResponse" }
+    "chat_pick_attachments_v2": {
+      "request": "#/$defs/pickAttachmentsRequest",
+      "response": "#/$defs/attachmentListResponse"
+    },
+    "chat_import_attachments_v2": {
+      "request": "#/$defs/importAttachmentsRequest",
+      "response": "#/$defs/attachmentListResponse"
+    },
+    "chat_list_draft_attachments_v2": {
+      "request": "#/$defs/listDraftAttachmentsRequest",
+      "response": "#/$defs/attachmentListResponse"
+    },
+    "chat_remove_attachment_v2": {
+      "request": "#/$defs/removeAttachmentRequest",
+      "response": "#/$defs/operationResponse"
+    },
+    "chat_create_session_v2": {
+      "request": "#/$defs/createSessionRequest",
+      "response": "#/$defs/createdTurnResponse"
+    },
+    "chat_submit_turn_v2": {
+      "request": "#/$defs/submitTurnRequest",
+      "response": "#/$defs/createdTurnResponse"
+    },
+    "chat_load_history_v2": {
+      "request": "#/$defs/sessionReadRequest",
+      "response": "#/$defs/historyPageResponse"
+    },
+    "chat_resync_session_v2": {
+      "request": "#/$defs/sessionReadRequest",
+      "response": "#/$defs/resyncResponse"
+    },
+    "chat_attachment_presentation_v2": {
+      "request": "#/$defs/attachmentPresentationRequest",
+      "response": "#/$defs/attachmentPresentationResponse"
+    }
   },
   "x-yijie-error-codes": [
     "chat_unauthenticated",
@@ -98,7 +127,9 @@
         "application/rtf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/svg+xml",
+        "video/mp4"
       ]
     },
     "mediaType": {
@@ -583,6 +614,115 @@
         "attachmentItemCount": { "type": "integer", "minimum": 1, "maximum": 10 },
         "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 60000 }
       }
+    },
+    "attachmentPresentationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draftTarget",
+        "attachmentId",
+        "action"
+      ],
+      "properties": {
+        "draftTarget": {
+          "$ref": "#/$defs/draftTarget"
+        },
+        "attachmentId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "enum": [
+            "read",
+            "clear"
+          ]
+        }
+      }
+    },
+    "attachmentPresentationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "contextId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "payload": {
+          "$ref": "#/$defs/attachmentPresentationPayload"
+        }
+      }
+    },
+    "attachmentPresentationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourcePath",
+            "imageUrl",
+            "expiresAt"
+          ],
+          "properties": {
+            "sourcePath": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "imageUrl": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 700000,
+                  "pattern": "^data:image/(png|svg\\+xml);base64,"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/epochSeconds"
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "x-yijie-attachment-presentation": "Main WebView only, current authorized unbound draft; ephemeral selected path and bounded image projection. Native reads borrow existing image read budget. No disk path input, output message field, persistence or provider transmission. Clear drops temporary selected-path metadata."
 }

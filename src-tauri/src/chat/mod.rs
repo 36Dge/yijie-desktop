@@ -127,6 +127,7 @@ pub(crate) fn feat126_s10_driver_unregistered_command_guard() {
     let _ = ipc::chat_create_session_v1;
     let _ = ipc::chat_submit_turn_v1;
     let _ = ipc::chat_pick_attachments_v2;
+    let _ = ipc::chat_attachment_presentation_v2;
     let _ = ipc::chat_list_draft_attachments_v2;
     let _ = ipc::chat_import_attachments_v2;
     let _ = ipc::chat_remove_attachment_v2;

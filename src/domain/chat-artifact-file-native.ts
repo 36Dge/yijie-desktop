@@ -24,7 +24,7 @@ export type ArtifactFileSaveResult = ArtifactSaveResult;
 export type ArtifactFilePreviewResult =
   | Readonly<{
     status: "previewed";
-    mediaType: "text/plain" | "application/json";
+    mediaType: "text/plain" | "text/markdown" | "application/json";
     text: string;
     truncated: boolean;
   }>
@@ -126,7 +126,7 @@ export function parseArtifactFilePreviewResponse(value: unknown): ArtifactFilePr
   exact(data, ["status", "mediaType", "text", "truncated"]);
   if (
     data.status !== "previewed" ||
-    (data.mediaType !== "text/plain" && data.mediaType !== "application/json") ||
+    (data.mediaType !== "text/plain" && data.mediaType !== "text/markdown" && data.mediaType !== "application/json") ||
     typeof data.truncated !== "boolean"
   ) {
     throw new ArtifactNativeContractError();

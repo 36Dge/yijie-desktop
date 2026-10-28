@@ -918,7 +918,7 @@ impl HostBridge {
         schema_version: u8,
     ) -> Result<HostEventStream, HostBridgeError> {
         require_non_nil(session_id)?;
-        if !matches!(schema_version, 2..=11) {
+        if !matches!(schema_version, 2..=12) {
             return Err(protocol_error());
         }
         let path = format!("/v{schema_version}/agent-sessions/{session_id}/events");
@@ -978,7 +978,9 @@ impl HostBridge {
         self.open_event_stream(
             session_id,
             cursor,
-            if super::artifact_media::enabled() {
+            if super::artifact_media::files_enabled() {
+                12
+            } else if super::artifact_media::enabled() {
                 9
             } else {
                 3
@@ -2186,6 +2188,8 @@ fn validate_turn_v2_blocks(blocks: &[HostTurnInputBlock]) -> Result<(), HostBrid
                         "application/pdf"
                             | "text/plain"
                             | "text/markdown"
+                            | "image/svg+xml"
+                            | "video/mp4"
                             | "text/csv"
                             | "application/json"
                             | "application/yaml"

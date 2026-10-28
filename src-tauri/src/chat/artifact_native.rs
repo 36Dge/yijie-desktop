@@ -375,6 +375,8 @@ pub struct ArtifactNativeRuntime {
     process_epoch: Uuid,
     registry: Mutex<PreviewRegistry>,
     reads: Mutex<InflightReadLimits>,
+    pending_reads: tokio::sync::Semaphore,
+    read_slots: tokio::sync::Semaphore,
     active_saves: Mutex<HashSet<PreviewIdentity>>,
 }
 
@@ -386,6 +388,8 @@ impl ArtifactNativeRuntime {
             process_epoch,
             registry: Mutex::new(PreviewRegistry::new(process_epoch)),
             reads: Mutex::new(InflightReadLimits::default()),
+            pending_reads: tokio::sync::Semaphore::new(MAX_HANDLES_PER_WEBVIEW),
+            read_slots: tokio::sync::Semaphore::new(MAX_INFLIGHT_READS),
             active_saves: Mutex::new(HashSet::new()),
         }
     }
@@ -476,6 +480,45 @@ impl ArtifactNativeRuntime {
         }
     }
 
+    pub(super) fn borrow_read(
+        &self,
+        bytes: usize,
+    ) -> Result<ImageReadLease<'_>, ArtifactNativeCode> {
+        Ok(ImageReadLease {
+            runtime: self,
+            _slot: self
+                .read_slots
+                .try_acquire()
+                .map_err(|_| ArtifactNativeCode::LimitExceeded)?,
+            reservation: self.reserve(bytes)?,
+        })
+    }
+
+    async fn queued_read_slot(
+        &self,
+    ) -> Result<
+        (
+            tokio::sync::SemaphorePermit<'_>,
+            tokio::sync::SemaphorePermit<'_>,
+        ),
+        ArtifactNativeCode,
+    > {
+        // Match the existing video reader: bound queued requests and wait time
+        // before consuming a single-use handle or allocating image bytes.
+        let pending = self
+            .pending_reads
+            .try_acquire()
+            .map_err(|_| ArtifactNativeCode::LimitExceeded)?;
+        let slot = tokio::time::timeout(
+            std::time::Duration::from_secs(NATIVE_IO_TIMEOUT_SECONDS),
+            self.read_slots.acquire(),
+        )
+        .await
+        .map_err(|_| ArtifactNativeCode::Unavailable)?
+        .map_err(|_| ArtifactNativeCode::Unavailable)?;
+        Ok((pending, slot))
+    }
+
     fn begin_save(&self, identity: PreviewIdentity) -> Result<SaveLease<'_>, ArtifactNativeCode> {
         let mut active_saves = self
             .active_saves
@@ -488,6 +531,17 @@ impl ArtifactNativeRuntime {
             runtime: self,
             identity,
         })
+    }
+}
+
+pub(super) struct ImageReadLease<'a> {
+    runtime: &'a ArtifactNativeRuntime,
+    _slot: tokio::sync::SemaphorePermit<'a>,
+    reservation: ReadReservation,
+}
+impl Drop for ImageReadLease<'_> {
+    fn drop(&mut self) {
+        self.runtime.release_reservation(self.reservation);
     }
 }
 
@@ -818,7 +872,14 @@ async fn pick_native_save_target(
     let extension = canonical_extension(media_type).ok_or(ArtifactNativeCode::Unsupported)?;
     Ok(rfd::AsyncFileDialog::new()
         .set_file_name(default_name)
-        .add_filter("Image", &[extension])
+        .add_filter(
+            "Image",
+            if media_type == "image/jpeg" {
+                &["jpg", "jpeg"][..]
+            } else {
+                std::slice::from_ref(&extension)
+            },
+        )
         .save_file()
         .await
         .map(|handle| handle.path().to_path_buf()))
@@ -855,7 +916,7 @@ fn canonical_save_name(
         return Ok(name.to_owned());
     }
     if media_type == "image/jpeg" && existing.as_deref() == Some("jpeg") {
-        return Ok(path.with_extension("jpg").to_string_lossy().into_owned());
+        return Ok(name.to_owned());
     }
     Ok(format!("{name}.{extension}"))
 }
@@ -867,7 +928,9 @@ fn validate_target_extension(target: &Path, media_type: &str) -> Result<(), Arti
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase)
     {
-        Some(actual) if actual == expected => Ok(()),
+        Some(actual) if actual == expected || (media_type == "image/jpeg" && actual == "jpeg") => {
+            Ok(())
+        }
         Some(_) => Err(ArtifactNativeCode::ExtensionMismatch),
         None => Ok(()),
     }
@@ -1181,6 +1244,10 @@ pub fn handle_preview_protocol(
     let app = context.app_handle().clone();
     tauri::async_runtime::spawn(async move {
         let artifact_runtime = app.state::<ArtifactNativeRuntime>();
+        let Ok((_pending, slot)) = artifact_runtime.queued_read_slot().await else {
+            responder.respond(protocol_not_found());
+            return;
+        };
         let now = match unix_seconds() {
             Ok(now) => now,
             Err(_) => {
@@ -1202,6 +1269,11 @@ pub fn handle_preview_protocol(
                 return;
             }
         };
+        let read_lease = ImageReadLease {
+            runtime: &artifact_runtime,
+            _slot: slot,
+            reservation,
+        };
         let locator = ArtifactLocator {
             session_id: binding.identity.session_id,
             turn_id: binding.identity.turn_id,
@@ -1214,7 +1286,6 @@ pub fn handle_preview_protocol(
             now,
         )
         .await;
-        artifact_runtime.release_reservation(reservation);
         let response = match content {
             Ok(content)
                 if content.identity == binding.identity
@@ -1227,6 +1298,7 @@ pub fn handle_preview_protocol(
             _ => protocol_not_found(),
         };
         responder.respond(response);
+        drop(read_lease);
     });
 }
 
@@ -1363,6 +1435,43 @@ mod tests {
         assert!(limits.reserve(1).is_ok());
     }
 
+    #[tokio::test]
+    async fn feat165_normal_four_image_reads_queue_without_dropping_previews() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let runtime = Arc::new(ArtifactNativeRuntime::new());
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for _ in 0..4 {
+            let runtime = runtime.clone();
+            let active = active.clone();
+            let peak = peak.clone();
+            tasks.push(tokio::spawn(async move {
+                let (_pending, slot) = runtime.queued_read_slot().await.unwrap();
+                let lease = ImageReadLease {
+                    runtime: &runtime,
+                    _slot: slot,
+                    reservation: runtime.reserve(1024).unwrap(),
+                };
+                peak.fetch_max(active.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                for _ in 0..4 {
+                    tokio::task::yield_now().await;
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+                drop(lease);
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 2);
+        assert_eq!(runtime.reads.lock().unwrap().total_bytes, 0);
+        assert!(runtime.borrow_read(1024).is_ok());
+    }
+
     #[test]
     fn protocol_validation_is_exact_and_oracle_free() {
         let handle = "A".repeat(43);
@@ -1438,7 +1547,7 @@ mod tests {
         );
         assert_eq!(
             canonical_save_name(Some("safe.jpeg"), "image/jpeg").unwrap(),
-            "safe.jpg"
+            "safe.jpeg"
         );
         assert_eq!(
             validate_target_extension(std::path::Path::new("safe.webp"), "image/png"),

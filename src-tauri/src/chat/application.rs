@@ -1386,6 +1386,16 @@ impl ConversationApplication {
         self.database.list_ready_attachments(draft_target).await
     }
 
+    pub(super) async fn draft_attachment_presentation(
+        &self,
+        id: Uuid,
+        target: DraftTarget,
+    ) -> Result<(String, Option<Vec<u8>>), ChatError> {
+        self.database
+            .call(move |repo| repo.draft_attachment_presentation(id, target))
+            .await
+    }
+
     pub async fn remove_ready_attachment(
         &self,
         attachment_id: Uuid,
@@ -3290,7 +3300,7 @@ impl ConversationApplication {
                             }.await;
                             if delivered.is_err(){sink.publish_artifact_resync_required(session_id,context.turn_id,ArtifactResyncReason::ProtocolError)?;}
                         }
-                        _=>{artifact_delivery_done=true;sink.publish_artifact_resync_required(session_id,context.turn_id,ArtifactResyncReason::ProtocolError)?;}
+                        _=>{artifact_delivery_done=true;artifacts=None;sink.publish_artifact_resync_required(session_id,context.turn_id,ArtifactResyncReason::ProtocolError)?;}
                     }
                 }
             }

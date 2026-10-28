@@ -15,7 +15,10 @@ export const ARTIFACT_MEDIA_TYPES = {
     "application/json",
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/html"
+    "text/html",
+    "text/markdown",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   ],
   "report": [
     "application/vnd.yijie.report+json;version=1"

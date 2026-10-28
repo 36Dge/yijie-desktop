@@ -791,7 +791,7 @@ pub fn decode_artifact_event_envelope_v3(
     local_session_id: Uuid,
     local_turn_id: Uuid,
 ) -> Result<ArtifactEventV3, ChatError> {
-    if !matches!(wire.schema_version, 3..=6 | 9)
+    if !matches!(wire.schema_version, 3..=6 | 9 | 12)
         || wire.event_id.is_nil()
         || wire.cursor.stream_id.is_nil()
         || wire.cursor.sequence == 0
@@ -897,11 +897,12 @@ pub fn decode_artifact_event_envelope_v3(
                 ordinal: payload.ordinal,
                 display_name: payload.display_name,
                 media_type: {
-                    if wire.schema_version != 9
+                    if !matches!(wire.schema_version, 9 | 12)
                         && matches!(payload.media_type.as_str(), "text/html" | "image/svg+xml")
                     {
                         return Err(ChatError::InvalidInput);
                     }
+                    if wire.schema_version != 12 && matches!(payload.media_type.as_str(),"text/markdown"|"application/vnd.openxmlformats-officedocument.wordprocessingml.document"|"application/vnd.openxmlformats-officedocument.presentationml.presentation") {return Err(ChatError::InvalidInput)}
                     payload.media_type
                 },
                 size_bytes: payload.size_bytes,
@@ -2121,6 +2122,13 @@ impl ChatRepository {
         let media_type = match media_type.as_deref() {
             Some("text/html") => "text/html",
             Some("text/plain") => "text/plain",
+            Some("text/markdown") => "text/markdown",
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document") => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
+            Some("application/vnd.openxmlformats-officedocument.presentationml.presentation") => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
             Some("text/csv") => "text/csv",
             Some("application/json") => "application/json",
             Some("application/pdf") => "application/pdf",
@@ -2626,11 +2634,17 @@ fn validate_kind_content(
                 && bytes[8..12].iter().all(u8::is_ascii)
         }
         ArtifactKind::File => match media_type {
-            "text/html" | "text/plain" | "text/csv" => std::str::from_utf8(bytes)
+            "text/html" | "text/plain" | "text/csv" | "text/markdown" => std::str::from_utf8(bytes)
                 .map(|text| !text.contains('\0'))
                 .unwrap_or(false),
             "application/json" => serde_json::from_slice::<Value>(bytes).is_ok(),
-            "application/pdf" => bytes.starts_with(b"%PDF-") && bytes.ends_with(b"%%EOF"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+                super::attachment::validate_office_artifact_content("docx", bytes).is_ok()
+            }
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+                super::attachment::validate_office_artifact_content("pptx", bytes).is_ok()
+            }
+            "application/pdf" => super::attachment::validate_pdf_artifact_content(bytes).is_ok(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
                 bytes.starts_with(b"PK\x03\x04")
             }
@@ -3162,6 +3176,34 @@ mod tests {
                 fs::read(sample).unwrap(),
             ));
         }
+        if let Some(root) = std::env::var_os("YIJIE_FEAT165_NORMAL_FILES") {
+            let root = std::path::PathBuf::from(root);
+            cases = [
+                (ArtifactKind::File, "text/csv", "sample.csv"),
+                (
+                    ArtifactKind::File,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "sample.docx",
+                ),
+                (
+                    ArtifactKind::File,
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "sample.pptx",
+                ),
+                (ArtifactKind::File, "text/markdown", "sample.md"),
+                (ArtifactKind::File, "text/plain", "sample.txt"),
+                (ArtifactKind::Image, "image/jpeg", "sample.jpg"),
+                (ArtifactKind::Image, "image/png", "sample.png"),
+                (ArtifactKind::Image, "image/jpeg", "sample.jpeg"),
+                (ArtifactKind::Image, "image/svg+xml", "sample.svg"),
+                (ArtifactKind::File, "text/html", "sample.html"),
+                (ArtifactKind::File, "application/pdf", "sample.pdf"),
+                (ArtifactKind::Video, "video/mp4", "sample.mp4"),
+            ]
+            .into_iter()
+            .map(|(kind, mime, name)| (kind, mime, name, fs::read(root.join(name)).unwrap()))
+            .collect();
+        }
         let committed_at = unix_seconds().unwrap();
         let mut records = Vec::new();
         for (ordinal, (kind, mime, name, bytes)) in cases.into_iter().enumerate() {
@@ -3208,7 +3250,7 @@ mod tests {
                     committed_at,
                     Uuid::now_v7(),
                 )
-                .unwrap();
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
             let target = root.join(name);
             super::super::artifact_native::atomic_save_content(
                 &target,

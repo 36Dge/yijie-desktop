@@ -92,6 +92,7 @@ struct ChatIpcInner {
     bind_generation: AtomicU64,
     bind_gate: Mutex<()>,
     host_resume_generation: Mutex<Option<String>>,
+    attachment_origins: StdMutex<HashMap<Uuid, (Uuid, DraftTarget, String, i64)>>,
 }
 
 impl Debug for ChatIpcRuntime {
@@ -155,7 +156,37 @@ impl ChatIpcRuntime {
                 bind_generation: AtomicU64::new(0),
                 bind_gate: Mutex::new(()),
                 host_resume_generation: Mutex::new(None),
+                attachment_origins: StdMutex::new(HashMap::new()),
             }),
+        }
+    }
+
+    fn remember_attachment_origins(
+        &self,
+        context: Uuid,
+        target: DraftTarget,
+        paths: Vec<PathBuf>,
+        attachments: &[AttachmentSummary],
+        now: i64,
+    ) {
+        if let Ok(mut origins) = self.inner.attachment_origins.lock() {
+            origins.retain(|_, (c, t, _, expiry)| *c == context && *t == target && *expiry > now);
+            if origins.len() + attachments.len() > 10 {
+                origins.clear();
+            }
+            for (path, attachment) in paths.into_iter().zip(attachments) {
+                if let Some(path) = path.to_str().filter(|p| p.len() <= 4096) {
+                    origins.insert(
+                        attachment.attachment_id,
+                        (
+                            context,
+                            target.clone(),
+                            path.to_owned(),
+                            attachment.expires_at,
+                        ),
+                    );
+                }
+            }
         }
     }
 
@@ -408,6 +439,9 @@ impl ChatIpcRuntime {
     }
 
     pub fn invalidate_all(&self) {
+        if let Ok(mut origins) = self.inner.attachment_origins.lock() {
+            origins.clear();
+        }
         self.inner.event_bridge.invalidate_all();
         if let Ok(mut cursors) = self.inner.cursors.lock() {
             cursors.clear();
@@ -8100,6 +8134,7 @@ pub async fn chat_pick_attachments_v2(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
     app: AppHandle,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<Vec<AttachmentDto>>, ChatIpcError> {
     let request: CommandRequest<PickAttachmentsPayload> = decode_request_v2(request)?;
     validate_operation(request.payload.operation_id, request.request_id)
@@ -8129,6 +8164,8 @@ pub async fn chat_pick_attachments_v2(
     )?;
     let now =
         unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    let selected_paths = paths.clone();
+    let origin_target = draft_target.clone();
     let (prepared, mut import_events) = prepare_attachments(
         app,
         request.context_id,
@@ -8156,6 +8193,13 @@ pub async fn chat_pick_attachments_v2(
                 .with_attachment_item_count(import_events.item_count));
         }
     };
+    ipc_runtime.remember_attachment_origins(
+        request.context_id,
+        origin_target,
+        selected_paths,
+        &attachments,
+        now,
+    );
     let attachment_dtos = attachments
         .into_iter()
         .map(AttachmentDto::from)
@@ -8169,6 +8213,7 @@ pub async fn chat_import_attachments_v2(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
     app: AppHandle,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<Vec<AttachmentDto>>, ChatIpcError> {
     let request: CommandRequest<ImportAttachmentsPayload> = decode_request_v2(request)?;
     validate_operation(request.payload.operation_id, request.request_id)
@@ -8193,6 +8238,8 @@ pub async fn chat_import_attachments_v2(
     let now =
         unix_seconds().map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
     let remaining_capacity = request.payload.remaining_capacity;
+    let selected_paths = paths.clone();
+    let origin_target = draft_target.clone();
     let (prepared, mut import_events) = prepare_attachments(
         app,
         request.context_id,
@@ -8220,12 +8267,142 @@ pub async fn chat_import_attachments_v2(
                 .with_attachment_item_count(import_events.item_count));
         }
     };
+    ipc_runtime.remember_attachment_origins(
+        request.context_id,
+        origin_target,
+        selected_paths,
+        &attachments,
+        now,
+    );
     let attachment_dtos = attachments
         .into_iter()
         .map(AttachmentDto::from)
         .collect::<Vec<_>>();
     import_events.emit_ready();
     Ok(CommandResponse::new_v2(request.request_id, attachment_dtos))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttachmentPresentationPayload {
+    draft_target: DraftTargetPayload,
+    attachment_id: Option<Uuid>,
+    action: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPresentationDto {
+    source_path: Option<String>,
+    image_url: Option<String>,
+    expires_at: i64,
+}
+
+#[tauri::command]
+pub async fn chat_attachment_presentation_v2(
+    request: Value,
+    webview: tauri::WebviewWindow,
+    chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
+    image_runtime: State<'_, super::ArtifactNativeRuntime>,
+) -> Result<CommandResponse<AttachmentPresentationDto>, ChatIpcError> {
+    let request: CommandRequest<AttachmentPresentationPayload> = decode_request_v2(request)?;
+    if webview.label() != "main" {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    let target = draft_target(request.payload.draft_target, request.request_id)?;
+    let now = unix_seconds().map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?;
+    let response = |source_path, image_url| {
+        CommandResponse::new_v2(
+            request.request_id,
+            AttachmentPresentationDto {
+                source_path,
+                image_url,
+                expires_at: now + 30,
+            },
+        )
+    };
+    if request.payload.action == "clear" {
+        let mut origins =
+            ipc_runtime.inner.attachment_origins.lock().map_err(|_| {
+                ChatIpcError::temporarily_unavailable(Some(request.request_id)).v2()
+            })?;
+        origins.retain(|id, (context, draft, _, _)| {
+            !(*context == request.context_id
+                && *draft == target
+                && request
+                    .payload
+                    .attachment_id
+                    .is_none_or(|selected| selected == *id))
+        });
+        return Ok(response(None, None));
+    }
+    if request.payload.action != "read"
+        || request.payload.attachment_id.is_none_or(|id| id.is_nil())
+    {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)).v2());
+    }
+    let id = request
+        .payload
+        .attachment_id
+        .ok_or_else(|| ChatIpcError::request_invalid(Some(request.request_id)).v2())?;
+    let (application, _, manager) = offline_applications(&chat_runtime, request.request_id)
+        .await
+        .map_err(ChatIpcError::v2)?;
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    let _lease = image_runtime
+        .borrow_read(attachment::MAX_ATTACHMENT_BYTES)
+        .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v2())?;
+    let (mime, bytes) = application
+        .draft_attachment_presentation(id, target.clone())
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?;
+    let image_url = if let Some(bytes) = bytes {
+        Some(
+            tokio::task::spawn_blocking(move || {
+                attachment::attachment_image_projection(&mime, &bytes)
+            })
+            .await
+            .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)).v2())?
+            .map_err(|e| map_attachment_import_error(e, request.request_id, 1))?,
+        )
+    } else {
+        None
+    };
+    // Recheck after the potentially expensive decode; context revocation never
+    // yields a new projection. No native bytes or lease are retained afterwards.
+    authorize(
+        &manager,
+        request.context_id,
+        draft_target_action(&target),
+        request.request_id,
+    )
+    .map_err(ChatIpcError::v2)?;
+    application
+        .list_ready_attachments(target.clone())
+        .await
+        .map_err(|e| map_chat_error(e, Some(request.request_id)).v2())?
+        .iter()
+        .find(|a| a.attachment_id == id)
+        .ok_or_else(|| map_chat_error(ChatError::NotFound, Some(request.request_id)).v2())?;
+    let source_path = ipc_runtime
+        .inner
+        .attachment_origins
+        .lock()
+        .ok()
+        .and_then(|mut entries| {
+            entries.retain(|_, (_, _, _, expires)| *expires > now);
+            entries
+                .get(&id)
+                .filter(|(c, t, _, _)| *c == request.context_id && *t == target)
+                .map(|(_, _, p, _)| p.clone())
+        });
+    Ok(response(source_path, image_url))
 }
 
 #[tauri::command]
@@ -8259,6 +8436,7 @@ pub async fn chat_list_draft_attachments_v2(
 pub async fn chat_remove_attachment_v2(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,
+    ipc_runtime: State<'_, ChatIpcRuntime>,
 ) -> Result<CommandResponse<OperationDto>, ChatIpcError> {
     let request: CommandRequest<RemoveAttachmentPayload> = decode_request_v2(request)?;
     validate_operation(request.payload.operation_id, request.request_id)
@@ -8285,6 +8463,9 @@ pub async fn chat_remove_attachment_v2(
         )
         .await
         .map_err(|error| map_chat_error(error, Some(request.request_id)).v2())?;
+    if let Ok(mut origins) = ipc_runtime.inner.attachment_origins.lock() {
+        origins.remove(&request.payload.attachment_id);
+    }
     Ok(CommandResponse::new_v2(
         request.request_id,
         OperationDto {

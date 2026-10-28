@@ -423,7 +423,7 @@ onBeforeUnmount(() => {
       <button class="yj-control"
         data-testid="artifact-image-save"
         type="button"
-        :disabled="saving || inlinePhase !== 'ready'"
+        :disabled="saving"
         aria-label="保存图片"
         title="保存图片"
         @click="saveImage"
@@ -602,29 +602,29 @@ onBeforeUnmount(() => {
   gap: var(--yj-space-2);
 }
 
-.artifact-image button {
+:is(.artifact-image, .artifact-image__dialog) button {
   border: var(--yj-border-width) solid var(--yj-color-border-default);
   color: var(--yj-color-text-primary);
   background: var(--yj-color-bg-card);
 }
 
-.artifact-image button:hover:not(:disabled) {
+:is(.artifact-image, .artifact-image__dialog) button:hover:not(:disabled) {
   border-color: var(--yj-color-border-control-hover);
   background: var(--yj-color-control-hover);
 }
 
-.artifact-image button:active:not(:disabled) {
+:is(.artifact-image, .artifact-image__dialog) button:active:not(:disabled) {
   border-color: var(--yj-color-border-control-hover);
   background: var(--yj-color-control-pressed);
 }
 
-.artifact-image button:disabled {
+:is(.artifact-image, .artifact-image__dialog) button:disabled {
   background: var(--yj-color-control-disabled-bg);
   color: var(--yj-color-text-disabled);
   cursor: not-allowed;
 }
 
-.artifact-image button:focus-visible {
+:is(.artifact-image, .artifact-image__dialog) button:focus-visible {
   outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring);
   outline-offset: var(--yj-space-1);
 }
@@ -695,6 +695,7 @@ onBeforeUnmount(() => {
 }
 .artifact-image__toolbar {
   justify-content: center;
+  flex-wrap: wrap;
   border-top: var(--yj-border-width) solid var(--yj-color-border-subtle);
 }
 .artifact-image__toolbar span {

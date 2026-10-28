@@ -15,6 +15,11 @@ pub fn enabled() -> bool {
         && std::env::var("YIJIE_LOCAL_PROFILE").as_deref() == Ok("demo_fast")
 }
 
+// FEAT-165 rides the current K3.1 candidate and its compatible private reader.
+pub fn files_enabled() -> bool {
+    enabled() && cfg!(feature = "kimi-k31-pro-candidate")
+}
+
 pub(super) fn validate_artifact_image(mime: &str, bytes: &[u8]) -> Result<(), ()> {
     if mime != "image/svg+xml" {
         return super::attachment::validate_image_content(mime, bytes)

@@ -42,7 +42,12 @@ export async function syncFEAT164ExpertResources({ check = false, packageProduce
   assert.equal(pin.schema_version, 1); assert.equal(pin.feature, "FEAT-158"); assert.equal(pin.release, false);
   assert.equal(pin.source.repository, "https://github.com/36Dge/yijie-skills.git");
   assert.ok(["git-commit", "working-tree"].includes(pin.source.revision_kind));
-  const sourceLockBytes = await readRegularFile(path.join(contractsRoot, "compatibility/experts/source.lock.json"), 1024 * 1024);
+  // Resource bundles retain their reviewed immutable authority. New file-input
+  // contracts share this family but do not republish expert assets. Read the
+  // exact retained Git object, then still verify both live bundle schema bytes
+  // against that lock below; do not refresh an asset digest to hide wire drift.
+  const resourceContractsCommit = "2adfa2bef43d38a932f6249dbb0a229c173ff103";
+  const sourceLockBytes = execFileSync("git", ["-C", contractsRoot, "show", `${resourceContractsCommit}:compatibility/experts/source.lock.json`], {maxBuffer: 1024 * 1024});
   assert.equal(sha256(sourceLockBytes), pin.contracts_source_lock_sha256, "Contracts candidate pin changed");
   const sourceLock = JSON.parse(sourceLockBytes);
   assert.equal(sourceLock.release, false);

@@ -126,7 +126,7 @@ pub async fn pick_paths() -> Result<Option<Vec<PathBuf>>, AttachmentImportError>
             "支持的图片与文件",
             &[
                 "jpg", "jpeg", "png", "webp", "gif", "pdf", "txt", "md", "markdown", "csv", "json",
-                "yaml", "yml", "xml", "html", "htm", "rtf", "docx", "xlsx", "pptx",
+                "yaml", "yml", "xml", "html", "htm", "rtf", "docx", "xlsx", "pptx", "svg", "mp4",
             ],
         )
         .pick_files()
@@ -481,6 +481,23 @@ fn detect_and_extract(extension: &str, content: &[u8]) -> Result<Detection, Atta
     }
 
     match extension {
+        "svg" if super::artifact_media::files_enabled() => {
+            super::artifact_media::validate_artifact_image("image/svg+xml", content)
+                .map_err(|_| AttachmentImportError::InvalidContent)?;
+            Ok(Detection {
+                kind: AttachmentKind::File,
+                media_type: "image/svg+xml",
+                extracted_text: Some(bounded_normalized_text(
+                    std::str::from_utf8(content)
+                        .map_err(|_| AttachmentImportError::InvalidContent)?,
+                )?),
+            })
+        }
+        "mp4" if super::artifact_media::files_enabled() => {
+            super::artifact_video_native::validate_mp4(content)
+                .map_err(|_| AttachmentImportError::InvalidContent)?;
+            Ok(Detection{kind:AttachmentKind::File,media_type:"video/mp4",extracted_text:Some(format!("视频附件（video/mp4，{} 字节）。未解析画面或音频内容；这不是视频转写或内容摘要。",content.len()))})
+        }
         "pdf" if content.starts_with(b"%PDF-") => Ok(Detection {
             kind: AttachmentKind::File,
             media_type: "application/pdf",
@@ -512,6 +529,12 @@ pub(crate) fn validate_image_content(
     media_type: &str,
     content: &[u8],
 ) -> Result<(), AttachmentImportError> {
+    decode_image_content(media_type, content).map(|_| ())
+}
+fn decode_image_content(
+    media_type: &str,
+    content: &[u8],
+) -> Result<image::DynamicImage, AttachmentImportError> {
     if detect_image(content) != Some(media_type)
         || !has_complete_image_container(media_type, content)
     {
@@ -539,7 +562,33 @@ pub(crate) fn validate_image_content(
     if pixels == 0 || pixels > MAX_IMAGE_PIXELS {
         return Err(AttachmentImportError::InvalidContent);
     }
-    Ok(())
+    Ok(decoded)
+}
+
+pub(crate) fn attachment_image_projection(
+    mime: &str,
+    bytes: &[u8],
+) -> Result<String, AttachmentImportError> {
+    use base64::Engine;
+    let (mime, projected) = if mime == "image/svg+xml" {
+        super::artifact_media::validate_artifact_image(mime, bytes)
+            .map_err(|_| AttachmentImportError::InvalidContent)?;
+        ("image/svg+xml", bytes.to_vec())
+    } else {
+        let thumbnail = decode_image_content(mime, bytes)?.thumbnail(320, 240);
+        let mut output = Cursor::new(Vec::new());
+        thumbnail
+            .write_to(&mut output, ImageFormat::Png)
+            .map_err(|_| AttachmentImportError::Unavailable)?;
+        ("image/png", output.into_inner())
+    };
+    if projected.len() > 512 * 1024 {
+        return Err(AttachmentImportError::TooLarge);
+    }
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(projected)
+    ))
 }
 
 fn has_complete_image_container(media_type: &str, content: &[u8]) -> bool {
@@ -1179,6 +1228,15 @@ fn extract_ooxml(
     Ok((media_type, bounded_normalized_text(&output)?))
 }
 
+pub(crate) fn validate_office_artifact_content(
+    extension: &str,
+    content: &[u8],
+) -> Result<(), AttachmentImportError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(content)).map_err(|_| AttachmentImportError::InvalidContent)?;
+    preflight_ooxml(extension, &mut archive).map(|_| ())
+}
+
 pub(crate) fn validate_xlsx_artifact_content(content: &[u8]) -> Result<(), AttachmentImportError> {
     let mut archive =
         ZipArchive::new(Cursor::new(content)).map_err(|_| AttachmentImportError::InvalidContent)?;
@@ -1813,6 +1871,36 @@ mod tests {
             writer.finish().unwrap();
         }
         output.into_inner()
+    }
+
+    #[test]
+    fn feat165_normal_input_formats_and_hover_projection() {
+        let Some(root) = std::env::var_os("YIJIE_FEAT165_NORMAL_FILES") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        for ext in [
+            "csv", "docx", "pptx", "md", "txt", "jpg", "png", "jpeg", "svg", "html", "pdf", "mp4",
+        ] {
+            let name = format!("sample.{ext}");
+            let bytes = fs::read(root.join(&name)).unwrap();
+            let attachment = prepare_bytes(name, bytes.clone(), 10).unwrap();
+            if matches!(ext, "svg" | "mp4") {
+                assert_eq!(attachment.kind, AttachmentKind::File);
+            }
+            if ext == "mp4" {
+                assert!(attachment
+                    .chunks
+                    .join("\n")
+                    .contains("未解析画面或音频内容"));
+            }
+            if matches!(ext, "jpg" | "jpeg" | "png" | "svg") {
+                let projection =
+                    attachment_image_projection(&attachment.media_type, &bytes).unwrap();
+                assert!(projection.starts_with("data:image/"));
+                assert!(projection.len() <= 700000);
+            }
+        }
     }
 
     #[test]

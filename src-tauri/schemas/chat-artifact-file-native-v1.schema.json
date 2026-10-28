@@ -48,9 +48,23 @@
       "text/csv",
       "application/json",
       "application/pdf",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/html",
+      "text/markdown",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     ],
-    "extensions": ["txt", "csv", "json", "pdf", "xlsx"]
+    "extensions": [
+      "txt",
+      "csv",
+      "json",
+      "pdf",
+      "xlsx",
+      "html",
+      "md",
+      "docx",
+      "pptx"
+    ]
   },
   "x-yijie-command-contracts": {
     "chat_read_artifact_file_preview_v1": {
@@ -93,12 +107,29 @@
     "textPreviewResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "mediaType", "text", "truncated"],
+      "required": [
+        "status",
+        "mediaType",
+        "text",
+        "truncated"
+      ],
       "properties": {
-        "status": { "const": "previewed" },
-        "mediaType": { "enum": ["text/plain", "application/json"] },
-        "text": { "type": "string" },
-        "truncated": { "type": "boolean" }
+        "status": {
+          "const": "previewed"
+        },
+        "mediaType": {
+          "enum": [
+            "text/plain",
+            "application/json",
+            "text/markdown"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "csvPreviewResult": {

@@ -507,6 +507,12 @@ function contentNodes(
 }
 
 const nodes = computed(() => contentNodes(props.blocks, props.mode));
+// Display order only; persisted content blocks and Native Items remain intact.
+const displayNodes = computed(() => props.mode === "plain" ? [
+  ...nodes.value.filter(node => node.kind === "attachment_reference"),
+  ...nodes.value.filter(node => node.kind !== "attachment_reference"),
+] : nodes.value);
+const hasAttachments = computed(() => props.mode === "plain" && nodes.value.some(node => node.kind === "attachment_reference"));
 const firstParagraphKey = computed(() => nodes.value.find(node => node.kind === "paragraph")?.key);
 
 function nestedBlocks(node: { key: string; text: string }): readonly ConversationTimelineContentBlock[] {
@@ -515,9 +521,9 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
 </script>
 
 <template>
-  <div class="chat-safe-content">
+  <div class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments }">
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
-    <template v-for="node in nodes" :key="node.key">
+    <template v-for="node in displayNodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
         <slot v-if="node.key === firstParagraphKey" name="text-prefix" />
         <template v-for="inline in node.inlines" :key="inline.key">
@@ -652,7 +658,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         </slot>
       </div>
 
-      <div v-else-if="node.kind === 'attachment_reference'" class="chat-safe-content__reference" role="note">
+      <div v-else-if="node.kind === 'attachment_reference'" class="chat-safe-content__attachment" role="note">
         <slot name="attachment-reference" :block="node.block">
           <YjIcon :name="node.block.kind === 'image' ? 'image' : 'file'" size="sm" tone="muted" />
           <span>附件引用：{{ node.block.name }}</span>
@@ -842,4 +848,10 @@ h3.chat-safe-content__heading {
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);
 }
+</style>
+
+<style scoped>
+.chat-safe-content--attachments { display: flex; flex-wrap: wrap; align-items: center; gap: var(--yj-space-2); }
+.chat-safe-content__attachment { display: inline-flex; min-width: 0; max-width: 100%; }
+.chat-safe-content--attachments > .chat-safe-content__paragraph { min-width: 0; }
 </style>
