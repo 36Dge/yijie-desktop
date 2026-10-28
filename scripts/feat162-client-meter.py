@@ -52,6 +52,22 @@ def prepare(payload):
     outgoing, metadata = shared.prepare_request(payload)
     require(metadata["image_count"] == 0, "Text-only approved run")
     body = json.loads(outgoing)
+    allowed_names = {"kimi_web_search", "kimi_web_fetch"}
+    selected = []
+    omitted = []
+    for tool in body.get("tools", []):
+        if tool.get("name") == "mcp__yijie_market" and isinstance(tool.get("tools"), list):
+            functions = [f for f in tool["tools"] if f.get("name") in allowed_names]
+            if functions:
+                selected.append({**tool, "tools": functions})
+        elif tool.get("name") in allowed_names or tool.get("name") in {"mcp__yijie_market__" + n for n in allowed_names}:
+            selected.append(tool)
+        else:
+            omitted.append(tool.get("name", tool.get("type")))
+    body["tools"] = selected
+    outgoing = json.dumps(body).encode()
+    metadata["other_tools_omitted"] = omitted
+    metadata["request_adjustments"].append("only_selected_kimi_tools_for_this_acceptance")
     outputs = [v for v in body.get("input", []) if isinstance(v, dict)
                and v.get("type") in {"function_call_output", "custom_tool_call_output"}]
     require(not any(failed_tool(v.get("output")) for v in outputs), "Tool failure stops further model requests")
@@ -165,7 +181,7 @@ def offline_response():
     message = {"id": "msg_feat162_local", "type": "message", "role": "assistant", "status": "completed",
                "content": [{"type": "output_text", "text": "FEAT162 本机零费用正控通过。此为合成响应，没有访问供应商。", "annotations": []}]}
     response = {"id": "resp_feat162_local", "object": "response", "model": shared.MODEL, "status": "completed",
-                "output": [message], "usage": {"input_tokens": 100, "output_tokens": 30}}
+                "output": [message], "usage": {"input_tokens": 100, "output_tokens": 30, "total_tokens": 130}}
     events = [{"type": "response.created", "response": {**response, "status": "in_progress", "output": []}},
               {"type": "response.output_item.added", "output_index": 0, "item": {**message, "status": "in_progress", "content": []}},
               {"type": "response.output_text.delta", "item_id": message["id"], "output_index": 0, "content_index": 0, "delta": message["content"][0]["text"]},
@@ -217,6 +233,9 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
             try:
                 length = int(self.headers.get("Content-Length", "0")); require(0 < length <= 4 * 1024 * 1024, "Request size")
                 payload, metadata = prepare(self.rfile.read(length))
+                if not budget.offline:
+                    names = {n.removeprefix("mcp__yijie_market__") for n in metadata["declared_tools"]}
+                    require({"kimi_web_search", "kimi_web_fetch"} <= names, "Selected Kimi connector required")
                 row = budget.admit(metadata)
             except (ValueError, TypeError, AttributeError):
                 # A deliberately unarmed startup rejects without spending; an

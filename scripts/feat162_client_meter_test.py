@@ -78,12 +78,26 @@ class Accounting(unittest.TestCase):
 
     def test_request_normalization_retains_functions_and_removes_unpriced_search(self):
         request = {"model": meter.shared.MODEL, "reasoning": {"effort": "max"}, "stream": True,
-                   "input": [], "tools": [{"type": "web_search"}, {"type": "function", "name": "kimi_web_search"}]}
+                   "input": [], "tools": [{"type": "web_search"}, {"type": "function", "name": "exec_command"}, {"type": "function", "name": "kimi_web_search"}]}
         raw, meta = meter.prepare(json.dumps(request).encode())
         self.assertEqual(json.loads(raw)["max_output_tokens"], 8192)
         self.assertEqual(meta["declared_tools"], ["kimi_web_search"])
         self.assertEqual(meta["native_search_omitted"], 1)
+        self.assertEqual(meta["other_tools_omitted"], ["exec_command"])
         self.assertNotIn("input", meta)
+
+    def test_selected_namespace_retains_both_canonical_kimi_tools(self):
+        request = {"model": meter.shared.MODEL, "reasoning": {"effort": "max"}, "stream": True,
+                   "input": [], "tools": [{"type": "namespace", "name": "mcp__yijie_market", "tools": [
+                       {"type": "function", "name": name} for name in ['kimi_web_search', 'kimi_web_fetch']]}]}
+        raw, meta = meter.prepare(json.dumps(request).encode())
+        self.assertEqual(json.loads(raw)["tools"], request["tools"])
+        self.assertEqual(meta["declared_tools"], ['mcp__yijie_market', 'kimi_web_search', 'kimi_web_fetch'])
+
+    def test_offline_terminal_has_required_runtime_usage_total(self):
+        event = json.loads(meter.offline_response().decode().strip().splitlines()[-1][6:])
+        usage = event['response']['usage']
+        self.assertEqual(usage['total_tokens'], usage['input_tokens'] + usage['output_tokens'])
 
     def test_failed_tool_output_blocks_next_model_request(self):
         request = {"model": meter.shared.MODEL, "reasoning": {"effort": "max"}, "stream": True,
