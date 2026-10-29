@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978"
   },
   "host": {
-    "base_commit": "29ce501d1e3cb1e2a9f361927e6ad05fac532b90",
+    "base_commit": "8d2f17e2ddf54f45d73636d6a42612c913fc884e",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -222,7 +222,7 @@
       "internal/codex/feat164_loaded_migration_test.go": "d25f4814e821e8cc8eeaa39b7c4f3eb22329b0f9e27b611ef17b337aa0f4ffcf",
       "internal/codex/feat164_meter.go": "3ce38737b15d0d857305e947b01c2a6e95b53eba3cb68d99765fd0cac8d14e6f",
       "internal/codex/feat164_meter_test.go": "8da44a8713af6b91061747e9eb5800b695b14065c286bf48e9d0594d36f7c0c9",
-      "internal/codex/feat164_surfaces_integration_test.go": "7baf10e59f0e3e3da9703cc7e55d1b8e15f1624af3d6e21f2288bd29080f76f7",
+      "internal/codex/feat164_surfaces_integration_test.go": "12119ace0f6e68a72a57d31a4c7d281ff92a37b9af2d19283e3667eb1bb36251",
       "internal/codex/feat164_title_test.go": "60f15f337f6b09a81dc0c2d1e35a1ec8989e723778dfc2c1b95d4aab0a08e7e0",
       "internal/codex/kimi_k31_activation.go": "72222afcf90cf6d24c8d3087115e419bad603952334f173d5d316893f13d55d0",
       "internal/codex/kimi_k31_activation_test.go": "7d4f4aea506c12604cf73d72471d176790aff5f607c46a8452fb3c394c45b4ee",
@@ -259,7 +259,7 @@
       "internal/codex/runtime.go": "297750aca79f49fd9a30ce5f28fd4143c883ca97ee622a6a890ddefbd87e4c74",
       "internal/codex/runtime_authority_test.go": "12b10524058cd05c49478ab50cdd1e22023081670d4d5544fa800be66aa1f36f",
       "internal/codex/runtime_integration_test.go": "e42c3a3b537a46d3a415a291f1f7a4f71459e62c42c59a10b782392cd5e15bd9",
-      "internal/codex/runtime_permissions.go": "5f4afa5f5268bd1d4d19915a2876972768cae0a2cab68539c3e8446b113c7cdb",
+      "internal/codex/runtime_permissions.go": "2a20a702afbb9d121feb0a7ef6ef85ac376ee4117df6fc4cbd588525dee3b9c9",
       "internal/codex/runtime_permissions_integration_test.go": "4b0ecbd31c2791a209fd25ac98c7969e3fdeb24d693d1d96def6ceca643d7352",
       "internal/codex/runtime_permissions_test.go": "60e9e1fd48a220ea2ceeb2a8ad09adf1ef87744291cd796837097d9830a09df9",
       "internal/codex/runtime_test.go": "9145ed8e5065cdae0f42c02ea543651f2957a4508e65adfae282e1e26c369e2e",
