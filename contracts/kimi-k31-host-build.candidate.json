@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978"
   },
   "host": {
-    "base_commit": "4ab3522af4035453535955153c380dfdc8058fc4",
+    "base_commit": "34a8fdd24319ed8f289336c30d48ed27afbb7691",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -106,8 +106,8 @@
       "api/market-provider.candidate.json": "dd2cfb2e132937b099866ad5550720a72744485bb3675bd3f66e7bdb9cf470a6",
       "api/market-provider.schema.json": "968a6f9d90fb6d4b741ac7560af0ba24f4e08998a344192e2ef65fcadd03bc05",
       "api/market-selection-v2.candidate.json": "2e85e1940c0fc9e4f8d2971157b5dadccadcac8969f221ef54f5817c4fb7eecf",
-      "api/native-conversation.lock.json": "54cc6378e140e243bf8fe05bdd93d631f2c0c1eda839d1781ef39a4bb8637665",
-      "api/native-mcp.lock.json": "2be16d044f737a332dfb8606bb6078dbac747904cb49f5e20e884424f48a8881",
+      "api/native-conversation.lock.json": "de6527fc83e9e2cb7c24327fe1b60e49c318b91d5bfc27a79272ca1cf2dfe773",
+      "api/native-mcp.lock.json": "c9f5237b00f96138ffcab57951c1df7f4b2e5bc47ab311c3003c9643bc1a9338",
       "api/native-process.candidate.json": "19e72ab957ce714b40be7886d22177a21e1408a6009f957957ac1a5233db96f8",
       "api/native-process.lock.json": "ce1b10ea60d36fb3c6c1f7a964679a79e0431910748f1cdcb49fbc0d31cb047f",
       "api/native-turn-timing.candidate.json": "9c40c175cf192de6f2a1ce33bc847ecd56b323e899e667878202ac1c75800f9b",
