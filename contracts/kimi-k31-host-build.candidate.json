@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978"
   },
   "host": {
-    "base_commit": "34a8fdd24319ed8f289336c30d48ed27afbb7691",
+    "base_commit": "29ce501d1e3cb1e2a9f361927e6ad05fac532b90",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -126,7 +126,7 @@
       "api/runtime-chat-models.candidate.json": "55d5acf851843731038c594a48dafb2e1ec199ec484fd9959f2f1a4409bb80e1",
       "api/runtime-input-only.candidate.json": "f3dff38e087538e6f3a5a12b7b6a18c1f9737af10db0559c68e038c26d5716fb",
       "api/runtime-kimi-k31-pro.candidate.json": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978",
-      "api/runtime-permissions.lock.json": "4ca8b1a160c32fd7dc037135ec5b2eb8be85cded7ff305cad8b39f561c2d5ab5",
+      "api/runtime-permissions.lock.json": "d135264f2c8e57fe3d894631da4e7bef17710f535b57e2f1db23cdaf6108267f",
       "api/scheduled-draft.candidate.json": "2120913718e5cc7b07707b7651e87f137962fe07fa644ea4fa2278588ceb875c",
       "api/scheduled-task-recovery.candidate.json": "b111633640c57639415d3a20e0a4028561e3c7d707b9fe08dc2e132cece32186",
       "api/schemas/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
