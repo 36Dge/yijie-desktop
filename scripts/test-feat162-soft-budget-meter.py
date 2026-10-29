@@ -81,4 +81,27 @@ class SoftBudgetTests(unittest.TestCase):
             self.assertEqual(len(b.state['requests']),1)
             self.assertFalse(b.state['requests'][0]['supplier_http_started'])
 
+    def test_first_proposal_failure_survives_settlement_and_normal_stop(self):
+        with tempfile.TemporaryDirectory() as root:
+            b=self.make(root);b.arm();b.begin_case('E1')
+            row=b.admit({'model_config_sha256':'a'*64})
+            observer=soft.legacy.ProposalObserver(b)
+            event={'type':'response.output_item.done','item':{'type':'function_call','name':'exec_command','namespace':'functions','arguments':'{}','call_id':'ordinary-call'}}
+            self.assertFalse(soft.legacy.observe_tool_chunk(b,observer,('data: '+json.dumps(event)+'\n\n').encode()))
+            b.settle(row,observer.failure_metadata);b.halt('normal_stop')
+            self.assertEqual(b.state['first_stop_reason'],'invalid_or_repeated_tool_proposal')
+            self.assertEqual(row['proposal_error_reason'],'unexpected_namespace')
+            self.assertEqual(row['last_proposal_name'],'exec_command')
+            self.assertFalse(row['supplier_http_started'])
+
+    def test_native_item_observation_is_retained_before_terminal_usage(self):
+        with tempfile.TemporaryDirectory() as root:
+            b=self.make(root);b.arm();b.begin_case('E1')
+            observer=soft.legacy.ProposalObserver(b)
+            item={'type':'web_search_call','id':'ordinary-native-item'}
+            for kind in ['response.output_item.added','response.output_item.done']:
+                observer.feed(('data: '+json.dumps({'type':kind,'item':item})+'\n\n').encode())
+            self.assertEqual(observer.failure_metadata['observed_native_search_items'],1)
+            self.assertEqual(b.state['first_stop_reason'],'native_search_already_executed')
+
 if __name__=='__main__':unittest.main()

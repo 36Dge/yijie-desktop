@@ -85,6 +85,10 @@ class Budget(v2.Budget):
 
     def halt(self, reason):
         with self.lock:
+            self.state.setdefault('first_stop_reason', reason)
+            reasons = self.state.setdefault('stop_reasons', [])
+            if reason not in reasons and len(reasons) < 8:
+                reasons.append(reason)
             legacy.Budget.halt(self, reason)
             self.state['native_stop'] = {'status': 'operator_native_ui_required', 'reason': reason}
             self.save()

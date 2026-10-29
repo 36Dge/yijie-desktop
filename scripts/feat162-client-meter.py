@@ -285,6 +285,7 @@ class ProposalObserver:
     def __init__(self, budget):
         self.budget, self.buffer = budget, b""
         self.failure_metadata = {}
+        self.native_search_ids = set()
 
     def feed(self, data):
         self.buffer += data
@@ -294,6 +295,11 @@ class ProposalObserver:
             if not line.startswith(b"data:") or line[5:].strip() == b"[DONE]":
                 continue
             event = json.loads(line[5:].strip())
+            known_events = {"response.created", "response.in_progress", "response.completed",
+                            "response.failed", "response.incomplete", "response.output_item.added",
+                            "response.output_item.done", "response.function_call_arguments.done"}
+            if event.get("type") in known_events:
+                self.failure_metadata["last_observed_event_type"] = event["type"]
             if event.get("type") in {"response.failed", "response.incomplete"}:
                 response = event.get("response", {})
                 error = response.get("error")
@@ -321,8 +327,18 @@ class ProposalObserver:
                 items += event.get("response", {}).get("output", [])
             for item in items:
                 if isinstance(item, dict) and item.get("type") == "web_search_call" and hasattr(self.budget, "begin_case"):
+                    self.native_search_ids.add(shared.canonical_digest(item.get("id", item)))
+                    self.failure_metadata["observed_native_search_items"] = len(self.native_search_ids)
                     self.budget.halt("native_search_already_executed")
                 if isinstance(item, dict) and item.get("type") == "function_call" and event.get("type") != "response.output_item.added":
+                    known_names = {"kimi_web_search", "kimi_web_search_pro", "kimi_web_fetch",
+                                   "exec_command", "write_stdin", "update_plan", "request_user_input",
+                                   "publish_artifact", "get_goal", "create_goal", "update_goal"}
+                    name = str(item.get("name", "")).removeprefix("mcp__yijie_market__")
+                    self.failure_metadata["last_proposal_name"] = name if name in known_names else "other"
+                    namespace = item.get("namespace")
+                    self.failure_metadata["last_proposal_namespace"] = namespace if namespace in {None, "mcp__yijie_market", "functions"} else "other"
+                    self.failure_metadata["last_proposal_sha256"] = shared.canonical_digest(item)
                     self.budget.proposal(item)
 
 
@@ -330,7 +346,16 @@ class ProposalObserver:
 def observe_tool_chunk(budget, proposals, chunk):
     try:
         proposals.feed(chunk)
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError) as error:
+        reasons = {"Unexpected namespace": "unexpected_namespace",
+                   "Wrong route or additional tool": "wrong_route_or_additional_tool",
+                   "Missing explicit filters": "missing_explicit_filters",
+                   "Invented filters": "invented_filters",
+                   "Changed proposal": "changed_proposal",
+                   "No tool allowance": "no_tool_allowance",
+                   "Missing call identity": "missing_call_identity"}
+        proposals.failure_metadata["proposal_error_class"] = type(error).__name__
+        proposals.failure_metadata["proposal_error_reason"] = reasons.get(str(error), "unclassified")
         budget.halt("invalid_or_repeated_tool_proposal")
     return not (getattr(budget, "enforces_owner_stop", False) and budget.state["halted"])
 
