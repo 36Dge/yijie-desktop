@@ -27,6 +27,7 @@ type SearchView = Readonly<{
 const props = defineProps<{
   artifact: ArtifactProjection;
   contextId: string;
+  openFile?: (artifact: ArtifactProjection) => void;
   client?: ChatArtifactFileNativeClient;
 }>();
 
@@ -319,11 +320,12 @@ onBeforeUnmount(() => {
     aria-label="文件预览与保存"
     :aria-busy="busy ? 'true' : 'false'"
   >
-    <p v-if="htmlPreview" class="artifact-file__fallback">支持自包含 HTML；外链资源不会加载。</p>
+    <p v-if="htmlPreview && !openFile" class="artifact-file__fallback">支持自包含 HTML；外链资源不会加载。</p>
     <div class="artifact-file__actions">
-      <button v-if="htmlPreview" class="yj-control" type="button" :disabled="busy" @click="openHTML">{{busy ? "正在打开…" : "预览 HTML"}}</button>
+      <button v-if="openFile" class="yj-control" type="button" @click="openFile(artifact)"><YjIcon name="file" size="sm" />预览文件</button>
+      <button v-if="htmlPreview && !openFile" class="yj-control" type="button" :disabled="busy" @click="openHTML">{{busy ? "正在打开…" : "预览 HTML"}}</button>
       <button class="yj-control"
-        v-if="canPreview"
+        v-if="canPreview && !openFile"
         ref="previewTrigger"
         data-testid="artifact-file-open"
         type="button"
@@ -334,10 +336,10 @@ onBeforeUnmount(() => {
         <YjIcon name="file" size="sm" />
         {{ busy ? "预览中" : "预览文件" }}
       </button>
-      <span v-else-if="saveOnly && !htmlPreview" class="artifact-file__fallback" role="note">
+      <span v-else-if="saveOnly && !htmlPreview && !openFile" class="artifact-file__fallback" role="note">
         当前格式不支持应用内预览，可使用原生保存。
       </span>
-      <span v-else-if="!htmlPreview" class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
+      <span v-else-if="!htmlPreview && !openFile" class="artifact-file__fallback" role="note">当前文件格式不可用。</span>
 
       <button class="yj-control"
         v-if="canSave"

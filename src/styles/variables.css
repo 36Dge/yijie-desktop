@@ -198,6 +198,12 @@
   --yj-motion-connector-loading: 960ms;
   --yj-layout-workspace-list-max: 240px;
   --yj-layout-workspace-create-width: 480px;
+  --yj-layout-preview-tabs-height: 44px;
+  --yj-layout-preview-heading-height: 48px;
+  --yj-layout-preview-tab-max: 240px;
+  --yj-layout-preview-empty-max: 320px;
+  --yj-z-preview-separator: 2;
+  --yj-z-preview-notice: 3;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-composer-fade: var(--yj-space-12);

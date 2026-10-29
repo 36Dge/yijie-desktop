@@ -58,7 +58,7 @@ pub(super) struct ArtifactLocator {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-enum FilePreviewProjection {
+pub(super) enum FilePreviewProjection {
     Text {
         media_type: &'static str,
         text: String,
@@ -923,7 +923,7 @@ fn bounded_csv_projection(
     }
 }
 
-fn project_file_preview(
+pub(super) fn project_file_preview(
     media_type: &'static str,
     bytes: &[u8],
 ) -> Result<FilePreviewProjection, ArtifactNativeCode> {

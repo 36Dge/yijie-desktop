@@ -66,6 +66,19 @@ function artifact(
 }
 
 describe("ChatArtifactShell", () => {
+  it("FEAT166 routes both filename and preview action through the same artifact binding", async () => {
+    const openFile = vi.fn();
+    const value = artifact(0, {kind:"file",status:"ready",mediaType:"application/pdf",displayName:"normal.pdf"});
+    const wrapper = mount(ChatArtifactList, {props:{artifacts:[value],contextId:CONTEXT_ID,openFile,fileNativeClient:FILE_NATIVE_CLIENT}});
+    try {
+      await wrapper.get(".artifact-shell__open").trigger("click");
+      await wrapper.get(".artifact-file__actions button").trigger("click");
+      expect(openFile).toHaveBeenNthCalledWith(1,value);expect(openFile).toHaveBeenNthCalledWith(2,value);
+      expect(wrapper.text()).not.toContain("当前格式不支持应用内预览");
+      await wrapper.setProps({artifacts:[artifact(0,{kind:"file",status:"ready",mediaType:"image/svg+xml",displayName:"normal.svg"})]});
+      expect(wrapper.find(".artifact-shell__open").exists()).toBe(false);
+    } finally {wrapper.unmount();}
+  });
   it("renders safe metadata, all generic states, four kinds, and synthetic provenance", () => {
     const items = [
       artifact(0, { kind: "image", status: "announced", displayName: "demo.png" }),

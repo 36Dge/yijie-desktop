@@ -1250,6 +1250,26 @@ struct OoxmlPreflight {
     actual_total_size: u64,
 }
 
+// FEAT-166 shares the importer/producer's exact bounded package admission.
+// Entries are read into memory, never extracted to a filesystem or executed.
+pub(super) fn document_preview_entries(
+    extension: &str,
+    content: &[u8],
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, AttachmentImportError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(content)).map_err(|_| AttachmentImportError::InvalidContent)?;
+    let admission = preflight_ooxml(extension, &mut archive)?;
+    let mut total = 0;
+    let mut entries = std::collections::BTreeMap::new();
+    for name in admission.names {
+        entries.insert(
+            name.clone(),
+            read_ooxml_entry(&mut archive, &name, &mut total)?,
+        );
+    }
+    Ok(entries)
+}
+
 fn preflight_ooxml(
     extension: &str,
     archive: &mut ZipArchive<Cursor<&[u8]>>,

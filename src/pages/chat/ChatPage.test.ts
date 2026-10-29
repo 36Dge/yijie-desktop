@@ -562,9 +562,9 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
     expect(wrapper.text()).toContain("检查标题");
     expect(wrapper.text()).toContain("标题检查完成");
-    expect(wrapper.findAll(".chat-message__attachment")).toHaveLength(1);
+    expect(wrapper.findAll(".chat-file-chip")).toHaveLength(1);
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
-    expect(wrapper.text()).toContain("文件 · 4 KB");
+    expect(wrapper.get(".chat-file-chip").attributes("aria-label")).toContain("PDF");
 
     const textCopyActions = wrapper.findAll('[aria-label="复制文本"]');
     expect(textCopyActions).toHaveLength(2);

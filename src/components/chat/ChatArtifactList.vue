@@ -9,6 +9,7 @@ import ChatArtifactShell from "./ChatArtifactShell.vue";
 defineProps<{
   artifacts: readonly ArtifactProjection[];
   contextId: string;
+  openFile?: (artifact: ArtifactProjection) => void;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
   fileNativeClient?: ChatArtifactFileNativeClient;
@@ -22,6 +23,7 @@ defineProps<{
       <li v-for="artifact in artifacts" :key="artifact.artifactId">
         <ChatArtifactShell
           :artifact="artifact"
+          :open-file="openFile"
           :context-id="contextId"
           :native-client="nativeClient"
           :video-native-client="videoNativeClient"

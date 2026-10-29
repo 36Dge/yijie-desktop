@@ -1396,6 +1396,29 @@ impl ConversationApplication {
             .await
     }
 
+    pub(super) async fn bound_document_preview(
+        &self,
+        session: Uuid,
+        message: Option<Uuid>,
+        attachment: Uuid,
+    ) -> Result<Result<super::document_preview_native::StoredDocument, ReadyFileReadError>, ChatError>
+    {
+        self.database
+            .call(move |repo| repo.bound_document_preview(session, message, attachment))
+            .await
+    }
+
+    pub(super) async fn document_preview_current(
+        &self,
+        source: super::document_preview_native::DocumentSource,
+        revision: String,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        self.database
+            .call(move |repo| repo.document_preview_current(source, revision, now))
+            .await
+    }
+
     pub async fn remove_ready_attachment(
         &self,
         attachment_id: Uuid,

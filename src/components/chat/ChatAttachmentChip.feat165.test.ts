@@ -10,6 +10,15 @@ const popover = defineComponent({ props: ["show"], template: '<div><slot name="t
 const base = { attachmentId: "file-1", name: "普通文件.jpeg", mediaType: "image/jpeg", status: "ready", removable: true };
 function chip(props = {}) { return mount(ChatAttachmentChip, { props: {...base, ...props}, global: {stubs: {NPopover: popover, Popover: popover}} }); }
 describe("FEAT165 local attachment chip", () => {
+  it("FEAT166 opens only explicitly bound non-media references on click or keyboard", async () => {
+    const openPreview=vi.fn();
+    const view=chip({name:"normal.pdf",mediaType:"application/pdf",status:"bound",removable:false,openPreview});
+    const trigger=view.get(".chat-file-chip");
+    expect(trigger.attributes("role")).toBe("button");
+    await trigger.trigger("click");await trigger.trigger("keydown",{key:"Enter"});await trigger.trigger("keydown",{key:" "});
+    expect(openPreview).toHaveBeenCalledTimes(3);
+    expect(view.find(".chat-file-chip__remove").exists()).toBe(false);
+  });
   it("loads an image only on demand and discards a reply after closing", async () => {
     let complete!: (value: AttachmentPresentation) => void;
     const read = vi.fn(() => new Promise<AttachmentPresentation>(resolve => {complete = resolve;}));

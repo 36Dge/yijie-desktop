@@ -50,6 +50,9 @@ import { useChatWorkspaces } from "../../composables/useChatWorkspaces";
 import ChatHomeOpening from "../../components/chat/ChatHomeOpening.vue";
 import ChatHomeMascot from "../../components/chat/ChatHomeMascot.vue";
 import type { ChatApprovalDecisionChange } from "../../components/chat/ChatCommandItem.vue";
+import ChatDocumentWorkspace from "../../components/chat/ChatDocumentWorkspace.vue";
+import { isSidebarFile } from "../../domain/conversation-file-preview";
+import type { ArtifactProjection } from "../../domain/chat-artifact";
 import ChatArtifactList from "../../components/chat/ChatArtifactList.vue";
 import ChatCopyAction from "../../components/chat/ChatCopyAction.vue";
 import ChatReasoningDisclosure from "../../components/chat/ChatReasoningDisclosure.vue";
@@ -78,6 +81,7 @@ import type {
 import {
   selectConversationTimeline,
   type ConversationTimelineArtifactReferenceContentBlock,
+  type ConversationTimelineAttachmentReferenceContentBlock,
   type ConversationTimelineItemViewModel,
 } from "../../domain/conversation-timeline";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
@@ -117,6 +121,22 @@ const readAttachmentPresentation = useChatAttachmentPresentation(
 );
 const attachmentPresentationScope = computed(() => `${chatStore.context?.contextId ?? ""}:${JSON.stringify(chatStore.draftTarget)}`);
 
+const previewWorkspace = ref<InstanceType<typeof ChatDocumentWorkspace>>();
+const previewTrigger = ref<HTMLButtonElement>();
+const previewExpanded = ref(false);
+const previewEnabled = computed(() => kimiK31Candidate && !isDraftMode.value && normalPurposeReady.value && chatStore.hasAction("read_sessions"));
+const previewScope = computed(() => `${route.fullPath}:${permissionScope.selectedTenantId ?? ""}:${permissionScope.authorizationRevision ?? ""}:${permissionScope.isReady}:${permissionScope.hasCapability("task.read")}`);
+function openArtifactFile(artifact: ArtifactProjection) {
+  if (!previewEnabled.value) return;
+  previewWorkspace.value?.openFile({ source: { kind: "artifact", sessionId: artifact.sessionId, turnId: artifact.turnId, artifactId: artifact.artifactId }, name: artifact.displayName ?? "未命名文件", mediaType: artifact.mediaType ?? "", status: artifact.status, expiresAt: artifact.expiresAt });
+}
+function attachmentPreview(block: ConversationTimelineAttachmentReferenceContentBlock): (() => void) | undefined {
+  if (!previewEnabled.value || !chatStore.selectedSessionId || !isSidebarFile(block.mediaType, block.name)) return;
+  const messages = chatStore.history?.turns.flatMap(t => t.messages).filter(m => m.role === "user" && m.contentBlocks?.some(b => b.type !== "text" && b.attachmentId === block.attachmentId)) ?? [];
+  if (messages.length !== 1) return;
+  const source = { kind: "attachment" as const, sessionId: chatStore.selectedSessionId, messageId: /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(messages[0]!.messageId) ? messages[0]!.messageId : null, attachmentId: block.attachmentId };
+  return () => previewWorkspace.value?.openFile({ source, name: block.name, mediaType: block.mediaType, status: block.status, expiresAt: block.expiresAt });
+}
 const artifactStore = useArtifactStore();
 const permissionScope = usePermissionStore();
 const draftPanel = ref<InstanceType<typeof ScheduledDraftPanel>>();
@@ -1148,7 +1168,8 @@ onBeforeUnmount(() => {
     </div>
   </section>
 
-  <section v-else class="chat-workspace" aria-labelledby="active-chat-title">
+  <ChatDocumentWorkspace v-else ref="previewWorkspace" :context-id="chatStore.context?.contextId ?? null" :scope-key="previewScope" :enabled="previewEnabled" @expanded="previewExpanded = $event" @restore-trigger="previewTrigger?.focus()">
+  <section class="chat-workspace" aria-labelledby="active-chat-title">
     <header class="chat-workspace__header">
       <div class="chat-workspace__heading-copy">
         <h1 id="active-chat-title" class="chat-workspace__title">
@@ -1166,6 +1187,7 @@ onBeforeUnmount(() => {
       >
         {{ readiness.title }}
       </div>
+      <button v-if="previewEnabled" ref="previewTrigger" type="button" class="yj-control yj-control--icon chat-workspace__preview-toggle" :aria-label="previewExpanded ? '收起文件预览' : '展开文件预览'" :title="previewExpanded ? '收起文件预览' : '展开文件预览'" :aria-expanded="previewExpanded" @click="previewWorkspace?.toggle()"><YjIcon name="previewSidebar" size="sm" /></button>
     </header>
 
     <div class="chat-workspace__conversation-wrap">
@@ -1239,7 +1261,7 @@ onBeforeUnmount(() => {
               />
             </template>
             <template #attachment-reference="{ block }">
-              <ChatAttachmentChip :attachment-id="block.attachmentId" :name="block.name" :media-type="block.mediaType" :status="block.status" />
+              <ChatAttachmentChip :attachment-id="block.attachmentId" :name="block.name" :media-type="block.mediaType" :status="block.status" :open-preview="attachmentPreview(block)" />
             </template>
             <template #artifact-reference="{ item, block }">
               <template
@@ -1253,6 +1275,7 @@ onBeforeUnmount(() => {
                   :native-client="chatArtifactNativeClient"
                   :video-native-client="chatArtifactVideoNativeClient"
                   :file-native-client="chatArtifactFileNativeClient"
+                  :open-file="previewEnabled ? openArtifactFile : undefined"
                   :report-native-client="chatArtifactReportNativeClient"
                 />
                 <span v-else class="chat-timeline__artifact-fallback">
@@ -1391,6 +1414,8 @@ onBeforeUnmount(() => {
     <div class="sr-only" aria-live="polite">{{ statusAnnouncement }}</div>
   </section>
 
+  </ChatDocumentWorkspace>
+
   <n-modal v-model:show="permissionDialogOpen" :mask-closable="true">
     <n-card class="permission-dialog" title="权限审批" role="dialog" aria-modal="true" :bordered="false">
       <div class="permission-dialog__status">
@@ -1475,7 +1500,11 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--yj-color-bg-page) 92%, transparent);
 }
 
-.chat-workspace__heading-copy { min-width: 0; }
+.chat-workspace__heading-copy { min-width: 0; flex:1; }
+.chat-workspace__preview-toggle { flex:none; appearance:none; border:var(--yj-border-width) solid transparent; background:transparent; box-shadow:none; color:var(--yj-color-text-primary); cursor:pointer; }
+.chat-workspace__preview-toggle:hover { background:var(--yj-color-control-hover); }
+.chat-workspace__preview-toggle:active { background:var(--yj-color-control-pressed); }
+.chat-workspace__preview-toggle:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:var(--yj-space-1); }
 .chat-workspace__title { font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-workspace__meta { display: flex; gap: var(--yj-space-4); margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-workspace__meta span { display: inline-flex; align-items: center; gap: var(--yj-space-1); }

@@ -50,6 +50,7 @@
 - 左导航收起：72px。
 - Chat 会话列表：280px。
 - 右侧上下文面板：320–380px。
+- FEAT-166 文件预览面板单独采用两侧最小400px的分栏公式，详见[文件预览](../05-patterns/17-feat-166-conversation-file-preview.md)；布局数值集中于 `conversation-file-preview.ts`，固定尺寸使用 `--yj-layout-preview-tabs-height` 44px、`--yj-layout-preview-heading-height` 48px、`--yj-layout-preview-tab-max` 240px、`--yj-layout-preview-empty-max` 320px。
 - 表单最大宽度：720–960px。
 - 专家详情弹窗最大宽度：600px（`--yj-layout-expert-detail-width`），最小高度700px（`--yj-layout-expert-detail-min-height`）；最小高度也受视口限制，上下至少留32px，居中显示，超高时固定头部、正文内部滚动。内部标准边距24px，窄窗口减为20px。
 - 定时任务创建、编辑及草案确认弹窗：520px（`--yj-layout-schedule-form-width`），竖向分组；标题和底部操作固定，内容超高时在弹窗内滚动，按实际缩放后的可用视口限制宽高。

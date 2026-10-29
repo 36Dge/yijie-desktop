@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-document-preview-v1.schema.json",
+  "title": "FEAT-166 scoped read-only document presentation",
+  "x-command-names": [
+    "chat_document_preview_v1"
+  ],
+  "x-event": "chat-document-preview-invalidated",
+  "x-authority": "Existing Native context/owner/tenant + committed artifact or bound message attachment; no paths, raw bytes, URLs, model or publish actions",
+  "x-compatibility": "New private operation; existing artifact and draft v1/v2 APIs unchanged; no durable state or Runtime protocol change",
+  "definitions": {
+    "Source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "artifact"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "turnId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "artifactId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "sessionId",
+            "turnId",
+            "artifactId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "attachment"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "messageId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Persisted message id when available; null for a newly accepted attachment. Native must resolve and verify its existing bound user message in this session."
+            },
+            "attachmentId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "sessionId",
+            "messageId",
+            "attachmentId"
+          ]
+        }
+      ]
+    },
+    "Viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "dpr": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 8
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "dpr"
+      ]
+    },
+    "Location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "section": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "scrollX": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "scrollY": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "revision": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "section",
+        "offset",
+        "zoom",
+        "scrollX",
+        "scrollY",
+        "revision"
+      ]
+    },
+    "Section": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ]
+    },
+    "Action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "open"
+            },
+            "viewId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "source": {
+              "$ref": "#/definitions/Source"
+            },
+            "viewport": {
+              "$ref": "#/definitions/Viewport"
+            },
+            "location": {
+              "$ref": "#/definitions/Location"
+            },
+            "theme": {
+              "enum": [
+                "light",
+                "dark"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "viewId",
+            "source",
+            "viewport",
+            "location",
+            "theme"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "resize"
+            },
+            "viewId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "viewport": {
+              "$ref": "#/definitions/Viewport"
+            },
+            "visible": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "action",
+            "viewId",
+            "viewport",
+            "visible"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "position"
+            },
+            "viewId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "action",
+            "viewId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "close"
+            },
+            "viewId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "action",
+            "viewId"
+          ]
+        }
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "contextId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "payload": {
+          "$ref": "#/definitions/Action"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "contextId",
+        "payload"
+      ]
+    },
+    "Document": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "html",
+            "text",
+            "docx",
+            "pptx",
+            "xlsx",
+            "pdf"
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Section"
+          },
+          "maxItems": 512
+        },
+        "section": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previousOffset": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "notice": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "revision",
+        "expiresAt",
+        "sections",
+        "section",
+        "offset",
+        "nextOffset",
+        "previousOffset",
+        "partial",
+        "notice"
+      ]
+    },
+    "Position": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scrollX": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "scrollY": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000000
+        }
+      },
+      "required": [
+        "scrollX",
+        "scrollY"
+      ]
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "resized",
+            "position",
+            "closed"
+          ]
+        },
+        "viewId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "document": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Document"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Position"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "viewId",
+        "document",
+        "position"
+      ]
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "data": {
+          "$ref": "#/definitions/Result"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "data"
+      ]
+    },
+    "Invalidated": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "viewId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "enum": [
+            "expired",
+            "forbidden",
+            "unavailable"
+          ]
+        }
+      },
+      "required": [
+        "viewId",
+        "reason"
+      ]
+    },
+    "Loaded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewId"
+      ],
+      "properties": {
+        "viewId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    }
+  },
+  "$ref": "#/definitions/Request",
+  "x-loaded-event": "chat-document-preview-loaded"
+}

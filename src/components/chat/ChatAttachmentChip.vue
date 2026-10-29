@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   removable?: boolean;
   disabled?: boolean;
   readPresentation?: AttachmentPresentationReader;
+  openPreview?: () => void;
 }>(), { active: false, removable: false, disabled: false });
 const emit = defineEmits<{ activate: [id: string | null]; remove: [id: string] }>();
 const file = computed(() => chatFilePresentation(props.mediaType));
@@ -52,6 +53,7 @@ watch(() => [props.active, props.attachmentId, available.value] as const, () => 
 onBeforeUnmount(release);
 function show(value: boolean) { emit("activate", value && available.value ? props.attachmentId : null); }
 function activateOrRead() {
+  if (props.openPreview) { props.openPreview(); return; }
   if (props.active) void read();
   else show(true);
 }
@@ -65,7 +67,7 @@ function closeOutside(event: FocusEvent) {
 <template>
   <NPopover :show="active && available" trigger="hover" placement="top" :show-arrow="false" @update:show="show">
     <template #trigger>
-      <span ref="triggerElement" class="chat-file-chip" :class="{ 'chat-file-chip--expired': statusLabel, 'chat-file-chip--removable': removable }" :tabindex="available ? 0 : undefined" :aria-label="`${name}，${file.label}${statusLabel ? `，${statusLabel}` : ''}`" @focus="show(true)" @focusout="closeOutside" @keydown.esc.stop="show(false)" @keydown.enter.self.stop.prevent="activateOrRead">
+      <span ref="triggerElement" class="chat-file-chip" :class="{ 'chat-file-chip--expired': statusLabel, 'chat-file-chip--removable': removable }" :role="openPreview ? 'button' : undefined" :tabindex="available || openPreview ? 0 : undefined" @click="openPreview?.()" @keydown.space.self.stop.prevent="openPreview?.()" :aria-label="`${name}，${file.label}${statusLabel ? `，${statusLabel}` : ''}`" @focus="show(true)" @focusout="closeOutside" @keydown.esc.stop="show(false)" @keydown.enter.self.stop.prevent="activateOrRead">
         <span class="chat-file-chip__icon" :class="`chat-file-chip__icon--${file.tone}`">
           <YjIcon class="chat-file-chip__type-icon" :name="file.icon" size="sm" />
           <button v-if="removable" class="chat-file-chip__remove" type="button" :disabled="disabled" :aria-label="`移除 ${name}`" @click.stop="emit('remove', attachmentId)" @focus="show(false)"><YjIcon name="dismiss" size="sm" /></button>
@@ -88,6 +90,7 @@ function closeOutside(event: FocusEvent) {
 <style scoped>
 .chat-file-chip { display: inline-flex; align-items: center; gap: var(--yj-space-2); max-width: 100%; min-width: 0; padding: var(--yj-space-1) var(--yj-space-3); border-radius: var(--yj-radius-full); background: var(--yj-color-skill-pill-bg); color: var(--yj-color-text-primary); font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); vertical-align: middle; }
 .chat-file-chip:not(.chat-file-chip--removable) { background: var(--yj-color-skill-pill-message-bg); }
+.chat-file-chip[role="button"] { cursor:pointer; }
 .chat-file-chip:focus-visible, .chat-file-chip__remove:focus-visible, .chat-file-chip__retry:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }
 .chat-file-chip__icon { position: relative; display: inline-flex; flex-shrink: 0; color: var(--yj-color-text-secondary); }
 .chat-file-chip__icon :deep(.chat-file-chip__type-icon) { color: inherit; }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { isSidebarFile } from "../../domain/conversation-file-preview";
 import { chatFilePresentation } from "../../domain/chat-file-presentation";
 import { NProgress, NTag } from "naive-ui";
 import type { ChatArtifactFileNativeClient } from "../../api/chat-artifact-file-native-client";
@@ -16,6 +17,7 @@ import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   artifact: ArtifactProjection;
   contextId: string;
+  openFile?: (artifact: ArtifactProjection) => void;
   nativeClient?: ChatArtifactNativeClient;
   videoNativeClient?: ChatArtifactVideoNativeClient;
   fileNativeClient?: ChatArtifactFileNativeClient;
@@ -69,6 +71,7 @@ const sizeLabel = computed(() => {
   if (bytes < 1024) return `${bytes} B`;
   return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 });
+const sidebarFile = computed(() => Boolean(props.openFile) && props.artifact.kind === "file" && isSidebarFile(props.artifact.mediaType ?? "", displayName.value));
 const titleId = computed(() => `artifact-${props.artifact.artifactId}-title`);
 const progressLabel = computed(() => `${displayName.value}处理进度`);
 </script>
@@ -86,7 +89,8 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
         <YjIcon :name="kindPresentation.icon" size="lg" tone="muted" />
       </span>
       <span class="artifact-shell__identity">
-        <strong :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
+        <button v-if="sidebarFile" :id="titleId" type="button" class="artifact-shell__name artifact-shell__open" :title="displayName" @click="openFile?.(artifact)">{{ displayName }}</button>
+        <strong v-else :id="titleId" class="artifact-shell__name">{{ displayName }}</strong>
         <span class="artifact-shell__kind">{{ kindPresentation.label }}<template v-if="sizeLabel"> · {{ sizeLabel }}</template></span>
       </span>
       <NTag size="small" :bordered="false">{{ provenanceLabel }}</NTag>
@@ -111,6 +115,7 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
       :artifact="artifact"
       :context-id="contextId"
       :client="fileNativeClient"
+      :open-file="sidebarFile ? openFile : undefined"
     />
 
     <ChatArtifactReport
@@ -216,6 +221,9 @@ const progressLabel = computed(() => `${displayName.value}处理进度`);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.artifact-shell__open { max-width:100%; border:0; padding:0; background:transparent; color:var(--yj-color-text-primary); text-align:left; cursor:pointer; }
+.artifact-shell__open:hover { text-decoration:underline; }
+.artifact-shell__open:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); }
 .artifact-shell__kind {
   color: var(--yj-color-text-tertiary);
   font-size: var(--yj-font-size-caption);

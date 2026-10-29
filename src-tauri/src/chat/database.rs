@@ -1688,6 +1688,89 @@ impl ChatRepository {
         attachments
     }
 
+    // FEAT-166: this is a separate bound-message path; draft semantics stay intact.
+    pub(super) fn bound_document_preview(
+        &self,
+        session: Uuid,
+        message: Option<Uuid>,
+        attachment: Uuid,
+    ) -> Result<
+        Result<super::document_preview_native::StoredDocument, super::artifact::ReadyFileReadError>,
+        ChatError,
+    > {
+        use super::artifact::ReadyFileReadError as ReadError;
+        use sha2::Digest;
+        let now = unix_seconds()?;
+        type Row = (String, String, i64, String, i64, Option<Vec<u8>>);
+        let row: Option<Row> = self.connection.query_row(
+            "SELECT a.media_type,a.state,a.byte_size,a.sha256,a.expires_at,
+             CASE WHEN a.state='bound' AND a.expires_at>?6 AND a.byte_size<=10485760 THEN a.content_blob ELSE NULL END
+             FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id
+             JOIN chat_sessions s ON s.id=m.session_id
+             JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id
+             WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND m.role='user' AND a.kind='file'
+             AND a.owner_user_id=?4 AND a.tenant_id=?5
+             AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id",
+            params![attachment.to_string(),message.map(|id| id.to_string()),session.to_string(),self.scope.owner_user_id,self.scope.tenant_id,now],
+            |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)),
+        ).optional().map_err(map_sqlite_error)?;
+        let Some((mime, state, size, revision, expires, bytes)) = row else {
+            return Ok(Err(ReadError::NotFound));
+        };
+        if state == "expired" || expires <= now {
+            return Ok(Err(ReadError::Expired));
+        }
+        if state != "bound" {
+            return Ok(Err(ReadError::NotReady));
+        }
+        if !(1..=10_485_760).contains(&size) {
+            return Ok(Err(ReadError::LimitExceeded));
+        }
+        let Some(bytes) = bytes else {
+            return Ok(Err(ReadError::NotFound));
+        };
+        if bytes.len() != size as usize || format!("{:x}", sha2::Sha256::digest(&bytes)) != revision
+        {
+            return Ok(Err(ReadError::Integrity));
+        }
+        Ok(Ok(super::document_preview_native::StoredDocument {
+            mime,
+            bytes,
+            expires,
+            revision,
+        }))
+    }
+
+    pub(super) fn document_preview_current(
+        &self,
+        source: super::document_preview_native::DocumentSource,
+        revision: String,
+        now: i64,
+    ) -> Result<bool, ChatError> {
+        let (session, second, id) = source.ids();
+        let sql=match source {
+            super::document_preview_native::DocumentSource::Artifact{..}=>
+                "SELECT EXISTS(SELECT 1 FROM chat_output_artifacts a JOIN chat_sessions s ON s.id=a.session_id JOIN chat_turns t ON t.id=a.turn_id AND t.session_id=s.id WHERE a.artifact_id=?1 AND a.turn_id=?2 AND a.session_id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND a.state='ready' AND a.local_committed_at IS NOT NULL AND a.sha256=?6 AND a.expires_at>?7)",
+            super::document_preview_native::DocumentSource::Attachment{..}=>
+                "SELECT EXISTS(SELECT 1 FROM chat_attachments a JOIN chat_messages m ON m.id=a.message_id JOIN chat_sessions s ON s.id=m.session_id JOIN chat_message_content_blocks b ON b.message_id=m.id AND b.attachment_id=a.id WHERE a.id=?1 AND (?2 IS NULL OR m.id=?2) AND s.id=?3 AND a.owner_user_id=?4 AND a.tenant_id=?5 AND s.owner_user_id=a.owner_user_id AND s.tenant_id=a.tenant_id AND m.role='user' AND a.kind='file' AND a.state='bound' AND a.sha256=?6 AND a.expires_at>?7)",
+        };
+        self.connection
+            .query_row(
+                sql,
+                params![
+                    id.to_string(),
+                    second.map(|id| id.to_string()),
+                    session.to_string(),
+                    self.scope.owner_user_id,
+                    self.scope.tenant_id,
+                    revision,
+                    now
+                ],
+                |r| r.get(0),
+            )
+            .map_err(map_sqlite_error)
+    }
+
     // A display projection can only read the current unbound draft, never a
     // supplied file path or a historical attachment belonging to another scope.
     pub(super) fn draft_attachment_presentation(
@@ -9844,6 +9927,97 @@ mod tests {
         assert_eq!(
             repository.draft_attachment_presentation(id, DraftTarget::New),
             Err(ChatError::NotFound)
+        );
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn feat166_normal_bound_document_uses_existing_message_identity_and_expiry() {
+        use super::super::document_preview_native::DocumentSource;
+        let root = std::env::temp_dir().join(format!("yijie-feat166-bound-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let original_scope = scope();
+        let mut repository = open_repository_for_scope(&root, 43, original_scope.clone());
+        let project = register_synthetic_project(&mut repository, &root);
+        let prepared = crate::chat::attachment::prepare_bytes(
+            "normal.txt".into(),
+            b"Normal preview body".to_vec(),
+            unix_seconds().unwrap(),
+        )
+        .unwrap();
+        let attachment = prepared.id;
+        repository
+            .store_attachment(prepared, DraftTarget::New)
+            .unwrap();
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project,
+                &[DraftContentBlock::File(attachment)],
+                Uuid::now_v7(),
+                7,
+            )
+            .unwrap();
+        let history = repository
+            .load_history(pending.session_id, None, Some(20))
+            .unwrap();
+        let message = history.turns[0].messages[0].message_id;
+        let content = repository
+            .bound_document_preview(pending.session_id, Some(message), attachment)
+            .unwrap()
+            .unwrap();
+        assert_eq!(content.bytes, b"Normal preview body");
+        let resolved = repository
+            .bound_document_preview(pending.session_id, None, attachment)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.revision, content.revision);
+        assert_eq!(resolved.bytes, content.bytes);
+        let source = DocumentSource::Attachment {
+            session_id: pending.session_id,
+            message_id: Some(message),
+            attachment_id: attachment,
+        };
+        assert!(repository
+            .document_preview_current(
+                source.clone(),
+                content.revision.clone(),
+                unix_seconds().unwrap()
+            )
+            .unwrap());
+        assert!(!repository
+            .document_preview_current(source.clone(), content.revision.clone(), content.expires)
+            .unwrap());
+        assert!(repository
+            .bound_document_preview(pending.session_id, Some(Uuid::now_v7()), attachment)
+            .unwrap()
+            .is_err());
+        assert!(!repository
+            .document_preview_current(
+                DocumentSource::Artifact {
+                    session_id: pending.session_id,
+                    turn_id: pending.turn_id,
+                    artifact_id: attachment
+                },
+                content.revision.clone(),
+                unix_seconds().unwrap()
+            )
+            .unwrap());
+        drop(repository);
+        let other = open_repository_for_scope(&root, 43, scope());
+        assert!(other
+            .bound_document_preview(pending.session_id, Some(message), attachment)
+            .unwrap()
+            .is_err());
+        drop(other);
+        let repository = open_repository_for_scope(&root, 43, original_scope);
+        assert_eq!(
+            repository
+                .bound_document_preview(pending.session_id, Some(message), attachment)
+                .unwrap()
+                .unwrap()
+                .bytes,
+            content.bytes
         );
         drop(repository);
         fs::remove_dir_all(root).unwrap();
