@@ -26,6 +26,8 @@ export default tseslint.config(
       "src/api/generated/scheduled-task-ipc-v2-validator.gen.js",
       "src/api/generated/market-selection-v2-validator.gen.js",
       "src/api/generated/market-host-v2-native-validator.gen.js",
+      // Canonical Ajv output, checked byte-for-byte by sync-feat162-local.
+      "src/api/generated/web-retrieval-validator.gen.js",
       "src/api/generated/experts-v2-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-formats.gen.js",
     ],

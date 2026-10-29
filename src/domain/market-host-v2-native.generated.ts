@@ -129,7 +129,7 @@ export interface ApprovalSnapshot {
   [k: string]: unknown;
 }
 /**
- * Independent market approval projection. identity is obtained by trusted Broker query for the real tools/call; never synthesized from metadata/tool title/last Item. Approval state is not provider execution success.
+ * Independent market approval projection. identity is obtained by trusted Broker query for the real tools/call; never synthesized from metadata/tool title/last Item. Approval state is not provider execution success. New web modes project paired deadlines from Broker. expiresAtUnixMs keeps execution deadline; pending UI/decision uses decisionExpiresAtUnixMs when present, otherwise legacy expiresAtUnixMs. No post-approval extension.
  */
 export interface MarketApproval {
   approvalId: CanonicalId;
@@ -142,6 +142,8 @@ export interface MarketApproval {
   expiresAtUnixMs: number;
   decisionId?: CanonicalId;
   decision?: Decision;
+  decisionExpiresAtUnixMs?: number;
+  executionExpiresAtUnixMs?: number;
   [k: string]: unknown;
 }
 /**

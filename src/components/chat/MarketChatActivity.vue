@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { Decision, MarketApproval, NativeObservation } from "../../domain/market-host-v2-native.generated";
+import WebRetrievalResult from "./WebRetrievalResult.vue";
 import YjIcon from "../yijie/YjIcon.vue";
 const props = defineProps<{
   observation: NativeObservation | null;
@@ -33,7 +34,7 @@ function approvalName(approval: MarketApproval): string {
       <strong>{{ approval.review.title }}</strong>
       <p>{{ approval.review.summary }}</p>
       <pre v-if="approval.review.argumentsJson" aria-label="本次工具调用完整参数">{{ approval.review.argumentsJson }}</pre>
-      <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · 有效期至 {{ new Date(approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
+      <p class="market-activity__meta">{{ approval.review.risk === 'read' ? '读取数据' : '修改数据' }} · {{ approval.identity.toolName }} · {{ approval.decisionExpiresAtUnixMs ? '最晚批准时间' : '有效期至' }} {{ new Date(approval.decisionExpiresAtUnixMs ?? approval.expiresAtUnixMs).toLocaleTimeString('zh-CN') }}</p>
       <p v-if="approval.state === 'approved'" class="market-activity__meta">本次批准已确认，执行结果以实际工具返回为准。</p>
       <footer v-if="approval.state === 'pending'">
         <button class="yj-control yj-control--regular" type="button" :disabled="!actionable(approval)" @click="$emit('decision', approval.approvalId, 'cancel')">取消本次</button>
@@ -55,7 +56,8 @@ function approvalName(approval: MarketApproval): string {
     <article v-for="item in displayed?.tools?.items ?? []" :key="item.nativeItemId" class="market-activity__card" aria-label="连接器工具结果">
       <header><YjIcon name="connector" size="md" /><strong>{{ item.service ? toolNames.get(item.service.serviceId) ?? item.service.serviceId : '连接器工具' }}</strong><span>{{ toolLabels[item.state] }}</span></header>
       <p class="market-activity__meta">{{ item.toolName }}</p>
-      <pre v-if="item.resultText">{{ item.resultText }}</pre>
+      <WebRetrievalResult v-if="item.resultText && ['kimi_web_search', 'kimi_web_search_pro', 'kimi_web_fetch'].includes(item.toolName)" :tool="item.toolName" :text="item.resultText" />
+      <pre v-else-if="item.resultText">{{ item.resultText }}</pre>
       <p v-else-if="item.state === 'in_progress'">正在等待工具返回。</p>
       <p v-else-if="item.state === 'failed'">本次工具调用失败，请根据对话中的结果继续处理。</p>
       <p v-else>工具调用已结束，没有可展示的文本结果。</p>

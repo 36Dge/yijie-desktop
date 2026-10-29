@@ -79,4 +79,23 @@ describe("market approval observation", () => {
     expect(flow.selectedTurnId.value).toBe(null);
     expect(flow.toolObservation.value).toEqual(live);
   });
+  it("disables new-mode decisions at A while preserving the later execution deadline", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000);
+    try {
+      const api = client(), observation = marketObservation();
+      const approval = observation.approvals!.requests[0]!;
+      approval.expiresAtUnixMs = 1_800_000_060_000;
+      approval.executionExpiresAtUnixMs = approval.expiresAtUnixMs;
+      approval.decisionExpiresAtUnixMs = 1_800_000_023_000;
+      vi.mocked(api.observe).mockResolvedValue(observation);
+      const { flow } = setup(api); await flushPromises();
+      expect(flow.actionable(approval)).toBe(true);
+      await vi.advanceTimersByTimeAsync(23000);
+      expect(flow.actionable(approval)).toBe(false);
+      await flow.decide(approval.approvalId, "approve_once");
+      expect(api.decide).not.toHaveBeenCalled();
+      expect(approval.expiresAtUnixMs).toBe(1_800_000_060_000);
+    } finally { wrappers.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); }
+  });
+
 });

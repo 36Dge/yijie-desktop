@@ -314,12 +314,25 @@ class ProposalObserver:
                              "context_or_tokens": ("context", "token limit", "maximum token"),
                              "tool_call": ("tool", "function", "namespace")}
                     self.failure_metadata["provider_error_terms"] = [k for k, words in terms.items() if any(w in message for w in words)]
-            items = [event.get("item")] if event.get("type") == "response.output_item.done" else []
+            if event.get("type") in {"response.failed", "response.incomplete"} and getattr(self.budget, "enforces_owner_stop", False):
+                self.budget.halt("provider_terminal_failure")
+            items = [event.get("item")] if event.get("type") in {"response.output_item.added", "response.output_item.done"} else []
             if event.get("type") == "response.completed":
                 items += event.get("response", {}).get("output", [])
             for item in items:
-                if isinstance(item, dict) and item.get("type") == "function_call":
+                if isinstance(item, dict) and item.get("type") == "web_search_call" and hasattr(self.budget, "begin_case"):
+                    self.budget.halt("native_search_already_executed")
+                if isinstance(item, dict) and item.get("type") == "function_call" and event.get("type") != "response.output_item.added":
                     self.budget.proposal(item)
+
+
+
+def observe_tool_chunk(budget, proposals, chunk):
+    try:
+        proposals.feed(chunk)
+    except (ValueError, TypeError, AttributeError):
+        budget.halt("invalid_or_repeated_tool_proposal")
+    return not (getattr(budget, "enforces_owner_stop", False) and budget.state["halted"])
 
 
 def offline_response():
@@ -362,6 +375,11 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
                     elif self.path == "/control/tool-approval":
                         size = int(self.headers.get("Content-Length", "0")); require(0 < size <= 8192, "Control size")
                         value = json.loads(self.rfile.read(size)); budget.tool_approval(**value)
+                    elif self.path == "/control/case" and hasattr(budget, "begin_case"):
+                        size = int(self.headers.get("Content-Length", "0")); require(0 < size <= 1024, "Case control size")
+                        budget.begin_case(json.loads(self.rfile.read(size))["case_id"])
+                    elif self.path == "/control/complete-case" and hasattr(budget, "finish_case"):
+                        budget.finish_case()
                     elif self.path == "/control/halt":
                         budget.halt("operator_stop")
                     elif self.path == "/control/stop":
@@ -378,7 +396,7 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
                 self.send_error(403); return
             try:
                 length = int(self.headers.get("Content-Length", "0")); require(0 < length <= 4 * 1024 * 1024, "Request size")
-                payload, metadata = prepare(self.rfile.read(length))
+                payload, metadata = getattr(budget, "prepare_request", prepare)(self.rfile.read(length))
                 if not budget.offline:
                     names = {n.removeprefix("mcp__yijie_market__") for n in metadata["declared_tools"]}
                     require({"kimi_web_search", "kimi_web_fetch"} <= names, "Selected Kimi connector required")
@@ -410,12 +428,13 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
                         error_body.extend(chunk[:max(0, 16385 - len(error_body))])
                     observer.feed(chunk)
                     if not budget.offline and not budget.state["halted"]:
-                        try:
-                            proposals.feed(chunk)
-                        except (ValueError, TypeError, AttributeError):
-                            budget.halt("invalid_or_repeated_tool_proposal")
+                        observe_tool_chunk(budget, proposals, chunk)
+                    if getattr(budget, "enforces_owner_stop", False) and budget.state["halted"]:
+                        # The owner stop has been attempted synchronously. Never
+                        # deliver the offending tool chunk after admission closes.
+                        break
                     self.wfile.write(chunk); self.wfile.flush(); digest.update(chunk); count += len(chunk)
-                complete = True
+                complete = not (getattr(budget, "enforces_owner_stop", False) and budget.state["halted"])
                 if status >= 400:
                     observer.result.update(shared.error_metadata(error_body))
             except (OSError, http.client.HTTPException) as error:
@@ -435,10 +454,13 @@ def main():
     parser.add_argument("--ledger", required=True, type=Path)
     parser.add_argument("--kimi-key-file", type=Path)
     parser.add_argument("--control-token-file", type=Path)
-    parser.add_argument("--authorization", required=True, choices=[AUTHORITY, CONTINUATION, ADDITIONAL_FOUR])
+    parser.add_argument("--authorization", required=True, choices=[AUTHORITY, CONTINUATION, ADDITIONAL_FOUR, "FEAT-162-basic-pro-v2", "FEAT-162-soft-budget-v3"])
     parser.add_argument("--create-continuation-from", type=Path)
     parser.add_argument("--continuation-evidence", type=Path)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--basic-pro-plan", type=Path)
+    parser.add_argument("--owner-stop-url")
+    parser.add_argument("--owner-token-file", type=Path)
     args = parser.parse_args()
     require(args.ledger.is_absolute() and args.ledger.parent.resolve(strict=True) == args.ledger.parent, "Canonical existing ledger directory")
     if args.create_continuation_from or args.continuation_evidence:
@@ -451,8 +473,25 @@ def main():
     require(args.kimi_key_file and args.control_token_file, "Existing credentials required")
     with open(args.ledger.with_suffix(".lock"), "a") as guard:
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        budget = Budget(args.ledger, args.offline)
+        if args.authorization in {"FEAT-162-basic-pro-v2", "FEAT-162-soft-budget-v3"}:
+            require(args.basic_pro_plan and not args.create_continuation_from, "New independent plan required")
+            policy_file = "feat162-soft-budget-meter.py" if args.authorization == "FEAT-162-soft-budget-v3" else "feat162-basic-pro-meter.py"
+            policy_spec = importlib.util.spec_from_file_location("feat162_current_policy", Path(__file__).with_name(policy_file))
+            policy = importlib.util.module_from_spec(policy_spec); policy_spec.loader.exec_module(policy)
+            budget = policy.Budget(args.ledger, json.loads(args.basic_pro_plan.read_text()), args.offline)
+        else:
+            require(not args.basic_pro_plan and not args.owner_stop_url and not args.owner_token_file, "Legacy ledgers cannot consume a v2 plan or stop adapter")
+            budget = Budget(args.ledger, args.offline)
         require(budget.state["authorization"] == args.authorization, "Matching authority required")
+        if args.authorization == "FEAT-162-basic-pro-v2" and not args.offline:
+            # Fail before reading credentials or opening a listening socket.
+            require(policy.LIVE_EXECUTION_QUALIFIED, "v2 live execution unqualified: native fee bound and owner stop evidence missing")
+            budget.live_ready(require_owner=False)
+            require(args.owner_stop_url and args.owner_token_file, "Explicit normal Owner stop configuration required")
+            budget.owner_stop = policy.OwnerStop(args.owner_stop_url, shared.credential(args.owner_token_file))
+            budget.live_ready()
+        if args.authorization == "FEAT-162-soft-budget-v3" and not args.offline:
+            budget.live_ready()
         key, control = shared.credential(args.kimi_key_file), shared.credential(args.control_token_file)
         server = server_for(budget, key, control)
         budget.state["meter_state"] = "running"; budget.save()

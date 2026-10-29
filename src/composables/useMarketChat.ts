@@ -17,13 +17,22 @@ export function useMarketChat(context: () => string | null, session: () => strin
   let epoch = 0, mutation = 0, disposed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let read: Promise<void> | null = null;
+  let expiryTimer: ReturnType<typeof setTimeout> | null = null;
   const managed = computed(() => observation.value?.managed === true);
   const ready = computed(() => session() === null || connected.value);
   const approvals = computed(() => observation.value?.approvals?.requests ?? []);
   const tools = computed(() => observation.value?.tools?.items ?? []);
   const pending = computed(() => approvals.value.some(item => item.state === "pending"));
+  function scheduleExpiry(): void {
+    if (expiryTimer !== null) clearTimeout(expiryTimer);
+    expiryTimer = null;
+    now.value = Date.now();
+    const next = Math.min(...approvals.value.filter(a => a.state === "pending").map(a => a.decisionExpiresAtUnixMs ?? a.expiresAtUnixMs).filter(t => t > now.value));
+    if (Number.isFinite(next)) expiryTimer = setTimeout(scheduleExpiry, Math.min(2147483647, next - now.value));
+  }
+  watch(approvals, scheduleExpiry);
   function actionable(item: MarketApproval): boolean {
-    return connected.value && !deciding.value && !uncertain.value.has(item.approvalId) && item.state === "pending" && item.expiresAtUnixMs > now.value;
+    return connected.value && !deciding.value && !uncertain.value.has(item.approvalId) && item.state === "pending" && (item.decisionExpiresAtUnixMs ?? item.expiresAtUnixMs) > now.value;
   }
   function clearTimer(): void { if (timer !== null) clearTimeout(timer); timer = null; }
   function refresh(): Promise<void> {
@@ -110,6 +119,6 @@ export function useMarketChat(context: () => string | null, session: () => strin
     historyRefreshing.value = false; historyError.value = null;
     void poll(epoch);
   }, { immediate: true, flush: "sync" });
-  onBeforeUnmount(() => { disposed = true; epoch++; clearTimer(); });
+  onBeforeUnmount(() => { disposed = true; epoch++; clearTimer(); if (expiryTimer !== null) clearTimeout(expiryTimer); });
   return { observation, managed, ready, connected, refreshing, deciding, error, approvals, tools, pending, uncertain, actionable, refresh, decide, selectedTurnId, toolObservation, historyRefreshing, historyError, selectTurn };
 }

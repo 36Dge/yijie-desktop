@@ -32,3 +32,4 @@ dist-ssr
 *.local-ca-key.pem
 *.local-integration.env
 *.provisionprofile
+/scripts/__pycache__/

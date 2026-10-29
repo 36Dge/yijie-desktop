@@ -18,6 +18,10 @@ BUILD_FIXED = {"CARGO_BUILD_JOBS": "2", "CARGO_NET_OFFLINE": "true", "GOPROXY": 
                "GIT_OPTIONAL_LOCKS": "0", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
+OBSERVATION_PROFILE = "feat162-soft-budget-v3"
+OBSERVATION_ENV = {"YIJIE_FEAT162_OBSERVATION_PROFILE": OBSERVATION_PROFILE,
+                   "YIJIE_PERMISSION_VERIFICATION_BASE_URL": "http://127.0.0.1:18083/v1"}
+
 def require(ok, message):
     if not ok:
         raise ValueError(message)
@@ -87,11 +91,11 @@ def source_facts(root):
     return facts
 
 
-def build_environment(environ):
+def build_environment(environ, feat162_observe=False):
     env = {k: environ[k] for k in ENV_KEYS if k in environ}
     require({"PATH", "HOME"} <= set(env) and env["HOME"] == str(Path.home()), "original build user")
     require(all(isinstance(v, str) and v and all(ord(c) >= 32 for c in v) for v in env.values()), "build environment")
-    return {**env, **BUILD_FIXED}
+    return {**env, **BUILD_FIXED, **(OBSERVATION_ENV if feat162_observe else {})}
 
 
 def checked_generation(root, generation, check_sources=True):
@@ -104,16 +108,16 @@ def checked_generation(root, generation, check_sources=True):
             and value["schema_version"] == 1 and value["feature"] == "FEAT-164" and value["policy"] == POLICY
             and value["layout"] == paths, "generation descriptor")
     environment, env_sha = read_json(output / "environment.json")
-    require(env_sha == value["environment_sha256"] and environment == build_environment(environment), "generation environment")
+    require(env_sha == value["environment_sha256"] and environment == build_environment(environment, environment.get("YIJIE_FEAT162_OBSERVATION_PROFILE") == OBSERVATION_PROFILE), "generation environment")
     if check_sources:
         require(value["sources"] == source_facts(root), "generation source drift")
     return paths, value, descriptor_sha, environment
 
 
-def prepare(root, generation, environ):
+def prepare(root, generation, environ, feat162_observe=False):
     paths = layout(root, generation)
     facts = source_facts(root)
-    env = build_environment(environ)
+    env = build_environment(environ, feat162_observe)
     output = Path(paths["output_root"])
     for p in [root / ".local", root / ".local/builds", output.parent]:
         if not p.exists():
@@ -162,14 +166,16 @@ def main():
     parser.add_argument("action", choices=["prepare", "open", "verify", "layout"])
     parser.add_argument("--generation", required=True)
     parser.add_argument("--pause-kimi", action="store_true")
+    parser.add_argument("--feat162-observe", action="store_true", help="Freeze the exact local observation transport; no allowance or activation is created")
     args = parser.parse_args()
+    require(not args.feat162_observe or args.action == "prepare", "observation must be frozen at prepare")
     require(not args.pause_kimi or args.action == "open", "pause applies to open only")
     if args.action == "layout":
         paths, value, sha, _ = checked_generation(ROOT, args.generation)
         print(json.dumps({**paths, "descriptor_sha256": sha, "sources": value["sources"]}))
         return 0
     if args.action == "prepare":
-        return prepare(ROOT, args.generation, os.environ)
+        return prepare(ROOT, args.generation, os.environ, args.feat162_observe)
     return open_daily(ROOT, args.generation, "D4" if args.action == "verify" else "D5",
                       args.action == "verify" or args.pause_kimi)
 

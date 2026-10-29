@@ -2034,7 +2034,14 @@ mod tests {
         }
         let without_policy =
             permission_child_environment(true, Some("http://127.0.0.1:18083/v1"), None);
-        assert_eq!(without_policy.len(), 2);
+        assert_eq!(without_policy.len(), 3);
+        assert!(without_policy.iter().any(|(name, value)| {
+            *name == "YIJIE_PERMISSION_VERIFICATION_BASE_URL"
+                && value == "http://127.0.0.1:18083/v1"
+        }));
+        assert!(!without_policy
+            .iter()
+            .any(|(name, _)| *name == "YIJIE_PERMISSION_VERIFICATION_POLICY_FILE"));
     }
 
     #[cfg(feature = "feat126-s10-driver")]

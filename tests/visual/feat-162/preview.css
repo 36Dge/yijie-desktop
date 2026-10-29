@@ -1,0 +1,5 @@
+.feat162-preview { max-width: 1180px; padding: var(--yj-space-6); margin: auto; }
+.feat162-preview h1 { font-size: var(--yj-font-size-page-title); }
+.feat162-preview p { line-height: var(--yj-line-height-body); }
+.feat162-preview nav { display: flex; flex-wrap: wrap; gap: var(--yj-space-3); }
+.feat162-preview select { color: var(--yj-color-text-primary); background: var(--yj-color-bg-card); border: var(--yj-border-width) solid var(--yj-color-border-control); border-radius: var(--yj-radius-md); padding: var(--yj-space-2); }
