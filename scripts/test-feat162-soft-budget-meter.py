@@ -55,8 +55,24 @@ class SoftBudgetTests(unittest.TestCase):
     def test_original_request_and_tools_remain_unchanged(self):
         body={'model':soft.legacy.shared.MODEL,'stream':True,'input':[],
               'tools':[{'type':'web_search'},{'type':'function','name':'ordinary_tool'}]}
-        payload=json.dumps(body).encode();out,meta=soft.v2.prepare(payload)
+        payload=json.dumps(body).encode();out,meta=soft.prepare(payload)
         self.assertEqual(out,payload);self.assertIsNone(meta['max_output_tokens']);self.assertIn('web_search',meta['declared_tools'])
+
+    def test_fresh_sessions_keep_product_configuration_and_bind_cache_identity(self):
+        body={'model':soft.legacy.shared.MODEL,'stream':True,'input':[],
+              'tools':[{'type':'web_search'}],'include':['reasoning.encrypted_content'],
+              'tool_choice':'auto','reasoning':{'effort':'max'}}
+        observations=[]
+        for thread in ['ordinary-session-one','ordinary-session-two']:
+            body.update(prompt_cache_key=thread,client_metadata={'thread_id':thread})
+            raw=json.dumps(body).encode();out,meta=soft.prepare(raw)
+            self.assertEqual(out,raw);observations.append(meta)
+        self.assertEqual(observations[0]['model_config_sha256'],observations[1]['model_config_sha256'])
+        self.assertNotEqual(observations[0]['full_model_config_sha256'],observations[1]['full_model_config_sha256'])
+        body['include']=[]
+        self.assertNotEqual(soft.prepare(json.dumps(body).encode())[1]['model_config_sha256'],observations[1]['model_config_sha256'])
+        body['prompt_cache_key']='different-session'
+        with self.assertRaises(ValueError):soft.prepare(json.dumps(body).encode())
 
     def test_concurrent_second_request_is_rejected_without_http(self):
         with tempfile.TemporaryDirectory() as root:

@@ -18,7 +18,26 @@ THRESHOLD = 20_000_000
 ESTIMATE = 1_000_000  # Accounting estimate, never a maximum or a send condition.
 
 
+def prepare(payload):
+    outgoing, metadata = v2.prepare(payload)
+    body = json.loads(payload)
+    cache = body.get('prompt_cache_key')
+    # The fixed Runtime uses its thread ID as the ordinary cache key. It varies
+    # between the seven fresh sessions, while the actual product configuration
+    # must stay fixed. Validate identity separately; forward all original bytes.
+    require(cache is None or (isinstance(cache, str) and cache
+            and cache == metadata.get('runtime_thread_id')), 'Unbound prompt cache identity')
+    metadata['full_model_config_sha256'] = metadata['model_config_sha256']
+    metadata['model_config_sha256'] = digest({k: v for k, v in body.items()
+        if k not in {'input', 'client_metadata', 'prompt_cache_key'}})
+    metadata['prompt_cache_key_sha256'] = digest(cache)
+    return outgoing, metadata
+
+
 class Budget(v2.Budget):
+    def prepare_request(self, payload):
+        return prepare(payload)
+
     def __init__(self, path, plan, offline=False):
         self.path, self.lock, self.offline = Path(path), threading.RLock(), offline
         self.plan = copy.deepcopy(plan)
