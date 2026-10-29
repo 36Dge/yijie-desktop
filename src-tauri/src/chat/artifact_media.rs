@@ -15,9 +15,13 @@ pub fn enabled() -> bool {
         && std::env::var("YIJIE_LOCAL_PROFILE").as_deref() == Ok("demo_fast")
 }
 
-// FEAT-165 rides the current K3.1 candidate and its compatible private reader.
+// FEAT-165 is an isolated K3.1 file-reader candidate. The existing daily
+// profile retains media/v9 and SQL41 until that separate migration is approved.
+// Do not remove the database's independent daily migration guard.
 pub fn files_enabled() -> bool {
-    enabled() && cfg!(feature = "kimi-k31-pro-candidate")
+    enabled()
+        && cfg!(feature = "kimi-k31-pro-candidate")
+        && std::env::var("YIJIE_FEAT164_DAILY").as_deref() != Ok("true")
 }
 
 pub(super) fn validate_artifact_image(mime: &str, bytes: &[u8]) -> Result<(), ()> {

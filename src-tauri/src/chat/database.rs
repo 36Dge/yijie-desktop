@@ -8965,6 +8965,55 @@ mod tests {
 
     use std::os::unix::fs::symlink;
 
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    #[test]
+    #[ignore = "run explicitly with the canonical local daily media environment"]
+    fn feat162_daily_media_reopens_sql41_without_file_candidate_migration() {
+        assert_eq!(std::env::var("YIJIE_FEAT164_DAILY").as_deref(), Ok("true"));
+        assert!(super::super::artifact_media::enabled());
+        assert!(super::super::models::v2_enabled());
+        let root = std::env::temp_dir().join(format!("feat162-daily-reader-{}", Uuid::now_v7()));
+        prepare_chat_directory(&root).unwrap();
+        let path = root.join(DATABASE_FILE_NAME);
+        prepare_database_file(&path).unwrap();
+        let key = DatabaseKey::from_bytes([64; 32]);
+        let mut connection = Connection::open(&path).unwrap();
+        apply_raw_key(&connection, &key).unwrap();
+        configure_connection(&connection).unwrap();
+        migrations::migrate_to_target(&mut connection, migrations::PLAN_RETIREMENT_SCHEMA_VERSION)
+            .unwrap();
+        connection.execute_batch("CREATE TABLE feat162_daily_probe(value TEXT NOT NULL); INSERT INTO feat162_daily_probe VALUES ('retained');").unwrap();
+        drop(connection);
+        let owner = scope();
+        for _ in 0..2 {
+            let repository = ChatRepository::open_with_schedule_storage(
+                &root,
+                &key,
+                ReceiptKey::from_bytes([65; 32]),
+                owner.clone(),
+                super::super::schedules::ScheduleStorageMode::TimingFoundation,
+            )
+            .unwrap();
+            assert_eq!(
+                repository
+                    .connection
+                    .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                migrations::PLAN_RETIREMENT_SCHEMA_VERSION
+            );
+            assert_eq!(
+                repository
+                    .connection
+                    .query_row("SELECT value FROM feat162_daily_probe", [], |r| r
+                        .get::<_, String>(0))
+                    .unwrap(),
+                "retained"
+            );
+            assert!(!super::super::artifact_media::files_enabled());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn live_database_file_protection_preserves_posix_locks() {

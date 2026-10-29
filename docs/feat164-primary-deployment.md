@@ -27,3 +27,7 @@ Use ordinary synthetic directories and parser values to verify schema 1/2 parity
 ## System Quit lifecycle
 
 The first primary build revealed that macOS Quit AppleEvents reached NSApplication termination outside the custom menu action. An exit code alone did not prove cleanup: the stopped-generation record was absent and Native WAL remained. Desktop now registers only its standard `aevt/quit` event with Foundation and routes it to the existing ExitOwner. Menu, window and system Quit share the same idempotent stop/wait/checkpoint chain; no process kill, external command, Runtime patch, new IPC permission or database migration is added. Main-thread registration is retained until cleanup finishes. Failure retains STOP_PENDING and ownership. Each new build still requires actual normal shutdown/post-state qualification; the first failed candidate remains failed.
+
+## Daily media versus the unqualified file candidate
+
+FEAT-162's actual App check exposed that FEAT-165 file support inherited the K3.1 media flag, while the independent database guard correctly refused its daily SQL42 migration. `files_enabled()` now excludes `YIJIE_FEAT164_DAILY=true`. Daily media stays enabled, consumes the existing v9 artifact stream and retains SQL41. Non-daily candidates retain their prior file behavior; the database migration guard stays intact. This is a semantic private-profile availability repair, not FEAT-165 daily activation. An explicitly invoked ordinary SQL41 open/reopen regression reproduces the old failure and verifies retained data without migration.
