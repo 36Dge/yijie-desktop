@@ -19,6 +19,7 @@ const messages: Readonly<Record<string, string>> = Object.freeze({
   unsupported_notification: "当前版本暂不支持部分原生通知。",
   unsupported_source: "部分信息来源暂不支持。",
   invalid_item_identity: "部分内容缺少有效的原生身份。",
+  runtime_notice: "运行时返回了提示，但未提供可显示的详细原因。已保留现有内容。",
   unknown: "会话存在未分类提示，已保留可用内容。",
 });
 

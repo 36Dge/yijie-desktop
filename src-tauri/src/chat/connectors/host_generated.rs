@@ -1026,6 +1026,18 @@ pub struct MarketApproval {
         deserialize_with = "optional_non_null"
     )]
     pub decision: Option<Decision>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_expires_at_unix_ms: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub execution_expires_at_unix_ms: Option<i64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1050,6 +1062,18 @@ struct MarketApprovalWire {
         deserialize_with = "optional_non_null"
     )]
     pub decision: Option<Decision>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub decision_expires_at_unix_ms: Option<i64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_non_null"
+    )]
+    pub execution_expires_at_unix_ms: Option<i64>,
 }
 impl TryFrom<MarketApprovalWire> for MarketApproval {
     type Error = &'static str;
@@ -1065,6 +1089,8 @@ impl TryFrom<MarketApprovalWire> for MarketApproval {
             expires_at_unix_ms: w.expires_at_unix_ms,
             decision_id: w.decision_id,
             decision: w.decision,
+            decision_expires_at_unix_ms: w.decision_expires_at_unix_ms,
+            execution_expires_at_unix_ms: w.execution_expires_at_unix_ms,
         };
         v.validate()?;
         Ok(v)
@@ -1134,6 +1160,42 @@ impl MarketApproval {
                 Ok(())
             })
             .transpose()?;
+        self.decision_expires_at_unix_ms
+            .as_ref()
+            .map(
+                |value_decision_expires_at_unix_ms| -> Result<(), &'static str> {
+                    if *value_decision_expires_at_unix_ms < 1 {
+                        return Err("invalid broker number");
+                    }
+                    if *value_decision_expires_at_unix_ms > 9007199254740991 {
+                        return Err("invalid broker number");
+                    }
+                    Ok(())
+                },
+            )
+            .transpose()?;
+        self.execution_expires_at_unix_ms
+            .as_ref()
+            .map(
+                |value_execution_expires_at_unix_ms| -> Result<(), &'static str> {
+                    if *value_execution_expires_at_unix_ms < 1 {
+                        return Err("invalid broker number");
+                    }
+                    if *value_execution_expires_at_unix_ms > 9007199254740991 {
+                        return Err("invalid broker number");
+                    }
+                    Ok(())
+                },
+            )
+            .transpose()?;
+        if self.decision_expires_at_unix_ms.is_some() != self.execution_expires_at_unix_ms.is_some()
+            || self
+                .decision_expires_at_unix_ms
+                .zip(self.execution_expires_at_unix_ms)
+                .is_some_and(|(a, d)| a >= d || d != self.expires_at_unix_ms)
+        {
+            return Err("invalid approval deadlines");
+        }
         Ok(())
     }
 }

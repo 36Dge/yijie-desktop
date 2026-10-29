@@ -22,6 +22,14 @@ The current operation keeps all original WIP in separately labelled local recove
 
 ## Validation
 
+### Observation builds require an explicit launch selection (2026-10-29)
+
+`--feat162-observe` freezes a temporary loopback model transport at preparation. Such a generation is an acceptance build, even though it shares the primary layout and the original daily data. It is not a normal daily build. `daily:open` and `daily:verify` now require the same explicit flag to open it; the flag cannot convert an ordinary generation into an observation generation. Even `--pause-kimi` does not waive this check, because the observation endpoint also overrides MiniMax.
+
+Before the launcher starts any service or App, an explicit observation open checks the existing meter's `GET /health` directly at `127.0.0.1:18083`, with a two-second timeout and a 4 KiB body limit. A missing, halted, non-FEAT-162 or invalid responder stops launch with an actionable message. Redirects are not followed. An unarmed healthy meter is allowed for zero-dispatch startup; this check neither arms it nor grants a model allowance. Availability after the check is not guaranteed. A later transport failure remains a failed turn, with no direct-provider fallback or automatic resubmission.
+
+Returning to daily use requires preparing a fresh generation **without** `--feat162-observe`, followed by its existing source, receipt, D4 and D5 checks. Do not edit an existing generation's environment, digest or approval. Existing observation artifacts and ledgers remain intact. This is a breaking change to the private observation launch CLI (an additional explicit flag is now mandatory); ordinary daily invocation and all public wire/storage contracts stay unchanged. No model or tool execution is authorized by selecting either launch profile.
+
 Use ordinary synthetic directories and parser values to verify schema 1/2 parity, schema3 D4/D5, exact primary root/generation matching, changed digest rejection, D3 rejection, no automatic activation and new-output preservation. No replacement executables, broken permissions, malicious archives or forced process exits. Actual preparation and zero-model normal App start/history/quit are separate qualification steps. Preserve the owner's existing exclusions and accepted layered evidence.
 
 ## System Quit lifecycle

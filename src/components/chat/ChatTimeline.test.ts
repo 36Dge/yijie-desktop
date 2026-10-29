@@ -542,6 +542,20 @@ describe("ChatTimeline", () => {
     expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("renders the known runtime notice without presenting it as an unknown diagnosis", () => {
+    const timeline = projectedTimeline({
+      threadNotices: [{ severity: "warning", code: "conversation_warning", diagnostic: "runtime_notice" }],
+      turns: [{ ...completedTurn("turn-main", 0), status: "failed", terminalStatus: "failed", terminalCode: "other" }],
+      items: [message("turn-main", "user", 0, "user_message", "普通问题")],
+    });
+    const wrapper = mount(ChatTimeline, { props: { timeline } });
+    expect(wrapper.get(".chat-timeline__notices").text()).toContain("未提供可显示的详细原因");
+    expect(wrapper.text()).not.toContain("未分类提示");
+    expect(wrapper.text()).toContain("本轮未能完成");
+    expect(wrapper.findAllComponents(ChatTimelineItemShell)).toHaveLength(1);
+    wrapper.unmount();
+  });
+
   it("is accessible and remains independent from ChatPage and state authorities", async () => {
     const timeline = projectedTimeline({
       threadNotices: [{ severity: "warning", code: "conversation_warning" }],

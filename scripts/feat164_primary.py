@@ -1,6 +1,7 @@
 """Canonical original-checkout build layout and explicit daily entry. No approval issuer."""
 import argparse
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,44 @@ BUILD_FIXED = {"CARGO_BUILD_JOBS": "2", "CARGO_NET_OFFLINE": "true", "GOPROXY": 
 OBSERVATION_PROFILE = "feat162-soft-budget-v3"
 OBSERVATION_ENV = {"YIJIE_FEAT162_OBSERVATION_PROFILE": OBSERVATION_PROFILE,
                    "YIJIE_PERMISSION_VERIFICATION_BASE_URL": "http://127.0.0.1:18083/v1"}
+
+
+class ObservationLaunchError(ValueError):
+    """Fixed, actionable launch diagnostics without configuration or response bodies."""
+
+
+def check_observation_launch(environment, opted_in):
+    observation = environment.get("YIJIE_FEAT162_OBSERVATION_PROFILE") == OBSERVATION_PROFILE
+    if not observation:
+        if opted_in:
+            raise ObservationLaunchError("所选构建不是 FEAT-162 验收构建，不能临时切换为验收模式。")
+        return
+    if not opted_in:
+        raise ObservationLaunchError(
+            "所选构建绑定 FEAT-162 本机计量器，不能作为普通日常入口打开。"
+            "日常使用请准备并激活不带 --feat162-observe 的新构建；"
+            "继续已获授权的验收才可显式添加 --feat162-observe。")
+    # Read-only health probe, directly to the fixed loopback endpoint. It never
+    # reads a provider key, follows a redirect, arms a meter or sends a model request.
+    connection = http.client.HTTPConnection("127.0.0.1", 18083, timeout=2)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        raw = response.read(4097)
+        if response.status != 200 or len(raw) > 4096:
+            raise ValueError("health response unavailable")
+        health = json.loads(raw)
+        if (not isinstance(health, dict) or health.get("feature") != "FEAT-162"
+                or type(health.get("offline")) is not bool
+                or type(health.get("armed")) is not bool
+                or health.get("halted") is not False):
+            raise ValueError("meter unavailable")
+    except (OSError, http.client.HTTPException, ValueError) as error:
+        raise ObservationLaunchError(
+            "FEAT-162 本机计量器未就绪或已停止，应用未启动。"
+            "请恢复已获授权的验收环境，或使用正式日常构建；不会自动直连模型。") from error
+    finally:
+        connection.close()
 
 def require(ok, message):
     if not ok:
@@ -145,7 +184,7 @@ def invoke(root, generation, environment, args):
     return subprocess.call(command, cwd=root, env=env)
 
 
-def open_daily(root, generation, stage, paused):
+def open_daily(root, generation, stage, paused, feat162_observe=False):
     paths, _, _, environment = checked_generation(root, generation)
     output = Path(paths["output_root"])
     index, _ = read_json(output / "activation" / (stage.lower() + ".json"))
@@ -154,6 +193,7 @@ def open_daily(root, generation, stage, paused):
     require(index["binding_file"] == str(binding_file), "approval binding path")
     _, sha = read_json(binding_file)
     require(sha == index["binding_sha256"], "approval binding digest")
+    check_observation_launch(environment, feat162_observe)
     env = {**environment, "YIJIE_FEAT164_DAILY_BINDING_FILE": str(binding_file),
            "YIJIE_FEAT164_DAILY_BINDING_SHA256": sha, "YIJIE_FEAT164_DAILY_STAGE": stage,
            "YIJIE_KIMI_K31_EXECUTION_PAUSED": "true" if paused else "false"}
@@ -166,9 +206,9 @@ def main():
     parser.add_argument("action", choices=["prepare", "open", "verify", "layout"])
     parser.add_argument("--generation", required=True)
     parser.add_argument("--pause-kimi", action="store_true")
-    parser.add_argument("--feat162-observe", action="store_true", help="Freeze the exact local observation transport; no allowance or activation is created")
+    parser.add_argument("--feat162-observe", action="store_true", help="Explicitly prepare or open the frozen local observation profile; no allowance or activation is created")
     args = parser.parse_args()
-    require(not args.feat162_observe or args.action == "prepare", "observation must be frozen at prepare")
+    require(not args.feat162_observe or args.action in {"prepare", "open", "verify"}, "observation requires prepare, open or verify")
     require(not args.pause_kimi or args.action == "open", "pause applies to open only")
     if args.action == "layout":
         paths, value, sha, _ = checked_generation(ROOT, args.generation)
@@ -177,13 +217,16 @@ def main():
     if args.action == "prepare":
         return prepare(ROOT, args.generation, os.environ, args.feat162_observe)
     return open_daily(ROOT, args.generation, "D4" if args.action == "verify" else "D5",
-                      args.action == "verify" or args.pause_kimi)
+                      args.action == "verify" or args.pause_kimi, args.feat162_observe)
 
 
 if __name__ == "__main__":
     sys.dont_write_bytecode = True
     try:
         raise SystemExit(main())
+    except ObservationLaunchError as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(1)
     except (ValueError, OSError, subprocess.CalledProcessError):
         print("Primary entry stopped: review source, generation, environment and explicit approval; existing data retained.", file=sys.stderr)
         raise SystemExit(1)

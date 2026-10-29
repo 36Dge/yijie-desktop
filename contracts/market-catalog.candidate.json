@@ -3,7 +3,7 @@
   "mode": "local_worktree_candidate",
   "release": false,
   "authority": "yijie-connectors/catalog/market-catalog.v1.json",
-  "base_commit": "ff436bb9bfe23297a1c5891a06fe6f6280c04e6d",
+  "base_commit": "ab1f8328ff50dab256b23f51d49157278421fd35",
   "source_sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d",
   "generated": "contracts/market-catalog.json"
 }

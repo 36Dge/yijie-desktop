@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 
@@ -24,7 +25,7 @@ primary = module("primary", "feat164_primary.py")
 
 
 class PrimaryComposition(composition.BindingComposition):
-    def prepare_parser_fixture(self):
+    def prepare_parser_fixture(self, observe=False):
         root = self.origin
         for name in primary.SOURCE_NAMES:
             p = root.parent / name
@@ -40,7 +41,7 @@ class PrimaryComposition(composition.BindingComposition):
         paths = primary.layout(root, generation)
         output = Path(paths["output_root"])
         output.mkdir(parents=True, mode=0o700)
-        env = primary.build_environment({"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"})
+        env = primary.build_environment({"HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}, observe)
         primary.write_new(output / "environment.json", env)
         primary.write_new(output / "generation.json", {"schema_version": 1, "feature": "FEAT-164", "policy": primary.POLICY,
             "layout": paths, "sources": primary.source_facts(root), "environment_sha256": primary.digest(primary.json_bytes(env))})
@@ -102,6 +103,25 @@ class PrimaryComposition(composition.BindingComposition):
         with self.assertRaises(FileNotFoundError):
             primary.open_daily(self.origin, paths["generation"], "D5", False)
         self.assertFalse((Path(paths["output_root"]) / "activation/d5.json").exists())
+
+    def test_observation_open_cannot_dispatch_implicitly_or_with_unavailable_meter(self):
+        value, paths = self.prepare_parser_fixture(observe=True)
+        activation = Path(paths["output_root"]) / "activation"
+        activation.mkdir(mode=0o700)
+        binding = activation / "binding-d4.json"
+        primary.write_new(binding, value)
+        primary.write_new(activation / "d4.json", {"stage": "D4", "binding_file": str(binding),
+            "binding_sha256": primary.digest(binding.read_bytes())})
+        before = {p: p.read_bytes() for p in activation.iterdir()}
+        with patch.object(primary, "invoke") as invoke, patch.object(primary.http.client, "HTTPConnection") as connect:
+            with self.assertRaisesRegex(primary.ObservationLaunchError, "不能作为普通日常入口"):
+                primary.open_daily(self.origin, paths["generation"], "D4", True)
+            connect.assert_not_called()
+            connect.return_value.request.side_effect = ConnectionRefusedError()
+            with self.assertRaisesRegex(primary.ObservationLaunchError, "未就绪或已停止"):
+                primary.open_daily(self.origin, paths["generation"], "D4", True, feat162_observe=True)
+            invoke.assert_not_called()
+        self.assertEqual(before, {p: p.read_bytes() for p in activation.iterdir()})
 
     def test_environment_and_command_are_primary_only(self):
         env = primary.build_environment({"HOME": str(Path.home()), "PATH": "/usr/bin:/bin", "YIJIE_PERMISSION_VERIFICATION_BASE_URL": "ordinary",
