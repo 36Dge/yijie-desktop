@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978"
   },
   "host": {
-    "base_commit": "ffdb3e66f292339fabccea6b1018bed6bba9c3b8",
+    "base_commit": "68a7696ee760d25ef04feadb5fef1212953a95c6",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -25,7 +25,7 @@
       "api/experts.candidate.json": "8bec59b1e2c3227c76a4722d098c90752f9ab9f90c4c3dfb126e61ab9fd80c2a",
       "api/experts.schema.json": "f18f92715452182fdf80fd35d4753ca12c364e977c3b2152894108a621d37955",
       "api/experts.transport.json": "831b574f6be5a164ff12e862c26d22c74a89df923672752b47dc1a9def7c5f36",
-      "api/feat162.local-candidate.json": "a97479e7377bc83ca300458561765f475e8b2e3fcc7e47274450cc7c2fad2aee",
+      "api/feat162.local-candidate.json": "65edea73c9f04bbaf752d3bf419f04a46b226d384bb213747cf4c7d198630383",
       "api/fixtures/agent/host-skills-v1/enabled-request.json": "93710bb7a9b86e33ea77d5457c413c0a7e252b94f65101fe4c4d6e9f25bd9707",
       "api/fixtures/agent/host-skills-v1/error-archive-unsafe.json": "1560f14bbd25015957b0bb354c65e21db8f8095658d43acfeb6b0deaf1a6d8a1",
       "api/fixtures/agent/host-skills-v1/error-skill-not-installable.json": "f11b42113be11c568ffa101bdbded6c016647cb7df715de15750784a7bd05b57",
