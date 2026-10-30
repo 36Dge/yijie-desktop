@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("alpha", Path(__file__).with_name("feat162-alpha-meter.py"))
 alpha = importlib.util.module_from_spec(spec)
@@ -79,11 +82,48 @@ class AlphaTests(unittest.TestCase):
             b = self.budget(root); old = (Path(root) / "prior.json").read_bytes()
             b.arm(); row = b.admit({})
             self.assertEqual(row["case"], "auxiliary")
-            with self.assertRaises(ValueError): b.admit({})
-            b.settle(row, {"usage": {"input_tokens": 100, "output_tokens": 10}})
+            waiting = threading.Event()
+            original_wait = b.request_finished.wait
+            def wait(timeout=None):
+                waiting.set()
+                return original_wait(timeout)
+            with patch.object(b.request_finished, "wait", wait), ThreadPoolExecutor(1) as pool:
+                next_request = pool.submit(b.admit, {})
+                self.assertTrue(waiting.wait(2))
+                self.assertEqual(len(b.state["requests"]), 1)
+                b.settle(row, {"usage": {"input_tokens": 100, "output_tokens": 10}})
+                second = next_request.result(timeout=2)
+                self.assertEqual(second["ordinal"], 2)
+                b.settle(second, {"usage": {"input_tokens": 0, "output_tokens": 0}})
             self.assertEqual(b.state["model_upper_micro_cny"], 1980)
             self.assertEqual(b.carried_count, 3)
             self.assertEqual((Path(root) / "prior.json").read_bytes(), old)
+
+    def test_queued_request_rechecks_soft_stop_after_settlement(self):
+        with tempfile.TemporaryDirectory() as root:
+            b = self.budget(root); b.arm(); row = b.admit({})
+            waiting = threading.Event(); original_wait = b.request_finished.wait
+            def wait(timeout=None):
+                waiting.set()
+                return original_wait(timeout)
+            with patch.object(b.request_finished, "wait", wait), ThreadPoolExecutor(1) as pool:
+                next_request = pool.submit(b.admit, {})
+                self.assertTrue(waiting.wait(2))
+                b.settle(row, {"usage": {"input_tokens": 2_000_000, "output_tokens": 0}})
+                with self.assertRaises(ValueError): next_request.result(timeout=2)
+            self.assertEqual(len(b.state["requests"]), 1)
+
+    def test_closed_alpha_continuation_carries_estimates_without_rewriting_history(self):
+        with tempfile.TemporaryDirectory() as root:
+            b = self.budget(root); b.arm(); b.admit({})
+            b.settle(b.state["requests"][0], {})
+            b.halt("normal_stop"); b.state["meter_state"] = "stopped_normally"; b.save()
+            old = b.path.read_bytes()
+            plan = {**b.plan, "prior_ledger": str(b.path), "prior_ledger_sha256": alpha.sha(b.path)}
+            c = alpha.Budget(Path(root) / "continuation.json", plan)
+            self.assertEqual(c.carried_count, 4)
+            self.assertEqual(c.state["carried_cost_micro_cny"], 4_105_000)
+            self.assertEqual(b.path.read_bytes(), old)
 
     def test_unarmed_and_reused_files_refused(self):
         with tempfile.TemporaryDirectory() as root:

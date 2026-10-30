@@ -45,6 +45,7 @@ class Budget(legacy.Budget):
     def __init__(self, path, plan, offline=False):
         self.path, self.plan, self.offline = Path(path), plan, offline
         self.lock = threading.RLock()
+        self.request_finished = threading.Condition(self.lock)
         require(not self.path.exists(), "New Alpha observation file required; history is immutable")
         require(plan.get("feature") == "FEAT-162" and plan.get("authority") == AUTHORITY
                 and plan.get("soft_threshold_micro_cny") == THRESHOLD
@@ -55,12 +56,14 @@ class Budget(legacy.Budget):
             prior = Path(plan["prior_ledger"])
             require(sha(prior) == plan["prior_ledger_sha256"], "Closed predecessor changed")
             previous = json.loads(prior.read_text())
-            require(previous.get("authorization") == "FEAT-162-soft-budget-v3"
+            require(previous.get("authorization") in {"FEAT-162-soft-budget-v3", AUTHORITY}
                     and previous.get("halted") is True and not previous.get("armed")
                     and previous.get("meter_state") == "stopped_normally"
-                    and not any(r["status"] == "inflight" for r in previous["requests"]), "Closed v3 predecessor required")
+                    and not any(r["status"] == "inflight" for r in previous["requests"]), "Closed predecessor required")
             self.carried_count = previous.get("carried_count", 0) + len(previous["requests"])
             carried = previous.get("carried_cost_micro_cny", 0) + previous["model_upper_micro_cny"]
+            if previous.get("authorization") == AUTHORITY:
+                carried += previous["tool_reserved_micro_cny"]
         self.state = {"schema_version": 4, "feature": "FEAT-162", "authorization": AUTHORITY,
                       "offline": offline, "plan_sha256": legacy.shared.canonical_digest(plan),
                       "carried_count": self.carried_count, "carried_cost_micro_cny": carried,
@@ -106,8 +109,23 @@ class Budget(legacy.Budget):
     def observed_total(self):
         return self.state["carried_cost_micro_cny"] + self.state["model_upper_micro_cny"] + self.state["tool_reserved_micro_cny"]
 
+    def halt(self, reason):
+        with self.request_finished:
+            super().halt(reason)
+            self.request_finished.notify_all()
+
     def admit(self, metadata):
-        with self.lock:
+        with self.request_finished:
+            # Runtime can start its next request immediately after receiving the
+            # terminal SSE event, before the prior HTTP connection reaches EOF.
+            # Queue locally until that request settles; never reject a normal
+            # follow-up as a second supplier request or forward it concurrently.
+            ready = self.request_finished.wait_for(
+                lambda: self.state["halted"] or not self.state["armed"]
+                or not any(r["status"] == "inflight" for r in self.state["requests"]),
+                timeout=240,
+            )
+            require(ready, "Previous transport did not finish")
             require(self.state["armed"] and not self.state["halted"]
                     and not any(r["status"] == "inflight" for r in self.state["requests"]), "No model allowance")
             if not self.offline:
@@ -140,6 +158,7 @@ class Budget(legacy.Budget):
             if not self.offline and self.observed_total() >= THRESHOLD:
                 self.halt("soft_budget_reached_after_request")
             self.save()
+            self.request_finished.notify_all()
 
 
 def main():
