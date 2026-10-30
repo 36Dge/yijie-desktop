@@ -35,15 +35,15 @@ describe("native turn duration", () => {
     const read = vi.fn().mockResolvedValueOnce(native()).mockResolvedValueOnce(native(51345));
     const { wrapper, turns } = harness(read);
     await flushPromises();
-    expect(wrapper.text()).toContain("已处理 7秒");
+    expect(wrapper.text()).toContain("已处理 7 s");
     await vi.advanceTimersByTimeAsync(1000);
-    expect(wrapper.text()).toContain("已处理 8秒");
+    expect(wrapper.text()).toContain("已处理 8 s");
     expect(read).toHaveBeenCalledTimes(1);
     turns.value = [turn("turn", true)]; await flushPromises();
-    expect(wrapper.text()).toContain("已完成 51s");
+    expect(wrapper.text()).toContain("已完成 51 s");
     await vi.advanceTimersByTimeAsync(60000);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain("已完成 51s");
+    expect(wrapper.text()).toContain("已完成 51 s");
     wrapper.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -83,12 +83,13 @@ describe("native turn duration", () => {
   });
 
   it("preserves native zero, missing, invalid and history semantics", () => {
-    expect(turnTimingLabel(native(0), false, 200000, "completed")).toBe("已完成 0s");
-    expect(turnTimingLabel(native(38999), false, 200000, "completed")).toBe("已完成 38s");
+    expect(turnTimingLabel(native(0), false, 200000, "completed")).toBe("已完成 0 s");
+    expect(turnTimingLabel(native(38999), false, 200000, "completed")).toBe("已完成 38 s");
     for (const status of ["failed", "interrupted", "unknown", "in_progress"] as const) {
       expect(turnTimingLabel(native(38000), false, 200000, status)).toBe("用时 38秒");
     }
-    expect(turnTimingLabel(native(3661000), false, 200000, "completed")).toBe("已完成 3661s");
+    expect(turnTimingLabel(native(3661000), false, 200000, "completed")).toBe("已完成 3661 s");
+    expect(turnTimingLabel(native(), true, 3761000)).toBe("已处理 3661 s");
     expect(turnTimingLabel(native(), false, 200000)).toBeNull();
     expect(turnTimingLabel(native(), true, 99000)).toBeNull();
     expect(turnTimingLabel({ ...native(), started_at: {state: "invalid"} }, true, 200000)).toBeNull();

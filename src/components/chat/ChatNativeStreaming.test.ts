@@ -163,20 +163,22 @@ describe("FEAT-134 native streaming presentation", () => {
   });
 });
 
-it.each([undefined, "final_answer"] as const)("moves from factual waiting progress to streamed phase %s output without waiting for Turn completion", async phase => {
+it.each([undefined, "final_answer"] as const)("moves from thinking to timed streamed phase %s output without waiting for Turn completion", async phase => {
   const view = native({availability: "available", items: [
     {ordinal: 0, lastMethod: "item/completed", item: {id: "user", type: "userMessage", text: "请介绍一下", availability: "available"}},
   ]});
-  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2秒"}}});
-  expect(wrapper.get('.chat-execution-progress').text()).toContain("本轮已开始，正在等待模型输出。");
+  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2 s"}}});
+  expect(wrapper.get('.chat-thinking').text()).toBe("正在思考");
+  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("正在思考");
   expect(wrapper.find('.chat-turn-group__header').exists()).toBe(false);
-  expect(wrapper.get('.chat-turn-group__items').element.nextElementSibling)
-    .toBe(wrapper.get('.chat-turn-group__progress').element);
+  expect(wrapper.find('.chat-turn-group__progress').exists()).toBe(false);
 
   const process: NativeConversationView = {...view, revision: "2", items: [...view.items, {
     ordinal: 1, lastMethod: "item/started", item: {id: "reasoning", type: "reasoning", content: ["检查已有信息"], summary: [], availability: "available"},
   }]};
   await wrapper.setProps({timeline: timeline(process, "turn")});
+  expect(wrapper.find('.chat-thinking').exists()).toBe(false);
+  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("已处理 2 s");
   expect(wrapper.get('.chat-turn-group__process-toggle').attributes('aria-expanded')).toBe("true");
   expect(wrapper.get('.chat-turn-group__progress .chat-execution-progress').isVisible()).toBe(true);
   const answer: NativeConversationView = {...process, revision: "3", items: [...process.items.map(entry => ({...entry, lastMethod: "item/completed" as const})), {

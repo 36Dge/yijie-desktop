@@ -20,6 +20,7 @@ import ChatSkillPill from "./ChatSkillPill.vue";
 import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatArchiveActivityDetails from "./ChatArchiveActivityDetails.vue";
 import ChatExecutionProgress from "./ChatExecutionProgress.vue";
+import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
 import ChatWebSearchItem from "./ChatWebSearchItem.vue";
@@ -73,7 +74,20 @@ const processExpanded = computed(() => expansionChoice.value ??
   (props.turn.liveObserved === true && ["in_progress", "waiting_approval"].includes(props.turn.domainStatus) && !answerStarted.value));
 const nativeLiveProgress = computed(() => props.turn.source === "native_observed" &&
   props.turn.statusSource === "runtime_notification" && props.turn.liveObserved && props.turn.progress !== null);
-const thinking = computed(() => {
+// An empty started Item is metadata, not the first streamed content. Reasoning
+// counts as output even when its details are folded in the reading layout.
+const hasOutput = computed(() => props.turn.plan !== null || props.turn.items.some(item =>
+  item.presentation !== "user_message" && (
+    item.approval != null || Boolean(item.activityLabel) || item.availability === "unavailable" ||
+    !["reasoning", "commentary", "final_answer", "assistant_unclassified"].includes(item.presentation) ||
+    item.contentBlocks.some(block => block.type === "text" || block.type === "code"
+      ? block.text.trim().length > 0 : true))));
+const outputObserved = ref(false);
+watch(() => [props.turn.identity, hasOutput.value] as const, ([identity, output], previous) => {
+  outputObserved.value = previous?.[0] === identity ? outputObserved.value || output : output;
+}, { immediate: true, flush: "sync" });
+const preloading = computed(() => nativeLiveProgress.value && props.turn.domainStatus === "in_progress" && !outputObserved.value);
+const awaitingMoreOutput = computed(() => {
   if (!nativeLiveProgress.value || props.turn.domainStatus !== "in_progress") return false;
   if (props.turn.items.some(item => item.approval?.status === "pending" ||
     (item.busy && ["command", "tool", "web_search"].includes(item.presentation)))) return false;
@@ -86,8 +100,8 @@ const thinking = computed(() => {
 });
 const localSubmissionTerminal = computed(() => props.turn.source === "local_submission" &&
   ["failed", "cancelled"].includes(props.turn.submissionStatus ?? ""));
-const showProgress = computed(() => !localSubmissionTerminal.value && props.turn.progress && (!nativeLiveProgress.value ||
-  props.turn.domainStatus !== "in_progress" || thinking.value));
+const showProgress = computed(() => !preloading.value && !localSubmissionTerminal.value && props.turn.progress && (!nativeLiveProgress.value ||
+  props.turn.domainStatus !== "in_progress" || awaitingMoreOutput.value));
 const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
 const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId),
   ...[...executionDescriptions.value.keys()].map(identity => `${processId}-execution-${encodeURIComponent(identity)}`)].join(" "));
@@ -398,18 +412,24 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
     <slot v-if="turn.source === 'legacy_archive'" name="legacy-records" :turn-id="turn.turnId" />
     <ChatTurnPlan v-if="turn.plan && !processPlan" :key="turn.plan.identity" :plan="turn.plan" />
 
-    <ol v-if="turn.items.length > 0 || timingLabel || hasProcess" class="chat-turn-group__items" aria-label="本轮对话内容">
+    <ol v-if="turn.items.length > 0 || timingLabel || hasProcess || preloading" class="chat-turn-group__items" aria-label="本轮对话内容">
       <template v-for="{ item, kind, identity } in turnEntries" :key="identity">
-        <li v-if="kind === 'timing' && (timingLabel || hasProcess)" class="chat-turn-group__timing">
-          <button v-if="hasProcess" class="chat-turn-group__process-toggle" type="button"
-            :aria-label="`${timingLabel || '处理过程'}，${processExpanded ? '收起' : '展开'}本轮处理过程`"
-            :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
-            <span>{{ timingLabel || '处理过程' }}</span>
-            <YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
-          </button>
-          <span v-else aria-label="本轮耗时">{{ timingLabel }}</span>
+        <li v-if="kind === 'timing' && (timingLabel || hasProcess || preloading)" class="chat-turn-group__timing"
+          :class="{ 'chat-turn-group__timing--preloading': preloading }">
+          <Transition name="chat-turn-status" mode="out-in">
+            <span v-if="preloading" key="thinking" class="chat-turn-group__thinking" role="status" aria-live="polite">
+              <ChatThinkingIndicator />
+            </span>
+            <button v-else-if="hasProcess" key="process" class="chat-turn-group__process-toggle" type="button"
+              :aria-label="`${timingLabel || '处理过程'}，${processExpanded ? '收起' : '展开'}本轮处理过程`"
+              :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
+              <span>{{ timingLabel || '处理过程' }}</span>
+              <YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+            </button>
+            <span v-else key="timing" aria-label="本轮耗时">{{ timingLabel }}</span>
+          </Transition>
         </li>
-        <li v-else-if="kind === 'details'" v-show="processExpanded" class="chat-turn-group__details-control">
+        <li v-else-if="kind === 'details'" v-show="processExpanded && !preloading" class="chat-turn-group__details-control">
           <button type="button" class="chat-turn-group__process-toggle" :aria-expanded="detailsExpanded"
             :aria-controls="processItems.filter(value => detailKeys.has(value.identity)).map(processItemId).join(' ')"
             @click="detailsExpanded = !detailsExpanded; expansionChoice = true">
@@ -426,7 +446,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
         </li>
         <li v-else-if="item"
           :id="processKeys.has(item.identity) ? processItemId(item) : undefined"
-          v-show="!processKeys.has(item.identity) || (processExpanded && (!detailKeys.has(item.identity) || detailsExpanded))"
+          v-show="item.presentation === 'user_message' || (!preloading && (!processKeys.has(item.identity) || (processExpanded && (!detailKeys.has(item.identity) || detailsExpanded))))"
           class="chat-turn-group__item"
           :class="`chat-turn-group__item--${item.presentation}`"
           :data-process-item="processKeys.has(item.identity) ? '' : undefined"
@@ -562,7 +582,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
     </ol>
 
     <div v-if="showProgress && turn.progress && turn.diagnostic !== 'native_format_unsupported'" class="chat-turn-group__progress" role="status" aria-live="polite" aria-atomic="true">
-      <ChatExecutionProgress v-if="thinking" :text="nativeWaitingDescription(turn)" />
+      <ChatExecutionProgress v-if="awaitingMoreOutput" :text="nativeWaitingDescription(turn)" />
       <span v-else>{{ progressLabel(turn.progress) }}</span>
     </div>
 
@@ -609,12 +629,25 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   outline-offset: var(--yj-space-1);
 }
 .chat-turn-group__timing {
+  min-height: calc(var(--yj-line-height-body) + var(--yj-space-2));
   padding-bottom: var(--yj-space-2);
   border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
   color: var(--yj-color-text-secondary);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   font-variant-numeric: tabular-nums;
+  transition: border-color var(--yj-motion-base) var(--yj-ease-standard);
+}
+.chat-turn-group__timing--preloading { border-color: transparent; }
+.chat-turn-group__thinking { display: inline-block; padding-block: var(--yj-space-1); }
+.chat-turn-status-enter-active,
+.chat-turn-status-leave-active { transition: opacity var(--yj-motion-fast) var(--yj-ease-standard); }
+.chat-turn-status-enter-from,
+.chat-turn-status-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) {
+  .chat-turn-group__timing,
+  .chat-turn-status-enter-active,
+  .chat-turn-status-leave-active { transition: none; }
 }
 
 .chat-turn-group__details-control {

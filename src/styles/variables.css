@@ -146,6 +146,7 @@
   --yj-motion-base: 180ms;
   --yj-motion-slow: 240ms;
   --yj-motion-chat-thinking: 1800ms;
+  --yj-color-chat-thinking-highlight: #f4f5f6;
   --yj-opacity-chat-stream-start: 0.35;
   --yj-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 

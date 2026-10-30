@@ -22,9 +22,10 @@ onBeforeUnmount(() => document.removeEventListener("visibilitychange", updateVis
 @supports (background-clip: text) or (-webkit-background-clip: text) {
   .chat-thinking {
     background: linear-gradient(100deg,
-      var(--yj-color-text-tertiary) 35%,
-      var(--yj-color-text-primary) 50%,
-      var(--yj-color-text-tertiary) 65%) 100% 0 / 250% 100%;
+      var(--yj-color-text-tertiary) 36%,
+      var(--yj-color-chat-thinking-highlight) 48%,
+      var(--yj-color-chat-thinking-highlight) 52%,
+      var(--yj-color-text-tertiary) 64%) 100% 0 / 300% 100%;
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
@@ -33,7 +34,8 @@ onBeforeUnmount(() => document.removeEventListener("visibilitychange", updateVis
 }
 .chat-thinking--paused { animation-play-state: paused; }
 @keyframes chat-thinking-sweep {
-  to { background-position: 0 0; }
+  0% { background-position: 100% 0; }
+  85%, 100% { background-position: 0 0; }
 }
 @media (prefers-reduced-motion: reduce), (forced-colors: active) {
   .chat-thinking {

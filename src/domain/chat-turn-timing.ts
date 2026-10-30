@@ -13,11 +13,11 @@ export function turnTimingLabel(timing: NativeTurnTiming | null | undefined, liv
   if (!timing) return null;
   if (timing.duration_ms.state === "known" && timing.duration_ms.value !== undefined) {
     const seconds = Math.floor(timing.duration_ms.value / 1000);
-    return status === "completed" ? `已完成 ${seconds}s` : `用时 ${elapsedLabel(seconds)}`;
+    return status === "completed" ? `已完成 ${seconds} s` : `用时 ${elapsedLabel(seconds)}`;
   }
   if (!live || timing.completed_at.state !== "unknown" || timing.started_at.state !== "known" ||
       timing.started_at.value === undefined) return null;
   // A future source time (clock skew) is unknown, not a fabricated zero duration.
   const elapsed = Math.floor(now / 1000) - timing.started_at.value;
-  return elapsed >= 0 ? `已处理 ${elapsedLabel(elapsed)}` : null;
+  return elapsed >= 0 ? `已处理 ${elapsed} s` : null;
 }

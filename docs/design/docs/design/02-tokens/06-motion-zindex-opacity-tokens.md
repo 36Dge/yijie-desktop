@@ -45,6 +45,8 @@
 | `motion-base` | 180ms | 弹层、按钮、状态切换 |
 | `motion-slow` | 240ms | 抽屉、页面局部切换 |
 
+2026-10-31 首段预加载修复：思考扫光使用 `--yj-color-chat-thinking-highlight`（#f4f5f6）形成明显中性亮带，沿文字从左向右移动，周期末保留短暂停顿。切换到计时各用 `motion-fast` 120ms 淡出/淡入；时间行分隔线用 `motion-base` 180ms 渐显。减少动态效果和强制颜色模式关闭两类动效。
+
 2026-09-30 用户指定的思考扫光为局部状态动效例外：`--yj-motion-chat-thinking` 1800ms，仅实时“正在思考”四字循环；隐藏窗口暂停、减少动态效果关闭。流式新文字仍使用 `motion-slow` 240ms，起始透明度 `--yj-opacity-chat-stream-start` 0.35，立即恢复为 1，不降低既有正文透明度。
 
 ## 缓动

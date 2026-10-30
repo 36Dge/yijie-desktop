@@ -62,7 +62,7 @@ describe("native process reading layout", () => {
 
   it("shows search and progress naturally, keeps empty commands and duplicate summaries in inspectable details", async () => {
     const view=native(), before=JSON.stringify(view);
-    const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1,timingLabel:"已完成 72s"}});
+    const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1,timingLabel:"已完成 72 s"}});
     const nodes=wrapper.findAll(".chat-turn-group__item");
     expect(nodes).toHaveLength(8);
     expect(nodes[7]!.isVisible()).toBe(true);
