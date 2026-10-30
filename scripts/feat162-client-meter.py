@@ -344,6 +344,10 @@ class ProposalObserver:
 
 
 def observe_tool_chunk(budget, proposals, chunk):
+    # Alpha keeps product approvals in the App and does not use the standard
+    # result/route observer as a gate on provider response delivery.
+    if getattr(budget, "alpha_passive_observation", False):
+        return True
     try:
         proposals.feed(chunk)
     except (ValueError, TypeError, AttributeError) as error:
@@ -422,7 +426,7 @@ def server_for(budget, key, control, address=("127.0.0.1", 18083)):
             try:
                 length = int(self.headers.get("Content-Length", "0")); require(0 < length <= 4 * 1024 * 1024, "Request size")
                 payload, metadata = getattr(budget, "prepare_request", prepare)(self.rfile.read(length))
-                if not budget.offline:
+                if not budget.offline and getattr(budget, "requires_selected_kimi_tools", True):
                     names = {n.removeprefix("mcp__yijie_market__") for n in metadata["declared_tools"]}
                     require({"kimi_web_search", "kimi_web_fetch"} <= names, "Selected Kimi connector required")
                 row = budget.admit(metadata)
