@@ -14,7 +14,7 @@ const lockFile="contracts/kimi-k31-host-build.candidate.json";
 function inputs(hostRoot,ref){
  const git=(...args)=>execFileSync("git",["-C",hostRoot,...args],{encoding:"utf8",maxBuffer:16*1024*1024}).trim();
  if(ref){assert.match(ref,/^[a-f0-9]{40}$/);assert.equal(git("rev-parse",`${ref}^{commit}`),ref);}
- const paths=["cmd","internal","api","go.mod","go.sum","artifact-mcp/Cargo.toml","artifact-mcp/Cargo.lock","artifact-mcp/src","scripts/build-artifact-adapter.sh"];
+ const paths=["cmd","internal","api","go.mod","go.sum","artifact-mcp/Cargo.toml","artifact-mcp/Cargo.lock","artifact-mcp/src","scripts/build-artifact-adapter.sh","scripts/artifact_build_output.py"];
  const names=[...new Set((ref?git("ls-tree","-r","--name-only",ref,"--",...paths):git("ls-files","-co","--exclude-standard","--",...paths)).split("\n"))].sort();
  const sources={};for(const name of names){assert(!path.isAbsolute(name)&&!name.split("/").includes(".."));if(ref){sources[name]=hash(execFileSync("git",["-C",hostRoot,"show",`${ref}:${name}`],{maxBuffer:16*1024*1024}));}else{assert(lstatSync(path.join(hostRoot,name)).isFile());sources[name]=hash(readFileSync(path.join(hostRoot,name)));}}
  return {base_commit:ref??git("rev-parse","HEAD"),sources};

@@ -27,7 +27,7 @@ export function chatModelBuildCandidateSelection(environment=process.env){
  return environment.YIJIE_ARTIFACT_MEDIA_ENABLED==='true' ? {feature:'FEAT-159',file:'artifact-media-host-build.candidate.json'} : {feature:'FEAT-156',file:'chat-model-host-build.candidate.json'};
 }
 function snapshot(root,media=false){
- const files=[...new Set(git(root,'ls-files','-co','--exclude-standard','--',...inputs,...(media?['artifact-mcp/Cargo.toml','artifact-mcp/Cargo.lock','artifact-mcp/src','scripts/build-artifact-adapter.sh']:[])).split('\n'))].sort();
+ const files=[...new Set(git(root,'ls-files','-co','--exclude-standard','--',...inputs,...(media?['artifact-mcp/Cargo.toml','artifact-mcp/Cargo.lock','artifact-mcp/src','scripts/build-artifact-adapter.sh','scripts/artifact_build_output.py']:[])).split('\n'))].sort();
  return {base_commit:git(root,'rev-parse','HEAD'),repository:git(root,'remote','get-url','origin'),sources:Object.fromEntries(files.map(f=>{assert(!path.isAbsolute(f)&&!f.split('/').includes('..'));assert(lstatSync(path.join(root,f)).isFile());return [f,digest(readFileSync(path.join(root,f)))];}))};
 }
 function candidateContracts(desktopRoot,expert){

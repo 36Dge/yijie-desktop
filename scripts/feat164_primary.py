@@ -10,6 +10,10 @@ import stat
 import subprocess
 import sys
 
+# Also supports the existing importlib-based source checks and parser tests.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import feat162_build_cache as build_cache
+
 POLICY = "feat164-primary-existing-homes-v3"
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_NAMES = ("yijie-desktop", "yijie-contracts", "yijie-agent-host", "yijie-connectors", "yijie-skills", "yijie-codex")
@@ -143,11 +147,16 @@ def checked_generation(root, generation, check_sources=True):
     for p in [root / ".local", root / ".local/builds", output.parent, output]:
         directory(p)
     value, descriptor_sha = read_json(output / "generation.json")
+    version = value.get("schema_version")
     require(set(value) == {"schema_version", "feature", "policy", "layout", "sources", "environment_sha256"}
-            and value["schema_version"] == 1 and value["feature"] == "FEAT-164" and value["policy"] == POLICY
+            | ({"build_cache"} if version == 2 else set())
+            and version in {1, 2} and value["feature"] == "FEAT-164" and value["policy"] == POLICY
             and value["layout"] == paths, "generation descriptor")
     environment, env_sha = read_json(output / "environment.json")
-    require(env_sha == value["environment_sha256"] and environment == build_environment(environment, environment.get("YIJIE_FEAT162_OBSERVATION_PROFILE") == OBSERVATION_PROFILE), "generation environment")
+    expected = build_environment(environment, environment.get("YIJIE_FEAT162_OBSERVATION_PROFILE") == OBSERVATION_PROFILE)
+    if version == 2:
+        expected.update(build_cache.validate(root, value["build_cache"]))
+    require(env_sha == value["environment_sha256"] and environment == expected, "generation environment")
     if check_sources:
         require(value["sources"] == source_facts(root), "generation source drift")
     return paths, value, descriptor_sha, environment
@@ -157,6 +166,13 @@ def prepare(root, generation, environ, feat162_observe=False):
     paths = layout(root, generation)
     facts = source_facts(root)
     env = build_environment(environ, feat162_observe)
+    cache = build_cache.discover(root, env)
+    env.update(build_cache.validate(root, cache))
+    with build_cache.acquire(root, cache):
+        return prepare_generation(root, generation, paths, facts, env, cache)
+
+
+def prepare_generation(root, generation, paths, facts, env, cache):
     output = Path(paths["output_root"])
     for p in [root / ".local", root / ".local/builds", output.parent]:
         if not p.exists():
@@ -166,8 +182,8 @@ def prepare(root, generation, environ, feat162_observe=False):
     for name in ["bin", "worker", "activation"]:
         (output / name).mkdir(mode=0o700)
     write_new(output / "environment.json", env)
-    write_new(output / "generation.json", {"schema_version": 1, "feature": "FEAT-164", "policy": POLICY,
-              "layout": paths, "sources": facts, "environment_sha256": digest(json_bytes(env))})
+    write_new(output / "generation.json", {"schema_version": 2, "feature": "FEAT-164", "policy": POLICY,
+              "layout": paths, "sources": facts, "environment_sha256": digest(json_bytes(env)), "build_cache": cache})
     return invoke(root, generation, env, ["--prepare-only"])
 
 
@@ -212,7 +228,8 @@ def main():
     require(not args.pause_kimi or args.action == "open", "pause applies to open only")
     if args.action == "layout":
         paths, value, sha, _ = checked_generation(ROOT, args.generation)
-        print(json.dumps({**paths, "descriptor_sha256": sha, "sources": value["sources"]}))
+        print(json.dumps({**paths, "descriptor_sha256": sha, "sources": value["sources"],
+                          **({"build_cache": value["build_cache"]} if value["schema_version"] == 2 else {})}))
         return 0
     if args.action == "prepare":
         return prepare(ROOT, args.generation, os.environ, args.feat162_observe)

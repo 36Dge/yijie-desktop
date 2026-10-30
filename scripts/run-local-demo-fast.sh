@@ -177,6 +177,13 @@ if [[ -n "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" ]]; then
   primary_paths="$(python3 -c 'import json,sys;v=json.loads(sys.argv[1]);print("\t".join(v[k] for k in ("output_root","target","worker_target","worker_manifest","bundle")))' "$primary_layout")"
   IFS=$'\t' read -r primary_output primary_target primary_worker_target primary_worker_manifest primary_bundle <<< "$primary_paths"
   [[ "${CARGO_TARGET_DIR:-}" == "$primary_target" && "${YIJIE_WORKER_TARGET_DIR:-}" == "$primary_worker_target" ]] || fail "primary output environment differs"
+  python3 -B - "$primary_layout" <<'PY'
+import json, os, sys
+value = json.loads(sys.argv[1]).get("build_cache", {}).get("directories", {})
+for component, variable in {"desktop": "CARGO_BUILD_BUILD_DIR", "worker": "YIJIE_WORKER_BUILD_DIR", "artifact": "YIJIE_ARTIFACT_BUILD_DIR"}.items():
+    if os.environ.get(variable) != value.get(component):
+        raise SystemExit("primary intermediate cache environment differs")
+PY
 fi
 if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
   [[ "$reopen_app" == "true" ]] || fail "daily execution requires its prepared artifact and --reopen"
@@ -375,9 +382,9 @@ if [[ "$market_connectors_enabled" == "true" ]]; then
       kimi_k31_worker_inputs="$(node "$desktop_root/scripts/expert-packaged-receipt.mjs" --worker-inputs-digest)"
     fi
     if [[ -n "$primary_output" ]]; then
-      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$primary_output/worker"
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --check-only --output-root "$primary_output/worker"
     else
-      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --check-only
     fi
   fi
   export YIJIE_MARKET_WORKER_MANIFEST="${primary_worker_manifest:-$workspace_root/yijie-connectors/bin/market-worker/current.json}"
@@ -496,6 +503,17 @@ if [[ ( "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) 
   kimi_k31_build_inputs="$(node scripts/kimi-k31-packaged-receipt.mjs --inputs-digest)"
 fi
 if [[ "$reopen_app" == "false" ]]; then
+  # All source/generated/runtime/worker/toolchain gates precede compilation.
+  if [[ "$scheduled_enabled" == "true" ]]; then
+    node --input-type=module -e 'import {verifyScheduledHostCandidate} from "./scripts/scheduled-host-build-candidate.mjs"; await verifyScheduledHostCandidate(process.cwd(), process.argv[1], process.argv[2]);' "$workspace_root/yijie-contracts" "$host_root"
+  fi
+  if [[ "$market_connectors_enabled" == "true" ]]; then
+    if [[ -n "$primary_output" ]]; then
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh" --output-root "$primary_output/worker"
+    else
+      bash "$workspace_root/yijie-connectors/scripts/build-market-worker.sh"
+    fi
+  fi
   (
     cd "$host_root"
     go build -trimpath -o "$host_binary" ./cmd/desktop-host

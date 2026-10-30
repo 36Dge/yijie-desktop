@@ -9,7 +9,7 @@
     "runtime-kimi-k31-pro": "3f1c5e09d6ebb1b8859a2f26c64d91a78ed8a47202db1a5e5a4d4bdbd3b7c978"
   },
   "host": {
-    "base_commit": "8d2f17e2ddf54f45d73636d6a42612c913fc884e",
+    "base_commit": "ffdb3e66f292339fabccea6b1018bed6bba9c3b8",
     "sources": {
       "api/README.md": "d270ca2dabf257b528ee2f178ba03e3d7fb3f1e04ffc8b4414247d4c47c50807",
       "api/artifact-media.candidate.json": "6d3ba9477e73b9e04a76e5933ba1d87e68076c62a97d28d2941b5d005c0f9864",
@@ -242,7 +242,8 @@
       "internal/codex/market_disabled_test.go": "03a04a905f32a943d7f1c9038461da47ce44f34afdfb66e4571dcc74aeefbb00",
       "internal/codex/market_environment_test.go": "0e2580f3ae596af6ad4b484afd455b4b79e17862a4b61ce49eea1985078ff500",
       "internal/codex/market_runtime.go": "55f27856c66fff3df14c5aef58f4856d247caa387310b23fde8d3a041aac8ce7",
-      "internal/codex/market_turns.go": "8995bd6eb78f70cdf6e50a607eb000deca51ced219dc84786dd48cbfd66a1b21",
+      "internal/codex/market_search_routing_test.go": "0c38e82912ab9425da8860b69c5478e700e249a093d39f8baafb2131155f9d5e",
+      "internal/codex/market_turns.go": "2b1e8d5e0e74407d2b2212fa2554c12589dd44a8da4431b4853face4adbe67bb",
       "internal/codex/native_config_layers.go": "5d0e101aa1f7ef92832061dede356740820cfb72f3410a39c02367989e665e24",
       "internal/codex/native_config_layers_test.go": "233cc6bf728a68c1888d3c7e17cad3c9742e1a0a86c88e0c69f65c719d8a689e",
       "internal/codex/native_conversation_test.go": "7ec4fa6bcd75f78ff62b432cbc56e3d69b9e68478d81694f9670c3f319d1097e",
@@ -445,7 +446,8 @@
       "internal/skills/store_database.go": "6bec62a456c81a32e02cc52501824db8085fa38485c5452f7822859f307024f4",
       "internal/skills/store_database_test.go": "5320bcd71f700b1efe7227a8e7016306868423468a245c47f04ba78d0c506f22",
       "internal/tools/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "scripts/build-artifact-adapter.sh": "de1fa7c9c6db76084e93b6b3869cc7cf7d5ee9f4424f685e38b812b10f81f56d"
+      "scripts/artifact_build_output.py": "84cec79a3561094dd6cb67d8fab94fec81dface0f3b77ff7719a07c47f19d886",
+      "scripts/build-artifact-adapter.sh": "ba1a676069d4acd834ab9126595a5c59caa35edb3851b61c786bbe3f3ac3ea22"
     }
   }
 }

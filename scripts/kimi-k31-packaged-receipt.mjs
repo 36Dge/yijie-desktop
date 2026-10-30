@@ -69,7 +69,17 @@ if(action==="--inputs-digest"){
   current.artifacts.worker=await fileRecord(worker.binary);current.artifacts.workerManifest=await fileRecord(manifest);
   assert.equal(current.artifacts.worker.sha256,worker.sha256);assert.equal(current.artifacts.worker.bytes,worker.sizeBytes);
  }
- if(kimiCallSurfaces().media)current.artifacts.adapter=await fileRecord(path.join(root,runtimeRoot,"bin/yijie-artifact-mcp"));
+ if(kimiCallSurfaces().media){
+  current.artifacts.adapter=await fileRecord(path.join(root,runtimeRoot,"bin/yijie-artifact-mcp"));
+  if(primary?.build_cache){
+   const collectionFile=path.join(root,runtimeRoot,"bin/yijie-artifact-mcp.build.json");
+   const collection=JSON.parse(await readFile(collectionFile,"utf8"));
+   assert.equal(collection.schema_version,1);assert.equal(collection.collection,"successful-cargo-compiler-artifact");
+   assert.equal(collection.sha256,current.artifacts.adapter.sha256);assert.equal(collection.size_bytes,current.artifacts.adapter.bytes);
+   assert(path.isAbsolute(collection.source)&&collection.source.startsWith(primary.target+path.sep),"Adapter must come from this generation's Cargo output");
+   current.artifacts.adapterCollection=await fileRecord(collectionFile);
+  }
+ }
  assert(current.artifacts.host.mode&0o111);assert(current.artifacts.runtime.mode&0o111);
  if(action==="--check"){
   assert.deepEqual(JSON.parse(await readFile(receipt,"utf8")),current,"Candidate sources/environment/artifacts changed; rebuild through the canonical entry");
