@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const stateRoot = path.join(root, ".local/demo-fast/workflow-dev");
+const stateRoot = path.join(root, process.env.YIJIE_DEVELOPMENT_CLIENT === "true" ? ".local/development" : ".local/demo-fast/workflow-dev");
 const statePath = path.join(stateRoot, "processes.json");
 const require = (valid, message) => { if (!valid) throw new Error(message); };
 
@@ -26,6 +26,21 @@ async function record(value) {
   await rename(temporary, statePath);
 }
 
+export function developmentArguments(environment) {
+  const args = ["exec", "tauri", "dev", "--config", "src-tauri/tauri.demo-fast.conf.json", "--config", "src-tauri/tauri.workflow-local.conf.json", "--no-watch"];
+  if (environment.YIJIE_DEVELOPMENT_CLIENT === "true") {
+    require(environment.YIJIE_FEAT164_DAILY === "true" && environment.YIJIE_KIMI_K31_PRO_CANDIDATE === "true" &&
+      environment.YIJIE_KIMI_K31_CALL_SURFACES === "media" && environment.YIJIE_EXPERTS_ENABLED === "true" &&
+      environment.YIJIE_MARKET_CONNECTORS_ENABLED === "true" && environment.YIJIE_ARTIFACT_MEDIA_ENABLED === "true" &&
+      environment.YIJIE_FEAT155_SCHEDULED_DAILY === "true" && environment.YIJIE_FEAT155_SCHEDULED_CANDIDATE === "false",
+    "fixed development requires the complete current daily profile");
+    args.push("--features", "kimi-k31-pro-candidate", "--config", "src-tauri/tauri.feat164-experts.conf.json");
+  } else if (environment.YIJIE_EXPERTS_ENABLED === "true") {
+    args.push("--config", "src-tauri/tauri.experts-daily.conf.json");
+  }
+  return args;
+}
+
 export async function runWorkflowDev() {
   const nativeEnvironment = { ...process.env };
   require(process.argv.length === 2 && nativeEnvironment.YIJIE_ENV === "local" && nativeEnvironment.YIJIE_LOCAL_PROFILE === "demo_fast" && nativeEnvironment.YIJIE_WORKFLOW_ENABLED === "true", "use the canonical exact local workflow launcher");
@@ -42,7 +57,8 @@ export async function runWorkflowDev() {
   delete nativeEnvironment.YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE;
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE;
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE;
-  const state = { schema_version: 1, mode: "canonical-workflow-dev", launcher_pid: process.pid, cli_pid: null, origin: "http://localhost:1420", phase: "preparing", started_at: new Date().toISOString() };
+  const arguments_ = developmentArguments(nativeEnvironment);
+  const state = { schema_version: 1, mode: nativeEnvironment.YIJIE_DEVELOPMENT_CLIENT === "true" ? "fixed-development-v1" : "canonical-workflow-dev", launcher_pid: process.pid, cli_pid: null, origin: "http://localhost:1420", phase: "preparing", started_at: new Date().toISOString() };
   await record(state);
   let server;
   let child;
@@ -52,12 +68,8 @@ export async function runWorkflowDev() {
   process.on("SIGTERM", pending);
   try {
     const { createServer } = await import("vite");
-    server = await createServer({ root, configFile: path.join(root, "vite.config.ts"), server: { host: "localhost", port: 1420, strictPort: true } });
+    server = await createServer({ root, configFile: path.join(root, "vite.config.ts"), server: { host: "localhost", port: 1420, strictPort: true, hmr: { host: "localhost", port: 1421 } } });
     await server.listen();
-    const arguments_ = ["exec", "tauri", "dev", "--config", "src-tauri/tauri.demo-fast.conf.json", "--config", "src-tauri/tauri.workflow-local.conf.json", "--no-watch"];
-    // The ordinary daily App can host both reviewed resources and the workflow
-    // iframe. Isolated expert identities are rejected by the parent launcher.
-    if (nativeEnvironment.YIJIE_EXPERTS_ENABLED === "true") arguments_.push("--config", "src-tauri/tauri.experts-daily.conf.json");
     child = spawn("pnpm", arguments_, { cwd: root, env: nativeEnvironment, stdio: "inherit", detached: true, shell: false });
     const finished = new Promise((resolve, reject) => {
       child.once("error", error => { childFinished = true; reject(error); });

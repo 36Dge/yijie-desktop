@@ -32,3 +32,26 @@ it("never displays an unrecognized upstream diagnostic as raw text", () => {
   expect(conversationDiagnosticMessage("ordinary_future_notice"))
     .toBe("会话存在未分类提示，已保留可用内容。");
 });
+
+it("shows execution guard reasons through the existing diagnostic allowlist", () => {
+  for (const code of ["web_retrieval_local_fetch_blocked", "operation_duplicate_pending", "operation_retry_unchanged", "operation_retry_dns_unchanged", "operation_retry_network_unchanged", "operation_retry_access_unchanged", "operation_guard_capacity"]) {
+    expect(safeConversationDiagnostic(code)).toBe(code);
+    expect(conversationDiagnosticMessage(code)).not.toContain("未分类");
+    expect(conversationDiagnosticMessage(code)).not.toContain("YIJIE_");
+  }
+  expect(conversationDiagnosticMessage("operation_retry_dns_unchanged")).toContain("域名解析错误");
+  expect(conversationDiagnosticMessage("web_retrieval_local_fetch_blocked")).toContain("本地脚本");
+});
+
+it("keeps a guard reason visible without inventing an executed command or failed answer", () => {
+  const saved: NativeConversationView = {
+    sessionId: "session", turnId: "turn", runtimeThreadId: "runtime-thread", runtimeTurnId: "runtime-turn",
+    source: "native_observed", revision: "5", availability: "available", status: "completed",
+    terminalObserved: true, terminalErrorCode: null, diagnostic: "web_retrieval_local_fetch_blocked", items: [],
+  };
+  const snapshot: ConversationSnapshot = { threads: [{ threadId: "session", status: "ready" }], turns: [], items: [] };
+  const timeline = selectConversationTimeline(composeConversationView(snapshot, [saved]), "session")!;
+  expect(timeline.notices[0]?.diagnostic).toBe("web_retrieval_local_fetch_blocked");
+  expect(timeline.turns[0]?.domainStatus).toBe("completed");
+  expect(timeline.turns[0]?.items).toEqual([]);
+});

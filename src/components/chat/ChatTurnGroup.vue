@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from "vue";
-import { executionProgressDescriptions, isCollapsibleProcessItem, nativeWaitingDescription, observedProgressMessages, processDetailItems, repeatedSummaryItems } from "../../domain/conversation-process";
+import { webSearchOccurrences } from "../../domain/web-search-presentation";
+import { executionProgressDescriptions, isCollapsibleProcessItem, nativeWaitingDescription, observedProgressMessages, processDetailItems } from "../../domain/conversation-process";
 import type {
   ConversationTimelineArtifactReferenceContentBlock,
   ConversationTimelineAttachmentReferenceContentBlock,
@@ -21,6 +22,7 @@ import ChatSafeContent from "./ChatSafeContent.vue";
 import ChatArchiveActivityDetails from "./ChatArchiveActivityDetails.vue";
 import ChatExecutionProgress from "./ChatExecutionProgress.vue";
 import ChatThinkingIndicator from "./ChatThinkingIndicator.vue";
+import ChatDeepThinking from "./ChatDeepThinking.vue";
 import ChatToolItem from "./ChatToolItem.vue";
 import ChatNativeToolItem from "./ChatNativeToolItem.vue";
 import ChatWebSearchItem from "./ChatWebSearchItem.vue";
@@ -48,12 +50,12 @@ const props = withDefaults(defineProps<{
 });
 
 const processId = `${useId()}-process`;
+const searchOccurrences = computed(() => webSearchOccurrences(props.turn.items));
 const firstUserMessage = computed(() => props.turn.items.find(item => item.presentation === "user_message")?.identity);
 const skillMessages = computed(() => new Map(props.turn.items
   .filter(item => item.role === "user" && item.presentation === "user_message")
   .map(item => [item.identity, presentSkillMessage(item.contentBlocks, props.skillCatalog)])));
 const expansionChoice = ref<boolean | null>(null);
-const detailsExpanded = ref(false);
 const observedProgressKeys = computed(() => slots["structured-answer"] || props.turn.source !== "native_observed"
   ? new Set<string>() : observedProgressMessages(props.turn.items, !["queued", "in_progress", "waiting_approval"].includes(props.turn.domainStatus)));
 const processItems = computed(() => props.turn.items.filter(item =>
@@ -61,9 +63,12 @@ const processItems = computed(() => props.turn.items.filter(item =>
     !["submitting", "reconciling", "error"].includes(props.approvalTransients[item.approval.approvalRequestId]?.phase ?? "idle"))));
 const processKeys = computed(() => new Set(processItems.value.map(item => item.identity)));
 const detailKeys = computed(() => processDetailItems(processItems.value));
-const duplicateKeys = computed(() => repeatedSummaryItems(processItems.value));
-const executionDescriptions = computed(() => slots["structured-answer"]
-  ? new Map() : executionProgressDescriptions(props.turn, processKeys.value, detailKeys.value));
+const executionDescriptions = computed(() => {
+  if (slots["structured-answer"]) return new Map();
+  const webKeys = new Set(props.turn.items.filter(item => item.presentation === "web_search").map(item => item.identity));
+  return new Map([...executionProgressDescriptions(props.turn, processKeys.value, detailKeys.value)]
+    .filter(([identity]) => !webKeys.has(identity)));
+});
 const processPlan = computed(() => props.turn.plan && !props.turn.plan.steps.some(step => step.status === "unknown") ? props.turn.plan : null);
 const hasProcess = computed(() => processItems.value.length > 0 || processPlan.value !== null);
 const answerStarted = computed(() => props.turn.items.some(item =>
@@ -105,7 +110,7 @@ const showProgress = computed(() => !preloading.value && !localSubmissionTermina
 const processItemId = (item: ConversationTimelineItemViewModel) => `${processId}-${encodeURIComponent(item.identity)}`;
 const processControls = computed(() => [...(processPlan.value ? [`${processId}-plan`] : []), ...processItems.value.map(processItemId),
   ...[...executionDescriptions.value.keys()].map(identity => `${processId}-execution-${encodeURIComponent(identity)}`)].join(" "));
-watch(() => props.turn.identity, () => { expansionChoice.value = null; detailsExpanded.value = false; });
+watch(() => props.turn.identity, () => { expansionChoice.value = null; });
 function toggleProcess() {
   expansionChoice.value = !processExpanded.value;
   emit("disclosure-change", { itemIdentity: props.turn.identity, expanded: processExpanded.value });
@@ -115,7 +120,7 @@ function preserveProcessExpansion(item: ConversationTimelineItemViewModel) {
 }
 
 const turnEntries = computed(() => {
-  const entries: { kind: "item" | "timing" | "plan" | "details" | "execution"; identity: string; item: ConversationTimelineItemViewModel | null }[] =
+  const entries: { kind: "item" | "timing" | "plan" | "execution"; identity: string; item: ConversationTimelineItemViewModel | null }[] =
     props.turn.items.flatMap(item => executionDescriptions.value.has(item.identity)
       ? [{kind: "execution" as const, identity: `${item.identity}:execution`, item}, {kind: "item" as const, identity: item.identity, item}]
       : [{kind: "item" as const, identity: item.identity, item}]);
@@ -123,7 +128,6 @@ const turnEntries = computed(() => {
   const index = firstOutput < 0 ? entries.length : firstOutput;
   entries.splice(index, 0, { kind: "timing", identity: `${props.turn.identity}:timing`, item: null });
   if (processPlan.value) entries.splice(index + 1, 0, { kind: "plan", identity: `${props.turn.identity}:plan`, item: null });
-  if (detailKeys.value.size) entries.splice(index + 1, 0, { kind: "details", identity: `${props.turn.identity}:details`, item: null });
   return entries;
 });
 
@@ -153,7 +157,6 @@ const slots = defineSlots<{
 }>();
 
 function itemLabel(item: ConversationTimelineItemViewModel): string {
-  if (duplicateKeys.value.has(item.identity)) return "重复摘要（原始记录）";
   if (observedProgressKeys.value.has(item.identity)) return "模型消息";
   switch (item.presentation) {
     case "user_message":
@@ -166,9 +169,7 @@ function itemLabel(item: ConversationTimelineItemViewModel): string {
     case "artifact":
       return "生成内容";
     case "reasoning":
-      return item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "summary") &&
-        !item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "content" && b.text.length > 0)
-        ? "推理摘要" : "过程记录";
+      return "深度思考";
     case "command":
       return "命令执行";
     case "tool":
@@ -351,15 +352,14 @@ function reasoningReasonLabel(item: ConversationTimelineItemViewModel): string |
 function reasoningStateMessage(item: ConversationTimelineItemViewModel): string | null {
   if (item.presentation !== "reasoning") return null;
   if (item.activityLabel) return item.activityLabel;
-  if (item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "summary") &&
-      !item.contentBlocks.some(b => b.type === "text" && b.reasoningSource === "content" && b.text.length > 0)) return null;
   const hasContent = item.contentBlocks.length > 0;
   if (item.busy && !hasContent) return null;
   if (item.reasoning === null) {
+    if (item.domainStatus === "incomplete") return "模型推理记录未完整结束，已保留可用内容。";
     if (item.domainStatus === "started" || item.domainStatus === "streaming") {
       return hasContent ? null : "正在等待过程记录…";
     }
-    return "此过程仅包含状态元数据；详情未进入当前对话投影。";
+    return hasContent ? null : "此过程仅包含状态元数据；详情未进入当前对话投影。";
   }
   const reason = reasoningReasonLabel(item);
   switch (item.reasoning?.status) {
@@ -378,6 +378,7 @@ function reasoningStateMessage(item: ConversationTimelineItemViewModel): string 
 }
 
 function forwardDisclosure(change: ChatTimelineDisclosureChange): void {
+  if (processKeys.value.has(change.itemIdentity) && processExpanded.value) expansionChoice.value = true;
   emit("disclosure-change", change);
 }
 
@@ -424,18 +425,11 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               :aria-label="`${timingLabel || '处理过程'}，${processExpanded ? '收起' : '展开'}本轮处理过程`"
               :aria-expanded="processExpanded" :aria-controls="processControls" @click="toggleProcess">
               <span>{{ timingLabel || '处理过程' }}</span>
-              <YjIcon :name="processExpanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
+              <YjIcon class="chat-turn-group__process-chevron" :name="processExpanded ? 'chevronDown' : 'chevronRight'"
+                size="xs" :stroke-width="1.5" tone="muted" />
             </button>
             <span v-else key="timing" aria-label="本轮耗时">{{ timingLabel }}</span>
           </Transition>
-        </li>
-        <li v-else-if="kind === 'details'" v-show="processExpanded && !preloading" class="chat-turn-group__details-control">
-          <button type="button" class="chat-turn-group__process-toggle" :aria-expanded="detailsExpanded"
-            :aria-controls="processItems.filter(value => detailKeys.has(value.identity)).map(processItemId).join(' ')"
-            @click="detailsExpanded = !detailsExpanded; expansionChoice = true">
-            <YjIcon :name="detailsExpanded ? 'chevronDown' : 'chevronRight'" size="sm" tone="muted" />
-            {{ detailsExpanded ? '收起详细过程' : '查看详细过程' }}（{{ detailKeys.size }} 条记录）
-          </button>
         </li>
         <li v-else-if="kind === 'plan' && processPlan" v-show="processExpanded" :id="`${processId}-plan`" @focusin="expansionChoice = true" @pointerdown="expansionChoice = true">
           <ChatTurnPlan :key="processPlan.identity" :plan="processPlan" />
@@ -446,7 +440,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
         </li>
         <li v-else-if="item"
           :id="processKeys.has(item.identity) ? processItemId(item) : undefined"
-          v-show="item.presentation === 'user_message' || (!preloading && (!processKeys.has(item.identity) || (processExpanded && (!detailKeys.has(item.identity) || detailsExpanded))))"
+          v-show="item.presentation === 'user_message' || (!preloading && (!processKeys.has(item.identity) || processExpanded))"
           class="chat-turn-group__item"
           :class="`chat-turn-group__item--${item.presentation}`"
           :data-process-item="processKeys.has(item.identity) ? '' : undefined"
@@ -458,8 +452,12 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
           <p v-else-if="observedProgressKeys.has(item.identity)"
             class="chat-turn-group__progress-source" data-message-source="model">模型消息</p>
           <ChatArchiveActivityDetails v-if="item.archiveV5?.type === 'fileChange'" :item="item.archiveV5" />
+          <ChatDeepThinking v-else-if="item.presentation === 'reasoning'" :item="item"
+            :visible="!preloading && (!processKeys.has(item.identity) || processExpanded)"
+            :live="turn.liveObserved === true && item.busy === true" :state-message="reasoningStateMessage(item)"
+            @disclosure-change="forwardDisclosure" />
           <ChatWebSearchItem v-else-if="item.presentation === 'web_search'" :item="item"
-            :process-presentation="processKeys.has(item.identity)" @disclosure-change="forwardDisclosure" />
+            :search-occurrence="searchOccurrences.get(item.identity) ?? 1" :process-presentation="processKeys.has(item.identity)" @disclosure-change="forwardDisclosure" />
           <ChatCommandItem
             v-else-if="item.presentation === 'command' && item.execution?.kind === 'command'"
             :item="item"
@@ -496,9 +494,9 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
             :label="itemLabel(item)"
             :status-label="itemStatusLabel(item)"
             :icon="itemIcon(item)"
-            :collapsible="duplicateKeys.has(item.identity) || (item.collapsible && !processKeys.has(item.identity))"
-            :process-presentation="processKeys.has(item.identity) && !duplicateKeys.has(item.identity)"
-            :default-expanded="duplicateKeys.has(item.identity) ? false : item.defaultExpanded"
+            :collapsible="item.collapsible && !processKeys.has(item.identity)"
+            :process-presentation="processKeys.has(item.identity)"
+            :default-expanded="item.defaultExpanded"
             @disclosure-change="forwardDisclosure"
           >
             <div
@@ -518,21 +516,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               草案以校验结果为准。
             </p>
 
-            <p
-              v-if="reasoningStateMessage(item)"
-              class="chat-turn-group__reasoning-state"
-              role="note"
-            >
-              {{ reasoningStateMessage(item) }}
-            </p>
-
-            <div v-if="item.presentation === 'reasoning'" class="chat-turn-group__reasoning-segments">
-              <section v-for="block in item.contentBlocks" :key="block.identity" :aria-label="block.type === 'text' && block.reasoningSource === 'summary' ? '推理摘要' : '模型推理记录'">
-                <strong class="chat-turn-group__segment-label">{{ block.type === "text" && block.reasoningSource === "summary" ? "推理摘要" : "模型推理记录" }}</strong>
-                <ChatSafeContent :blocks="[block]" mode="plain" :streaming="item.busy === true && processExpanded" />
-              </section>
-            </div>
-            <slot v-else-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
+            <slot v-if="(item.presentation === 'final_answer' || item.presentation === 'assistant_unclassified') && slots['structured-answer']" name="structured-answer" :turn-id="turn.turnId" />
             <ChatSafeContent
               v-else-if="item.presentation !== 'unknown' && item.presentation !== 'command' && item.presentation !== 'tool' && item.contentBlocks.length > 0"
               :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
@@ -630,39 +614,25 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 }
 .chat-turn-group__timing {
   min-height: calc(var(--yj-line-height-body) + var(--yj-space-2));
-  padding-bottom: var(--yj-space-2);
-  border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
-  color: var(--yj-color-text-secondary);
+  /* Tighten only the space after the timing row, keeping the button's hit area. */
+  margin-block-end: calc(-1 * var(--yj-space-1));
+  color: var(--yj-color-chat-timing);
   font-size: var(--yj-font-size-body);
   line-height: var(--yj-line-height-body);
   font-variant-numeric: tabular-nums;
-  transition: border-color var(--yj-motion-base) var(--yj-ease-standard);
 }
-.chat-turn-group__timing--preloading { border-color: transparent; }
+.chat-turn-group__timing .chat-turn-group__process-chevron { color: inherit; }
 .chat-turn-group__thinking { display: inline-block; padding-block: var(--yj-space-1); }
 .chat-turn-status-enter-active,
 .chat-turn-status-leave-active { transition: opacity var(--yj-motion-fast) var(--yj-ease-standard); }
 .chat-turn-status-enter-from,
 .chat-turn-status-leave-to { opacity: 0; }
 @media (prefers-reduced-motion: reduce), (forced-colors: active) {
-  .chat-turn-group__timing,
   .chat-turn-status-enter-active,
   .chat-turn-status-leave-active { transition: none; }
 }
 
-.chat-turn-group__details-control {
-  color: var(--yj-color-text-tertiary);
-  font-size: var(--yj-font-size-caption);
-  line-height: var(--yj-line-height-caption);
-}
-
 .chat-turn-group__progress-source { margin: 0 0 var(--yj-space-1); color: var(--yj-color-text-tertiary); font-size: var(--yj-font-size-caption); line-height: var(--yj-line-height-caption); }
-
-.chat-turn-group__reasoning-segments { display: grid; gap: var(--yj-space-3); }
-.chat-turn-group__segment-label {
-  display: block; margin-bottom: var(--yj-space-1);
-  color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption);
-}
 
 .chat-turn-group {
   display: grid;
@@ -740,16 +710,11 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
   line-height: var(--yj-line-height-body);
 }
 
-.chat-turn-group__draft-note,
-.chat-turn-group__reasoning-state {
+.chat-turn-group__draft-note {
   margin: var(--yj-space-0);
   color: var(--yj-color-text-body);
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
-}
-
-.chat-turn-group__reasoning-state + .chat-safe-content {
-  margin-block-start: var(--yj-space-3);
 }
 
 .chat-turn-group__unknown code,
@@ -786,5 +751,12 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
 .chat-turn-group__notice--warning .chat-turn-group__notice-body {
   border-color: var(--yj-color-warning);
   background: var(--yj-color-warning-soft);
+}
+</style>
+
+<style scoped>
+/* Compact adjacent search entries without changing other process spacing. */
+.chat-turn-group__item--web_search + .chat-turn-group__item--web_search {
+  margin-block-start: calc(-1 * var(--yj-space-3));
 }
 </style>

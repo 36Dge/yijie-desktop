@@ -1,5 +1,9 @@
 # FEAT-164 primary deployment v3
 
+2026-10-31: The owner selected the [fixed development client](development-client.md) for routine UI/code iteration.
+The generation/approval workflow below remains the explicit packaged-delivery path; it is no longer required
+for each local edit or developer restart. Existing generations and evidence are not rewritten.
+
 2026-10-28. Private deployment interface, `contract-impact=semantic`. Owner requested direct build/run from the original `yijie-desktop` main checkout after plan and audit. Existing schema 1/2 and their separated-source restrictions remain unchanged. Public DTOs, Native SQL41, Host11, writer4/reader5 and Runtime r5 do not change.
 
 ## Source and outputs

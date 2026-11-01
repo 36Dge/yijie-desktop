@@ -20,6 +20,13 @@ const messages: Readonly<Record<string, string>> = Object.freeze({
   unsupported_source: "部分信息来源暂不支持。",
   invalid_item_identity: "部分内容缺少有效的原生身份。",
   runtime_notice: "运行时返回了提示，但未提供可显示的详细原因。已保留现有内容。",
+  web_retrieval_local_fetch_blocked: "本轮已使用网页检索，已阻止再次通过本地脚本抓取网页。需要补充内容时，请使用当前检索工具。",
+  operation_duplicate_pending: "相同操作仍在进行，已阻止重复启动。请等待原操作的结果。",
+  operation_retry_unchanged: "上次相同操作失败，输入或执行条件尚未变化，已停止重复执行。修正原因后可重试。",
+  operation_retry_dns_unchanged: "上次操作发生域名解析错误，相关条件尚未变化，已停止重复执行。",
+  operation_retry_network_unchanged: "上次操作发生网络连接错误，相关条件尚未变化，已停止重复执行。",
+  operation_retry_access_unchanged: "上次操作返回权限或认证错误，相关条件尚未变化，已停止重复执行。",
+  operation_guard_capacity: "本轮执行记录已达上限，已停止启动新的操作。可在下一轮继续。",
   unknown: "会话存在未分类提示，已保留可用内容。",
 });
 

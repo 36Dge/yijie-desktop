@@ -29,6 +29,7 @@
   --yj-color-text-body: #25282b;
   --yj-color-text-secondary: #51565d;
   --yj-color-text-tertiary: #6f757d;
+  --yj-color-chat-timing: #858585;
   --yj-color-text-disabled: #a5abb2;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-selection-bg: #c3f35b;
@@ -43,6 +44,8 @@
   --yj-color-bg-subtle: #ffffff;
   --yj-color-bg-composer-tray: #f4f5f6;
   --yj-color-chat-user-bg: #f2f2f2;
+  --yj-color-chat-search-sources-bg: var(--yj-color-chat-user-bg);
+  --yj-color-chat-search-source-hover: #e6e6e6;
   --yj-color-skill-pill-bg: var(--yj-color-chat-user-bg);
   --yj-color-skill-pill-message-bg: color-mix(in srgb, var(--yj-color-text-primary) 10%, var(--yj-color-chat-user-bg));
   --yj-color-skill-pill-border: transparent;
@@ -207,6 +210,9 @@
   --yj-z-preview-notice: 3;
   --yj-layout-chat-column-max: 880px;
   --yj-layout-chat-composer-max: 880px;
+  --yj-layout-chat-search-max-height: 150px;
+  --yj-layout-chat-thinking-max-height: 240px;
+  --yj-layout-chat-thinking-scrollbar-width: 3px;
   --yj-layout-chat-composer-fade: var(--yj-space-12);
   --yj-z-chat-fade: 1;
   --yj-z-chat-scroll-control: 2;
@@ -280,6 +286,7 @@
   --yj-color-text-body: #e6e9ed;
   --yj-color-text-secondary: #c2c7ce;
   --yj-color-text-tertiary: #969ea8;
+  --yj-color-chat-timing: var(--yj-color-text-tertiary);
   --yj-color-text-disabled: #69717b;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-on-danger: #ffffff;
@@ -292,6 +299,8 @@
   --yj-color-bg-subtle: #22262a;
   --yj-color-bg-composer-tray: #22262a;
   --yj-color-chat-user-bg: var(--yj-color-control-hover);
+  --yj-color-chat-search-sources-bg: var(--yj-color-chat-user-bg);
+  --yj-color-chat-search-source-hover: var(--yj-color-control-pressed);
   --yj-color-skill-pill-bg: var(--yj-color-chat-user-bg);
   --yj-color-skill-pill-message-bg: color-mix(in srgb, var(--yj-color-text-primary) 10%, var(--yj-color-chat-user-bg));
   --yj-color-skill-pill-border: transparent;

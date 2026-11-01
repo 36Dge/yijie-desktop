@@ -26,6 +26,7 @@ onBeforeUnmount(() => document.removeEventListener("visibilitychange", updateVis
       var(--yj-color-chat-thinking-highlight) 48%,
       var(--yj-color-chat-thinking-highlight) 52%,
       var(--yj-color-text-tertiary) 64%) 100% 0 / 300% 100%;
+    background-repeat: no-repeat;
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;

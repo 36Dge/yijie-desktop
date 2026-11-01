@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "yijie:desktop:chat-web-source:v1",
+  "description": "Desktop-owned, user-requested access to a search source. The original display URL is only a locator; native must reauthorize the context, resolve exact membership in saved native history and validate HTTP(S) before opening or fetching an icon. No source metadata or history format is changed.",
+  "definitions": {
+    "WebSourceTarget": {"type":"object","additionalProperties":false,"required":["sessionId","turnId","itemId","url"],"properties":{"sessionId":{"type":"string","format":"uuid"},"turnId":{"type":"string","format":"uuid"},"itemId":{"type":"string","maxLength":512},"url":{"type":"string","maxLength":8192}}},
+    "WebSourcePayload": {"type":"object","additionalProperties":false,"required":["action","target"],"properties":{"action":{"type":"string","enum":["icon","open"]},"target":{"$ref":"#/definitions/WebSourceTarget"}}},
+    "WebSourceRequest": {"type":"object","additionalProperties":false,"required":["schemaVersion","requestId","contextId","payload"],"properties":{"schemaVersion":{"const":1},"requestId":{"type":"string","format":"uuid"},"contextId":{"type":"string","format":"uuid"},"payload":{"$ref":"#/definitions/WebSourcePayload"}}},
+    "WebSourceResult": {"type":"object","additionalProperties":false,"required":["status","icon"],"properties":{"status":{"type":"string","enum":["opened","icon","unavailable"]},"icon":{"oneOf":[{"type":"string","pattern":"^data:image/png;base64,","maxLength":131072},{"type":"null"}]}}},
+    "WebSourceResponse": {"type":"object","additionalProperties":false,"required":["schemaVersion","requestId","data"],"properties":{"schemaVersion":{"const":1},"requestId":{"type":"string","format":"uuid"},"data":{"$ref":"#/definitions/WebSourceResult"}}}
+  }
+}

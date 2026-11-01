@@ -97,12 +97,12 @@ describe("FEAT-134 native streaming presentation", () => {
     const view = frozen(native());
     const before = timeline(view, "turn");
     const wrapper = mount(ChatTimeline, {props: {timeline: before}});
-    const raw = wrapper.get('[aria-label="模型推理记录"] .chat-safe-content__paragraph').element;
+    const raw = wrapper.get('[aria-label="思考原文"] .chat-safe-content__paragraph').element;
     const item = view.items[0]!;
     const next = timeline({...view, revision: "2", items: [{...item, item: {...item.item, summary: ["普通摘要"]}}]}, "turn");
     await wrapper.setProps({timeline: next});
-    expect(wrapper.get('[aria-label="模型推理记录"] .chat-safe-content__paragraph').element).toBe(raw);
-    expect(wrapper.get('[aria-label="推理摘要"]').text()).toContain("普通摘要");
+    expect(wrapper.get('[aria-label="思考原文"] .chat-safe-content__paragraph').element).toBe(raw);
+    expect(wrapper.get('[aria-label="思考摘要"]').text()).toContain("普通摘要");
     expect(wrapper.find('.chat-safe-content strong').exists()).toBe(false);
     expect(wrapper.find('a, [aria-label="复制"]').exists()).toBe(false);
     const blocks = next.turns[0]!.items[0]!.contentBlocks;
@@ -117,9 +117,9 @@ describe("FEAT-134 native streaming presentation", () => {
     const wrapper = mount(ChatTimeline, {props: {timeline: timeline(view)}});
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
     expect(wrapper.text()).not.toContain("仅提供推理摘要，未提供原始模型推理正文");
-    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
-    expect(wrapper.find('[aria-label="模型推理记录"]').exists()).toBe(false);
-    expect(wrapper.get('[aria-label="推理摘要"]').text()).toContain("只有摘要");
+    await wrapper.get(".chat-deep-thinking__toggle").trigger("click");
+    expect(wrapper.find('[aria-label="思考原文"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="思考摘要"]').text()).toContain("只有摘要");
   });
 
   it.each(["completed", "interrupted", "failed"] as const)("stops busy UI after %s without sealing the Item", status => {
@@ -167,7 +167,7 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   const view = native({availability: "available", items: [
     {ordinal: 0, lastMethod: "item/completed", item: {id: "user", type: "userMessage", text: "请介绍一下", availability: "available"}},
   ]});
-  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2 s"}}});
+  const wrapper = mount(ChatTimeline, {attachTo: document.body, props: {timeline: timeline(view, "turn"), turnTimingLabels: {turn: "已处理 2s"}}});
   expect(wrapper.get('.chat-thinking').text()).toBe("正在思考");
   expect(wrapper.get('.chat-turn-group__timing').text()).toBe("正在思考");
   expect(wrapper.find('.chat-turn-group__header').exists()).toBe(false);
@@ -178,7 +178,7 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   }]};
   await wrapper.setProps({timeline: timeline(process, "turn")});
   expect(wrapper.find('.chat-thinking').exists()).toBe(false);
-  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("已处理 2 s");
+  expect(wrapper.get('.chat-turn-group__timing').text()).toBe("已处理 2s");
   expect(wrapper.get('.chat-turn-group__process-toggle').attributes('aria-expanded')).toBe("true");
   expect(wrapper.get('.chat-turn-group__progress .chat-execution-progress').isVisible()).toBe(true);
   const answer: NativeConversationView = {...process, revision: "3", items: [...process.items.map(entry => ({...entry, lastMethod: "item/completed" as const})), {
@@ -187,12 +187,12 @@ it.each([undefined, "final_answer"] as const)("moves from thinking to timed stre
   await wrapper.setProps({timeline: timeline(answer, "turn")});
   expect(wrapper.find('.chat-turn-group__progress .chat-execution-progress').exists()).toBe(false);
   expect(wrapper.get('.chat-turn-group__timing button').attributes('aria-expanded')).toBe(phase ? "false" : "true");
-  expect(wrapper.get('.chat-turn-group__item--reasoning').isVisible()).toBe(false);
+  expect(wrapper.get('.chat-deep-thinking__viewport').isVisible()).toBe(false);
   expect(wrapper.get('[aria-label="模型回答"] strong').text()).toBe("开始回答");
   expect(wrapper.find('.chat-timeline-item-shell__header').exists()).toBe(false);
   expect(wrapper.get('[aria-label="模型回答"]').attributes('aria-busy')).toBe("true");
   if (phase) await wrapper.get('.chat-turn-group__timing button').trigger('click');
-  await wrapper.get('.chat-turn-group__details-control button').trigger('click');
+  await wrapper.get('.chat-deep-thinking__toggle').trigger('click');
   await wrapper.setProps({timeline: timeline({...answer, revision: "4", status: "completed", terminalObserved: true}, "turn")});
   expect(wrapper.get('.chat-turn-group__item--reasoning').isVisible()).toBe(true);
   expect(wrapper.text()).toContain("本轮已结束，未观察到该项结束记录");

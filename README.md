@@ -1,6 +1,8 @@
 # yijie-desktop
 
-FEAT-164 原主工作目录日常模式：在本仓用 `pnpm daily:prepare --generation YYYYMMDD-NN` 构建新制品；完成该来源的受限验收与明确激活后，用 `pnpm daily:open --generation YYYYMMDD-NN` 运行，追加 `--pause-kimi` 可暂停 Kimi。这些命令编译/运行本仓实际源码，输出存本仓 `.local/builds/primary/`，不转调 `yijie/.local/daily-source`。当前已验收 generation 以元仓 FEAT-164 最新交付报告为准；未批准的 generation 拒绝启动。详见[主目录部署](docs/feat164-primary-deployment.md)。下方普通 `tauri:dev` 保留历史开发语义，不代表该日常新来源资格。
+**本机开发默认入口（2026-10-31）：`pnpm client:dev`。** 保留现有完整功能、身份和历史，前端热更新，原生改动正常退出后增量编译重启；固定构建目录，不逐次留新包或做全量备份。`tauri:dev` 和 `tauri:demo-fast` 为同一入口。详见[固定开发客户端](docs/development-client.md)。以下 generation 流程仅用于显式打包交付，保留原校验。
+
+FEAT-164 原主工作目录日常模式：在本仓用 `pnpm daily:prepare --generation YYYYMMDD-NN` 构建新制品；完成该来源的受限验收与明确激活后，用 `pnpm daily:open --generation YYYYMMDD-NN` 运行，追加 `--pause-kimi` 可暂停 Kimi。这些命令编译/运行本仓实际源码，输出存本仓 `.local/builds/primary/`，不转调 `yijie/.local/daily-source`。当前已验收 generation 以元仓 FEAT-164 最新交付报告为准；未批准的 generation 拒绝启动。详见[主目录部署](docs/feat164-primary-deployment.md)。固定开发入口见上文，其开发状态不代表打包发布资格。
 
 > 2026-09-05：FEAT-137 已按“Owner 永久终止、未完成验收”收尾。普通与 stable 入口均使用现存 FEAT-136 两补丁 Runtime；stable 保留 FEAT-134/136，审批 v6、原生 opt-in 和 UI 均停用。Contracts 权威为 `4d3f967938dde1c86ca34003a0a5628717f96262:docs/retirements/FEAT-137.json`。历史 v6 lock/checker、存储读取和源码不作活动入口，也不代表验收 PASS；完整记录见相邻 yijie 仓库 FEAT-137 的 `03-termination.md`。
 

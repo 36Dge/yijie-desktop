@@ -204,6 +204,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(native_auth)
         .manage(ChatIpcRuntime::new())
+        .manage(chat::ipc::web_sources::WebSourceRuntime::default())
         .manage(chat::schedules::ipc::ScheduleIpcRuntime::default())
         .manage(chat::exit_owner::ExitOwner::default())
         .manage(ArtifactFileNativeRuntime::new())
@@ -495,6 +496,7 @@ pub fn run() {
         chat::ipc::chat_list_sessions_v1,
         chat::ipc::chat_get_session_purpose_v1,
         chat::ipc::chat_read_turn_timing_v1,
+        chat::ipc::web_sources::chat_web_source_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_native_history_v1,
         chat::ipc::chat_load_native_history_v2,

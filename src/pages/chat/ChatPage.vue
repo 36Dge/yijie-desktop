@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { provideWebSourceActions } from "../../composables/useWebSources";
 import { useChatTurnTiming } from "../../composables/useChatTurnTiming";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -113,6 +114,7 @@ import { compileSkillInput, selectedSkillIssue, skillSelectionIssue, type ChatSk
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+provideWebSourceActions(() => chatStore.context?.contextId);
 const readAttachmentPresentation = useChatAttachmentPresentation(
   () => chatStore.context?.contextId ?? null,
   () => chatStore.draftTarget,

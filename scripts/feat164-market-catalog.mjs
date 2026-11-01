@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = path.resolve(root, "../yijie-connectors");
 const source = "catalog/market-catalog.v1.json";
 const bytes = readFileSync(path.join(sourceRoot, source));
-const feat164Commit="7990cc4f54ae5a157d75d42d3f63dae8cb324ae4";
+const feat164Commit="4c650237a5e0d30ad3b95882b90869435b0f17a7";
 if(feat164){
  assert.equal(execFileSync("git",["-C",sourceRoot,"rev-parse","HEAD"],{encoding:"utf8"}).trim(),feat164Commit);
  assert.deepEqual(bytes,execFileSync("git",["-C",sourceRoot,"show",`${feat164Commit}:${source}`]));

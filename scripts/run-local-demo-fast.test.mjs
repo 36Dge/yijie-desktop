@@ -94,8 +94,9 @@ describe("local demo launcher profiles", () => {
   it("keeps the default commands and adds one explicit stable API entry", async () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
 
-    expect(packageJson.scripts["tauri:dev"]).toBe("./scripts/run-local-demo-fast.sh");
-    expect(packageJson.scripts["tauri:demo-fast"]).toBe("./scripts/run-local-demo-fast.sh");
+    expect(packageJson.scripts["tauri:dev"]).toBe("python3 -B scripts/development-client.py start");
+    expect(packageJson.scripts["tauri:demo-fast"]).toBe(packageJson.scripts["tauri:dev"]);
+    expect(packageJson.scripts["client:dev"]).toBe(packageJson.scripts["tauri:dev"]);
     expect(packageJson.scripts["tauri:demo-fast:stable"]).toBe(
       "./scripts/run-local-demo-fast.sh --stable-api-only",
     );

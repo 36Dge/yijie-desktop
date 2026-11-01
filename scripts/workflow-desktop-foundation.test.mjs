@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { developmentArguments } from "./run-workflow-dev.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = file => readFile(path.join(root, file), "utf8");
@@ -15,7 +16,7 @@ const [launcher, helper, sidecar, nativeWindow, nativeRuntime, base, overlay, ca
 
 describe("workflow Desktop normal foundation boundaries", () => {
   it("keeps the canonical main App and its existing window size", () => {
-    expect(packageJson.scripts["tauri:dev"]).toBe("./scripts/run-local-demo-fast.sh");
+    expect(packageJson.scripts["tauri:dev"]).toBe("python3 -B scripts/development-client.py start");
     expect(packageJson.scripts["tauri:demo-fast:app"]).toBe("./scripts/run-local-demo-fast.sh --packaged");
     expect(overlay.productName).toBeUndefined();
     expect(overlay.identifier).toBeUndefined();
@@ -69,8 +70,7 @@ describe("workflow Desktop normal foundation boundaries", () => {
     expect(launcher).toContain('workflow_credential_file="${workflow_credential_file:-$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json}"');
     expect(launcher).toContain('make -C "$workspace_root/yijie-infra" workflow-up');
     expect(launcher).not.toContain('workflow-init');
-    expect(helper).toContain('nativeEnvironment.YIJIE_EXPERTS_ENABLED === "true"');
-    expect(helper).toContain('arguments_.push("--config", "src-tauri/tauri.experts-daily.conf.json")');
+    expect(developmentArguments({YIJIE_EXPERTS_ENABLED: "true"})).toContain("src-tauri/tauri.experts-daily.conf.json");
   });
 
   it("preserves normal non-forceful Host cleanup with workflow and daily schedules", () => {

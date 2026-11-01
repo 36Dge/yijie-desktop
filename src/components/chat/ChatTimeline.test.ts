@@ -21,6 +21,7 @@ type ConversationThreadStatus,
 type ConversationTurnSnapshot,
 } from "../../domain/conversation-view";
 import ChatTimeline from "./ChatTimeline.vue";
+import ChatDeepThinking from "./ChatDeepThinking.vue";
 import ChatTimelineItemShell from "./ChatTimelineItemShell.vue";
 
 const THREAD_ID = "thread-demo";
@@ -442,7 +443,7 @@ describe("ChatTimeline", () => {
     expect(wrapper.findAll(".action-artifact-item")).toHaveLength(1);
     expect(wrapper.findAll(".action-reasoning")).toHaveLength(0);
 
-    const reasoningShell = wrapper.findAllComponents(ChatTimelineItemShell)
+    const reasoningShell = wrapper.findAllComponents(ChatDeepThinking)
       .find((shell) => shell.props("item").itemId === "reasoning");
     if (reasoningShell === undefined) throw new Error("fixture_missing_reasoning");
     await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
@@ -512,7 +513,7 @@ describe("ChatTimeline", () => {
     });
 
     function disclosureFor(itemId: string): HTMLButtonElement {
-      const shell = wrapper.findAllComponents(ChatTimelineItemShell)
+      const shell = wrapper.findAllComponents(ChatDeepThinking)
         .find((candidate) => candidate.props("item").itemId === itemId);
       const disclosure = shell?.element.closest(".chat-turn-group")?.querySelector(
         ".chat-turn-group__process-toggle",
@@ -536,7 +537,7 @@ describe("ChatTimeline", () => {
     });
     const reorderedTurns = wrapper.findAll(".chat-timeline__turn");
     expect(reorderedTurns).toHaveLength(2);
-    expect(wrapper.findAllComponents(ChatTimelineItemShell)
+    expect(wrapper.findAllComponents(ChatDeepThinking)
       .map((shell) => shell.props("item").itemId)).toEqual(["reasoning-b", "reasoning-a"]);
     expect(disclosureFor("reasoning-a").getAttribute("aria-expanded")).toBe("true");
     expect(disclosureFor("reasoning-b").getAttribute("aria-expanded")).toBe("false");

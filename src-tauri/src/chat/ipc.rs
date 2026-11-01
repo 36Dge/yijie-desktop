@@ -1,3 +1,4 @@
+pub mod web_sources;
 pub(crate) mod workspaces;
 
 use super::application::{

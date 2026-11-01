@@ -29,7 +29,7 @@ function turn(view = native(), protect = false) {
 }
 
 describe("native process reading layout", () => {
-  it("shows only supplied search sources as inert text, distinct from answer citations", async () => {
+  it("shows only supplied search source links, distinct from answer citations", async () => {
     const view=native();
     view.items[1]!.item.webSearch!.sources=[{url:"https://example.org/statistics/2025",title:"Annual statistics"}];
     const before=JSON.stringify(view);
@@ -39,20 +39,40 @@ describe("native process reading layout", () => {
     await search.get("button").trigger("click");
     expect(search.get('[aria-label="搜索来源"]').text()).toContain("https://example.org/statistics/2025");
     expect(search.text()).toContain("不代表回答已逐项引用或核验");
-    expect(search.find("a").exists()).toBe(false);
+    expect(search.get("a").attributes("href")).toBe("https://example.org/statistics/2025");
     expect(JSON.stringify(view)).toBe(before);
     expect(wrapper.findAll(".chat-turn-group__item--assistant_unclassified")[1]!.text()).not.toContain("example.org");
     wrapper.unmount();
   });
 
-  it("keeps completed search detail limitations inside the disclosure without hiding unavailable records", async () => {
+  it("distinguishes repeated native searches without discarding either result set", async () => {
+    const view = native();
+    const query = "新丰小吃 推荐分店 新丰小吃 必点小吃 新丰小吃 分店 人气";
+    view.items[1]!.item.webSearch = {action: "search", queries: [query], sources: [{title: "第一次返回的来源", url: "https://example.org/first"}]};
+    const second = record({id: "search-again", type: "webSearch", availability: "available", webSearch: {action: "search", queries: [query], sources: [{title: "第二次返回的来源", url: "https://example.org/second"}]}}, 3);
+    view.items = [view.items[0]!, view.items[1]!, view.items[2]!, second, view.items[7]!];
+    const before = JSON.stringify(view);
+    const wrapper = mount(ChatTurnGroup, {props: {turn: turn(view), position: 1}});
+    await wrapper.get('.chat-turn-group__timing button').trigger('click');
+    const searches = wrapper.findAll('.chat-web-search');
+    expect(searches).toHaveLength(2);
+    expect(searches[0]!.get('button').text()).toBe('网页搜索新丰小吃 · 推荐分店、必点小吃、分店人气');
+    expect(searches[1]!.get('button').text()).toBe('再次搜索新丰小吃 · 推荐分店、必点小吃、分店人气');
+    for (const search of searches) await search.get('button').trigger('click');
+    expect(searches[0]!.get('a').attributes('href')).toBe('https://example.org/first');
+    expect(searches[1]!.get('a').attributes('href')).toBe('https://example.org/second');
+    expect(JSON.stringify(view)).toBe(before);
+    wrapper.unmount();
+  });
+
+  it("removes the partial footer without hiding unavailable records", async () => {
     const view=native(); view.items[1]!.item.availability="partial";
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1}});
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
     const search=wrapper.findAll(".chat-turn-group__item--web_search")[0]!;
     expect(search.find('[role="note"]').exists()).toBe(false);
     await search.get("button").trigger("click");
-    expect(search.get('[role="note"]').text()).toContain("信息不完整");
+    expect(search.text()).not.toContain("信息不完整");
     view.items[1]!.item.availability="unavailable";
     await wrapper.setProps({turn:turn(view)});
     await search.get("button").trigger("click");
@@ -62,7 +82,7 @@ describe("native process reading layout", () => {
 
   it("shows search and progress naturally, keeps empty commands and duplicate summaries in inspectable details", async () => {
     const view=native(), before=JSON.stringify(view);
-    const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1,timingLabel:"已完成 72 s"}});
+    const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1,timingLabel:"已完成 72s"}});
     const nodes=wrapper.findAll(".chat-turn-group__item");
     expect(nodes).toHaveLength(8);
     expect(nodes[7]!.isVisible()).toBe(true);
@@ -70,16 +90,15 @@ describe("native process reading layout", () => {
     expect(wrapper.find(".chat-turn-group__unknown").exists()).toBe(false);
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
     expect(nodes[1]!.isVisible()).toBe(true);
-    expect(nodes[1]!.text()).toContain("已搜索网页");
-    expect(nodes[6]!.text()).toContain("已阅读网页");
+    expect(nodes[1]!.text()).toContain("网页搜索");
+    expect(nodes[6]!.text()).toContain("阅读网页");
     expect(nodes[5]!.isVisible()).toBe(true);
     expect(nodes[5]!.get("article").classes()).toContain("chat-timeline-item-shell--process-inline");
-    expect(nodes[2]!.isVisible()).toBe(false);
-    expect(nodes[3]!.isVisible()).toBe(false);
-    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
     expect(nodes[2]!.isVisible()).toBe(true);
+    expect(nodes[2]!.get(".chat-deep-thinking__viewport").isVisible()).toBe(false);
     expect(nodes[3]!.isVisible()).toBe(true);
-    expect(nodes[4]!.text()).toContain("重复摘要（原始记录）");
+    expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
+    expect(nodes[4]!.get("button").text()).toBe("深度思考");
     expect(nodes[4]!.get("button").attributes("aria-expanded")).toBe("false");
     await nodes[4]!.get("button").trigger("click");
     expect(nodes[4]!.text()).toContain("先核对两地公开资料。");
@@ -97,11 +116,10 @@ describe("native process reading layout", () => {
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(view),position:1}});
     expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(false);
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
-    expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(false);
-    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
+    expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__item--unknown").isVisible()).toBe(true);
     expect(wrapper.text()).toContain("unsupported_content");
-    expect(wrapper.text()).not.toContain("已搜索网页");
+    expect(wrapper.text()).not.toContain("网页搜索");
     wrapper.unmount();
   });
 
@@ -121,7 +139,7 @@ describe("native process reading layout", () => {
   it("keeps protected process text protected when the reading placement changes", async () => {
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:turn(native(),true),position:1}});
     await wrapper.get(".chat-turn-group__timing button").trigger("click");
-    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
+    expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("继续核对公开资料。");
     expect(wrapper.text()).not.toContain("先核对两地公开资料。");
     expect(wrapper.text()).toContain("模型过程内容已隐藏");
@@ -143,12 +161,12 @@ describe("native process reading layout", () => {
     wrapper.unmount();
   });
 
-  it("collapses a summary when completion proves it is an exact repeat", async () => {
+  it("keeps repeated summaries individually collapsed without a nested detail group", async () => {
     const view=native();view.status="inProgress";view.terminalObserved=false;
     view.items=view.items.slice(0,5);view.items[4]!.lastMethod="item/started";
     const projected=()=>selectConversationTimeline(composeConversationView(snapshot,[view]),"session",undefined,{protectApprovalProcessContent:false,liveTurnId:"turn"})!.turns[0]!;
     const wrapper=mount(ChatTurnGroup,{attachTo:document.body,props:{turn:projected(),position:1}});
-    await wrapper.get(".chat-turn-group__details-control button").trigger("click");
+    expect(wrapper.find(".chat-turn-group__details-control").exists()).toBe(false);
     view.items[4]!.lastMethod="item/completed";
     await wrapper.setProps({turn:projected()});
     const duplicate=wrapper.findAll(".chat-turn-group__item--reasoning")[1]!;
@@ -187,17 +205,15 @@ describe("model and runtime progress have distinct provenance", () => {
     wrapper.unmount();
   });
 
-  it("renders a quiet provider's actual web work as system prose without creating a model message", async () => {
+  it("renders actual web work directly without duplicate system prose or a model message", async () => {
     const view = native();
     view.items = [view.items[0]!, view.items[1]!, view.items[2]!, view.items[7]!];
     const before = JSON.stringify(view);
     const wrapper = mount(ChatTurnGroup, {attachTo: document.body, props: {turn: turn(view), position: 1}});
-    const description = wrapper.get('.chat-turn-group__execution-description');
-    expect(description.isVisible()).toBe(false);
+    expect(wrapper.find('.chat-turn-group__execution-description').exists()).toBe(false);
     await wrapper.get('.chat-turn-group__timing button').trigger('click');
-    expect(description.isVisible()).toBe(true);
-    expect(description.text()).toContain('执行进度');
-    expect(description.text()).toContain('已完成网页搜索');
+    expect(wrapper.get('.chat-web-search__toggle').text()).toContain('网页搜索城市产业 / 生活成本');
+    expect(wrapper.text()).not.toContain('具体情况可展开下方记录查看');
     expect(wrapper.find('[data-progress-source="model"]').exists()).toBe(false);
     expect(wrapper.findAll('.chat-turn-group__item--assistant_unclassified')).toHaveLength(1);
     expect(wrapper.get('.chat-turn-group__item--assistant_unclassified').text()).toContain('两地各有优势。');
@@ -214,10 +230,9 @@ describe("model and runtime progress have distinct provenance", () => {
     expect(wrapper.get('.chat-turn-group__item--commentary .chat-safe-content').text()).toBe('我会先核对两地资料。');
     const children = [...wrapper.get('.chat-turn-group__items').element.children];
     const model = children.findIndex(node => node.classList.contains('chat-turn-group__item--commentary'));
-    const system = children.findIndex(node => node.classList.contains('chat-turn-group__execution-description'));
     const web = children.findIndex(node => node.classList.contains('chat-turn-group__item--web_search'));
-    expect(model).toBeLessThan(system);
-    expect(system).toBeLessThan(web);
+    expect(model).toBeLessThan(web);
+    expect(wrapper.find('.chat-turn-group__execution-description').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -292,7 +307,8 @@ describe("model and runtime progress have distinct provenance", () => {
     const project = (live: boolean) => selectConversationTimeline(composeConversationView(snapshot,[view]),'session',undefined,
       {protectApprovalProcessContent:false,liveTurnId:live?'turn':null})!.turns[0]!;
     const wrapper = mount(ChatTurnGroup, {attachTo: document.body, props:{turn:project(true),position:1}});
-    expect(wrapper.get('.chat-execution-progress').text()).toContain('正在进行网页搜索');
+    expect(wrapper.get('.chat-web-search').attributes('aria-busy')).toBe('true');
+    expect(wrapper.get('.chat-web-search__toggle').attributes('aria-label')).toContain('进行中');
     expect(wrapper.text()).not.toContain('已完成网页搜索');
     await wrapper.setProps({turn:project(false)});
     expect(wrapper.find('.chat-execution-progress').exists()).toBe(false);

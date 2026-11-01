@@ -1,5 +1,10 @@
 # Local Development
 
+> 2026-10-31 默认入口已改为固定完整开发客户端：`pnpm client:dev`（`pnpm tauri:dev` 同义）。
+> 当前 Kimi、MiniMax、专家、连接器、计划、媒体与工作流沿用原日常配置及历史数据。
+> 前端热更新；原生改动正常退出后增量编译重启；不逐次生成新包或全量备份。
+> 以[固定开发客户端 v1](development-client.md)为准。下文 packaged/generation 仅用于显式打包交付，旧历史记录保留。
+
 > 2026-09-05：FEAT-137 已按“Owner 永久终止、未完成验收”收尾。普通与 stable 入口均使用现存 FEAT-136 两补丁 Runtime；stable 保留 FEAT-134/136，审批 v6、原生 opt-in 和 UI 均停用。Contracts 权威为 `4d3f967938dde1c86ca34003a0a5628717f96262:docs/retirements/FEAT-137.json`。历史 v6 lock/checker、存储读取和源码不作活动入口，也不代表验收 PASS；完整记录见相邻 yijie 仓库 FEAT-137 的 `03-termination.md`。
 
 ## Demo 快速闭环（默认本地业务验证）

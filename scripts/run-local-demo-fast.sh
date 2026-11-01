@@ -39,19 +39,31 @@ sha256_file() {
 image_generation_enabled="true"
 stable_api_only="false"
 packaged_app="false"
+development_app="false"
 expert_profile="daily"
 reopen_app="false"
 feat134_environment=()
 kimi_k31_daily="false"
 daily_workflow_requested="$workflow_requested"
+# Fixed development client: full daily features/data, no packaged generation.
+# The wrapper supplies only canonical fixed output paths and an allowlisted env.
+if [[ "${1:-}" == "--development" ]]; then
+  development_app="true"
+  [[ "${YIJIE_DEVELOPMENT_CLIENT:-}" == "true" && "${CARGO_TARGET_DIR:-}" == "$desktop_root/.local/development/target" && "${YIJIE_WORKER_TARGET_DIR:-}" == "$desktop_root/.local/development/worker-target" ]] || fail "use pnpm client:dev for the fixed development client"
+  [[ -z "${YIJIE_FEAT164_PRIMARY_GENERATION:-}" && -z "${YIJIE_FEAT164_DAILY_BINDING_FILE:-}" && -z "${YIJIE_PERMISSION_VERIFICATION_BASE_URL:-}" ]] || fail "development cannot select a packaged generation or observation transport"
+  shift
+elif [[ "${YIJIE_DEVELOPMENT_CLIENT:-false}" != "false" ]]; then
+  fail "development requires its explicit canonical selector"
+fi
 # The ordinary packaged entry keeps the existing stable-only branch intact.
 if [[ "$#" -ge 1 && "$1" == "--packaged" ]]; then
+  [[ "$development_app" == "false" ]] || fail "development and packaged modes cannot be combined"
   packaged_app="true"
   shift
 fi
 # Daily K31 is explicit. Preparation builds only; data maintenance is a separate action.
 if [[ "$#" -ge 1 && "$1" == "--kimi-k31-daily" ]]; then
-  [[ "$packaged_app" == "true" ]] || fail "daily Kimi requires --packaged"
+  [[ "$packaged_app" == "true" || "$development_app" == "true" ]] || fail "daily Kimi requires packaged or fixed development mode"
   [[ "${YIJIE_FEAT164_QUALIFICATION:-false}" == "false" ]] || fail "daily and qualification profiles cannot be mixed"
   kimi_k31_daily="true"
   export YIJIE_FEAT164_DAILY=true
@@ -86,7 +98,7 @@ prepare_only="false"
 migrate_isolated_k3="false"
 migrate_daily_k3="false"
 if [[ "$#" -ge 1 && "$1" == "--kimi-k31-pro" ]]; then
-  [[ "$packaged_app" == "true" ]] || fail "Kimi candidate requires --packaged"
+  [[ "$packaged_app" == "true" || "$development_app" == "true" ]] || fail "Kimi candidate requires packaged or fixed development mode"
   kimi_k31_candidate="true"
   export YIJIE_KIMI_K31_PRO_CANDIDATE=true VITE_YIJIE_KIMI_K31_PRO_CANDIDATE=true
   export YIJIE_FEAT155_SCHEDULED_CANDIDATE=true YIJIE_FEAT155_SCHEDULED_DAILY=false
@@ -165,6 +177,15 @@ case "$#" in
   *) fail "unsupported arguments; expected no arguments or --stable-api-only" ;;
 esac
 
+if [[ "$development_app" == "true" ]]; then
+  [[ "$kimi_k31_daily" == "true" && "$prepare_only" == "false" && "$reopen_app" == "false" && "$migrate_daily_k3" == "false" && "$migrate_isolated_k3" == "false" && "$workflow_requested" == "true" ]] || fail "fixed development requires the complete daily profile without package/migration actions"
+  python3 -B "$desktop_root/scripts/development-client.py" check
+  daily_bound_host_home="$desktop_root/.local/demo-fast/host-home"
+  daily_bound_codex_home="$desktop_root/.local/demo-fast/codex-home"
+  provider_key_file="$host_root/.local/secrets/minimax-api-key"
+  export YIJIE_KIMI_API_KEY_FILE="$host_root/.local/secrets/kimi-api-key"
+  workflow_credential_file="$workspace_root/yijie-infra/environments/local/generated/feat-153/private/k-na.json"
+fi
 
 # FEAT-164 D1: preparation has no data authority; use one qualified artifact for D3-D5.
 # Resolve before credentials/builds/services. No default empty Host/Runtime Home.
@@ -185,7 +206,7 @@ for component, variable in {"desktop": "CARGO_BUILD_BUILD_DIR", "worker": "YIJIE
         raise SystemExit("primary intermediate cache environment differs")
 PY
 fi
-if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
+if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" && "$development_app" == "false" ]]; then
   [[ "$reopen_app" == "true" ]] || fail "daily execution requires its prepared artifact and --reopen"
   daily_stage="${YIJIE_FEAT164_DAILY_STAGE:-}"
   if [[ "$migrate_daily_k3" == "true" ]]; then
@@ -279,10 +300,10 @@ export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit d191ad6ed08f0e8cc89dfea1346b5ecdf010e776 --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit ffb0ef6ef478114464f4ae9e6974a3be3276d8ce --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
-    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/kimi-k31-pro-r5/aarch64-apple-darwin"
+    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/web-retrieval-guard-v1/aarch64-apple-darwin"
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check
@@ -316,6 +337,7 @@ fi
 
 if [[ "$kimi_k31_daily" == "true" ]]; then
   runtime_root="${primary_output:-$desktop_root/.local/feat164-daily}"
+  if [[ "$development_app" == "true" ]]; then runtime_root="$desktop_root/.local/development"; fi
   # This is an artifact root only; prepare-only does not create data Homes.
   host_home="${daily_bound_host_home:-}"
   codex_home="${daily_bound_codex_home:-}"
@@ -499,7 +521,7 @@ fi
 if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$packaged_app" == "true" && "$reopen_app" == "false" ]]; then
   expert_build_inputs="$(node scripts/expert-packaged-receipt.mjs --inputs-digest)"
 fi
-if [[ ( "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) && "$reopen_app" == "false" ]]; then
+if [[ ( "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) && "$reopen_app" == "false" && "$development_app" == "false" ]]; then
   kimi_k31_build_inputs="$(node scripts/kimi-k31-packaged-receipt.mjs --inputs-digest)"
 fi
 if [[ "$reopen_app" == "false" ]]; then
@@ -537,7 +559,9 @@ if [[ "$workflow_requested" == "true" && "$prepare_only" != "true" && "$migrate_
   make -C "$workspace_root/yijie-infra" workflow-up
 fi
 
-if [[ "$stable_api_only" == "true" ]]; then
+if [[ "$development_app" == "true" ]]; then
+  launch_command=(node scripts/run-workflow-dev.mjs)
+elif [[ "$stable_api_only" == "true" ]]; then
   pnpm tauri:build:demo-fast:stable
   bundle_binary="$desktop_root/src-tauri/target/debug/bundle/macos/易界 AI FEAT-131.app/Contents/MacOS/yijie-desktop"
   [[ -x "$bundle_binary" && ! -L "$bundle_binary" ]] || fail "stable Desktop app bundle is missing"
@@ -588,7 +612,7 @@ if [[ "$experts_requested" == "true" && "$kimi_k31_candidate" != "true" && "$pac
   fi
 fi
 
-if [[ "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ]]; then
+if [[ ( "$kimi_k31_candidate" == "true" || "$feat164_qualification" == "true" ) && "$development_app" == "false" ]]; then
   if [[ "$reopen_app" == "true" ]]; then
     node scripts/kimi-k31-packaged-receipt.mjs --check "$codex_binary" "$codex_manifest"
   else
@@ -598,7 +622,10 @@ fi
 
 
 # Daily readiness is checked only after the exact bundle receipt, never repaired.
-if [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
+if [[ "$development_app" == "true" ]]; then
+  python3 -B "$desktop_root/scripts/development-client.py" ready
+  printf 'Fixed development client: live frontend, original daily data, incremental native build.\n'
+elif [[ "$kimi_k31_daily" == "true" && "$prepare_only" != "true" ]]; then
   if [[ "$migrate_daily_k3" != "true" && "$workflow_requested" == "true" ]]; then
     python3 -B "$desktop_root/scripts/feat164-daily-deployment.py" ready --stage "$daily_stage" --desktop-root "$desktop_root"
   fi

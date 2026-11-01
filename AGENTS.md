@@ -87,6 +87,20 @@ dirty/floating sibling 只能用于本地候选验证，不能作为发布来源
 
 ## 开发与验证
 
+2026-10-31 用户确认的默认方式：使用 `pnpm client:dev` 固定开发客户端；`pnpm tauri:dev`、
+`pnpm tauri:demo-fast` 为同一入口，完整功能及历史数据沿用原日常身份与 Homes。
+界面和前端逻辑改动直接热更新；原生逻辑改动通过 App 菜单或 ⌘Q 正常退出后，再用同一入口
+增量编译并重启。不得将原生 watcher 的强制终止当作正常重启。
+不要为每次小改动默认生成独立 generation、安装包或全量数据备份。只有用户明确要求打包交付
+时才采用下述打包流程；数据迁移和高影响数据变更另行评估，不因本条改变原权限/审批规则。
+实现及固定路径见 `docs/development-client.md`，此条覆盖历史文档关于默认开发入口的旧说明。
+
+同日追加：日常点击桌面/用户 Applications 的“易界.app”固定入口，自动启动原 Docker 和
+专用服务；正常退出 App 后自动清理专用服务。入口源码 `scripts/development-entry.swift`，
+安装命令 `pnpm client:install-entry`；不是逐次打包完整客户端。服务生命周期由 Infra
+`scripts/workflow-session.py` 拥有，使用原容器身份和只读存储核验，普通重开不做数据备份。
+真实异常或未完成操作须保留现场，不重放任务，也不自动执行旧 recovery 备份流程。
+
 统一使用 pnpm，不混用 npm 或 yarn。提交 `pnpm-lock.yaml` 和 `src-tauri/Cargo.lock`，不提交 `node_modules/`、`dist/`、Rust `target/`、本地环境文件或生产凭据。
 
 ```bash
