@@ -1,6 +1,7 @@
+import { createConversationTimelineSelector, selectConversationTimeline } from "./conversation-timeline";
 import { describe, expect, it } from "vitest";
 import type { NativeConversationView, NativeConversationViewEvent } from "../api/generated/native-conversation-private.gen";
-import { composeConversationView, selectConversationTurn, type ConversationSnapshot } from "./conversation-view";
+import { createConversationComposer, composeConversationView, selectConversationTurn, type ConversationSnapshot } from "./conversation-view";
 import { validateNativeHistory, validateNativeViewEvent } from "../api/generated/native-conversation-validator.gen.js";
 const legacy: ConversationSnapshot = {threads:[{threadId:"local-session",status:"ready"}],turns:[{threadId:"local-session",turnId:"local-turn",ordinal:0,status:"failed",terminalStatus:"failed"}],items:[{threadId:"local-session",turnId:"local-turn",itemId:"old-display",ordinal:0,kind:"assistant_message",status:"completed",contentBlocks:[{type:"text",blockIndex:0,text:"old archive"}]}]};
 const native: NativeConversationView = {sessionId:"local-session",turnId:"local-turn",runtimeThreadId:"runtime-thread",runtimeTurnId:"runtime-turn",source:"native_observed",revision:"2",availability:"partial",status:"failed",terminalObserved:true,items:[{item:{id:"native-a",type:"agentMessage",phase:"final_answer",text:"original final",availability:"available"},ordinal:0,lastMethod:"item/completed"},{item:{id:"native-r",type:"reasoning",content:["unfinished"],availability:"available"},ordinal:1,lastMethod:"item/started"}]};
@@ -83,5 +84,34 @@ describe("FEAT164 saved archive compatibility", () => {
   for (const changed of [{...base,source:"native_rebuilt" as const},{...base,status:"completed" as const},{...base,terminalObserved:false}]) {
    expect(Object.values(composeConversationView(legacy,[changed],[],[],[],[archive]).items)[0]?.archiveV5).toBeUndefined();
   }
+ });
+});
+
+
+describe("streaming projection reuse", () => {
+ it("preserves untouched turns while producing the same facts as a full projection", () => {
+  const compose = createConversationComposer(); const timeline = createConversationTimelineSelector();
+  const archived = {...native, turnId: "earlier", runtimeTurnId: "earlier", status: "completed" as const};
+  const first = compose(legacy, [archived, native]);
+  const initial = timeline(first, "local-session", undefined, {liveTurnId: "local-turn", protectApprovalProcessContent: false});
+  const changed = {...native, revision: "3", items: native.items.map((entry, index) => index === 0 ? {...entry, item: {...entry.item, text: "new native text"}} : entry)};
+  const next = compose(legacy, [archived, changed]);
+  expect(next).toEqual(composeConversationView(legacy, [archived, changed]));
+  const projected = timeline(next, "local-session", undefined, {liveTurnId: "local-turn", protectApprovalProcessContent: false});
+  expect(projected).toEqual(selectConversationTimeline(next, "local-session", undefined, {liveTurnId: "local-turn", protectApprovalProcessContent: false}));
+  expect(projected?.turns.find(t => t.turnId === "earlier")).toBe(initial?.turns.find(t => t.turnId === "earlier"));
+  expect(projected?.turns.find(t => t.turnId === "local-turn")).not.toBe(initial?.turns.find(t => t.turnId === "local-turn"));
+ });
+ it("invalidates history, diagnostics and live-policy dependencies", () => {
+  const compose = createConversationComposer(); const timeline = createConversationTimelineSelector();
+  compose(legacy, [native]);
+  const snapshot = {...legacy, items: []};
+  const diagnostics = [{sessionId: "local-session", turnId: "local-turn", formatVersion: 6, code: "format_unsupported" as const}];
+  const next = compose(snapshot, [native], [], diagnostics);
+  expect(next).toEqual(composeConversationView(snapshot, [native], [], diagnostics));
+  const live = timeline(next, "local-session", undefined, {liveTurnId: "local-turn", protectApprovalProcessContent: false});
+  const history = timeline(next, "local-session");
+  expect(history).toEqual(selectConversationTimeline(next, "local-session"));
+  expect(history?.turns[0]).not.toBe(live?.turns[0]);
  });
 });

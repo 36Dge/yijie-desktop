@@ -118,6 +118,7 @@ fn feat164_delivery_migration_does_not_backfill_legacy_pending() {
 }
 #[test]
 fn feat164_delivery_cancel_after_claim_survives_reopen_without_rewriting_or_reviving() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_cancel_after_claim_survives_reopen_without_rewriting_or_reviving") { return; }
     let mut f = Fixture::new();
     let p = f.create();
     let before = proof(&f.repo().connection, p.turn_operation_id).unwrap();
@@ -207,6 +208,7 @@ fn feat164_delivery_new_acceptance_replay_preserves_proof_and_input_identity() {
 }
 #[test]
 fn feat164_delivery_public_or_create_attempt_prevents_cancel_even_after_legacy_retry_reset() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_public_or_create_attempt_prevents_cancel_even_after_legacy_retry_reset") { return; }
     for stage in ["public", "create"] {
         let mut f = Fixture::new();
         let p = f.create();
@@ -245,6 +247,7 @@ fn feat164_delivery_public_or_create_attempt_prevents_cancel_even_after_legacy_r
 }
 #[test]
 fn feat164_delivery_ordinary_final_send_binds_operation_profile_path_and_is_single_use() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_ordinary_final_send_binds_operation_profile_path_and_is_single_use") { return; }
     let mut f = Fixture::new();
     let (session, host, op) = f.existing();
     f.repo()
@@ -287,6 +290,7 @@ fn feat164_delivery_ordinary_final_send_binds_operation_profile_path_and_is_sing
 }
 #[test]
 fn feat164_delivery_cancel_releases_lane_and_allows_explicit_model_selection() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_cancel_releases_lane_and_allows_explicit_model_selection") { return; }
     let mut f = Fixture::new();
     let (session, _, op) = f.existing();
     assert!(f
@@ -322,6 +326,7 @@ fn feat164_delivery_cancel_releases_lane_and_allows_explicit_model_selection() {
 }
 #[test]
 fn feat164_delivery_new_chat_binding_is_observed_before_first_turn_send() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_new_chat_binding_is_observed_before_first_turn_send") { return; }
     let mut f = Fixture::new();
     let p = f.create();
     let task = Uuid::now_v7();
@@ -373,6 +378,7 @@ fn feat164_delivery_new_chat_binding_is_observed_before_first_turn_send() {
 }
 #[test]
 fn feat164_delivery_market_and_expert_have_independent_proof_and_no_ordinary_claim() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_market_and_expert_have_independent_proof_and_no_ordinary_claim") { return; }
     use crate::chat::{
         connectors::{selection::ExecutionAdmission, selection_generated},
         experts::{generated as expert, store},
@@ -495,6 +501,11 @@ fn feat164_delivery_legacy_without_proof_remains_unclassified_and_unmodified() {
 
 #[test]
 fn feat164_delivery_permission_turn_checks_nested_source_operation() {
+    if crate::chat::model_test_support::run_in_current_model_environment(
+        "chat::delivery::tests::feat164_delivery_permission_turn_checks_nested_source_operation",
+    ) {
+        return;
+    }
     let mut f = Fixture::new();
     let (_, host, op) = f.existing();
     f.repo()
@@ -515,6 +526,7 @@ fn feat164_delivery_permission_turn_checks_nested_source_operation() {
 }
 #[test]
 fn feat164_delivery_pause_blocks_claim_but_preserves_explicit_unsent_cancel() {
+    if crate::chat::model_test_support::run_in_current_model_environment("chat::delivery::tests::feat164_delivery_pause_blocks_claim_but_preserves_explicit_unsent_cancel") { return; }
     let mut f = Fixture::new();
     let project = f.project;
     assert!(f

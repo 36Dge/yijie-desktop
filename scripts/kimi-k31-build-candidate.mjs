@@ -9,7 +9,7 @@ import {fileURLToPath} from "node:url";
 const desktop=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const contracts=path.resolve(desktop,"../yijie-contracts"),host=path.resolve(desktop,"../yijie-agent-host");
 const hash=b=>createHash("sha256").update(b).digest("hex");
-const commit="ffb0ef6ef478114464f4ae9e6974a3be3276d8ce";
+const commit="b8854c159375a1abd2fef47f7e6ee182b84a4b09";
 const lockFile="contracts/kimi-k31-host-build.candidate.json";
 function inputs(hostRoot,ref){
  const git=(...args)=>execFileSync("git",["-C",hostRoot,...args],{encoding:"utf8",maxBuffer:16*1024*1024}).trim();

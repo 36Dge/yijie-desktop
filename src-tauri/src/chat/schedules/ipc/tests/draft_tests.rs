@@ -13,6 +13,12 @@ async fn feat156_model_draft_enters_original_claim_and_recovery_path() {
 #[cfg(feature = "kimi-k31-pro-candidate")]
 #[tokio::test]
 async fn feat164_surfaces_draft_claim_and_recovery() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_surfaces_draft_claim_and_recovery"
+    )) {
+        return;
+    }
     model_draft_claim("kimi-k3-1-pro-max-v1").await;
 }
 

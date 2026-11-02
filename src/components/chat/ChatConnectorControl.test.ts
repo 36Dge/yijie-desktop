@@ -16,6 +16,8 @@ describe("chat connector conversation selection", () => {
     const wrapper = setup();
     const control = wrapper.get('[role="switch"]');
     expect(control.attributes("aria-checked")).toBe("false");
+    expect(control.attributes("aria-disabled")).toBe("false");
+    expect(wrapper.get('.connector-menu__status').text()).toBe("已启用");
     await wrapper.get('[data-connector-option]').trigger("click");
     expect(wrapper.emitted("selection-change")).toEqual([["sample", true]]);
     expect(wrapper.emitted("enabled-change")).toBeUndefined();
@@ -25,6 +27,16 @@ describe("chat connector conversation selection", () => {
     expect(wrapper.emitted("selection-change")).toEqual([["sample", true], ["sample", false]]);
     expect(wrapper.emitted("configure")).toBeUndefined();
     expect(wrapper.emitted("close")).toBeUndefined();
+    expect(wrapper.get('.connector-menu__status').text()).toBe("已启用");
+  });
+  it("keeps global enablement visible while conversation selection is temporarily unavailable", async () => {
+    const wrapper = setup();
+    await wrapper.setProps({ selectionAvailable: false });
+    expect(wrapper.get('.connector-menu__status').text()).toBe("已启用");
+    expect(wrapper.get('[role="switch"]').attributes("aria-checked")).toBe("false");
+    expect(wrapper.get('[role="switch"]').attributes("aria-disabled")).toBe("true");
+    await wrapper.get('[role="switch"]').trigger("click");
+    expect(wrapper.emitted("selection-change")).toBeUndefined();
   });
   it("allows selection without connector management permission", async () => {
     const wrapper = setup();

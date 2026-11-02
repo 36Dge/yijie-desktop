@@ -1293,11 +1293,18 @@ fn feat155_daily_cancelled_uncreated_dedicated_target_gets_fresh_operation() {
 
 #[test]
 fn feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot() {
+    #[cfg(feature = "kimi-k31-pro-candidate")]
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot"
+    )) {
+        return;
+    }
     let root = Temp::new();
     let n = now().unwrap();
     let mut r = open(&root.0, ScheduleStorageMode::LocalPreparation);
     let (old, _, old_grant) = confirmed(&mut r, TargetMode::NewChatEachRun, None, n, 1);
-    crate::chat::migrations::migrate_to_target(&mut r.connection, 28).unwrap();
+    crate::chat::model_test_support::migrate_active_store(&mut r.connection, 28);
     assert_eq!(
         grant(&r.connection, &r.scope, &old_grant.grant_id, n)
             .unwrap()
@@ -1311,7 +1318,12 @@ fn feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot() {
         .model_profile
         .is_none());
     let mut request = plan_request(TargetMode::NewChatEachRun, None);
-    request.definition.model_profile = Some(PlanDefinitionModelProfile::KimiK3MaxV1);
+    request.definition.model_profile = Some(
+        serde_json::from_value(serde_json::json!(
+            crate::chat::model_test_support::active_profile()
+        ))
+        .unwrap(),
+    );
     let p = r.save_schedule(request, n).unwrap();
     let g = r
         .confirm_schedule_grant(
@@ -1348,20 +1360,25 @@ fn feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot() {
     let snapshot: PlanView = serde_json::from_str(&raw).unwrap();
     assert_eq!(
         snapshot.definition.model_profile,
-        Some(PlanDefinitionModelProfile::KimiK3MaxV1)
+        Some(
+            serde_json::from_value(serde_json::json!(
+                crate::chat::model_test_support::active_profile()
+            ))
+            .unwrap()
+        )
     );
     assert_eq!(
         r.model_operation_profile(Uuid::parse_str(&run.operation_id).unwrap())
             .unwrap()
             .as_deref(),
-        Some("kimi-k3-max-v1")
+        Some(crate::chat::model_test_support::active_profile())
     );
     let (_, _, create, _) = binding(&r, &run);
     assert_eq!(
         r.model_operation_profile(Uuid::parse_str(&create.unwrap()).unwrap())
             .unwrap()
             .as_deref(),
-        Some("kimi-k3-max-v1")
+        Some(crate::chat::model_test_support::active_profile())
     );
     assert_eq!(
         r.prepare_manual_local(

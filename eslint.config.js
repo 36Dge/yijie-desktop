@@ -21,6 +21,7 @@ export default tseslint.config(
       "src/api/generated/market-host-native-validator.gen.js",
       "src/api/generated/experts-validator.gen.js",
       "src/api/generated/chat-turn-timing-validator.gen.js",
+      "src/api/generated/chat-turn-model-validator.gen.js",
       "src/api/generated/workflow-local-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-validator.gen.js",
       "src/api/generated/scheduled-task-ipc-v2-validator.gen.js",

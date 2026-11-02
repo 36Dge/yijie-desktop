@@ -122,9 +122,9 @@ describe("Desktop v2 Skill resources", () => {
       'YIJIE_DESKTOP_CONTRACTS_DIR="$workspace_root/yijie-contracts"',
     );
     expect(runner).toContain('YIJIE_DESKTOP_AGENT_HOST_DIR="$host_root"');
-    expect(runner).toContain(
-      'YIJIE_DESKTOP_SKILLS_DIR="$workspace_root/yijie-skills"',
-    );
+    const installer = await readFile(path.join(repositoryRoot, "scripts/sync-desktop-skill-resources.mjs"), "utf8");
+    expect(installer).toContain("YIJIE_DESKTOP_SKILLS_DIR");
+    expect(installer).toContain("../yijie-skills");
     expect(runner.indexOf("pnpm skills:sync:local")).toBeLessThan(
       runner.indexOf("go build -trimpath"),
     );

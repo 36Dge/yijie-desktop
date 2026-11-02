@@ -73,7 +73,7 @@ describe("FEAT-136 native Command display", () => {
   it.each(["completed", "failed", "declined"] as const)("preserves legal empty output for %s without calling it success", async status => {
     const wrapper = setup(view({status, outputText: ""}));
     await expand(wrapper);
-    expect(wrapper.text()).toContain("已收到的安全输出为空");
+    expect(wrapper.text()).toContain("命令已结束，没有输出内容。");
     expect(wrapper.text()).not.toContain("命令已完成，没有输出内容");
     expect(wrapper.find('[aria-label="复制代码"]').exists()).toBe(false);
   });

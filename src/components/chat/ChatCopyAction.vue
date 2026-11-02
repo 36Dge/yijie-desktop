@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { ChatClipboardAdapter } from "../../api/chat-clipboard-adapter";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatActionButton from "./ChatActionButton.vue";
 
 type CopyOutcome = "idle" | "pending" | "success" | "error";
 
@@ -9,6 +10,7 @@ const props = withDefaults(defineProps<{
   adapter: ChatClipboardAdapter;
   text: string;
   kind?: "text" | "code";
+  compact?: boolean;
 }>(), {
   kind: "text",
 });
@@ -16,6 +18,9 @@ const props = withDefaults(defineProps<{
 const outcome = ref<CopyOutcome>("idle");
 const announcement = ref("");
 let operationEpoch = 0;
+let resetTimer: ReturnType<typeof setTimeout> | undefined;
+function clearReset() { clearTimeout(resetTimer); resetTimer = undefined; }
+onBeforeUnmount(() => { operationEpoch++; clearReset(); });
 
 const actionLabel = computed(() => props.kind === "code" ? "复制代码" : "复制文本");
 const feedback = computed(() => {
@@ -47,6 +52,7 @@ watch(
   () => [props.text, props.adapter] as const,
   () => {
     operationEpoch += 1;
+    clearReset();
     outcome.value = "idle";
     announcement.value = "";
   },
@@ -55,6 +61,7 @@ watch(
 async function copy(): Promise<void> {
   if (unavailable.value) return;
   const epoch = ++operationEpoch;
+  clearReset();
   const text = props.text;
   outcome.value = "pending";
   announcement.value = "";
@@ -63,6 +70,7 @@ async function copy(): Promise<void> {
     if (epoch !== operationEpoch) return;
     outcome.value = "success";
     announcement.value = props.kind === "code" ? "代码已复制。" : "文本已复制。";
+    if (props.compact) resetTimer = setTimeout(() => { if (operationEpoch === epoch) {outcome.value = "idle"; announcement.value = "";} }, 2000);
   } catch {
     if (epoch !== operationEpoch) return;
     outcome.value = "error";
@@ -76,7 +84,10 @@ async function copy(): Promise<void> {
     class="chat-copy-action"
     :class="`chat-copy-action--${outcome}`"
   >
-    <button
+    <ChatActionButton v-if="compact" label="复制" :tooltip="feedback || '复制'"
+      :icon="outcome === 'success' ? 'checkmark' : icon" :error="outcome === 'error'"
+      :busy="outcome === 'pending'" :disabled="unavailable" preserve-selection @click="copy" />
+    <button v-else
       class="chat-copy-action__button"
       type="button"
       :aria-label="actionLabel"
@@ -90,7 +101,7 @@ async function copy(): Promise<void> {
       <YjIcon :name="icon" size="sm" :tone="iconTone" />
     </button>
     <span
-      v-if="feedback"
+      v-if="feedback && !compact"
       class="chat-copy-action__feedback"
       aria-hidden="true"
     >{{ feedback }}</span>

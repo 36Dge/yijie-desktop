@@ -18,7 +18,9 @@ mod selection_gate_tests;
 #[allow(dead_code)]
 #[cfg_attr(feature = "kimi-k31-pro-candidate", path = "selection_v2_generated.rs")]
 pub(crate) mod selection_generated;
+mod startup;
 mod store;
+pub(crate) use startup::StartupState;
 #[cfg(test)]
 mod tests;
 
@@ -332,6 +334,22 @@ fn apply_observation(
                 .installations
                 .iter()
                 .any(|item| item.effective_enabled);
+            if std::env::var("YIJIE_DEVELOPMENT_CLIENT").as_deref() == Ok("true") {
+                eprintln!(
+                    "Connector snapshot ready: installed={}, enabled={}, pending={}",
+                    snapshot.installations.len(),
+                    snapshot
+                        .installations
+                        .iter()
+                        .filter(|item| item.effective_enabled)
+                        .count(),
+                    snapshot
+                        .installations
+                        .iter()
+                        .filter(|item| item.active_operation.is_some())
+                        .count()
+                );
+            }
             encode(&snapshot)
         }
         Action::Selection(payload) if !payload.selection.is_empty() => {
@@ -359,6 +377,53 @@ fn apply_observation(
         other => apply(db, scope, other, capabilities, timestamp),
     }
 }
+async fn execute_action(
+    runtime: &ChatRuntime,
+    authorization: super::authorization::ChatAuthorizationManager,
+    context: Uuid,
+    scope: ChatScope,
+    action: Action,
+) -> Result<Value, Error> {
+    if let Some(data) = provider::handle(
+        runtime,
+        authorization.clone(),
+        context,
+        scope.clone(),
+        action.clone(),
+    )
+    .await?
+    {
+        return Ok(data);
+    }
+    let permission = action.permission();
+    runtime
+        .database()
+        .await
+        .map_err(|_| Error::TemporarilyUnavailable)?
+        .call(move |repo| {
+            Ok(authorization
+                .with_connector_context(
+                    context,
+                    &scope,
+                    permission,
+                    now().map_err(|_| super::error::ChatError::DatabaseUnavailable)?,
+                    |caps| {
+                        apply(
+                            &mut repo.connection,
+                            &scope,
+                            action,
+                            caps,
+                            now().unwrap_or(-1),
+                        )
+                    },
+                )
+                .map_err(auth_error)
+                .and_then(|value| value))
+        })
+        .await
+        .map_err(|_| Error::TemporarilyUnavailable)?
+}
+
 async fn command(raw: Value, runtime: &ChatRuntime, name: &str) -> Result<Value, wire::Error> {
     let known_id = raw
         .get("requestId")
@@ -382,44 +447,8 @@ async fn command(raw: Value, runtime: &ChatRuntime, name: &str) -> Result<Value,
         authorization
             .with_connector_context(context, &scope, permission, now()?, |_| ())
             .map_err(auth_error)?;
-        if let Some(data) = provider::handle(
-            runtime,
-            authorization.clone(),
-            context,
-            scope.clone(),
-            action.clone(),
-        )
-        .await?
-        {
-            return Ok(serde_json::json!({"schemaVersion":1,"requestId":request_id,"data":data}));
-        }
-        let worker = runtime
-            .database()
-            .await
-            .map_err(|_| Error::TemporarilyUnavailable)?;
-        let data = worker
-            .call(move |repo| {
-                Ok(authorization
-                    .with_connector_context(
-                        context,
-                        &scope,
-                        permission,
-                        now().map_err(|_| super::error::ChatError::DatabaseUnavailable)?,
-                        |caps| {
-                            apply(
-                                &mut repo.connection,
-                                &scope,
-                                action,
-                                caps,
-                                now().unwrap_or(-1),
-                            )
-                        },
-                    )
-                    .map_err(auth_error)
-                    .and_then(|value| value))
-            })
-            .await
-            .map_err(|_| Error::TemporarilyUnavailable)??;
+        startup::initialize(runtime, authorization.clone(), context, scope.clone()).await?;
+        let data = execute_action(runtime, authorization, context, scope, action).await?;
         Ok(serde_json::json!({"schemaVersion":1,"requestId":request_id,"data":data}))
     }
     .await;

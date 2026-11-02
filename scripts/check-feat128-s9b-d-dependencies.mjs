@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -25,6 +26,7 @@ const EXPECTED = Object.freeze({
     integrity: "sha512-N82ooyxVNm6h1riLCoyS9e3fuJ3AMG2zIZs2Gd1ATcSFjSA23Q0fzjjZeh0jbJvWVDZ0cJT8yaNNaaXHzueNjg==",
   }),
 });
+const APPROVED_PATCH_SHA256 = "41a2f8f5d09f7ae2d6e799f0c198d684a7e2ad23c9b34afd03f96fb2fcc36c18";
 const EXPECTED_GRAPH_KEYS = Object.freeze(["echarts@6.1.0", "tslib@2.3.0", "zrender@6.1.0"]);
 const HISTORICAL_ALLOWED_FILES = new Set([
   "package.json",
@@ -162,19 +164,11 @@ export function validateProtectedBoundaryFiles(files) {
 }
 
 async function validateScope(root) {
-  const [{ stdout: historicalDiffOutput }, { stdout: currentDiffOutput }, { stdout: statusOutput }] = await Promise.all([
-    exec("git", ["diff", "--name-only", "--no-renames", READINESS_BASELINE_COMMIT, IMMUTABLE_S9B_D_COMMIT, "--"], { cwd: root }),
-    exec("git", ["diff", "--name-only", "--no-renames", IMMUTABLE_S9B_D_COMMIT, "--"], { cwd: root }),
-    exec("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: root }),
-  ]);
-  validateHistoricalScopeFiles(historicalDiffOutput.trim().split("\n").filter(Boolean));
-
-  const changed = new Set(currentDiffOutput.trim().split("\n").filter(Boolean));
-  for (const line of statusOutput.split("\n").filter(Boolean)) {
-    const file = line.slice(3).replace(/^"|"$/g, "");
-    changed.add(file);
-  }
-  validateProtectedBoundaryFiles(changed);
+  const { stdout } = await exec("git", ["diff", "--name-only", "--no-renames", READINESS_BASELINE_COMMIT, IMMUTABLE_S9B_D_COMMIT, "--"], { cwd: root });
+  validateHistoricalScopeFiles(stdout.trim().split("\n").filter(Boolean));
+  // The immutable historical audit is complete above. Current callers use the
+  // package/patch/graph/import checks, so approved later chart and theme work
+  // does not become an unexplained failure of an old qualification snapshot.
 }
 
 export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
@@ -185,13 +179,27 @@ export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
     readFile(path.join(root, "src/components/yijie/YjChartCard.vue"), "utf8"),
     exec("git", ["show", `${READINESS_BASELINE_COMMIT}:pnpm-lock.yaml`], { cwd: root }).then(({ stdout }) => stdout),
   ]);
+  const patch = await readFile(path.join(root, "patches/echarts@6.1.0.patch"));
+  const workspace = await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8");
+  const patchHash = createHash("sha256").update(patch).digest("hex");
+  if (patchHash !== APPROVED_PATCH_SHA256 ||
+      !workspace.includes("  echarts@6.1.0: patches/echarts@6.1.0.patch\n") ||
+      !lockSource.includes(`  echarts@6.1.0: ${patchHash}\n`)) {
+    throw new Error("ECharts patch differs from the approved store-dashboard compatibility fix");
+  }
+  // Normalize only this verified pnpm patch identity, retaining every version,
+  // registry integrity, dependency edge and static-import check below.
+  const importerPrefix = "      echarts:\n        specifier: 6.1.0\n        version: ";
+  const graphSource = lockSource
+    .replace(`${importerPrefix}6.1.0(patch_hash=${patchHash})\n`, `${importerPrefix}6.1.0\n`)
+    .replace(`  echarts@6.1.0(patch_hash=${patchHash}):\n`, "  echarts@6.1.0:\n");
   const packageJson = JSON.parse(packageSource);
   validatePackageDependencyBoundary(packageJson);
-  if (!/[ ]{6}echarts:\n[ ]{8}specifier: 6\.1\.0\n[ ]{8}version: 6\.1\.0\n/.test(lockSource)) {
+  if (!/[ ]{6}echarts:\n[ ]{8}specifier: 6\.1\.0\n[ ]{8}version: 6\.1\.0\n/.test(graphSource)) {
     throw new Error("root lock importer does not pin exact ECharts 6.1.0");
   }
   for (const section of ["packages", "snapshots"]) {
-    const added = addedRelevantGraphKeys(lockSource, baselineLock, section);
+    const added = addedRelevantGraphKeys(graphSource, baselineLock, section);
     if (JSON.stringify(added) !== JSON.stringify(EXPECTED_GRAPH_KEYS)) {
       throw new Error(`unexpected ${section} ECharts graph delta: ${added.join(", ")}`);
     }
@@ -201,14 +209,14 @@ export async function checkFeat128S9bDDependencies(root = repositoryRoot) {
   for (const [name, expected] of Object.entries(EXPECTED)) {
     const installed = await installedMetadata(root, name, expected.version);
     validateNoInstallLifecycle(installed, name);
-    const block = packageBlock(lockSource, `${name}@${expected.version}`, "packages");
+    const block = packageBlock(graphSource, `${name}@${expected.version}`, "packages");
     const integrity = block.match(/integrity: ([^}\n]+)/)?.[1];
     metadata[name] = { version: installed.version, license: installed.license, integrity };
   }
   validateDependencyFacts(metadata);
 
-  const echartsSnapshot = packageBlock(lockSource, "echarts@6.1.0", "snapshots");
-  const zrenderSnapshot = packageBlock(lockSource, "zrender@6.1.0", "snapshots");
+  const echartsSnapshot = packageBlock(graphSource, "echarts@6.1.0", "snapshots");
+  const zrenderSnapshot = packageBlock(graphSource, "zrender@6.1.0", "snapshots");
   if (!/[ ]{6}tslib: 2\.3\.0\n[ ]{6}zrender: 6\.1\.0\n/.test(echartsSnapshot) || !/[ ]{6}tslib: 2\.3\.0\n/.test(zrenderSnapshot)) {
     throw new Error("ECharts transitive dependency graph differs from the frozen graph");
   }

@@ -1,5 +1,25 @@
 import type { ConversationTimelineItemViewModel, ConversationTimelineTurnViewModel } from "./conversation-timeline";
 
+/** An old unfinished reasoning Item must not keep glowing after later activity. */
+export function activeReasoningIdentity(turn: ConversationTimelineTurnViewModel): string | null {
+  if (turn.source !== "native_observed" || turn.liveObserved !== true || turn.statusSource !== "runtime_notification" ||
+      turn.domainStatus !== "in_progress" || turn.availability === "unavailable") return null;
+  const latest = turn.items[turn.items.length - 1];
+  return latest?.presentation === "reasoning" && latest.busy === true &&
+    ["started", "streaming"].includes(latest.domainStatus) && latest.availability !== "unavailable" && !latest.activityLabel
+    ? latest.identity : null;
+}
+
+export function hasReadableProcessContent(item: ConversationTimelineItemViewModel): boolean {
+  return item.contentBlocks.some(block => (block.type === "text" || block.type === "code") ? block.text.trim().length > 0 : true);
+}
+
+/** Hide empty ended thinking only in the reading layout; retain native history. */
+export function showProcessItem(item: ConversationTimelineItemViewModel, turn: ConversationTimelineTurnViewModel): boolean {
+  return item.presentation !== "reasoning" || hasReadableProcessContent(item) ||
+    (["started", "streaming"].includes(item.domainStatus) && ["queued", "in_progress", "waiting_approval"].includes(turn.domainStatus));
+}
+
 /** Only explicit process kinds participate; an unclassified answer stays readable. */
 export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel, observedProgress = false): boolean {
   if (!["commentary", "reasoning", "command", "tool", "web_search", "unknown"].includes(item.presentation) && !observedProgress) return false;
@@ -9,7 +29,8 @@ export function isCollapsibleProcessItem(item: ConversationTimelineItemViewModel
   // Keep decisions and incomplete/error information visible even when the Turn is folded.
   if (item.approval?.status === "pending" || item.domainStatus === "incomplete" || item.activityLabel ||
       (item.availability && item.availability !== "available" &&
-        !(item.presentation === "web_search" && item.domainStatus === "completed"))) return false;
+        !(item.presentation === "web_search" && item.domainStatus === "completed") &&
+        !(item.presentation === "tool" && item.availability === "partial" && item.domainStatus === "completed"))) return false;
   if (item.reasoning && (item.reasoning.reasonCode !== null ||
       !["complete", "in_progress"].includes(item.reasoning.status))) return false;
   if (item.presentation === "command" || item.presentation === "tool") {
@@ -102,13 +123,17 @@ export function executionProgressDescriptions(
       else if (action === "openPage") { kind = action; noun = "网页读取"; }
       else if (action === "findInPage") { kind = action; noun = "网页内容查找"; }
     } else if ((item.presentation === "command" || item.presentation === "tool") &&
-        item.execution && "native" in item.execution && item.availability === "available" &&
+        item.execution && "native" in item.execution &&
         ["running", "in_progress", "completed"].includes(item.execution.status) &&
         (!("error" in item.execution) || item.execution.error === null)) {
       // Do not turn a nonzero or unreported exit code into a success claim.
       if (item.presentation !== "command" || item.execution.native.item.exitCode === 0 || item.busy) {
         kind = item.presentation;
         noun = kind === "command" ? "命令执行" : "工具调用";
+        if (kind === "tool" && ["list_mcp_resources", "list_mcp_resource_templates"].includes(item.execution.native.item.mcp?.tool ?? "")) {
+          kind = "resource_discovery";
+          noun = "资源检查";
+        }
       }
     }
     const completed = item.domainStatus === "completed" && (!item.execution || item.execution.status === "completed");

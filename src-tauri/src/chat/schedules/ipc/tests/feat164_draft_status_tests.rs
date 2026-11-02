@@ -3,6 +3,12 @@ use super::*;
 // Ordinary repository transitions, with no transport or process fault injection.
 #[tokio::test]
 async fn feat164_stopped_attempted_draft_has_read_only_uncertain_projection() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_stopped_attempted_draft_has_read_only_uncertain_projection"
+    )) {
+        return;
+    }
     let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
     f.worker
         .call(|r| {
@@ -98,6 +104,12 @@ async fn feat164_stopped_attempted_draft_has_read_only_uncertain_projection() {
 
 #[tokio::test]
 async fn feat164_never_attempted_failed_draft_does_not_invent_uncertainty() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_never_attempted_failed_draft_does_not_invent_uncertainty"
+    )) {
+        return;
+    }
     let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
     f.worker
         .call(|r| {

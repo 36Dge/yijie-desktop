@@ -1,0 +1,166 @@
+{
+  "completed_at": "2026-11-02T15:47:49.981475+08:00",
+  "contract_impact": "additive",
+  "authority": "src-tauri/schemas/chat-turn-model-v1.schema.json",
+  "added_command": "chat_read_turn_model_v1",
+  "public_contracts_pin": "N/A: same Desktop private read-only IPC; Host, Runtime and persistence schema unchanged",
+  "metadata_source": "chat_turns.operation_id -> chat_operation_models.profile_id; NativeTurnTiming.completed_at",
+  "head": "55f88341aa59522f214c0015ed7928b8d1f5021d",
+  "source_sha256": {
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "b07b760d04b7b792a214c8a8771281925d79fbd42b51078816179caba6acc395",
+    "docs/verification/2026-11-02-answer-actions.md": "ea59cf9bc4cee1b8b07033de904e610546f1e6beb83b722211535a4980cc6da9",
+    "eslint.config.js": "90f7922fa8b51e7c5e0ed924fd05d9427a2c7c35ccca32ae88d6dde06e57821f",
+    "package.json": "c06c60ebbaf46256c2c794648e023dc725371819a44493560bbbb9a98da48873",
+    "scripts/generate-chat-turn-model.mjs": "acf2118aca16a989d5839d1e0aa0d65b6b836f7fa2457ab3ec3184ca895ecdba",
+    "src-tauri/schemas/chat-turn-model-v1.schema.json": "d8944c12c8e6114c161faa3c6607d0ed9971945ebdcf46e4984e86b4d55df6dc",
+    "src-tauri/src/chat/application.rs": "0d7b1607eed8574a5e9ac9d8e5e65650d3725e69b0558c5504b037c53ce76aec",
+    "src-tauri/src/chat/ipc.rs": "29a66e02ab167f07553479c281c3217fde88af447261d389e4689d9ce99ad31d",
+    "src-tauri/src/chat/mod.rs": "6357c560b6694dcb150f82abcdd9596d0d7ab3d7923a5c39a161a98a08d83a19",
+    "src-tauri/src/chat/models.rs": "cfb786aafcb75d0e59a9f40f22344a9ea2d803245576c1615c92b345653c16e1",
+    "src-tauri/src/chat/turn_model_generated.rs": "0b4d798f70304b3f25c933adfbdf4b8ee28154179b264ae531727a4b58337820",
+    "src-tauri/src/lib.rs": "5f529477e9aa01c34e89cb3b203c344e65c2fd1e6fb5b86156086e90bc18fd78",
+    "src/api/chat-turn-model-client.test.ts": "e1293bbdd5a7548934790ae904a30eebd4cb872f7e7cedfc6abd096acf5fe1c9",
+    "src/api/chat-turn-model-client.ts": "c3d53ee08d1783bbba4534c3463917da8c60b79af9af9f52c09cf202095f1d69",
+    "src/api/generated/chat-turn-model-validator.gen.d.ts": "b652bb71bc798d0737819ba3d0ade335f74c3835ba5bb99cca1ccd11a250f2e6",
+    "src/api/generated/chat-turn-model-validator.gen.js": "63492e27127ad2f0f015eed6ada9d393fd1842cc2099e3591227fce0ed3aee9f",
+    "src/components/chat/ChatActionButton.vue": "4e199eb840c0a549a989e6bb9a4f79626e25051e76bc43bcacd3a34ece535500",
+    "src/components/chat/ChatAnswerActions.test.ts": "8cb468c89a8b25eab8d41e7b33e6042666b0819167849b953dade5bd8458569b",
+    "src/components/chat/ChatAnswerActions.vue": "5975c11ab0a71fec553dcfbe5944fac9e693d6aac46a5e47494b4549d6dbb3fb",
+    "src/components/chat/ChatCopyAction.vue": "918bb309349bc6476fff122e66399716b54a4be3302ee49d10c92bba33c1cf62",
+    "src/composables/useChatTurnModels.test.ts": "9af5288da518bba4c09025909fe694f042a8ffedb28a266477a0c7edbcd77181",
+    "src/composables/useChatTurnModels.ts": "cad73d515bade9029a76e8515e6e466f4a3f94ad5613c9d24ceb533f31d07700",
+    "src/composables/useChatTurnTiming.test.ts": "261b72e1c10e0d83a598a655f00e6995c7589c041490d7e7063310ae693aff56",
+    "src/composables/useChatTurnTiming.ts": "01f5cbf9b287f28a217880debc615c7b936e670ec349a1f25c2e847dab317042",
+    "src/domain/chat-answer-actions.test.ts": "f89246e3ba4635d2f6ff627a198c422d2276194a8a5ea6d78b34ce856a32d22f",
+    "src/domain/chat-answer-actions.ts": "8e576d2f7b4a8104915bbf01e9f913369f812e7234c22d6bcc20467e7941a68c",
+    "src/domain/chat-turn-model.generated.ts": "1f36b9fe03b4dd61edd6e20335ddc2f84fac7bbbb8c6cf7c7c10d6e287527caa",
+    "src/icons/registry.test.ts": "83035fccf5f471b4c683fa83bef376c4f69467fa3e1d57c801bc87eaaf86ae93",
+    "src/icons/registry.ts": "dead617d303b7d528c3a4072c884ce4c549e5914f55c95c529394ab121195c07",
+    "src/pages/chat/ChatPage.test.ts": "964e3f33d6e024dea7be7095af1173c42330a2e05373dd15727e6b29edaeb906",
+    "src/pages/chat/ChatPage.vue": "92399c07dffce6075f6d4247e00295e9ca297db15fec2b67d901b5edb67e0c02",
+    "src/styles/variables.css": "857ee6619877cbe2f688318a2fa9d2eab12ffc5c2dfd98ecb04074542a5b411b",
+    "tests/visual/chat-answer-actions/index.html": "7f4c3c8c2450953ba74260cb5b9670eee3baa17a93b20ee573d231c4988716ad",
+    "tests/visual/chat-answer-actions/main.ts": "6212a621e7ff6c6f2a076c72059d7291a6a3f3f9fcff70fd2cde625891f9cdf6"
+  },
+  "feedback": {
+    "state": "component memory only",
+    "model_feedback": false,
+    "network_requests": false,
+    "persistence": false,
+    "telemetry": false,
+    "reason_count": 6,
+    "other_reason": false,
+    "mutually_exclusive": true,
+    "reset_on_unmount_or_identity_change": true
+  },
+  "workbuddy": {
+    "latest_task_inspected": true,
+    "copy_success_observed": true,
+    "like_toggle_observed": true,
+    "dislike_reason_selection_observed": true,
+    "reason_feedback_submitted": false,
+    "test_like_cleared": true,
+    "popup_cancelled": true
+  },
+  "real_client": {
+    "fixed_entry": "/Users/jack/Applications/易界.app",
+    "previous_pid": 66859,
+    "current_pid": 26156,
+    "normal_quit_observed": true,
+    "old_cli_exit_code": 0,
+    "old_cli_signal": null,
+    "build": "canonical incremental development build",
+    "new_model_questions": 0,
+    "history_models": [
+      "Kimi K3.1 Pro",
+      "Kimi K3"
+    ],
+    "last_hangzhou_completion_time": "11:21",
+    "real_copy_success": true,
+    "like_toggle": true,
+    "dislike_multiselect_confirm_and_cancel": true,
+    "tooltip_labels": [
+      "复制",
+      "点赞",
+      "点踩"
+    ],
+    "minimum_window": [
+      1180,
+      760
+    ],
+    "restored_window": [
+      1268,
+      845
+    ],
+    "test_votes_cleared": true
+  },
+  "browser": {
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "viewport": [
+      1180,
+      760
+    ],
+    "no_horizontal_overflow": true,
+    "feedback_dialog_inside_viewport": true,
+    "independent_answer_votes": true,
+    "escape_restores_trigger_focus": true,
+    "time_hidden_outside_group": true,
+    "console_warn_or_error_count": 0,
+    "temporary_tab_closed": true,
+    "viewport_reset": true,
+    "clipboard": "preview adapter only; native copy separately verified"
+  },
+  "checks": {
+    "make_lint": "PASS",
+    "make_test": "PASS",
+    "frontend_final": {
+      "files_passed": 255,
+      "tests_passed": 2041,
+      "tests_skipped": 16,
+      "node_tests_passed": 26
+    },
+    "native_ordinary": {
+      "passed": 623,
+      "failed": 0,
+      "ignored": 14,
+      "safety_filtered": 27,
+      "duration_seconds": 484.1
+    },
+    "native_kimi": {
+      "passed": 658,
+      "failed": 0,
+      "ignored": 16,
+      "safety_filtered": 27,
+      "duration_seconds": 564.54
+    },
+    "make_build": "PASS (existing large-chunk warning)",
+    "final_frontend_lint_test_build": "PASS",
+    "docs_build": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "safety": {
+    "forced_kill": false,
+    "binary_substitution": false,
+    "permission_sabotage": false,
+    "attack_fixtures": false,
+    "exclusions": "scripts/test-safety-exclusions.json; skipped/ignored/filtered are NOT RUN, not PASS"
+  },
+  "artifacts": {
+    "native_footer": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/回答操作组-实机.png",
+    "native_full_window": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/native-toolbar-final.png",
+    "native_minimum_feedback": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/native-minimum-feedback.png",
+    "native_copy_success": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/native-copy-final.png",
+    "native_selected_reasons": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/native-feedback-selected.png",
+    "dark_theme": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/feedback-dark.png",
+    "task_only_patch": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/task-only.patch",
+    "lint_log": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/make-lint.log",
+    "test_log": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/make-test-final.log",
+    "final_frontend_test_log": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/frontend-tests-final.log",
+    "build_log": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/build-final.log",
+    "docs_build_log": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/answer-actions-20261102/docs-build-final.log"
+  },
+  "patch_notes": "Existing source preimages captured under before/. The timing-test preimage is reconstructed by removing only the new shared-read case and its import; earlier timing changes preserved. New files are explicit additions. No git commit or push."
+}

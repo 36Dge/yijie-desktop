@@ -1,540 +1,67 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type {
-  ConversationTimelineArtifactReferenceContentBlock,
-  ConversationTimelineAttachmentReferenceContentBlock,
-  ConversationTimelineContentBlock,
-} from "../../domain/conversation-timeline";
+import { computed, inject, provide, ref } from "vue";
+import type { ConversationTimelineArtifactReferenceContentBlock, ConversationTimelineAttachmentReferenceContentBlock, ConversationTimelineContentBlock } from "../../domain/conversation-timeline";
+import { createChatMarkdownParser, type ChatContentNode } from "../../domain/chat-markdown";
+import { measureChatRender } from "../../domain/chat-render-performance";
+import { chatTextRevealKey, useChatTextReveal } from "../../composables/useChatTextReveal";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatStreamText from "./ChatStreamText.vue";
-
-type SafeInlineNode = Readonly<{
-  key: string;
-  kind: "text" | "strong" | "emphasis" | "strikethrough" | "inline_code" | "inert_link";
-  text: string;
-  destination: string | null;
-}>;
-
-type SafeInlineGroup = Readonly<{
-  key: string;
-  inlines: readonly SafeInlineNode[];
-}>;
-
-type SafeContentNode =
-  | Readonly<{
-      key: string;
-      kind: "paragraph";
-      inlines: readonly SafeInlineNode[];
-    }>
-  | Readonly<{
-      key: string;
-      kind: "heading";
-      level: number;
-      inlines: readonly SafeInlineNode[];
-    }>
-  | Readonly<{ key: string; kind: "rule" }>
-  | Readonly<{ key: string; kind: "quote"; text: string }>
-  | Readonly<{
-      key: string;
-      kind: "list";
-      ordered: boolean;
-      start: number;
-      items: readonly Readonly<{ key: string; text: string }>[];
-    }>
-  | Readonly<{
-      key: string;
-      kind: "code";
-      language: string | null;
-      text: string;
-    }>
-  | Readonly<{
-      key: string;
-      kind: "table";
-      headers: readonly SafeInlineGroup[];
-      rows: readonly (readonly SafeInlineGroup[])[];
-    }>
-  | Readonly<{
-      key: string;
-      kind: "artifact_reference";
-      block: ConversationTimelineArtifactReferenceContentBlock;
-    }>
-  | Readonly<{
-      key: string;
-      kind: "attachment_reference";
-      block: ConversationTimelineAttachmentReferenceContentBlock;
-    }>
-  | Readonly<{
-      key: string;
-      kind: "unknown";
-      code: "unsupported_content";
-    }>;
+import ChatTextLink from "./ChatTextLink.vue";
+import { messageLinkTargetKey, type MessageLinkTarget } from "../../composables/useChatMessageLink";
 
 const props = withDefaults(defineProps<{
-  blocks: readonly ConversationTimelineContentBlock[];
+  blocks?: readonly ConversationTimelineContentBlock[];
   mode?: "rich" | "plain";
   streaming?: boolean;
-}>(), {
-  mode: "rich",
-  streaming: false,
-});
+  animate?: boolean;
+  linkTarget?: MessageLinkTarget;
+  /** Internal recursion uses the already parsed tree and the parent's clock. */
+  parsedNodes?: readonly ChatContentNode[];
+}>(), { blocks: () => [], mode: "rich", streaming: false, animate: true });
 
 defineSlots<{
   "text-prefix"(): unknown;
-  "artifact-reference"(props: {
-    block: ConversationTimelineArtifactReferenceContentBlock;
-  }): unknown;
-  "attachment-reference"(props: {
-    block: ConversationTimelineAttachmentReferenceContentBlock;
-  }): unknown;
-  "code-actions"(props: {
-    codeIdentity: string;
-    text: string;
-    language: string | null;
-  }): unknown;
+  "artifact-reference"(props: { block: ConversationTimelineArtifactReferenceContentBlock }): unknown;
+  "attachment-reference"(props: { block: ConversationTimelineAttachmentReferenceContentBlock }): unknown;
+  "code-actions"(props: { codeIdentity: string; text: string; language: string | null }): unknown;
 }>();
-
-function stableKey(...parts: readonly string[]): string {
-  return parts.map((part) => `${part.length}:${part}`).join("|");
-}
-
-function inlineNodes(source: string, keyBase: string, plain: boolean): readonly SafeInlineNode[] {
-  if (source.length === 0) return Object.freeze([]);
-  if (plain) {
-    return Object.freeze([Object.freeze({
-      key: stableKey(keyBase, "text", "0"),
-      kind: "text" as const,
-      text: source,
-      destination: null,
-    })]);
-  }
-
-  const nodes: SafeInlineNode[] = [];
-  let cursor = 0;
-  let plainStart = 0;
-
-  function append(
-    kind: SafeInlineNode["kind"],
-    text: string,
-    destination: string | null = null,
-  ): void {
-    if (text.length === 0) return;
-    nodes.push(Object.freeze({
-      key: stableKey(keyBase, kind, String(nodes.length)),
-      kind,
-      text,
-      destination,
-    }));
-  }
-
-  function flushPlain(end: number): void {
-    if (end > plainStart) append("text", source.slice(plainStart, end));
-  }
-
-  while (cursor < source.length) {
-    if (source[cursor] === "\\" && /[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/.test(source[cursor + 1] ?? "")) {
-      flushPlain(cursor);
-      append("text", source[cursor + 1]!);
-      cursor += 2;
-      plainStart = cursor;
-      continue;
-    }
-
-    if (source[cursor] === "`") {
-      const closing = source.indexOf("`", cursor + 1);
-      if (closing > cursor + 1) {
-        flushPlain(cursor);
-        append("inline_code", source.slice(cursor + 1, closing));
-        cursor = closing + 1;
-        plainStart = cursor;
-        continue;
-      }
-      if (props.streaming && closing === -1) {
-        flushPlain(cursor);
-        append("inline_code", source.slice(cursor + 1));
-        plainStart = cursor = source.length;
-        continue;
-      }
-    }
-
-    const delimiter = source.startsWith("**", cursor) ? "**"
-      : source.startsWith("__", cursor) ? "__"
-      : source.startsWith("~~", cursor) ? "~~" : null;
-    if (delimiter) {
-      const closing = source.indexOf(delimiter, cursor + 2);
-      if (closing > cursor + 2) {
-        flushPlain(cursor);
-        append(delimiter === "~~" ? "strikethrough" : "strong", source.slice(cursor + 2, closing));
-        cursor = closing + 2;
-        plainStart = cursor;
-        continue;
-      }
-      // A live suffix may not have received its closing marker yet. Keep the
-      // same formatted node as it arrives; settled/malformed text keeps the old fallback.
-      if (props.streaming && closing === -1) {
-        flushPlain(cursor);
-        const suffix = source.slice(cursor + 2);
-        append(delimiter === "~~" ? "strikethrough" : "strong",
-          suffix.endsWith(delimiter[0]!) ? suffix.slice(0, -1) : suffix);
-        plainStart = cursor = source.length;
-        continue;
-      }
-    }
-
-    if ((source[cursor] === "*" && !source.startsWith("**", cursor)) ||
-        (source[cursor] === "_" && !source.startsWith("__", cursor) && !/[\p{L}\p{N}]/u.test(source[cursor - 1] ?? ""))) {
-      const closing = source.indexOf(source[cursor]!, cursor + 1);
-      if (closing > cursor + 1) {
-        flushPlain(cursor);
-        append("emphasis", source.slice(cursor + 1, closing));
-        cursor = closing + 1;
-        plainStart = cursor;
-        continue;
-      }
-    }
-
-    if (source[cursor] === "[" && source[cursor - 1] !== "!") {
-      const separator = source.indexOf("](", cursor + 1);
-      if (separator === -1) break;
-      const closing = separator === -1 ? -1 : source.indexOf(")", separator + 2);
-      if (closing === -1) break;
-      if (separator > cursor + 1 && closing > separator + 2) {
-        flushPlain(cursor);
-        append(
-          "inert_link",
-          source.slice(cursor + 1, separator),
-          source.slice(separator + 2, closing),
-        );
-        cursor = closing + 1;
-        plainStart = cursor;
-        continue;
-      }
-    }
-
-    cursor += 1;
-  }
-
-  flushPlain(source.length);
-  return Object.freeze(nodes);
-}
-
-function safeLanguage(value: string | null): string | null {
-  const language = value?.trim() ?? "";
-  return language.length > 0 && language.length <= 32 && /^[A-Za-z0-9_+-]+$/.test(language)
-    ? language
-    : null;
-}
-
-function tableCells(line: string): readonly string[] | null {
-  const trimmed = line.trim();
-  if (!trimmed.includes("|")) return null;
-  const unwrapped = trimmed
-    .replace(/^\|/, "")
-    .replace(/\|$/, "");
-  const cells = unwrapped.split("|").map((cell) => cell.trim());
-  return cells.length >= 2 ? Object.freeze(cells) : null;
-}
-
-function isTableDelimiter(cells: readonly string[] | null): cells is readonly string[] {
-  return cells !== null && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-}
-
-function heading(line: string): { level: number; text: string } | null {
-  const match = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$/);
-  return match ? { level: match[1]!.length, text: (match[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "") } : null;
-}
-
-function isRule(line: string): boolean {
-  return /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line);
-}
-
-function listMarker(line: string): { indent: number; width: number; ordered: boolean; start: number; text: string } | null {
-  const match = line.match(/^( {0,3})([-+*]|\d{1,9}[.)])([ \t]+)(.*)$/);
-  if (!match) return null;
-  const ordered = /^\d/.test(match[2]!);
-  return {
-    indent: match[1]!.length,
-    width: match[1]!.length + match[2]!.length + match[3]!.length,
-    ordered,
-    start: ordered ? parseInt(match[2]!, 10) : 1,
-    text: match[4]!,
-  };
-}
-
-function fenceLanguage(line: string): string | null | undefined {
-  const match = line.match(/^ {0,3}```([^\s`]*)\s*$/);
-  return match === null ? undefined : safeLanguage(match[1] ?? null);
-}
-
-function nextClosingFenceIndexes(lines: readonly string[]): readonly number[] {
-  const indexes = new Array<number>(lines.length).fill(-1);
-  let nextClosing = -1;
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    indexes[index] = nextClosing;
-    if (/^ {0,3}```\s*$/.test(lines[index] ?? "")) nextClosing = index;
-  }
-  return Object.freeze(indexes);
-}
-
-function startsBlock(
-  lines: readonly string[],
-  closingFenceIndexes: readonly number[],
-  index: number,
-): boolean {
-  const line = lines[index] ?? "";
-  if (line.trim().length === 0) return true;
-  if (fenceLanguage(line) !== undefined && (closingFenceIndexes[index] !== -1 || props.streaming)) return true;
-  if (heading(line) || isRule(line) || /^ {0,3}>/.test(line) || listMarker(line)) return true;
-  const header = tableCells(line);
-  return header !== null && isTableDelimiter(tableCells(lines[index + 1] ?? ""));
-}
-
-function inlineGroup(text: string, key: string, plain: boolean): SafeInlineGroup {
-  return Object.freeze({ key, inlines: inlineNodes(text, key, plain) });
-}
-
-function markdownNodes(
-  text: string,
-  keyBase: string,
-  plain: boolean,
-): readonly SafeContentNode[] {
-  if (plain) {
-    return text.length === 0
-      ? Object.freeze([])
-      : Object.freeze([Object.freeze({
-          key: stableKey(keyBase, "paragraph", "0"),
-          kind: "paragraph" as const,
-          inlines: inlineNodes(text, stableKey(keyBase, "paragraph", "0"), true),
-        })]);
-  }
-
-  const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  const closingFenceIndexes = nextClosingFenceIndexes(lines);
-  const nodes: SafeContentNode[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-    if (line.trim().length === 0) {
-      index += 1;
-      continue;
-    }
-
-    const language = fenceLanguage(line);
-    const closingFence = language === undefined ? -1 :
-      (closingFenceIndexes[index] === -1 && props.streaming ? lines.length : (closingFenceIndexes[index] ?? -1));
-    if (language !== undefined && closingFence !== -1) {
-      const key = stableKey(keyBase, "code", String(nodes.length));
-      nodes.push(Object.freeze({
-        key,
-        kind: "code" as const,
-        language,
-        text: lines.slice(index + 1, closingFence).join("\n"),
-      }));
-      index = closingFence + 1;
-      continue;
-    }
-
-    const title = heading(line);
-    const underline = lines[index + 1]?.match(/^ {0,3}(=+|-+)[ \t]*$/);
-    if (title || (underline && !listMarker(line) && !/^ {0,3}>/.test(line))) {
-      const key = stableKey(keyBase, "heading", String(nodes.length));
-      nodes.push(Object.freeze({
-        key,
-        kind: "heading" as const,
-        level: title?.level ?? (underline![1]![0] === "=" ? 1 : 2),
-        inlines: inlineNodes(title?.text ?? line.trim(), key, false),
-      }));
-      index += title ? 1 : 2;
-      continue;
-    }
-
-    if (isRule(line)) {
-      nodes.push(Object.freeze({ key: stableKey(keyBase, "rule", String(nodes.length)), kind: "rule" as const }));
-      index += 1;
-      continue;
-    }
-
-    if (/^ {0,3}>/.test(line)) {
-      const quoted: string[] = [];
-      while (index < lines.length && /^ {0,3}>/.test(lines[index]!)) {
-        quoted.push(lines[index]!.replace(/^ {0,3}>[ \t]?/, ""));
-        index += 1;
-      }
-      nodes.push(Object.freeze({
-        key: stableKey(keyBase, "quote", String(nodes.length)),
-        kind: "quote" as const,
-        text: quoted.join("\n"),
-      }));
-      continue;
-    }
-
-    const headerCells = tableCells(line);
-    const delimiterCells = tableCells(lines[index + 1] ?? "");
-    if (
-      headerCells !== null &&
-      isTableDelimiter(delimiterCells) &&
-      headerCells.length === delimiterCells.length
-    ) {
-      const key = stableKey(keyBase, "table", String(nodes.length));
-      const headers = Object.freeze(headerCells.map((cell, cellIndex) =>
-        inlineGroup(cell, stableKey(key, "header", String(cellIndex)), false)));
-      const rows: (readonly SafeInlineGroup[])[] = [];
-      let rowIndex = index + 2;
-      while (rowIndex < lines.length) {
-        const cells = tableCells(lines[rowIndex] ?? "");
-        if (cells === null || cells.length !== headers.length) break;
-        rows.push(Object.freeze(cells.map((cell, cellIndex) =>
-          inlineGroup(
-            cell,
-            stableKey(key, "row", String(rows.length), String(cellIndex)),
-            false,
-          ))));
-        rowIndex += 1;
-      }
-      nodes.push(Object.freeze({
-        key,
-        kind: "table" as const,
-        headers,
-        rows: Object.freeze(rows),
-      }));
-      index = rowIndex;
-      continue;
-    }
-
-    const firstMarker = listMarker(line);
-    if (firstMarker) {
-      const key = stableKey(keyBase, "list", String(nodes.length));
-      const items: { key: string; text: string }[] = [];
-      while (index < lines.length) {
-        const marker = listMarker(lines[index]!);
-        if (!marker || marker.ordered !== firstMarker.ordered || marker.indent !== firstMarker.indent || isRule(lines[index]!)) break;
-        const body = [marker.text];
-        index += 1;
-        while (index < lines.length) {
-          const nextLine = lines[index]!;
-          if (nextLine.trim().length === 0) {
-            let next = index + 1;
-            while (next < lines.length && lines[next]!.trim().length === 0) next += 1;
-            const following = lines[next] ?? "";
-            if (following.startsWith(" ".repeat(marker.width))) {
-              body.push("");
-              index = next;
-              continue;
-            }
-            const nextMarker = listMarker(following);
-            if (nextMarker?.indent === firstMarker.indent && nextMarker.ordered === firstMarker.ordered) index = next;
-            break;
-          }
-          if (nextLine.startsWith(" ".repeat(marker.width))) {
-            body.push(nextLine.slice(marker.width));
-          } else if (!startsBlock(lines, closingFenceIndexes, index)) {
-            body.push(nextLine);
-          } else break;
-          index += 1;
-        }
-        items.push(Object.freeze({ key: stableKey(key, "item", String(items.length)), text: body.join("\n") }));
-      }
-      nodes.push(Object.freeze({
-        key,
-        kind: "list" as const,
-        ordered: firstMarker.ordered,
-        start: firstMarker.start,
-        items: Object.freeze(items),
-      }));
-      continue;
-    }
-
-    const paragraphLines: string[] = [line];
-    index += 1;
-    while (index < lines.length && !startsBlock(lines, closingFenceIndexes, index)) {
-      paragraphLines.push(lines[index] ?? "");
-      index += 1;
-    }
-    const key = stableKey(keyBase, "paragraph", String(nodes.length));
-    const literalFallback = paragraphLines.some((paragraphLine) =>
-      fenceLanguage(paragraphLine) !== undefined);
-    const paragraphText = literalFallback ? paragraphLines.join("\n") : paragraphLines
-      .map((paragraphLine, lineIndex) => {
-        const hardBreak = /(?: {2,}|\\)$/.test(paragraphLine);
-        const content = hardBreak ? paragraphLine.replace(/(?: {2,}|\\)$/, "") : paragraphLine;
-        return content + (lineIndex < paragraphLines.length - 1 ? hardBreak ? "\n" : " " : "");
-      }).join("");
-    nodes.push(Object.freeze({
-      key,
-      kind: "paragraph" as const,
-      inlines: inlineNodes(paragraphText, key, literalFallback),
-    }));
-  }
-
-  return Object.freeze(nodes);
-}
-
-function contentNodes(
-  blocks: readonly ConversationTimelineContentBlock[],
-  mode: "rich" | "plain",
-): readonly SafeContentNode[] {
-  const nodes: SafeContentNode[] = [];
-  for (const block of blocks) {
-    switch (block.type) {
-      case "text":
-        nodes.push(...markdownNodes(block.text, block.identity, mode === "plain"));
-        break;
-      case "code":
-        nodes.push(Object.freeze({
-          key: block.identity,
-          kind: "code" as const,
-          language: safeLanguage(block.language),
-          text: block.text,
-        }));
-        break;
-      case "artifact_reference":
-        nodes.push(Object.freeze({ key: block.identity, kind: block.type, block }));
-        break;
-      case "attachment_reference":
-        nodes.push(Object.freeze({ key: block.identity, kind: block.type, block }));
-        break;
-      case "unknown":
-      default:
-        nodes.push(Object.freeze({
-          key: block.identity,
-          kind: "unknown" as const,
-          code: "unsupported_content" as const,
-        }));
-        break;
-    }
-  }
-  return Object.freeze(nodes);
-}
-
-const nodes = computed(() => contentNodes(props.blocks, props.mode));
-// Display order only; persisted content blocks and Native Items remain intact.
-const displayNodes = computed(() => props.mode === "plain" ? [
-  ...nodes.value.filter(node => node.kind === "attachment_reference"),
-  ...nodes.value.filter(node => node.kind !== "attachment_reference"),
-] : nodes.value);
+const root = ref<HTMLElement | null>(null);
+const parse = createChatMarkdownParser();
+const documentView = computed(() => props.parsedNodes ? { nodes: props.parsedNodes, text: "" }
+  : measureChatRender("markdown", () => parse(props.blocks, props.mode, props.streaming)));
+const inherited = inject(chatTextRevealKey, null);
+const reveal = props.parsedNodes && inherited ? inherited
+  : useChatTextReveal(() => documentView.value.text, () => props.streaming, () => props.animate, root);
+provide(chatTextRevealKey, reveal);
+if (!props.parsedNodes) provide(messageLinkTargetKey, () => props.linkTarget);
+const nodes = computed(() => documentView.value.nodes);
+const displayNodes = computed<readonly ChatContentNode[]>((previous) => {
+  const cursor = reveal.frame.value.cursor;
+  const visible = nodes.value.filter(node => (node.startOffset < cursor || node.startOffset === node.endOffset && node.startOffset <= cursor) || node.kind === "artifact_reference" || node.kind === "attachment_reference" || node.kind === "unknown");
+  const ordered = props.mode === "plain" ? [...visible.filter(node => node.kind === "attachment_reference"), ...visible.filter(node => node.kind !== "attachment_reference")] : visible;
+  // A reveal frame inside one block does not invalidate its surrounding layout.
+  if (previous?.length === ordered.length && ordered.every((node, i) => node === previous[i])) return previous;
+  return ordered;
+});
 const hasAttachments = computed(() => props.mode === "plain" && nodes.value.some(node => node.kind === "attachment_reference"));
 const firstParagraphKey = computed(() => nodes.value.find(node => node.kind === "paragraph")?.key);
-
-function nestedBlocks(node: { key: string; text: string }): readonly ConversationTimelineContentBlock[] {
-  return [{ identity: node.key, blockIndex: 0, type: "text", text: node.text }];
-}
+function visibleItems<T extends { startOffset: number; endOffset: number }>(items: readonly T[]) { return items.filter(item => item.startOffset < reveal.frame.value.cursor || item.startOffset === item.endOffset && item.startOffset <= reveal.frame.value.cursor); }
+function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonly T[]) { return rows.filter(row => (row[0]?.startOffset ?? Infinity) <= reveal.frame.value.cursor); }
 </script>
 
 <template>
-  <div class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments }">
+  <div ref="root" class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments }">
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in displayNodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
         <slot v-if="node.key === firstParagraphKey" name="text-prefix" />
         <template v-for="inline in node.inlines" :key="inline.key">
-          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
-          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
-          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
-          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
-          <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-            <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
-          </span>
-          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
+          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></code>
+          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
+          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
+          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
+          <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
         </template>
       </p>
 
@@ -544,21 +71,19 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         class="chat-safe-content__heading"
       >
         <template v-for="inline in node.inlines" :key="inline.key">
-          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
-          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
-          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
-          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
-          <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-            <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
-          </span>
-          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
+          <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></code>
+          <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
+          <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
+          <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
+          <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+          <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
         </template>
       </component>
 
       <hr v-else-if="node.kind === 'rule'" class="chat-safe-content__rule">
 
       <blockquote v-else-if="node.kind === 'quote'" class="chat-safe-content__quote">
-        <ChatSafeContent :blocks="nestedBlocks(node)" mode="rich" :streaming="streaming">
+        <ChatSafeContent :parsed-nodes="node.children" mode="rich" :streaming="streaming">
           <template v-if="$slots['code-actions']" #code-actions="scope">
             <slot name="code-actions" v-bind="scope" />
           </template>
@@ -571,8 +96,8 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
         :start="node.ordered ? node.start : undefined"
         class="chat-safe-content__list"
       >
-        <li v-for="item in node.items" :key="item.key">
-          <ChatSafeContent :blocks="nestedBlocks(item)" mode="rich" :streaming="streaming">
+        <li v-for="item in visibleItems(node.items)" :key="item.key">
+          <ChatSafeContent :parsed-nodes="item.children" mode="rich" :streaming="streaming">
             <template v-if="$slots['code-actions']" #code-actions="scope">
               <slot name="code-actions" v-bind="scope" />
             </template>
@@ -606,7 +131,7 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             />
           </div>
         </div>
-        <pre><code><ChatStreamText :text="node.text" :streaming="streaming" /></code></pre>
+        <pre><code><ChatStreamText :text="node.text" :streaming="streaming" :offset="node.startOffset" /></code></pre>
       </div>
 
       <div
@@ -620,30 +145,26 @@ function nestedBlocks(node: { key: string; text: string }): readonly Conversatio
             <tr>
               <th v-for="header in node.headers" :key="header.key" scope="col">
                 <template v-for="inline in header.inlines" :key="inline.key">
-                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
-                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
-                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
-                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
-                  <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-                    <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
-                  </span>
-                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
+                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></code>
+                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
+                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
+                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
+                  <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
                 </template>
               </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in node.rows" :key="row[0]?.key">
+            <tr v-for="row in visibleRows(node.rows)" :key="row[0]?.key">
               <td v-for="cell in row" :key="cell.key">
                 <template v-for="inline in cell.inlines" :key="inline.key">
-                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" /></code>
-                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" /></strong>
-                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" /></em>
-                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" /></del>
-                  <span v-else-if="inline.kind === 'inert_link'" class="chat-safe-content__inert-link">
-                    <ChatStreamText :text="inline.text" :streaming="streaming" />（{{ inline.destination }}）
-                  </span>
-                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" /></span>
+                  <code v-if="inline.kind === 'inline_code'" class="chat-safe-content__inline-code"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></code>
+                  <strong v-else-if="inline.kind === 'strong'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></strong>
+                  <em v-else-if="inline.kind === 'emphasis'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></em>
+                  <del v-else-if="inline.kind === 'strikethrough'"><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></del>
+                  <ChatTextLink v-else-if="inline.kind === 'inert_link'" :text="inline.text" :destination="inline.destination" :streaming="streaming" :offset="inline.startOffset" />
+                  <span v-else><ChatStreamText :text="inline.text" :streaming="streaming" :offset="inline.startOffset" /></span>
                 </template>
               </td>
             </tr>
@@ -748,12 +269,6 @@ h3.chat-safe-content__heading {
   white-space: break-spaces;
 }
 
-.chat-safe-content__inert-link {
-  color: var(--yj-color-text-primary);
-  text-decoration: underline;
-  text-decoration-color: var(--yj-color-text-primary);
-  text-underline-offset: var(--yj-space-1);
-}
 
 .chat-safe-content__code-region,
 .chat-safe-content__table-region {

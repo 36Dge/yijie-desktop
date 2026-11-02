@@ -115,6 +115,12 @@ fn historical(r: &mut ChatRepository, p: &PlanView, state: PlanState, n: i64) ->
 }
 #[test]
 fn feat164_plan_retirement_before_dispatch() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_plan_retirement_before_dispatch"
+    )) {
+        return;
+    }
     assert!(crate::chat::models::v2_enabled());
     assert!(crate::chat::models::dispatch_profile_available(
         "kimi-k3-1-pro-max-v1"
@@ -364,6 +370,12 @@ fn feat164_plan_retirement_before_dispatch() {
 
 #[test]
 fn feat164_s3_explicit_save_reauthorize_and_bound_target() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_s3_explicit_save_reauthorize_and_bound_target"
+    )) {
+        return;
+    }
     assert!(crate::chat::models::v2_enabled());
     let t = Temp::new();
     let mut r = open(&t);
@@ -489,6 +501,15 @@ fn feat164_s3_explicit_save_reauthorize_and_bound_target() {
 
 #[test]
 fn feat164_s3_paused_candidate_preserves_authority() {
+    if crate::chat::model_test_support::run_in_model_environment(
+        concat!(
+            module_path!(),
+            "::feat164_s3_paused_candidate_preserves_authority"
+        ),
+        true,
+    ) {
+        return;
+    }
     assert!(crate::chat::models::v2_enabled());
     assert!(!crate::chat::models::dispatch_profile_available(
         "kimi-k3-1-pro-max-v1"
@@ -542,6 +563,12 @@ fn feat164_s3_paused_candidate_preserves_authority() {
 
 #[test]
 fn feat164_s3_schema_upgrade_and_replay() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_s3_schema_upgrade_and_replay"
+    )) {
+        return;
+    }
     assert!(crate::chat::models::v2_enabled());
     for version in [38, 39, 40] {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
@@ -617,6 +644,12 @@ impl crate::chat::keychain::ReceiptKeyStore for Keys {
 }
 #[tokio::test]
 async fn feat164_s3_worker_starts_after_retirement() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_s3_worker_starts_after_retirement"
+    )) {
+        return;
+    }
     assert!(crate::chat::models::v2_enabled());
     let t = Temp::new();
     let mut r = open(&t);

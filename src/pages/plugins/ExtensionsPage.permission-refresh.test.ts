@@ -65,7 +65,7 @@ function visible(element: HTMLElement): boolean {
   return true;
 }
 function button(text: string, selector = "button"): HTMLButtonElement {
-  const matches = [...document.querySelectorAll<HTMLButtonElement>(selector)].filter(item => item.textContent?.trim() === text && visible(item));
+  const matches = [...document.querySelectorAll<HTMLButtonElement>(selector)].filter(item => (item.textContent?.trim() === text || item.getAttribute("aria-label") === `去试试：${text}`) && visible(item));
   expect(matches).toHaveLength(1);
   return matches[0]!;
 }

@@ -1,0 +1,24 @@
+{
+  "scope": "Only directories created during this validation; standard compiler outputs, no application or runtime executable replacement.",
+  "removed": [
+    {
+      "path": ".local/development/target/debug/.fingerprint",
+      "files": 3748,
+      "bytes": 765178
+    },
+    {
+      "path": ".local/development/target/debug/deps",
+      "files": 4130,
+      "bytes": 4246667827
+    },
+    {
+      "path": ".local/development/target/debug/incremental",
+      "files": 857,
+      "bytes": 3272825691
+    }
+  ],
+  "removedBytes": 7520258696,
+  "fixedDevelopmentBinaryUnchanged": true,
+  "binarySha256": "68600850710e509f993d0055815cd715d61a3db2b8afab742b1affcb87713f91",
+  "canonicalSharedBuildCacheUntouched": true
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "com.yijie.desktop/chat-turn-model-v1.schema.json",
+  "description": "Read-only Desktop metadata. profileId is the frozen chat_operation_models profile for this exact owned session/turn operation, never the current session selection. Missing historical snapshots return null. This command does not send feedback, change a model or start Runtime/Host execution.",
+  "x-yijie-command": "chat_read_turn_model_v1",
+  "$defs": {
+    "TurnModelRequest": {
+      "type": "object", "additionalProperties": false, "required": ["sessionId", "turnId"],
+      "properties": {"sessionId": {"type": "string", "format": "uuid"}, "turnId": {"type": "string", "format": "uuid"}}
+    },
+    "TurnModelView": {
+      "type": "object", "additionalProperties": false, "required": ["sessionId", "turnId", "profileId"],
+      "properties": {
+        "sessionId": {"type": "string", "format": "uuid"},
+        "turnId": {"type": "string", "format": "uuid"},
+        "profileId": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 128}, {"type": "null"}], "description": "Original frozen profile; retired identities remain readable. Unknown future values must not be reinterpreted as the current selection."}
+      }
+    }
+  }
+}

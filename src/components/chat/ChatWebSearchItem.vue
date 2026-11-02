@@ -5,10 +5,13 @@ import type { ConversationTimelineItemViewModel } from "../../domain/conversatio
 import type { ChatTimelineDisclosureChange } from "./ChatTimelineItemShell.vue";
 import { sourceHref, sourceInitial, useWebSources } from "../../composables/useWebSources";
 import YjIcon from "../yijie/YjIcon.vue";
+import ChatShortScrollbar from "./ChatShortScrollbar.vue";
 
 const props = withDefaults(defineProps<{ item: ConversationTimelineItemViewModel; processPresentation?: boolean; searchOccurrence?: number }>(), {searchOccurrence: 1});
 const emit = defineEmits<{ "disclosure-change": [change: ChatTimelineDisclosureChange] }>();
 const expanded = ref(false);
+const viewport = ref<HTMLElement | null>(null);
+const content = ref<HTMLElement | null>(null);
 const { icons, open, openError } = useWebSources(() => props.item, () => expanded.value);
 const contentId = `${useId()}-search`;
 const sourceNoteId = `${contentId}-note`;
@@ -56,27 +59,30 @@ watch(() => props.item.identity, () => { expanded.value = false; });
     <p v-if="availabilityMessage" class="chat-web-search__notice" role="note">{{ availabilityMessage }}</p>
     <p v-if="stateMessage" class="chat-web-search__notice" role="note">{{ stateMessage }}</p>
     <div v-if="expanded" class="chat-web-search__details">
-      <div :id="contentId" class="chat-web-search__viewport" role="region" aria-label="网页活动详情" tabindex="0">
-        <div class="chat-web-search__content">
-      <section v-if="item.webSearch?.sources?.length" :aria-describedby="sourceNoteId" aria-label="搜索来源">
-        <p :id="sourceNoteId" class="chat-web-search__sr-only">以下页面由搜索返回，不代表回答已逐项引用或核验。</p>
-        <ul class="chat-web-search__sources">
-          <li v-for="(source, index) in item.webSearch.sources" :key="`${index}:${source.url}`"
-            class="chat-web-search__source">
-            <a class="chat-web-search__source-link" :href="sourceHref(source.url)" target="_blank" rel="noopener noreferrer"
-              @click.prevent="open(source.url)" @auxclick.middle.prevent="open(source.url)">
-              <img v-if="icons[source.url]" class="chat-web-search__source-icon" :src="icons[source.url]!" alt="" width="16" height="16"
-                @error="icons[source.url] = null">
-              <span v-else class="chat-web-search__source-fallback" aria-hidden="true">{{ sourceInitial(source.url) }}</span>
-              <span class="chat-web-search__source-title">{{ source.title || source.url }}</span>
-              <span v-if="source.title" class="chat-web-search__sr-only">（{{ source.url }}）</span>
-            </a>
-          </li>
-        </ul>
-      </section>
-      <p v-else-if="emptyMessage" class="chat-web-search__notice" role="note">{{ emptyMessage }}</p>
-      <p v-else class="chat-web-search__notice">{{ detail }}</p>
+      <div class="chat-web-search__scroll-frame">
+        <div :id="contentId" ref="viewport" class="chat-web-search__viewport" role="region" aria-label="网页活动详情" tabindex="0">
+          <div ref="content" class="chat-web-search__content">
+          <section v-if="item.webSearch?.sources?.length" :aria-describedby="sourceNoteId" aria-label="搜索来源">
+            <p :id="sourceNoteId" class="chat-web-search__sr-only">以下页面由搜索返回，不代表回答已逐项引用或核验。</p>
+            <ul class="chat-web-search__sources">
+              <li v-for="(source, index) in item.webSearch.sources" :key="`${index}:${source.url}`"
+                class="chat-web-search__source">
+                <a class="chat-web-search__source-link" :href="sourceHref(source.url)" target="_blank" rel="noopener noreferrer"
+                  @click.prevent="open(source.url)" @auxclick.middle.prevent="open(source.url)">
+                  <img v-if="icons[source.url]" class="chat-web-search__source-icon" :src="icons[source.url]!" alt="" width="16" height="16"
+                    @error="icons[source.url] = null">
+                  <span v-else class="chat-web-search__source-fallback" aria-hidden="true">{{ sourceInitial(source.url) }}</span>
+                  <span class="chat-web-search__source-title">{{ source.title || source.url }}</span>
+                  <span v-if="source.title" class="chat-web-search__sr-only">（{{ source.url }}）</span>
+                </a>
+              </li>
+            </ul>
+          </section>
+          <p v-else-if="emptyMessage" class="chat-web-search__notice" role="note">{{ emptyMessage }}</p>
+          <p v-else class="chat-web-search__notice">{{ detail }}</p>
+          </div>
         </div>
+        <ChatShortScrollbar :viewport="viewport" :content="content" :controls="contentId" label="滚动网页搜索结果" />
       </div>
     </div>
     <p v-if="openError" class="chat-web-search__notice" role="alert">{{ openError }}</p>
@@ -138,18 +144,22 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   font-size: var(--yj-font-size-caption);
   line-height: var(--yj-line-height-caption);
 }
+.chat-web-search__scroll-frame { position: relative; }
 .chat-web-search__viewport {
+  display: grid;
   max-height: calc(var(--yj-layout-chat-search-max-height) - 2 * var(--yj-space-3));
   overflow-y: auto;
   overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
+  scrollbar-width: none;
 }
+.chat-web-search__viewport::-webkit-scrollbar { display: none; }
 .chat-web-search__viewport:focus-visible { outline-offset: 0; }
 .chat-web-search__content {
+  grid-area: 1 / 1;
   display: grid;
   min-width: 0;
   gap: var(--yj-space-2);
-  padding-inline: var(--yj-space-3);
+  padding-inline: var(--yj-space-3) calc(var(--yj-space-3) + var(--yj-space-2));
 }
 .chat-web-search__sources {
   display: grid;
@@ -192,9 +202,6 @@ watch(() => props.item.identity, () => { expanded.value = false; });
   color: var(--yj-color-text-secondary);
   background: var(--yj-color-bg-card);
 }
-.chat-web-search__viewport::-webkit-scrollbar { width: var(--yj-layout-chat-thinking-scrollbar-width); }
-.chat-web-search__viewport::-webkit-scrollbar-track { background: transparent; }
-.chat-web-search__viewport::-webkit-scrollbar-thumb { background: var(--yj-color-border-strong); border-radius: var(--yj-radius-sm); }
 .chat-web-search__source-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-web-search__notice { margin: 0; font-size: var(--yj-font-size-caption); overflow-wrap: anywhere; }
 .chat-web-search__sr-only {

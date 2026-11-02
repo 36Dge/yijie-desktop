@@ -265,102 +265,31 @@ describe("visible management operation observation", () => {
 });
 
 
-describe("saved enabled connector startup recovery", () => {
+describe("connector startup is controlled by Native connection restoration", () => {
   const saved = { ...installed, desiredEnabled: true, credentialRef: "019c1a00-0000-7000-8000-000000000009" };
-  const ready = { ...saved, revision: 2, effectiveEnabled: true, connectionStatus: "ready" as const };
-  async function settle() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
-  it("rechecks saved enable intent once and makes the new live connection selectable", async () => {
+  it("never enables on bind, refresh, context renewal or renderer recreation", async () => {
     const { store, client } = setup(snapshot([saved]));
+    await store.bind("boot", "tenant-a");
+    await store.refresh(); await store.bind("renewed", "tenant-a");
+    store.clear(); await store.bind("next-renderer", "tenant-a");
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    expect(client.configure).not.toHaveBeenCalled(); expect(client.authorize).not.toHaveBeenCalled();
+    expect(store.entries[0]?.selectable).toBe(false);
+  });
+  it("enables only after an explicit user operation and requires current readiness", async () => {
+    const { store, client } = setup(snapshot([installed]));
+    const ready = { ...installed, revision: 2, desiredEnabled: true, effectiveEnabled: true, connectionStatus: "ready" as const };
     client.setEnabled.mockImplementation(async (_context, _item, enabled, id) => {
       expect(enabled).toBe(true);
       client.snapshot.mockResolvedValue({ ...snapshot([ready]), executionAvailable: true });
       return { installation: ready, operation: operation(id) };
     });
-    await store.bind("boot", "tenant-a"); await settle();
-    expect(client.setEnabled).toHaveBeenCalledExactlyOnceWith("boot", saved, true, expect.any(String));
-    expect(store.selectionAvailable).toBe(true);
-    expect(store.entries[0]).toMatchObject({ enabled: true, selectable: true });
-    await store.refresh(); await store.bind("renewed", "tenant-a"); await store.refresh(); await settle();
-    expect(client.setEnabled).toHaveBeenCalledTimes(1);
-    expect(client.authorize).not.toHaveBeenCalled(); expect(client.configure).not.toHaveBeenCalled();
-  });
-  it("retains failed recovery intent without repeated checks on refresh or context renewal", async () => {
-    const { store, client } = setup(snapshot([saved]));
-    client.setEnabled.mockImplementation(async (_context, item, _enabled, id) => ({ installation: item, operation: { ...operation(id, "failed"), errorCode: "temporarily_unavailable" } }));
-    await store.bind("boot", "tenant-a"); await settle();
-    await store.refresh(); await store.bind("renewed", "tenant-a"); await store.refresh(); await settle();
-    expect(client.setEnabled).toHaveBeenCalledTimes(1);
-    expect(store.installation("sample")?.desiredEnabled).toBe(true);
-    expect(store.entries[0]?.selectable).toBe(false);
-    expect(store.operationErrors.sample).toContain("暂不可用");
-    // A new signed-in session can perform its own bounded startup check.
-    store.clear(); await store.bind("next-boot", "tenant-a"); await settle();
-    expect(client.setEnabled).toHaveBeenCalledTimes(2);
-  });
-  it("does not start auth, configure, an existing operation or a disabled connection", async () => {
-    for (const item of [installed, ready, { ...saved, activeOperation: operation("original", "pending") },
-      { ...saved, activeOperation: operation("unknown-original", "unknown") },
-      { ...saved, configurationStatus: "unconfigured" as const },
-      { ...saved, authorizationStatus: "required" as const }]) {
-      const { store, client } = setup(snapshot([item]));
-      await store.bind("boot"); await settle();
-      await store.refresh(); await settle();
-      expect(client.setEnabled).not.toHaveBeenCalled();
-      expect(client.authorize).not.toHaveBeenCalled(); expect(client.configure).not.toHaveBeenCalled();
-    }
-  });
-  it("requires current management permission before reconnecting", async () => {
-    const { store, client } = setup({ ...snapshot([saved]), capabilities: ["connector.read", "connector.use"] });
-    await store.bind("boot"); await settle();
-    expect(client.setEnabled).not.toHaveBeenCalled();
-    client.snapshot.mockRejectedValue(new ConnectorClientError("permission_denied"));
-    await store.refresh(); await settle();
-    expect(client.setEnabled).not.toHaveBeenCalled();
-  });
-  it("only polls the original pending recovery and publishes readiness on confirmed completion", async () => {
-    vi.useFakeTimers();
-    const { store, client } = setup(snapshot([saved]));
-    try {
-      client.setEnabled.mockImplementation(async (_context, item, _enabled, id) => ({ installation: item, operation: operation(id, "pending") }));
-      await store.bind("boot"); await settle(); store.setOperationObservation(true);
-      const id = client.setEnabled.mock.calls[0]![3];
-      expect(store.entries[0]?.enabled).toBe(false);
-      client.operation.mockImplementation(async () => {
-        client.snapshot.mockResolvedValue({ ...snapshot([ready]), executionAvailable: true });
-        return operation(id);
-      });
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(client.operation).toHaveBeenCalledExactlyOnceWith("boot", id);
-      expect(store.entries[0]?.selectable).toBe(true);
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(client.setEnabled).toHaveBeenCalledTimes(1);
-      expect(client.operation).toHaveBeenCalledTimes(1);
-    } finally { store.setOperationObservation(false); vi.useRealTimers(); }
-  });
-  it("does not repeat a recovery while its authority context is renewed", async () => {
-    const { store, client } = setup(snapshot([saved]));
-    let finish!: (value: MutationResult) => void;
-    client.setEnabled.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     await store.bind("boot", "tenant-a");
-    await store.bind("renewed", "tenant-a");
-    const id = client.setEnabled.mock.calls[0]![3];
-    finish({ installation: ready, operation: operation(id) }); await settle();
-    expect(client.setEnabled).toHaveBeenCalledTimes(1);
-    expect(store.installation("sample")?.revision).toBe(saved.revision);
-    client.operation.mockResolvedValue(operation(id, "pending"));
-    await store.execute("retry", "sample");
-    expect(client.operation).toHaveBeenCalledWith("renewed", id);
-  });
-  it("serializes startup checks and re-evaluates a queued connector after the user disables it", async () => {
-    const second = { ...saved, installationId: "019c1a00-0000-7000-8000-000000000002", serviceId: "second" };
-    const data = { ...snapshot([saved, second]), catalog: [service, { ...service, serviceId: "second", serverName: "second" }] };
-    const { store, client } = setup(data);
-    let finish!: (value: MutationResult) => void;
-    client.setEnabled.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-    await store.bind("boot");
-    expect(client.setEnabled).toHaveBeenCalledTimes(1);
-    client.snapshot.mockResolvedValue({ ...data, installations: [ready, { ...second, desiredEnabled: false }] });
-    finish({ installation: ready, operation: operation(client.setEnabled.mock.calls[0]![3]) }); await settle();
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    expect(await store.execute("enable", "sample")).toBe(true);
+    expect(client.setEnabled).toHaveBeenCalledExactlyOnceWith("boot", installed, true, expect.any(String));
+    expect(store.entries[0]).toMatchObject({ enabled: true, selectable: true });
+    await store.refresh(); await store.bind("renewed", "tenant-a");
     expect(client.setEnabled).toHaveBeenCalledTimes(1);
   });
 });
@@ -386,8 +315,8 @@ it("keeps bounded application recovery observation when the page becomes hidden"
 });
 
 
-describe("built-in Kimi automatic preparation", () => {
-  it.each([true, false])("prepares without Configure once, available=%s", async available => {
+describe("built-in Kimi explicit preparation", () => {
+  it.each([true, false])("prepares only on explicit enable without Configure, available=%s", async available => {
     const item: Installation = { ...installed, serviceId: "kimi-web", desiredEnabled: true, configurationStatus: "unconfigured", authorizationStatus: "unknown" };
     const data = snapshot([item]); data.catalog = [{ ...service, serviceId: "kimi-web", authMode: "api_key" }];
     const { client, store } = setup(data);
@@ -398,6 +327,8 @@ describe("built-in Kimi automatic preparation", () => {
       return { installation: next, operation: { ...operation(id, available ? "succeeded" : "failed"), serviceId: "kimi-web", ...(available ? {} : { errorCode: "not_configured" as const }) } };
     });
     await store.bind("context-a", "local:tenant-a");
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    await store.execute("enable", "kimi-web");
     await vi.waitFor(() => expect(store.entries[0]?.enabled).toBe(available));
     await vi.waitFor(() => expect(client.setEnabled).toHaveBeenCalledTimes(1));
     await store.refresh(); await store.bind("renewed-context", "local:tenant-a");

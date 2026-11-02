@@ -1,0 +1,148 @@
+{
+  "completed_at": "2026-11-02T13:18:30.516942+08:00",
+  "contract_impact": "additive",
+  "authority": "src-tauri/schemas/chat-web-source-v1.schema.json",
+  "added_action": "open_message_link",
+  "unchanged_actions": [
+    "open",
+    "icon"
+  ],
+  "public_contracts_pin": "N/A: same Desktop private IPC; Host/Runtime/persistence unchanged",
+  "head": "55f88341aa59522f214c0015ed7928b8d1f5021d",
+  "source_sha256": {
+    "docs/design/docs/design/02-tokens/02-color-tokens.md": "20546229508b9f8fd89ce822b30fc9162ac62b753a26ea0357261f44a089817b",
+    "docs/design/docs/design/02-tokens/06-motion-zindex-opacity-tokens.md": "2f52db1c3d18ffce403b3a30f17796d42ae1faff44b39592347018bdc1555827",
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "e034fcd59c3842815688238298a0dab9f0ead85c942c3747d97fc6696c1dbef3",
+    "src-tauri/schemas/chat-web-source-v1.schema.json": "ca1d2a6c3aa96b1eae8d2d124df986115d509bf2dea931129538f417ade01af3",
+    "src-tauri/src/chat/ipc/web_sources.rs": "4f338ccc9a308046d568c5e54de6c2f80606be3944483ad64da1bb23b6904fa2",
+    "src/api/chat-web-source-client.test.ts": "93ff5147383efa13ba8473917d447fb2ba9850c791bda2f521f3fe65ed0d815d",
+    "src/api/chat-web-source-client.ts": "11a1bdc299f06f983373eb47d6010a2a4f9d87546518475db49c6b64a58031c6",
+    "src/components/chat/ChatDeepThinking.test.ts": "6802cea5bd66961c957c3915f748f908b356ad786a9794a7c29e57c5e86e8444",
+    "src/components/chat/ChatDeepThinking.vue": "b1d2d2ce5b5fb677c161ea15cf78eb05fb1cdc01de1d78cf5a882e3ed725ea37",
+    "src/components/chat/ChatNativeStreaming.test.ts": "eed14c40fc15d91eaa68de5e8cabefa15887fbe290c0f8a4a0c8466567872232",
+    "src/components/chat/ChatProcessPresentation.test.ts": "ec9762812003f397574b3e49e3dbfc8b0b594184ae5c49a812c3db5dafd4c3f2",
+    "src/components/chat/ChatSafeContent.test.ts": "9910ec6cdf6eb3899a5693342ce7c0ee4613a6d914529aa7bf2395ef3551622c",
+    "src/components/chat/ChatSafeContent.vue": "071486f80f7daee8d8bdd4339ad88fa6ea693a21361d06ef91cce6f0c0f31d67",
+    "src/components/chat/ChatThinkingIndicator.vue": "fa606500dacba04a8959308dce4dab45a58b177b2b96d4f595a4148a4497a63e",
+    "src/components/chat/ChatTurnGroup.vue": "b909a096e36d594c8205917e9b87d9aa08dc6ffdeb60dbb73de937827bd2a1c5",
+    "src/components/chat/ChatTurnPreloading.test.ts": "47327aafec7696266978c1a8a02ad912b5ad9bb4f96bb1350117cd1d7d5cc07c",
+    "src/composables/useWebSources.ts": "9316d8a2e059b2ae222335db325febd6f1a789581f98dd872fe55295e0aa5a6a",
+    "src/domain/chat-markdown.test.ts": "f2b09c175abad109ef53beb99318297d776de27da5470cf6cdd27342bf939612",
+    "src/domain/chat-markdown.ts": "56ccadadf643c955b0c25b11cedc30d96e67bd5496aff24281f347d0a194d34c",
+    "src/domain/conversation-process.ts": "e8620902922427cdb07d76ecbbabc398f38379230d9cbd3e286383db1217caa9",
+    "src/domain/web-source.generated.ts": "a8594798ca33c8f53b40cdc5bd248043667bd24c6af3e23ab2d4e182448d726f",
+    "src/styles/variables.css": "32f3bc2636e3d118562ffa4aa0e1f2e6850553144ea59c284ae01c8f98f8f58d",
+    "src/composables/useChatMessageLink.ts": "bfd8b5e0b7c04020f6d85939cfe3e1800ad3bbcc29d630353a58d16f74b0e835",
+    "src/components/chat/ChatTextLink.vue": "aa2077b454118d3edc8337e6369fe27c32b867a837ea56bb10135ea79c830a28",
+    "src/components/chat/ChatTextLink.test.ts": "59067e957de923c80ebbe198476cce52777c99395b07a093457e08fe96440dc7",
+    "src/domain/conversation-active-reasoning.test.ts": "ea34afe84c9064f75bafd72519801ee194d1cb042f8da9f180da2a2619e0a162",
+    "tests/visual/chat-links-thinking/main.ts": "1e2c53313a61244afb8e25fe3456fdf95cf1906847664597a4479aefc6b6c1f7",
+    "tests/visual/chat-links-thinking/index.html": "72f6d0e12f42c464f0fc8acb4e22a01b31ed88c90526fd690f69ff0064e0c87c"
+  },
+  "real_client": {
+    "previous_pid": 85700,
+    "current_pid": 66859,
+    "normal_quit_observed": true,
+    "old_cli_exit_code": 0,
+    "old_cli_signal": null,
+    "fixed_entry": "/Users/jack/Applications/易界.app",
+    "build": "canonical incremental development build",
+    "real_model_requests": 1,
+    "model": "Kimi K3.1 Pro",
+    "new_answer_labels": [
+      "路线来源",
+      "相关说明"
+    ],
+    "hover_tooltip": "https://example.org/",
+    "native_click_opened_browser": {
+      "browser": "Chrome",
+      "url": "https://example.org/",
+      "title": "Example Domain",
+      "tab_id": "896509803",
+      "verified_and_closed": true
+    },
+    "original_history_checked": true,
+    "original_history_route_tooltip": "https://tidenews.com.cn/news.html?id=3304002",
+    "native_thinking_sweep_observed_in_video": [
+      4.8,
+      7.8
+    ],
+    "minimum_window": [
+      1180,
+      760
+    ],
+    "restored_window": [
+      1268,
+      845
+    ],
+    "raw_video": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/text-links-thinking-20261102/native-flow.mov"
+  },
+  "browser": {
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "tooltip_on_focus_and_escape": true,
+    "parsed_label_only": true,
+    "nested_list_quote_table_links": true,
+    "sweep_animation": "chat-thinking-sweep",
+    "sweep_duration_ms": 1800,
+    "answer_and_tool_animation": "none",
+    "temporary_tabs_closed": true,
+    "viewport_reset": true
+  },
+  "colors": {
+    "light": {
+      "text": "4b651d",
+      "background": "ffffff",
+      "contrast": 6.61
+    },
+    "dark": {
+      "text": "c3f35b",
+      "background": "191c20",
+      "contrast": 13.26
+    }
+  },
+  "checks": {
+    "frontend_files": 251,
+    "frontend_passed": 2027,
+    "frontend_skipped": 16,
+    "node_passed": 26,
+    "focused_passed": 40,
+    "native_focused_passed": 5,
+    "native_focused_network_ignored": 1,
+    "native_ordinary": {
+      "passed": 622,
+      "failed": 0,
+      "ignored": 14,
+      "safety_filtered": 27,
+      "duration_seconds": 475.02
+    },
+    "native_kimi": {
+      "passed": 657,
+      "failed": 0,
+      "ignored": 16,
+      "safety_filtered": 27,
+      "duration_seconds": 550.65
+    },
+    "make_lint": "PASS",
+    "final_frontend_lint": "PASS",
+    "make_test": "PASS",
+    "make_build": "PASS (existing large-chunk warning)",
+    "docs_build": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "safety": {
+    "forced_kill": false,
+    "binary_substitution": false,
+    "permission_sabotage": false,
+    "attack_fixtures": false,
+    "exclusions": "scripts/test-safety-exclusions.json; excluded/ignored checks remain NOT RUN, not PASS"
+  },
+  "artifacts": {
+    "history_hyperlink": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/text-links-thinking-20261102/native-history-route-tooltip.png",
+    "native_hover": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/text-links-thinking-20261102/native-link-tooltip.png",
+    "native_shimmer_gif": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/text-links-thinking-20261102/深度思考-实机扫光.gif",
+    "task_only_patch": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/text-links-thinking-20261102/task-only.patch"
+  }
+}

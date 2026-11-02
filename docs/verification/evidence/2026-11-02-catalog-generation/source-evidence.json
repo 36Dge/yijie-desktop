@@ -1,0 +1,28 @@
+{
+  "catalogRevision": 11,
+  "entries": 61,
+  "byteIdentical": true,
+  "sources": {
+    "source-worktree": {
+      "bytes": 31506,
+      "sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d"
+    },
+    "desktop-generated": {
+      "bytes": 31506,
+      "sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d"
+    },
+    "ab1f8328ff50dab256b23f51d49157278421fd35": {
+      "bytes": 31506,
+      "sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d"
+    },
+    "4c650237a5e0d30ad3b95882b90869435b0f17a7": {
+      "bytes": 31506,
+      "sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d"
+    }
+  },
+  "unchangedFromGit": {
+    "contracts/market-catalog.json": true,
+    "contracts/market-catalog.candidate.json": true,
+    "contracts/market-catalog-feat164.candidate.json": true
+  }
+}

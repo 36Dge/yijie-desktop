@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+import { afterAll } from "vitest";
 import { mount } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
 import { afterEach, expect, it, vi } from "vitest";
 import { NButton, NDialogProvider } from "naive-ui";
 import ScheduledPlanForm from "./ScheduledPlanForm.vue";
 import type { PlanDefinition } from "../../domain/scheduled-plan-v2.generated";
+vi.hoisted(() => { vi.stubEnv("VITE_YIJIE_KIMI_K31_PRO_CANDIDATE", "true"); vi.stubEnv("VITE_YIJIE_CHAT_MODELS_ENABLED", "true"); });
 vi.mock("../../stores/chat.store",()=>({useChatStore:()=>({context:{contextId:"ordinary-context"}})}));
 vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn()}));
 import { chatModelClient } from "../../api/chat-model-client";
@@ -25,3 +27,5 @@ it.each(["kimi-k3-1-pro-max-v1","kimi-k3-max-v1"] as const)("mounted candidate f
  if(model==="kimi-k3-max-v1")expect(saved).not.toHaveBeenCalled();
  else {expect(saved).toHaveBeenCalledOnce();expect(saved.mock.calls[0]![0]).toMatchObject({model_profile:model,name:"正常计划"});}
 });
+
+afterAll(() => vi.unstubAllEnvs());

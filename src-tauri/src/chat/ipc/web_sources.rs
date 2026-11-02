@@ -25,11 +25,13 @@ struct Payload {
     action: Action,
     target: Target,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Action {
     Icon,
     Open,
+    #[serde(rename = "open_message_link")]
+    OpenMessageLink,
 }
 #[derive(Serialize)]
 struct ResultData {
@@ -104,23 +106,43 @@ pub async fn chat_web_source_v1(
     let supplied = history.views.iter().any(|view| {
         view.items.iter().any(|entry| {
             entry.item.id == target.item_id
-                && entry
-                    .item
-                    .web_search
-                    .as_ref()
-                    .and_then(|s| s.sources.as_ref())
-                    .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
-        })
-    }) || history.archived_views_v5.as_ref().is_some_and(|views| {
-        views.iter().any(|view| {
-            view.items.iter().any(|entry| {
-                entry.item.id == target.item_id
-                    && entry
+                && if matches!(request.payload.action, Action::OpenMessageLink) {
+                    message_contains_link(
+                        &entry.item.kind,
+                        entry.item.text.as_deref(),
+                        entry.item.summary.as_deref(),
+                        entry.item.content.as_deref(),
+                        &target.url,
+                    )
+                } else {
+                    entry
                         .item
                         .web_search
                         .as_ref()
                         .and_then(|s| s.sources.as_ref())
                         .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
+                }
+        })
+    }) || history.archived_views_v5.as_ref().is_some_and(|views| {
+        views.iter().any(|view| {
+            view.items.iter().any(|entry| {
+                entry.item.id == target.item_id
+                    && if matches!(request.payload.action, Action::OpenMessageLink) {
+                        message_contains_link(
+                            &entry.item.kind,
+                            entry.item.text.as_deref(),
+                            entry.item.summary.as_deref(),
+                            entry.item.content.as_deref(),
+                            &target.url,
+                        )
+                    } else {
+                        entry
+                            .item
+                            .web_search
+                            .as_ref()
+                            .and_then(|s| s.sources.as_ref())
+                            .is_some_and(|sources| sources.iter().any(|s| s.url == target.url))
+                    }
             })
         })
     });
@@ -134,7 +156,7 @@ pub async fn chat_web_source_v1(
         request.request_id,
     )?;
     let data = match request.payload.action {
-        Action::Open => {
+        Action::Open | Action::OpenMessageLink => {
             // Same hardened system-browser library used by login and connectors.
             tokio::task::spawn_blocking(move || webbrowser::open(url.as_str()))
                 .await
@@ -165,6 +187,28 @@ pub async fn chat_web_source_v1(
     };
     serde_json::to_value(CommandResponse::new(request.request_id, data))
         .map_err(|_| ChatIpcError::temporarily_unavailable(Some(request.request_id)))
+}
+
+/// Resolve an exact destination in the already-authorized model Item. The
+/// renderer formats Markdown; Native independently checks provenance and URL
+/// policy. This is a membership check, not a second rich-text renderer.
+fn message_contains_link(
+    kind: &str,
+    text: Option<&str>,
+    summary: Option<&[String]>,
+    content: Option<&[String]>,
+    destination: &str,
+) -> bool {
+    let needle = format!("]({destination})");
+    match kind {
+        "agentMessage" => text.is_some_and(|text| text.contains(&needle)),
+        "reasoning" => summary
+            .into_iter()
+            .chain(content)
+            .flatten()
+            .any(|text| text.contains(&needle)),
+        _ => false,
+    }
 }
 
 fn public_url(raw: &str) -> Option<Url> {
@@ -405,6 +449,76 @@ async fn favicon(url: Url) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn message_links_match_the_exact_model_destination_without_rewriting_history() {
+        let url = "https://example.org/Guide_(city)?q=1#overview";
+        let text = format!("参考 [路线来源]({url})。");
+        assert!(message_contains_link(
+            "agentMessage",
+            Some(&text),
+            None,
+            None,
+            url
+        ));
+        assert!(!message_contains_link(
+            "agentMessage",
+            Some(&text),
+            None,
+            None,
+            "https://example.org/other"
+        ));
+        assert!(!message_contains_link(
+            "userMessage",
+            Some(&text),
+            None,
+            None,
+            url
+        ));
+        assert!(!message_contains_link(
+            "agentMessage",
+            None,
+            None,
+            None,
+            url
+        ));
+        assert!(message_contains_link(
+            "reasoning",
+            None,
+            Some(std::slice::from_ref(&text)),
+            None,
+            url
+        ));
+        assert!(message_contains_link(
+            "reasoning",
+            None,
+            None,
+            Some(std::slice::from_ref(&text)),
+            url
+        ));
+        assert_eq!(text, format!("参考 [路线来源]({url})。"));
+    }
+    #[test]
+    fn additive_message_action_preserves_the_original_open_and_icon_actions() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../../../schemas/chat-web-source-v1.schema.json"
+        ))
+        .unwrap();
+        for action in ["open", "icon", "open_message_link"] {
+            assert!(
+                schema["definitions"]["WebSourcePayload"]["properties"]["action"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value == action)
+            );
+            let request = json!({"schemaVersion":1,"requestId":Uuid::now_v7(),"contextId":Uuid::now_v7(),"payload":{"action":action,"target":{"sessionId":Uuid::now_v7(),"turnId":Uuid::now_v7(),"itemId":"answer","url":"https://example.org/guide"}}});
+            let decoded: CommandRequest<Payload> = decode_request(request).unwrap();
+            assert_eq!(
+                matches!(decoded.payload.action, Action::OpenMessageLink),
+                action == "open_message_link"
+            );
+        }
+    }
     #[test]
     fn normal_site_urls_and_declared_icons() {
         let page = public_url("https://www.hangzhou.gov.cn/guide.html?q=city#overview").unwrap();

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { provideWebSourceActions } from "../../composables/useWebSources";
-import { useChatTurnTiming } from "../../composables/useChatTurnTiming";
+import { useChatTurnTimingDetails } from "../../composables/useChatTurnTiming";
+import { useChatTurnModels } from "../../composables/useChatTurnModels";
+import { isCompletedAnswer, nativeCompletedAt } from "../../domain/chat-answer-actions";
+import ChatAnswerActions from "../../components/chat/ChatAnswerActions.vue";
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -19,6 +22,7 @@ import ChatDeliveryControl from "../../components/chat/ChatDeliveryControl.vue";
 import { useChatDelivery } from "../../composables/useChatDelivery";
 import { chatModelsEnabled, kimiK31Candidate, defaultModelProfile } from "../../api/chat-model-client";
 import ChatComposer from "../../components/chat/ChatComposer.vue";
+import ChatScrollToBottomButton from "../../components/chat/ChatScrollToBottomButton.vue";
 import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
 import { useChatAttachmentPresentation } from "../../composables/useChatAttachmentPresentation";
 import ChatShopControl from "../../components/chat/ChatShopControl.vue";
@@ -80,11 +84,12 @@ import type {
   ChatComposerSubmissionState,
 } from "../../domain/chat-composer";
 import {
-  selectConversationTimeline,
+  createConversationTimelineSelector,
   type ConversationTimelineArtifactReferenceContentBlock,
   type ConversationTimelineAttachmentReferenceContentBlock,
   type ConversationTimelineItemViewModel,
 } from "../../domain/conversation-timeline";
+import { measureChatRender } from "../../domain/chat-render-performance";
 import { copyableTimelineItemText } from "../../domain/conversation-timeline-copy";
 import { feat137ApprovalUiEnabled } from "../../authorization/feat137-approval-ui-config";
 import { selectConversationTurn, type ConversationView } from "../../domain/conversation-view";
@@ -372,22 +377,32 @@ const timelineFrameProjection = createFrameBatchedProjection(
   browserFrameProjectionScheduler(),
   () => !timelineSelectionActive(),
 );
+const selectConversationTimeline = createConversationTimelineSelector();
 const conversationTimeline = computed(() => {
   const sessionId = chatStore.selectedSessionId;
   return sessionId === null
     ? null
-    : selectConversationTimeline(
+    : measureChatRender("timeline", () => selectConversationTimeline(
         renderedConversationView.value,
         sessionId,
         chatStore.conversationApprovalState,
         { protectApprovalProcessContent: feat137ApprovalUiEnabled, liveTurnId: chatStore.nativeLiveTurnId },
-      );
+      ));
 });
-const turnTimingLabels = useChatTurnTiming({
+const turnTiming = useChatTurnTimingDetails({
   scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
     ? `${chatStore.context.contextId}:${chatStore.selectedSessionId}` : null,
   turns: () => conversationTimeline.value?.turns ?? [],
   read: (turnId, signal) => chatStore.readTurnTiming(turnId, signal),
+});
+const turnTimingLabels = turnTiming.labels;
+const turnTimingFacts = turnTiming.facts;
+const answerActionIds = computed(() => new Set((conversationTimeline.value?.turns ?? [])
+  .flatMap(turn => turn.items.filter(item => isCompletedAnswer(item, turn)).map(item => item.identity))));
+const turnModels = useChatTurnModels({
+  scope: () => chatStore.context && chatStore.selectedSessionId && chatStore.hasAction("read_sessions")
+    ? {contextId: chatStore.context.contextId, sessionId: chatStore.selectedSessionId} : null,
+  turnIds: () => (conversationTimeline.value?.turns ?? []).filter(turn => turn.items.some(item => answerActionIds.value.has(item.identity))).map(turn => turn.turnId),
 });
 const userMessageTimes = computed(() => {
   const times: Record<string, { datetime: string; label: string; title: string }> = {};
@@ -1249,8 +1264,11 @@ onBeforeUnmount(() => {
                 :datetime="userMessageTimes[item.turnId]!.datetime"
                 :title="userMessageTimes[item.turnId]!.title"
               >{{ userMessageTimes[item.turnId]!.label }}</time>
+              <ChatAnswerActions v-if="itemCopyText(item) && answerActionIds.has(item.identity)"
+                :identity="`${chatStore.context?.contextId}:${item.identity}`" :adapter="browserChatClipboardAdapter" :text="itemCopyText(item)"
+                :model-profile-id="turnModels[item.turnId]" :completed-at="nativeCompletedAt(turnTimingFacts[item.turnId])" />
               <ChatCopyAction
-                v-if="itemCopyText(item)"
+                v-else-if="itemCopyText(item)"
                 :adapter="browserChatClipboardAdapter"
                 :text="itemCopyText(item)"
               />
@@ -1326,16 +1344,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <button
+      <ChatScrollToBottomButton
         v-if="showBottomButton"
         class="chat-workspace__bottom-button"
-        type="button"
-        aria-label="滚动到对话底部"
-        title="滚动到对话底部"
         @click="scrollToBottom(true)"
-      >
-        <YjIcon name="backToBottom" size="lg" />
-      </button>
+      />
     </div>
 
     <footer class="chat-workspace__composer">
@@ -1533,7 +1546,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(to bottom, transparent, var(--yj-color-bg-page));
   pointer-events: none;
 }
-.chat-workspace__conversation { isolation: isolate; width: 100%; height: 100%; padding-inline: var(--yj-space-8); overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: var(--yj-space-8); scroll-padding-block-end: calc(var(--yj-layout-chat-composer-fade) + var(--yj-space-4)); }
+.chat-workspace__conversation { isolation: isolate; width: 100%; height: 100%; padding-inline: var(--yj-space-8); overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; scroll-padding-block: var(--yj-space-8); scroll-padding-block-end: calc(var(--yj-layout-chat-composer-fade) + var(--yj-space-4)); }
 .chat-workspace__conversation:focus { outline: none; }
 .chat-workspace__column { display: flex; width: min(100%, var(--yj-layout-chat-composer-max)); min-height: 100%; flex-direction: column; gap: var(--yj-space-5); padding-block: var(--yj-space-8); padding-block-end: calc(var(--yj-layout-chat-composer-fade) + var(--yj-space-4)); margin-inline: auto; }
 
@@ -1594,21 +1607,8 @@ onBeforeUnmount(() => {
   z-index: var(--yj-z-chat-scroll-control);
   right: 50%;
   bottom: var(--yj-space-4);
-  display: inline-flex;
-  width: var(--yj-space-10);
-  height: var(--yj-space-10);
-  align-items: center;
-  justify-content: center;
-  padding: 0;
   transform: translateX(50%);
-  border: var(--yj-border-width) solid var(--yj-color-border-default);
-  border-radius: var(--yj-radius-full);
-  color: var(--yj-color-text-primary);
-  background: var(--yj-color-bg-elevated);
-  box-shadow: none;
 }
-.chat-workspace__bottom-button:hover { border-color: var(--yj-color-border-control-hover); background: var(--yj-color-control-hover); }
-.chat-workspace__bottom-button:focus-visible,
 .chat-workspace__load-history:focus-visible,
 .chat-notice__action:focus-visible,
 .permission-dialog button:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: var(--yj-space-1); }

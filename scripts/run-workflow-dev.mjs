@@ -5,6 +5,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, rename } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { stageDevelopmentResources } from "./development-resources.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stateRoot = path.join(root, process.env.YIJIE_DEVELOPMENT_CLIENT === "true" ? ".local/development" : ".local/demo-fast/workflow-dev");
@@ -58,6 +59,7 @@ export async function runWorkflowDev() {
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_CREDENTIAL_FILE;
   delete nativeEnvironment.VITE_YIJIE_WORKFLOW_COZE_CREDENTIAL_FILE;
   const arguments_ = developmentArguments(nativeEnvironment);
+  await stageDevelopmentResources(root, nativeEnvironment, arguments_);
   const state = { schema_version: 1, mode: nativeEnvironment.YIJIE_DEVELOPMENT_CLIENT === "true" ? "fixed-development-v1" : "canonical-workflow-dev", launcher_pid: process.pid, cli_pid: null, origin: "http://localhost:1420", phase: "preparing", started_at: new Date().toISOString() };
   await record(state);
   let server;

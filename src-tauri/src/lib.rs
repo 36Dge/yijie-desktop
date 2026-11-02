@@ -333,7 +333,13 @@ pub fn run() {
                     }) {
                     Ok(roots) if experts_enabled => SkillRuntime::from_expert_roots(roots),
                     Ok(roots) => SkillRuntime::from_roots(roots),
-                    Err(_) => SkillRuntime::unavailable(),
+                    Err(error) => {
+                        eprintln!(
+                            "Skill resource initialization unavailable: {}",
+                            error.code()
+                        );
+                        SkillRuntime::unavailable()
+                    }
                 }
             } else {
                 SkillRuntime::disabled()
@@ -496,6 +502,7 @@ pub fn run() {
         chat::ipc::chat_list_sessions_v1,
         chat::ipc::chat_get_session_purpose_v1,
         chat::ipc::chat_read_turn_timing_v1,
+        chat::ipc::chat_read_turn_model_v1,
         chat::ipc::web_sources::chat_web_source_v1,
         chat::ipc::chat_load_history_v1,
         chat::ipc::chat_load_native_history_v1,

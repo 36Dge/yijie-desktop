@@ -46,13 +46,17 @@ const compactStatusLabels: Readonly<Record<string, string>> = {
   "正在卸载": "卸载中",
   "待配置": "待配置",
   "待授权": "待授权",
-  "已启用": "不可用",
+  "已启用": "已启用",
+  "可使用": "已启用",
   "未启用": "未启用",
+  "待启用": "待启用",
 };
 function compactStatus(entry: ConnectorView): ConnectorStatusView | null {
-  if (!entry.busy && ((entry.selectable && props.selectionAvailable) || entry.status.label === "未启用")) return null;
+  // Global enablement is independent of this conversation's selectedIds.
+  // Keep the enabled label visible even when the selection switch is off.
+  if (!entry.busy && entry.enabled) return { label: "已启用", tone: "success" };
   const label = compactStatusLabels[entry.status.label] ?? (entry.busy ? "处理中" : "待确认");
-  return { label, tone: entry.status.label === "连接待恢复" || label === "不可用" ? "warning" : entry.status.tone };
+  return { label, tone: entry.status.label === "连接待恢复" ? "warning" : entry.status.tone };
 }
 const filtered = computed(() => filterConnectors(installed.value, query.value).map(entry => ({ entry, status: compactStatus(entry) })));
 function selected(entry: ConnectorView): boolean { return props.selectedIds.includes(entry.id); }
@@ -98,6 +102,7 @@ onMounted(() => { emit("refresh"); });
             <span v-if="status" class="connector-menu__status" :class="[`connector-menu__status--${status.tone}`, { 'connector-menu__status--pending': status.label === '待连接' }]" :title="entry.explanation ? `${entry.status.label}：${entry.explanation}` : entry.status.label">{{ status.label }}</span>
           </button>
           <NSwitch
+            class="connector-menu__switch"
             size="small"
             :value="selected(entry)"
             :loading="false"
@@ -126,6 +131,14 @@ onMounted(() => { emit("refresh"); });
 .connector-menu__option { display: flex; align-items: center; min-width: 0; flex: 1; gap: var(--yj-space-2); min-height: var(--yj-control-height-sm); padding: var(--yj-space-1) 0; border: 0; border-radius: var(--yj-radius-md); color: var(--yj-color-text-primary); background: transparent; text-align: left; font: inherit; cursor: pointer; }
 .connector-menu__option:focus-visible { outline: var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset: calc(-1 * var(--yj-focus-ring-width)); }
 .connector-menu__option:disabled { cursor: default; }
+.connector-menu__switch { flex: none; }
+/* A disabled selection still needs a legible track and a white thumb. The
+   global disabled palette otherwise reduces this small control to a grey dot. */
+.connector-menu__switch.n-switch--disabled {
+  --n-rail-color: var(--yj-color-control-track) !important;
+  --n-rail-color-active: var(--yj-color-control-track) !important;
+  --n-button-color: var(--yj-color-control-switch-thumb) !important;
+}
 .connector-menu__name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--yj-font-size-body); }
 .connector-menu__status { flex: none; padding-inline: var(--yj-space-1); border-radius: var(--yj-radius-xs); color: var(--yj-color-text-secondary); background: var(--yj-color-control-hover); font-size: var(--yj-font-size-caption); line-height: var(--yj-badge-line-height); white-space: nowrap; }
 .connector-menu__status--warning { color: var(--yj-color-semantic-warning-ink); background: var(--yj-color-warning-soft); }

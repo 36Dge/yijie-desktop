@@ -445,7 +445,7 @@ describe("FEAT-164 daily deployment binding", () => {
     const script = String.raw`
 import importlib.util, pathlib, tempfile, os, datetime as dt, copy, json, hashlib, sqlite3
 p=pathlib.Path(__import__('sys').argv[1]); spec=importlib.util.spec_from_file_location('d1',p);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-root=pathlib.Path(tempfile.mkdtemp(prefix='feat164-d1-binding-',dir=os.environ.get('FEAT164_D1_TEST_ROOT')))
+root=pathlib.Path(tempfile.mkdtemp(prefix='feat164-d1-binding-',dir=os.environ.get('FEAT164_D1_TEST_ROOT'))).resolve()
 origin=root/'original/yijie-desktop';candidate=root/'candidate/yijie-desktop';candidate.mkdir(parents=True)
 for home in ['host-home','codex-home']:
  d=origin/'.local/demo-fast'/home;d.mkdir(parents=True,mode=0o700)

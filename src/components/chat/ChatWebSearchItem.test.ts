@@ -8,6 +8,7 @@ import { webSourceActionsKey } from "../../composables/useWebSources";
 import ChatWebSearchItem from "./ChatWebSearchItem.vue";
 
 enableAutoUnmount(afterEach);
+afterEach(() => vi.useRealTimers());
 function item(search: NativeWebSearchDisplay = {action: "search", queries: ["杭州 河坊街", "清河坊 历史"], sources: [
   {title: "清河坊历史文化街区", url: "https://example.org/hefang"}, {url: "https://example.org/history"},
 ]}, active = false, id = "search", live = active) {
@@ -91,6 +92,35 @@ describe("compact native web search disclosure", () => {
     expect(wrapper.text()).toContain("当前进度待确认");
     await wrapper.setProps({item: {...item(), activityLabel: "当前权限不允许读取此记录"}});
     expect(wrapper.get('[role="note"]').text()).toContain("当前权限不允许读取此记录");
+  });
+
+  it("uses the shared short scrollbar for its own results and cleans up when collapsed", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(ChatWebSearchItem, {attachTo: document.body, props: {item: item()}});
+    await wrapper.get("button").trigger("click");
+    const region = wrapper.get('[role="region"]');
+    const panel = region.element as HTMLElement;
+    Object.defineProperties(panel, {scrollHeight: {value: 650}, clientHeight: {value: 126}});
+    panel.style.setProperty("--yj-ui-scale", "2");
+    panel.scrollTop = 100;
+    await region.trigger("scroll");
+    const rail = wrapper.get(".chat-short-scrollbar");
+    const thumb = wrapper.get('[role="scrollbar"]');
+    expect(thumb.attributes("aria-controls")).toBe(region.attributes("id"));
+    expect(thumb.attributes("aria-label")).toBe("滚动网页搜索结果");
+    expect(thumb.attributes("aria-valuemax")).toBe("524");
+    expect(rail.classes()).toContain("chat-short-scrollbar--active");
+    await vi.advanceTimersByTimeAsync(700);
+    expect(rail.classes()).not.toContain("chat-short-scrollbar--active");
+    await thumb.trigger("keydown", {key: "End"});
+    expect(panel.scrollTop).toBe(524);
+    const wheel = new WheelEvent("wheel", {deltaY: -120, bubbles: true, cancelable: true});
+    rail.element.dispatchEvent(wheel);
+    expect(panel.contains(rail.element)).toBe(true);
+    expect(wheel.defaultPrevented).toBe(false);
+    await wrapper.get("button").trigger("click");
+    expect(wrapper.find('[role="scrollbar"]').exists()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each([

@@ -1,0 +1,365 @@
+{
+  "scope": "Desktop local worktree catalog-generation fix; not a release qualification",
+  "frontend": {
+    "numPassedTests": 1977,
+    "numFailedTests": 32,
+    "numPendingTests": 16
+  },
+  "frontendFailures": [
+    {
+      "file": "scripts/check-feat128-s9b-d-dependencies.test.mjs",
+      "failedTests": [
+        "FEAT-128 S9B-D dependency boundary checks the actual package, lock, notice and static import boundary"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "scripts/feat164-g2v-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/feat164-successor-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/feat164-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/retained-expert-resources.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/run-local-demo-fast.test.mjs",
+      "failedTests": [
+        "FEAT-164 daily deployment binding preserves original synthetic Homes and rejects incomplete stage/source approval"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "scripts/sync-desktop-skill-resources.test.mjs",
+      "failedTests": [
+        "Desktop v2 Skill resources builds demo_fast with its exact compile-time profile and local channel"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "scripts/tests/feat164-candidate-closure.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/tests/feat164-daily-profile.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/tests/feat164-generation.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "src/api/call-surfaces.feat164.test.ts",
+      "failedTests": [
+        "v2 market wrapper sends the exact active model and original operation",
+        "v2 expert wrapper sends the exact active model and original operation"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/domain/chat-artifact-native.test.ts",
+      "failedTests": [
+        "private Artifact native boundary accepts only identity fields in every request payload"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "failedTests": [
+        "private chat IPC v2 JSON Schema accepts an explicit null project for new tasks while requiring the project field",
+        "private chat IPC v2 JSON Schema accepts valid attachment and history instances",
+        "private chat IPC v2 JSON Schema rejects attachment type and media-type mismatches",
+        "private chat IPC v2 JSON Schema rejects invalid persisted history blocks and missing text projections",
+        "private chat IPC v2 JSON Schema rejects duplicate native drag paths",
+        "private chat IPC v2 JSON Schema keeps draft targets closed, explicit, and non-nil",
+        "private chat IPC v2 JSON Schema accepts only closed attachment import failure reasons",
+        "private chat IPC v2 JSON Schema keeps attachment progress aggregate and free of file metadata"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/icons/registry.test.ts",
+      "failedTests": [
+        "iconRegistry exposes only the semantic icons required by the app"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "tests/feat-131/chat-event-replay-harness.test.ts",
+      "failedTests": [
+        "FEAT-131 raw event replay: GS-001-streaming-complete.synthetic.json passes raw payloads through the production parser and store deterministically",
+        "FEAT-131 raw event replay: GS-012-resync-recovery.synthetic.json passes raw payloads through the production parser and store deterministically",
+        "FEAT-131 raw event replay: GS-013-sequence-gap.synthetic.json passes raw payloads through the production parser and store deterministically"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/schedules/ScheduledPlanForm.feat164.test.ts",
+      "failedTests": [
+        "mounted candidate form preserves explicit model kimi-k3-1-pro-max-v1 through save admission",
+        "mounted candidate form preserves explicit model kimi-k3-max-v1 through save admission"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/chat/ChatNativeCommand.test.ts",
+      "failedTests": [
+        "FEAT-136 native Command display preserves legal empty output for completed without calling it success",
+        "FEAT-136 native Command display preserves legal empty output for failed without calling it success",
+        "FEAT-136 native Command display preserves legal empty output for declined without calling it success"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/yijie/YjSidebar.test.ts",
+      "failedTests": [
+        "YjSidebar permission rendering hides task history in icon mode and preserves collapsed directories when restored"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "failedTests": [
+        "FEAT-126 ChatPage publishes a streaming burst and follows new content at most once per frame",
+        "FEAT-126 ChatPage replaces a queued presentation frame when the selected session changes",
+        "FEAT-126 ChatPage does not switch the renderer when metadata-only reasoning enters the projection",
+        "FEAT-126 ChatPage does not treat an active empty reasoning Item as historical authority loss",
+        "FEAT-126 ChatPage renders an empty-text assistant turn with trusted Artifact identity and all typed clients"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.permission-refresh.test.ts",
+      "failedTests": [
+        "FEAT158 explains normal same-scope permission renewal cancelling a quick-prompt confirmation and accepts a fresh explicit selection"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.prefill.test.ts",
+      "failedTests": [
+        "FEAT158 keeps an existing draft, then replaces it from the already-selected expert capsule using real nested dialogs and memory routing"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.test.ts",
+      "failedTests": [
+        "extensions page tab continuity closes details when switching away and returns to the default expert tab on a fresh visit"
+      ],
+      "runnerMismatch": false
+    }
+  ],
+  "independentFailureReproduction": {
+    "numPassedTests": 205,
+    "numFailedTests": 32,
+    "numPendingTests": 4
+  },
+  "independentFailureFiles": [
+    {
+      "file": "scripts/check-feat128-s9b-d-dependencies.test.mjs",
+      "failedTests": [
+        "FEAT-128 S9B-D dependency boundary checks the actual package, lock, notice and static import boundary"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "scripts/run-local-demo-fast.test.mjs",
+      "failedTests": [
+        "FEAT-164 daily deployment binding preserves original synthetic Homes and rejects incomplete stage/source approval"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "scripts/sync-desktop-skill-resources.test.mjs",
+      "failedTests": [
+        "Desktop v2 Skill resources builds demo_fast with its exact compile-time profile and local channel"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/api/call-surfaces.feat164.test.ts",
+      "failedTests": [
+        "v2 market wrapper sends the exact active model and original operation",
+        "v2 expert wrapper sends the exact active model and original operation"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/icons/registry.test.ts",
+      "failedTests": [
+        "iconRegistry exposes only the semantic icons required by the app"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/domain/chat-artifact-native.test.ts",
+      "failedTests": [
+        "private Artifact native boundary accepts only identity fields in every request payload"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "failedTests": [
+        "private chat IPC v2 JSON Schema accepts an explicit null project for new tasks while requiring the project field",
+        "private chat IPC v2 JSON Schema accepts valid attachment and history instances",
+        "private chat IPC v2 JSON Schema rejects attachment type and media-type mismatches",
+        "private chat IPC v2 JSON Schema rejects invalid persisted history blocks and missing text projections",
+        "private chat IPC v2 JSON Schema rejects duplicate native drag paths",
+        "private chat IPC v2 JSON Schema keeps draft targets closed, explicit, and non-nil",
+        "private chat IPC v2 JSON Schema accepts only closed attachment import failure reasons",
+        "private chat IPC v2 JSON Schema keeps attachment progress aggregate and free of file metadata"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "tests/feat-131/chat-event-replay-harness.test.ts",
+      "failedTests": [
+        "FEAT-131 raw event replay: GS-001-streaming-complete.synthetic.json passes raw payloads through the production parser and store deterministically",
+        "FEAT-131 raw event replay: GS-012-resync-recovery.synthetic.json passes raw payloads through the production parser and store deterministically",
+        "FEAT-131 raw event replay: GS-013-sequence-gap.synthetic.json passes raw payloads through the production parser and store deterministically"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/schedules/ScheduledPlanForm.feat164.test.ts",
+      "failedTests": [
+        "mounted candidate form preserves explicit model kimi-k3-1-pro-max-v1 through save admission",
+        "mounted candidate form preserves explicit model kimi-k3-max-v1 through save admission"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/chat/ChatNativeCommand.test.ts",
+      "failedTests": [
+        "FEAT-136 native Command display preserves legal empty output for completed without calling it success",
+        "FEAT-136 native Command display preserves legal empty output for failed without calling it success",
+        "FEAT-136 native Command display preserves legal empty output for declined without calling it success"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/components/yijie/YjSidebar.test.ts",
+      "failedTests": [
+        "YjSidebar permission rendering hides task history in icon mode and preserves collapsed directories when restored"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "failedTests": [
+        "FEAT-126 ChatPage publishes a streaming burst and follows new content at most once per frame",
+        "FEAT-126 ChatPage replaces a queued presentation frame when the selected session changes",
+        "FEAT-126 ChatPage does not switch the renderer when metadata-only reasoning enters the projection",
+        "FEAT-126 ChatPage does not treat an active empty reasoning Item as historical authority loss",
+        "FEAT-126 ChatPage renders an empty-text assistant turn with trusted Artifact identity and all typed clients"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.permission-refresh.test.ts",
+      "failedTests": [
+        "FEAT158 explains normal same-scope permission renewal cancelling a quick-prompt confirmation and accepts a fresh explicit selection"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.prefill.test.ts",
+      "failedTests": [
+        "FEAT158 keeps an existing draft, then replaces it from the already-selected expert capsule using real nested dialogs and memory routing"
+      ],
+      "runnerMismatch": false
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.test.ts",
+      "failedTests": [
+        "extensions page tab continuity closes details when switching away and returns to the default expert tab on a fresh visit"
+      ],
+      "runnerMismatch": false
+    }
+  ],
+  "nodeTestSeparateRun": {
+    "passed": 26,
+    "failed": 0
+  },
+  "native": {
+    "passed": 591,
+    "failed": 29,
+    "ignored": 14,
+    "measured": 0,
+    "filteredOut": 27,
+    "failedTests": [
+      "chat::application::scheduled_dispatch_tests::feat155_3c1_existing_user_bookmark_keeps_original_path_and_session",
+      "chat::application::scheduled_dispatch_tests::feat155_3c1_mapping_recovery_enqueues_only_original_turn_once",
+      "chat::application::scheduled_dispatch_tests::feat155_3c1_three_targets_last_debit_and_dedicated_reuse",
+      "chat::application::scheduled_dispatch_tests::feat155_3c1_pending_approval_blocks_then_same_operation_can_start",
+      "chat::application::scheduled_dispatch_tests::feat155_draft_accepted_recovery_null_origin_observes_sse_without_post",
+      "chat::application::scheduled_dispatch_tests::feat155_3c1_original_coordinator_reaches_native_terminal_and_stops_normally",
+      "chat::application::scheduled_dispatch_tests::manual_composition_tests::feat155_4c1_candidate_manual_three_targets_original_coordinator",
+      "chat::application::scheduled_dispatch_tests::manual_composition_tests::feat155_4d1_background_clock_reads_without_send_admission",
+      "chat::application::scheduled_dispatch_tests::single_composition_tests::feat155_4c3_single_and_rerun_three_targets_preserve_automatic_grant",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_long_sse_uses_same_tick_and_records_busy",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_rerun_diff_confirmation_idempotence_and_history_unchanged",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_paused_cancelled_cursors_do_not_starve_and_budget_requires_confirmation",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_rerun_of_automatic_does_not_change_slot_cursor_or_original",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_three_automatic_targets_dedup_and_last_debit",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_original_coordinator_automatically_reaches_terminal_and_stops",
+      "chat::application::tests::feat132_coordinator_recovers_missing_cursor_from_confirmed_previous_host",
+      "chat::application::tests::feat132_native_sse_commits_final_objects_without_legacy_body_reconciliation",
+      "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_4c2_current_automatic_three_targets_no_manual_permit_and_last_debit",
+      "chat::application::tests::feat132_open_native_stream_dispatches_interrupt_before_terminal",
+      "chat::application::tests::feat134_background_recovery_terminalizes_preexisting_failed_turn_projection",
+      "chat::application::tests::feat134_direct_start_not_ready_fails_once_without_turn_post",
+      "chat::application::tests::feat134_first_claim_turn_active_fails_without_binding_or_retry",
+      "chat::artifact_file_native::tests::preview_rejects_unauthorized_formats_controls_bidi_and_invalid_documents",
+      "chat::application::tests::feat158_native_observers_capture_overlapping_sessions",
+      "chat::application::tests::v2_invalid_accepted_response_retries_same_operation_id",
+      "chat::artifact::tests::sqlcipher_commit_ack_reopen_expiry_receipt_and_delete_are_atomic",
+      "chat::database::tests::failed_start_turn_dispatch_v2_atomically_terminalizes_only_the_queued_turn",
+      "chat::kimi_k31_tests::feat164_canonical_migration_paths_and_repeat_are_valid",
+      "chat::kimi_k31_tests::feat164_populated_migrations_preserve_history_and_delivery_facts"
+    ],
+    "existingIgnored": [
+      "chat::application::tests::s10p3_real_desktop_rust_path_binds_public_task_before_host_and_retains_public_row ... ignored, S10P3 local integration: requires the explicit S10E synthetic API/identity profile",
+      "chat::database::isolated_model_migration::tests::feat164_archive_readonly_preflight ... ignored, explicit actual inspection copy only; no original database access",
+      "chat::database::isolated_model_migration::tests::feat164_controlled_daily_migration ... ignored, requires fresh retained natural legacy fixture; never the actual daily data root",
+      "chat::database::isolated_model_migration::tests::feat164_controlled_isolated_migration ... ignored, requires fresh retained natural legacy fixture and isolated test output",
+      "chat::database::isolated_model_migration::tests::feat164_disabled_migration_is_rejected ... ignored, explicit feature-off process; no database access",
+      "chat::database::isolated_model_migration::tests::feat164_settled_history_preflight_readonly_copy ... ignored, explicit retained inspection copy only; no original data or migration",
+      "chat::database::tests::feat132_cross_repo_host_bytes_reach_native_storage_without_identity_rewriting ... ignored, Run pnpm check:native-integration with actual Host projection output",
+      "chat::ipc::web_sources::tests::reference_website_returns_its_own_icon ... ignored, Explicit normal network check against the requested reference website",
+      "chat::schedules::execution::preparation::tests::feat156_bound_targets_reject_changed_model_without_consuming_grant ... ignored, requires explicit local demo_fast model writer environment",
+      "chat::schedules::feat164_natural_plan_tests::feat164_natural_plan_upgrade ... ignored, explicit retained root; run legacy producer then candidate upgrade and reopen",
+      "chat::schedules::ipc::tests::draft_tests::feat156_model_draft_enters_original_claim_and_recovery_path ... ignored, requires the explicit local demo_fast model writer environment",
+      "chat::schedules::ipc::tests::draft_tests::feat156_projectless_chat_is_a_valid_target_and_grant_workspace ... ignored, requires the explicit local demo_fast model writer environment",
+      "feat126_secure_storage::tests::signed_bundle_exercises_three_run_scoped_items_without_default_namespace_access ... ignored, requires an Apple Development signed bundle with Protected Data Keychain entitlement",
+      "native_auth::keychain::tests::protected_data_keychain_s7_round_trip ... ignored, S7 local integration: mutates and then removes an isolated synthetic Keychain item"
+    ],
+    "connectorPassed": 57,
+    "binaryAndDocTargets": "Both completed successfully; 0 registered tests in each."
+  },
+  "checks": {
+    "generateCheck": "PASS",
+    "defaultCatalogCheck": "PASS",
+    "qualifiedCatalogCheck": "PASS",
+    "makeLint": "PASS",
+    "makeBuild": "PASS",
+    "docsBuild": "PASS",
+    "allChecksPassed": false
+  }
+}

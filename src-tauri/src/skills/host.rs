@@ -696,7 +696,20 @@ pub(crate) async fn reconcile_background(
     chat: &ChatRuntime,
     reason: &'static str,
 ) {
-    let _ = runtime.scan(chat, reason).await;
+    match runtime.scan(chat, reason).await {
+        Ok(snapshot) if reason == "startup" => eprintln!(
+            "Skill startup ready: catalog={}, installed={}, enabled={}",
+            snapshot.skills.len(),
+            snapshot
+                .skills
+                .iter()
+                .filter(|item| item.installation_status == "installed")
+                .count(),
+            snapshot.skills.iter().filter(|item| item.enabled).count(),
+        ),
+        Err(error) => eprintln!("Skill reconciliation unavailable: {}", error.code),
+        _ => {}
+    }
 }
 
 #[cfg(test)]

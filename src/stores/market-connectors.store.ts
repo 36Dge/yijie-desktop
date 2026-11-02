@@ -28,11 +28,6 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
     const operationObservers = new Set<string>();
     let operationObservation = false, operationPollBusy = false;
     let operationTimer: ReturnType<typeof setTimeout> | null = null;
-    // Session-local only: refresh/navigation/context renewal must not turn a
-    // failed connection check into another external attempt.
-    const restorationChecked = new Set<string>();
-    let restorationBusy = false;
-    function restorationKey(item: Installation): string { return `${item.installationId}:${item.generation}`; }
     const operationBudgets = new Map<string, { startedAt: number; attempts: number; failures: number; lastRead: number }>();
     const canManage = computed(() => snapshot.value?.capabilities.includes("connector.manage") === true);
     const selectionAvailable = computed(() => contextId.value !== null && snapshot.value?.executionAvailable === true && snapshot.value.capabilities.includes("connector.use") && !error.value && phase.value === "ready");
@@ -83,7 +78,7 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
     function forgetAttempt(id: string): void { const next = { ...unconfirmed.value }; delete next[id]; unconfirmed.value = next; }
     function installation(id: string): Installation | undefined { return snapshot.value?.installations.find(item => item.serviceId === id && item.status !== "removed"); }
     function clear(): void {
-      stopOperationTimer(); operationBudgets.clear(); restorationChecked.clear(); mutationEpoch++;
+      stopOperationTimer(); operationBudgets.clear(); mutationEpoch++;
       scopeEpoch++; readEpoch++; contextId.value = null; authorityScope.value = null; snapshot.value = null; phase.value = "loading";
       refreshing.value = false; error.value = null; pending.value = new Set(); unconfirmed.value = {}; operationErrors.value = {};
     }
@@ -124,31 +119,8 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       } finally {
         if (scope === scopeEpoch && read === readEpoch) {
           refreshing.value = false;
-          void restoreEnabled();
         }
         scheduleOperationPoll();
-      }
-    }
-    async function restoreEnabled(): Promise<void> {
-      if (restorationBusy || !contextId.value || phase.value !== "ready" || error.value || !canManage.value) return;
-      restorationBusy = true;
-      const scope = scopeEpoch;
-      try {
-        while (scope === scopeEpoch && contextId.value && phase.value === "ready" && !error.value && canManage.value) {
-          const item = snapshot.value?.installations.find(item => item.status === "installed" && item.desiredEnabled && !restorationChecked.has(restorationKey(item)));
-          if (!item) break;
-          restorationChecked.add(restorationKey(item));
-          // Reuse only the noninteractive enable path. Existing operations keep
-          // their original identity; authorization/configuration require a user.
-          const entry = entries.value.find(entry => entry.id === item.serviceId);
-          if (item.effectiveEnabled || item.activeOperation || unconfirmed.value[item.serviceId] || !entry?.actions.includes("enable")) continue;
-          await execute("enable", item.serviceId);
-        }
-      } finally {
-        restorationBusy = false;
-        // A renewed context may have completed its read while the old attempt
-        // was still returning. Re-evaluate the new scope, never its old receipt.
-        if (scope !== scopeEpoch) void restoreEnabled();
       }
     }
     function acceptMutation(result: MutationResult): void {
@@ -180,7 +152,6 @@ export function createMarketConnectorStoreDefinition(client: MarketConnectorClie
       const context = contextId.value, entry = entries.value.find(item => item.id === serviceId);
       if (!context || !entry || pending.value.has(serviceId) || !entry.actions.includes(action)) return false;
       const scope = scopeEpoch, item = installation(serviceId);
-      if (item) restorationChecked.add(restorationKey(item));
       setPending(serviceId, true); setError(serviceId, null); readEpoch++; mutationEpoch++; refreshing.value = false;
       const stillCurrent = () => scope === scopeEpoch && context === contextId.value;
       try {

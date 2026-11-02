@@ -4026,7 +4026,7 @@ mod tests {
             ("kind", "report", ReadyFileReadError::Unsupported),
             (
                 "media_type",
-                "text/markdown",
+                "application/octet-stream",
                 ReadyFileReadError::Unsupported,
             ),
         ] {

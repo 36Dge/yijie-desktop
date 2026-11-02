@@ -7,6 +7,13 @@
   z-index: var(--yj-z-popover);
 }
 
+/* Raw popovers own positioning; the inner menu owns the rounded surface and
+   shadow. Naive UI otherwise leaves a second, square shadow on the wrapper. */
+.chat-control-overlay .n-popover--raw {
+  background: transparent;
+  box-shadow: none;
+}
+
 .chat-control-menu {
   pointer-events: auto;
   zoom: var(--yj-ui-scale, 1);

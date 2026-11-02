@@ -4,7 +4,7 @@ import { defineComponent, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativeTurnTiming } from "../api/generated/chat-turn-timing.gen";
 import type { ConversationTimelineTurnViewModel } from "../domain/conversation-timeline";
-import { useChatTurnTiming } from "./useChatTurnTiming";
+import { useChatTurnTiming, useChatTurnTimingDetails } from "./useChatTurnTiming";
 import { turnTimingLabel } from "../domain/chat-turn-timing";
 
 const native = (duration?: number): NativeTurnTiming => ({
@@ -30,6 +30,15 @@ function harness(read: (id: string, signal: AbortSignal) => Promise<NativeTurnTi
 afterEach(() => vi.useRealTimers());
 
 describe("native turn duration", () => {
+  it("shares the same native read for the elapsed label and completion timestamp", async () => {
+    const read=vi.fn(async()=>native(51345));
+    let details!: ReturnType<typeof useChatTurnTimingDetails>;
+    const wrapper=mount(defineComponent({setup(){details=useChatTurnTimingDetails({scope:()=>"session",turns:()=>[turn("turn",true)],read});return ()=>null;}}));
+    await flushPromises();
+    expect(details.labels.value.turn).toBe("已完成 51s");
+    expect(details.facts.value.turn?.completed_at).toEqual({state:"known",value:150});
+    expect(read).toHaveBeenCalledTimes(1); wrapper.unmount();
+  });
   it("ticks from native start without polling, then freezes to native duration rather than timestamp difference", async () => {
     vi.useFakeTimers(); vi.setSystemTime(107000);
     const read = vi.fn().mockResolvedValueOnce(native()).mockResolvedValueOnce(native(51345));

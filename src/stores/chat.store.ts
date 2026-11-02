@@ -1,3 +1,5 @@
+import { createConversationComposer } from "../domain/conversation-view";
+import { measureChatRender } from "../domain/chat-render-performance";
 import { useChatExpertsStore, type ExpertTurnIntent } from "./chat-experts.store";
 import { ExpertClientError } from "../api/expert-native-client";
 import { marketHostNativeClient, MarketChatError } from "../api/market-host-native-client";
@@ -1757,10 +1759,13 @@ export function createChatStoreDefinition(
       }
     }
 
+    const composeNativeViews = createConversationComposer();
+    let cachedHistory: { sessionId: string; history: NonNullable<typeof history.value>; snapshot: ReturnType<typeof conversationSnapshotFromHistory> } | undefined;
     function displayNativeViews(): void {
       const sessionId = selectedSessionId.value;
       if (!sessionId || !history.value) return;
-      conversationState.value = composeConversationView(conversationSnapshotFromHistory(sessionId, history.value), Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value, Object.values(nativeArchivesV5.value));
+      if (cachedHistory?.sessionId !== sessionId || cachedHistory.history !== history.value) cachedHistory = { sessionId, history: history.value, snapshot: conversationSnapshotFromHistory(sessionId, history.value) };
+      conversationState.value = measureChatRender("conversation", () => composeNativeViews(cachedHistory!.snapshot, Object.values(nativeViews.value), Object.values(localSubmissions.value), Object.values(nativeRecordDiagnostics.value), artifactReferenceItems.value, Object.values(nativeArchivesV5.value)));
       const latest = Object.values(nativeViews.value).sort((a,b) => (b.ordinal ?? 0) - (a.ordinal ?? 0))[0];
       if (!latest) return;
       syncLiveProjection(liveProjection(conversationState.value, sessionId, latest.turnId));
@@ -1778,7 +1783,7 @@ export function createChatStoreDefinition(
       if (previous && BigInt(previous.revision) >= BigInt(event.view.revision)) return;
       nativeViews.value = {...nativeViews.value, [event.view.turnId]: event.view};
       const submission = localSubmissions.value[event.view.turnId];
-      if (submission) localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
+      if (submission && submission.status !== "submitted") localSubmissions.value = {...localSubmissions.value, [event.view.turnId]: {...submission, status: "submitted"}};
       displayNativeViews();
       if (event.view.terminalObserved || event.view.statusSource === "runtime_read") void resyncSelected();
       else if (event.view.status === "inProgress") {

@@ -129,6 +129,7 @@ fn feat164_migration_expands_without_rewriting_model_facts() {
     );
 }
 
+#[cfg(feature = "kimi-k31-pro-candidate")]
 #[test]
 fn feat164_canonical_migration_paths_and_repeat_are_valid() {
     for previous in [15, 29, 37, 38, 39, 40, 41] {
@@ -154,6 +155,7 @@ fn feat164_canonical_migration_paths_and_repeat_are_valid() {
     }
 }
 
+#[cfg(feature = "kimi-k31-pro-candidate")]
 #[test]
 fn feat164_populated_migrations_preserve_history_and_delivery_facts() {
     use rusqlite::types::Value;
@@ -259,4 +261,39 @@ fn feat164_candidate_decoder_separates_readable_and_executable_identity() {
     assert!(super::models::executable_profile("kimi-k3-1-pro-max-v1"));
     assert!(serde_json::from_str::<wire::ActiveProfileId>("\"kimi-k3-max-v1\"").is_err());
     assert!(serde_json::from_str::<wire::ProfileId>("\"future-profile\"").is_err());
+}
+
+#[cfg(not(feature = "kimi-k31-pro-candidate"))]
+#[test]
+fn feat164_old_reader_refuses_new_model_storage_without_mutation() {
+    let mut db = Connection::open_in_memory().unwrap();
+    migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION).unwrap();
+    let before: String = db
+        .query_row(
+            "SELECT group_concat(version || ':' || sha256) FROM chat_schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        migrations::validate_reader(&db),
+        Err(super::error::ChatError::MigrationFailed)
+    );
+    assert_eq!(
+        migrations::migrate_to_target(&mut db, migrations::PLAN_RETIREMENT_SCHEMA_VERSION),
+        Err(super::error::ChatError::MigrationFailed)
+    );
+    let after: String = db
+        .query_row(
+            "SELECT group_concat(version || ':' || sha256) FROM chat_schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(before, after);
+    assert_eq!(
+        db.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        migrations::PLAN_RETIREMENT_SCHEMA_VERSION
+    );
 }

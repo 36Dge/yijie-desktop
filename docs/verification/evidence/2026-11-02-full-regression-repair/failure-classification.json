@@ -1,0 +1,629 @@
+{
+  "status": "all_executed_checks_passed",
+  "original_frontend_failures": [
+    {
+      "file": "scripts/check-feat128-s9b-d-dependencies.test.mjs",
+      "test": "FEAT-128 S9B-D dependency boundary checks the actual package, lock, notice and static import boundary",
+      "classification": "stale-checker",
+      "resolution": "Validate the already approved ECharts patch and current dependency/import boundary; preserve immutable historical audit without freezing all later UI changes."
+    },
+    {
+      "file": "scripts/run-local-demo-fast.test.mjs",
+      "test": "FEAT-164 daily deployment binding preserves original synthetic Homes and rejects incomplete stage/source approval",
+      "classification": "stale-fixture",
+      "resolution": "Canonicalize macOS /var -> /private/var temporary directory using Path.resolve, matching real path authority."
+    },
+    {
+      "file": "scripts/sync-desktop-skill-resources.test.mjs",
+      "test": "Desktop v2 Skill resources builds demo_fast with its exact compile-time profile and local channel",
+      "classification": "stale-fixture",
+      "resolution": "Assert the shared development resource installer used by the current launcher."
+    },
+    {
+      "file": "src/api/call-surfaces.feat164.test.ts",
+      "test": "v2 market wrapper sends the exact active model and original operation",
+      "classification": "fixture-environment",
+      "resolution": "Enable current candidate/model flags explicitly in the isolated test module; production defaults unchanged."
+    },
+    {
+      "file": "src/api/call-surfaces.feat164.test.ts",
+      "test": "v2 expert wrapper sends the exact active model and original operation",
+      "classification": "fixture-environment",
+      "resolution": "Enable current candidate/model flags explicitly in the isolated test module; production defaults unchanged."
+    },
+    {
+      "file": "src/domain/chat-artifact-native.test.ts",
+      "test": "private Artifact native boundary accepts only identity fields in every request payload",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotation in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema accepts an explicit null project for new tasks while requiring the project field",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema accepts valid attachment and history instances",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema rejects attachment type and media-type mismatches",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema rejects invalid persisted history blocks and missing text projections",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema rejects duplicate native drag paths",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema keeps draft targets closed, explicit, and non-nil",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema accepts only closed attachment import failure reasons",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/domain/chat-ipc-schema.test.ts",
+      "test": "private chat IPC v2 JSON Schema keeps attachment progress aggregate and free of file metadata",
+      "classification": "stale-schema-consumer",
+      "resolution": "Register the existing schema annotations in strict AJV; do not weaken validation."
+    },
+    {
+      "file": "src/icons/registry.test.ts",
+      "test": "iconRegistry exposes only the semantic icons required by the app",
+      "classification": "stale-expectation",
+      "resolution": "Extend the exact approved registry list with current semantic icons."
+    },
+    {
+      "file": "tests/feat-131/chat-event-replay-harness.test.ts",
+      "test": "FEAT-131 raw event replay: GS-001-streaming-complete.synthetic.json passes raw payloads through the production parser and store deterministically",
+      "classification": "stale-transport-fixture",
+      "resolution": "Use current native-view/purpose/history interfaces; legacy live content remains inert and explicit history resync is verified."
+    },
+    {
+      "file": "tests/feat-131/chat-event-replay-harness.test.ts",
+      "test": "FEAT-131 raw event replay: GS-012-resync-recovery.synthetic.json passes raw payloads through the production parser and store deterministically",
+      "classification": "stale-transport-fixture",
+      "resolution": "Use current native-view/purpose/history interfaces; legacy live content remains inert and explicit history resync is verified."
+    },
+    {
+      "file": "tests/feat-131/chat-event-replay-harness.test.ts",
+      "test": "FEAT-131 raw event replay: GS-013-sequence-gap.synthetic.json passes raw payloads through the production parser and store deterministically",
+      "classification": "stale-transport-fixture",
+      "resolution": "Use current native-view/purpose/history interfaces; legacy live content remains inert and explicit history resync is verified."
+    },
+    {
+      "file": "src/components/schedules/ScheduledPlanForm.feat164.test.ts",
+      "test": "mounted candidate form preserves explicit model kimi-k3-1-pro-max-v1 through save admission",
+      "classification": "fixture-environment",
+      "resolution": "Enable current candidate/model flags explicitly in the isolated test module; production defaults unchanged."
+    },
+    {
+      "file": "src/components/schedules/ScheduledPlanForm.feat164.test.ts",
+      "test": "mounted candidate form preserves explicit model kimi-k3-max-v1 through save admission",
+      "classification": "fixture-environment",
+      "resolution": "Enable current candidate/model flags explicitly in the isolated test module; production defaults unchanged."
+    },
+    {
+      "file": "src/components/chat/ChatNativeCommand.test.ts",
+      "test": "FEAT-136 native Command display preserves legal empty output for completed without calling it success",
+      "classification": "stale-copy",
+      "resolution": "Verify the current neutral empty-output wording, retaining no-invented-success assertions."
+    },
+    {
+      "file": "src/components/chat/ChatNativeCommand.test.ts",
+      "test": "FEAT-136 native Command display preserves legal empty output for failed without calling it success",
+      "classification": "stale-copy",
+      "resolution": "Verify the current neutral empty-output wording, retaining no-invented-success assertions."
+    },
+    {
+      "file": "src/components/chat/ChatNativeCommand.test.ts",
+      "test": "FEAT-136 native Command display preserves legal empty output for declined without calling it success",
+      "classification": "stale-copy",
+      "resolution": "Verify the current neutral empty-output wording, retaining no-invented-success assertions."
+    },
+    {
+      "file": "src/components/yijie/YjSidebar.test.ts",
+      "test": "YjSidebar permission rendering hides task history in icon mode and preserves collapsed directories when restored",
+      "classification": "functional-defect",
+      "resolution": "v-show on a component with Fragment/Teleport roots cannot hide it; apply visibility to a real wrapper while preserving child state."
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "test": "FEAT-126 ChatPage publishes a streaming burst and follows new content at most once per frame",
+      "classification": "stale-render-fixture",
+      "resolution": "Measure actual frame batch and scroll effects, current attachment/diagnostic UI, and a genuinely queued initial reasoning state."
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "test": "FEAT-126 ChatPage replaces a queued presentation frame when the selected session changes",
+      "classification": "stale-render-fixture",
+      "resolution": "Measure actual frame batch and scroll effects, current attachment/diagnostic UI, and a genuinely queued initial reasoning state."
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "test": "FEAT-126 ChatPage does not switch the renderer when metadata-only reasoning enters the projection",
+      "classification": "stale-render-fixture",
+      "resolution": "Measure actual frame batch and scroll effects, current attachment/diagnostic UI, and a genuinely queued initial reasoning state."
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "test": "FEAT-126 ChatPage does not treat an active empty reasoning Item as historical authority loss",
+      "classification": "stale-render-fixture",
+      "resolution": "Measure actual frame batch and scroll effects, current attachment/diagnostic UI, and a genuinely queued initial reasoning state."
+    },
+    {
+      "file": "src/pages/chat/ChatPage.test.ts",
+      "test": "FEAT-126 ChatPage renders an empty-text assistant turn with trusted Artifact identity and all typed clients",
+      "classification": "stale-render-fixture",
+      "resolution": "Measure actual frame batch and scroll effects, current attachment/diagnostic UI, and a genuinely queued initial reasoning state."
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.permission-refresh.test.ts",
+      "test": "FEAT158 explains normal same-scope permission renewal cancelling a quick-prompt confirmation and accepts a fresh explicit selection",
+      "classification": "stale-accessibility-selector",
+      "resolution": "Find current expert actions using their accessible names."
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.prefill.test.ts",
+      "test": "FEAT158 keeps an existing draft, then replaces it from the already-selected expert capsule using real nested dialogs and memory routing",
+      "classification": "stale-accessibility-selector",
+      "resolution": "Find current expert actions using their accessible names."
+    },
+    {
+      "file": "src/pages/plugins/ExtensionsPage.test.ts",
+      "test": "extensions page tab continuity closes details when switching away and returns to the default expert tab on a fresh visit",
+      "classification": "stale-accessibility-selector",
+      "resolution": "Find current expert actions using their accessible names and section wording."
+    }
+  ],
+  "node_runner_mismatches": [
+    {
+      "file": "scripts/feat164-g2v-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/feat164-successor-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/feat164-verdict.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/retained-expert-resources.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/tests/feat164-candidate-closure.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/tests/feat164-daily-profile.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    },
+    {
+      "file": "scripts/tests/feat164-generation.test.mjs",
+      "failedTests": [],
+      "runnerMismatch": true
+    }
+  ],
+  "original_native_failures": [
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_3c1_existing_user_bookmark_keeps_original_path_and_session",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_3c1_mapping_recovery_enqueues_only_original_turn_once",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_3c1_three_targets_last_debit_and_dedicated_reuse",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_3c1_pending_approval_blocks_then_same_operation_can_start",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_draft_accepted_recovery_null_origin_observes_sse_without_post",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::feat155_3c1_original_coordinator_reaches_native_terminal_and_stops_normally",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::manual_composition_tests::feat155_4c1_candidate_manual_three_targets_original_coordinator",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::manual_composition_tests::feat155_4d1_background_clock_reads_without_send_admission",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::single_composition_tests::feat155_4c3_single_and_rerun_three_targets_preserve_automatic_grant",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_long_sse_uses_same_tick_and_records_busy",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_rerun_diff_confirmation_idempotence_and_history_unchanged",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_paused_cancelled_cursors_do_not_starve_and_budget_requires_confirmation",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_rerun_of_automatic_does_not_change_slot_cursor_or_original",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_three_automatic_targets_dedup_and_last_debit",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_3c2_original_coordinator_automatically_reaches_terminal_and_stops",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::tests::feat132_coordinator_recovers_missing_cursor_from_confirmed_previous_host",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::tests::feat132_native_sse_commits_final_objects_without_legacy_body_reconciliation",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::scheduled_dispatch_tests::trigger_tests::feat155_4c2_current_automatic_three_targets_no_manual_permit_and_last_debit",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::tests::feat132_open_native_stream_dispatches_interrupt_before_terminal",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain."
+    },
+    {
+      "test": "chat::application::tests::feat134_background_recovery_terminalizes_preexisting_failed_turn_projection",
+      "classification": "functional-defect-and-stale-expectation",
+      "resolution": "Atomically mark outbox and local submission failed; never invent Runtime terminal facts."
+    },
+    {
+      "test": "chat::application::tests::feat134_direct_start_not_ready_fails_once_without_turn_post",
+      "classification": "stale-state-authority",
+      "resolution": "Assert local submission failed, no Runtime completion, and pending reasoning when no model ran."
+    },
+    {
+      "test": "chat::application::tests::feat134_first_claim_turn_active_fails_without_binding_or_retry",
+      "classification": "stale-state-authority",
+      "resolution": "Assert local submission failed, no Runtime completion, and pending reasoning when no model ran."
+    },
+    {
+      "test": "chat::artifact_file_native::tests::preview_rejects_unauthorized_formats_controls_bidi_and_invalid_documents",
+      "classification": "stale-supported-format",
+      "resolution": "Markdown is supported; use ordinary unsupported MIME to keep unsupported-format coverage."
+    },
+    {
+      "test": "chat::application::tests::feat158_native_observers_capture_overlapping_sessions",
+      "classification": "stale-protocol-fixture",
+      "resolution": "Current coordinator fixtures implement event v11 and native-thread v4; independent legacy decoder tests remain. Full rerun also revealed a stale pre-binding clock used to claim a newly queued turn; use the post-binding current timestamp, retaining concurrent-stream ordering and the original timeout."
+    },
+    {
+      "test": "chat::application::tests::v2_invalid_accepted_response_retries_same_operation_id",
+      "classification": "stale-retry-expectation",
+      "resolution": "Ambiguous accepted reply stays uncertain with the original operation and only one POST; do not resend."
+    },
+    {
+      "test": "chat::artifact::tests::sqlcipher_commit_ack_reopen_expiry_receipt_and_delete_are_atomic",
+      "classification": "stale-supported-format",
+      "resolution": "Markdown is supported; use ordinary unsupported MIME to keep unsupported-format coverage."
+    },
+    {
+      "test": "chat::database::tests::failed_start_turn_dispatch_v2_atomically_terminalizes_only_the_queued_turn",
+      "classification": "stale-state-authority",
+      "resolution": "Assert local submission failed, no Runtime completion, and pending reasoning when no model ran."
+    },
+    {
+      "test": "chat::kimi_k31_tests::feat164_canonical_migration_paths_and_repeat_are_valid",
+      "classification": "fixture-build-matrix",
+      "resolution": "Run new-schema migrations in the current Kimi writer build; ordinary build verifies rejection without mutation."
+    },
+    {
+      "test": "chat::kimi_k31_tests::feat164_populated_migrations_preserve_history_and_delivery_facts",
+      "classification": "fixture-build-matrix",
+      "resolution": "Run new-schema migrations in the current Kimi writer build; ordinary build verifies rejection without mutation."
+    }
+  ],
+  "additional_kimi_matrix_failures": [
+    {
+      "test": "chat::connectors::dispatch::tests::feat158_dispatch_preserves_private_snapshot_through_original_receipt_binding",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat158_expert_file_uses_existing_materializer_and_replays_after_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat158_feature_off_skips_new_expert_work_without_stalling_ordinary_conversations",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat158_unknown_dispatch_retains_expert_and_never_enters_legacy_claim",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat158_unknown_observation_preserves_typed_issue_and_local_submission_status",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat160_missing_receipt_alone_keeps_unknown_and_never_resends",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::feat160_confirmed_busy_rejection_uses_existing_terminal_path_and_survives_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::native_market_first_turn_reuses_content_and_commits_actual_binding_atomically",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::dispatch::tests::native_market_unknown_retains_original_operation_for_read_only_recovery",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::tests::feat157_selection_first_turn_snapshot_is_atomic_and_survives_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::expert_tests::feat158_expert_turn_freezes_with_existing_queue_and_replays_after_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::tests::feat157_selection_same_operation_binds_complete_intent_and_never_adopts_legacy",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::expert_tests::feat158_explicit_ordinary_is_a_frozen_expert_family_snapshot",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::tests::feat157_nonempty_selection_requires_explicit_ask_but_empty_preserves_modes",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::expert_tests::feat164_surfaces_expert_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::tests::feat162_k31_kimi_selection_preserves_receipt_after_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::connectors::selection::tests::feat164_surfaces_market_normal_reopen",
+      "classification": "fixture-model-family",
+      "resolution": "Use the compiled active profile and canonical compatible schema in ordinary fixtures; historical retirement fixtures keep old profiles."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_cancel_after_claim_survives_reopen_without_rewriting_or_reviving",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_cancel_releases_lane_and_allows_explicit_model_selection",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_market_and_expert_have_independent_proof_and_no_ordinary_claim",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_new_chat_binding_is_observed_before_first_turn_send",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_ordinary_final_send_binds_operation_profile_path_and_is_single_use",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_pause_blocks_claim_but_preserves_explicit_unsent_cancel",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_permission_turn_checks_nested_source_operation",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::delivery::tests::feat164_delivery_public_or_create_attempt_prevents_cancel_even_after_legacy_retry_reset",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::host_bridge::tests::feat164_delivery_http_admission_blocks_cancelled_and_sends_live_once",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::models::tests::feat156_model_outbox_freezes_profile_and_rejects_changed_retry",
+      "classification": "fixture-model-family-and-legacy-fence",
+      "resolution": "Use active profile and verify the current writer rejects the legacy model-switch entry before binding validation."
+    },
+    {
+      "test": "chat::schedules::execution::preparation::tests::feat156_schedule_model_is_in_grant_run_and_first_turn_snapshot",
+      "classification": "fixture-model-family-and-environment",
+      "resolution": "Use current profile/schema and isolate normal local model enablement."
+    },
+    {
+      "test": "chat::schedules::ipc::tests::draft_tests::feat164_surfaces_draft_claim_and_recovery",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::ipc::tests::feat164_draft_status_tests::feat164_stopped_attempted_draft_has_read_only_uncertain_projection",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::ipc::tests::feat164_draft_status_tests::feat164_never_attempted_failed_draft_does_not_invent_uncertainty",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::ipc::tests::feat164_draft_fact_tests::feat164_current_native_writer_can_preview_completed_draft_without_rewriting",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::model_retirement_tests::feat164_plan_retirement_before_dispatch",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::model_retirement_tests::feat164_s3_explicit_save_reauthorize_and_bound_target",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::model_retirement_tests::feat164_s3_paused_candidate_preserves_authority",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::model_retirement_tests::feat164_s3_schema_upgrade_and_replay",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::schedules::model_retirement_tests::feat164_s3_worker_starts_after_retirement",
+      "classification": "fixture-environment",
+      "resolution": "Run this exact test in the real compiled test executable with explicit local activation or pause environment; verify target exists so zero tests cannot pass."
+    },
+    {
+      "test": "chat::tests::feat156_unconfigured_model_history_preserves_unfinished_recovery",
+      "classification": "fixture-catalog-family",
+      "resolution": "Use the current compiled catalog enum and schema, preserving unavailable-history assertions."
+    }
+  ],
+  "safety_manifest": "../../../../scripts/test-safety-exclusions.json",
+  "unverified": [
+    "Existing ignored tests",
+    "Safety-excluded fault/attack cases",
+    "Historical production-hardened S10D-H qualification",
+    "Real external model/provider requests"
+  ],
+  "additional_checks": [
+    "Normal local failure survives close/reopen, releases next submission, and creates no Runtime terminal facts.",
+    "Exact isolated child test registration is checked before execution."
+  ],
+  "final_results": {
+    "frontend": {
+      "filesPassed": 249,
+      "passed": 2009,
+      "failed": 0,
+      "skipped": 16,
+      "log": "frontend-final-2.log"
+    },
+    "node": {
+      "files": 7,
+      "passed": 26,
+      "failed": 0
+    },
+    "nativeOrdinary": {
+      "passed": 620,
+      "failed": 0,
+      "ignored": 14,
+      "safetyFiltered": 27,
+      "log": "native-default-final-2.log"
+    },
+    "nativeKimi": {
+      "passed": 655,
+      "failed": 0,
+      "ignored": 16,
+      "safetyFiltered": 27,
+      "log": "full-test-final.log",
+      "finalChangedTestFollowup": "native-observers-final-scoped.log"
+    },
+    "lint": {
+      "status": "passed",
+      "log": "full-lint-final-3.log"
+    },
+    "build": {
+      "status": "passed",
+      "log": "full-build-final-2.log"
+    },
+    "docs": {
+      "status": "passed",
+      "log": "docs-build-final-3.log"
+    }
+  },
+  "intermediateFailuresPreserved": {
+    "combinedMakeTest": "full-test-final.log",
+    "reason": "ordinary observer fixture used pre-binding clock; final ordinary full run and changed Kimi test rerun passed"
+  }
+}

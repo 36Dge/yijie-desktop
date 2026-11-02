@@ -300,10 +300,10 @@ export VITE_YIJIE_CHAT_MODELS_ENABLED="$chat_models_enabled"
 if [[ "$chat_models_enabled" == "true" ]]; then
   [[ "$scheduled_enabled" == "true" && "$stable_api_only" == "false" ]] || fail "chat models require the current scheduled native runtime"
   if [[ "$kimi_k31_candidate" == "true" ]]; then
-    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit ffb0ef6ef478114464f4ae9e6974a3be3276d8ce --check
+    python3 "$host_root/scripts/sync-kimi-k31-pro-contracts.py" --commit b8854c159375a1abd2fef47f7e6ee182b84a4b09 --check
     node "$workspace_root/yijie-contracts/scripts/generate-runtime-kimi-k31-pro.mjs" --check
     candidate_lock="$desktop_root/contracts/runtime-kimi-k31-pro.candidate.json"
-    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/web-retrieval-guard-v1/aarch64-apple-darwin"
+    codex_runtime_root="$workspace_root/yijie-codex/.yijie/build/answer-completion-v1/aarch64-apple-darwin"
   else
   node "$workspace_root/yijie-contracts/scripts/generate-runtime-chat-models.mjs" --check
   node "$workspace_root/yijie-contracts/scripts/sync-runtime-chat-models.mjs" --check

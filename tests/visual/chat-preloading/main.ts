@@ -1,10 +1,12 @@
-import { computed, createApp, defineComponent, h, onBeforeUnmount, provide, ref } from "vue";
+import { computed, createApp, defineComponent, h, nextTick, onBeforeUnmount, provide, ref, watch } from "vue";
 import type { NativeConversationView } from "../../../src/api/generated/native-conversation-private.gen";
 import { composeConversationView } from "../../../src/domain/conversation-view";
 import { selectConversationTimeline } from "../../../src/domain/conversation-timeline";
 import { turnTimingLabel } from "../../../src/domain/chat-turn-timing";
 import { webSourceActionsKey } from "../../../src/composables/useWebSources";
 import ChatTurnGroup from "../../../src/components/chat/ChatTurnGroup.vue";
+import ChatScrollToBottomButton from "../../../src/components/chat/ChatScrollToBottomButton.vue";
+import { useChatScroll } from "../../../src/composables/useChatScroll";
 import "../../../src/styles/variables.css";
 import "../../../src/styles/main.css";
 import "./preview.css";
@@ -26,7 +28,12 @@ createApp(defineComponent({ setup() {
   const thinkingLines = ref(1);
   const searchScene = ref(false);
   const repeatedSearchScene = ref(false);
+  const scrollControlsScene = ref(false);
   const streamingThinking = ref(false);
+  const formattedThinking = ref(false);
+  const thinkingZoom = ref(1);
+  const conversation = ref<HTMLElement | null>(null);
+  const {update: updateScroll, showBottomButton, scrollToBottom} = useChatScroll(conversation);
   const width = ref(window.innerWidth);
   function resize() { width.value = window.innerWidth; }
   window.addEventListener("resize", resize);
@@ -47,7 +54,7 @@ createApp(defineComponent({ setup() {
   onBeforeUnmount(() => { clearInterval(interval); window.removeEventListener("resize", resize); });
   function setPhase(next: typeof phase.value, elapsed: number) {
     if (next === "waiting") run.value++;
-    playing.value = false; streamingThinking.value = false; thinkingLines.value = 1; searchScene.value = false; repeatedSearchScene.value = false;
+    playing.value = false; streamingThinking.value = false; formattedThinking.value = false; thinkingLines.value = 1; searchScene.value = false; repeatedSearchScene.value = false; scrollControlsScene.value = false;
     phase.value = next; seconds.value = elapsed;
   }
   const turn = computed(() => {
@@ -59,7 +66,9 @@ createApp(defineComponent({ setup() {
       { ordinal: 1, lastMethod: phase.value === "waiting" || phase.value === "reasoning" ? "item/started" : "item/completed", item: {
         id: "reasoning", type: "reasoning", content: [], summary: phase.value === "waiting" ? [] : [thinkingLines.value === 1
           ? "先核对门店位置和招牌小吃。"
-          : Array.from({length: thinkingLines.value}, (_, index) => `第 ${index + 1} 段演示记录：整理已经收到的信息，核对景点位置、交通和行程安排。`).join("\n\n")], availability: "available",
+          : Array.from({length: thinkingLines.value}, (_, index) => formattedThinking.value
+            ? `### 第 ${index + 1} 组信息\n\n先梳理 **关键信息**，再整理行程。\n\n- 核对景点位置\n  - 公共交通\n  - 步行路线\n- 整理开放时间\n\n> 为每个地点预留合理的参观时间。\n\n| 项目 | 状态 |\n| --- | --- |\n| 路线 | 已整理 |\n\n\`\`\`txt\n路线示例：入口 → 景点 → 出口\n\`\`\``
+            : `第 ${index + 1} 段演示记录：整理已经收到的信息，核对景点位置、交通和行程安排。`).join("\n\n")], availability: "available",
       } },
     ];
     if (searchScene.value) {
@@ -76,7 +85,9 @@ createApp(defineComponent({ setup() {
     }
     if (phase.value === "answer" || done) items.push({ ordinal: items.length, lastMethod: done ? "item/completed" : "item/started", item: {
       id: "answer", type: "agentMessage", phase: "final_answer", availability: "available",
-      text: "**第一次去，可以考虑庆春路分店。**\n\n虾肉小笼、牛肉粉丝汤和虾肉馄饨是经典搭配。一个人可以先点一笼小笼和一碗汤。",
+      text: scrollControlsScene.value
+        ? Array.from({length: 20}, (_, index) => `### 第 ${index + 1} 项行程安排\n\n整理路线与时间，保留充足的步行和休息时间。`).join("\n\n")
+        : "**第一次去，可以考虑庆春路分店。**\n\n虾肉小笼、牛肉粉丝汤和虾肉馄饨是经典搭配。一个人可以先点一笼小笼和一碗汤。",
     } });
     const native: NativeConversationView = { sessionId: "preview", turnId: "turn", runtimeThreadId: "preview", runtimeTurnId: "turn",
       source: "native_observed", revision: String(seconds.value), availability: "available", status: done ? "completed" : "inProgress",
@@ -88,6 +99,7 @@ createApp(defineComponent({ setup() {
     started_at: { state: "known", value: 100 }, completed_at: phase.value === "completed" ? {state: "known", value: 109} : {state: "unknown"},
     duration_ms: phase.value === "completed" ? {state: "known", value: 9123} : {state: "unknown"},
   }, phase.value !== "completed", (100 + seconds.value) * 1000, turn.value.domainStatus));
+  watch([turn, thinkingZoom], () => { void nextTick(updateScroll); }, {flush: "post"});
   return () => h("main", [
     h("h1", "易界对话预加载验收"),
     h("p", "使用真实前端组件与普通演示数据；内容区域为 1180 × 760。"),
@@ -98,15 +110,22 @@ createApp(defineComponent({ setup() {
       h("button", {onClick: () => setPhase("answer", 6)}, "回答输出"),
       h("button", {onClick: () => setPhase("completed", 9)}, "输出完成"),
       h("button", {onClick: () => {setPhase("completed", 9); thinkingLines.value = 20;}}, "长思考记录"),
-      h("button", {onClick: () => {run.value++; setPhase("reasoning", 3); thinkingLines.value = 12; streamingThinking.value = true;}}, "实时思考滚动"),
+      h("button", {onClick: () => {run.value++; setPhase("completed", 9); thinkingLines.value = 8; formattedThinking.value = true;}}, "Markdown 思考"),
+      h("button", {onClick: () => {run.value++; setPhase("reasoning", 3); thinkingLines.value = 12; formattedThinking.value = true; streamingThinking.value = true;}}, "实时思考滚动"),
       h("button", {onClick: () => {run.value++; setPhase("completed", 9); searchScene.value = true;}}, "网页搜索展示"),
       h("button", {onClick: () => {run.value++; setPhase("completed", 9); searchScene.value = true; repeatedSearchScene.value = true;}}, "重复搜索与滚动"),
+      h("button", {onClick: () => {run.value++; setPhase("completed", 9); searchScene.value = true; scrollControlsScene.value = true;}}, "搜索滚动与返回底部"),
       h("button", {onClick: () => {dark.value = !dark.value; document.documentElement.dataset.theme = dark.value ? "dark" : "light";}}, dark.value ? "切换亮色" : "切换暗色"),
+      h("select", {"aria-label": "思考区域缩放", value: thinkingZoom.value, onChange: (event: Event) => {thinkingZoom.value = Number((event.target as HTMLSelectElement).value);}},
+        [1, 1.5, 2].map(zoom => h("option", {value: zoom}, `${zoom * 100}%`))),
     ]),
     h("div", {class: "preview-fit", style: {width: `${1180 * scale.value}px`, height: `${760 * scale.value}px`}}, [
       h("section", {class: "preview-window", "aria-label": "1180 × 760 对话窗口", style: {transform: `scale(${scale.value})`}}, [
         h("header", {class: "preview-title"}, "杭州美食推荐"),
-        h("div", {class: "preview-conversation"}, [h(ChatTurnGroup, {key: run.value, turn: turn.value, position: 1, timingLabel: timing.value})]),
+        h("div", {class: "preview-conversation-frame"}, [
+          h("div", {ref: conversation, class: "preview-conversation", role: "region", "aria-label": "对话记录", tabindex: 0, style: {zoom: thinkingZoom.value, "--yj-ui-scale": thinkingZoom.value}, onScroll: updateScroll}, [h(ChatTurnGroup, {key: run.value, turn: turn.value, position: 1, timingLabel: timing.value})]),
+          showBottomButton.value ? h(ChatScrollToBottomButton, {class: "preview-bottom-button", onClick: () => scrollToBottom(true)}) : null,
+        ]),
         h("div", {class: "preview-composer"}, "继续输入任务需求…"),
       ]),
     ]),

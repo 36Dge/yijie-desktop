@@ -71,11 +71,13 @@ function handleEntryClick(entry: AppNavEntry): void {
             :selected="isSelected(entry)"
             @click="handleEntryClick(entry)"
           />
-          <ChatSidebarTree
+          <div
             v-if="showChatTree && entry.kind === 'section' && entry.key === 'taskHistory'"
             v-show="!collapsed"
-            :current-path="currentPath"
-          />
+            class="yj-sidebar__chat-tree-container"
+          >
+            <ChatSidebarTree :current-path="currentPath" />
+          </div>
         </li>
       </ul>
 
@@ -164,6 +166,13 @@ function handleEntryClick(entry: AppNavEntry): void {
   flex: 1;
   flex-direction: column;
   margin-top: var(--yj-space-2);
+}
+
+.yj-sidebar__chat-tree-container {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
 .yj-sidebar__section {

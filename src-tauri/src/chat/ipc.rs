@@ -8581,6 +8581,28 @@ pub async fn chat_read_turn_timing_v1(
 }
 
 #[tauri::command]
+pub async fn chat_read_turn_model_v1(
+    request: Value,
+    chat_runtime: State<'_, ChatRuntime>,
+) -> Result<CommandResponse<super::turn_model_generated::TurnModelView>, ChatIpcError> {
+    let request: CommandRequest<super::turn_model_generated::TurnModelRequest> =
+        decode_request(request)?;
+    if request.payload.session_id.is_nil() || request.payload.turn_id.is_nil() {
+        return Err(ChatIpcError::request_invalid(Some(request.request_id)));
+    }
+    let (_, authorized, _) = offline_applications(&chat_runtime, request.request_id).await?;
+    let data = authorized
+        .turn_model(
+            request.context_id,
+            request.payload.session_id,
+            request.payload.turn_id,
+        )
+        .await
+        .map_err(|error| map_chat_error(error, Some(request.request_id)))?;
+    Ok(CommandResponse::new(request.request_id, data))
+}
+
+#[tauri::command]
 pub async fn chat_get_session_purpose_v1(
     request: Value,
     chat_runtime: State<'_, ChatRuntime>,

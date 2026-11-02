@@ -5,6 +5,12 @@ use crate::chat::{
 
 #[tokio::test]
 async fn feat164_current_native_writer_can_preview_completed_draft_without_rewriting() {
+    if crate::chat::model_test_support::run_in_current_model_environment(concat!(
+        module_path!(),
+        "::feat164_current_native_writer_can_preview_completed_draft_without_rewriting"
+    )) {
+        return;
+    }
     let f = Fixture::new(ScheduleStorageMode::ManagementFoundation);
     f.worker
         .call(|r| {

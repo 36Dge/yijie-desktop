@@ -1,0 +1,163 @@
+{
+  "date": "2026-11-02T12:07:36.264797+08:00",
+  "contract_impact": "none: frontend display only; native protocol, execution state, permission, stored text and replay unchanged",
+  "head": "55f88341aa59522f214c0015ed7928b8d1f5021d",
+  "branch": "feat/feat164-primary-20261028",
+  "dirty_workspace_preserved": true,
+  "reference": {
+    "path": "/Users/jack/Desktop/流式输出.mov",
+    "sha256": "ada30a999b6dbb8ccdc2a061278cf20f514ef6d406e6f2b012695e0fba48945a",
+    "duration_seconds": 18.696667,
+    "observations": [
+      "Fine-grained forward text progression",
+      "Visible light-to-dark tail fade",
+      "Stable previously displayed text"
+    ],
+    "limits": "Visual reference only; no inference of proprietary implementation or identical provider throughput"
+  },
+  "source_sha256": {
+    "src/domain/chat-text-reveal.ts": "b24c070e6cc73e2db8cba53366d38875cae2f95556f18829c9c6ca57aa8bbf89",
+    "src/domain/chat-text-reveal.test.ts": "5918b2620d0834e80bd4a9ac61e834e6356c1e2fc0f50ffc48f47c453d408beb",
+    "src/components/chat/ChatStreamText.vue": "96ebbc81a547814f88c092927bb95db2dc88d56ff9b19a5a85b4206b22c98043",
+    "src/components/chat/ChatStreamText.test.ts": "b4546b7ba2161cf1cf9e1a2f5daf35c33edbfe7656456effb20bb53ea14f7d2b",
+    "src/styles/variables.css": "6104ae25820cd063711dabbe3aa32e1f3080b36cdab00dcd9da914a57bfa22c2",
+    "docs/design/docs/design/02-tokens/06-motion-zindex-opacity-tokens.md": "c470fdc168ed1a00a89176c11a544156782542f67dc6b35aa01d3748f456c3e8",
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "ef7ce8456a01acf934791bb1f3924dfed0222352ac12b56c651079fc89195c9b"
+  },
+  "settings": {
+    "base_graphemes_per_second": 40,
+    "catchup_graphemes_per_second": 72,
+    "fade_ms": 600,
+    "fade_from_opacity": 0.12,
+    "fade_timing": "linear",
+    "frame_elapsed_cap_ms": 50,
+    "terminal_flush_deadline": null
+  },
+  "native": {
+    "client_pid": 85700,
+    "window_minimum": [
+      1180,
+      760
+    ],
+    "window_restored": [
+      1268,
+      780
+    ],
+    "model": "Kimi K3.1 Pro",
+    "real_requests": 5,
+    "topics": [
+      "北京 × 2",
+      "苏州（列表与表格）× 2",
+      "南京 × 1"
+    ],
+    "final_version_request": "南京",
+    "metrics": {
+      "after-beijing": {
+        "graphemes": 510,
+        "first_visible_ms": 28096,
+        "all_visible_ms": 37136,
+        "visible_progress_ms": 9040,
+        "sample_count": 478
+      },
+      "final-suzhou": {
+        "graphemes": 360,
+        "first_visible_ms": 18866,
+        "all_visible_ms": 27834,
+        "visible_progress_ms": 8968,
+        "sample_count": 349
+      },
+      "final-nanjing": {
+        "graphemes": 336,
+        "first_visible_ms": 25321,
+        "all_visible_ms": 33600,
+        "visible_progress_ms": 8279,
+        "sample_count": 405
+      }
+    },
+    "measurement_limits": "AX samples are non-atomic and approximately 100–200ms apart, not per-frame timing. Table samples visit AXRows once; the first Suzhou sample duplicated AX column/header views and is excluded. Concurrent native regressions consumed CPU; these are observations, not a latency SLA.",
+    "forced_termination": false,
+    "service_restart": false,
+    "native_binary_changed": false,
+    "user_window_theme_changed": false
+  },
+  "browser": {
+    "viewport": [
+      1180,
+      760
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "uses_production_components": true,
+    "exact_terminal_rendered_text": true,
+    "dark_with_30_history": {
+      "visible_steps": 233,
+      "max_utf16_step": 11,
+      "family_emoji_utf16_length": 11,
+      "max_frame_ms": 24,
+      "terminal_catchup_ms": 3463,
+      "markdown_p95_ms": 0.2,
+      "bottom_distance_px": 0,
+      "horizontal_overflow": false
+    },
+    "final_small_chunks": {
+      "visible_steps": 233,
+      "max_utf16_step": 11,
+      "max_frame_ms": 10,
+      "terminal_catchup_ms": 2288,
+      "markdown_p95_ms": 0.1
+    },
+    "tab_closed": true,
+    "viewport_reset": true
+  },
+  "checks": {
+    "focused": {
+      "files": 2,
+      "passed": 19
+    },
+    "final_frontend": {
+      "files": 249,
+      "passed": 2016,
+      "skipped": 16,
+      "node_passed": 26
+    },
+    "make_lint": "PASS",
+    "make_build": "PASS (pre-existing large-chunk warning)",
+    "docs_build": "PASS",
+    "native_ordinary": {
+      "passed": 620,
+      "failed": 0,
+      "ignored": 14,
+      "filtered": 27,
+      "duration_seconds": 479.63
+    },
+    "native_kimi": {
+      "passed": 655,
+      "failed": 0,
+      "ignored": 16,
+      "filtered": 27,
+      "duration_seconds": 528.58
+    },
+    "git_diff_check": "PASS",
+    "make_test": "PASS; followed by final pnpm test after frontend-only refinements"
+  },
+  "safety_exclusions": "scripts/test-safety-exclusions.json; attack, permission-sabotage, executable-substitution and force-kill fixtures NOT RUN, not claimed as passed",
+  "local_evidence_directory": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/streaming-refinement-20261102",
+  "artifacts": {
+    "易界-流式输出-调整后.mp4": {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/streaming-refinement-20261102/易界-流式输出-调整后.mp4",
+      "sha256": "47ee201c0cfebeb35612c9e4d9545f38e9e334825ec87299e0ba47b97ab6d00d"
+    },
+    "native-fade.png": {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/streaming-refinement-20261102/native-fade.png",
+      "sha256": "0992fa7daf57c1053c42d00318c2719f36f6e2cf661b1aaac99876aa0dd91933"
+    },
+    "易界-流式输出-调整前.mp4": {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/streaming-refinement-20261102/易界-流式输出-调整前.mp4",
+      "sha256": "aadb2b6f161cecb106d9b3b1be7abfa328f32ef77c005825d5611baeea5d257d"
+    }
+  },
+  "completed_at": "2026-11-02T12:14:43.148166+08:00",
+  "status": "IMPLEMENTED_AND_VERIFIED_IN_FIXED_DEVELOPMENT_CLIENT"
+}

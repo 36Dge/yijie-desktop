@@ -388,76 +388,101 @@ function nativeExecution(entry: NativeConversationView["items"][number], view: N
   return null;
 }
 /** Select whole Item sets by documented source. Never match cold and live IDs or compare content. */
-export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = [], artifactReferences: readonly ConversationItemSnapshot[] = [], archivesV5: readonly ArchiveV5NativeConversationView[] = []): ConversationView {
-  const legacy = viewFromLegacySnapshot(snapshot);
+interface ConversationCompositionCache {
+  legacy: ConversationView;
+  native: WeakMap<NativeConversationView, { turn: ConversationTurn; items: readonly ConversationItem[] }>;
+}
+/** Cache only exact input objects; native revisions and persisted facts remain authoritative. */
+export function createConversationComposer() {
+  let previous: readonly unknown[] = [];
+  let cache: ConversationCompositionCache | undefined;
+  return (snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], diagnostics: readonly NativeRecordDiagnostic[] = [], artifacts: readonly ConversationItemSnapshot[] = [], archives: readonly ArchiveV5NativeConversationView[] = []) => {
+    const dependencies = [snapshot, ...submissions, ...diagnostics, ...artifacts, ...archives];
+    if (!cache || previous.length !== dependencies.length || dependencies.some((value, index) => value !== previous[index])) {
+      cache = { legacy: viewFromLegacySnapshot(snapshot), native: new WeakMap() }; previous = dependencies;
+    }
+    return composeConversationView(snapshot, nativeViews, submissions, diagnostics, artifacts, archives, cache);
+  };
+}
+
+export function composeConversationView(snapshot: ConversationSnapshot, nativeViews: readonly NativeConversationView[], submissions: readonly LocalSubmissionView[] = [], recordDiagnostics: readonly NativeRecordDiagnostic[] = [], artifactReferences: readonly ConversationItemSnapshot[] = [], archivesV5: readonly ArchiveV5NativeConversationView[] = [], cache?: ConversationCompositionCache): ConversationView {
+  const legacy = cache?.legacy ?? viewFromLegacySnapshot(snapshot);
   const productReferences = viewFromLegacySnapshot({...snapshot, turns: [], items: artifactReferences.filter(item => item.kind === "artifact")}).items;
   const turns = {...legacy.turns}; const items = {...legacy.items}; const threads = {...legacy.threads};
   for (const view of nativeViews) {
     if (!threads[view.sessionId]) continue;
     const key = turnKey(view.sessionId, view.turnId);
     const old = turns[key];
-    const localUsers = (old?.itemKeys ?? []).map(k => items[k]).filter(item =>
-      item?.kind === "user_message" && item.contentBlocks.some(block => block.type === "attachment_reference"));
-    // The persisted local session/turn binding is authority for the submitted
-    // display text. Runtime's userMessage may contain Host-added file context.
-    // Only the unambiguous local submission replaces that view text; no native
-    // Item or wire content is changed, and cold/ambiguous history stays native.
-    const submittedText = localUsers.length === 1 && view.items.filter(entry => entry.item.type === "userMessage").length === 1
-      ? localUsers[0]!.contentBlocks.filter((block): block is TextContentBlock => block.type === "text")
-      : null;
-    // Local attachments and Artifact references are separate product records, not native Items.
-    const priorReferences = old?.itemKeys.flatMap(k => {
-      const item = items[k];
-      if (!item) return [];
-      const blocks = item.contentBlocks.filter(b => b.type === "attachment_reference" || b.type === "artifact_reference");
-      return blocks.length ? [{...item, contentBlocks: item.kind === "user_message" && !view.items.some(entry => entry.item.type === "userMessage") ? item.contentBlocks : blocks}] : [];
-    }) ?? [];
-    const localReferences = [...new Map([
-      ...priorReferences,
-      ...Object.values(productReferences).filter(item => item.threadId === view.sessionId && item.turnId === view.turnId),
-    ].map(item => [item.itemId, item])).values()];
-    for (const k of old?.itemKeys ?? []) delete items[k];
-    // Same saved whole view only; never merge an archive companion with a
-    // different storage revision, cold reconstruction or live item set.
-    const archive = archivesV5.find(a => a.sessionId === view.sessionId && a.turnId === view.turnId && a.revision === view.revision && a.source === view.source && a.status === view.status && a.terminalObserved === view.terminalObserved && a.runtimeThreadId === view.runtimeThreadId && a.runtimeTurnId === view.runtimeTurnId && a.items.length === view.items.length && a.items.every((entry,index) => entry.item.id === view.items[index]?.item.id && entry.ordinal === view.items[index]?.ordinal));
-    const nativeItems: ConversationItem[] = view.items.map(entry => {
-      const item = entry.item;
-      const archiveItem = archive?.items.find(e => e.ordinal === entry.ordinal && e.item.id === item.id)?.item;
-      const archiveV5 = archiveItem && (archiveItem.type === "fileChange" || archiveItem.commandActions || archiveItem.commandPreview || archiveItem.appContext) ? archiveItem : undefined;
-      const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
-      const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
-        ? submittedText
-        : item.type === "reasoning"
-        ? (["summary", "content"] as const).flatMap(reasoningSource =>
-          (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
-        : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
-      return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
-        availability: item.availability,
-        ...(archiveV5 ? {archiveV5} : {}),
-        ...(item.webSearch ? {webSearch: item.webSearch} : {}),
-        status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
-        agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,
-        reasoning: item.type === "reasoning" ? {status: entry.lastMethod === "item/completed" ? "complete" : entry.lastMethod === "thread/read" ? "unknown" : "in_progress", reasonCode: null} : null,
-        execution: nativeExecution(entry, view), reconciliation: "not_applicable",
-        contentBlocks,
+    const cached = cache?.native.get(view);
+    if (cached) {
+      for (const k of old?.itemKeys ?? []) delete items[k];
+      for (const item of cached.items) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
+      turns[key] = cached.turn;
+    } else {
+      const localUsers = (old?.itemKeys ?? []).map(k => items[k]).filter(item =>
+        item?.kind === "user_message" && item.contentBlocks.some(block => block.type === "attachment_reference"));
+      // The persisted local session/turn binding is authority for the submitted
+      // display text. Runtime's userMessage may contain Host-added file context.
+      // Only the unambiguous local submission replaces that view text; no native
+      // Item or wire content is changed, and cold/ambiguous history stays native.
+      const submittedText = localUsers.length === 1 && view.items.filter(entry => entry.item.type === "userMessage").length === 1
+        ? localUsers[0]!.contentBlocks.filter((block): block is TextContentBlock => block.type === "text")
+        : null;
+      // Local attachments and Artifact references are separate product records, not native Items.
+      const priorReferences = old?.itemKeys.flatMap(k => {
+        const item = items[k];
+        if (!item) return [];
+        const blocks = item.contentBlocks.filter(b => b.type === "attachment_reference" || b.type === "artifact_reference");
+        return blocks.length ? [{...item, contentBlocks: item.kind === "user_message" && !view.items.some(entry => entry.item.type === "userMessage") ? item.contentBlocks : blocks}] : [];
+      }) ?? [];
+      const localReferences = [...new Map([
+        ...priorReferences,
+        ...Object.values(productReferences).filter(item => item.threadId === view.sessionId && item.turnId === view.turnId),
+      ].map(item => [item.itemId, item])).values()];
+      for (const k of old?.itemKeys ?? []) delete items[k];
+      // Same saved whole view only; never merge an archive companion with a
+      // different storage revision, cold reconstruction or live item set.
+      const archive = archivesV5.find(a => a.sessionId === view.sessionId && a.turnId === view.turnId && a.revision === view.revision && a.source === view.source && a.status === view.status && a.terminalObserved === view.terminalObserved && a.runtimeThreadId === view.runtimeThreadId && a.runtimeTurnId === view.runtimeTurnId && a.items.length === view.items.length && a.items.every((entry,index) => entry.item.id === view.items[index]?.item.id && entry.ordinal === view.items[index]?.ordinal));
+      const nativeItems: ConversationItem[] = view.items.map(entry => {
+        const item = entry.item;
+        const archiveItem = archive?.items.find(e => e.ordinal === entry.ordinal && e.item.id === item.id)?.item;
+        const archiveV5 = archiveItem && (archiveItem.type === "fileChange" || archiveItem.commandActions || archiveItem.commandPreview || archiveItem.appContext) ? archiveItem : undefined;
+        const kind: ConversationItemKind = item.type === "userMessage" ? "user_message" : item.type === "agentMessage" ? "assistant_message" : item.type === "reasoning" ? "reasoning" : item.type === "commandExecution" ? "command" : item.type === "mcpToolCall" ? "tool" : item.type === "webSearch" ? "web_search" : "unknown";
+        const contentBlocks: readonly TextContentBlock[] = item.type === "userMessage" && submittedText !== null
+          ? submittedText
+          : item.type === "reasoning"
+          ? (["summary", "content"] as const).flatMap(reasoningSource =>
+            (item[reasoningSource] ?? []).map((text, blockIndex) => ({type: "text", text, blockIndex, reasoningSource})))
+          : item.text == null ? [] : [{type: "text", text: item.text, blockIndex: 0}];
+        return {threadId: view.sessionId, turnId: view.turnId, itemId: item.id, ordinal: entry.ordinal, kind,
+          availability: item.availability,
+          ...(archiveV5 ? {archiveV5} : {}),
+          ...(item.webSearch ? {webSearch: item.webSearch} : {}),
+          status: entry.lastMethod === "item/completed" ? "completed" : entry.lastMethod === "thread/read" ? "incomplete" : "streaming",
+          agentMessagePhase: item.type === "agentMessage" ? conversationAgentMessagePhase(item.phase) : null,
+          reasoning: item.type === "reasoning" ? {status: entry.lastMethod === "item/completed" ? "complete" : entry.lastMethod === "thread/read" ? "unknown" : "in_progress", reasonCode: null} : null,
+          execution: nativeExecution(entry, view), reconciliation: "not_applicable",
+          contentBlocks,
+        };
+      });
+      // Attachment-only submissions already have their independent product row.
+      // Keep the native observation intact without adding an empty text bubble.
+      const displayedNativeItems = nativeItems.filter(item => !(submittedText !== null && item.kind === "user_message" && item.contentBlocks.length === 0));
+      for (const item of [...displayedNativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
+      const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
+      turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
+        source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource,
+        diagnostic: view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
+        status: view.status === "inProgress" ? "in_progress" : view.status ?? "unknown",
+        terminalStatus: terminal, terminalCode: view.terminalErrorCode ?? null,
+        plan: view.plan == null ? null : {explanation: view.explanation ?? null, steps: view.plan.map((s, ordinal) => ({ordinal, text: s.step, status: s.status === "inProgress" ? "in_progress" : s.status}))},
+        // The private view does not carry diagnostic scope. Do not assign a
+        // thread-only warning to the Turn whose stream happened to observe it.
+        notices: [],
+        itemKeys: [...displayedNativeItems, ...localReferences].map(item => itemKey(item.threadId, item.turnId, item.itemId)),
       };
-    });
-    // Attachment-only submissions already have their independent product row.
-    // Keep the native observation intact without adding an empty text bubble.
-    const displayedNativeItems = nativeItems.filter(item => !(submittedText !== null && item.kind === "user_message" && item.contentBlocks.length === 0));
-    for (const item of [...displayedNativeItems, ...localReferences]) items[itemKey(item.threadId, item.turnId, item.itemId)] = item;
-    const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
-    turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
-      source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource,
-      diagnostic: view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
-      status: view.status === "inProgress" ? "in_progress" : view.status ?? "unknown",
-      terminalStatus: terminal, terminalCode: view.terminalErrorCode ?? null,
-      plan: view.plan == null ? null : {explanation: view.explanation ?? null, steps: view.plan.map((s, ordinal) => ({ordinal, text: s.step, status: s.status === "inProgress" ? "in_progress" : s.status}))},
-      // The private view does not carry diagnostic scope. Do not assign a
-      // thread-only warning to the Turn whose stream happened to observe it.
-      notices: [],
-      itemKeys: [...displayedNativeItems, ...localReferences].map(item => itemKey(item.threadId, item.turnId, item.itemId)),
-    };
+      cache?.native.set(view, { turn: turns[key]!, items: turns[key]!.itemKeys.map(k => items[k]!) });
+    }
     const thread = threads[view.sessionId];
     const diagnostic = view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;
     if (thread) threads[view.sessionId] = {...thread,

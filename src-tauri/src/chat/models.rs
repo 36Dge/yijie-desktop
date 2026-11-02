@@ -137,6 +137,49 @@ pub(super) fn freeze(
     Ok(())
 }
 impl ChatRepository {
+    /// Immutable presentation metadata, including retired model identities.
+    /// Never consult the mutable session selection or dispatch a model here.
+    pub(super) fn turn_model_profile(
+        &self,
+        session: Uuid,
+        turn: Uuid,
+    ) -> Result<Option<String>, ChatError> {
+        self.session_summary(session)?;
+        if self.deletion_status_for_session(session)?.is_some() {
+            return Err(ChatError::NotFound);
+        }
+        let operation_id: String = self
+            .connection
+            .query_row(
+                "SELECT operation_id FROM chat_turns WHERE id=?1 AND session_id=?2",
+                params![turn.to_string(), session.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or(ChatError::NotFound)?;
+        if !table(&self.connection)? {
+            return Ok(None);
+        }
+        let frozen: Option<(String, String)> = self
+            .connection
+            .query_row(
+                "SELECT session_id,profile_id FROM chat_operation_models WHERE operation_id=?1",
+                [operation_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(db_error)?;
+        match frozen {
+            Some((owner, profile))
+                if owner == session.to_string() && !profile.is_empty() && profile.len() <= 128 =>
+            {
+                Ok(Some(profile))
+            }
+            Some(_) => Err(ChatError::ConversationConflict),
+            None => Ok(None),
+        }
+    }
     fn require_model_storage(&self) -> Result<(), ChatError> {
         if !table(&self.connection)? {
             return Err(ChatError::OrchestrationUnavailable);
@@ -530,6 +573,61 @@ mod tests {
         keychain::{DatabaseKey, ReceiptKey},
     };
     #[test]
+    fn turn_model_metadata_is_frozen_read_only_and_missing_for_legacy_turns() {
+        let root = std::env::temp_dir().join(format!("turn-model-metadata-{}", Uuid::now_v7()));
+        std::fs::create_dir(&root).unwrap();
+        let mut repo = ChatRepository::open(
+            &root.join("chat"),
+            &DatabaseKey::from_bytes([156; 32]),
+            ReceiptKey::from_bytes([157; 32]),
+            ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap(),
+        )
+        .unwrap();
+        let workspace = root.join("project");
+        std::fs::create_dir(&workspace).unwrap();
+        let project =
+            Uuid::parse_str(&repo.register_project(&workspace, b"fixture").unwrap().id).unwrap();
+        let legacy = repo
+            .create_session_and_enqueue(project, "历史普通消息", Uuid::now_v7())
+            .unwrap();
+        assert_eq!(
+            repo.turn_model_profile(legacy.session_id, legacy.turn_id)
+                .unwrap(),
+            None
+        );
+        crate::chat::model_test_support::migrate_active_store(&mut repo.connection, 28);
+        let profile = crate::chat::model_test_support::active_profile();
+        let current = repo
+            .create_model_session(
+                Some(project),
+                vec![DraftContentBlock::Text("普通消息".into())],
+                Uuid::now_v7(),
+                1,
+                ModelIntent {
+                    profile_id: serde_json::from_value(serde_json::json!(profile)).unwrap(),
+                    expected_revision: 0,
+                },
+            )
+            .unwrap();
+        // A normal mutable selection change cannot relabel the earlier Turn.
+        repo.connection.execute("UPDATE chat_model_selections SET profile_id='minimax-m3-high-v1',revision=revision+1 WHERE session_id=?1",[current.session_id.to_string()]).unwrap();
+        let before = repo.connection.total_changes();
+        assert_eq!(
+            repo.turn_model_profile(current.session_id, current.turn_id)
+                .unwrap()
+                .as_deref(),
+            Some(profile)
+        );
+        assert_eq!(
+            repo.turn_model_profile(legacy.session_id, legacy.turn_id)
+                .unwrap(),
+            None
+        );
+        assert_eq!(repo.connection.total_changes(), before);
+        drop(repo);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn feat156_model_outbox_freezes_profile_and_rejects_changed_retry() {
         let root = std::env::temp_dir().join(format!("feat156-model-{}", Uuid::now_v7()));
         std::fs::create_dir(&root).unwrap();
@@ -540,14 +638,17 @@ mod tests {
             ChatScope::new(Uuid::now_v7().to_string(), Uuid::now_v7().to_string()).unwrap(),
         )
         .unwrap();
-        crate::chat::migrations::migrate_to_target(&mut repo.connection, 28).unwrap();
+        crate::chat::model_test_support::migrate_active_store(&mut repo.connection, 28);
         let workspace = root.join("project");
         std::fs::create_dir(&workspace).unwrap();
         let project =
             Uuid::parse_str(&repo.register_project(&workspace, b"fixture").unwrap().id).unwrap();
         let op = Uuid::now_v7();
         let intent = ModelIntent {
-            profile_id: wire::ProfileId::KimiK3MaxV1,
+            profile_id: serde_json::from_value(serde_json::json!(
+                crate::chat::model_test_support::active_profile()
+            ))
+            .unwrap(),
             expected_revision: 0,
         };
         let p = repo
@@ -563,7 +664,7 @@ mod tests {
             repo.model_operation_profile(p.turn_operation_id)
                 .unwrap()
                 .as_deref(),
-            Some("kimi-k3-max-v1")
+            Some(crate::chat::model_test_support::active_profile())
         );
         assert_eq!(repo.model_state(p.session_id).unwrap().revision, 1);
         let repeat = repo
@@ -607,7 +708,12 @@ mod tests {
             agent_session_id: host.to_string(),
             state: wire::SelectionState::Ready,
             revision: 1,
-            profile_id: Some(wire::ProfileId::KimiK3MaxV1),
+            profile_id: Some(
+                serde_json::from_value(serde_json::json!(
+                    crate::chat::model_test_support::active_profile()
+                ))
+                .unwrap(),
+            ),
             operation_id: None,
         };
         assert_eq!(
@@ -637,7 +743,7 @@ mod tests {
             repo.model_operation_profile(p.turn_operation_id)
                 .unwrap()
                 .as_deref(),
-            Some("kimi-k3-max-v1")
+            Some(crate::chat::model_test_support::active_profile())
         );
         // Normal local-history fixtures: the native binding is absent, then the
         // project is removed through its persisted lifecycle state. Neither may
@@ -646,13 +752,23 @@ mod tests {
             .execute("UPDATE chat_outbox SET state='done'", [])
             .unwrap();
         let select = ModelIntent {
-            profile_id: wire::ProfileId::KimiK3MaxV1,
+            profile_id: serde_json::from_value(serde_json::json!(
+                crate::chat::model_test_support::active_profile()
+            ))
+            .unwrap(),
             expected_revision: 2,
         };
-        assert!(matches!(
+        // The current writer fences this legacy selection entry point before
+        // checking native bindings. Its delivery admission has separate coverage.
+        let expected = if cfg!(feature = "kimi-k31-pro-candidate") {
+            ChatError::OrchestrationUnavailable
+        } else {
+            ChatError::ConversationConflict
+        };
+        assert_eq!(
             repo.begin_model_selection(p.session_id, select.clone(), Uuid::now_v7()),
-            Err(ChatError::ConversationConflict)
-        ));
+            Err(expected)
+        );
         assert_eq!(repo.model_state(p.session_id).unwrap().state, "ready");
         repo.connection
             .execute(
@@ -666,10 +782,10 @@ mod tests {
                 [project.to_string()],
             )
             .unwrap();
-        assert!(matches!(
+        assert_eq!(
             repo.begin_model_selection(p.session_id, select, Uuid::now_v7()),
-            Err(ChatError::ConversationConflict)
-        ));
+            Err(expected)
+        );
         assert_eq!(repo.model_state(p.session_id).unwrap().state, "ready");
         drop(repo);
         std::fs::remove_dir_all(root).unwrap();

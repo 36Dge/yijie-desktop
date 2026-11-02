@@ -946,7 +946,7 @@ mod tests {
                 scope,
             )
             .unwrap();
-            crate::chat::migrations::migrate_to_target(&mut repo.connection, 32).unwrap();
+            crate::chat::model_test_support::migrate_active_store(&mut repo.connection, 32);
             Self {
                 root,
                 repo: Some(repo),
@@ -956,7 +956,7 @@ mod tests {
             self.repo.as_mut().unwrap()
         }
         fn create(&mut self) -> Pending {
-            let payload:selection_generated::SubmitPayload=serde_json::from_value(serde_json::json!({"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"Ordinary connector conversation"}],"intent":{"profileId":"kimi-k3-max-v1","expectedRevision":0},"selection":[]})).unwrap();
+            let payload:selection_generated::SubmitPayload=serde_json::from_value(serde_json::json!({"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"Ordinary connector conversation"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":0},"selection":[]})).unwrap();
             self.repo()
                 .market_submission_admitted(
                     payload,
@@ -981,8 +981,8 @@ mod tests {
             &mut self,
             attachment: Option<Uuid>,
         ) -> (Pending, expert_wire::NativeSubmitPayload) {
-            crate::chat::migrations::migrate_to_target(&mut self.repo().connection, 34).unwrap();
-            let mut request:expert_wire::NativeSubmitPayload=serde_json::from_value(serde_json::json!({"submission":{"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"Ordinary expert dispatch storage check"}],"intent":{"profileId":"kimi-k3-max-v1","expectedRevision":0},"selection":[]},"expectedBindingRevision":0,"expert":{"expertId":"sample-expert","version":"0.1.0"}})).unwrap();
+            crate::chat::model_test_support::migrate_active_store(&mut self.repo().connection, 34);
+            let mut request:expert_wire::NativeSubmitPayload=serde_json::from_value(serde_json::json!({"submission":{"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"Ordinary expert dispatch storage check"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":0},"selection":[]},"expectedBindingRevision":0,"expert":{"expertId":"sample-expert","version":"0.1.0"}})).unwrap();
             if let Some(attachment) = attachment {
                 request.submission.content_blocks.push(
                     serde_json::from_value(

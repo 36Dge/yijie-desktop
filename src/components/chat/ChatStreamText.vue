@@ -1,37 +1,30 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, inject, ref } from "vue";
+import { chatTextRevealKey, useChatTextReveal } from "../../composables/useChatTextReveal";
 
-const props = withDefaults(defineProps<{ text: string; streaming?: boolean }>(), { streaming: false });
-// Only animation ranges are retained. Every received character is rendered immediately;
-// there is no playback queue or second authoritative copy of the model output.
-const ranges = ref<{ start: number; end: number }[]>([]);
-const prefix = computed(() => props.text.slice(0, ranges.value[0]?.start ?? props.text.length));
-watch(() => [props.text, props.streaming] as const, ([text, streaming], previous) => {
-  const [before, wasStreaming] = previous ?? ["", streaming];
-  if (!streaming || !wasStreaming || !text.startsWith(before)) {
-    ranges.value = [];
-    return;
-  }
-  if (text.length > before.length) {
-    ranges.value = [...ranges.value, { start: before.length, end: text.length }].slice(-32);
-  }
-}, { immediate: true });
-function settle(end: number) {
-  // The page freezes native updates during selection. Decorative cleanup must
-  // respect that same reading interaction instead of replacing selected nodes.
-  if (document.getSelection()?.isCollapsed === false) return;
-  ranges.value = ranges.value.filter(range => range.end > end);
-}
+const props = withDefaults(defineProps<{ text: string; streaming?: boolean; offset?: number }>(), { streaming: false, offset: 0 });
+const root = ref<HTMLElement | null>(null);
+const inherited = inject(chatTextRevealKey, null);
+const reveal = inherited ?? useChatTextReveal(() => props.text, () => props.streaming, () => true, root);
+const visibleEnd = computed(() => Math.min(props.text.length, Math.max(0, reveal.frame.value.cursor - props.offset)));
+const ranges = computed<readonly { start: number; end: number; key: number }[]>((previous) => {
+  const next = reveal.frame.value.ranges.flatMap(range => {
+  const start = Math.max(0, range.start - props.offset);
+  const end = Math.min(visibleEnd.value, range.end - props.offset);
+  return end > start ? [{ start, end, key: range.start }] : [];
+  });
+  return previous?.length === next.length && next.every((range, index) => range.start === previous[index]!.start && range.end === previous[index]!.end && range.key === previous[index]!.key) ? previous : next;
+});
+const prefix = computed(() => props.text.slice(0, ranges.value[0]?.start ?? visibleEnd.value));
 </script>
 
 <template>
-  {{ prefix }}<span v-for="range in ranges" :key="range.start" class="chat-stream-text__fresh"
-    @animationend="settle(range.end)">{{ text.slice(range.start, range.end) }}</span>
+  <span ref="root" class="chat-stream-text">{{ prefix }}<span v-for="range in ranges" :key="range.key" class="chat-stream-text__fresh">{{ text.slice(range.start, range.end) }}</span></span>
 </template>
 
 <style scoped>
 .chat-stream-text__fresh {
-  animation: chat-stream-arrive var(--yj-motion-slow) var(--yj-ease-standard) both;
+  animation: chat-stream-arrive var(--yj-motion-chat-stream-fade) linear both;
 }
 @keyframes chat-stream-arrive {
   from { opacity: var(--yj-opacity-chat-stream-start); }

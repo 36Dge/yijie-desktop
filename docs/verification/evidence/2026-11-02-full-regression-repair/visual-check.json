@@ -1,0 +1,34 @@
+{
+  "surface": "production YjSidebar in a local non-native preview",
+  "viewport": {
+    "width": 1180,
+    "height": 760
+  },
+  "syntheticTaskCount": 40,
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "scrollArea": {
+    "clientHeight": 324,
+    "scrollHeight": 1336,
+    "scrollTopAfterNormalScroll": 1012,
+    "scrollTopAfterCollapseAndRestore": 1012
+  },
+  "observed": [
+    "Task 40 reachable",
+    "Task tree absent while sidebar collapsed",
+    "Settings stays visible",
+    "No overlap or horizontal overflow"
+  ],
+  "cleanup": [
+    "Temporary tab closed",
+    "Viewport reset",
+    "Vite stopped normally with Ctrl-C"
+  ],
+  "screenshots": [
+    "sidebar-light-collapsed.png",
+    "sidebar-dark-expanded.png",
+    "sidebar-long-list.png"
+  ]
+}

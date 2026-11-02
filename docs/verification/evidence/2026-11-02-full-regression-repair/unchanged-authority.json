@@ -1,0 +1,26 @@
+{
+  "head": "55f88341aa59522f214c0015ed7928b8d1f5021d",
+  "files": [
+    {
+      "path": "src-tauri/migrations/chat/0014_chat_native_conversation.sql",
+      "sha256": "e4a5306fbc980599521af4ec429c51fac6b7ca7ab7354210e14bf1d38f76fc5a",
+      "unchanged_from_head": true
+    },
+    {
+      "path": "contracts/market-catalog.json",
+      "sha256": "55ec42e1965a7ecdfd17771af299afea786bc74a175ab4f021afdf8d538ab70d",
+      "unchanged_from_head": true
+    },
+    {
+      "path": "contracts/market-catalog.candidate.json",
+      "sha256": "89c5ff5e6dcee76a90dd47a33a8fd3283221a21154f7d1d5173c01f87527c8a5",
+      "unchanged_from_head": true
+    },
+    {
+      "path": "contracts/market-catalog-feat164.candidate.json",
+      "sha256": "2c3de66b8b6d44bfdb034e731072aead6ff096e974a0a88a1a1a8598fe421159",
+      "unchanged_from_head": true
+    }
+  ],
+  "rechecked_after_canonical_activation": true
+}

@@ -20,6 +20,7 @@ for (const keyword of [
   "x-yijie-command-contracts",
   "x-yijie-error-codes",
   "x-yijie-attachment-issues",
+  "x-yijie-attachment-presentation",
   "x-yijie-max-utf8-bytes",
   "x-yijie-forbid-nul",
   "x-yijie-absolute-path",

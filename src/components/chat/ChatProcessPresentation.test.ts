@@ -7,6 +7,7 @@ import {selectConversationTimeline} from "../../domain/conversation-timeline";
 import {executionProgressDescriptions, observedProgressMessages, isCollapsibleProcessItem, processDetailItems} from "../../domain/conversation-process";
 import ChatTurnGroup from "./ChatTurnGroup.vue";
 import ChatTimeline from "./ChatTimeline.vue";
+import ChatTextLink from "./ChatTextLink.vue";
 
 const snapshot: ConversationSnapshot = {threads:[{threadId:"session",status:"ready"}],turns:[],items:[]};
 const record = (item: NativeConversationView["items"][number]["item"], ordinal: number): NativeConversationView["items"][number] => ({item, ordinal, lastMethod:"item/completed"});
@@ -246,7 +247,8 @@ describe("model and runtime progress have distinct provenance", () => {
     expect(message.isVisible()).toBe(true);
     expect(message.get('[data-message-source="model"]').text()).toBe('模型消息');
     expect(wrapper.find('[data-progress-source="model"]').exists()).toBe(false);
-    expect(message.text()).toContain('https://example.org/statistics/2025');
+    expect(message.get('.chat-text-link').text()).toBe('统计资料');
+    expect(message.getComponent(ChatTextLink).props('destination')).toBe('https://example.org/statistics/2025');
     expect(message.find('a').exists()).toBe(false);
     expect(view.items[5]!.item.phase).toBeUndefined();
     expect(turn(view).items[5]!.assistantPhase).toBe('unknown');
@@ -276,12 +278,14 @@ describe("model and runtime progress have distinct provenance", () => {
     const row = message.get('tbody tr');
     expect(row.text()).toContain('2025 年指标');
     expect(row.text()).toContain('100');
-    expect(row.get('.chat-safe-content__inert-link').text()).toContain('https://example.org/statistics/2025');
-    expect(message.get('li').text()).toContain('80 另一来源（https://example.org/statistics/2024）');
+    expect(row.get('.chat-text-link').text()).toBe('统计资料');
+    expect(row.getComponent(ChatTextLink).props('destination')).toBe('https://example.org/statistics/2025');
+    expect(message.get('li').text()).toContain('80 另一来源');
+    expect(message.get('li').getComponent(ChatTextLink).props('destination')).toBe('https://example.org/statistics/2024');
     await wrapper.get('.chat-turn-group__timing button').trigger('click');
     await wrapper.get('.chat-turn-group__timing button').trigger('click');
     expect(message.isVisible()).toBe(true);
-    expect(message.findAll('.chat-safe-content__inert-link')).toHaveLength(2);
+    expect(message.findAll('.chat-text-link')).toHaveLength(2);
     expect(message.find('a, [href]').exists()).toBe(false);
     expect(JSON.stringify(view)).toBe(before);
     wrapper.unmount();

@@ -1341,7 +1341,7 @@ mod tests {
     #[test]
     fn preview_rejects_unauthorized_formats_controls_bidi_and_invalid_documents() {
         for (media_type, bytes) in [
-            ("text/markdown", b"# title".as_slice()),
+            ("application/octet-stream", b"ordinary bytes".as_slice()),
             ("text/plain", b"alpha\0beta".as_slice()),
             ("text/plain", "alpha\u{202e}beta".as_bytes()),
             ("application/json", b"{broken".as_slice()),

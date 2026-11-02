@@ -1,0 +1,6 @@
+body { margin: 0; background: var(--yj-color-bg-page); color: var(--yj-color-text-primary); font-family: var(--yj-font-family-sans); }
+main { max-width: 680px; margin: 40px auto; padding: 24px; }
+h1 { font-size: 20px; } p, output { color: var(--yj-color-text-secondary); font-size: 14px; }
+nav { display: flex; gap: 12px; margin: 20px 0; }
+nav button { border: 1px solid var(--yj-color-border-default); border-radius: 8px; padding: 8px 12px; color: inherit; background: var(--yj-color-bg-card); cursor: pointer; }
+.preview-panel { width: 310px; max-width: 100%; margin-bottom: 20px; border: 1px solid var(--yj-color-border-default); border-radius: 14px; background: var(--yj-color-bg-card); }

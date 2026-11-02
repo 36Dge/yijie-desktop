@@ -60,7 +60,7 @@ describe("first-content loading feedback", () => {
 
     native.value = view([user, { ...emptyReasoning, item: { ...emptyReasoning.item, summary: ["先核对店铺信息。"] } }]);
     await flushPromises();
-    expect(wrapper.find(".chat-thinking").exists()).toBe(false);
+    expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__timing").element).toBe(row);
     expect(row.textContent).toBe("已处理 3s");
     expect(wrapper.get(".chat-turn-group__timing").find('[aria-live]').exists()).toBe(false);
@@ -93,7 +93,7 @@ describe("first-content loading feedback", () => {
     const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view([user, item])), turnTimingLabels: { turn: "已处理 2s" } } });
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("正在思考");
     await wrapper.setProps({ timeline: timeline(view([user, { ...item, item: { ...item.item, text: "开始输出" } }])) });
-    expect(wrapper.find(".chat-thinking").exists()).toBe(false);
+    expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 2s");
   });
 
@@ -101,7 +101,7 @@ describe("first-content loading feedback", () => {
     const wrapper = mount(ChatTimeline, { props: { timeline: timeline(view()), turnTimingLabels: { turn: "已处理 2s" } } });
     await wrapper.setProps({ timeline: timeline(view([user, { ordinal: 1, lastMethod: "item/started",
       item: { id: "search", type: "webSearch", webSearch: { action: "search", queries: ["杭州美食"] }, availability: "available" } }])) });
-    expect(wrapper.find(".chat-thinking").exists()).toBe(false);
+    expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 2s");
     expect(wrapper.get(".chat-web-search").attributes("aria-busy")).toBe("true");
     expect(wrapper.get(".chat-web-search__toggle").text()).toContain("网页搜索杭州美食");
@@ -119,7 +119,7 @@ describe("first-content loading feedback", () => {
     } }]);
     const wrapper = mount(ChatTimeline, { props: { timeline: timeline(output), turnTimingLabels: { turn: "已处理 3s" } } });
     await wrapper.setProps({ timeline: timeline(view()) });
-    expect(wrapper.find(".chat-thinking").exists()).toBe(false);
+    expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("已处理 3s");
   });
 
@@ -134,7 +134,7 @@ describe("first-content loading feedback", () => {
     ];
     for (const [native, live] of variants) {
       const wrapper = mount(ChatTimeline, { props: { timeline: timeline(native, live) } });
-      expect(wrapper.find(".chat-thinking").exists()).toBe(false);
+      expect(wrapper.find(".chat-turn-group__thinking .chat-thinking").exists()).toBe(false);
       wrapper.unmount();
     }
   });

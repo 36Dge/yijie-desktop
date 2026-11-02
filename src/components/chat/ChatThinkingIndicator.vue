@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
+withDefaults(defineProps<{label?: string; active?: boolean; paused?: boolean}>(), {label: "正在思考", active: true, paused: false});
+
 const visible = ref(true);
 function updateVisibility() { visible.value = document.visibilityState !== "hidden"; }
 onMounted(() => {
@@ -11,16 +13,17 @@ onBeforeUnmount(() => document.removeEventListener("visibilitychange", updateVis
 </script>
 
 <template>
-  <span class="chat-thinking" :class="{ 'chat-thinking--paused': !visible }">正在思考</span>
+  <span class="chat-thinking" :class="{ 'chat-thinking--active': active, 'chat-thinking--paused': paused || !visible }">{{ label }}</span>
 </template>
 
 <style scoped>
 .chat-thinking {
   display: inline-block;
-  color: var(--yj-color-text-tertiary);
+  color: inherit;
 }
+.chat-thinking--active { color: var(--yj-color-text-tertiary); }
 @supports (background-clip: text) or (-webkit-background-clip: text) {
-  .chat-thinking {
+  .chat-thinking--active {
     background: linear-gradient(100deg,
       var(--yj-color-text-tertiary) 36%,
       var(--yj-color-chat-thinking-highlight) 48%,
@@ -39,7 +42,7 @@ onBeforeUnmount(() => document.removeEventListener("visibilitychange", updateVis
   85%, 100% { background-position: 0 0; }
 }
 @media (prefers-reduced-motion: reduce), (forced-colors: active) {
-  .chat-thinking {
+  .chat-thinking--active {
     animation: none;
     background: none;
     color: var(--yj-color-text-tertiary);

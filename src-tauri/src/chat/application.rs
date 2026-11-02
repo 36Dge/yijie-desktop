@@ -77,6 +77,25 @@ impl Debug for AuthorizedConversationApplication {
 }
 
 impl AuthorizedConversationApplication {
+    pub async fn turn_model(
+        &self,
+        context_id: Uuid,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<super::turn_model_generated::TurnModelView, ChatError> {
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        let profile_id = self
+            .application
+            .database
+            .call(move |r| r.turn_model_profile(session_id, turn_id))
+            .await?;
+        self.authorize(context_id, ChatAction::ReadSessions)?;
+        Ok(super::turn_model_generated::TurnModelView {
+            session_id,
+            turn_id,
+            profile_id,
+        })
+    }
     pub async fn turn_timing(
         &self,
         context_id: Uuid,
@@ -3550,30 +3569,32 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn feat134_background_recovery_terminalizes_preexisting_failed_turn_projection() {
+    async fn background_preserves_local_failure_without_inventing_runtime_completion() {
         let (root, database, pending, turn, _agent_session_id) =
             prepare_v2_turn_outbox("feat134-failed-turn-recovery").await;
         database.fail_outbox(turn.operation_id).await.unwrap();
         let application = ConversationApplication::new_offline(database.clone());
 
         let outcome = application.run_background_once().await.unwrap();
-        assert_eq!(
-            outcome,
-            CoordinatorOutcome::Dispatched(DispatchOutcome::TurnSubmissionFailed {
-                operation_id: pending.turn_operation_id,
-                session_id: pending.session_id,
-                turn_id: pending.turn_id,
-            })
-        );
+        assert_eq!(outcome, CoordinatorOutcome::Idle);
         let snapshot = database
             .load_feat134_history_snapshot(pending.session_id, None, Some(20))
             .await
             .unwrap();
         assert_eq!(
             snapshot.session.latest_turn_status.as_deref(),
-            Some("failed")
+            Some("queued")
         );
-        assert_eq!(snapshot.history.turns[0].status, "failed");
+        assert_eq!(snapshot.history.turns[0].status, "queued");
+        assert!(snapshot.history.turns[0].terminal_at.is_none());
+        assert_eq!(
+            database
+                .local_submissions(pending.session_id, vec![pending.turn_id])
+                .await
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
         assert_eq!(snapshot.feat134.turns[0].terminal_code, None);
         assert!(!snapshot.feat134.turns[0].v4_authority);
         assert_eq!(
@@ -3929,7 +3950,16 @@ mod tests {
             .load_history(pending.session_id, None, Some(20))
             .await
             .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].status, "queued");
+        assert!(history.turns[0].terminal_at.is_none());
+        assert_eq!(
+            database
+                .local_submissions(pending.session_id, vec![pending.turn_id])
+                .await
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
         assert_eq!(history.turns[0].runtime_turn_id, None);
 
         let requests = server.await.unwrap();
@@ -4311,9 +4341,18 @@ mod tests {
             .load_history(pending.session_id, None, Some(20))
             .await
             .unwrap();
-        assert_eq!(history.turns[0].status, "failed");
+        assert_eq!(history.turns[0].status, "queued");
+        assert!(history.turns[0].terminal_at.is_none());
+        assert_eq!(
+            database
+                .local_submissions(pending.session_id, vec![pending.turn_id])
+                .await
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
         assert_eq!(history.turns[0].runtime_turn_id, None);
-        assert_eq!(history.turns[0].reasoning_status, "unavailable");
+        assert_eq!(history.turns[0].reasoning_status, "pending");
         assert_eq!(
             application.dispatch_next().await.unwrap(),
             DispatchOutcome::Idle
@@ -4478,7 +4517,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn v2_invalid_accepted_response_retries_same_operation_id() {
+    async fn v2_invalid_accepted_response_keeps_original_operation_uncertain_without_repost() {
         const NONCE: &str = "019fbd88-cbc3-7bf1-934d-7b05cd693fb0";
         const TOKEN: &str = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
         let (root, database, pending, claimed, _agent_session_id) =
@@ -4489,15 +4528,9 @@ mod tests {
         let token_path = token_directory.join("api-token");
         fs::write(&token_path, format!("{TOKEN}\n")).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let runtime_turn_id = Uuid::now_v7();
         let (port, server) = serve_http(vec![
             ready_response(NONCE),
             json_response("202 Accepted", r#"{"turn_id":"#),
-            ready_response(NONCE),
-            json_response(
-                "202 Accepted",
-                &serde_json::json!({"turn_id": runtime_turn_id}).to_string(),
-            ),
         ])
         .await;
         let application = ConversationApplication::new(
@@ -4519,25 +4552,34 @@ mod tests {
             .unwrap();
         assert_eq!(
             application.dispatch_next().await.unwrap(),
-            DispatchOutcome::RetryScheduled {
-                operation_id: pending.turn_operation_id
+            DispatchOutcome::TurnSubmissionUncertain {
+                operation_id: pending.turn_operation_id,
+                session_id: pending.session_id,
+                turn_id: pending.turn_id,
             }
         );
-        tokio::time::sleep(Duration::from_secs(RETRY_DELAY_SECONDS as u64)).await;
         assert_eq!(
             application.dispatch_next().await.unwrap(),
-            DispatchOutcome::TurnAccepted {
-                session_id: pending.session_id
-            }
+            DispatchOutcome::Idle
         );
-
         let requests = server.await.unwrap();
-        let first_body = requests[1].split("\r\n\r\n").nth(1).unwrap();
-        let second_body = requests[3].split("\r\n\r\n").nth(1).unwrap();
-        assert_eq!(first_body, second_body);
+        assert_eq!(requests.len(), 2);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(first_body).unwrap()["operation_id"],
+            requests.iter().filter(|r| r.starts_with("POST ")).count(),
+            1
+        );
+        let body = requests[1].split("\r\n\r\n").nth(1).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(body).unwrap()["operation_id"],
             pending.turn_operation_id.to_string()
+        );
+        assert_eq!(
+            database
+                .local_submissions(pending.session_id, vec![pending.turn_id])
+                .await
+                .unwrap()[0]
+                .status,
+            "uncertain"
         );
 
         drop(application);
@@ -4865,7 +4907,10 @@ mod tests {
                 .await
                 .unwrap();
             let turn = database
-                .claim_next_conversation_outbox(now, OUTBOX_LEASE_SECONDS)
+                // Binding enqueues this turn with its own current timestamp.
+                // Under full-suite SQLCipher load, setup can cross a second;
+                // claiming with the pre-binding clock correctly yields None.
+                .claim_next_conversation_outbox(unix_seconds().unwrap(), OUTBOX_LEASE_SECONDS)
                 .await
                 .unwrap()
                 .unwrap();
@@ -4896,11 +4941,11 @@ mod tests {
                     let sequence=index+1;
                     let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":native_turn,"availability":"available"});
                     for (k,v) in payload.as_object().unwrap() {n[k]=v.clone();}
-                    let event=serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":sequence,"occurred_at":"2026-10-17T00:00:00Z","task_id":context.task_id,"agent_session_id":host_id,"codex_thread_id":context.codex_thread_id,"turn_id":native_turn,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+                    let event=serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream,"sequence":sequence,"occurred_at":"2026-10-17T00:00:00Z","task_id":context.task_id,"agent_session_id":host_id,"codex_thread_id":context.codex_thread_id,"turn_id":native_turn,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
                     let message=format!("id: {stream}:{sequence}\nevent: native.notification\ndata: {event}\n\n");
                     if method=="turn/completed" {end.push_str(&message);} else {start.push_str(&message);}
                 }
-                let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 8\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",start.len()+end.len());
+                let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 11\r\nX-Yijie-Event-Stream-ID: {stream}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",start.len()+end.len());
                 responses.insert(host_id.to_string(), (headers + &start, end));
             }
             let token_directory = root.join("host");
@@ -4940,7 +4985,7 @@ mod tests {
                     }
                     let id = responses
                         .keys()
-                        .find(|id| request.starts_with(&format!("GET /v8/agent-sessions/{id}/")))
+                        .find(|id| request.starts_with(&format!("GET /v11/agent-sessions/{id}/")))
                         .unwrap()
                         .clone();
                     let (start, end) = responses.remove(&id).unwrap();
@@ -5023,7 +5068,7 @@ mod tests {
             .unwrap();
         let stream_id = Uuid::now_v7();
         let event = |sequence, method: &str, status: &str| {
-            let e = serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
+            let e = serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-09T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":{"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available","turn":{"id":runtime_turn_id,"status":status,"items":[],"itemsComplete":false}}}});
             format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {e}\n\n")
         };
         let started = event(1, "turn/started", "inProgress");
@@ -5050,8 +5095,8 @@ mod tests {
             let (mut sse, _) = listener.accept().await.unwrap();
             assert!(read_request(&mut sse)
                 .await
-                .starts_with("GET /v8/agent-sessions/"));
-            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 8\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
+                .starts_with("GET /v11/agent-sessions/"));
+            let headers=format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nX-Accel-Buffering: no\r\nX-Yijie-Event-Schema-Version: 11\r\nX-Yijie-Event-Stream-ID: {stream_id}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",started.len()+ended.len());
             sse.write_all(format!("{headers}{started}").as_bytes())
                 .await
                 .unwrap();
@@ -5152,7 +5197,7 @@ mod tests {
             ("turn/completed",serde_json::json!({"turn":{"id":runtime_turn_id,"status":"failed","errorCode":"usageLimitExceeded","items":[],"itemsComplete":false}})),
         ].into_iter().enumerate(){
             let sequence=index+1;let mut n=serde_json::json!({"source":"runtime_notification","method":method,"threadId":context.codex_thread_id,"turnId":runtime_turn_id,"availability":"available"});for(k,v)in payload.as_object().unwrap(){n[k]=v.clone();}
-            let event=serde_json::json!({"schema_version":8,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
+            let event=serde_json::json!({"schema_version":11,"event_id":Uuid::now_v7(),"stream_id":stream_id,"sequence":sequence,"occurred_at":"2026-09-08T00:00:00Z","task_id":context.task_id,"agent_session_id":agent_session_id,"codex_thread_id":context.codex_thread_id,"turn_id":runtime_turn_id,"event_type":"native.notification","terminal":method=="turn/completed","payload":{"native":n}});
             sse.push_str(&format!("id: {stream_id}:{sequence}\nevent: native.notification\ndata: {event}\n\n"));
         }
         let token_directory = root.join("host");
@@ -5169,7 +5214,7 @@ mod tests {
                     ("Content-Type", "text/event-stream"),
                     ("Cache-Control", "no-store"),
                     ("X-Accel-Buffering", "no"),
-                    ("X-Yijie-Event-Schema-Version", "8"),
+                    ("X-Yijie-Event-Schema-Version", "11"),
                     ("X-Yijie-Event-Stream-ID", &stream_id.to_string()),
                 ],
                 &sse,
@@ -5211,7 +5256,7 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v8/agent-sessions/{agent_session_id}/events HTTP/1.1"
+            "GET /v11/agent-sessions/{agent_session_id}/events HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);
@@ -5241,7 +5286,7 @@ mod tests {
         let token_path = token_directory.join("api-token");
         fs::write(&token_path, TOKEN).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let snapshot = serde_json::json!({"schema_version":2,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
+        let snapshot = serde_json::json!({"schema_version":4,"source":"runtime_read","thread_id":context.codex_thread_id,"availability":"partial","turns":[{"id":runtime_turn_id,"status":"completed","itemsComplete":false,"items":[{"id":"item-0","type":"agentMessage","text":"recovered by Codex","phase":"final_answer","availability":"partial"}]}]});
         let (port, server) = serve_http(vec![
             ready_response(CURRENT),
             json_response("200 OK", &snapshot.to_string()),
@@ -5282,7 +5327,7 @@ mod tests {
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[1].starts_with(&format!(
-            "GET /v2/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
+            "GET /v4/agent-sessions/{agent_session_id}/native-thread HTTP/1.1"
         )));
         assert!(requests.iter().all(|r| !r.starts_with("POST ")));
         drop(application);

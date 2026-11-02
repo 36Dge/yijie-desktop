@@ -42,7 +42,7 @@ const DraftPage = defineComponent({
 });
 
 function button(text: string, selector = "button"): HTMLButtonElement {
-  const matches = [...document.querySelectorAll<HTMLButtonElement>(selector)].filter(item => item.textContent?.trim() === text && getComputedStyle(item).display !== "none");
+  const matches = [...document.querySelectorAll<HTMLButtonElement>(selector)].filter(item => (item.textContent?.trim() === text || item.getAttribute("aria-label") === `去试试：${text}`) && getComputedStyle(item).display !== "none");
   const found = matches[matches.length - 1];
   expect(found, `visible ${text} action`).toBeDefined();
   return found!;

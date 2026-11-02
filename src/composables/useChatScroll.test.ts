@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { mount } from "@vue/test-utils";
-import { defineComponent, ref } from "vue";
+import { defineComponent, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatScroll } from "./useChatScroll";
 
@@ -63,4 +63,47 @@ describe("useChatScroll", () => {
     await wrapper.vm.preservePositionWhile(async () => { scrollHeight = 1320; });
     expect(scrollTop).toBe(500);
   });
+});
+
+
+it("coalesces automatic follow into one frame and cancels it on upward reading input", async () => {
+  const callbacks = new Map<number, FrameRequestCallback>(); let id = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callbacks.set(++id, callback); return id; });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+  const wrapper = mount(Harness); await nextTick();
+  const element = wrapper.get("div").element as HTMLElement;
+  const smooth = vi.fn(); let top = 600; let height = 1000;
+  Object.defineProperties(element, {
+    scrollHeight: {configurable: true, get: () => height}, clientHeight: {configurable: true, value: 400},
+    scrollTop: {configurable: true, get: () => top, set: value => { top = Number(value); }},
+    scrollTo: {configurable: true, value: smooth},
+  });
+  wrapper.vm.update(); height = 1400; wrapper.vm.update();
+  expect(wrapper.vm.following).toBe(true);
+  await wrapper.vm.followNewContent(); await wrapper.vm.followNewContent();
+  expect(callbacks.size).toBe(1);
+  for (const callback of callbacks.values()) callback(16); callbacks.clear();
+  expect(top).toBe(1000); expect(smooth).not.toHaveBeenCalled();
+  await wrapper.vm.followNewContent();
+  element.dispatchEvent(new WheelEvent("wheel", {deltaY: -1}));
+  expect(callbacks.size).toBe(0); expect(wrapper.vm.following).toBe(false);
+  top = 990; wrapper.vm.update(); expect(wrapper.vm.following).toBe(false);
+  top = 1000; wrapper.vm.update(); expect(wrapper.vm.following).toBe(true);
+  await wrapper.vm.followNewContent(); wrapper.unmount(); expect(callbacks.size).toBe(0);
+});
+
+
+it("keeps following while explicit smooth navigation is still far from the bottom", async () => {
+  const wrapper = mount(Harness); await nextTick();
+  const element = wrapper.get("div").element as HTMLElement;
+  let top = 100;
+  Object.defineProperties(element, {
+    scrollHeight: {configurable: true, value: 2400}, clientHeight: {configurable: true, value: 400},
+    scrollTop: {configurable: true, get: () => top}, scrollTo: {configurable: true, value: vi.fn()},
+  });
+  wrapper.vm.scrollToBottom(); top = 200; wrapper.vm.update();
+  expect(wrapper.vm.following).toBe(true);
+  element.dispatchEvent(new WheelEvent("wheel", {deltaY: -10}));
+  expect(wrapper.vm.following).toBe(false);
+  wrapper.unmount();
 });

@@ -14,11 +14,12 @@ function live(turn: ConversationTimelineTurnViewModel): boolean {
 
 type TimingRequest = { key: string; controller: AbortController; attempts: number; pending: boolean };
 
-export function useChatTurnTiming(options: {
+type TurnTimingOptions = {
   scope: () => string | null;
   turns: () => readonly ConversationTimelineTurnViewModel[];
   read: (turnId: string, signal: AbortSignal) => Promise<NativeTurnTiming | null>;
-}) {
+};
+export function useChatTurnTimingDetails(options: TurnTimingOptions) {
   const facts = shallowRef<Readonly<Record<string, NativeTurnTiming | null>>>({});
   const now = ref(Date.now());
   const requests = new Map<string, TimingRequest>();
@@ -104,7 +105,11 @@ export function useChatTurnTiming(options: {
   }, { immediate: true });
   onScopeDispose(() => { stopped = true; reset(); clearInterval(interval); });
 
-  return computed(() => Object.fromEntries(options.turns().map(turn => [
+  const labels = computed(() => Object.fromEntries(options.turns().map(turn => [
     turn.turnId, turnTimingLabel(facts.value[turn.turnId], live(turn), now.value, turn.domainStatus),
   ])));
+  return {labels, facts: computed(() => facts.value)};
 }
+
+/** Existing duration consumers retain their original API and one read owner. */
+export function useChatTurnTiming(options: TurnTimingOptions) { return useChatTurnTimingDetails(options).labels; }

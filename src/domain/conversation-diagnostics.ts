@@ -1,5 +1,8 @@
 /** Display-only allowlist. Unknown upstream codes never become visible text. */
 const messages: Readonly<Record<string, string>> = Object.freeze({
+  answer_completion_continuing: "检测到过程说明提前结束，已请求根据已有结果补全回答。",
+  answer_completion_tools_blocked: "正在补全回答，已阻止重复执行操作。",
+  answer_completion_failed: "模型未能生成可交付的回答，本轮已停止，已取得的内容保留。",
   display_limit: "显示内容达到容量限制，已保留可用部分。",
   history_display_limit: "本次历史显示达到容量限制，历史信息可能不完整。",
   stream_gap: "部分实时通知未被观察到，已保留收到的内容。",

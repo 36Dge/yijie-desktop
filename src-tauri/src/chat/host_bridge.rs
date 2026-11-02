@@ -2626,6 +2626,7 @@ mod tests {
     #[cfg(feature = "kimi-k31-pro-candidate")]
     #[tokio::test]
     async fn feat164_delivery_http_admission_blocks_cancelled_and_sends_live_once() {
+        if crate::chat::model_test_support::run_in_current_model_environment("chat::host_bridge::tests::feat164_delivery_http_admission_blocks_cancelled_and_sends_live_once") { return; }
         use crate::chat::{
             database::{ChatScope, DraftContentBlock},
             delivery::Admission,

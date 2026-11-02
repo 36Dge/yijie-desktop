@@ -4345,8 +4345,11 @@ impl ChatRepository {
 
     pub fn fail_outbox(&mut self, operation_id: Uuid) -> Result<(), ChatError> {
         validate_non_nil(operation_id)?;
-        let changed = self
+        let transaction = self
             .connection
+            .transaction()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
+        let changed = transaction
             .execute(
                 "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
                  WHERE operation_id=?1 AND state IN ('pending', 'inflight')
@@ -4365,6 +4368,10 @@ impl ChatRepository {
         if changed != 1 {
             return Err(ChatError::ConversationConflict);
         }
+        mark_failed_local_submission(&transaction, operation_id)?;
+        transaction
+            .commit()
+            .map_err(|_| ChatError::DatabaseUnavailable)?;
         Ok(())
     }
 
@@ -4405,7 +4412,9 @@ impl ChatRepository {
             .optional()
             .map_err(|_| ChatError::DatabaseUnavailable)?;
         let (turn_id, session_id) = row.ok_or(ChatError::ConversationConflict)?;
-        transaction.execute("UPDATE chat_turns SET submission_status='failed' WHERE id=?1 AND runtime_turn_id IS NULL",[&turn_id]).map_err(map_constraint_or_database)?;
+        if mark_failed_local_submission(&transaction, operation_id)? != 1 {
+            return Err(ChatError::ConversationConflict);
+        }
         let outbox_changed = transaction
             .execute(
                 "UPDATE chat_outbox SET state='failed', next_attempt_at=NULL
@@ -8536,6 +8545,23 @@ fn load_history_page_from_connection(
     })
 }
 
+fn mark_failed_local_submission(
+    connection: &Connection,
+    operation_id: Uuid,
+) -> Result<usize, ChatError> {
+    connection
+        .execute(
+            "UPDATE chat_turns SET submission_status='failed'
+         WHERE operation_id=?1 AND status='queued' AND runtime_turn_id IS NULL
+           AND NOT EXISTS(SELECT 1 FROM chat_observed_events_v4 e WHERE e.turn_id=chat_turns.id)
+           AND EXISTS(SELECT 1 FROM chat_outbox o WHERE o.operation_id=chat_turns.operation_id
+             AND o.session_id=chat_turns.session_id AND o.kind='start_turn'
+             AND o.payload_version=2 AND o.state IN ('inflight','failed'))",
+            [operation_id.to_string()],
+        )
+        .map_err(map_constraint_or_database)
+}
+
 fn load_history_messages(
     connection: &Connection,
     turn_ids: &[String],
@@ -9411,7 +9437,58 @@ mod tests {
     }
 
     #[test]
-    fn failed_start_turn_dispatch_v2_atomically_terminalizes_only_the_queued_turn() {
+    fn failed_local_outbox_survives_normal_reopen_and_releases_next_submission() {
+        let root = std::env::temp_dir().join(format!("yijie-local-failure-{}", Uuid::now_v7()));
+        fs::create_dir(&root).unwrap();
+        let owner = scope();
+        let mut repository = open_repository_for_scope(&root, 51, owner.clone());
+        let project_id = register_synthetic_project(&mut repository, &root);
+        let pending = repository
+            .create_session_and_enqueue_multimodal(
+                project_id,
+                &[DraftContentBlock::Text("ordinary local request".to_owned())],
+                Uuid::now_v7(),
+                1,
+            )
+            .unwrap();
+        bind_and_claim_first_turn(&mut repository, &pending, unix_seconds().unwrap());
+        repository.fail_outbox(pending.turn_operation_id).unwrap();
+        drop(repository);
+
+        let mut repository = open_repository_for_scope(&root, 51, owner);
+        assert_eq!(
+            repository.outbox_state(pending.turn_operation_id).unwrap(),
+            OutboxState::Failed
+        );
+        assert_eq!(
+            repository
+                .local_submissions(pending.session_id, &[pending.turn_id])
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+        assert!(repository
+            .native_views(pending.session_id, &[pending.turn_id])
+            .unwrap()
+            .is_empty());
+        let history = repository
+            .load_feat134_history_snapshot(pending.session_id, None, Some(20))
+            .unwrap();
+        assert_eq!(history.history.turns[0].status, "queued");
+        assert_eq!(history.history.turns[0].terminal_at, None);
+        assert!(repository
+            .enqueue_turn_multimodal(
+                pending.session_id,
+                &[DraftContentBlock::Text("next ordinary request".to_owned())],
+                Uuid::now_v7(),
+            )
+            .is_ok());
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_start_turn_dispatch_v2_atomically_fails_only_local_submission() {
         let root =
             std::env::temp_dir().join(format!("yijie-feat134-turn-failure-{}", Uuid::now_v7()));
         fs::create_dir(&root).unwrap();
@@ -9444,18 +9521,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             snapshot.session.latest_turn_status.as_deref(),
-            Some("failed")
+            Some("queued")
         );
         assert_eq!(snapshot.history.turns.len(), 1);
         let turn = &snapshot.history.turns[0];
-        assert_eq!(turn.status, "failed");
+        assert_eq!(turn.status, "queued");
         assert_eq!(turn.runtime_turn_id, None);
-        assert_eq!(turn.terminal_at, Some(now + 1));
-        assert_eq!(turn.reasoning_status, "unavailable");
-        assert_eq!(
-            turn.reasoning_reason_code.as_deref(),
-            Some("reasoning_not_emitted")
-        );
+        assert_eq!(turn.terminal_at, None);
+        assert_eq!(turn.reasoning_status, "pending");
+        assert_eq!(turn.reasoning_reason_code.as_deref(), None);
         assert_eq!(turn.messages.len(), 1);
         assert_eq!(turn.messages[0].content, "safe local fixture");
         assert!(!snapshot.feat134.turns[0].v4_authority);
@@ -9463,6 +9537,17 @@ mod tests {
         assert!(snapshot.feat134.turns[0].items.is_empty());
         assert!(snapshot.feat134.turns[0].plan.is_none());
         assert!(snapshot.feat134.turns[0].notices.is_empty());
+        assert_eq!(
+            repository
+                .local_submissions(pending.session_id, &[pending.turn_id])
+                .unwrap()[0]
+                .status,
+            "failed"
+        );
+        assert!(repository
+            .native_views(pending.session_id, &[pending.turn_id])
+            .unwrap()
+            .is_empty());
         assert!(repository
             .enqueue_turn_multimodal(
                 pending.session_id,

@@ -35,6 +35,10 @@ pnpm client:dev
 - 复用 `.local/build-cache/feat162-v1` 的有界中间缓存及构建互斥锁。前端修改不创建 generation、不生成 `.app` 安装包、不创建数据全量备份、不伪造打包回执或激活记录。
 - Vite 绑定 localhost:1420，HMR 使用已有 localhost:1421。工作流仍使用 127.0.0.1:18888。无新增外部目标、Tauri capability 或原生 command。
 
+2026-11-01 日常资源修复：固定 tauri-build 2.6.3 在 Cargo 独立 build-dir 下把资源输出到中间缓存。开发入口现依据同一 Tauri 资源配置和既有技能/专家 pin，使用原资源同步器将精确受审文件装配到 `.local/development/target/debug`，供 Native 原生路径解析器读取。每次启动核对清单、归档摘要和输出文件集；未变化的文件保持。此步骤仅处理可复现资源，不复制可执行文件、不修改已安装技能或专家。
+
+同日用户进一步澄清：默认关闭的是**当前对话选用**开关；已配置的连接器应保持**全局已启用**。上一轮“每次启动全局停用”解释已撤回。Native 启动使用既有 provider probe 恢复已保存的启用意愿，不改聊天选集；刷新、身份续期、前端热更新不重复探测。针对上一轮误停用的 Shopify/Kimi，使用两个 scope 绑定的普通幂等 Enable 操作进行一次修复，其真实回执防止覆盖用户之后的明确停用。缺少配置/授权的 Sorftime/Tushare 保持真实提示，配置和授权仍走原安全入口，不从历史回执伪造连接就绪。未完成操作保留原 ID，不重放业务工具。
+
 ## 检查与兼容
 
 启动环境从白名单重建，不继承旧 generation、观察代理、模型 URL、Home、凭据正文或 TAURI_CONFIG 覆盖。只选择已安装且满足 go.mod 的工具链，离线构建。原始数据目录和数据库必须已存在，不能因配置遗漏创建空历史。启动前使用 Infra 日常会话入口复用/启动原服务，再执行原 authenticated workflow ready-only 检查。

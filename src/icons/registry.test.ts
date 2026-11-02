@@ -4,6 +4,22 @@ import { iconRegistry } from "./registry";
 describe("iconRegistry", () => {
   it("exposes only the semantic icons required by the app", () => {
     expect(Object.keys(iconRegistry).sort()).toEqual([
+      "fileCsv",
+      "fileDocx",
+      "fileHtml",
+      "fileJpeg",
+      "fileMarkdown",
+      "filePdf",
+      "filePng",
+      "filePptx",
+      "fileSvg",
+      "fileTxt",
+      "fileVideo",
+      "globe",
+      "lightbulb",
+      "previewSidebar",
+      "terminal",
+
       "arrowRight",
       "arrowUpRight",
       "assistant",
@@ -15,6 +31,8 @@ describe("iconRegistry", () => {
       "collapseSidebar",
       "connector",
       "copy",
+      "thumbsUp",
+      "thumbsDown",
       "dismiss",
       "download",
       "edit",
@@ -127,7 +145,7 @@ describe("iconRegistry", () => {
       "workspace",
       "zoomIn",
       "zoomOut",
-    ]);
+    ].sort());
   });
 
   it("maps every semantic name to a renderable component", () => {

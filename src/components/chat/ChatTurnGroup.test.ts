@@ -323,8 +323,8 @@ describe("ChatTurnGroup", () => {
     await reasoningItems[0]!.get("button").trigger("click");
     expect(reasoningItems[0]!.get(".chat-deep-thinking__viewport").isVisible()).toBe(true);
     expect(reasoningItems[0]?.get(".chat-deep-thinking__viewport").text())
-      .toContain("**短过程保持字面量**");
-    expect(reasoningItems[0]?.find(".chat-safe-content strong").exists()).toBe(false);
+      .toContain("短过程保持字面量");
+    expect(reasoningItems[0]?.get(".chat-safe-content strong").text()).toBe("短过程保持字面量");
     expect(reasoningItems[0]?.find(".chat-safe-content__inert-link").exists()).toBe(false);
     expect(wrapper.emitted("disclosure-change")?.[0]?.[0]).toEqual({
       itemIdentity: turn.identity,
@@ -332,7 +332,7 @@ describe("ChatTurnGroup", () => {
     });
   });
 
-  it("renders authoritative completed reasoning status without inventing content", async () => {
+  it("retains completed reasoning metadata without rendering an empty disclosure", () => {
     const turn = projectedTurn({
       items: [{
         threadId: THREAD_ID,
@@ -347,13 +347,9 @@ describe("ChatTurnGroup", () => {
     });
     const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
 
-    expect(wrapper.get(".chat-turn-group__process-toggle").attributes("aria-expanded")).toBe("false");
-    await wrapper.get(".chat-turn-group__process-toggle").trigger("click");
-    expect(wrapper.get("article").attributes("aria-label")).toBe("深度思考");
-    expect(wrapper.text()).toContain("已完成");
-    expect(wrapper.find(".chat-timeline-item-shell__disclosure").exists()).toBe(false);
-    expect(wrapper.text()).toContain("模型推理记录已完成，但没有可显示的正文。");
-    expect(wrapper.get(".chat-deep-thinking__notice").attributes("role")).toBe("note");
+    expect(wrapper.find(".chat-turn-group__process-toggle").exists()).toBe(false);
+    expect(wrapper.find(".chat-deep-thinking").exists()).toBe(false);
+    expect(turn.items[0]?.reasoning).toEqual({status: "complete", reasonCode: null});
     expect(wrapper.find(".chat-safe-content").exists()).toBe(false);
   });
 
@@ -391,7 +387,7 @@ describe("ChatTurnGroup", () => {
     expect(wrapper.get(".chat-deep-thinking__notice").text()).toContain("流缺口");
   });
 
-  it("renders unavailable and unknown reasoning states explicitly", async () => {
+  it("retains unavailable and unknown metadata without empty ended thinking rows", () => {
     const turn = projectedTurn({
       items: [{
         threadId: THREAD_ID,
@@ -416,11 +412,8 @@ describe("ChatTurnGroup", () => {
     const wrapper = mount(ChatTurnGroup, { attachTo: document.body, props: { turn, position: 1 } });
     const reasoningItems = wrapper.findAll(".chat-turn-group__item--reasoning");
 
-    expect(reasoningItems[0]!.text()).toContain("不可用");
-    expect(reasoningItems[1]!.text()).toContain("状态未知");
-    expect(reasoningItems.every(item => item.get(".chat-deep-thinking__notice").isVisible())).toBe(true);
-    expect(reasoningItems[0]?.text()).toContain("本轮未产生可显示的模型推理记录");
-    expect(reasoningItems[1]?.text()).toContain("模型推理记录状态未知");
+    expect(reasoningItems).toHaveLength(0);
+    expect(turn.items.map(item => item.reasoning?.status)).toEqual(["unavailable", "unknown"]);
   });
 
   it("renders phase-driven commentary, plan, reasoning, unclassified and final policies", () => {
@@ -482,9 +475,9 @@ describe("ChatTurnGroup", () => {
     expect(reasoning.text()).toContain("模型推理记录");
     expect(reasoning.text()).toContain("未完整结束");
     expect(reasoning.text()).toContain("流缺口");
-    expect(reasoning.find(".chat-safe-content strong").exists()).toBe(false);
+    expect(reasoning.get(".chat-safe-content strong").text()).toBe("原始推理保持字面量");
     expect(reasoning.find(".chat-safe-content__code-region").exists()).toBe(false);
-    expect(reasoning.text()).toContain("**原始推理保持字面量**");
+    expect(reasoning.text()).toContain("原始推理保持字面量");
     expect(wrapper.find(".action-reasoning").exists()).toBe(false);
     expect(wrapper.find(".code-action-reasoning").exists()).toBe(false);
 

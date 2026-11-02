@@ -751,6 +751,15 @@ async fn snapshot(
                 merge_status(&tx, &check.scope, &status, now()?)?;
                 project(&tx, &check.scope, &mut catalog)?;
                 tx.commit().map_err(db_error)?;
+                eprintln!(
+                    "Expert catalog ready: experts={}, resources_ready={}",
+                    catalog.experts.len(),
+                    catalog
+                        .experts
+                        .iter()
+                        .filter(|entry| entry.state == wire::ResourceState::Ready)
+                        .count()
+                );
                 Ok(catalog)
             }))
         })

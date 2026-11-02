@@ -1,0 +1,164 @@
+{
+  "policy": "User AGENTS.md: normal non-destructive tests only; no force-kill, executable substitution, permission sabotage or attack fixtures.",
+  "frontend": {
+    "excludeFiles": [
+      {
+        "path": "src/components/chat/ChatTurnPlan.test.ts",
+        "reason": "Shared fixture contains executable script markup used by all 3 rendering tests."
+      },
+      {
+        "path": "src/components/chat/feat126-s9-consumer.test.ts",
+        "reason": "Script-markup injection fixture."
+      }
+    ],
+    "excludeNames": [
+      {
+        "name": "renders raw reasoning as literal text and never creates executable rich content",
+        "reason": "XSS event-handler fixture."
+      },
+      {
+        "name": "opens only after explicit intent, deduplicates loading, and renders inert plain text",
+        "reason": "Script/formula injection fixture."
+      },
+      {
+        "name": "escapes the safe name and keeps the image action surface metadata-only",
+        "reason": "XSS event-handler fixture."
+      },
+      {
+        "name": "rejects source, output and fixture traversal",
+        "reason": "Path traversal payloads."
+      },
+      {
+        "name": "rejects traversal, source drift, capability drift and expired exceptions",
+        "reason": "Mixed case contains path traversal payload."
+      },
+      {
+        "name": "accepts only the exact Contracts, Host and Skills immutable pins",
+        "reason": "Mixed case contains path traversal payload."
+      }
+    ],
+    "existingProjectExcludeFiles": [
+      "**/.contracts-source/**",
+      "**/.agent-host-source/**",
+      "**/.skills-source/**",
+      "**/.local/**",
+      "scripts/check-feat128-s10d-h.test.mjs"
+    ]
+  },
+  "native": {
+    "excludeTests": [
+      {
+        "name": "unsafe_existing_lock_file_is_rejected",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "rejects_writable_bundle_or_app_data_authority_before_creating_managed_state",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "symlink_wrong_mode_and_non_temp_roots_fail_closed",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "unknown_symlink_hardlink_and_mode_drift_delete_nothing",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "unsafe_database_path_and_project_paths_fail_closed",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "token_reader_rejects_open_permissions_and_symlinks",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "nonce_mismatch_fails_before_token_read_or_protected_request",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "local_ca_rejects_missing_or_noncanonical_pin_and_unsafe_permissions",
+        "reason": "Intentional filesystem permission weakening"
+      },
+      {
+        "name": "strict_termination_rechecks_live_spawn_identity_before_signalling",
+        "reason": "Synthetic executable or forced process-cleanup/failure fixture"
+      },
+      {
+        "name": "feat126_test_profile_is_exact_closed_and_allowlisted",
+        "reason": "Synthetic executable or forced process-cleanup/failure fixture"
+      },
+      {
+        "name": "distinct_test_profile_lifecycles_record_content_free_child_crash_evidence",
+        "reason": "Synthetic executable or forced process-cleanup/failure fixture"
+      },
+      {
+        "name": "arbitrary_or_group_writable_executables_are_rejected",
+        "reason": "Synthetic executable or forced process-cleanup/failure fixture"
+      },
+      {
+        "name": "pdf_preflight_accepts_small_text_and_rejects_high_ratio_streams",
+        "reason": "Dangerous archive/PDF expansion, cycle or forged-directory fixture"
+      },
+      {
+        "name": "pdf_accepts_bounded_forms_and_rejects_xref_cycles_depth_and_reference_amplification",
+        "reason": "Dangerous archive/PDF expansion, cycle or forged-directory fixture"
+      },
+      {
+        "name": "ooxml_requires_matching_content_types_and_accepts_docx_xlsx_and_pptx",
+        "reason": "Dangerous archive/PDF expansion, cycle or forged-directory fixture"
+      },
+      {
+        "name": "rejects_non_https_or_cross_origin_oidc_endpoints",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "accepts_only_an_exact_optional_issuer_parameter",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "ephemeral_cross_run_and_manifest_authority_fail_closed",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "symlink_lock_path_is_rejected",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "hard_link_lock_path_is_rejected",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "rejects_symlinked_bundle_manifest_and_managed_directory",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "native_save_rejects_symlink_and_nonregular_targets",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "file_save_is_atomic_and_cleanup_accepts_only_verified_prior_epoch_files",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "canonical_save_is_atomic_and_cleanup_is_report_only",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "video_save_reuses_atomic_private_temp_and_cleans_normal_failures",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "local_ca_rejects_symlinks_bundles_and_private_keys",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "minimax_key_file_configuration_rejects_direct_keys_and_unsafe_files",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      },
+      {
+        "name": "filesystem_boundary_accepts_exactly_ten_mib_and_rejects_oversize_and_non_regular_files",
+        "reason": "Attack-style cross-authority/issuer or symlink boundary fixture"
+      }
+    ]
+  }
+}

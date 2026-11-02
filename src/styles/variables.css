@@ -30,6 +30,7 @@
   --yj-color-text-secondary: #51565d;
   --yj-color-text-tertiary: #6f757d;
   --yj-color-chat-timing: #858585;
+  --yj-color-chat-link: #4b651d;
   --yj-color-text-disabled: #a5abb2;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-selection-bg: #c3f35b;
@@ -150,7 +151,8 @@
   --yj-motion-slow: 240ms;
   --yj-motion-chat-thinking: 1800ms;
   --yj-color-chat-thinking-highlight: #f4f5f6;
-  --yj-opacity-chat-stream-start: 0.35;
+  --yj-motion-chat-stream-fade: 600ms;
+  --yj-opacity-chat-stream-start: 0.12;
   --yj-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
   --yj-layout-window-min-width: 1180px;
@@ -212,7 +214,10 @@
   --yj-layout-chat-composer-max: 880px;
   --yj-layout-chat-search-max-height: 150px;
   --yj-layout-chat-thinking-max-height: 240px;
-  --yj-layout-chat-thinking-scrollbar-width: 3px;
+  --yj-layout-chat-link-tooltip-max-width: 480px;
+  --yj-layout-chat-feedback-width: 360px;
+  --yj-layout-chat-scrollbar-width: 5px;
+  --yj-layout-chat-scrollbar-thumb-height: 18px;
   --yj-layout-chat-composer-fade: var(--yj-space-12);
   --yj-z-chat-fade: 1;
   --yj-z-chat-scroll-control: 2;
@@ -222,6 +227,12 @@
   --yj-layout-permission-menu-width: 320px;
   --yj-layout-model-menu-width: 240px;
   --yj-layout-permission-confirm-width: 420px;
+  --yj-layout-full-access-confirm-width: 480px;
+  --yj-color-full-access-overlay: rgba(0, 0, 0, 0.15);
+  --yj-color-full-access-panel: #f7f7f7;
+  --yj-color-full-access-risk: #c8324e;
+  --yj-color-full-access-action: #e5484d;
+  --yj-color-full-access-action-disabled: #f5b9b9;
   --yj-color-model-kimi-bg: #000000;
   --yj-color-model-kimi-ink: #ffffff;
 
@@ -287,6 +298,7 @@
   --yj-color-text-secondary: #c2c7ce;
   --yj-color-text-tertiary: #969ea8;
   --yj-color-chat-timing: var(--yj-color-text-tertiary);
+  --yj-color-chat-link: var(--yj-color-brand-primary);
   --yj-color-text-disabled: #69717b;
   --yj-color-text-on-accent: var(--yj-color-on-brand);
   --yj-color-text-on-danger: #ffffff;
@@ -296,6 +308,10 @@
   --yj-color-bg-nav: #191c20;
   --yj-color-bg-card: #25282b;
   --yj-color-bg-elevated: #2e3237;
+  --yj-color-full-access-overlay: rgba(0, 0, 0, 0.45);
+  --yj-color-full-access-panel: var(--yj-color-bg-subtle);
+  --yj-color-full-access-risk: var(--yj-color-semantic-error-ink);
+  --yj-color-full-access-action-disabled: color-mix(in srgb, var(--yj-color-full-access-action) 40%, var(--yj-color-bg-elevated));
   --yj-color-bg-subtle: #22262a;
   --yj-color-bg-composer-tray: #22262a;
   --yj-color-chat-user-bg: var(--yj-color-control-hover);

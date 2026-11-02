@@ -30,6 +30,7 @@ for (const keyword of [
   "x-yijie-command-contracts",
   "x-yijie-error-codes",
   "x-yijie-preview-scheme",
+  "x-yijie-save-extension-aliases",
 ]) ajv.addKeyword(keyword);
 ajv.addSchema(schema);
 

@@ -70,7 +70,7 @@ describe("extensions page tab continuity", () => {
     await page.findAll('[role="tab"]')[0]!.trigger("click"); await flushPromises();
     const panel = page.findComponent(ExpertMarketPanel);
     await panel.get(".expert-card__details").trigger("click"); await flushPromises();
-    expect(document.body.textContent).toContain("可以这样提问");
+    expect(document.body.textContent).toContain("专家帮你做");
     await page.findAll('[role="tab"]')[1]!.trigger("click"); await flushPromises();
     expect(panel.props("active")).toBe(false);
     expect(panel.findComponent({ name: "Modal" }).exists()).toBe(false);

@@ -6,10 +6,11 @@ import type { ConversationTimelineItemViewModel } from "../domain/conversation-t
 export type WebSourceActions = {
   icon(target: WebSourceTarget): Promise<string | null>;
   open(target: WebSourceTarget): Promise<void>;
+  openMessageLink?(target: WebSourceTarget): Promise<void>;
 };
 export const webSourceActionsKey: InjectionKey<WebSourceActions> = Symbol("web-source-actions");
 export function provideWebSourceActions(contextId: () => string | undefined) {
-  async function run(action: "icon" | "open", target: WebSourceTarget) {
+  async function run(action: "icon" | "open" | "open_message_link", target: WebSourceTarget) {
     const id = contextId();
     if (!id) throw new Error("web_source_context_unavailable");
     return webSourceClient(id, {action, target});
@@ -17,6 +18,7 @@ export function provideWebSourceActions(contextId: () => string | undefined) {
   provide(webSourceActionsKey, {
     icon: async target => (await run("icon", target)).icon,
     open: async target => { await run("open", target); },
+    openMessageLink: async target => { await run("open_message_link", target); },
   });
 }
 

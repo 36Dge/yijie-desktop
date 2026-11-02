@@ -610,54 +610,6 @@ async fn observe(
         .database()
         .await
         .map_err(|_| Error::TemporarilyUnavailable)?;
-    // The built-in policy is separately authorized. Read-only contexts keep a
-    // pure snapshot; no renderer value chooses the default service or key.
-    if matches!(action, Action::Snapshot)
-        && crate::chat::models::enabled()
-        && authorization
-            .with_market_authority(
-                context,
-                &scope,
-                &["connector.manage", "connector.credentials.manage"],
-                now()?,
-                |_| (),
-            )
-            .is_ok()
-    {
-        runtime
-            .ensure_demo_fast_sidecar()
-            .await
-            .map_err(|_| Error::TemporarilyUnavailable)?;
-        let current_host = runtime
-            .local_host_bridge()
-            .await
-            .map_err(|_| Error::TemporarilyUnavailable)?;
-        let host_id = current_host.instance_nonce().to_string();
-        let default_scope = scope.clone();
-        let default_auth = authorization.clone();
-        db.call(move |repo| {
-            Ok(default_auth
-                .with_market_authority(
-                    context,
-                    &default_scope,
-                    &["connector.manage", "connector.credentials.manage"],
-                    now().map_err(|_| crate::chat::error::ChatError::DatabaseUnavailable)?,
-                    |authority| {
-                        store::prepare_kimi_default(
-                            &mut repo.connection,
-                            &default_scope,
-                            &host_id,
-                            &authority,
-                            now().unwrap_or(-1),
-                        )
-                    },
-                )
-                .map_err(auth_error)
-                .and_then(|v| v))
-        })
-        .await
-        .map_err(|_| Error::TemporarilyUnavailable)??;
-    }
     let selection = if let Action::Selection(payload) = &action {
         payload.selection.clone()
     } else {
@@ -1512,6 +1464,95 @@ mod tests {
         assert!(removed.result.installation.generation > item.generation);
         db.close().unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn startup_restores_prepared_connection_once_and_respects_later_explicit_disable() {
+        let (mut db, scope, unconfigured, host, authority) = setup();
+        assert!(
+            super::super::startup::actions(&db, &scope, vec![unconfigured])
+                .unwrap()
+                .is_empty()
+        );
+        let entry = catalog()
+            .catalog
+            .iter()
+            .find(|entry| entry.service_id == "shopify")
+            .unwrap();
+        let item = store::install(
+            &mut db,
+            &scope,
+            entry,
+            catalog().catalog_revision,
+            ui::InstallPayload {
+                service_id: "shopify".into(),
+                operation_id: Uuid::now_v7().to_string(),
+                expected_revision: 0,
+            },
+            100,
+        )
+        .unwrap()
+        .installation;
+        let plan = super::super::startup::actions(&db, &scope, vec![item.clone()]).unwrap();
+        assert_eq!(plan.len(), 1);
+        let action = &plan[0];
+        assert!(action.desired_enabled);
+        action.validate().unwrap();
+        let key = ui::InstallationOperationPayload {
+            installation_id: action.installation_id.clone(),
+            operation_id: action.operation_id.clone(),
+            expected_revision: action.expected_revision,
+        };
+        let prepared = store::prepare_provider(
+            &mut db,
+            &scope,
+            &catalog().catalog,
+            store::ProviderIntent {
+                key: &key,
+                expected_generation: None,
+                action: ui::OperationAction::Enable,
+                intent: &serde_json::to_value(action).unwrap(),
+                host: &host,
+                authority: authority.clone(),
+                now: 101,
+            },
+        )
+        .unwrap();
+        let pending = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(super::super::startup::actions(&db, &scope, vec![pending])
+            .unwrap()
+            .is_empty());
+        let mut connected = status(&prepared, p::OperationState::Succeeded);
+        connected.qualification = p::Qualification::Qualified;
+        connected.execution_available = true;
+        let enabled = store::finish_provider(&mut db, &scope, &prepared, connected, 102).unwrap();
+        let saved = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(saved.desired_enabled && !saved.effective_enabled);
+        let next_boot = super::super::startup::actions(&db, &scope, vec![saved.clone()]).unwrap();
+        assert_eq!(next_boot.len(), 1);
+        assert_ne!(next_boot[0].operation_id, action.operation_id);
+        let suspended = begin(
+            &mut db,
+            &scope,
+            &saved,
+            &host,
+            authority,
+            ui::OperationAction::Disable,
+        );
+        let mut stopped = status(&suspended, p::OperationState::Succeeded);
+        stopped.authorization_status = p::AuthorizationStatus::Unknown;
+        stopped.connection_status = p::ConnectionStatus::Disconnected;
+        store::finish_provider(&mut db, &scope, &suspended, stopped, 104).unwrap();
+        let disabled = store::find(&db, &scope, &catalog().catalog, &item.installation_id).unwrap();
+        assert!(!disabled.desired_enabled);
+        assert_eq!(disabled.credential_ref, saved.credential_ref);
+        assert!(super::super::startup::actions(&db, &scope, vec![disabled])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store::operation(&db, &scope, &action.operation_id).unwrap(),
+            enabled.result
+        );
     }
 
     #[test]

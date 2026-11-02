@@ -171,7 +171,7 @@ describe("FEAT-131 scenario catalog", () => {
 });
 
 describe.each(REPLAY_FILES)("FEAT-131 raw event replay: %s", (fixtureName) => {
-  it("passes raw payloads through the production parser and store deterministically", async () => {
+  it("keeps old live payloads inert and reads retained history through explicit resync", async () => {
     vi.useFakeTimers();
     const fixtureValue = readJson(fixtureName);
     const fixture = parseChatReplayFixture(fixtureValue);
@@ -179,9 +179,19 @@ describe.each(REPLAY_FILES)("FEAT-131 raw event replay: %s", (fixtureName) => {
     const harness = await createChatEventReplayHarness(fixtureValue);
 
     try {
+      const before = harness.snapshot();
+      let resyncRequested = false;
       for (const step of harness.fixture.steps) {
-        expect(harness.emit(step)).toEqual(step.expect);
+        const observed = harness.emit(step);
+        if (step.event.kind === "resync_required") {
+          resyncRequested = true;
+          expect(observed.phase).toBe("resyncing");
+        } else {
+          expect(observed).toEqual(before);
+        }
+        expect(observed.liveAssistantText).toBe("");
       }
+      if (!resyncRequested) await harness.store.resyncSelected();
       await harness.settle();
       expect(harness.snapshot()).toEqual(harness.fixture.expectedAfterSettle);
       harness.assertConsumed();

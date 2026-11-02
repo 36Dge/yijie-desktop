@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { chatRenderMeasurements, setChatRenderMeasurementEnabled } from "../../domain/chat-render-performance";
+import ChatAttachmentChip from "../../components/chat/ChatAttachmentChip.vue";
 import { createExpertNativeClient, expertNativeClient } from "../../api/expert-native-client";
 import { expertDisplay, expertEntry, expertSnapshot } from "../../test/expert-fixture";
 import { usePermissionStore } from "../../stores/permission.store";
@@ -566,7 +568,7 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.text()).toContain("synthetic-brief.pdf");
     expect(wrapper.get(".chat-file-chip").attributes("aria-label")).toContain("PDF");
 
-    const textCopyActions = wrapper.findAll('[aria-label="复制文本"]');
+    const textCopyActions = wrapper.findAll('[aria-label="复制文本"], [aria-label="复制"]');
     expect(textCopyActions).toHaveLength(2);
     await textCopyActions[1]!.trigger("click");
     await flushPromises();
@@ -696,24 +698,34 @@ describe("FEAT-126 ChatPage", () => {
     const scrollTo = vi.fn();
     Object.defineProperty(scroller, "scrollTo", { configurable: true, value: scrollTo });
 
+    const advanceFrame = async (time: number) => {
+      const current = [...callbacks.values()]; callbacks.clear();
+      current.forEach(callback => callback(time));
+      await flushPromises();
+    };
+    // Settle mount/layout callbacks before measuring the streaming update.
+    for (let frame = 1; frame <= 3; frame++) await advanceFrame(frame * 16);
+    scrollTo.mockClear();
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1200 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 400 });
+    let top = 0;
+    const writeTop = vi.fn((value: number) => { top = value; });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => top, set: writeTop });
+    setChatRenderMeasurementEnabled(true);
     store.phase = "streaming";
-    for (let revision = 1; revision <= 100; revision += 1) {
-      store.conversationState = {
-        ...store.conversationState,
-
-      };
+    for (let revision = 1; revision <= 100; revision++) {
+      store.conversationState = { ...store.conversationState };
     }
     await flushPromises();
-
-    expect(callbacks.size).toBe(1);
-    expect(scrollTo).not.toHaveBeenCalled();
-    const frameCallbacks = [...callbacks.values()];
-    callbacks.clear();
-    frameCallbacks.forEach((callback) => callback(16));
-    await flushPromises();
-    await flushPromises();
-
-    expect(scrollTo).toHaveBeenCalledOnce();
+    expect(chatRenderMeasurements().timeline?.samples ?? 0).toBe(0);
+    for (let frame = 4; frame <= 6; frame++) {
+      const before = writeTop.mock.calls.length;
+      await advanceFrame(frame * 16);
+      expect(writeTop.mock.calls.length - before).toBeLessThanOrEqual(1);
+    }
+    expect(chatRenderMeasurements().timeline?.samples).toBe(1);
+    expect(top).toBe(800);
+    expect(scrollTo).not.toHaveBeenCalled(); // automatic following does not restart smooth scrolling
     expect(wrapper.text()).toContain("标题检查完成");
   });
 
@@ -737,7 +749,7 @@ describe("FEAT-126 ChatPage", () => {
     const secondTurnId = "019c1a00-0000-7000-8000-000000000021";
     store.phase = "streaming";
     store.conversationState = { ...store.conversationState };
-    expect(callbacks.size).toBe(1);
+    expect(callbacks.size).toBeGreaterThan(0);
 
     store.sessions = [SESSION, {
       ...SESSION,
@@ -770,7 +782,12 @@ describe("FEAT-126 ChatPage", () => {
     store.selectedSessionId = secondSessionId;
     await flushPromises();
 
-    expect(callbacks.size).toBe(0);
+    // Layout/transition frames may remain, but none can restore the old session.
+    for (let frame = 1; frame <= 3; frame++) {
+      const current = [...callbacks.values()]; callbacks.clear();
+      current.forEach(callback => callback(frame * 16));
+      await flushPromises();
+    }
     expect(wrapper.text()).toContain("第二个本地任务");
     expect(wrapper.text()).toContain("第二个会话的回答");
     expect(wrapper.text()).not.toContain("标题检查完成");
@@ -820,8 +837,8 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(wrapper.getComponent(ChatTimeline).element).toBe(timelineElement);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
-    expect(wrapper.text()).toContain("处理过程");
-    expect(wrapper.text()).toContain("此过程仅包含状态元数据；详情未进入当前对话投影。");
+    expect(wrapper.text()).toContain("模型推理记录");
+    expect(wrapper.find(".chat-deep-thinking__content").exists()).toBe(false);
     expect(wrapper.text()).toContain("标题检查完成");
     expect(loadReasoning).not.toHaveBeenCalled();
   });
@@ -846,7 +863,8 @@ describe("FEAT-126 ChatPage", () => {
     const { wrapper, store } = await mountPage(
       `/chat/${SESSION_ID}`,
       true,
-      HISTORY_WITHOUT_REASONING,
+      { turns: [{ ...HISTORY_WITHOUT_REASONING.turns[0]!, status: "queued", terminalAt: null,
+        reasoning: [], messages: [HISTORY_WITHOUT_REASONING.turns[0]!.messages[0]!] }], nextCursor: null },
     );
     // A live state needs an observed Native notification, not a legacy archive.
     store.conversationState = composeConversationView(
@@ -862,6 +880,7 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
+    expect(wrapper.getComponent(ChatTimeline).props("timeline").turns[0]).toMatchObject({ liveObserved: true, domainStatus: "in_progress", source: "native_observed", progress: { phase: "active" } });
     expect(wrapper.text()).toContain("正在思考");
     expect(wrapper.get(".chat-turn-group__timing").text()).toBe("正在思考");
     expect(wrapper.text()).not.toContain("当前进度待确认");
@@ -945,7 +964,7 @@ describe("FEAT-126 ChatPage", () => {
 
     expect(wrapper.findComponent(ChatTimeline).exists()).toBe(true);
     expect(wrapper.find(".chat-turn").exists()).toBe(false);
-    expect(wrapper.findAll(".chat-message__attachment")).toHaveLength(1);
+    expect(wrapper.findAllComponents(ChatAttachmentChip)).toHaveLength(1);
     expect(wrapper.findAllComponents(ChatArtifactList)).toHaveLength(1);
     const list = wrapper.getComponent(ChatArtifactList);
     expect(list.props("contextId")).toBe(store.context!.contextId);

@@ -85,7 +85,7 @@ describe("ChatSafeContent", () => {
     expect(wrapper.element.textContent).toBe(text);
   });
 
-  it("renders the supported rich-text subset in source order without executable links", () => {
+  it("renders the rich-text subset in source order and keeps links inactive without a message scope", () => {
     const wrapper = mount(ChatSafeContent, {
       props: {
         blocks: [textBlock([
@@ -110,8 +110,7 @@ describe("ChatSafeContent", () => {
     expect(wrapper.find(".chat-safe-content__inline-code").text()).toBe("inline");
     expect(wrapper.find("a").exists()).toBe(false);
     expect(wrapper.find("[href]").exists()).toBe(false);
-    expect(wrapper.get(".chat-safe-content__inert-link").text())
-      .toBe("参考（https://docs.invalid/guide）");
+    expect(wrapper.get(".chat-text-link").text()).toBe("参考");
     expect(wrapper.findAll("ul li").map((item) => item.text())).toEqual(["第一项", "第二项"]);
     expect(wrapper.findAll("th").map((cell) => cell.text())).toEqual(["名称", "状态"]);
     expect(wrapper.findAll("td").map((cell) => cell.text())).toEqual(["示例", "完成"]);
@@ -182,6 +181,13 @@ describe("ChatSafeContent", () => {
       language: "typescript",
     });
     expect(wrapper.findAll("[role='group'][aria-label='代码操作']")).toHaveLength(2);
+  });
+
+  it("preserves empty list items and table rows in completed Markdown", () => {
+    const wrapper = mount(ChatSafeContent, {props: {blocks: [textBlock("- 一\n- \n\n| 一 | 二 |\n| --- | --- |\n|  |  |")]} });
+    expect(wrapper.findAll("li")).toHaveLength(2);
+    expect(wrapper.findAll("tbody tr")).toHaveLength(1);
+    wrapper.unmount();
   });
 
   it("renders benign markup as literal text and offers an unparsed plain mode", () => {

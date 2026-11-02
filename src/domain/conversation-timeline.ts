@@ -690,16 +690,38 @@ function projectTurn(
   });
 }
 
+interface TimelineTurnCacheEntry {
+  items: readonly ConversationItem[];
+  approval?: ConversationApprovalState;
+  protected: boolean;
+  live: boolean;
+  result: ConversationTimelineTurnViewModel;
+}
+export function createConversationTimelineSelector() {
+  const cache = new WeakMap<ConversationTurn, TimelineTurnCacheEntry>();
+  return (state: ConversationView, threadId: string, approvalState?: ConversationApprovalState, policy?: ConversationTimelineProjectionPolicy) => selectConversationTimeline(state, threadId, approvalState, policy, cache);
+}
+
 export function selectConversationTimeline(
   state: ConversationView,
   threadId: string,
   approvalState?: ConversationApprovalState,
   policy?: ConversationTimelineProjectionPolicy,
+  cache?: WeakMap<ConversationTurn, TimelineTurnCacheEntry>,
 ): ConversationTimelineViewModel | null {
   const thread = state.threads[threadId];
   if (thread === undefined || thread.threadId !== threadId) return null;
   const turns = Object.freeze(relatedTurns(state, thread)
-    .map((turn) => projectTurn(state, turn, approvalState, policy)));
+    .map((turn) => {
+      const items = relatedItems(state, turn);
+      const previous = cache?.get(turn);
+      const protectedContent = policy?.protectApprovalProcessContent === true;
+      const live = policy?.liveTurnId === turn.turnId;
+      if (previous && previous.approval === approvalState && previous.protected === protectedContent && previous.live === live && previous.items.length === items.length && items.every((item, index) => item === previous.items[index])) return previous.result;
+      const result = projectTurn(state, turn, approvalState, policy);
+      cache?.set(turn, { items, approval: approvalState, protected: protectedContent, live, result });
+      return result;
+    }));
   return Object.freeze({
     identity: stableIdentity("conversation-timeline", thread.threadId),
     threadId: thread.threadId,

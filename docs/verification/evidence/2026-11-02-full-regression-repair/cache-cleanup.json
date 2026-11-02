@@ -1,0 +1,63 @@
+{
+  "status": "removed_after_all_test_and_compiler_processes_finished",
+  "only_new_test_intermediates": [
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target/debug/deps",
+      "created_at": "2026-11-02T10:08:50.769458",
+      "size_kib": 5759340
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target/debug/.fingerprint",
+      "created_at": "2026-11-02T10:08:50.769495",
+      "size_kib": 15248
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target/debug/incremental",
+      "created_at": "2026-11-02T10:08:50.769524",
+      "size_kib": 8171468
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target/debug/deps",
+      "created_at": "2026-11-02T10:22:45.602434",
+      "size_kib": 641968
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target/debug/.fingerprint",
+      "created_at": "2026-11-02T10:22:45.602481",
+      "size_kib": 9144
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target/debug/incremental",
+      "created_at": "2026-11-02T10:22:45.602510",
+      "size_kib": 651720
+    }
+  ],
+  "preserved_development_executables": [
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target/debug/yijie-desktop",
+      "sha256_before": "68600850710e509f993d0055815cd715d61a3db2b8afab742b1affcb87713f91",
+      "size": 109127088,
+      "sha256_after": "68600850710e509f993d0055815cd715d61a3db2b8afab742b1affcb87713f91"
+    },
+    {
+      "path": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target/debug/yijie-desktop",
+      "sha256_before": "e3dffa403dd37634dfccce88eb6112b793451b9a73a8583365a8c7cb225aa2b6",
+      "size": 192109888,
+      "sha256_after": "e3dffa403dd37634dfccce88eb6112b793451b9a73a8583365a8c7cb225aa2b6"
+    }
+  ],
+  "target_size_before_kib": {
+    "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target": 13778572,
+    "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target": 4054280
+  },
+  "filesystem_available_before": 644788666368,
+  "shared_daily_cache": "untouched",
+  "target_size_after_kib": {
+    "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target": 1462296,
+    "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/src-tauri/target": 2788772
+  },
+  "filesystem_available_after": 658706513920,
+  "filesystem_freed_bytes": 13917847552,
+  "filesystem_available_after_canonical_client_activation": 658713358336,
+  "net_available_increase_after_activation_bytes": 13924691968
+}

@@ -201,6 +201,7 @@ pub struct ChatRuntime {
     authorization: Option<ChatAuthorizationManager>,
     worker: Mutex<Option<DatabaseWorker>>,
     initialization: Mutex<()>,
+    connector_startup: Mutex<connectors::StartupState>,
     sidecar: Option<Arc<SidecarSupervisor>>,
     host_bridge: Mutex<Option<Arc<HostBridge>>>,
 }
@@ -286,6 +287,7 @@ impl ChatRuntime {
                     authorization: None,
                     worker: Mutex::new(None),
                     initialization: Mutex::new(()),
+                    connector_startup: Mutex::new(connectors::StartupState::default()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
                     lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -305,6 +307,7 @@ impl ChatRuntime {
                     authorization: None,
                     worker: Mutex::new(None),
                     initialization: Mutex::new(()),
+                    connector_startup: Mutex::new(connectors::StartupState::default()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
                     lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -325,6 +328,7 @@ impl ChatRuntime {
                     authorization: None,
                     worker: Mutex::new(None),
                     initialization: Mutex::new(()),
+                    connector_startup: Mutex::new(connectors::StartupState::default()),
                     sidecar: None,
                     host_bridge: Mutex::new(None),
                     lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -345,6 +349,7 @@ impl ChatRuntime {
                 authorization: None,
                 worker: Mutex::new(None),
                 initialization: Mutex::new(()),
+                connector_startup: Mutex::new(connectors::StartupState::default()),
                 sidecar: None,
                 host_bridge: Mutex::new(None),
                 lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -467,6 +472,7 @@ impl ChatRuntime {
             authorization,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
+            connector_startup: Mutex::new(connectors::StartupState::default()),
             sidecar,
             host_bridge: Mutex::new(None),
             lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -1468,6 +1474,7 @@ mod tests {
             authorization,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
+            connector_startup: Mutex::new(connectors::StartupState::default()),
             sidecar: None,
             host_bridge: Mutex::new(None),
             lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -1501,13 +1508,14 @@ mod tests {
             active_runtime_turn_id: None,
             active_turn_operation_id: None,
         };
+        let active_profile = model_test_support::active_profile();
         let mut catalog: models_generated::Catalog = serde_json::from_value(serde_json::json!({
-            "schema_version": 1, "default_profile": "kimi-k3-max-v1", "models": [{
-                "profile": {"profile_id":"kimi-k3-max-v1", "label":"Kimi K3", "provider":"kimi", "model":"kimi-k3", "effort":"max", "context_window":1048576},
+            "schema_version": models::schema_version(), "default_profile": active_profile, "models": [{
+                "profile": {"profile_id":active_profile, "label":"Kimi", "provider":"kimi", "model":"test-model", "effort":"max", "context_window":1048576},
                 "available":false, "reason":"not_configured"
             }]
         })).unwrap();
-        let profile = Some("kimi-k3-max-v1");
+        let profile = Some(active_profile);
         assert!(retain_unavailable_model_history(
             &terminal,
             profile,
@@ -1829,6 +1837,7 @@ mod tests {
             authorization: None,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
+            connector_startup: Mutex::new(connectors::StartupState::default()),
             sidecar: None,
             host_bridge: Mutex::new(None),
             lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -1854,6 +1863,7 @@ mod tests {
             authorization: None,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
+            connector_startup: Mutex::new(connectors::StartupState::default()),
             sidecar: None,
             host_bridge: Mutex::new(Some(Arc::new(bridge))),
             lifecycle: lifecycle::Lifecycle::default(),
@@ -1878,6 +1888,7 @@ mod tests {
             authorization: None,
             worker: Mutex::new(None),
             initialization: Mutex::new(()),
+            connector_startup: Mutex::new(connectors::StartupState::default()),
             sidecar: None,
             host_bridge: Mutex::new(None),
             lifecycle: lifecycle::Lifecycle::new(lifecycle::Phase::Recovering),
@@ -2011,6 +2022,7 @@ mod native_conversation_storage;
 pub mod native_conversation_v2_generated;
 pub mod native_conversation_v3_generated;
 
+pub(crate) mod turn_model_generated;
 mod turn_timing;
 pub(crate) mod turn_timing_generated;
 
@@ -2033,3 +2045,6 @@ mod artifact_media_generated;
 
 #[cfg(all(test, feature = "kimi-k31-pro-candidate"))]
 mod feat164_boundary_tests;
+
+#[cfg(test)]
+mod model_test_support;

@@ -22,14 +22,15 @@ lint:
 	pnpm lint
 	cargo fmt --manifest-path src-tauri/Cargo.toml --check
 	cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+	cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --features kimi-k31-pro-candidate -- -D warnings
 
 test:
 	YIJIE_DESKTOP_CONTRACTS_DIR="$(CONTRACTS_DIR)" pnpm test
-	cargo test --manifest-path src-tauri/Cargo.toml
+	node scripts/run-tests.mjs --native
 
 test-production-hardened:
 	YIJIE_DESKTOP_CONTRACTS_DIR="$(CONTRACTS_DIR)" pnpm test:production-hardened
-	cargo test --manifest-path src-tauri/Cargo.toml
+	node scripts/run-tests.mjs --native
 
 generate:
 	YIJIE_DESKTOP_CONTRACTS_DIR="$(CONTRACTS_DIR)" pnpm generate

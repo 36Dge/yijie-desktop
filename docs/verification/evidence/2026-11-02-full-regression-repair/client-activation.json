@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-11-02T11:07:14.127756+08:00",
+  "entry_log_offset": 519828,
+  "entry": "/Users/jack/Applications/\u6613\u754c.app",
+  "status": "native_started_and_catalogs_ready",
+  "native_executable": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/target/debug/yijie-desktop",
+  "native_sha256": "f9a84712172f46957241b51c53ee49bd7fc379db2bff7fcc7aad98ac7f7bc085",
+  "native_modified_at": "2026-11-02T11:09:08.546864+08:00",
+  "native_build_seconds": 14.43,
+  "packages_created": false,
+  "full_backups_created": false,
+  "workflow_authenticated_ready": true
+}

@@ -166,6 +166,15 @@ watch(
     if (requiredCapability === null || canRenderCurrentRoute.value) {
       return;
     }
+    // A normal permission refresh may outlive the previous projection (for
+    // example after the window sleeps). Keep the route while it is checked;
+    // canRenderCurrentRoute still hides protected content until it is valid.
+    if (
+      authoritativePermissionUiEnabled &&
+      (permissionStore.phase === "discovering" || permissionStore.phase === "loading")
+    ) {
+      return;
+    }
     if (authoritativePermissionUiEnabled && permissionStore.isReady) {
       await router.replace({
         path: "/access-denied",

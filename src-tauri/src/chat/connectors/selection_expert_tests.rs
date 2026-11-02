@@ -19,7 +19,7 @@ impl Fixture {
             scope.clone(),
         )
         .unwrap();
-        crate::chat::migrations::migrate_to_target(&mut repo.connection, 34).unwrap();
+        crate::chat::model_test_support::migrate_active_store(&mut repo.connection, 34);
         Self {
             root,
             repo: Some(repo),
@@ -67,12 +67,12 @@ fn resolved() -> expert_store::ResolvedExpert {
     }
 }
 fn request(expert: bool) -> expert_wire::NativeSubmitPayload {
-    serde_json::from_value(serde_json::json!({"submission":{"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"普通专家资源验证"}],"intent":{"profileId":"kimi-k3-max-v1","expectedRevision":0},"selection":[]},"expectedBindingRevision":0,"expert":if expert { serde_json::json!({"expertId":"sample-expert","version":"0.1.0"}) } else { serde_json::Value::Null }})).unwrap()
+    serde_json::from_value(serde_json::json!({"submission":{"operationId":Uuid::now_v7(),"projectId":null,"contentBlocks":[{"type":"text","text":"普通专家资源验证"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":0},"selection":[]},"expectedBindingRevision":0,"expert":if expert { serde_json::json!({"expertId":"sample-expert","version":"0.1.0"}) } else { serde_json::Value::Null }})).unwrap()
 }
 
 #[test]
 fn feat158_expert_turn_freezes_with_existing_queue_and_replays_after_normal_reopen() {
-    expert_replay("kimi-k3-max-v1");
+    expert_replay(crate::chat::model_test_support::active_profile());
 }
 
 #[cfg(feature = "kimi-k31-pro-candidate")]

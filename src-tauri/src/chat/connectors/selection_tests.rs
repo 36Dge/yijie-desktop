@@ -19,7 +19,7 @@ impl Fixture {
             scope,
         )
         .unwrap();
-        crate::chat::migrations::migrate_to_target(&mut repo.connection, 32).unwrap();
+        crate::chat::model_test_support::migrate_active_store(&mut repo.connection, 32);
         let workspace = root.join("project");
         std::fs::create_dir(&workspace).unwrap();
         let project = id(&repo
@@ -37,7 +37,7 @@ impl Fixture {
         self.repo.as_mut().unwrap()
     }
     fn request(&self) -> wire::SubmitPayload {
-        serde_json::from_value(serde_json::json!({"operationId":Uuid::now_v7(),"projectId":self.project,"contentBlocks":[{"type":"text","text":"ordinary local submission"}],"intent":{"profileId":"kimi-k3-max-v1","expectedRevision":0},"selection":[]})).unwrap()
+        serde_json::from_value(serde_json::json!({"operationId":Uuid::now_v7(),"projectId":self.project,"contentBlocks":[{"type":"text","text":"ordinary local submission"}],"intent":{"profileId":crate::chat::model_test_support::active_profile(),"expectedRevision":0},"selection":[]})).unwrap()
     }
     fn selection(&mut self, index: usize) -> management::SelectionRef {
         let entry = &super::super::catalog().catalog[index];
@@ -86,7 +86,7 @@ fn feat157_selection_unready_provider_does_not_enqueue_even_empty_selection() {
 
 #[test]
 fn feat157_selection_first_turn_snapshot_is_atomic_and_survives_normal_reopen() {
-    market_replay("kimi-k3-max-v1");
+    market_replay(crate::chat::model_test_support::active_profile());
 }
 
 #[cfg(feature = "kimi-k31-pro-candidate")]
