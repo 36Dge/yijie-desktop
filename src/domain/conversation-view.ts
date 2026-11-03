@@ -472,7 +472,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       const terminal = view.terminalObserved && (view.status === "completed" || view.status === "failed" || view.status === "interrupted") ? view.status : null;
       turns[key] = {threadId: view.sessionId, turnId: view.turnId, ordinal: view.ordinal ?? old?.ordinal ?? 0,
         source: view.source, availability: view.availability, nativeStatus: view.status, statusSource: view.statusSource,
-        diagnostic: view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
+        diagnostic: view.terminalObserved && view.status === "failed" && view.terminalErrorCode === "sessionBudgetExceeded" ? "session_budget_exceeded" : view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : undefined,
         status: view.status === "inProgress" ? "in_progress" : view.status ?? "unknown",
         terminalStatus: terminal, terminalCode: view.terminalErrorCode ?? null,
         plan: view.plan == null ? null : {explanation: view.explanation ?? null, steps: view.plan.map((s, ordinal) => ({ordinal, text: s.step, status: s.status === "inProgress" ? "in_progress" : s.status}))},
@@ -484,7 +484,7 @@ export function composeConversationView(snapshot: ConversationSnapshot, nativeVi
       cache?.native.set(view, { turn: turns[key]!, items: turns[key]!.itemKeys.map(k => items[k]!) });
     }
     const thread = threads[view.sessionId];
-    const diagnostic = view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;
+    const diagnostic = view.terminalObserved && view.status === "failed" && view.terminalErrorCode === "sessionBudgetExceeded" ? "session_budget_exceeded" : view.diagnostic ? safeConversationDiagnostic(view.diagnostic) : null;
     if (thread) threads[view.sessionId] = {...thread,
       turnKeys: thread.turnKeys.includes(key) ? thread.turnKeys : [...thread.turnKeys, key],
       notices: diagnostic && !thread.notices.some(n => n.diagnostic === diagnostic)

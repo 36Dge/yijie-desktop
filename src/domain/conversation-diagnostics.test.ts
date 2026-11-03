@@ -33,6 +33,24 @@ it("never displays an unrecognized upstream diagnostic as raw text", () => {
     .toBe("会话存在未分类提示，已保留可用内容。");
 });
 
+it("displays the existing native budget failure without changing the terminal fact", () => {
+  const saved: NativeConversationView = {
+    sessionId: "session", turnId: "turn", runtimeThreadId: "runtime-thread", runtimeTurnId: "runtime-turn",
+    source: "native_observed", revision: "5", availability: "available", status: "failed",
+    terminalObserved: true, terminalErrorCode: "sessionBudgetExceeded", diagnostic: "runtime_notice", items: [],
+  };
+  const original = JSON.stringify(saved);
+  const snapshot: ConversationSnapshot = { threads: [{ threadId: "session", status: "ready" }], turns: [], items: [] };
+  const timeline = selectConversationTimeline(composeConversationView(snapshot, [saved]), "session")!;
+  expect(timeline.turns[0]?.domainStatus).toBe("failed");
+  expect(timeline.notices[0]?.diagnostic).toBe("session_budget_exceeded");
+  expect(conversationDiagnosticMessage("session_budget_exceeded")).toContain("预算已用尽");
+  expect(JSON.stringify(saved)).toBe(original);
+  const running = {...saved, status: "inProgress" as const, terminalObserved: false};
+  const live = selectConversationTimeline(composeConversationView(snapshot, [running]), "session")!;
+  expect(live.notices[0]?.diagnostic).toBe("runtime_notice");
+});
+
 it("shows execution guard reasons through the existing diagnostic allowlist", () => {
   for (const code of ["web_retrieval_local_fetch_blocked", "operation_duplicate_pending", "operation_retry_unchanged", "operation_retry_dns_unchanged", "operation_retry_network_unchanged", "operation_retry_access_unchanged", "operation_guard_capacity"]) {
     expect(safeConversationDiagnostic(code)).toBe(code);
