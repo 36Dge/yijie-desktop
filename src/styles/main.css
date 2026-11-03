@@ -45,3 +45,20 @@ html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"])
   .yj-sidebar__navigation {
   padding-inline: var(--yj-space-2);
 }
+
+/* At large reading zoom, keep every navigation entry reachable above the
+ * fixed Settings row instead of clipping the last entries. */
+html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"])
+  .yj-sidebar__list--main {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"])
+  .yj-sidebar__list--main > li:not(.yj-sidebar__history-entry) {
+  flex-shrink: 0;
+}
+html:is([data-ui-zoom-percent="180"], [data-ui-zoom-percent="200"])
+  .yj-sidebar--chat-tree .yj-sidebar__history-entry {
+  min-height: calc(var(--yj-space-16) * 2);
+  flex-shrink: 0;
+}

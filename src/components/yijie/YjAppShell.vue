@@ -12,6 +12,7 @@ import { resolveAppNavigation } from "../../navigation/app-nav";
 import { useChatStore } from "../../stores/chat.store";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
+import { useChatReadingStore } from "../../stores/chat-reading.store";
 import YjSidebar from "./YjSidebar.vue";
 import YjWindowTitlebar from "./YjWindowTitlebar.vue";
 
@@ -54,6 +55,7 @@ if (typeof window !== "undefined") {
 }
 
 sidebarStore.hydrate(storage);
+useChatReadingStore().hydrate(storage);
 
 function recoverCurrentNewTask(): void {
   void chatStore.clearSelectedSession();

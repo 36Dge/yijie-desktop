@@ -121,7 +121,6 @@ function handleEntryClick(entry: AppNavEntry): void {
   min-height: var(--yj-space-16);
   align-items: center;
   padding-inline: var(--yj-space-4);
-  border-bottom: 1px solid var(--yj-color-border-subtle);
 }
 
 .yj-sidebar--collapsed .yj-sidebar__brand {
@@ -147,7 +146,7 @@ function handleEntryClick(entry: AppNavEntry): void {
 }
 
 .yj-sidebar__list--main {
-  --yj-nav-item-height: var(--yj-control-height-md);
+  --yj-nav-item-height: var(--yj-control-height-sm);
   --yj-nav-item-padding-block: var(--yj-space-1);
   flex: 1;
   min-height: 0;

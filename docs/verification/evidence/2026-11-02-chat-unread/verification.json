@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-02",
+  "contractImpact": "additive",
+  "localPreference": {
+    "key": "yijie.desktop.ui.chat-reading.v1",
+    "schemaVersion": 1
+  },
+  "head": "4ec526fd673d4b6a4eadcb102d4c1bb195195e36",
+  "nativeChanges": [],
+  "checks": {
+    "lint": "passed",
+    "frontend": {
+      "files": 256,
+      "passed": 2064,
+      "skipped": 16
+    },
+    "node": {
+      "passed": 26
+    },
+    "focused": {
+      "passed": 115,
+      "skipped": 3
+    },
+    "build": "passed",
+    "docsBuild": "passed",
+    "nativeFullSuite": "not run; frontend-only change; no native rebuild"
+  },
+  "files": {
+    "src/composables/useChatScroll.test.ts": "496811bb3595fd2cc7dcb8e9eb39115a9f6409473a79c68719ab31a6ac34bc64",
+    "src/composables/useChatScroll.ts": "e8cc1b2bbd506ecbb538a872c1e8d8da447ded605523bf5b3b87ef9fa68af876",
+    "src/styles/variables.css": "e193458cd83f5837459e1f52377dc06fe8f3a4ce67e00294bbc661107891f2a3",
+    "src/pages/chat/ChatPage.test.ts": "a50713bd64553576709534abfb1466502f76e254aa657e8a30a42702825cf192",
+    "src/pages/chat/ChatPage.vue": "aea747642c12f874f1a6057b722f780c7630037705af809eb33fbb99399f9d2b",
+    "src/components/chat/ChatSidebarSessionRow.vue": "aa99ba51df87d2db5086925993b9372856812d9b17f12d0ee05dc4baceffd026",
+    "src/components/chat/ChatSidebarTree.test.ts": "01afebef41370a5b0a14c33639b1a73ecdef9a3358c8d64cf0ceb2b61239b76a",
+    "src/components/chat/ChatSidebarTree.vue": "9878732eb969dc0214f41ff501ded67431f5c7e7970468aa3f8a2c56d4e8dc10",
+    "src/components/yijie/YjAppShell.vue": "6eb56a64dda3a693db1daf58b9b2754e66a3603514773551885bb4713d79c074",
+    "docs/design/docs/design/04-components/02-navigation-components.md": "51c6b37ad75dae809d5472d7dfc4fdbc184957ee08f7adcab715c9c5b288aca5",
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "129209387ff7c393968081748059449b06554e6ff17a6885c1641e3a4c3ace77",
+    "docs/design/docs/design/05-patterns/15-feat-130-sidebar-layout.md": "d530fc37c6c67da42a62d7ebd9e92b328774cf71510ee67692e0b2fc04b4dd3c",
+    "tests/visual/sidebar-typography/main.ts": "e0a75aeb8134a1ebd7423e4c65e3e30584426205b0d38be7209d96319358c5ec",
+    "src/domain/chat-reading-preference.ts": "c12cfb739c551de764975e6dae107f048809ac27efd892da5d15405d9c8fc3a7",
+    "src/stores/chat-reading.store.ts": "b1cb98e37fa841ae8392efc7325bd591779c005dce772341c9881d7d4bbe9613",
+    "src/stores/chat-reading.store.test.ts": "bb05d4b86f8969ab0dad47b35ae871bc87648c2f30b93528aa63d3f0f0c6439c",
+    "docs/chat-reading-preference.md": "410d9e51e14d83efc41c58a4534d2a41d7133edc6f125b0eddd371fb0a9b51c8",
+    "docs/verification/2026-11-02-chat-unread.md": "e4b6a0f4fc51a85908e89ea3c74d765dac19f42bd56fde16c69592ae9574f620"
+  },
+  "visual": {
+    "light": {
+      "color": "rgb(75, 101, 29)",
+      "height": "6px",
+      "linkColor": "#4b651d",
+      "overflow": false,
+      "width": "6px"
+    },
+    "dark": {
+      "color": "rgb(195, 243, 91)",
+      "height": "6px",
+      "width": "6px"
+    },
+    "afterClick": false,
+    "duringStream": false,
+    "completionReturned": {
+      "description": "v-0",
+      "dot": true
+    }
+  },
+  "native": {
+    "pid": 47170,
+    "windowId": 199,
+    "frame": [
+      150,
+      58,
+      1287,
+      845
+    ],
+    "completedDotClearsOnClick": true,
+    "existingHistoryTurns": 6,
+    "repeatedSidebarClickAnchorsLatest": true,
+    "newModelRequests": 0,
+    "appRestartPerformed": false
+  },
+  "evidenceDirectory": ".local/development/chat-unread-20261102",
+  "screenshots": {
+    "native-read-after.png": "cd6f6d9543ab069942a639ada9cb62d5838d3acc99801f3c85487867029174ab",
+    "native-unread-before.png": "d47d7294a5c5de27349f9188303475ce71fecd2d9fc9bb05b9bc276a979c5ead",
+    "native-reclick-latest.png": "dafa4142d6297e0d3c39f57eb0f108fc25ccc42542859da1206bec350401fee1",
+    "native-latest-turn.png": "dafa4142d6297e0d3c39f57eb0f108fc25ccc42542859da1206bec350401fee1",
+    "native-scrolled-older.png": "6169121b7c4d9cf27c202b27ec7b3a7e027edc0c0a16fa6817d02c83b50ebe9d",
+    "light-minimum-read.png": "1ca433f63b584eca439389a43fc2c25bd6dcf09bd49ad13998eb3ca5829c1c44",
+    "dark-minimum-completed-preview.png": "b813a5699b247283a2ab5f2f651381366f8a2b41964e25424a154b5c8017de18"
+  },
+  "logs": {
+    "docs-build.log": "2d475a35a07dc6070022c3ff2fb1be20a523d6b6f1bb07d26572a38adf605f2b",
+    "lint.log": "5fdbedec2fbf0a86106b15d143526b85bbe8f2084ce1bc68787604d30988e3d6",
+    "test.log": "1a78471cff5c59fbdb81071e761bcfc0f100b8de25ce656941057541b5b7ce7b",
+    "focused.log": "a6932b5a10d38cf23f6e59d11aad51bb1fea63be3c5f5023d699c77f1d361fdf",
+    "build.log": "b7679cca53834b4a9d03333d121432659779b9a387edbd8ef21bbff8a1328344"
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "date": "2026-11-02",
+  "contractImpact": "none",
+  "head": "4ec526fd673d4b6a4eadcb102d4c1bb195195e36",
+  "nativeChanges": [],
+  "checks": {
+    "lint": "passed",
+    "frontend": {
+      "files": 256,
+      "passed": 2068,
+      "skipped": 16
+    },
+    "node": {
+      "passed": 26
+    },
+    "focused": {
+      "passed": 31,
+      "filteredOut": 159
+    },
+    "build": "passed",
+    "docsBuild": "passed",
+    "nativeFullSuite": "not run; no native source changes or rebuild"
+  },
+  "files": {
+    "src/stores/chat.store.ts": "d429b7dd2f9c5508638b477c9033998e1a6445aa4dc2b83291d403a81c569af7",
+    "src/stores/chat.store.test.ts": "c285fab4df2a8b6f8b8f6170ddb215d3dc00df34b60471be02149dceb8318f10",
+    "src/components/chat/ChatSidebarSessionRow.vue": "bd28842fd0bbb60ad66fa2030571c10a054a13781ab6b14ad11a922d2eec3446",
+    "src/components/chat/ChatSidebarTree.test.ts": "893249a37e91180abee5429968b848a222f4832ce1c9658b20de96a2fa16654d",
+    "src/components/chat/ChatSidebarTree.vue": "1a68ab7ff2b8c91f45c1609b172ddfc3be5111002ce312f36545295de666242b",
+    "docs/design/docs/design/05-patterns/15-feat-130-sidebar-layout.md": "8ccce9448f4fd4f1acb598f00490e5ee7260a2bde039db80c0b1e0ff448de296",
+    "tests/visual/sidebar-typography/main.ts": "e8dadc77038e013fd0efac52c37b3438fd13eaa2bcd93292fc89d2be85b8a29e",
+    "docs/verification/2026-11-02-task-context-menu.md": "f0d69145c0dae234985b03753a3546a5b6bb0773166542909504880f60fe428b"
+  },
+  "visual": {
+    "doubleClickTitle": {
+      "selection": "",
+      "userSelect": "none",
+      "webkit": "none"
+    },
+    "bodySelection": "既有",
+    "afterTitleDrag": "既有",
+    "renameFocus": "一条较长的已完成任务标题，用来检查省略、青柠圆点与置顶标记",
+    "zoom120Before": {
+      "menus": [
+        {
+          "rect": {
+            "bottom": 769.1687622070312,
+            "height": 142.7734375,
+            "left": 170.40000915527344,
+            "right": 380.4000244140625,
+            "top": 626.3953247070312,
+            "width": 210.00001525878903,
+            "x": 170.40000915527344,
+            "y": 626.3953247070312
+          },
+          "text": "重命名取消置顶永久删除"
+        }
+      ],
+      "row": {
+        "bottom": 534.7734375,
+        "height": 38.3984375,
+        "left": 19.1953125,
+        "right": 265.40625,
+        "top": 496.375,
+        "width": 246.2109375,
+        "x": 19.1953125,
+        "y": 496.375
+      },
+      "viewport": {
+        "height": 760,
+        "width": 1180
+      }
+    },
+    "zoom120After": {
+      "menus": [
+        {
+          "pointer": "all",
+          "rect": {
+            "bottom": 665.96875,
+            "height": 142.7734375,
+            "left": 142,
+            "right": 352,
+            "top": 523.1953125,
+            "width": 210,
+            "x": 142,
+            "y": 523.1953125
+          }
+        }
+      ],
+      "row": {
+        "bottom": 534.7734375,
+        "height": 38.3984375,
+        "left": 19.1953125,
+        "right": 265.40625,
+        "top": 496.375,
+        "width": 246.2109375,
+        "x": 19.1953125,
+        "y": 496.375
+      },
+      "viewport": {
+        "height": 760,
+        "width": 1180
+      }
+    },
+    "zoom200Keyboard": {
+      "menus": [
+        {
+          "bottom": 691.4403076171875,
+          "height": 221.4403076171875,
+          "left": 24,
+          "right": 349.6475524902344,
+          "top": 470,
+          "width": 325.6475524902344,
+          "x": 24,
+          "y": 470
+        }
+      ],
+      "viewport": {
+        "height": 760,
+        "width": 1180
+      }
+    },
+    "zoom200CoordinateRightClick": {
+      "point": {
+        "hit": "chat-tree__session-title",
+        "scrollY": 0,
+        "x": 177,
+        "y": 426.3984375
+      },
+      "expanded": true
+    }
+  },
+  "native": {
+    "pid": 47170,
+    "windowId": 199,
+    "backgroundTaskContextMenu": true,
+    "controlClickMenu": true,
+    "realTaskMutations": 0,
+    "newModelRequests": 0
+  },
+  "localEvidence": ".local/development/task-context-menu-20261102",
+  "screenshots": {
+    "native-control-click-immediate.png": "63337f76e4f969e1ecd2448ed99e84f38a6dec4c4ce40e4606e8d49739c392e7",
+    "dark-minimum-200.png": "12f562133e72a657f6dfc8630c781a8e3dab2fc5d2dda01f411e4ffe0775a96d",
+    "native-control-click.png": "a2008c8368446edc0494e2e7a128cb2462ec1a0db8ef245fcc98d0c054adda6a",
+    "native-before.png": "0983efe6a76666a9385b879eeb53920bc7bf1b5ef7eb66f4a208db2bbd1c6dad",
+    "dark-minimum-200-keyboard.png": "d289314a2aabf736459b1eec7e421c4a711099e2cafdd7ec3d3dc5daf3935eb9",
+    "dark-minimum-120.png": "eed14de130e2077567bc0af2f3a71add0972b349e9c16f2067fb91849053bd48",
+    "native-context-after.png": "5d29cafe3dd871d323b76a2ab01fe6d5bc4d8f67d43ace4d9a38e564f7ef1b22",
+    "dark-minimum-200-pointer.png": "7c5e0d8ef48cb653d3b07996ce606e86a0e5fffa33656abba6077a4a9783e28c",
+    "dark-minimum-120-fixed.png": "31be8fc1d8e2d7c4bc095695c0d3ae308f2ade890b78b6b81e0ad228033081ab"
+  },
+  "logHashes": {
+    "docs-build.log": "394ce9f0fedd6fed2107dd0393e210350fd56e77fbf883372fb9906ff8ef5d53",
+    "lint.log": "5fdbedec2fbf0a86106b15d143526b85bbe8f2084ce1bc68787604d30988e3d6",
+    "test.log": "3ccc003566f15732468307ef130e5c772c7d068a606df57177951b51d5c84cd1",
+    "focused.log": "953aed1b6e4fd85d28a616825546da7fb3b5f991a1403023d475c50f7b995294",
+    "build.log": "e901195d8bdd1b36b5628d9feb0347b61e596543206c43e6bdb64e19f450a4d9"
+  }
+}

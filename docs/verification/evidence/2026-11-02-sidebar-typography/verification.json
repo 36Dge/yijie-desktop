@@ -1,0 +1,217 @@
+{
+  "completed_at": "2026-11-02T20:30:49.402345+08:00",
+  "contract_impact": "none",
+  "head": "4ec526fd673d4b6a4eadcb102d4c1bb195195e36",
+  "qwen_measurement": {
+    "qwen_screenshot_pixels": [
+      2668,
+      1708
+    ],
+    "sidebar_boundary_physical_x": 512,
+    "display_physical_resolution": [
+      3024,
+      1964
+    ],
+    "display_logical_resolution": [
+      1512,
+      982
+    ],
+    "backing_scale": 2,
+    "measured_sidebar_logical_width": 256,
+    "measurement": "Five horizontal rows in the live screenshot share the sidebar background boundary at x=512; divide by the current display backing scale. Match the visible width, not the app source default of 280."
+  },
+  "layout_decision": {
+    "sidebar_expanded_css_px": 256,
+    "sidebar_collapsed_css_px": 72,
+    "sidebar_large_zoom_css_px": 196,
+    "default_window": [
+      1268,
+      780
+    ],
+    "minimum_window": [
+      1180,
+      760
+    ],
+    "window_config_unchanged": true,
+    "window_config_sha256": {
+      "src-tauri/tauri.feat164-qualification.conf.json": "2bbdf6e005bc0816aecce51a294b886948b88a9add1995d93a81c5a6ddd38cf0",
+      "src-tauri/tauri.experts-content-v011.conf.json": "d2b76b7b83a1a5c539292727047a4d66df45a0c0c73d08f86f12659af57eb200",
+      "src-tauri/tauri.conf.json": "94a13c24511fb603dc53d4ec04e43da49b5199b711b750a0bb64cfaed3521d64",
+      "src-tauri/tauri.experts-daily.conf.json": "f8eae07accf0dc8999d614cb066eba040871559444ad7cbd34df239e73a46b99",
+      "src-tauri/tauri.experts-local.conf.json": "d45c3e19efc4ad68d3c47b98ddc0b5b60bb8fab887ac740c06a4fb89692502a1",
+      "src-tauri/tauri.workflow-local.conf.json": "8dace54c163818d5ca15a8f6845495873171ef1e28b90d15908649aaa5c157fd",
+      "src-tauri/tauri.feat164-experts.conf.json": "d2102b16572b7c718e0afab2c0d10b0b6f8db0c950f96507eb54ef86fdbc041e",
+      "src-tauri/tauri.experts-content-v013.conf.json": "abdf093b2d5b44285769ac2d6fae2a5e547ee9337f64eb74dd3a358042e9ddf1",
+      "src-tauri/tauri.feat164-kimi-k31.conf.json": "56cdfd67d82a60034e4af0086c753abfb66845f90f06d2cc39ef7b03b6a0d604",
+      "src-tauri/tauri.feat131-stable.conf.json": "3ecc5bb6a09c272fe28d8604419795987b8f6ce97c0a5f2cf7ff683e312890da",
+      "src-tauri/tauri.desktop-release.conf.json": "d7f922fc71ce1efca6b221f8d81ac798860a27ae801dc19a0f30085deec89250",
+      "src-tauri/tauri.experts-content-v012.conf.json": "6750196357edfb4b45d156200561c3164bfab2fd42132577d1f5155712595f5a",
+      "src-tauri/tauri.demo-fast.conf.json": "ba526ab5da30c825fd80995c1c8a5aa284028dba66a2fbe69fa4b8b1ec340386"
+    },
+    "reassessment": "The active conversation has an existing local 760px override; preserve it instead of implementing the earlier 800px suggestion based on the global 880px fallback.",
+    "reading_column_css_px": 760
+  },
+  "typography": {
+    "body_font_px": 14,
+    "body_line_height_px": 25.2,
+    "h1_h2_h3_px": [
+      20,
+      18,
+      16
+    ],
+    "heading_line_height": 1.5,
+    "emphasis_weight": 600,
+    "paragraph_gap_px": 12,
+    "section_gap_px": 24,
+    "heading_content_gap_px": 8,
+    "table_px": [
+      14,
+      22
+    ],
+    "code_px": [
+      13,
+      20
+    ],
+    "plain_and_process_preserved": true,
+    "stream_and_completion_style_equal": true
+  },
+  "feat166": {
+    "layout_coordinates": "unzoomed ResizeObserver contentRect / computed width",
+    "native_viewport_coordinates": "original visual getBoundingClientRect unchanged",
+    "two_columns_min_css_px": 400,
+    "fractional_800_67_rejected": true,
+    "pointer_delta_120_percent": {
+      "visual_px": 60,
+      "layout_px": 49.9994049390062
+    },
+    "notice_overlay_before": true,
+    "notice_overlay_after": false,
+    "notice_clears_on_space_recovery": true,
+    "tabs_and_draft_retained": true,
+    "restore_does_not_auto_expand": true
+  },
+  "native_validation": {
+    "pid": 47170,
+    "window_id": 199,
+    "default_split": {
+      "workspace": 1012,
+      "chat": 404,
+      "preview": 607
+    },
+    "minimum_split": {
+      "workspace": 924,
+      "chat": 400,
+      "preview": 523
+    },
+    "collapsed_sidebar": {
+      "width": 72,
+      "workspace": 1108,
+      "chat": 443,
+      "preview": 664
+    },
+    "zoom_120_collapses_preview": true,
+    "two_empty_tabs_retained_after_zoom": true,
+    "test_tabs_removed": true,
+    "preview_closed_at_end": true,
+    "window_restored": {
+      "position": [
+        91,
+        89
+      ],
+      "size": [
+        1335,
+        845
+      ],
+      "zoom_percent": 100,
+      "left_sidebar_expanded": true
+    },
+    "restart": false,
+    "model_requests": 0,
+    "actual_file_format_reads_retested": false
+  },
+  "browser_validation": {
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "sizes": [
+      [
+        1268,
+        780
+      ],
+      [
+        1180,
+        760
+      ]
+    ],
+    "zoom_percent": [
+      80,
+      100,
+      120,
+      200
+    ],
+    "high_zoom_navigation_reachable": true,
+    "settings_reachable": true,
+    "temporary_tab_closed": true,
+    "viewport_reset": true,
+    "metrics_file": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/browser-metrics.json",
+    "console_warn_error_final": 0
+  },
+  "checks": {
+    "regression_before": {
+      "failed": 2,
+      "passed": 8
+    },
+    "preview_components_and_domain": {
+      "passed": 29,
+      "failed": 0
+    },
+    "frontend": {
+      "files": 255,
+      "passed": 2050,
+      "skipped": 16
+    },
+    "node_passed": 26,
+    "pnpm_lint": "PASS",
+    "pnpm_build": "PASS (existing chunk-size warning)",
+    "pnpm_docs_build": "PASS",
+    "git_diff_check": "PASS",
+    "native_full_suite": "NOT RERUN: Native source/wire unchanged; avoid recreating large compilation caches; actual layout/empty-tab checks performed."
+  },
+  "source_sha256": {
+    "docs/design/docs/design/02-tokens/03-typography-tokens.md": "1f18318ba409e3ebbfc6298f5ded420b32ba3c21d91be4c6052ade6d2ad04a9f",
+    "docs/design/docs/design/02-tokens/04-spacing-layout-tokens.md": "179184cbf8b5011e240b2fa179744a24e4bd5c394d4e6a5ec21ed57c3be5d91a",
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "5df258c89d6c3130a9549cf7fa17a31de4e7e287ad18766eabfb35bdbafa8199",
+    "docs/design/docs/design/05-patterns/17-feat-166-conversation-file-preview.md": "39679d2a8452ebbac06769052b595ac97386d35a4930f2bd3cfe128616359405",
+    "docs/verification/2026-11-02-sidebar-typography.md": "b27577d3e50829360e568016e0a9ef297290d7349f5e80b641ea0a308dc674ce",
+    "src/components/chat/ChatDocumentWorkspace.test.ts": "3be8c4d5bac35ab4c8243afc8d41084315d8e1ffe1826a66c96447aa8f55f919",
+    "src/components/chat/ChatDocumentWorkspace.vue": "b72883b2c71055af51cecb09e4182b49c71ae86849b7f80863470a59a3019a50",
+    "src/components/chat/ChatSafeContent.vue": "25577f0b6e25b4571e70151207dba56daebb9f92a6218213212238ec00ac5ae7",
+    "src/components/chat/ChatTurnGroup.vue": "d853a6de7b3b05626643b29993f7b7325f81dda9495b11e03df1b7e4e19affff",
+    "src/composables/useConversationDocumentPreview.ts": "7a1163a262084342713ca2e39746eff345b941a29a924a52f76cd242b6438100",
+    "src/domain/conversation-file-preview.test.ts": "f84c83992f664ec2eb701775eb84201e48fb62ffadcfe200abb3bc6f0de65ccf",
+    "src/styles/main.css": "aa9e681c10f51386ab970ad0ad1b761b38998af879e22d29d9f4ec332f83b3ea",
+    "src/styles/variables.css": "ae4eeb70724fc721ff277ec4e5cd31c3921768df72c443ab012ef1f742b3b259",
+    "tests/visual/sidebar-typography/index.html": "a5ec6b0947747c968bca62ff4d4d6033dd26a347853b6cadba098be8997cd613",
+    "tests/visual/sidebar-typography/main.ts": "c17a68aab48f5bf6e4feafe836e564116c3d80c2494fc55ac1fd1c931cfb4b59",
+    "tests/visual/sidebar-typography/preview.css": "b16773936596fdd6b3133d7627f1eea29370931b14a05e469fc0336b26f85466"
+  },
+  "artifacts": {
+    "qwen": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/qwen-current.png",
+    "native_reading": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/native-final.png",
+    "native_minimum_split": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/native-minimum-split.png",
+    "native_space_notice": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/native-zoom120-notice.png",
+    "dark_split": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/browser-min-dark.png",
+    "high_zoom": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/browser-zoom200-final.png",
+    "task_patch": "/Users/jack/Downloads/Personal_Info/CrossBSD/yijie-desktop/.local/development/sidebar-typography-20261102/task-only.patch"
+  },
+  "safety": {
+    "forced_kill": false,
+    "binary_substitution": false,
+    "permission_sabotage": false,
+    "attack_fixtures": false,
+    "new_dependency": false,
+    "git_commit": false,
+    "git_push": false
+  }
+}

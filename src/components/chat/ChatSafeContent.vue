@@ -12,12 +12,13 @@ import { messageLinkTargetKey, type MessageLinkTarget } from "../../composables/
 const props = withDefaults(defineProps<{
   blocks?: readonly ConversationTimelineContentBlock[];
   mode?: "rich" | "plain";
+  typography?: "answer" | "compact";
   streaming?: boolean;
   animate?: boolean;
   linkTarget?: MessageLinkTarget;
   /** Internal recursion uses the already parsed tree and the parent's clock. */
   parsedNodes?: readonly ChatContentNode[];
-}>(), { blocks: () => [], mode: "rich", streaming: false, animate: true });
+}>(), { blocks: () => [], mode: "rich", typography: "compact", streaming: false, animate: true });
 
 defineSlots<{
   "text-prefix"(): unknown;
@@ -50,7 +51,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
 </script>
 
 <template>
-  <div ref="root" class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments }">
+  <div ref="root" class="chat-safe-content" :class="{ 'chat-safe-content--attachments': hasAttachments, 'chat-safe-content--answer': typography === 'answer' && mode === 'rich' }">
     <p v-if="$slots['text-prefix'] && !firstParagraphKey" class="chat-safe-content__paragraph"><slot name="text-prefix" /></p>
     <template v-for="node in displayNodes" :key="node.key">
       <p v-if="node.kind === 'paragraph'" class="chat-safe-content__paragraph">
@@ -83,7 +84,7 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
       <hr v-else-if="node.kind === 'rule'" class="chat-safe-content__rule">
 
       <blockquote v-else-if="node.kind === 'quote'" class="chat-safe-content__quote">
-        <ChatSafeContent :parsed-nodes="node.children" mode="rich" :streaming="streaming">
+        <ChatSafeContent :parsed-nodes="node.children" mode="rich" :typography="typography" :streaming="streaming">
           <template v-if="$slots['code-actions']" #code-actions="scope">
             <slot name="code-actions" v-bind="scope" />
           </template>
@@ -96,8 +97,8 @@ function visibleRows<T extends readonly { startOffset: number }[]>(rows: readonl
         :start="node.ordered ? node.start : undefined"
         class="chat-safe-content__list"
       >
-        <li v-for="item in visibleItems(node.items)" :key="item.key">
-          <ChatSafeContent :parsed-nodes="item.children" mode="rich" :streaming="streaming">
+        <li v-for="item in visibleItems(node.items)" :key="item.key" :class="{ 'chat-safe-content__list-item--loose': item.children.length > 1 }">
+          <ChatSafeContent :parsed-nodes="item.children" mode="rich" :typography="typography" :streaming="streaming">
             <template v-if="$slots['code-actions']" #code-actions="scope">
               <slot name="code-actions" v-bind="scope" />
             </template>
@@ -363,6 +364,29 @@ h3.chat-safe-content__heading {
 .chat-safe-content__unknown {
   color: var(--yj-color-text-body);
 }
+
+/* Reading rhythm belongs to answers, not user messages or process controls.
+ * Recursion receives the same variant so lists and quotes retain the rhythm. */
+.chat-safe-content--answer {
+  gap: 0;
+  line-height: var(--yj-line-height-chat-answer);
+}
+.chat-safe-content--answer > * + * { margin-block-start: var(--yj-chat-paragraph-gap); }
+.chat-safe-content--answer > .chat-safe-content__heading:not(:first-child) { margin-block-start: var(--yj-chat-section-gap); }
+.chat-safe-content--answer > .chat-safe-content__heading + .chat-safe-content__heading { margin-block-start: var(--yj-chat-paragraph-gap); }
+.chat-safe-content--answer > .chat-safe-content__heading + :not(.chat-safe-content__heading),
+.chat-safe-content--answer > .chat-safe-content__paragraph + .chat-safe-content__list { margin-block-start: var(--yj-chat-heading-content-gap); }
+.chat-safe-content--answer > .chat-safe-content__heading { line-height: var(--yj-line-height-chat-answer-heading); }
+.chat-safe-content--answer > h1.chat-safe-content__heading { font-size: var(--yj-font-size-chat-answer-title); }
+.chat-safe-content--answer strong { font-weight: var(--yj-font-weight-semibold); }
+.chat-safe-content--answer > .chat-safe-content__list > .chat-safe-content__list-item--loose + li,
+.chat-safe-content--answer > .chat-safe-content__list > li + .chat-safe-content__list-item--loose { margin-block-start: var(--yj-space-1); }
+.chat-safe-content--answer .chat-safe-content__inline-code,
+.chat-safe-content--answer pre { font-family: var(--yj-font-family-mono); }
+.chat-safe-content--answer pre { font-size: var(--yj-font-size-code); line-height: var(--yj-line-height-code); }
+.chat-safe-content--answer pre code { font: inherit; }
+.chat-safe-content--answer th,
+.chat-safe-content--answer td { font-size: var(--yj-font-size-body); line-height: var(--yj-line-height-body); }
 </style>
 
 <style scoped>

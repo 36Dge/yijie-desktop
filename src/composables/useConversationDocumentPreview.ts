@@ -22,7 +22,7 @@ const phase = ref<"empty" | "loading" | "ready" | "error" | "paused">("empty");
 const error = ref<ReturnType<typeof previewFailure> | null>(null);
 const notice = ref("");
 const dragging = ref(false);
-let drag: { start: number; width: number; preference: number | null; pointerId: number } | null = null;
+let drag: { start: number; width: number; preference: number | null; pointerId: number; scale: number } | null = null;
 let resizeObserver: ResizeObserver | undefined;
 let mutationObserver: MutationObserver | undefined;
 let themeObserver: MutationObserver | undefined;
@@ -38,6 +38,7 @@ let current: { id: string; context: string; tab: PreviewTab; loaded: boolean } |
 const closeTasks = new Set<Promise<void>>();
 const newId = () => crypto.randomUUID();
 const capacityText = "最多打开10个标签页，请先关闭一个";
+const insufficientSpaceText = "窗口空间不足，请扩大窗口后打开文件预览";
 
 function measuredViewport(): Viewport | null {
   const r = viewport.value?.getBoundingClientRect();
@@ -125,7 +126,7 @@ function focusTab(id: string | null) {
 }
 function ensureOpen(): boolean {
   if (!props.enabled) return false;
-  if (!geometry.value.available) { notice.value = "窗口空间不足，请扩大窗口后打开文件预览"; return false; }
+  if (!geometry.value.available) { notice.value = insufficientSpaceText; return false; }
   notice.value = ""; opened.value = true; return true;
 }
 function openFile(file: PreviewFile) {
@@ -180,16 +181,32 @@ function keyResize(event: KeyboardEvent) {
 function startDrag(event: PointerEvent) {
   if (event.button !== 0) return;
   event.preventDefault(); separator.value?.focus();
-  drag = { start: event.clientX, width: geometry.value.right, preference: preferred.value, pointerId: event.pointerId };
+  const scale = (root.value?.getBoundingClientRect().width ?? 0) / width.value;
+  drag = { start: event.clientX, width: geometry.value.right, preference: preferred.value, pointerId: event.pointerId, scale: Number.isFinite(scale) && scale > 0 ? scale : 1 };
   dragging.value = true; separator.value?.setPointerCapture?.(event.pointerId); syncViewport();
 }
-function moveDrag(event: PointerEvent) { if (drag) preferred.value = Math.max(geometry.value.min, Math.min(geometry.value.max, drag.width + drag.start - event.clientX)); }
+function moveDrag(event: PointerEvent) { if (drag) preferred.value = Math.max(geometry.value.min, Math.min(geometry.value.max, drag.width + (drag.start - event.clientX) / drag.scale)); }
 function endDrag(commit = true) {
   const previous = drag; drag = null; dragging.value = false;
   if (previous) { if (!commit) preferred.value = previous.preference; if (separator.value?.hasPointerCapture?.(previous.pointerId)) separator.value.releasePointerCapture(previous.pointerId); }
   syncViewport();
 }
 function cancelDrag() { if (drag) endDrag(false); }
+function measureLayout(measured?: number) {
+  // Grid columns and the 400px minimum use unzoomed layout pixels. Native child
+  // positioning above deliberately keeps visual getBoundingClientRect values.
+  const element = root.value;
+  const cssWidth = element ? getComputedStyle(element).width : "";
+  const fallback = cssWidth.endsWith("px") ? Number.parseFloat(cssWidth) : element?.clientWidth ?? 0;
+  const next = measured ?? fallback;
+  if (next !== width.value && drag) endDrag(false);
+  width.value = next;
+  if (!geometry.value.available && opened.value) {
+    const focusHidden = panel.value?.contains(document.activeElement) || separator.value === document.activeElement;
+    collapse(Boolean(focusHidden)); notice.value = insufficientSpaceText;
+  }
+  if (geometry.value.available && notice.value === insufficientSpaceText) notice.value = "";
+}
 function suspend() {
   cancelDrag(); epoch++; queued = null; void detach(true);
   phase.value = active.value?.file ? "paused" : "empty";
@@ -211,18 +228,17 @@ watch(() => [props.contextId, props.enabled], () => {
 });
 onMounted(async () => {
   resizeObserver = new ResizeObserver(entries => {
-    if (entries.some(e => e.target === root.value)) {
-      const next = root.value?.getBoundingClientRect().width ?? 0;
-      if (next !== width.value && drag) endDrag(false);
-      width.value = next;
-      if (!geometry.value.available && opened.value) { const focusHidden = panel.value?.contains(document.activeElement) || separator.value === document.activeElement; collapse(Boolean(focusHidden)); notice.value = "窗口空间不足，请扩大窗口后打开文件预览"; }
-    }
+    const resizedRoot = entries.find(e => e.target === root.value);
+    if (resizedRoot) measureLayout(resizedRoot.contentRect?.width);
     syncViewport();
   });
-  if (root.value) { width.value = root.value.getBoundingClientRect().width; resizeObserver.observe(root.value); }
+  if (root.value) { measureLayout(); resizeObserver.observe(root.value); }
   mutationObserver = new MutationObserver(syncViewport); mutationObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "aria-modal", "hidden", "open"] });
-  themeObserver = new MutationObserver(() => { if (opened.value) reload(); });
-  themeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme"] });
+  themeObserver = new MutationObserver(records => {
+    if (records.some(record => record.attributeName === "data-ui-zoom-percent")) { cancelDrag(); measureLayout(); syncViewport(); }
+    if (records.some(record => record.attributeName === "data-theme") && opened.value) reload();
+  });
+  themeObserver.observe(document.documentElement, { attributes:true, attributeFilter:["data-theme", "data-ui-zoom-percent"] });
   document.addEventListener("visibilitychange", visibility);
   window.addEventListener("blur", cancelDrag);
   try {

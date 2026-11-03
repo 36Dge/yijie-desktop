@@ -783,6 +783,28 @@ describe("chat view-model store", () => {
     vi.unstubAllGlobals();
   });
 
+  it("targets background session metadata without selecting it or modifying the active conversation", async () => {
+    const renameSession = vi.fn<ChatClient["renameSession"]>(async (_context, _session, _title, operation) => operation);
+    const setSessionPinned = vi.fn<ChatClient["setSessionPinned"]>(async (_context, _session, _pinned, operation) => operation);
+    const { client } = fakeClient({ renameSession, setSessionPinned });
+    const store = createStore(client);
+    await store.bind(TENANT);
+    await store.selectSession(SESSION_A);
+    const history = store.history;
+    await store.renameSession(SESSION_B, "新的普通任务标题");
+    await store.setSessionPinned(SESSION_B, true);
+    expect(renameSession).toHaveBeenCalledWith(CONTEXT, SESSION_B, "新的普通任务标题", expect.any(String));
+    expect(setSessionPinned).toHaveBeenCalledWith(CONTEXT, SESSION_B, true, expect.any(String));
+    expect(store.selectedSessionId).toBe(SESSION_A);
+    expect(store.history).toBe(history);
+    store.context = { ...store.context!, allowedActions: ["read_sessions"] };
+    await store.renameSession(SESSION_B, "不应保存");
+    await store.setSessionPinned(SESSION_B, false);
+    expect(renameSession).toHaveBeenCalledTimes(1);
+    expect(setSessionPinned).toHaveBeenCalledTimes(1);
+    await store.dispose();
+  });
+
   it("FEAT165 preserves exact attachment bindings when older native history is paged and reopened", async () => {
     const olderTurnId = "019c1a00-0000-7000-8000-000000000030";
     const pageCursor = "abcdefghijklmnop";

@@ -17,7 +17,7 @@ const toggleLabel = computed(() => props.collapsed ? "展开侧栏" : "收起侧
       :aria-expanded="!collapsed"
       @click="emit('toggle')"
     >
-      <YjIcon name="sidebar" />
+      <YjIcon name="sidebar" size="sm" tone="muted" :stroke-width="1.5" />
     </button>
   </header>
 </template>

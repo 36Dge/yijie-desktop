@@ -4027,28 +4027,36 @@ export function createChatStoreDefinition(
       return projection;
     }
 
-    async function renameSelected(title: string): Promise<void> {
+    async function renameSession(sessionId: string, title: string): Promise<void> {
       const bound = context.value;
-      const sessionId = selectedSessionId.value;
       if (
-        !bound || !sessionId || !hasAction("rename_session") ||
-        deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null
+        !bound || !hasAction("rename_session") ||
+        (selectedSessionId.value !== sessionId && !sessions.value.some(session => session.sessionId === sessionId)) ||
+        deleteInFlightSessionId.value === sessionId || (selectedSessionId.value === sessionId && cleanupStatus.value !== null)
       ) return;
       await client.renameSession(bound.contextId, sessionId, title, operationId());
-      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
+      if (context.value?.contextId !== bound.contextId) return;
+      await reloadSessions();
+    }
+
+    async function renameSelected(title: string): Promise<void> {
+      if (selectedSessionId.value) await renameSession(selectedSessionId.value, title);
+    }
+
+    async function setSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
+      const bound = context.value;
+      if (
+        !bound || !hasAction("pin_session") ||
+        (selectedSessionId.value !== sessionId && !sessions.value.some(session => session.sessionId === sessionId)) ||
+        deleteInFlightSessionId.value === sessionId || (selectedSessionId.value === sessionId && cleanupStatus.value !== null)
+      ) return;
+      await client.setSessionPinned(bound.contextId, sessionId, pinned, operationId());
+      if (context.value?.contextId !== bound.contextId) return;
       await reloadSessions();
     }
 
     async function setSelectedPinned(pinned: boolean): Promise<void> {
-      const bound = context.value;
-      const sessionId = selectedSessionId.value;
-      if (
-        !bound || !sessionId || !hasAction("pin_session") ||
-        deleteInFlightSessionId.value === sessionId || cleanupStatus.value !== null
-      ) return;
-      await client.setSessionPinned(bound.contextId, sessionId, pinned, operationId());
-      if (context.value?.contextId !== bound.contextId || selectedSessionId.value !== sessionId) return;
-      await reloadSessions();
+      if (selectedSessionId.value) await setSessionPinned(selectedSessionId.value, pinned);
     }
 
     async function interruptSelected(): Promise<boolean> {
@@ -4434,6 +4442,8 @@ export function createChatStoreDefinition(
       requestLocalRecovery,
       renameSelected,
       setSelectedPinned,
+      renameSession,
+      setSessionPinned,
       interruptSelected,
       deleteSelected,
       refreshSelectedCleanup,

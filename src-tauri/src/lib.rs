@@ -12,6 +12,8 @@ mod native_auth;
 #[cfg(target_os = "macos")]
 mod single_instance;
 mod skills;
+#[cfg(target_os = "macos")]
+mod window_chrome;
 #[cfg(not(feature = "feat126-s10-driver"))]
 mod workflows;
 
@@ -230,6 +232,15 @@ pub fn run() {
     #[cfg(feature = "feat128-s10-runtime")]
     let builder = builder.manage(feat128_s10d_runtime);
     let builder = builder.on_window_event(|window, event| {
+        #[cfg(target_os = "macos")]
+        if matches!(
+            event,
+            tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::ScaleFactorChanged { .. }
+                | tauri::WindowEvent::Focused(true)
+        ) {
+            window_chrome::apply(window);
+        }
         if matches!(event, tauri::WindowEvent::Destroyed) {
             #[cfg(not(feature = "feat126-s10-driver"))]
             if window.label() == "main" {
@@ -272,6 +283,10 @@ pub fn run() {
         page_load_driver.record_page_load(payload.event());
     });
     let builder = builder.setup(move |app| {
+        #[cfg(target_os = "macos")]
+        if let Some(window) = app.get_window("main") {
+            window_chrome::apply(&window);
+        }
         #[cfg(feature = "feat126-s10-driver")]
         {
             let setup_driver = app

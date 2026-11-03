@@ -1,4 +1,5 @@
 import type { Component } from "vue";
+import { ThumbsDownFilled, ThumbsUpFilled } from "./answer-feedback-icons";
 import { ModelDeepSeek, ModelGlm, ModelKimi, ModelMiniMax } from "./model-icons";
 import {
   SkillCategoryContent,
@@ -146,6 +147,8 @@ export const iconRegistry = {
   copy: Copy,
   thumbsUp: ThumbsUp,
   thumbsDown: ThumbsDown,
+  thumbsUpFilled: ThumbsUpFilled,
+  thumbsDownFilled: ThumbsDownFilled,
   connector: Cable,
   dismiss: X,
   download: Download,

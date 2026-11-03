@@ -91,8 +91,11 @@
   --yj-color-chart-series-8: #475569;
 
   --yj-font-family-sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
+  --yj-font-family-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   --yj-font-size-caption: 12px;
   --yj-font-size-body: 14px;
+  --yj-font-size-code: 13px;
+  --yj-font-size-chat-answer-title: 20px;
   --yj-font-size-chat-expert-chip: 13px;
   --yj-font-size-workflow-description: 13px;
   --yj-font-size-card-title: 16px;
@@ -102,6 +105,9 @@
   --yj-font-size-display: 32px;
   --yj-line-height-caption: 18px;
   --yj-line-height-body: 22px;
+  --yj-line-height-code: 20px;
+  --yj-line-height-chat-answer: 1.8;
+  --yj-line-height-chat-answer-heading: 1.5;
   --yj-line-height-workflow-description: 20px;
   --yj-line-height-card-title: 24px;
   --yj-line-height-section-title: 26px;
@@ -131,6 +137,10 @@
   --yj-space-12: 48px;
   --yj-space-16: 64px;
 
+  --yj-chat-paragraph-gap: var(--yj-space-3);
+  --yj-chat-section-gap: var(--yj-space-6);
+  --yj-chat-heading-content-gap: var(--yj-space-2);
+
   --yj-radius-xs: 4px;
   --yj-radius-sm: 6px;
   --yj-radius-md: 8px;
@@ -157,7 +167,7 @@
 
   --yj-layout-window-min-width: 1180px;
   --yj-layout-window-min-height: 760px;
-  --yj-layout-sidebar-expanded: 240px;
+  --yj-layout-sidebar-expanded: 256px;
   --yj-layout-sidebar-collapsed: 72px;
   --yj-layout-titlebar-height: var(--yj-space-8);
   --yj-layout-titlebar-controls-inset: calc(var(--yj-space-16) + var(--yj-space-8));
@@ -222,6 +232,7 @@
   --yj-z-chat-fade: 1;
   --yj-z-chat-scroll-control: 2;
   --yj-layout-chat-sidebar-indent: var(--yj-space-0);
+  --yj-size-chat-completion-dot: 6px;
   --yj-layout-chat-action-size: var(--yj-control-height-sm);
   --yj-layout-chat-stop-square-size: 9.5px;
   --yj-layout-permission-menu-width: 320px;

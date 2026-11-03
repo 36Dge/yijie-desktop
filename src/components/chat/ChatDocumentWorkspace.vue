@@ -9,7 +9,7 @@ defineExpose({ toggle, openFile, opened });
 </script>
 
 <template>
-  <div ref="root" class="document-workspace" :class="{ 'document-workspace--open': opened, 'document-workspace--dragging': dragging }" :style="opened ? { gridTemplateColumns: `minmax(0, 1fr) 1px ${geometry.right}px` } : undefined">
+  <div ref="root" class="document-workspace" :class="{ 'document-workspace--open': opened, 'document-workspace--dragging': dragging, 'document-workspace--notice': notice }" :style="opened ? { gridTemplateColumns: `minmax(0, 1fr) 1px ${geometry.right}px` } : undefined">
     <div class="document-workspace__chat"><slot /></div>
     <div v-if="opened" ref="separator" class="document-workspace__separator" role="separator" aria-orientation="vertical" aria-label="调整对话与文件预览宽度" :aria-valuemin="geometry.min" :aria-valuemax="geometry.max" :aria-valuenow="geometry.right" tabindex="0" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag(true)" @pointercancel="endDrag(false)" @lostpointercapture="endDrag(false)" @keydown="keyResize" @keydown.esc.prevent="endDrag(false)" @dblclick="resetWidth" />
     <aside v-if="opened" ref="panel" class="document-sidebar" aria-label="文件预览">
@@ -21,7 +21,7 @@ defineExpose({ toggle, openFile, opened });
           </div>
         </div>
         <button ref="addButton" type="button" class="yj-control yj-control--icon" aria-label="新标签页" :title="state.tabs.length >= MAX_PREVIEW_TABS ? capacityText : '新标签页'" :disabled="state.tabs.length >= MAX_PREVIEW_TABS" @click="createTab"><YjIcon name="plus" size="sm" /></button>
-        <button type="button" class="yj-control yj-control--icon" aria-label="收起文件预览" title="收起文件预览" @click="collapse()"><YjIcon name="previewSidebar" size="sm" /></button>
+        <button type="button" class="yj-control yj-control--icon" aria-label="收起文件预览" title="收起文件预览" @click="collapse()"><YjIcon name="previewSidebar" size="sm" tone="muted" :stroke-width="1.5" /></button>
       </div>
       <div v-if="active?.file" class="document-sidebar__heading"><span :title="active.file.name">{{ active.file.name }}</span><small>只读预览</small></div>
       <div v-if="metadata && phase === 'ready'" class="document-sidebar__reading" aria-label="阅读选项">
@@ -44,7 +44,8 @@ defineExpose({ toggle, openFile, opened });
 </template>
 
 <style scoped>
-.document-workspace { display:grid; grid-template-columns:minmax(0,1fr); width:100%; height:100%; min-width:0; min-height:0; position:relative; overflow:hidden; }
+.document-workspace { display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); width:100%; height:100%; min-width:0; min-height:0; position:relative; overflow:hidden; }
+.document-workspace--notice { grid-template-rows:minmax(0,1fr) auto; }
 .document-workspace__chat { min-width:0; min-height:0; height:100%; container-type:inline-size; }
 .document-workspace__separator { position:relative; z-index:var(--yj-z-preview-separator); background:var(--yj-color-border-default); cursor:col-resize; touch-action:none; }
 .document-workspace__separator::after { content:""; position:absolute; top:0; bottom:0; left:50%; width:var(--yj-space-2); transform:translateX(-50%); }
@@ -74,7 +75,7 @@ defineExpose({ toggle, openFile, opened });
 .document-sidebar__empty strong { color:var(--yj-color-text-primary); font-weight:var(--yj-font-weight-semibold); }
 .document-sidebar__empty p { max-width:var(--yj-layout-preview-empty-max); margin:0; }
 .document-sidebar__notice,.document-workspace__notice { color:var(--yj-color-text-secondary); padding:var(--yj-space-2) var(--yj-space-4); margin:0; font-size:var(--yj-font-size-caption); }
-.document-workspace__notice { position:absolute; bottom:var(--yj-space-4); left:var(--yj-space-4); right:var(--yj-space-4); background:var(--yj-color-bg-card); border:var(--yj-border-width) solid var(--yj-color-border-default); border-radius:var(--yj-radius-md); z-index:var(--yj-z-preview-notice); }
+.document-workspace__notice { grid-column:1 / -1; background:var(--yj-color-bg-card); border-top:var(--yj-border-width) solid var(--yj-color-border-default); }
 .document-sidebar__sr-status { position:absolute; width:1px; height:1px; clip-path:inset(50%); overflow:hidden; }
 @container (max-width:639px) { .document-workspace__chat :deep(.chat-workspace__header),.document-workspace__chat :deep(.chat-workspace__conversation),.document-workspace__chat :deep(.chat-workspace__composer) { padding-inline:var(--yj-space-4); } }
 </style>

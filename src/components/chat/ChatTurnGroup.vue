@@ -524,6 +524,7 @@ function forwardApprovalDecision(change: ChatApprovalDecisionChange): void {
               :blocks="skillMessages.get(item.identity)?.blocks ?? item.contentBlocks"
               :link-target="item.kind === 'assistant_message' ? {sessionId: item.threadId, turnId: item.turnId, itemId: item.itemId} : undefined"
               :mode="item.presentation === 'user_message' ? 'plain' : item.contentMode"
+              :typography="!processKeys.has(item.identity) && ['final_answer', 'assistant_unclassified'].includes(item.presentation) ? 'answer' : 'compact'"
               :streaming="item.kind === 'assistant_message' && item.busy === true && (!processKeys.has(item.identity) || processExpanded)"
               :animate="(!processKeys.has(item.identity) || processExpanded) && !['failed', 'interrupted'].includes(turn.domainStatus)"
             >

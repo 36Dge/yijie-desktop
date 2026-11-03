@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { NCard, NDropdown, NInput, NModal, type DropdownOption } from "naive-ui";
-import { useRouter } from "vue-router";
+import { isNavigationFailure, NavigationFailureType, useRouter } from "vue-router";
 import type { ChatSession } from "../../domain/chat-ipc";
 import { buildChatSidebarHistory, type ChatHistoryProjectGroup } from "../../domain/chat-sidebar-history";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
+import { useChatReadingStore } from "../../stores/chat-reading.store";
 import YjIcon from "../yijie/YjIcon.vue";
 import ChatSidebarSessionRow from "./ChatSidebarSessionRow.vue";
 
@@ -15,20 +16,24 @@ const props = defineProps<{
 
 const chatStore = useChatStore();
 const sidebarStore = useSidebarStore();
+const readingStore = useChatReadingStore();
 const router = useRouter();
 const expandedProjectIds = ref<ReadonlySet<string>>(new Set());
 const renameSession = ref<ChatSession | null>(null);
 const deleteSession = ref<ChatSession | null>(null);
 const removeProjectTarget = ref<ChatHistoryProjectGroup | null>(null);
 const projectMenuId = ref<string | null>(null);
+const activeSessionMenuId = ref<string | null>(null);
 const projectMenuX = ref(0);
 const projectMenuY = ref(0);
-const projectMenuOverlay = ref<HTMLElement | null>(null);
+const menuOverlay = ref<HTMLElement | null>(null);
 const renameValue = ref("");
 const actionPending = ref(false);
 const actionError = ref<string | null>(null);
 let lastDialogTrigger: HTMLElement | null = null;
 let knownProjectIds = new Set<string>();
+
+watch(() => chatStore.sessions, sessions => readingStore.observeSessions(sessions), { immediate: true, flush: "sync" });
 
 const history = computed(() => buildChatSidebarHistory(chatStore.projects, chatStore.sessions, sidebarStore.taskDirectoryPreferences));
 const historyGroups = computed(() => history.value.groups);
@@ -65,10 +70,14 @@ watch(
 
 watch([() => props.currentPath, () => chatStore.context?.allowedActions, actionPending], () => {
   projectMenuId.value = null;
+  activeSessionMenuId.value = null;
+  if (readingStore.latestRequest && props.currentPath !== `/chat/${readingStore.latestRequest.sessionId}`) readingStore.cancelLatest();
 });
 watch(() => chatStore.context?.contextId, () => {
   projectMenuId.value = null;
+  activeSessionMenuId.value = null;
   removeProjectTarget.value = null;
+  readingStore.cancelLatest();
 });
 
 watch(
@@ -115,6 +124,7 @@ function projectMenuOptions(project: ChatHistoryProjectGroup): DropdownOption[] 
 function openProjectMenu(group: ChatHistoryProjectGroup, event: MouseEvent | KeyboardEvent): void {
   if (actionPending.value || projectMenuOptions(group).length === 0) return;
   event.preventDefault();
+  activeSessionMenuId.value = null;
   const element = event.currentTarget as HTMLElement;
   const trigger = element instanceof HTMLButtonElement ? element : element.querySelector<HTMLButtonElement>("button");
   if (!trigger) return;
@@ -151,15 +161,27 @@ function sessionMenuOptions(session: ChatSession): DropdownOption[] {
 
 async function openSession(session: ChatSession): Promise<void> {
   actionError.value = null;
-  await router.push(`/chat/${session.sessionId}`);
+  const path = `/chat/${session.sessionId}`;
+  const result = await router.push(path);
+  if (result && !isNavigationFailure(result, NavigationFailureType.duplicated)) return;
+  if (router.currentRoute.value.path !== path) return;
+  readingStore.requestLatest(chatStore.sessions.find(entry => entry.sessionId === session.sessionId) ?? session);
 }
 
 async function ensureSelected(session: ChatSession): Promise<void> {
-  if (chatStore.selectedSessionId !== session.sessionId) await chatStore.selectSession(session.sessionId);
+  const changed = chatStore.selectedSessionId !== session.sessionId;
+  const path = `/chat/${session.sessionId}`;
+  const result = await router.push(path);
+  if ((result && !isNavigationFailure(result, NavigationFailureType.duplicated)) || router.currentRoute.value.path !== path) throw new Error("task-navigation-cancelled");
+  if (changed || chatStore.selectedSessionId !== session.sessionId) await chatStore.selectSession(session.sessionId);
+  if (chatStore.selectedSessionId !== session.sessionId || router.currentRoute.value.path !== path) throw new Error("task-selection-changed");
 }
 
-function rememberTrigger(event: MouseEvent | KeyboardEvent): void {
-  lastDialogTrigger = event.currentTarget as HTMLElement;
+function rememberTrigger(event: MouseEvent | KeyboardEvent, sessionId: string): void {
+  const element = event.currentTarget as HTMLElement;
+  lastDialogTrigger = element instanceof HTMLButtonElement ? element : element.querySelector<HTMLButtonElement>(".chat-tree__session-link");
+  projectMenuId.value = null;
+  activeSessionMenuId.value = sessionId;
 }
 
 async function restoreDialogTrigger(): Promise<void> {
@@ -189,6 +211,8 @@ async function handleProjectAction(target: ChatHistoryProjectGroup, key: string)
 }
 
 async function handleSessionAction(session: ChatSession, key: string): Promise<void> {
+  if (actionPending.value || !chatStore.sessions.some(entry => entry.sessionId === session.sessionId)
+    || !sessionMenuOptions(session).some(option => option.key === key)) return;
   actionError.value = null;
   if (key === "rename") {
     renameSession.value = session;
@@ -202,8 +226,7 @@ async function handleSessionAction(session: ChatSession, key: string): Promise<v
   if (key === "pin") {
     actionPending.value = true;
     try {
-      await ensureSelected(session);
-      await chatStore.setSelectedPinned(session.pinnedAt === null);
+      await chatStore.setSessionPinned(session.sessionId, session.pinnedAt === null);
     } catch {
       actionError.value = "任务置顶状态更新失败，请稍后重试";
     } finally {
@@ -224,8 +247,7 @@ async function confirmRename(): Promise<void> {
   actionPending.value = true;
   actionError.value = null;
   try {
-    await ensureSelected(session);
-    await chatStore.renameSelected(title);
+    await chatStore.renameSession(session.sessionId, title);
     renameSession.value = null;
     await restoreDialogTrigger();
   } catch {
@@ -273,7 +295,7 @@ async function confirmRemoveProject(): Promise<void> {
 </script>
 
 <template>
-  <Teleport to="body"><div ref="projectMenuOverlay" class="chat-control-overlay" /></Teleport>
+  <Teleport to="body"><div ref="menuOverlay" class="chat-control-overlay" /></Teleport>
   <section class="chat-tree" aria-label="任务：项目与对话" :aria-busy="treeLoading">
     <p v-if="actionError" class="chat-tree__error" role="alert">{{ actionError }}</p>
     <p v-if="treeError" class="chat-tree__error" role="alert">{{ treeError }}</p>
@@ -301,7 +323,7 @@ async function confirmRemoveProject(): Promise<void> {
           </button>
           <n-dropdown
             v-if="projectMenuOptions(group).length > 0"
-            :to="projectMenuOverlay ?? false"
+            :to="menuOverlay ?? false"
             :style="{ zoom: 'var(--yj-ui-scale, 1)', width: 'min(var(--yj-layout-chat-context-menu-width), calc(var(--yj-ui-viewport-width, 100vw) - var(--yj-space-8)))' }"
             trigger="manual"
             placement="bottom-end"
@@ -334,12 +356,15 @@ async function confirmRemoveProject(): Promise<void> {
             v-for="session in group.sessions"
             :key="session.sessionId"
             :session="session"
+            :completion-unread="readingStore.hasUnreadCompletion(session)"
             :current-path="currentPath"
             :options="sessionMenuOptions(session)"
             :action-pending="actionPending"
+            :active-menu-id="activeSessionMenuId"
+            :menu-target="menuOverlay ?? false"
             @open="openSession"
             @action="handleSessionAction"
-            @remember-trigger="rememberTrigger"
+            @remember-trigger="rememberTrigger($event, session.sessionId)"
           />
           <li v-if="group.sessions.length === 0" class="chat-tree__empty-session">暂无对话</li>
         </ul>
@@ -348,12 +373,15 @@ async function confirmRemoveProject(): Promise<void> {
         v-for="session in topLevelSessions"
         :key="session.sessionId"
         :session="session"
+        :completion-unread="readingStore.hasUnreadCompletion(session)"
         :current-path="currentPath"
         :options="sessionMenuOptions(session)"
         :action-pending="actionPending"
+        :active-menu-id="activeSessionMenuId"
+        :menu-target="menuOverlay ?? false"
         @open="openSession"
         @action="handleSessionAction"
-        @remember-trigger="rememberTrigger"
+        @remember-trigger="rememberTrigger($event, session.sessionId)"
       />
     </ul>
 

@@ -1,0 +1,146 @@
+{
+  "date": "2026-11-02",
+  "contractImpact": "none",
+  "desktopHead": "4ec526fd673d4b6a4eadcb102d4c1bb195195e36",
+  "nativeChanges": [],
+  "checks": {
+    "lint": "passed",
+    "test": {
+      "filesPassed": 255,
+      "testsPassed": 2053,
+      "skipped": 16,
+      "nodePassed": 26
+    },
+    "build": "passed",
+    "docsBuild": "passed",
+    "focused": {
+      "passed": 99,
+      "skipped": 3
+    },
+    "nativeFullSuite": "not run; frontend-only change; avoid recreating large build caches"
+  },
+  "files": {
+    "src/pages/chat/ChatPage.test.ts": "5ae06cc136aafd7c0ca80c91f5861c5f5956678b695f932ce4cfc88c0e874a0b",
+    "src/pages/chat/ChatPage.vue": "d44e6b075d0b6a67596e0414d4cf38bca1be0990cbe90ef099f40b46216d3dcc",
+    "src/components/chat/ChatSidebarSessionRow.vue": "3cd0c63d97c9773d73e6cfc2ce4c74a53d677d19179b626125b55c13f5880aa4",
+    "src/components/chat/ChatSidebarTree.test.ts": "b12c1210582006c658b3c1de4e5abe0bd7b9b6cf40f8474826f2a4282d516942",
+    "src/components/yijie/YjSidebar.vue": "192c1d5aeb45c9cdd5b563f82ac28ff1d01ead430798e15f171bf5f4d7f2e025",
+    "docs/design/docs/design/04-components/02-navigation-components.md": "5959e4fbad899b26cc2ba5c0ced9a92f747fced02391c4747b7677a3f7a2b9be",
+    "docs/design/docs/design/05-patterns/02-chat-workspace.md": "af3fceea5def2e375d1355fb50eeaf2dad5942ea8e6e92b549875291975c9ece",
+    "docs/design/docs/design/05-patterns/15-feat-130-sidebar-layout.md": "8908e45c71a52d291449d4d5e9df2e619a14728b58dcec1658e0f3f652a09118",
+    "docs/design/docs/design/05-patterns/01-app-shell-navigation.md": "0910bb94426d1fe99ae6af61f4104dfda73bb9f1ea2548142e2d096abd76daf0",
+    "tests/visual/sidebar-typography/main.ts": "e0a75aeb8134a1ebd7423e4c65e3e30584426205b0d38be7209d96319358c5ec",
+    "tests/visual/sidebar-typography/preview.css": "0ba01b7b4e7d1d23ea522ea34148f0c550a1cad5f04096d40fda8155f53d7fc1"
+  },
+  "visual": {
+    "minimum": {
+      "brandBorder": "0px",
+      "dotColor": "rgb(195, 243, 91)",
+      "headerBorder": "0px",
+      "menus": [
+        {
+          "height": 32,
+          "y": 114.1953125
+        },
+        {
+          "height": 32,
+          "y": 150.1953125
+        },
+        {
+          "height": 32,
+          "y": 186.1953125
+        },
+        {
+          "height": 32,
+          "y": 222.1953125
+        },
+        {
+          "height": 32,
+          "y": 258.1953125
+        },
+        {
+          "height": 32,
+          "y": 294.1953125
+        }
+      ],
+      "overflow": false,
+      "rows": [
+        {
+          "description": "v-0",
+          "dot": true,
+          "name": "北京介绍 · 城市气质与日常生活",
+          "width": 223
+        },
+        {
+          "description": "v-1",
+          "dot": true,
+          "name": "一条较长的已完成任务标题，用来检查省略、青柠圆点与置顶标记",
+          "width": 205
+        },
+        {
+          "description": null,
+          "dot": false,
+          "name": "路线整理 · 正在输出",
+          "width": 223
+        },
+        {
+          "description": null,
+          "dot": false,
+          "name": "另一条未完成的任务",
+          "width": 223
+        }
+      ],
+      "sidebar": "256px"
+    },
+    "collapsed": {
+      "draft": "保留在当前对话中的普通草稿",
+      "overflow": false,
+      "preview": 664,
+      "sidebar": "72px"
+    },
+    "stream": {
+      "during": false,
+      "completed": true,
+      "titleWidthBoth": 191
+    },
+    "zoom200": {
+      "taskKeyboardReachable": true,
+      "horizontalOverflow": false
+    }
+  },
+  "native": {
+    "pid": 47170,
+    "windowId": 199,
+    "frame": [
+      83,
+      33,
+      1287,
+      845
+    ],
+    "sidebarWidth": 256,
+    "previewSplit": [
+      412,
+      1,
+      618
+    ],
+    "endState": "original new-task page; preview closed; window and zoom unchanged"
+  },
+  "localEvidence": ".local/development/sidebar-completion-20261102",
+  "screenshots": {
+    "native-final.png": "238c3c5eee0d901f594d6ded846fd0db4bc80ab1ed711ca63172bba6af0b3609",
+    "dark-200-task-focus.png": "217cf399557f275af50a4114e25f13a6ae16f73b50fe515710221befab403106",
+    "dark-minimum-preview.png": "e80276df1875d43cafa2a18257e511f071c521a99ed7e42d9f37ccfe08e79dae",
+    "dark-200.png": "df2895ebcfccb51340403903c8a332fa4d8bda4afe0411cc79337df65d8c4cb2",
+    "native-current.png": "990a37ad9b9655247cf9961c3e820ebb9d85e3f42e663a7bf26fad4836fd86a0",
+    "native-conversation.png": "9137e46372d42e3bb46cf2e1f237ea9ebf3588f2fe364598d27bbac28123a8df",
+    "light-minimum.png": "c80ccd887e02ad80ffb7f649ad924c6112f6245e83a3417ee4cb74becf25bbf5",
+    "native-preview.png": "08c03085055f5817537c86ba136891607d3ab59bd0cdf475d748377cf3bc236a"
+  },
+  "logHashes": {
+    "docs-build.log": "c0ef62a4d3cfd84bdc43beb7de4afc93f59bc885bcd46cb6e892088a6b8d03e8",
+    "lint.log": "5fdbedec2fbf0a86106b15d143526b85bbe8f2084ce1bc68787604d30988e3d6",
+    "test.log": "e8dc1c0905bd0fae6084a7619b7465887872eaa2f404977448f1ff5c92d65a8e",
+    "focused.log": "1338fae38f7e377aa94b754ecb538408de2af20294019244c21b046837201ee9",
+    "build.log": "13365fb7e1a4029edcf1ddd6355a5b161a52ba344b7361433b29a190366cb97d"
+  }
+}

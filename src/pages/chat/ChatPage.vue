@@ -105,6 +105,7 @@ import {
   turnStatusLabel,
 } from "../../domain/chat-ui";
 import { useChatStore } from "../../stores/chat.store";
+import { useChatReadingStore } from "../../stores/chat-reading.store";
 import { useArtifactStore } from "../../stores/artifact.store";
 import { chatArtifactNativeClient } from "../../api/chat-artifact-native-client";
 import { chatArtifactVideoNativeClient } from "../../api/chat-artifact-video-native-client";
@@ -119,6 +120,8 @@ import { compileSkillInput, selectedSkillIssue, skillSelectionIssue, type ChatSk
 const route = useRoute();
 const router = useRouter();
 const chatStore = useChatStore();
+const readingStore = useChatReadingStore();
+let anchoredSidebarSession: string | null = null;
 provideWebSourceActions(() => chatStore.context?.contextId);
 const readAttachmentPresentation = useChatAttachmentPresentation(
   () => chatStore.context?.contextId ?? null,
@@ -352,6 +355,7 @@ const {
   showBottomButton,
   update: updateScrollPosition,
   scrollToBottom,
+  scrollToAnchor,
   followNewContent,
   preservePositionWhile,
 } = useChatScroll(conversationScroller);
@@ -674,6 +678,7 @@ watch(
 watch(
   () => chatStore.selectedSessionId,
   (sessionId, previousSessionId) => {
+    anchoredSidebarSession = null;
     // Replace any presentation frame queued for the previous session. The
     // native view remains synchronous; only its DOM projection
     // is frame-batched.
@@ -684,7 +689,9 @@ watch(
     actionErrorCode.value = null;
     transientNotice.value = null;
     if (!sharedComposerDraftsEnabled && sessionId === null && previousSessionId !== null) selectedProjectId.value = null;
-    if (!requestedTurn.value) void nextTick(() => scrollToBottom());
+    void nextTick(() => {
+      if (!requestedTurn.value && readingStore.latestRequest?.sessionId !== sessionId && anchoredSidebarSession !== sessionId) scrollToBottom();
+    });
   },
 );
 
@@ -699,8 +706,32 @@ const presentedConversationChange = computed(() => [renderedConversationView.val
 
 watch(
   presentedConversationChange,
-  () => { if (!requestedTurn.value) void followNewContent(); },
+  () => { if (!requestedTurn.value && readingStore.latestRequest?.sessionId !== routeSessionId.value) void followNewContent(); },
   { flush: "post" },
+);
+
+watch(
+  [() => readingStore.latestRequest, routeSessionId, selectedSession, conversationTimeline, conversationScroller, () => chatStore.history, () => chatStore.phase, requestedTurn],
+  () => {
+    const session = selectedSession.value;
+    const timeline = conversationTimeline.value;
+    const request = readingStore.latestRequest;
+    if (request && (request.sessionId !== routeSessionId.value || requestedTurn.value)) readingStore.cancelLatest();
+    if (!session || session.sessionId !== routeSessionId.value || !chatStore.history
+      || ["binding", "loading", "binding-pending", "resyncing"].includes(chatStore.phase)
+      || timeline?.threadId !== session.sessionId) return;
+    const latest = timeline.turns[timeline.turns.length - 1];
+    if (!latest) return;
+    readingStore.observeLatestTurn(session, latest.turnId, latest.domainStatus === "completed");
+    if (!request || request !== readingStore.latestRequest || requestedTurn.value) return;
+    const anchor = [...(conversationScroller.value?.querySelectorAll<HTMLElement>("[data-turn-id]") ?? [])]
+      .find(element => element.dataset.turnId === latest.turnId);
+    if (!anchor) return;
+    scrollToAnchor(anchor);
+    anchoredSidebarSession = session.sessionId;
+    readingStore.finishLatest(request.id, session, latest.turnId, latest.domainStatus === "completed");
+  },
+  { flush: "post", immediate: true },
 );
 
 async function locateRequestedTurn() {
@@ -1072,7 +1103,10 @@ onMounted(() => {
   updateScrollPosition();
   void installDragDropListener();
   document.addEventListener("selectionchange", flushTimelineAfterSelection);
-  if (isSessionRoute.value) void nextTick(() => scrollToBottom());
+  if (isSessionRoute.value) void nextTick(() => {
+    if (!requestedTurn.value && readingStore.latestRequest?.sessionId !== routeSessionId.value
+      && anchoredSidebarSession !== routeSessionId.value) scrollToBottom();
+  });
 });
 
 onBeforeUnmount(() => {
@@ -1192,9 +1226,8 @@ onBeforeUnmount(() => {
         <h1 id="active-chat-title" class="chat-workspace__title">
           {{ selectedSession?.title ?? (isHistoryLoading ? "正在读取任务" : "任务对话") }}
         </h1>
-        <p class="chat-workspace__meta">
+        <p v-if="isDraftMode || selectedSession?.projectId" class="chat-workspace__meta">
           <span v-if="isDraftMode">定时任务草案 · 仅输入文本</span><span v-else-if="selectedSession?.projectId"><YjIcon name="folder" size="xs" tone="muted" />{{ activeProject?.safeName ?? "本地项目" }}</span>
-          <span v-if="chatStore.liveTurnStatus"><YjIcon name="pending" size="xs" tone="muted" />{{ turnStatusLabel(chatStore.liveTurnStatus) }}</span>
         </p>
       </div>
       <div
@@ -1204,7 +1237,7 @@ onBeforeUnmount(() => {
       >
         {{ readiness.title }}
       </div>
-      <button v-if="previewEnabled" ref="previewTrigger" type="button" class="yj-control yj-control--icon chat-workspace__preview-toggle" :aria-label="previewExpanded ? '收起文件预览' : '展开文件预览'" :title="previewExpanded ? '收起文件预览' : '展开文件预览'" :aria-expanded="previewExpanded" @click="previewWorkspace?.toggle()"><YjIcon name="previewSidebar" size="sm" /></button>
+      <button v-if="previewEnabled" ref="previewTrigger" type="button" class="yj-control yj-control--icon chat-workspace__preview-toggle" :aria-label="previewExpanded ? '收起文件预览' : '展开文件预览'" :title="previewExpanded ? '收起文件预览' : '展开文件预览'" :aria-expanded="previewExpanded" @click="previewWorkspace?.toggle()"><YjIcon name="previewSidebar" size="sm" tone="muted" :stroke-width="1.5" /></button>
     </header>
 
     <div class="chat-workspace__conversation-wrap">
@@ -1511,7 +1544,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: var(--yj-space-4);
   padding: var(--yj-space-3) var(--yj-space-8);
-  border-bottom: var(--yj-border-width) solid var(--yj-color-border-subtle);
   background: color-mix(in srgb, var(--yj-color-bg-page) 92%, transparent);
 }
 
@@ -1520,7 +1552,7 @@ onBeforeUnmount(() => {
 .chat-workspace__preview-toggle:hover { background:var(--yj-color-control-hover); }
 .chat-workspace__preview-toggle:active { background:var(--yj-color-control-pressed); }
 .chat-workspace__preview-toggle:focus-visible { outline:var(--yj-focus-ring-width) solid var(--yj-color-focus-ring); outline-offset:var(--yj-space-1); }
-.chat-workspace__title { font-size: var(--yj-font-size-section-title); line-height: var(--yj-line-height-section-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-workspace__title { font-size: var(--yj-font-size-card-title); line-height: var(--yj-line-height-section-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-workspace__meta { display: flex; gap: var(--yj-space-4); margin: var(--yj-space-1) 0 0; color: var(--yj-color-text-secondary); font-size: var(--yj-font-size-caption); }
 .chat-workspace__meta span { display: inline-flex; align-items: center; gap: var(--yj-space-1); }
 

@@ -5,6 +5,7 @@ import { createExpertNativeClient, expertNativeClient } from "../../api/expert-n
 import { expertDisplay, expertEntry, expertSnapshot } from "../../test/expert-fixture";
 import { usePermissionStore } from "../../stores/permission.store";
 import { useChatComposerDraftStore } from "../../stores/chat-composer-drafts.store";
+import { useChatReadingStore } from "../../stores/chat-reading.store";
 import { useChatExpertsStore } from "../../stores/chat-experts.store";
 import { useExpertsStore } from "../../stores/experts.store";
 import { defineComponent, h } from "vue";
@@ -323,6 +324,51 @@ it("locates the exact requested local turn without sending or substituting the l
 });
 
 describe("FEAT-126 ChatPage", () => {
+  it("anchors the latest turn for repeated sidebar clicks without resubmitting or reloading history", async () => {
+    const latestId = "019c1a00-0000-7000-8000-000000000099";
+    const history: ChatHistoryPage = { ...HISTORY, turns: [...HISTORY.turns, {
+      ...HISTORY.turns[0]!, turnId: latestId, reasoning: [], terminalAt: 6,
+      messages: [{ messageId: "019c1a00-0000-7000-8000-000000000098", role: "user", content: "最新一轮问题", status: "complete", ordinal: 3, createdAt: 5 }],
+    }] };
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true, history);
+    const reading = useChatReadingStore(pinia);
+    const submit = vi.spyOn(store, "submitTurn");
+    const reload = vi.spyOn(store, "selectSession");
+    scroll.mockClear();
+    for (let click = 1; click <= 2; click++) {
+      reading.requestLatest(SESSION);
+      await flushPromises();
+      expect(scroll).toHaveBeenCalledTimes(click);
+      expect((scroll.mock.contexts[click - 1] as HTMLElement).dataset.turnId).toBe(latestId);
+      expect(document.activeElement).toBe(wrapper.get(`[data-turn-id="${latestId}"]`).element);
+      expect(reading.latestRequest).toBeNull();
+    }
+    expect(reading.receipts[0]?.turnId).toBe(latestId);
+    expect(submit).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("waits for the requested history to render before anchoring and does not substitute an older turn", async () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    const { wrapper, store, pinia } = await mountPage(`/chat/${SESSION_ID}`, true);
+    const reading = useChatReadingStore(pinia);
+    store.phase = "resyncing";
+    store.history = null;
+    reading.requestLatest(SESSION);
+    await flushPromises();
+    expect(scroll).not.toHaveBeenCalled();
+    expect(reading.latestRequest).not.toBeNull();
+    setHistoryProjection(store, HISTORY);
+    store.phase = "ready";
+    await flushPromises();
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect((scroll.mock.contexts[0] as HTMLElement).dataset.turnId).toBe(TURN_ID);
+    expect(reading.latestRequest).toBeNull();
+    wrapper.unmount();
+  });
+
   it("shows the decorative mascot only on the new-task homepage and keeps it out of a conversation", async () => {
     const { wrapper, router } = await mountPage("/chat");
     expect(wrapper.find(".home-mascot[aria-hidden=true]").exists()).toBe(true);
@@ -392,6 +438,23 @@ describe("FEAT-126 ChatPage", () => {
     expect(wrapper.get(".home-opening").attributes("data-animating")).toBe("false");
     wrapper.unmount();
     expect(frames.size).toBe(0);
+  });
+
+  it("keeps the task title and workspace context without duplicating turn status in the header", async () => {
+    const { wrapper, store } = await mountPage(`/chat/${SESSION_ID}`, true);
+    store.liveTurnStatus = "completed";
+    await flushPromises();
+    const header = wrapper.get(".chat-workspace__header");
+    expect(header.get("h1").text()).toBe(SESSION.title);
+    expect(header.get(".chat-workspace__meta").text()).toBe(PROJECT.safeName);
+    expect(header.text()).not.toContain("已完成");
+    expect(wrapper.get('.chat-workspace > .sr-only[aria-live="polite"]').text()).toBe("已完成");
+
+    store.sessions = [{ ...SESSION, projectId: null }];
+    await flushPromises();
+    expect(header.find(".chat-workspace__meta").exists()).toBe(false);
+    expect(header.get("h1").text()).toBe(SESSION.title);
+    wrapper.unmount();
   });
 
   it("announces Host identity binding without presenting a missing-resource failure", async () => {

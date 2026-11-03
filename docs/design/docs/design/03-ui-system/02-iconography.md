@@ -90,6 +90,8 @@ API / Agent Host、路由与权限语义、本地持久状态均无变化。
 
 此组图像是用户授权的业务图标例外；导航、加号、刷新、删除、启停及状态图标仍走 `YjIcon`。图片不承担唯一语义，不改变安装、启停、权限或协议行为。`contract-impact = none`。
 
+2026-11-02 用户指定的回答评价选中态：点赞/点踩默认使用既有 Lucide 线性图标，选中使用同轮廓的实心变体，手掌与袖口保留透明间隙。变体位于 `src/icons/answer-feedback-icons.ts`，通过 registry 和 `YjIcon` 消费；16px、1.5px 线宽与原命中区保持，颜色使用 `--yj-color-text-secondary`，不添加选中底色。此为用户明确指定的状态表达例外，不更换全局图标风格或增加依赖。`contract-impact = none`：仅改变前端显示，不影响评价行为、模型、协议和持久状态。
+
 ## 品牌图标
 
 Amazon、Temu、Shopee、TikTok Shop、LinkedIn、飞书、钉钉等品牌图标必须优先使用官方素材。官方素材进入：
@@ -151,3 +153,5 @@ hover、pressed 及键盘焦点继续使用既有 token 和交互规则。
 
 `contract-impact = none`：仅替换 Desktop 发送图标，按钮尺寸不变，Desktop/API/Agent Host
 跨进程接口、权限、发送与停止流程及本地持久状态均无变化。
+
+2026-11-03 窗口侧栏开关：左上展开/收起由18px减为16px；对话标题右侧预览开关和文件栏收起开关保持16px。三处均用1.5线宽、`icon-muted`灰色，按钮命中区域保持32px。业务菜单图标不随本次调整缩小。

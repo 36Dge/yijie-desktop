@@ -32,7 +32,7 @@
 
 ## 规则
 
-导航文案使用中文，短而明确。主导航图标必须来自 registry。侧栏当前选中状态使用中性灰底语义 token，不显示青柠标记。导航不得承载过多二级菜单，复杂管理入口应放设置或独立页面。
+导航文案使用中文，短而明确。主导航图标必须来自 registry。侧栏当前选中状态使用中性灰底语义 token，不显示青柠选中标记；任务名称右侧的6px正文链接同色色点表达最近一轮已完成且未查看，点击任务后清除，与中性选中底独立。导航不得承载过多二级菜单，复杂管理入口应放设置或独立页面。
 
 亮色导航容器为纯白；普通导航文字/图标使用 primary。侧栏 YjNavItem 选中项使用 control-hover 浅灰底，移除内侧青柠描边；hover/pressed 仅该项使用中性局部底。焦点为 2px 中性且可与 selected 共存。小型筛选 selected 使用青柠填充与 on-brand，线形内容 Tabs 使用中性文字与青柠色选中下划线。暗色按相同角色映射中性石墨表面。品牌区继续使用已批准 SVG，Logo 形态不变。
 
@@ -55,7 +55,7 @@
 本次 `contract-impact = none`：仅调整 Desktop 进程内展示，跨进程调用、API / Agent Host、
 路由参数和本地持久状态均无可观察变化。
 
-`YjSidebar` 必须支持 240px 展开和 72px 收起两种 token 化尺寸。唯一收起控件位于 `YjWindowTitlebar`，在原生三色窗口按钮右侧；状态作为非敏感本地 UI 偏好跨路由和应用重启保留，读取失败时默认展开。
+`YjSidebar` 必须支持 256px 展开和 72px 收起两种 token 化尺寸。唯一收起控件位于 `YjWindowTitlebar`，在原生三色窗口按钮右侧；状态作为非敏感本地 UI 偏好跨路由和应用重启保留，读取失败时默认展开。
 
 `YjNavItem` 至少支持 `default`、`hover`、`focus-visible`、`selected`、`disabled` 和权限过滤后的 `hidden` 语义：
 

@@ -8,6 +8,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chat.store";
 import { useSidebarStore } from "../../stores/sidebar.store";
+import { useChatReadingStore } from "../../stores/chat-reading.store";
 import ChatSidebarTree from "./ChatSidebarTree.vue";
 
 const PROJECT_ID = "019c1a00-0000-7000-8000-000000000001";
@@ -76,8 +77,77 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).toContain("Synthetic Workspace");
     expect(wrapper.text()).toContain("Synthetic Session");
     expect(wrapper.get('[aria-current="page"]').text()).toBe("Synthetic Session");
-    expect(wrapper.text()).not.toContain("已完成");
+    const selected = wrapper.get('[aria-current="page"]');
+    expect(selected.find(".chat-tree__session-completed").exists()).toBe(true);
+    const descriptionId = selected.attributes("aria-describedby");
+    expect(document.getElementById(descriptionId!)?.textContent).toBe("任务已完成，尚未查看");
     expect(wrapper.find(".chat-tree__more--session").exists()).toBe(false);
+  });
+
+  it("marks only the latest completed turn, including when the session is not selected", async () => {
+    const statuses = ["completed", "queued", "pending", "streaming", "inProgress", "waiting_approval", "failed", "interrupted", "unknown", null];
+    const { wrapper } = await mountTree(store => {
+      const original = store.sessions[0]!;
+      store.sessions = statuses.map((status, index) => ({
+        ...original,
+        sessionId: `${SESSION_ID}-${index}`,
+        title: `Session ${index}`,
+        latestTurnStatus: status,
+      }));
+    });
+    expect(wrapper.find('[aria-current="page"]').exists()).toBe(false);
+    const rows = wrapper.findAll(".chat-tree__session-link");
+    expect(rows).toHaveLength(statuses.length);
+    for (const [index, status] of statuses.entries()) {
+      const row = rows.find(entry => entry.text() === `Session ${index}`)!;
+      expect(row.find(".chat-tree__session-completed").exists()).toBe(status === "completed");
+      expect(Boolean(row.attributes("aria-describedby"))).toBe(status === "completed");
+    }
+    wrapper.unmount();
+  });
+
+  it("clears completion as soon as another turn queues and restores it only on completion", async () => {
+    const { wrapper, store } = await mountTree();
+    for (const status of ["queued", "streaming", "failed", "completed"]) {
+      store.sessions = store.sessions.map(session => ({ ...session, latestTurnStatus: status }));
+      await flushPromises();
+      const selected = wrapper.get('[aria-current="page"]');
+      expect(selected.text()).toBe("Synthetic Session");
+      expect(selected.find(".chat-tree__session-completed").exists()).toBe(status === "completed");
+    }
+    await wrapper.setProps({ currentPath: "/chat" });
+    expect(wrapper.find(".chat-tree__session-completed").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("dismisses completion only on opening and requests the latest turn on every same-route click", async () => {
+    const { wrapper } = await mountTree();
+    const reading = useChatReadingStore();
+    const row = wrapper.get('[aria-current="page"]');
+    await row.trigger("contextmenu", { clientX: 50, clientY: 100 });
+    expect(row.find(".chat-tree__session-completed").exists()).toBe(true);
+    await row.trigger("click");
+    await flushPromises();
+    expect(row.find(".chat-tree__session-completed").exists()).toBe(false);
+    expect(row.attributes("aria-describedby")).toBeUndefined();
+    const first = reading.latestRequest!.id;
+    await row.trigger("click");
+    await flushPromises();
+    expect(reading.latestRequest!.id).toBeGreaterThan(first);
+    expect(reading.latestRequest!.sessionId).toBe(SESSION_ID);
+    wrapper.unmount();
+  });
+
+  it("does not mark a task viewed or request scrolling when navigation is cancelled", async () => {
+    const { wrapper, router } = await mountTree(store => {
+      store.sessions = [{ ...store.sessions[0]!, sessionId: "019c1a00-0000-7000-8000-000000000009" }];
+    });
+    router.beforeEach(() => false);
+    await wrapper.get(".chat-tree__session-link").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".chat-tree__session-completed").exists()).toBe(true);
+    expect(useChatReadingStore().latestRequest).toBeNull();
+    wrapper.unmount();
   });
 
   it("offers only pin/remove project and rename/pin/delete session actions", async () => {
@@ -92,8 +162,8 @@ describe("ChatSidebarTree", () => {
     expect(sessionOptions.filter((option) => option.type !== "divider").map((option) => option.label)).toEqual(["重命名", "置顶", "永久删除"]);
   });
 
-  it("exposes mutation actions only for the route-selected conversation", async () => {
-    const { wrapper, store } = await mountTree();
+  it("opens the app menu for an unselected task, suppresses the native menu and keeps only one task menu open", async () => {
+    const { wrapper, store, router } = await mountTree();
     store.sessions = [...store.sessions, {
       ...store.sessions[0]!,
       sessionId: "019c1a00-0000-7000-8000-000000000006",
@@ -102,23 +172,85 @@ describe("ChatSidebarTree", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Background Session");
-    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(2);
+    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(3);
     expect(wrapper.find('[aria-label="任务 Background Session 的操作菜单"]').exists()).toBe(false);
     const selected = wrapper.get('.chat-tree__session-link[aria-current="page"]');
     const background = wrapper.findAll(".chat-tree__session-link").find(row => row.text() === "Background Session")!;
     const menu = wrapper.findAllComponents(NDropdown)[1]!;
+    const backgroundMenu = wrapper.findAllComponents(NDropdown)[2]!;
     expect(selected.attributes("aria-haspopup")).toBe("menu");
-    expect(background.attributes("aria-haspopup")).toBeUndefined();
-    await background.trigger("contextmenu", { clientX: 40, clientY: 80 });
+    expect(background.attributes("aria-haspopup")).toBe("menu");
+    const nativeEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 80, button: 2 });
+    background.element.dispatchEvent(nativeEvent);
+    await flushPromises();
+    expect(nativeEvent.defaultPrevented).toBe(true);
+    expect(backgroundMenu.props("show")).toBe(true);
     expect(menu.props("show")).toBe(false);
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(useChatReadingStore().latestRequest).toBeNull();
+    expect(background.find(".chat-tree__session-completed").exists()).toBe(true);
     await selected.trigger("contextmenu", { clientX: 50, clientY: 90 });
     expect(menu.props("show")).toBe(true);
+    expect(backgroundMenu.props("show")).toBe(false);
     expect(menu.props("x")).toBe(50);
     expect(menu.props("y")).toBe(90);
     expect(document.activeElement).toBe(selected.element);
     menu.vm.$emit("clickoutside");
     await flushPromises();
     expect(menu.props("show")).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("prevents title selection and treats Control-click as a context gesture without dismissing unread completion", async () => {
+    const { wrapper } = await mountTree();
+    const row = wrapper.get(".chat-tree__session-link");
+    const title = row.get(".chat-tree__session-title");
+    const select = new Event("selectstart", { bubbles: true, cancelable: true });
+    title.element.dispatchEvent(select);
+    expect(select.defaultPrevented).toBe(true);
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(title.element);
+    selection.addRange(range);
+    await row.trigger("contextmenu");
+    expect(selection.toString()).toBe("");
+    await row.trigger("click", { ctrlKey: true, button: 0 });
+    expect(useChatReadingStore().latestRequest).toBeNull();
+    expect(row.find(".chat-tree__session-completed").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("pins and renames the right-clicked background task without switching the active conversation", async () => {
+    const backgroundId = "019c1a00-0000-7000-8000-000000000006";
+    const { wrapper, store, router } = await mountTree(state => {
+      state.sessions = [...state.sessions, { ...state.sessions[0]!, sessionId: backgroundId, title: "Background Session" }];
+      state.selectedSessionId = SESSION_ID;
+    });
+    const pin = vi.spyOn(store, "setSessionPinned").mockResolvedValue();
+    const rename = vi.spyOn(store, "renameSession").mockResolvedValue();
+    const select = vi.spyOn(store, "selectSession");
+    const row = wrapper.findAll(".chat-tree__session-link").find(entry => entry.text() === "Background Session")!;
+    const menu = wrapper.findAllComponents(NDropdown)[2]!;
+    await row.trigger("contextmenu");
+    menu.vm.$emit("select", "pin");
+    await flushPromises();
+    expect(pin).toHaveBeenCalledWith(backgroundId, true);
+    await row.trigger("contextmenu");
+    menu.vm.$emit("select", "rename");
+    await flushPromises();
+    const input = document.body.querySelector<HTMLInputElement>('[role="dialog"] input')!;
+    expect(input.value).toBe("Background Session");
+    input.value = "Updated background title";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === "保存")!.click();
+    await flushPromises();
+    expect(rename).toHaveBeenCalledWith(backgroundId, "Updated background title");
+    expect(select).not.toHaveBeenCalled();
+    expect(store.selectedSessionId).toBe(SESSION_ID);
+    expect(router.currentRoute.value.path).toBe(`/chat/${SESSION_ID}`);
+    expect(useChatReadingStore().latestRequest).toBeNull();
+    wrapper.unmount();
   });
 
   it("opens the session menu from the keyboard and restores focus after cancelling rename", async () => {
@@ -150,7 +282,7 @@ describe("ChatSidebarTree", () => {
     await selected.trigger("contextmenu");
     expect(selected.attributes("aria-expanded")).toBe("true");
     await wrapper.setProps({ currentPath: "/chat/other" });
-    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(1);
+    expect(wrapper.findAllComponents(NDropdown)).toHaveLength(2);
     await wrapper.setProps({ currentPath: `/chat/${SESSION_ID}` });
     expect(selected.attributes("aria-expanded")).toBe("false");
     await selected.trigger("contextmenu");
@@ -173,6 +305,9 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.text()).toContain("Synthetic Session");
     expect(wrapper.findAllComponents(NDropdown)).toHaveLength(0);
     expect(wrapper.get(".chat-tree__session-link").attributes("aria-current")).toBe("page");
+    const nativeEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    wrapper.get(".chat-tree__session-link").element.dispatchEvent(nativeEvent);
+    expect(nativeEvent.defaultPrevented).toBe(true);
   });
 
   it("does not misreport a write denial as loss of history read access", async () => {
@@ -223,6 +358,34 @@ describe("ChatSidebarTree", () => {
     expect(wrapper.findAllComponents(NModal)[1].props("show")).toBe(true);
     expect(document.body.textContent).toContain("此操作不能撤销");
     expect(deleteSelected).not.toHaveBeenCalled();
+  });
+
+  it("requires confirmed navigation to the background deletion target and never deletes the still-active task", async () => {
+    const targetId = "019c1a00-0000-7000-8000-000000000006";
+    const { wrapper, store, router } = await mountTree(state => {
+      state.sessions = [...state.sessions, { ...state.sessions[0]!, sessionId: targetId, title: "Background Session" }];
+      state.selectedSessionId = SESSION_ID;
+    });
+    const deletedTargets: Array<string | null> = [];
+    const deletion = vi.spyOn(store, "deleteSelected").mockImplementation(async () => { deletedTargets.push(store.selectedSessionId); return null; });
+    const selection = vi.spyOn(store, "selectSession").mockImplementation(async id => { store.selectedSessionId = id; });
+    wrapper.findAllComponents(NDropdown)[2]!.vm.$emit("select", "delete");
+    await flushPromises();
+    expect(document.body.querySelector('[role="alertdialog"]')?.textContent).toContain("Background Session");
+    expect(deletion).not.toHaveBeenCalled();
+    const removeGuard = router.beforeEach(() => false);
+    const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(button => button.textContent === "永久删除")!;
+    confirm.click();
+    await flushPromises();
+    expect(deletion).not.toHaveBeenCalled();
+    expect(selection).not.toHaveBeenCalled();
+    expect(store.selectedSessionId).toBe(SESSION_ID);
+    removeGuard();
+    confirm.click();
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe(`/chat/${targetId}`);
+    expect(deletedTargets).toEqual([targetId]);
+    wrapper.unmount();
   });
 
   it("closes a pending mutation dialog when its authority is revoked", async () => {
@@ -427,12 +590,12 @@ describe("ChatSidebarTree", () => {
     expect(router.currentRoute.value.path).toBe("/chat/removed-page");
     await wrapper.setProps({ currentPath: router.currentRoute.value.path });
     store.selectedSessionId = "removed-page";
-    const pin = vi.spyOn(store, "setSelectedPinned").mockResolvedValue();
+    const pin = vi.spyOn(store, "setSessionPinned").mockResolvedValue();
     const menu = wrapper.findAllComponents(NDropdown).slice(-1)[0]!;
     expect(menu.props("options")!.filter(option => option.type !== "divider").map(option => option.label)).toEqual(["重命名", "置顶", "永久删除"]);
     menu.vm.$emit("select", "pin");
     await flushPromises();
-    expect(pin).toHaveBeenCalledWith(true);
+    expect(pin).toHaveBeenCalledWith("removed-page", true);
     expect(wrapper.get('[aria-current="page"]').text()).toContain("Removed Page");
 
     store.context = { ...store.context!, allowedActions: ["read_sessions", "read_projects"] };

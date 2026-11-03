@@ -63,6 +63,32 @@ describe("useChatScroll", () => {
     await wrapper.vm.preservePositionWhile(async () => { scrollHeight = 1320; });
     expect(scrollTop).toBe(500);
   });
+
+  it("anchors a long latest turn without allowing pending or subsequent content updates to pull it to the bottom", async () => {
+    const callbacks = new Map<number, FrameRequestCallback>();
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callbacks.set(1, callback); return 1; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+    const wrapper = mount(Harness);
+    await nextTick();
+    const element = wrapper.get("div").element as HTMLElement;
+    const anchor = document.createElement("div");
+    anchor.tabIndex = -1;
+    element.append(anchor);
+    const scroll = vi.fn();
+    Object.defineProperty(anchor, "scrollIntoView", { value: scroll });
+    Object.defineProperties(element, {
+      scrollHeight: { value: 2400 }, clientHeight: { value: 400 }, scrollTop: { configurable: true, value: 1000 },
+    });
+    await wrapper.vm.followNewContent();
+    expect(callbacks.size).toBe(1);
+    wrapper.vm.scrollToAnchor(anchor);
+    expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "instant" });
+    expect(callbacks.size).toBe(0);
+    await wrapper.vm.followNewContent();
+    expect(callbacks.size).toBe(0);
+    expect(wrapper.vm.following).toBe(false);
+    wrapper.unmount();
+  });
 });
 
 

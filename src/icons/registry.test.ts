@@ -33,6 +33,8 @@ describe("iconRegistry", () => {
       "copy",
       "thumbsUp",
       "thumbsDown",
+      "thumbsUpFilled",
+      "thumbsDownFilled",
       "dismiss",
       "download",
       "edit",

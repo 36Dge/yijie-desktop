@@ -76,6 +76,17 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     });
   }
 
+  function scrollToAnchor(anchor: HTMLElement): void {
+    const element = scrollElement.value;
+    if (!element || !element.contains(anchor)) return;
+    pauseFollowing();
+    // Native scrolling accounts for CSS zoom and the scroller's scroll padding.
+    anchor.scrollIntoView({ block: "start", behavior: "instant" });
+    previousTop = element.scrollTop;
+    bottomDistance.value = distanceFromBottom(element);
+    anchor.focus({ preventScroll: true });
+  }
+
   async function preservePositionWhile(action: () => Promise<void>): Promise<void> {
     const element = scrollElement.value;
     if (!element) return action();
@@ -129,6 +140,7 @@ export function useChatScroll(scrollElement: Ref<HTMLElement | null>) {
     showBottomButton,
     update,
     scrollToBottom,
+    scrollToAnchor,
     followNewContent,
     preservePositionWhile,
   };

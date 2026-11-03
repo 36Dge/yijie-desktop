@@ -36,7 +36,7 @@ describe("FEAT-166 conversation preview rules", () => {
     openPreviewFile(s, { ...a, source: { kind: "attachment", sessionId: "s", messageId: null, attachmentId: "same" } }, () => "3");
     expect(s.tabs).toHaveLength(2);
   });
-  it.each([[800,false,0],[801,true,400],[940,true,539],[1028,true,616],[1108,true,664],[2400,true,1200]])("width %s respects both columns", (width, available, right) => {
+  it.each([[800,false,0],[800.67,false,0],[801,true,400],[924,true,523],[940,true,539],[1012,true,607],[1028,true,616],[1108,true,664],[2400,true,1200]])("width %s respects both columns", (width, available, right) => {
     const g = previewWidths(Number(width)); expect(g.available).toBe(available); expect(g.right).toBe(right);
     if (g.available) { expect(g.chat).toBeGreaterThanOrEqual(400); expect(g.chat + g.right + 1).toBe(width); }
   });

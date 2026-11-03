@@ -2,8 +2,10 @@
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
+import { NTooltip } from "naive-ui";
 import { readFileSync } from "node:fs";
 import ChatAnswerActions from "./ChatAnswerActions.vue";
+import ChatActionButton from "./ChatActionButton.vue";
 enableAutoUnmount(afterEach);
 afterEach(()=>vi.useRealTimers());
 const text="**真实原文** [资料](https://example.org)";
@@ -50,6 +52,27 @@ describe("local answer actions",()=>{
     expect(wrapper.get('[aria-label="点赞"]').attributes('aria-pressed')).toBe('false');
     await wrapper.get('[aria-label="点赞"]').trigger('click'); await wrapper.setProps({text:'修订后的普通正文'});
     expect(wrapper.get('[aria-label="点赞"]').attributes('aria-pressed')).toBe('false');
+  });
+  it.each(['close','confirm','escape'])("keeps the tooltip closed when %s restores focus, then follows the next hover",async(method)=>{
+    const {wrapper}=render();
+    const down=wrapper.get('[aria-label="点踩"]');
+    const tooltip=wrapper.findAllComponents(ChatActionButton).find(action=>action.props('label')==='点踩')!.findComponent(NTooltip);
+    await down.trigger('mouseenter');
+    expect(tooltip.props('show')).toBe(true);
+    await down.trigger('click'); await flushPromises();
+    expect(tooltip.props('show')).toBe(false);
+    if (method==='confirm') {
+      button('回答模糊/不具体').click(); await nextTick(); button('确认反馈').click();
+    } else if (method==='close') {
+      panel().querySelector<HTMLButtonElement>('[aria-label="关闭"]')!.click();
+    } else {
+      panel().dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    }
+    await flushPromises();
+    expect(document.activeElement).toBe(down.element);
+    expect(tooltip.props('show')).toBe(false);
+    await down.trigger('mouseenter'); expect(tooltip.props('show')).toBe(true);
+    await down.trigger('mouseleave'); expect(tooltip.props('show')).toBe(false);
   });
   it("keeps copy a plain action and exposes toggle/disclosure state only where applicable",()=>{
     const {wrapper}=render();
